@@ -139,7 +139,13 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
     return { ...event, message: redactSecrets(event.message, secrets) };
   }
   if (event.type === "tool.finished") {
-    return { ...event, content: redactSecrets(event.content, secrets) };
+    return {
+      ...event,
+      content: redactSecrets(event.content, secrets),
+      ...(event.details !== undefined
+        ? { details: redactJsonValue(event.details, secrets) }
+        : {}),
+    };
   }
   if (event.type === "model.delta") {
     return {
@@ -151,6 +157,11 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
     };
   }
   return event;
+}
+
+/** Redact secrets inside structured tool details that JSON events may print. */
+function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
+  return JSON.parse(redactSecrets(JSON.stringify(value), secrets)) as unknown;
 }
 
 /** Lazy-load the Anthropic adapter so unused providers stay off the startup path. */

@@ -141,6 +141,43 @@ test("secrets are redacted from json tool results and model text", async () => {
   });
 });
 
+test("secrets are redacted from json edit details", async () => {
+  const secret = "sk-secret-do-not-print";
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "note.txt"), `token ${secret}\n`);
+    const result = await run(["-p", "edit note", "--json", "--api-key", secret], {
+      env: {},
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "e1",
+                name: "edit",
+                arguments: {
+                  path: "note.txt",
+                  edits: [
+                    {
+                      oldText: `token ${secret}`,
+                      newText: "token gone",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { text: "done" },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.includes(secret)).toBe(false);
+    expect(result.stderr.includes(secret)).toBe(false);
+    expect(result.stdout).toContain("***");
+  });
+});
+
 test("provider stream failure exits non-zero with an actionable error", async () => {
   const result = await run(["-p", "hello"], {
     model: createScriptedModel({ error: "connection reset" }),

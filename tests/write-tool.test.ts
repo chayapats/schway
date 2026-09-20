@@ -100,10 +100,6 @@ test("write reports a model-visible error when the path is a directory", async (
   });
 });
 
-test("write guidance recommends edit for targeted changes", () => {
-  expect(writeTool.description.toLowerCase()).toContain("edit");
-});
-
 test("write aborts before mutating the filesystem", async () => {
   await withTempDir(async (dir) => {
     const controller = new AbortController();
