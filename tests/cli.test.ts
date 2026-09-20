@@ -119,3 +119,36 @@ test("headless CLI uses the resolved workspace", async () => {
     expect(result.exitCode).toBe(0);
   });
 });
+
+test("-p does not treat the next flag as a prompt", async () => {
+  const result = await run(["-p", "--json"], {
+    model: createScriptedModel({ text: "nope" }),
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Missing prompt for -p");
+  expect(result.stdout).toBe("");
+});
+
+test("--api-key does not treat the next flag as a key", async () => {
+  const result = await run(["-p", "hello", "--api-key", "--json"], {
+    env: {},
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Missing value for --api-key");
+});
+
+test("partial streamed text is terminated before an error diagnostic", async () => {
+  const result = await run(["-p", "hello"], {
+    model: {
+      provider: "scripted",
+      id: "scripted",
+      async *stream() {
+        yield { type: "text_delta" as const, text: "Hel" };
+        throw new Error("connection reset");
+      },
+    },
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe("Hel\n");
+  expect(result.stderr).toContain("connection reset");
+});

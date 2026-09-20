@@ -84,6 +84,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
 
     if (safeEvent.type === "error") {
+      if (!parsed.args.json && printedText) {
+        io.stdout.write("\n");
+        printedText = false;
+      }
       failed = true;
       io.stderr.write(`${safeEvent.message}\n`);
     } else if (safeEvent.type === "agent.finished" && safeEvent.reason === "error") {

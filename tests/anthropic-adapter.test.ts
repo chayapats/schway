@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { STABLE_SYSTEM_PROMPT } from "../src/context/prompt.ts";
-import { createAnthropicModel } from "../src/model/providers/anthropic.ts";
+import {
+  createAnthropicModel,
+  DEFAULT_ANTHROPIC_MODEL,
+} from "../src/model/providers/anthropic.ts";
 import { collect } from "./helpers/scripted-model.ts";
 import {
   encodeSse,
@@ -39,7 +42,7 @@ test("converts a Schway request into an Anthropic Messages request", async () =>
     system: Array<{ type: string; text: string }>;
     messages: Array<{ role: string; content: unknown }>;
   };
-  expect(body.model).toBe("claude-sonnet-4-5");
+  expect(body.model).toBe(DEFAULT_ANTHROPIC_MODEL);
   expect(body.stream).toBe(true);
   expect(body.max_tokens).toBeGreaterThan(0);
   expect(body.system[0]).toEqual({ type: "text", text: STABLE_SYSTEM_PROMPT });

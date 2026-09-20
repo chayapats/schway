@@ -13,7 +13,7 @@ import type {
 } from "../../conversation/types.ts";
 import type { Model, ModelRequest, ModelStreamEvent } from "../model.ts";
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 export const DEFAULT_ANTHROPIC_MAX_TOKENS = 16_384;
 
 type FetchLike = (

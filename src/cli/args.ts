@@ -24,10 +24,11 @@ export function parseArgs(
       continue;
     }
     if (arg === "-p") {
-      const value = argv[++i];
-      if (value === undefined) {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
         return { error: "Missing prompt for -p" };
       }
+      i++;
       args.prompt = value;
       continue;
     }
@@ -36,10 +37,11 @@ export function parseArgs(
       continue;
     }
     if (arg === "--api-key") {
-      const value = argv[++i];
-      if (value === undefined) {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
         return { error: "Missing value for --api-key" };
       }
+      i++;
       args.apiKey = value;
       continue;
     }

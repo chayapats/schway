@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, writeFile } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTempDir } from "./helpers.ts";
 
@@ -74,7 +74,6 @@ test("project .env files are not loaded automatically", async () => {
 });
 
 test("the schway bin is executable", async () => {
-  await chmod(bin, 0o755);
-  const info = Bun.file(bin);
-  expect(await info.exists()).toBe(true);
+  const info = await stat(bin);
+  expect(info.mode & 0o111).not.toBe(0);
 });
