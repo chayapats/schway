@@ -38,10 +38,12 @@ const ALLOWED_TYPES = new Set([
   "null",
 ]);
 
+/** Compiled check for model-generated tool arguments. */
 export type SchemaValidator = (
   value: unknown,
 ) => { ok: true; value: unknown } | { ok: false; message: string };
 
+/** Clone a TypeBox or JSON Schema value into a plain JSON object. */
 export function toPlainJsonSchema(schema: unknown): Record<string, unknown> {
   const plain = JSON.parse(JSON.stringify(schema)) as unknown;
   if (typeof plain !== "object" || plain === null || Array.isArray(plain)) {
@@ -50,6 +52,10 @@ export function toPlainJsonSchema(schema: unknown): Record<string, unknown> {
   return plain as Record<string, unknown>;
 }
 
+/**
+ * Reject JSON Schema constructs outside the subset Schway tools support.
+ * Throws an actionable error naming the keyword and path.
+ */
 export function assertSupportedJsonSchema(schema: unknown, path = ""): void {
   if (schema === true || schema === false) {
     return;
@@ -125,6 +131,10 @@ export function assertSupportedJsonSchema(schema: unknown, path = ""): void {
   }
 }
 
+/**
+ * Compile a validator once at tool registration.
+ * Unsupported schemas fail here rather than at invocation time.
+ */
 export function compileValidator(schema: unknown): SchemaValidator {
   const plain = toPlainJsonSchema(schema);
   assertSupportedJsonSchema(plain);
@@ -148,6 +158,7 @@ export function compileValidator(schema: unknown): SchemaValidator {
   };
 }
 
+/** Require a non-empty array of nested schemas, then walk each entry. */
 function assertSchemaArray(value: unknown, path: string): void {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(
@@ -159,6 +170,7 @@ function assertSchemaArray(value: unknown, path: string): void {
   });
 }
 
+/** JSON-pointer-like path used in schema error messages. */
 function formatPath(path: string): string {
   return path.length === 0 ? "/" : path;
 }

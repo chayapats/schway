@@ -8,8 +8,10 @@ import { toPlainJsonSchema } from "../tools/schema.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
 
+/** Safety bound on model rounds per `runAgentLoop` invocation. */
 export const DEFAULT_MAX_TURNS = 32;
 
+/** Inputs for one agent run. Tools and workspace are required to execute calls. */
 export interface AgentLoopOptions {
   session: Session;
   model: Model;
@@ -20,6 +22,11 @@ export interface AgentLoopOptions {
   maxTurns?: number;
 }
 
+/**
+ * Own the agent loop: prepare context, stream the model, execute tool calls,
+ * append one result per accepted call, and repeat until a final answer, cancel,
+ * or the turn bound.
+ */
 export async function* runAgentLoop(
   options: AgentLoopOptions,
 ): AsyncGenerator<RuntimeEvent> {
@@ -130,12 +137,14 @@ export async function* runAgentLoop(
   }
 }
 
+/** Collect tool_call blocks from an assembled assistant message. */
 function toolCallsOf(message: AssistantMessage): ToolCallContent[] {
   return message.content.filter(
     (block): block is ToolCallContent => block.type === "tool_call",
   );
 }
 
+/** Strip execute functions and TypeBox symbols before sending tools to a model. */
 function toModelTools(registry: ToolRegistry | undefined): ModelTool[] | undefined {
   if (!registry) {
     return undefined;
@@ -147,6 +156,7 @@ function toModelTools(registry: ToolRegistry | undefined): ModelTool[] | undefin
   }));
 }
 
+/** Normalize thrown values into a printable error string. */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

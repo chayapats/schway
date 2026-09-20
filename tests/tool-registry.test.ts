@@ -4,6 +4,7 @@ import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 
+/** Minimal tool used to exercise schema registration. */
 function stub(schema: unknown): ToolDefinition {
   return {
     name: "stub",

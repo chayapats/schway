@@ -12,10 +12,12 @@ import { createToolRegistry } from "../tools/registry.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 import { parseArgs, USAGE } from "./args.ts";
 
+/** Minimal writer used so tests can capture CLI output. */
 export interface CliWriter {
   write(chunk: string): void;
 }
 
+/** Process I/O and optional injected model for headless runs. */
 export interface CliIo {
   stdout: CliWriter;
   stderr: CliWriter;
@@ -25,6 +27,10 @@ export interface CliIo {
   createModel?: (input: { apiKey: string }) => Promise<Model>;
 }
 
+/**
+ * Run a headless Schway invocation.
+ * Returns a process exit code: 0 on success, 1 on usage, auth, or run failure.
+ */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
@@ -109,6 +115,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   return failed ? 1 : 0;
 }
 
+/** Gather runtime and environment API keys so output can redact them. */
 function collectSecrets(
   runtimeApiKey: string | undefined,
   env: Record<string, string | undefined>,
@@ -124,6 +131,7 @@ function collectSecrets(
   return secrets;
 }
 
+/** Redact configured secrets from event fields that can reach stdout. */
 function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEvent {
   if (event.type === "error") {
     return { ...event, message: redactSecrets(event.message, secrets) };
@@ -143,11 +151,13 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
   return event;
 }
 
+/** Lazy-load the Anthropic adapter so unused providers stay off the startup path. */
 async function loadAnthropicModel(apiKey: string): Promise<Model> {
   const { createAnthropicModel } = await import("../model/providers/anthropic.ts");
   return createAnthropicModel({ apiKey });
 }
 
+/** Process entrypoint for the `schway` binary. */
 async function main(): Promise<number> {
   return runCli(process.argv.slice(2), {
     stdout: { write: (chunk) => void process.stdout.write(chunk) },

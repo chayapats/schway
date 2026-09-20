@@ -2,6 +2,7 @@ import { STABLE_SYSTEM_PROMPT } from "../../src/context/prompt.ts";
 import type { ConversationItem } from "../../src/conversation/types.ts";
 import type { ModelRequest } from "../../src/model/model.ts";
 
+/** Chunked text stream used to test adapter delta assembly. */
 export const TEXT_STREAM_EVENTS = [
   {
     type: "message_start",
@@ -45,6 +46,7 @@ export const TEXT_STREAM_EVENTS = [
   },
 ];
 
+/** Thinking plus text stream, including a signature delta. */
 export const THINKING_STREAM_EVENTS = [
   {
     type: "message_start",
@@ -102,6 +104,7 @@ export const THINKING_STREAM_EVENTS = [
   },
 ];
 
+/** Streamed tool_use whose input JSON arrives as partial_json deltas. */
 export const TOOL_USE_STREAM_EVENTS = [
   {
     type: "message_start",
@@ -164,6 +167,7 @@ export const TOOL_USE_STREAM_EVENTS = [
   },
 ];
 
+/** Encode Anthropic stream events as `text/event-stream` bytes. */
 export function encodeSse(events: readonly object[]): string {
   return events
     .map((event) => {
@@ -173,6 +177,7 @@ export function encodeSse(events: readonly object[]): string {
     .join("");
 }
 
+/** Minimal Schway model request used by adapter protocol tests. */
 export function sampleRequest(): ModelRequest {
   return {
     systemPrompt: STABLE_SYSTEM_PROMPT,

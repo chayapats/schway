@@ -8,9 +8,12 @@ import type {
 } from "./types.ts";
 import { resolveToolPath } from "./path.ts";
 
+/** Default number of lines returned when the model omits `limit`. */
 export const DEFAULT_READ_LINE_LIMIT = 2000;
+/** Hard cap on model-facing characters, including line-number prefixes. */
 export const MAX_READ_CHARS = 50_000;
 
+/** TypeBox schema for `read`. Compiled once when the tool is registered. */
 export const readInputSchema = Type.Object(
   {
     path: Type.String({
@@ -33,8 +36,10 @@ export const readInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Validated arguments for the built-in `read` tool. */
 export type ReadInput = Static<typeof readInputSchema>;
 
+/** Structured extras attached to a successful or failed read. */
 export interface ReadDetails {
   path: string;
   resolvedPath: string;
@@ -45,6 +50,7 @@ export interface ReadDetails {
   nextOffset?: number;
 }
 
+/** Built-in file reader. Declares parallel execution. */
 export const readTool: ToolDefinition<ReadInput> = {
   name: "read",
   description:
@@ -54,6 +60,11 @@ export const readTool: ToolDefinition<ReadInput> = {
   execute: executeRead,
 };
 
+/**
+ * Read a file as line-numbered, bounded text.
+ * Relative paths resolve from the workspace root. Output never exceeds
+ * {@link MAX_READ_CHARS}. AbortSignal cancels an in-flight stream.
+ */
 export async function executeRead(
   input: ReadInput,
   ctx: ToolContext,
@@ -183,6 +194,10 @@ export async function executeRead(
   };
 }
 
+/**
+ * Stream the file once: keep only the requested line window in memory and
+ * count remaining lines without storing them.
+ */
 async function scanFileWindow(
   path: string,
   startLine: number,
@@ -208,6 +223,7 @@ async function scanFileWindow(
   return { lineCount, window, slicedLine, binary: false };
 }
 
+/** Yield newline-split lines, capping any single line at {@link MAX_READ_CHARS}. */
 async function* iterateFileLines(
   path: string,
   signal?: AbortSignal,
@@ -278,12 +294,14 @@ async function* iterateFileLines(
   }
 }
 
+/** Error used when an AbortSignal fires during a read. */
 function abortError(): Error {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
   return error;
 }
 
+/** True for AbortError / ABORT_ERR from streams or AbortSignal. */
 function isAbortError(error: unknown): boolean {
   return (
     (error instanceof Error && error.name === "AbortError") ||
@@ -294,6 +312,7 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+/** Map common filesystem failures to model-visible messages. */
 function filesystemError(path: string, error: unknown): string {
   if (isErrno(error, "ENOENT")) {
     return `File not found: ${path}`;
@@ -304,6 +323,7 @@ function filesystemError(path: string, error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Narrow Node/Bun filesystem errors by `code`. */
 function isErrno(error: unknown, code: string): boolean {
   return (
     typeof error === "object" &&

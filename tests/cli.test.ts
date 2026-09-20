@@ -7,6 +7,7 @@ import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 
+/** Capture writes so CLI tests can assert stdout and stderr. */
 function capture() {
   let text = "";
   return {
@@ -19,6 +20,7 @@ function capture() {
   };
 }
 
+/** Run `runCli` against an in-memory IO harness. */
 async function run(
   argv: string[],
   options: {

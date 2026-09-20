@@ -17,6 +17,7 @@ import {
 
 type CapturedRequest = { body?: unknown; calls: number };
 
+/** Fake fetch that records the Anthropic request body and returns an SSE fixture. */
 function sseFetch(events: readonly object[], captured: CapturedRequest) {
   return async (_input: string | URL | Request, init?: RequestInit) => {
     captured.calls += 1;

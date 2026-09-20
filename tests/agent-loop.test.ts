@@ -26,6 +26,7 @@ const workspace = {
   extraRoots: [],
 };
 
+/** Build a single-text user message for loop tests. */
 function user(text: string): UserMessage {
   return { type: "user", id: "u1", content: [{ type: "text", text }] };
 }
@@ -443,6 +444,7 @@ test("cancellation prevents later tool calls and yields cancelled results", asyn
   });
 });
 
+/** Return the model-facing content for a tool_result in a later model request. */
 function resultContent(request: ModelRequest, toolCallId: string): string {
   const match = request.items.find(
     (item): item is ToolResult =>

@@ -9,6 +9,7 @@ import {
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
 
+/** Tool context whose workspace root is a temporary directory. */
 async function contextFor(dir: string, launchCwd = dir): Promise<ToolContext> {
   return {
     workspace: { root: dir, launchCwd, extraRoots: [] },

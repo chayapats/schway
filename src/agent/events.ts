@@ -1,5 +1,9 @@
 import type { ToolCallStatus } from "../tools/types.ts";
 
+/**
+ * Normalized runtime events for TUI, headless `--json`, and diagnostics.
+ * This is not the durable session record.
+ */
 export type RuntimeEvent =
   | { type: "agent.started" }
   | {

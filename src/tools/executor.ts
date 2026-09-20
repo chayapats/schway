@@ -5,12 +5,18 @@ import type { ToolCallStatus } from "./types.ts";
 
 const CANCELLED_CONTENT = "Tool call cancelled";
 
+/** Conversation tool result plus the status used in runtime events. */
 export interface ExecutedToolCall {
   result: ToolResult;
   status: ToolCallStatus;
   details?: unknown;
 }
 
+/**
+ * Validate and run one accepted tool call.
+ * Unknown tools, invalid arguments, and thrown errors become model-visible
+ * results instead of crashing the loop. Aborted signals yield cancelled.
+ */
 export async function executeToolCall(options: {
   registry?: ToolRegistry;
   call: ToolCallContent;
@@ -62,6 +68,7 @@ export async function executeToolCall(options: {
   }
 }
 
+/** Build a cancelled result for an accepted call that did not run. */
 function cancelled(call: ToolCallContent): ExecutedToolCall {
   return {
     result: toolResult(call, CANCELLED_CONTENT, true),
@@ -69,6 +76,7 @@ function cancelled(call: ToolCallContent): ExecutedToolCall {
   };
 }
 
+/** Build a model-visible error result without throwing. */
 function failure(call: ToolCallContent, content: string): ExecutedToolCall {
   return {
     result: toolResult(call, content, true),
@@ -76,6 +84,7 @@ function failure(call: ToolCallContent, content: string): ExecutedToolCall {
   };
 }
 
+/** Session item matching one accepted tool call. */
 function toolResult(
   call: ToolCallContent,
   content: string,

@@ -4,6 +4,7 @@ import type {
 } from "../../src/conversation/types.ts";
 import type { Model, ModelRequest, ModelStreamEvent } from "../../src/model/model.ts";
 
+/** One predetermined model turn for deterministic loop tests. */
 export interface ScriptedTurn {
   chunks?: string[];
   text?: string;
@@ -13,16 +14,19 @@ export interface ScriptedTurn {
   toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
 }
 
+/** Static turn or a function that inspects the latest request. */
 export type ScriptedTurnFactory =
   | ScriptedTurn
   | ((request: ModelRequest) => ScriptedTurn);
 
+/** Scripted model config: a single turn, or `responses` for multi-round loops. */
 export interface ScriptedModelOptions extends ScriptedTurn {
   provider?: string;
   id?: string;
   responses?: ScriptedTurnFactory[];
 }
 
+/** Fake model that yields predetermined text and tool calls without a network. */
 export function createScriptedModel(options: ScriptedModelOptions = {}): Model {
   const id = options.id ?? "scripted";
   const provider = options.provider ?? "scripted";
@@ -57,6 +61,7 @@ export function createScriptedModel(options: ScriptedModelOptions = {}): Model {
   };
 }
 
+/** Drain an async iterable into an array. */
 export async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   const items: T[] = [];
   for await (const item of iterable) {
@@ -65,6 +70,7 @@ export async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   return items;
 }
 
+/** Text chunks for a turn. Tool-only turns emit no default "ok" text. */
 function chunksOf(turn: ScriptedTurn): string[] {
   if (turn.chunks) {
     return turn.chunks;
@@ -78,6 +84,7 @@ function chunksOf(turn: ScriptedTurn): string[] {
   return ["ok"];
 }
 
+/** Build the assembled assistant message for a scripted turn. */
 function assistantMessage(turn: ScriptedTurn, chunks: string[]): AssistantMessage {
   if (turn.message) {
     return turn.message;
