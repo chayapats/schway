@@ -7,13 +7,17 @@ import {
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
+import { readTool } from "../tools/read.ts";
+import { createToolRegistry } from "../tools/registry.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 import { parseArgs, USAGE } from "./args.ts";
 
+/** Minimal writer used so tests can capture CLI output. */
 export interface CliWriter {
   write(chunk: string): void;
 }
 
+/** Process I/O and optional injected model for headless runs. */
 export interface CliIo {
   stdout: CliWriter;
   stderr: CliWriter;
@@ -23,6 +27,10 @@ export interface CliIo {
   createModel?: (input: { apiKey: string }) => Promise<Model>;
 }
 
+/**
+ * Run a headless Schway invocation.
+ * Returns a process exit code: 0 on success, 1 on usage, auth, or run failure.
+ */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
@@ -71,6 +79,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     session,
     model,
     contextManager: createContextManager(workspace),
+    tools: createToolRegistry([readTool]),
+    workspace,
   })) {
     const safeEvent = redactEvent(event, secrets);
     if (parsed.args.json) {
@@ -90,7 +100,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }
       failed = true;
       io.stderr.write(`${safeEvent.message}\n`);
-    } else if (safeEvent.type === "agent.finished" && safeEvent.reason === "error") {
+    } else if (
+      safeEvent.type === "agent.finished" &&
+      (safeEvent.reason === "error" || safeEvent.reason === "cancelled")
+    ) {
       failed = true;
     }
   }
@@ -102,6 +115,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   return failed ? 1 : 0;
 }
 
+/** Gather runtime and environment API keys so output can redact them. */
 function collectSecrets(
   runtimeApiKey: string | undefined,
   env: Record<string, string | undefined>,
@@ -117,18 +131,33 @@ function collectSecrets(
   return secrets;
 }
 
+/** Redact configured secrets from event fields that can reach stdout. */
 function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEvent {
-  if (event.type !== "error") {
-    return event;
+  if (event.type === "error") {
+    return { ...event, message: redactSecrets(event.message, secrets) };
   }
-  return { ...event, message: redactSecrets(event.message, secrets) };
+  if (event.type === "tool.finished") {
+    return { ...event, content: redactSecrets(event.content, secrets) };
+  }
+  if (event.type === "model.delta") {
+    return {
+      ...event,
+      content: {
+        ...event.content,
+        text: redactSecrets(event.content.text, secrets),
+      },
+    };
+  }
+  return event;
 }
 
+/** Lazy-load the Anthropic adapter so unused providers stay off the startup path. */
 async function loadAnthropicModel(apiKey: string): Promise<Model> {
   const { createAnthropicModel } = await import("../model/providers/anthropic.ts");
   return createAnthropicModel({ apiKey });
 }
 
+/** Process entrypoint for the `schway` binary. */
 async function main(): Promise<number> {
   return runCli(process.argv.slice(2), {
     stdout: { write: (chunk) => void process.stdout.write(chunk) },
