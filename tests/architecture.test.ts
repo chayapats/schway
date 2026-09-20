@@ -29,6 +29,9 @@ test("core modules do not import provider SDKs", async () => {
     "src/tools/registry.ts",
     "src/tools/executor.ts",
     "src/tools/read.ts",
+    "src/tools/write.ts",
+    "src/tools/edit.ts",
+    "src/tools/fs.ts",
     "src/tools/path.ts",
   ];
   for (const file of files) {

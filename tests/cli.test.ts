@@ -208,6 +208,45 @@ test("headless -p can read a workspace file through the agent loop", async () =>
   });
 });
 
+test("headless -p can create a file through the agent loop", async () => {
+  await withTempDir(async (dir) => {
+    const result = await run(["-p", "write note", "--json"], {
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "w1",
+                name: "write",
+                arguments: { path: "note.txt", content: "cli-created\n" },
+              },
+            ],
+          },
+          {
+            toolCalls: [
+              {
+                id: "r1",
+                name: "read",
+                arguments: { path: "note.txt" },
+              },
+            ],
+          },
+          (request) => {
+            const tool = request.items.find(
+              (item): item is ToolResult =>
+                item.type === "tool_result" && item.toolCallId === "r1",
+            );
+            return { text: tool?.content ?? "missing" };
+          },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("cli-created");
+  });
+});
+
 test("partial streamed text is terminated before an error diagnostic", async () => {
   const result = await run(["-p", "hello"], {
     model: {

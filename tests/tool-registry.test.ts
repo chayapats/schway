@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
+import { editTool } from "../src/tools/edit.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
+import { writeTool } from "../src/tools/write.ts";
 
 /** Minimal tool used to exercise schema registration. */
 function stub(schema: unknown): ToolDefinition {
@@ -16,7 +18,7 @@ function stub(schema: unknown): ToolDefinition {
 }
 
 test("registers TypeBox schemas and validates arguments before execution", () => {
-  const registry = createToolRegistry([readTool]);
+  const registry = createToolRegistry([readTool, writeTool, editTool]);
   const registered = registry.get("read");
   expect(registered).toBeDefined();
   expect(registered?.validate({ path: "a.ts" }).ok).toBe(true);
@@ -26,6 +28,21 @@ test("registers TypeBox schemas and validates arguments before execution", () =>
     throw new Error("expected invalid arguments");
   }
   expect(invalid.message).toContain("path");
+  expect(registry.get("write")?.validate({ path: "a.ts", content: "x" }).ok).toBe(
+    true,
+  );
+  expect(
+    registry.get("edit")?.validate({
+      path: "a.ts",
+      edits: [{ oldText: "a", newText: "b" }],
+    }).ok,
+  ).toBe(true);
+  expect(
+    registry.get("edit")?.validate({
+      path: "a.ts",
+      edits: [{ oldText: "", newText: "b" }],
+    }).ok,
+  ).toBe(false);
 });
 
 test("unsupported schemas fail early with an actionable error", () => {

@@ -1,12 +1,17 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import {
+  abortError,
+  filesystemError,
+  isAbortError,
+} from "./fs.ts";
+import { resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
   ToolDefinition,
   ToolExecutionResult,
 } from "./types.ts";
-import { resolveToolPath } from "./path.ts";
 
 /** Default number of lines returned when the model omits `limit`. */
 export const DEFAULT_READ_LINE_LIMIT = 2000;
@@ -294,41 +299,3 @@ async function* iterateFileLines(
   }
 }
 
-/** Error used when an AbortSignal fires during a read. */
-function abortError(): Error {
-  const error = new Error("The operation was aborted");
-  error.name = "AbortError";
-  return error;
-}
-
-/** True for AbortError / ABORT_ERR from streams or AbortSignal. */
-function isAbortError(error: unknown): boolean {
-  return (
-    (error instanceof Error && error.name === "AbortError") ||
-    (typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code?: unknown }).code === "ABORT_ERR")
-  );
-}
-
-/** Map common filesystem failures to model-visible messages. */
-function filesystemError(path: string, error: unknown): string {
-  if (isErrno(error, "ENOENT")) {
-    return `File not found: ${path}`;
-  }
-  if (isErrno(error, "EACCES") || isErrno(error, "EPERM")) {
-    return `Permission denied: ${path}`;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
-/** Narrow Node/Bun filesystem errors by `code`. */
-function isErrno(error: unknown, code: string): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === code
-  );
-}
