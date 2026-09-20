@@ -1,11 +1,12 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   abortError,
   filesystemFailure,
   isAbortError,
   isErrno,
+  writeFileAtomically,
 } from "./fs.ts";
 import { resolveToolPath } from "./path.ts";
 import type {
@@ -80,7 +81,7 @@ export async function executeWrite(
 
   try {
     await mkdir(dirname(resolvedPath), { recursive: true });
-    await writeFile(resolvedPath, input.content);
+    await writeFileAtomically(resolvedPath, input.content, ctx.signal);
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();

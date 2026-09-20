@@ -1,3 +1,4 @@
+import { rename, unlink, writeFile } from "node:fs/promises";
 import type { ToolExecutionResult } from "./types.ts";
 
 /** Error used when an AbortSignal fires during a tool. */
@@ -43,6 +44,22 @@ export function filesystemFailure(
     isError: true,
     details: { path, resolvedPath },
   };
+}
+
+/** Write `content` via a same-directory temp file, then rename over `path`. */
+export async function writeFileAtomically(
+  path: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
+  try {
+    await writeFile(tempPath, content, { signal });
+    await rename(tempPath, path);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Narrow Node/Bun filesystem errors by `code`. */

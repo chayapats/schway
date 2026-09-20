@@ -161,7 +161,21 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
 
 /** Redact secrets inside structured tool details that JSON events may print. */
 function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
-  return JSON.parse(redactSecrets(JSON.stringify(value), secrets)) as unknown;
+  if (typeof value === "string") {
+    return redactSecrets(value, secrets);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactJsonValue(entry, secrets));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key,
+        redactJsonValue(nested, secrets),
+      ]),
+    );
+  }
+  return value;
 }
 
 /** Lazy-load the Anthropic adapter so unused providers stay off the startup path. */

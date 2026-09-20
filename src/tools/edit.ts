@@ -1,9 +1,10 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import {
   abortError,
   filesystemFailure,
   isAbortError,
+  writeFileAtomically,
 } from "./fs.ts";
 import { resolveToolPath } from "./path.ts";
 import type {
@@ -93,7 +94,10 @@ export async function executeEdit(
         details: { path: input.path, resolvedPath } satisfies EditDetails,
       };
     }
-    original = await readFile(resolvedPath, "utf8");
+    original = await readFile(resolvedPath, {
+      encoding: "utf8",
+      signal: ctx.signal,
+    });
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
@@ -111,7 +115,7 @@ export async function executeEdit(
   }
 
   try {
-    await writeFile(resolvedPath, applied.content);
+    await writeFileAtomically(resolvedPath, applied.content, ctx.signal);
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();

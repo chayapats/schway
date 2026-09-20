@@ -43,6 +43,29 @@ async function run(
   return { exitCode, stdout: stdout.text, stderr: stderr.text };
 }
 
+/** True when any parsed JSONL value contains `secret` as a string, not as escaped JSON text. */
+function parsedJsonlContains(text: string, secret: string): boolean {
+  for (const line of text.split("\n").filter((entry) => entry.length > 0)) {
+    if (valueContains(JSON.parse(line), secret)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function valueContains(value: unknown, secret: string): boolean {
+  if (typeof value === "string") {
+    return value.includes(secret);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => valueContains(entry, secret));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).some((entry) => valueContains(entry, secret));
+  }
+  return false;
+}
+
 test("schway -p streams text from the agent loop", async () => {
   const result = await run(["-p", "hello"], {
     model: createScriptedModel({ chunks: ["Hel", "lo"] }),
@@ -138,6 +161,42 @@ test("secrets are redacted from json tool results and model text", async () => {
     expect(result.stdout.includes(secret)).toBe(false);
     expect(result.stderr.includes(secret)).toBe(false);
     expect(result.stdout).toContain("***");
+  });
+});
+
+test("secrets with JSON metacharacters are redacted from parsed edit details", async () => {
+  const secret = 'sk-"secret\\do-not-print';
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "note.txt"), `token ${secret}\n`);
+    const result = await run(["-p", "edit note", "--json", "--api-key", secret], {
+      env: {},
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "e1",
+                name: "edit",
+                arguments: {
+                  path: "note.txt",
+                  edits: [
+                    {
+                      oldText: `token ${secret}`,
+                      newText: "token gone",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { text: "done" },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(parsedJsonlContains(result.stdout, secret)).toBe(false);
+    expect(result.stderr.includes(secret)).toBe(false);
   });
 });
 
