@@ -7,8 +7,10 @@ import {
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
+import { editTool } from "../tools/edit.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
+import { writeTool } from "../tools/write.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 import { parseArgs, USAGE } from "./args.ts";
 
@@ -79,7 +81,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     session,
     model,
     contextManager: createContextManager(workspace),
-    tools: createToolRegistry([readTool]),
+    tools: createToolRegistry([readTool, writeTool, editTool]),
     workspace,
   })) {
     const safeEvent = redactEvent(event, secrets);
@@ -137,7 +139,13 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
     return { ...event, message: redactSecrets(event.message, secrets) };
   }
   if (event.type === "tool.finished") {
-    return { ...event, content: redactSecrets(event.content, secrets) };
+    return {
+      ...event,
+      content: redactSecrets(event.content, secrets),
+      ...(event.details !== undefined
+        ? { details: redactJsonValue(event.details, secrets) }
+        : {}),
+    };
   }
   if (event.type === "model.delta") {
     return {
@@ -149,6 +157,25 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
     };
   }
   return event;
+}
+
+/** Redact secrets inside structured tool details that JSON events may print. */
+function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
+  if (typeof value === "string") {
+    return redactSecrets(value, secrets);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactJsonValue(entry, secrets));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key,
+        redactJsonValue(nested, secrets),
+      ]),
+    );
+  }
+  return value;
 }
 
 /** Lazy-load the Anthropic adapter so unused providers stay off the startup path. */

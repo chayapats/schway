@@ -10,12 +10,14 @@ import type {
   UserMessage,
 } from "../src/conversation/types.ts";
 import type { ModelRequest } from "../src/model/model.ts";
+import { editTool } from "../src/tools/edit.ts";
 import {
   DEFAULT_READ_LINE_LIMIT,
   readTool,
   type ReadInput,
 } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
+import { writeTool } from "../src/tools/write.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
@@ -440,6 +442,111 @@ test("cancellation prevents later tool calls and yields cancelled results", asyn
     expect(events.at(-1)).toEqual({
       type: "agent.finished",
       reason: "cancelled",
+    });
+  });
+});
+
+test("agent creates a file and reads it back through the real loop", async () => {
+  await withTempDir(async (dir) => {
+    const project = { root: dir, launchCwd: dir, extraRoots: [] };
+    const session = createSession([user("create note.txt")]);
+    let readBack = "";
+    await collect(
+      runAgentLoop({
+        session,
+        model: createScriptedModel({
+          responses: [
+            {
+              toolCalls: [
+                {
+                  id: "w1",
+                  name: "write",
+                  arguments: { path: "note.txt", content: "created-token\n" },
+                },
+              ],
+            },
+            {
+              toolCalls: [
+                { id: "r1", name: "read", arguments: { path: "note.txt" } },
+              ],
+            },
+            (request) => {
+              readBack = resultContent(request, "r1");
+              return { text: `saw ${readBack}` };
+            },
+          ],
+        }),
+        contextManager: createContextManager(project),
+        tools: createToolRegistry([readTool, writeTool, editTool]),
+        workspace: project,
+      }),
+    );
+    expect(readBack).toContain("created-token");
+    const assistant = session.items.at(-1) as AssistantMessage;
+    expect(assistant.content).toEqual([
+      { type: "text", text: expect.stringContaining("created-token") },
+    ]);
+  });
+});
+
+test("agent edits a file and reads it back through the real loop", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "note.txt"), "alpha-token\n");
+    const project = { root: dir, launchCwd: dir, extraRoots: [] };
+    const session = createSession([user("edit note.txt")]);
+    let readBack = "";
+    const events = await collect(
+      runAgentLoop({
+        session,
+        model: createScriptedModel({
+          responses: [
+            {
+              toolCalls: [
+                {
+                  id: "e1",
+                  name: "edit",
+                  arguments: {
+                    path: "note.txt",
+                    edits: [{ oldText: "alpha-token", newText: "beta-token" }],
+                  },
+                },
+              ],
+            },
+            {
+              toolCalls: [
+                { id: "r1", name: "read", arguments: { path: "note.txt" } },
+              ],
+            },
+            (request) => {
+              readBack = resultContent(request, "r1");
+              return { text: `saw ${readBack}` };
+            },
+          ],
+        }),
+        contextManager: createContextManager(project),
+        tools: createToolRegistry([readTool, writeTool, editTool]),
+        workspace: project,
+      }),
+    );
+    expect(readBack).toContain("beta-token");
+    expect(readBack.includes("alpha-token")).toBe(false);
+    const editResult = session.items.find(
+      (item): item is ToolResult =>
+        item.type === "tool_result" && item.toolCallId === "e1",
+    );
+    expect(editResult?.content).toBe("Edited note.txt (1 replacement)");
+    expect(editResult?.content.includes("alpha-token")).toBe(false);
+    const finished = events.find(
+      (event) => event.type === "tool.finished" && event.toolCallId === "e1",
+    );
+    expect(finished).toMatchObject({
+      type: "tool.finished",
+      name: "edit",
+      status: "success",
+      content: "Edited note.txt (1 replacement)",
+      details: {
+        hunks: [{ oldText: "alpha-token", newText: "beta-token" }],
+      },
     });
   });
 });
