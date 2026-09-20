@@ -1,0 +1,6 @@
+# Disable automatic project .env loading so credentials do not change
+# merely because the user entered another repository.
+env = false
+
+[test]
+root = "."
