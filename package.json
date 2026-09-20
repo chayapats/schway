@@ -1,0 +1,32 @@
+{
+  "name": "schway",
+  "version": "0.1.0",
+  "description": "A lean, light, fast, and hackable coding-agent harness",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "schway": "./bin/schway"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun --no-env-file src/cli/main.ts",
+    "start": "bun --no-env-file src/cli/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
+}

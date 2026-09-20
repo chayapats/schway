@@ -1,0 +1,242 @@
+import Anthropic from "@anthropic-ai/sdk";
+import type {
+  MessageParam,
+  MessageStreamEvent,
+  TextBlockParam,
+  ThinkingBlockParam,
+} from "@anthropic-ai/sdk/resources/messages/messages";
+import type {
+  AssistantContent,
+  AssistantMessage,
+  ConversationItem,
+  ProviderMetadata,
+} from "../../conversation/types.ts";
+import type { Model, ModelRequest, ModelStreamEvent } from "../model.ts";
+
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+export const DEFAULT_ANTHROPIC_MAX_TOKENS = 16_384;
+
+type FetchLike = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export function createAnthropicModel(options: {
+  apiKey: string;
+  model?: string;
+  maxTokens?: number;
+  fetch?: FetchLike;
+}): Model {
+  const modelId = options.model ?? DEFAULT_ANTHROPIC_MODEL;
+  const maxTokens = options.maxTokens ?? DEFAULT_ANTHROPIC_MAX_TOKENS;
+  const client = new Anthropic({
+    apiKey: options.apiKey,
+    maxRetries: 0,
+    logLevel: "off",
+    fetch: options.fetch,
+  });
+
+  return {
+    provider: "anthropic",
+    id: modelId,
+    async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      const stream = client.messages.stream(
+        {
+          model: modelId,
+          max_tokens: maxTokens,
+          stream: true,
+          system: toAnthropicSystem(request),
+          messages: toAnthropicMessages(request.items),
+        },
+        { signal: request.signal },
+      );
+      const builder = createStreamBuilder();
+      for await (const event of stream) {
+        const deltas = builder.accept(event);
+        for (const delta of deltas) {
+          yield delta;
+        }
+      }
+      yield { type: "message_complete", message: builder.complete() };
+    },
+  };
+}
+
+function toAnthropicSystem(request: ModelRequest): TextBlockParam[] {
+  return [
+    { type: "text", text: request.systemPrompt },
+    ...request.context.map((section) => ({
+      type: "text" as const,
+      text: `<${section.name}>\n${section.content}\n</${section.name}>`,
+    })),
+  ];
+}
+
+function toAnthropicMessages(items: readonly ConversationItem[]): MessageParam[] {
+  const messages: MessageParam[] = [];
+  for (const item of items) {
+    if (item.type === "user") {
+      messages.push({
+        role: "user",
+        content: item.content.map((block) => ({
+          type: "text" as const,
+          text: block.text,
+        })),
+      });
+      continue;
+    }
+    if (item.type === "assistant") {
+      const content = toAnthropicAssistantContent(item.content);
+      if (content.length === 0) {
+        continue;
+      }
+      messages.push({ role: "assistant", content });
+    }
+  }
+  return messages;
+}
+
+function toAnthropicAssistantContent(
+  content: readonly AssistantContent[],
+): Array<TextBlockParam | ThinkingBlockParam> {
+  const blocks: Array<TextBlockParam | ThinkingBlockParam> = [];
+  for (const block of content) {
+    if (block.type === "text") {
+      blocks.push({ type: "text", text: block.text });
+      continue;
+    }
+    if (block.type === "thinking") {
+      const signature = anthropicField(block.providerMetadata, "signature");
+      if (typeof signature !== "string" || signature.length === 0) {
+        continue;
+      }
+      blocks.push({
+        type: "thinking",
+        thinking: block.text,
+        signature,
+      });
+    }
+  }
+  return blocks;
+}
+
+function anthropicField(
+  metadata: ProviderMetadata | undefined,
+  key: string,
+): unknown {
+  const anthropic = metadata?.anthropic;
+  if (!anthropic || typeof anthropic !== "object" || Array.isArray(anthropic)) {
+    return undefined;
+  }
+  return (anthropic as Record<string, unknown>)[key];
+}
+
+function createStreamBuilder() {
+  const id = crypto.randomUUID();
+  let anthropicMessageId: string | undefined;
+  let stopReason: string | undefined;
+  const blocks: Array<
+    | { type: "text"; text: string }
+    | { type: "thinking"; text: string; signature?: string }
+  > = [];
+
+  return {
+    accept(event: MessageStreamEvent): ModelStreamEvent[] {
+      switch (event.type) {
+        case "message_start":
+          anthropicMessageId = event.message.id;
+          return [];
+        case "content_block_start":
+          if (event.content_block.type === "text") {
+            blocks[event.index] = {
+              type: "text",
+              text: event.content_block.text,
+            };
+          } else if (event.content_block.type === "thinking") {
+            blocks[event.index] = {
+              type: "thinking",
+              text: event.content_block.thinking,
+              signature: event.content_block.signature || undefined,
+            };
+          }
+          return [];
+        case "content_block_delta":
+          return applyDelta(blocks, event);
+        case "message_delta":
+          stopReason = event.delta.stop_reason ?? undefined;
+          return [];
+        default:
+          return [];
+      }
+    },
+    complete(): AssistantMessage {
+      const content: AssistantContent[] = [];
+      for (const block of blocks) {
+        if (!block) {
+          continue;
+        }
+        if (block.type === "text") {
+          content.push({ type: "text", text: block.text });
+          continue;
+        }
+        content.push({
+          type: "thinking",
+          text: block.text,
+          ...(block.signature
+            ? { providerMetadata: { anthropic: { signature: block.signature } } }
+            : {}),
+        });
+      }
+      const anthropic: Record<string, unknown> = {};
+      if (anthropicMessageId) {
+        anthropic.message_id = anthropicMessageId;
+      }
+      if (stopReason) {
+        anthropic.stop_reason = stopReason;
+      }
+      return {
+        type: "assistant",
+        id,
+        content,
+        ...(Object.keys(anthropic).length > 0
+          ? { providerMetadata: { anthropic } }
+          : {}),
+      };
+    },
+  };
+}
+
+function applyDelta(
+  blocks: Array<
+    | { type: "text"; text: string }
+    | { type: "thinking"; text: string; signature?: string }
+  >,
+  event: Extract<MessageStreamEvent, { type: "content_block_delta" }>,
+): ModelStreamEvent[] {
+  const delta = event.delta;
+  if (delta.type === "text_delta") {
+    const current = blocks[event.index];
+    if (!current || current.type !== "text") {
+      blocks[event.index] = { type: "text", text: delta.text };
+    } else {
+      current.text += delta.text;
+    }
+    return [{ type: "text_delta", text: delta.text }];
+  }
+  if (delta.type === "thinking_delta") {
+    const current = blocks[event.index];
+    if (!current || current.type !== "thinking") {
+      blocks[event.index] = { type: "thinking", text: delta.thinking };
+    } else {
+      current.text += delta.thinking;
+    }
+    return [{ type: "thinking_delta", text: delta.thinking }];
+  }
+  if (delta.type === "signature_delta") {
+    const current = blocks[event.index];
+    if (current && current.type === "thinking") {
+      current.signature = delta.signature;
+    }
+  }
+  return [];
+}

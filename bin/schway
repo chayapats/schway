@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source="${BASH_SOURCE[0]}"
+while [[ -L "$source" ]]; do
+  dir="$(cd "$(dirname "$source")" && pwd)"
+  source="$(readlink "$source")"
+  [[ "$source" != /* ]] && source="$dir/$source"
+done
+root="$(cd "$(dirname "$source")/.." && pwd)"
+
+exec bun --no-env-file "$root/src/cli/main.ts" "$@"
