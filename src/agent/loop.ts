@@ -1,14 +1,23 @@
-import type { AssistantMessage } from "../conversation/types.ts";
+import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import type { ContextManager } from "../context/manager.ts";
-import type { Model } from "../model/model.ts";
+import type { Model, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
+import { executeToolCall } from "../tools/executor.ts";
+import type { ToolRegistry } from "../tools/registry.ts";
+import { toPlainJsonSchema } from "../tools/schema.ts";
+import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
+
+export const DEFAULT_MAX_TURNS = 32;
 
 export interface AgentLoopOptions {
   session: Session;
   model: Model;
   contextManager: ContextManager;
+  tools?: ToolRegistry;
+  workspace?: Workspace;
   signal?: AbortSignal;
+  maxTurns?: number;
 }
 
 export async function* runAgentLoop(
@@ -16,58 +25,126 @@ export async function* runAgentLoop(
 ): AsyncGenerator<RuntimeEvent> {
   yield { type: "agent.started" };
 
+  const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+
   try {
-    const prepared = options.contextManager.prepare(options.session);
-    yield {
-      type: "model.started",
-      provider: options.model.provider,
-      model: options.model.id,
-    };
-
-    let complete: AssistantMessage | undefined;
-    try {
-      for await (const event of options.model.stream({
-        systemPrompt: prepared.systemPrompt,
-        context: prepared.context,
-        items: prepared.items,
-        signal: options.signal,
-      })) {
-        if (event.type === "text_delta") {
-          yield {
-            type: "model.delta",
-            content: { type: "text", text: event.text },
-          };
-        } else if (event.type === "thinking_delta") {
-          yield {
-            type: "model.delta",
-            content: { type: "thinking", text: event.text },
-          };
-        } else {
-          complete = event.message;
-        }
+    for (let turn = 0; turn < maxTurns; turn++) {
+      if (options.signal?.aborted) {
+        yield { type: "agent.finished", reason: "cancelled" };
+        return;
       }
-    } catch (error) {
-      yield { type: "error", message: errorMessage(error) };
-      yield { type: "agent.finished", reason: "error" };
-      return;
-    }
 
-    if (!complete) {
+      const prepared = options.contextManager.prepare(options.session);
       yield {
-        type: "error",
-        message: "Model stream ended without a complete message",
+        type: "model.started",
+        provider: options.model.provider,
+        model: options.model.id,
       };
-      yield { type: "agent.finished", reason: "error" };
-      return;
+
+      let complete: AssistantMessage | undefined;
+      try {
+        for await (const event of options.model.stream({
+          systemPrompt: prepared.systemPrompt,
+          context: prepared.context,
+          items: prepared.items,
+          tools: toModelTools(options.tools),
+          signal: options.signal,
+        })) {
+          if (event.type === "text_delta") {
+            yield {
+              type: "model.delta",
+              content: { type: "text", text: event.text },
+            };
+          } else if (event.type === "thinking_delta") {
+            yield {
+              type: "model.delta",
+              content: { type: "thinking", text: event.text },
+            };
+          } else {
+            complete = event.message;
+          }
+        }
+      } catch (error) {
+        if (options.signal?.aborted) {
+          yield { type: "agent.finished", reason: "cancelled" };
+          return;
+        }
+        yield { type: "error", message: errorMessage(error) };
+        yield { type: "agent.finished", reason: "error" };
+        return;
+      }
+
+      if (!complete) {
+        yield {
+          type: "error",
+          message: "Model stream ended without a complete message",
+        };
+        yield { type: "agent.finished", reason: "error" };
+        return;
+      }
+
+      options.session.append(complete);
+      yield { type: "model.finished" };
+
+      const calls = toolCallsOf(complete);
+      if (calls.length === 0) {
+        yield { type: "agent.finished", reason: "completed" };
+        return;
+      }
+
+      for (const call of calls) {
+        yield {
+          type: "tool.started",
+          toolCallId: call.id,
+          name: call.name,
+        };
+        const executed = await executeToolCall({
+          registry: options.tools,
+          call,
+          workspace: options.workspace,
+          signal: options.signal,
+        });
+        options.session.append(executed.result);
+        yield {
+          type: "tool.finished",
+          toolCallId: call.id,
+          name: call.name,
+          status: executed.status,
+          content: executed.result.content,
+          ...(executed.details !== undefined
+            ? { details: executed.details }
+            : {}),
+        };
+      }
+
+      if (options.signal?.aborted) {
+        yield { type: "agent.finished", reason: "cancelled" };
+        return;
+      }
     }
 
-    options.session.append(complete);
-    yield { type: "model.finished" };
-    yield { type: "agent.finished", reason: "completed" };
+    yield { type: "agent.finished", reason: "max_turns" };
   } catch (error) {
     yield { type: "error", message: errorMessage(error) };
     yield { type: "agent.finished", reason: "error" };
   }
+}
+
+function toolCallsOf(message: AssistantMessage): ToolCallContent[] {
+  return message.content.filter(
+    (block): block is ToolCallContent => block.type === "tool_call",
+  );
+}
+
+function toModelTools(registry: ToolRegistry | undefined): ModelTool[] | undefined {
+  if (!registry) {
+    return undefined;
+  }
+  return registry.definitions().map((definition) => ({
+    name: definition.name,
+    description: definition.description,
+    inputSchema: toPlainJsonSchema(definition.inputSchema),
+  }));
 }
 
 function errorMessage(error: unknown): string {

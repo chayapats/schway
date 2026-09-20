@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { runCli } from "../src/cli/main.ts";
 import type { Model } from "../src/model/model.ts";
+import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -135,6 +138,38 @@ test("--api-key does not treat the next flag as a key", async () => {
   });
   expect(result.exitCode).toBe(1);
   expect(result.stderr).toContain("Missing value for --api-key");
+});
+
+test("headless -p can read a workspace file through the agent loop", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "README.md"), "hello from workspace\n");
+    const result = await run(["-p", "read README", "--json"], {
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "t1",
+                name: "read",
+                arguments: { path: "README.md" },
+              },
+            ],
+          },
+          (request) => {
+            const tool = request.items.find(
+              (item): item is ToolResult => item.type === "tool_result",
+            );
+            return { text: tool?.content ?? "missing" };
+          },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("tool.started");
+    expect(result.stdout).toContain("tool.finished");
+    expect(result.stdout).toContain("hello from workspace");
+  });
 });
 
 test("partial streamed text is terminated before an error diagnostic", async () => {

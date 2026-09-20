@@ -1,10 +1,17 @@
 import type { AssistantMessage, ConversationItem } from "../conversation/types.ts";
 import type { ContextSection } from "../context/manager.ts";
 
+export interface ModelTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
 export interface ModelRequest {
   systemPrompt: string;
   context: readonly ContextSection[];
   items: readonly ConversationItem[];
+  tools?: readonly ModelTool[];
   signal?: AbortSignal;
 }
 

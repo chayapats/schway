@@ -7,6 +7,8 @@ import {
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
+import { readTool } from "../tools/read.ts";
+import { createToolRegistry } from "../tools/registry.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 import { parseArgs, USAGE } from "./args.ts";
 
@@ -71,6 +73,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     session,
     model,
     contextManager: createContextManager(workspace),
+    tools: createToolRegistry([readTool]),
+    workspace,
   })) {
     const safeEvent = redactEvent(event, secrets);
     if (parsed.args.json) {
@@ -90,7 +94,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }
       failed = true;
       io.stderr.write(`${safeEvent.message}\n`);
-    } else if (safeEvent.type === "agent.finished" && safeEvent.reason === "error") {
+    } else if (
+      safeEvent.type === "agent.finished" &&
+      (safeEvent.reason === "error" || safeEvent.reason === "cancelled")
+    ) {
       failed = true;
     }
   }

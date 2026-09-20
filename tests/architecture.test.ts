@@ -24,6 +24,12 @@ test("core modules do not import provider SDKs", async () => {
     "src/session/session.ts",
     "src/workspace/workspace.ts",
     "src/cli/args.ts",
+    "src/tools/types.ts",
+    "src/tools/schema.ts",
+    "src/tools/registry.ts",
+    "src/tools/executor.ts",
+    "src/tools/read.ts",
+    "src/tools/path.ts",
   ];
   for (const file of files) {
     const source = await Bun.file(file).text();
