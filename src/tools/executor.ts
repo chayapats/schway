@@ -49,7 +49,10 @@ export async function executeToolCall(options: {
       details: output.details,
     };
   } catch (error) {
-    if (options.signal?.aborted) {
+    if (
+      options.signal?.aborted ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
       return cancelled(options.call);
     }
     return failure(

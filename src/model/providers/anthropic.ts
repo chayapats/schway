@@ -162,10 +162,17 @@ function toAnthropicAssistantContent(
       type: "tool_use",
       id: block.id,
       name: block.name,
-      input: block.arguments ?? {},
+      input: toAnthropicToolInput(block.arguments),
     });
   }
   return blocks;
+}
+
+function toAnthropicToolInput(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
 }
 
 function anthropicField(

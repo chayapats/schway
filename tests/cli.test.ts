@@ -105,6 +105,40 @@ test("secrets are not printed when a run fails", async () => {
   expect(result.stderr).toContain("unauthorized");
 });
 
+test("secrets are redacted from json tool results and model text", async () => {
+  const secret = "sk-secret-do-not-print";
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "note.txt"), `token ${secret}\n`);
+    const result = await run(["-p", "read note", "--json", "--api-key", secret], {
+      env: {},
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "t1",
+                name: "read",
+                arguments: { path: "note.txt" },
+              },
+            ],
+          },
+          (request) => {
+            const tool = request.items.find(
+              (item): item is ToolResult => item.type === "tool_result",
+            );
+            return { text: `got ${tool?.content ?? ""}` };
+          },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.includes(secret)).toBe(false);
+    expect(result.stderr.includes(secret)).toBe(false);
+    expect(result.stdout).toContain("***");
+  });
+});
+
 test("provider stream failure exits non-zero with an actionable error", async () => {
   const result = await run(["-p", "hello"], {
     model: createScriptedModel({ error: "connection reset" }),

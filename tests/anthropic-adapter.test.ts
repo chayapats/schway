@@ -354,3 +354,52 @@ test("tool errors round-trip with is_error on the Anthropic request", async () =
     ],
   });
 });
+
+test("non-object tool arguments serialize as an empty input object", async () => {
+  const captured: CapturedRequest = { calls: 0 };
+  const model = createAnthropicModel({
+    apiKey: "sk-test",
+    fetch: sseFetch(TEXT_STREAM_EVENTS, captured),
+  });
+  await collect(
+    model.stream({
+      ...sampleRequest(),
+      items: [
+        ...sampleRequest().items,
+        {
+          type: "assistant",
+          id: "a1",
+          content: [
+            {
+              type: "tool_call",
+              id: "toolu_badjson",
+              name: "read",
+              arguments: '{"path":',
+            },
+          ],
+        },
+        {
+          type: "tool_result",
+          id: "tr1",
+          toolCallId: "toolu_badjson",
+          content: "Invalid arguments for tool read",
+          isError: true,
+        },
+      ],
+    }),
+  );
+  const body = captured.body as {
+    messages: Array<{ role: string; content: unknown }>;
+  };
+  expect(body.messages[1]).toEqual({
+    role: "assistant",
+    content: [
+      {
+        type: "tool_use",
+        id: "toolu_badjson",
+        name: "read",
+        input: {},
+      },
+    ],
+  });
+});

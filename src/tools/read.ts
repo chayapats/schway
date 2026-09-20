@@ -1,5 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import type {
   ToolContext,
   ToolDefinition,
@@ -77,10 +78,15 @@ export async function executeRead(
     };
   }
 
-  let buffer: Buffer;
+  const startLine = input.offset ?? 1;
+  const limit = input.limit ?? DEFAULT_READ_LINE_LIMIT;
+  let scanned;
   try {
-    buffer = await readFile(resolvedPath);
+    scanned = await scanFileWindow(resolvedPath, startLine, limit, ctx.signal);
   } catch (error) {
+    if (ctx.signal?.aborted || isAbortError(error)) {
+      throw error instanceof Error ? error : new Error("The operation was aborted");
+    }
     return {
       content: filesystemError(input.path, error),
       isError: true,
@@ -88,7 +94,7 @@ export async function executeRead(
     };
   }
 
-  if (buffer.includes(0)) {
+  if (scanned.binary) {
     return {
       content: `Cannot read binary file: ${input.path}`,
       isError: true,
@@ -96,8 +102,7 @@ export async function executeRead(
     };
   }
 
-  const lines = splitLines(buffer.toString("utf8"));
-  if (lines.length === 0) {
+  if (scanned.lineCount === 0) {
     return {
       content: "(empty file)",
       details: {
@@ -111,49 +116,48 @@ export async function executeRead(
     };
   }
 
-  const startLine = input.offset ?? 1;
-  if (startLine > lines.length) {
+  if (startLine > scanned.lineCount) {
     return {
-      content: `offset ${startLine} is beyond the end of the file (${lines.length} lines)`,
+      content: `offset ${startLine} is beyond the end of the file (${scanned.lineCount} lines)`,
       isError: true,
       details: {
         path: input.path,
         resolvedPath,
-        lineCount: lines.length,
+        lineCount: scanned.lineCount,
         startLine,
-        endLine: lines.length,
+        endLine: scanned.lineCount,
         truncated: false,
       } satisfies ReadDetails,
     };
   }
 
-  const limit = input.limit ?? DEFAULT_READ_LINE_LIMIT;
-  const requestedEnd = Math.min(lines.length, startLine - 1 + limit);
+  const requestedEnd = Math.min(scanned.lineCount, startLine - 1 + limit);
   const width = Math.max(6, String(requestedEnd).length);
 
   const formatted: string[] = [];
   let chars = 0;
   let lastIncluded = startLine - 2;
-  let slicedLine = false;
-  for (let index = startLine - 1; index < requestedEnd; index++) {
-    const line = `${String(index + 1).padStart(width)}|${lines[index]}`;
+  let slicedLine = scanned.slicedLine;
+  for (const [offset, text] of scanned.window.entries()) {
+    const lineNumber = startLine + offset;
+    const line = `${String(lineNumber).padStart(width)}|${text}`;
     const extra = (formatted.length === 0 ? 0 : 1) + line.length;
     if (formatted.length > 0 && chars + extra > MAX_READ_CHARS) {
       break;
     }
     if (formatted.length === 0 && extra > MAX_READ_CHARS) {
       formatted.push(line.slice(0, MAX_READ_CHARS));
-      lastIncluded = index;
+      lastIncluded = lineNumber - 1;
       chars = MAX_READ_CHARS;
       slicedLine = true;
       break;
     }
     formatted.push(line);
     chars += extra;
-    lastIncluded = index;
+    lastIncluded = lineNumber - 1;
   }
 
-  const remainingLines = lines.length - (lastIncluded + 1);
+  const remainingLines = scanned.lineCount - (lastIncluded + 1);
   const truncated = slicedLine || remainingLines > 0;
   const nextOffset = lastIncluded + 2;
   let content = formatted.join("\n");
@@ -170,7 +174,7 @@ export async function executeRead(
     details: {
       path: input.path,
       resolvedPath,
-      lineCount: lines.length,
+      lineCount: scanned.lineCount,
       startLine,
       endLine: lastIncluded + 1,
       truncated,
@@ -179,15 +183,115 @@ export async function executeRead(
   };
 }
 
-function splitLines(text: string): string[] {
-  if (text.length === 0) {
-    return [];
+async function scanFileWindow(
+  path: string,
+  startLine: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<{ lineCount: number; window: string[]; slicedLine: boolean; binary: boolean }> {
+  const window: string[] = [];
+  let lineCount = 0;
+  let slicedLine = false;
+  for await (const item of iterateFileLines(path, signal)) {
+    if ("binary" in item) {
+      return { lineCount: 0, window: [], slicedLine: false, binary: true };
+    }
+    lineCount += 1;
+    if (lineCount < startLine || window.length >= limit) {
+      continue;
+    }
+    window.push(item.text);
+    if (item.truncated) {
+      slicedLine = true;
+    }
   }
-  const lines = text.split("\n");
-  if (lines.at(-1) === "") {
-    lines.pop();
+  return { lineCount, window, slicedLine, binary: false };
+}
+
+async function* iterateFileLines(
+  path: string,
+  signal?: AbortSignal,
+): AsyncGenerator<{ text: string; truncated: boolean } | { binary: true }> {
+  const stream = createReadStream(path, { signal });
+  const decoder = new TextDecoder("utf8");
+  let carry = "";
+  let skipRestOfLine = false;
+
+  try {
+    for await (const chunk of stream) {
+      if (signal?.aborted) {
+        throw abortError();
+      }
+      const buffer = chunk as Buffer;
+      if (buffer.includes(0)) {
+        yield { binary: true };
+        return;
+      }
+      let text = carry + decoder.decode(buffer, { stream: true });
+      carry = "";
+
+      if (skipRestOfLine) {
+        const newline = text.indexOf("\n");
+        if (newline === -1) {
+          continue;
+        }
+        text = text.slice(newline + 1);
+        skipRestOfLine = false;
+      }
+
+      while (text.length > 0) {
+        const newline = text.indexOf("\n");
+        if (newline === -1) {
+          if (text.length > MAX_READ_CHARS) {
+            yield { text: text.slice(0, MAX_READ_CHARS), truncated: true };
+            skipRestOfLine = true;
+            text = "";
+          } else {
+            carry = text;
+            text = "";
+          }
+          break;
+        }
+
+        const raw = text.slice(0, newline);
+        text = text.slice(newline + 1);
+        if (raw.length > MAX_READ_CHARS) {
+          yield { text: raw.slice(0, MAX_READ_CHARS), truncated: true };
+        } else {
+          yield { text: raw, truncated: false };
+        }
+      }
+    }
+
+    if (skipRestOfLine) {
+      return;
+    }
+    const tail = carry + decoder.decode();
+    if (tail.length > 0) {
+      yield {
+        text: tail.slice(0, MAX_READ_CHARS),
+        truncated: tail.length > MAX_READ_CHARS,
+      };
+    }
+  } finally {
+    stream.destroy();
   }
-  return lines;
+}
+
+function abortError(): Error {
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof Error && error.name === "AbortError") ||
+    (typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ABORT_ERR")
+  );
 }
 
 function filesystemError(path: string, error: unknown): string {

@@ -125,10 +125,22 @@ function collectSecrets(
 }
 
 function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEvent {
-  if (event.type !== "error") {
-    return event;
+  if (event.type === "error") {
+    return { ...event, message: redactSecrets(event.message, secrets) };
   }
-  return { ...event, message: redactSecrets(event.message, secrets) };
+  if (event.type === "tool.finished") {
+    return { ...event, content: redactSecrets(event.content, secrets) };
+  }
+  if (event.type === "model.delta") {
+    return {
+      ...event,
+      content: {
+        ...event.content,
+        text: redactSecrets(event.content.text, secrets),
+      },
+    };
+  }
+  return event;
 }
 
 async function loadAnthropicModel(apiKey: string): Promise<Model> {

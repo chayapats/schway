@@ -121,6 +121,20 @@ test("read truncates a single oversized line", async () => {
   });
 });
 
+test("read aborts an in-flight file read", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "note.txt"), "alpha\n");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      readTool.execute({ path: "note.txt" }, {
+        ...(await contextFor(dir)),
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
 test("read reports a model-visible error for a missing file", async () => {
   await withTempDir(async (dir) => {
     const result = await readTool.execute(
