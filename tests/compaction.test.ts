@@ -6,6 +6,7 @@ import type {
   AssistantMessage,
   UserMessage,
 } from "../src/conversation/types.ts";
+import type { Model } from "../src/model/model.ts";
 import {
   createJsonlSession,
   loadJsonlSession,
@@ -303,6 +304,9 @@ test("repeated compaction chains summaries and advances the retained window", as
 
   expect(two).not.toBeNull();
   expect(two?.firstKeptId).not.toBe(firstKept);
+  // Parent linkage chains the second record to the first.
+  expect(one?.parentCompactionId).toBeUndefined();
+  expect(two?.parentCompactionId).toBe(one?.id);
   // The second summary input built on the first summary.
   expect(secondInput.includes("first")).toBe(true);
   const prepared = await manager.prepare(session);
@@ -337,6 +341,23 @@ test("resumed sessions reconstruct the same summary plus retained records", asyn
     );
     // Raw history survived the round trip, including the compaction marker.
     expect(loaded.items.length).toBe(turns(12).length + 1);
+    const persisted = loaded.items.find((item) => item.type === "compaction");
+    expect(persisted?.type).toBe("compaction");
+    if (persisted?.type === "compaction" && record) {
+      expect(persisted.summary).toBe(CODING_SUMMARY);
+      expect(persisted.firstKeptId).toBe(record?.firstKeptId);
+    }
+    // A second compaction after resume chains to the reloaded record.
+    loaded.append(
+      { type: "user", id: "u-post", content: [{ type: "text", text: "more" }] },
+      { type: "assistant", id: "a-post", content: [{ type: "text", text: "done" }] },
+    );
+    const chained = await createContextManager(project).compact(
+      loaded,
+      createScriptedModel({ text: `${CODING_SUMMARY}\nchained` }),
+      { reason: "manual" },
+    );
+    expect(chained?.parentCompactionId).toBe(record?.id);
   });
 });
 
@@ -416,4 +437,72 @@ test("repeated overflow terminates clearly instead of looping", async () => {
   // Went through exactly one forced compaction before terminating.
   expect(events.filter((e) => e.type === "compaction.started")).toHaveLength(1);
   expect(session.items.filter((item) => item.type === "compaction")).toHaveLength(1);
+});
+
+test("Anthropic prompt-too-long text without a code still recovers", async () => {
+  const session = createSession(turns(12));
+  const manager = createContextManager(workspace, { keepTurns: 10 });
+  const model = createScriptedModel({
+    responses: [
+      {
+        error: "prompt is too long: 213418 tokens > 200000 maximum",
+        status: 400,
+      },
+      { text: CODING_SUMMARY },
+      { text: "recovered" },
+    ],
+  });
+
+  const events = await collect(
+    runAgentLoop({ session, model, contextManager: manager }),
+  );
+
+  expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
+  expect(events.some((e) => e.type === "model.retry")).toBe(false);
+  expect(session.items.some((item) => item.type === "compaction")).toBe(true);
+});
+
+test("aborting after a forced compaction keeps the record and reports completion", async () => {
+  const session = createSession(turns(12));
+  const manager = createContextManager(workspace, { keepTurns: 10 });
+  const controller = new AbortController();
+  let calls = 0;
+  const model: Model = {
+    provider: "scripted",
+    id: "scripted",
+    async *stream() {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(
+          new Error("prompt is too long: 213418 tokens > 200000 maximum"),
+          { status: 400 },
+        );
+      }
+      // Abort mid-compaction, then still return a summary.
+      controller.abort();
+      yield {
+        type: "message_complete",
+        message: {
+          type: "assistant",
+          id: "a-sum",
+          content: [{ type: "text", text: CODING_SUMMARY }],
+        },
+      };
+    },
+  };
+
+  const events = await collect(
+    runAgentLoop({
+      session,
+      model,
+      contextManager: manager,
+      signal: controller.signal,
+    }),
+  );
+
+  expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "cancelled" });
+  const finished = events.filter((e) => e.type === "compaction.finished");
+  expect(finished).toHaveLength(1);
+  expect(finished[0]).toMatchObject({ status: "completed" });
+  expect(session.items.some((item) => item.type === "compaction")).toBe(true);
 });

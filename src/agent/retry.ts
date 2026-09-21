@@ -212,7 +212,7 @@ const OVERFLOW_CODES = new Set([
 ]);
 
 const OVERFLOW_MESSAGE =
-  /context\s*(length|window|size)?\s*(exceeded|too\s*(long|large|big))|maximum\s*context|input\s*too\s*long|prompt\s*too\s*long|too\s*many\s*tokens|context_length_exceeded/i;
+  /context\s*(length|window|size)?\s*(exceeded|too\s*(long|large|big))|maximum\s*context|(input|prompt|request|message)\s*(is\s+)?too\s*(long|large|big)|too\s*many\s*tokens|tokens\s*>\s*\d+\s*maximum|context_length_exceeded/i;
 
 /** True for actual provider context overflow, separate from transport retries. */
 export function isContextOverflowError(error: unknown): boolean {

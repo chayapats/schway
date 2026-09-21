@@ -52,6 +52,8 @@ export interface CompactionRecord {
   summary: string;
   firstKeptId: string;
   tokensBefore?: number;
+  /** Prior compaction record this summary builds on; absent for the first compaction. */
+  parentCompactionId?: string;
 }
 
 /** Any durable session entry: model-facing conversation or compaction marker. */

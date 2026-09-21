@@ -210,6 +210,7 @@ export function createContextManager(
       summary,
       firstKeptId: boundary.firstKeptId,
       tokensBefore,
+      ...(latest ? { parentCompactionId: latest.id } : {}),
     };
     session.append(record);
     return record;

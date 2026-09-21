@@ -303,6 +303,12 @@ function toSessionRecord(value: unknown): SessionRecord {
     if (typeof value.tokensBefore === "number") {
       record.tokensBefore = value.tokensBefore;
     }
+    if (
+      typeof value.parentCompactionId === "string" &&
+      value.parentCompactionId.length > 0
+    ) {
+      record.parentCompactionId = value.parentCompactionId;
+    }
     return record;
   }
   throw malformedRecord();

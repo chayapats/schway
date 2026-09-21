@@ -62,7 +62,17 @@ export async function* runAgentLoop(
       signal: options.signal,
     });
     if (options.signal?.aborted) {
-      yield { type: "compaction.finished", reason: "overflow", status: "noop" };
+      if (record) {
+        yield {
+          type: "compaction.finished",
+          reason: "overflow",
+          status: "completed",
+          recordId: record.id,
+          firstKeptId: record.firstKeptId,
+        };
+      } else {
+        yield { type: "compaction.finished", reason: "overflow", status: "noop" };
+      }
       yield { type: "agent.finished", reason: "cancelled" };
       return null;
     }
@@ -119,7 +129,7 @@ export async function* runAgentLoop(
       yield {
         type: "error",
         message:
-          "Repeated context overflow after compaction. The session is unchanged; compact manually or shorten the history and retry.",
+          "Repeated context overflow after compaction. The compaction record was kept; shorten the history or start a new session and retry.",
       };
       yield { type: "agent.finished", reason: "error" };
       return null;
