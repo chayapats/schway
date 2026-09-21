@@ -58,7 +58,7 @@ export function createOpenAICompatibleModel(options: {
       if (auth !== "none" && apiKey.length > 0) {
         headers.set("Authorization", `Bearer ${apiKey}`);
       }
-      const secrets = apiKey.length > 0 ? [apiKey] : [];
+      const secrets = secretsToRedact(apiKey, options.headers);
       const response = await fetchFn(completionsUrl(options.baseUrl), {
         method: "POST",
         headers,
@@ -83,6 +83,46 @@ export function createOpenAICompatibleModel(options: {
       yield { type: "message_complete", message: builder.complete() };
     },
   };
+}
+
+/** Header names whose values are treated as credentials for error redaction. */
+const CREDENTIAL_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "api-key",
+  "x-auth-token",
+  "x-access-token",
+]);
+
+/** Collect API key and credential-header values that must not appear in errors. */
+function secretsToRedact(
+  apiKey: string,
+  headers: Record<string, string> | undefined,
+): string[] {
+  const secrets: string[] = [];
+  if (apiKey.length > 0) {
+    secrets.push(apiKey);
+  }
+  if (!headers) {
+    return secrets;
+  }
+  for (const [name, value] of Object.entries(headers)) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (!CREDENTIAL_HEADER_NAMES.has(name.toLowerCase())) {
+      continue;
+    }
+    secrets.push(trimmed);
+    const bearer = /^Bearer\s+(.+)$/i.exec(trimmed);
+    const token = bearer?.[1]?.trim();
+    if (token && token.length > 0 && token !== trimmed) {
+      secrets.push(token);
+    }
+  }
+  return secrets;
 }
 
 /** Join a custom base URL with the Chat Completions path. */
@@ -189,6 +229,7 @@ async function* readSseJson(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let drained = false;
   const abort = () => {
     void reader.cancel("aborted").catch(() => undefined);
   };
@@ -208,6 +249,7 @@ async function* readSseJson(
       }
       if (done) {
         buffer += decoder.decode();
+        drained = true;
         break;
       }
       buffer += decoder.decode(value, { stream: true });
@@ -233,10 +275,18 @@ async function* readSseJson(
     }
   } finally {
     signal?.removeEventListener("abort", abort);
-    try {
-      reader.releaseLock();
-    } catch {
-      // cancel() already released the lock
+    if (!drained) {
+      try {
+        await reader.cancel();
+      } catch {
+        // already cancelled by abort or a previous cancel()
+      }
+    } else {
+      try {
+        reader.releaseLock();
+      } catch {
+        // cancel() already released the lock
+      }
     }
   }
 }

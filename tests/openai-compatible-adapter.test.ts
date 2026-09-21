@@ -436,6 +436,55 @@ test("authentication failures are actionable and do not reveal credentials", asy
   }
 });
 
+test("endpoint errors redact credential header values", async () => {
+  const secret = "hdr-secret-credential";
+  const model = createOpenAICompatibleModel({
+    baseUrl: "http://127.0.0.1:8080/v1",
+    auth: "none",
+    headers: { "X-Api-Key": secret },
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: `Incorrect API key provided: ${secret}` },
+        }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ),
+  });
+  try {
+    await collect(model.stream(sampleRequest()));
+    throw new Error("expected authentication failure");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toMatch(/authentication failed/i);
+    expect(message.includes(secret)).toBe(false);
+  }
+});
+
+test("completing on [DONE] cancels the remaining SSE body", async () => {
+  let released = false;
+  const payload = encodeChatCompletionsSse(TEXT_STREAM_CHUNKS);
+  const model = createOpenAICompatibleModel({
+    baseUrl: "http://127.0.0.1:8080/v1",
+    fetch: async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(payload));
+        },
+        cancel() {
+          released = true;
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  });
+  const events = await collect(model.stream(sampleRequest()));
+  expect(events.at(-1)?.type).toBe("message_complete");
+  expect(released).toBe(true);
+});
+
 test("malformed SSE produces an actionable error", async () => {
   const model = createOpenAICompatibleModel({
     baseUrl: "http://127.0.0.1:8080/v1",
