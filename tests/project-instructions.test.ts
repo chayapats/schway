@@ -187,6 +187,44 @@ test("sibling and similar-prefix directories do not leak instructions", async ()
   });
 });
 
+test("AGENTS.md symlink into an out-of-scope file is not loaded", async () => {
+  await withTempDir(async (dir) => {
+    const outside = await makeDir(join(dir, "outside"));
+    await writeFile(join(outside, "secret.md"), "OUTSIDE_SECRET_NU\n");
+    const project = await makeDir(join(dir, "project"));
+    await makeSymlink(join(outside, "secret.md"), join(project, "AGENTS.md"));
+    const workspace = { root: project, launchCwd: project, extraRoots: [] };
+    const requests = await captureRequests(workspace, {
+      responses: [{ text: "ok" }],
+    });
+
+    expect(instructionsOf(requests[0]).includes("OUTSIDE_SECRET_NU")).toBe(
+      false,
+    );
+    expect(requests[0]?.context.map((section) => section.name)).toEqual([
+      "environment",
+    ]);
+  });
+});
+
+test("AGENTS.md symlink to an in-scope file still loads", async () => {
+  await withTempDir(async (dir) => {
+    const project = await makeDir(join(dir, "project"));
+    await makeDir(join(project, "docs"));
+    await writeFile(join(project, "docs", "rules.md"), "IN_SCOPE_RULE_XI\n");
+    await makeSymlink(
+      join(project, "docs", "rules.md"),
+      join(project, "AGENTS.md"),
+    );
+    const workspace = { root: project, launchCwd: project, extraRoots: [] };
+    const requests = await captureRequests(workspace, {
+      responses: [{ text: "ok" }],
+    });
+
+    expect(instructionsOf(requests[0])).toContain("IN_SCOPE_RULE_XI");
+  });
+});
+
 test("scope selection follows canonical target paths through symlinks", async () => {
   await withTempDir(async (dir) => {
     const repo = await nestedRepo(dir);

@@ -57,7 +57,8 @@ export async function discoverAgentsInstructions(options: {
   const instructions: AgentsInstruction[] = [];
   const seen = new Set<string>();
   for (const [dir, depth] of ordered) {
-    const loaded = await readAgentsFile(join(dir, "AGENTS.md"));
+    const allowedRoot = depth === GLOBAL_SCOPE_DEPTH ? dir : root;
+    const loaded = await readAgentsFile(join(dir, "AGENTS.md"), allowedRoot);
     if (loaded === undefined || seen.has(loaded.path)) {
       continue;
     }
@@ -116,17 +117,22 @@ async function ancestorDirsWithinRoot(
 
 async function readAgentsFile(
   path: string,
+  allowedRoot: string,
 ): Promise<Omit<AgentsInstruction, "displayPath"> | undefined> {
+  const canonical = await canonicalPath(path);
+  if (!isInside(allowedRoot, canonical)) {
+    return undefined;
+  }
   try {
-    const info = await stat(path);
+    const info = await stat(canonical);
     if (!info.isFile()) {
       return undefined;
     }
-    const content = await readFile(path, "utf8");
+    const content = await readFile(canonical, "utf8");
     if (content.trim().length === 0) {
       return undefined;
     }
-    return { path: await canonicalPath(path), content };
+    return { path: canonical, content };
   } catch {
     return undefined;
   }
