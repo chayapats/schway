@@ -8,8 +8,7 @@ async function source(path: string): Promise<string> {
   return Bun.file(join(import.meta.dir, "..", path)).text();
 }
 
-/** Run a command and collect piped output with its exit code. */
-async function runCommand(
+/** Run a command and collect piped output with its exit code. */async function runCommand(
   argv: string[],
   options: { cwd?: string },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
@@ -172,3 +171,13 @@ test("npm pack produces an installable tarball with the runtime files only", asy
     expect(help.stdout).toContain("Usage: schway");
   });
 }, 180_000);
+
+test("travis commands have no unquoted YAML mapping inside list items", async () => {
+  // A `: ` inside an unquoted `- ` item parses as a mapping, not a command.
+  // That silently breaks the CI step (e.g. `echo "unsupported arch: ..."`).
+  const raw = await source(".travis.yml");
+  const suspicious = raw
+    .split("\n")
+    .filter((line) => /^  - [^'\"]/.test(line) && line.includes(": "));
+  expect(suspicious).toEqual([]);
+});
