@@ -1,13 +1,16 @@
 export const USAGE =
-  'Usage: schway -p <prompt> [--json] [--api-key <key>]';
+  'Usage: schway -p <prompt> [--json] [--api-key <key>] [--resume <session-id>]';
 
+/** Headless flags. `resume` is a session id, not a file path. */
 export interface CliArgs {
   prompt?: string;
   json: boolean;
   apiKey?: string;
+  resume?: string;
   help: boolean;
 }
 
+/** Parse argv. Unknown options and missing flag values return an error. */
 export function parseArgs(
   argv: readonly string[],
 ): { args: CliArgs } | { error: string } {
@@ -47,6 +50,19 @@ export function parseArgs(
     }
     if (arg.startsWith("--api-key=")) {
       args.apiKey = arg.slice("--api-key=".length);
+      continue;
+    }
+    if (arg === "--resume") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { error: "Missing value for --resume" };
+      }
+      i++;
+      args.resume = value;
+      continue;
+    }
+    if (arg.startsWith("--resume=")) {
+      args.resume = arg.slice("--resume=".length);
       continue;
     }
     if (arg.startsWith("-")) {

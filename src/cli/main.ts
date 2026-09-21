@@ -6,7 +6,12 @@ import {
 } from "../auth/secrets.ts";
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
-import { createSession } from "../session/session.ts";
+import {
+  createJsonlSession,
+  loadJsonlSession,
+  sessionsDirectory,
+  type JsonlSession,
+} from "../session/jsonl.ts";
 import { bashTool } from "../tools/bash.ts";
 import { editTool } from "../tools/edit.ts";
 import { findTool } from "../tools/find.ts";
@@ -15,7 +20,7 @@ import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
-import { resolveWorkspace } from "../workspace/workspace.ts";
+import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import { parseArgs, USAGE } from "./args.ts";
 
 /** Minimal writer used so tests can capture CLI output. */
@@ -54,6 +59,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
+  const home = io.env.HOME;
+  if (!home) {
+    io.stderr.write("HOME is not set; cannot write session history.\n");
+    return 1;
+  }
+
   const secrets = collectSecrets(parsed.args.apiKey, io.env);
   let model = io.model;
   if (!model) {
@@ -71,8 +82,28 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       : await loadAnthropicModel(credential.apiKey);
   }
 
-  const workspace = await resolveWorkspace(io.cwd);
-  const session = createSession();
+  const directory = sessionsDirectory(home);
+  let workspace: Workspace;
+  let session: JsonlSession;
+  if (parsed.args.resume) {
+    try {
+      session = await loadJsonlSession({
+        directory,
+        id: parsed.args.resume,
+      });
+    } catch (error) {
+      io.stderr.write(`${errorMessage(error)}\n`);
+      return 1;
+    }
+    workspace = {
+      root: session.header.workspaceRoot,
+      launchCwd: session.header.launchCwd,
+      extraRoots: [...session.header.extraRoots],
+    };
+  } else {
+    workspace = await resolveWorkspace(io.cwd);
+    session = await createJsonlSession({ directory, workspace });
+  }
   session.append({
     type: "user",
     id: crypto.randomUUID(),
@@ -127,6 +158,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   return failed ? 1 : 0;
+}
+
+/** Normalize thrown values into a printable error string. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Gather runtime and environment API keys so output can redact them. */

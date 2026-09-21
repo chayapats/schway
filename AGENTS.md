@@ -8,6 +8,7 @@
 - Disable SDK automatic retries. Schway will own retry policy.
 - Deterministic tests must not require paid model APIs. Use a scripted model and protocol fixtures.
 - Tool-relative paths resolve from the primary workspace root (nearest Git root, otherwise launch cwd), canonicalized through real paths.
+- Exported functions and types get a one-line TSDoc that states the contract, not the identifier.
 
 ## Agent skills
 
