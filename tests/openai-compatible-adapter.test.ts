@@ -397,6 +397,30 @@ test("AbortSignal stops consuming an in-flight SSE body", async () => {
   expect(released).toBe(true);
 });
 
+test("429 responses expose status and Retry-After for the agent retry policy", async () => {
+  const model = createOpenAICompatibleModel({
+    baseUrl: "http://127.0.0.1:8080/v1",
+    fetch: async () =>
+      new Response(JSON.stringify({ error: { message: "slow down" } }), {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "7",
+        },
+      }),
+  });
+  try {
+    await collect(model.stream(sampleRequest()));
+    throw new Error("expected 429 failure");
+  } catch (error) {
+    expect(error).toMatchObject({ status: 429 });
+    expect((error as { headers: Headers }).headers.get("retry-after")).toBe("7");
+    expect(error instanceof Error ? error.message : String(error)).toContain(
+      "slow down",
+    );
+  }
+});
+
 test("transport failures are not retried by the adapter", async () => {
   let calls = 0;
   const model = createOpenAICompatibleModel({

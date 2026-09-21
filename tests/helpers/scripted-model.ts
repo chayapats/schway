@@ -10,6 +10,11 @@ export interface ScriptedTurn {
   text?: string;
   thinkingChunks?: string[];
   error?: string;
+  status?: number;
+  headers?: Record<string, string>;
+  code?: string;
+  throwAfter?: "start" | "chunks";
+  waitForAbort?: boolean;
   message?: AssistantMessage;
   toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
 }
@@ -43,15 +48,26 @@ export function createScriptedModel(options: ScriptedModelOptions = {}): Model {
       const factory = turns[turnIndex]!;
       turnIndex += 1;
       const turn = typeof factory === "function" ? factory(request) : factory;
-      if (turn.error) {
-        throw new Error(turn.error);
+      throwIfAborted(request.signal);
+      const throwAfter = turn.throwAfter ?? "start";
+      if (turn.error && throwAfter === "start" && !turn.waitForAbort) {
+        throwTurnError(turn);
       }
       for (const thinking of turn.thinkingChunks ?? []) {
+        throwIfAborted(request.signal);
         yield { type: "thinking_delta", text: thinking };
       }
       const chunks = chunksOf(turn);
       for (const text of chunks) {
+        throwIfAborted(request.signal);
         yield { type: "text_delta", text };
+      }
+      if (turn.waitForAbort) {
+        await waitForAbort(request.signal);
+        throwIfAborted(request.signal);
+      }
+      if (turn.error) {
+        throwTurnError(turn);
       }
       yield {
         type: "message_complete",
@@ -109,4 +125,48 @@ function assistantMessage(turn: ScriptedTurn, chunks: string[]): AssistantMessag
     id: "asst-scripted",
     content,
   };
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw abortError();
+  }
+}
+
+function waitForAbort(signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return Promise.reject(
+      new Error("scripted model waitForAbort requires a signal"),
+    );
+  }
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+function throwTurnError(turn: ScriptedTurn): never {
+  const error = new Error(turn.error ?? "scripted failure") as Error & {
+    status?: number;
+    headers?: Headers;
+    code?: string;
+  };
+  if (turn.status !== undefined) {
+    error.status = turn.status;
+  }
+  if (turn.headers) {
+    error.headers = new Headers(turn.headers);
+  }
+  if (turn.code) {
+    error.code = turn.code;
+  }
+  throw error;
+}
+
+function abortError(): Error {
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
 }

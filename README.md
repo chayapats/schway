@@ -46,6 +46,8 @@ Runtime credentials (`--api-key`) take precedence over environment variables, in
 
 `--max-turns` bounds agent rounds (default 32). `--max-concurrent-tools` caps overlapping parallel-safe tools (default 10).
 
+Headless runs share one `AbortSignal` from the CLI (SIGINT/SIGTERM) through model streaming, tools, and provider requests. Transient provider failures (network resets, 429, 5xx) retry up to three total attempts with exponential backoff and `Retry-After`. Authentication errors, malformed requests, and ordinary tool failures are not retried. Cancelled or failed streams are not written as durable assistant messages; a cancelled run still leaves a resumable session.
+
 ## Configuration
 
 Schway is zero-config-first. Valid credentials are enough to run `schway -p "..."`. Config files are never created automatically.

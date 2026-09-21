@@ -16,6 +16,13 @@ export type RuntimeEvent =
       content: { type: "text"; text: string } | { type: "thinking"; text: string };
     }
   | { type: "model.finished" }
+  | {
+      type: "model.retry";
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      message: string;
+    }
   | { type: "tool.started"; toolCallId: string; name: string }
   | {
       type: "tool.delta";
