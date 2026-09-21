@@ -43,7 +43,7 @@ test("session stores user, assistant, thinking, and tool-call content", () => {
   expect(stored.content[2]).toEqual(assistant.content[2]);
 });
 
-test("stable system prompt is assembled separately from environment context", () => {
+test("stable system prompt is assembled separately from environment context", async () => {
   const workspace = {
     root: "/tmp/project",
     launchCwd: "/tmp/project/pkg",
@@ -56,7 +56,7 @@ test("stable system prompt is assembled separately from environment context", ()
       content: [{ type: "text", text: "hello" }],
     },
   ]);
-  const prepared = createContextManager(workspace).prepare(session);
+  const prepared = await createContextManager(workspace).prepare(session);
 
   expect(prepared.systemPrompt).toBe(STABLE_SYSTEM_PROMPT);
   expect(prepared.systemPrompt.includes("/tmp/project")).toBe(false);

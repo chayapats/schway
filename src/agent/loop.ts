@@ -41,7 +41,7 @@ export async function* runAgentLoop(
         return;
       }
 
-      const prepared = options.contextManager.prepare(options.session);
+      const prepared = await options.contextManager.prepare(options.session);
       yield {
         type: "model.started",
         provider: options.model.provider,
