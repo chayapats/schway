@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type {
   AssistantContent,
@@ -54,6 +54,61 @@ export async function createJsonlSession(options: {
 /** Canonical per-user session directory: `~/.schway/sessions`. */
 export function sessionsDirectory(home: string): string {
   return join(home, ".schway", "sessions");
+}
+
+/** Lightweight header for session pickers; skips corrupt or unreadable files. */
+export interface SessionSummary {
+  id: string;
+  createdAt: string;
+  workspaceRoot: string;
+}
+
+/**
+ * List persisted sessions newest-first by header timestamp.
+ * Missing directories yield an empty list; corrupt files are skipped.
+ */
+export async function listSessions(directory: string): Promise<SessionSummary[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(directory);
+  } catch (error) {
+    if (isNotFound(error)) {
+      return [];
+    }
+    throw error;
+  }
+  const summaries: SessionSummary[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".jsonl")) {
+      continue;
+    }
+    let text: string;
+    try {
+      text = await readFile(join(directory, entry), "utf8");
+    } catch {
+      continue;
+    }
+    const firstLine = text.split("\n").find((line) => line.length > 0);
+    if (firstLine === undefined) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(firstLine);
+    } catch {
+      continue;
+    }
+    if (!isSessionHeader(parsed)) {
+      continue;
+    }
+    summaries.push({
+      id: parsed.id,
+      createdAt: parsed.createdAt,
+      workspaceRoot: parsed.workspaceRoot,
+    });
+  }
+  summaries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  return summaries;
 }
 
 /** Load a session, settle unresolved tool calls, and drop a corrupt trailing record. */

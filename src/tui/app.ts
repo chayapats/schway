@@ -1,0 +1,696 @@
+import { createContextManager } from "../context/manager.ts";
+import { loadResolvedSettings } from "../config/config.ts";
+import { applyEnvFiles } from "../config/env-file.ts";
+import { resolve } from "node:path";
+import {
+  redactSecrets,
+  resolveAnthropicApiKey,
+  resolveOpenAIApiKey,
+} from "../auth/secrets.ts";
+import type { Model } from "../model/model.ts";
+import {
+  createJsonlSession,
+  listSessions,
+  loadJsonlSession,
+  sessionsDirectory,
+} from "../session/jsonl.ts";
+import { bashTool } from "../tools/bash.ts";
+import { editTool } from "../tools/edit.ts";
+import { findTool } from "../tools/find.ts";
+import { grepTool } from "../tools/grep.ts";
+import { lsTool } from "../tools/ls.ts";
+import { readTool } from "../tools/read.ts";
+import { createToolRegistry } from "../tools/registry.ts";
+import { writeTool } from "../tools/write.ts";
+import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
+import {
+  cliOverridesFromArgs,
+  type CliArgs,
+  type CliAuthMode,
+  type CliProvider,
+} from "../cli/args.ts";
+import { TuiController } from "./controller.ts";
+import { helpText, parseSlashCommand } from "./commands.ts";
+import { loadProviderModel } from "../model/loader.ts";
+
+/** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
+export interface TuiWriter {
+  write(chunk: string): void;
+}
+
+type FetchLike = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
+/** Process I/O passed from the CLI entrypoint into the interactive session. */
+export interface InteractiveIo {
+  stdout: TuiWriter;
+  stderr: TuiWriter;
+  env: Record<string, string | undefined>;
+  cwd: string;
+  args: CliArgs;
+  signal?: AbortSignal;
+  model?: Model;
+  fetch?: FetchLike;
+  createModel?: (input: {
+    apiKey?: string;
+    provider: string;
+    model?: string;
+    maxTokens?: number;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+    extraBody?: Record<string, unknown>;
+    auth?: CliAuthMode;
+  }) => Promise<Model>;
+}
+
+/**
+ * Run the interactive terminal conversation.
+ * Returns a process exit code: 0 on clean quit, 1 on startup failure.
+ */
+export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
+  const home = io.env.HOME;
+  if (!home) {
+    io.stderr.write("HOME is not set; cannot write session history.\n");
+    return 1;
+  }
+
+  let env = io.env;
+  if (io.args.envFiles && io.args.envFiles.length > 0) {
+    const loadedEnv = await applyEnvFiles(
+      io.args.envFiles.map((path) => resolve(io.cwd, path)),
+      env,
+    );
+    if ("error" in loadedEnv) {
+      io.stderr.write(`${loadedEnv.error}\n`);
+      return 1;
+    }
+    env = loadedEnv;
+  }
+
+  const directory = sessionsDirectory(home);
+  let workspace: Workspace;
+  try {
+    if (io.args.resume) {
+      const resumed = await loadJsonlSession({ directory, id: io.args.resume });
+      workspace = {
+        root: resumed.header.workspaceRoot,
+        launchCwd: resumed.header.launchCwd,
+        extraRoots: [...resumed.header.extraRoots],
+      };
+    } else {
+      workspace = await resolveWorkspace(io.cwd);
+    }
+  } catch (error) {
+    io.stderr.write(`${messageOf(error)}\n`);
+    return 1;
+  }
+
+  const settings = await loadResolvedSettings({
+    home,
+    workspaceRoot: workspace.root,
+    cli: cliOverridesFromArgs(io.args),
+  });
+  if ("error" in settings) {
+    io.stderr.write(`${settings.error}\n`);
+    return 1;
+  }
+  if (
+    hasCliConnectionOptions(io.args) &&
+    settings.provider !== "openai-compatible"
+  ) {
+    io.stderr.write(
+      "OpenAI-compatible connection options require --provider openai-compatible\n",
+    );
+    return 1;
+  }
+
+  const secrets = collectSecrets(io.args.apiKey, env);
+  let model = io.model;
+  let startupError: string | undefined;
+  if (!model) {
+    const loaded = await loadInteractiveModel(settings.provider, settings.model, {
+      maxTokens: settings.maxOutput,
+      baseUrl: settings.baseUrl,
+      headers: settings.headers,
+      extraBody: settings.extraBody,
+      auth: settings.auth,
+      runtimeApiKey: io.args.apiKey,
+      env,
+      fetch: io.fetch,
+      createModel: io.createModel,
+      secrets,
+    });
+    if ("error" in loaded) {
+      startupError = loaded.error;
+    } else {
+      model = loaded.model;
+    }
+  }
+
+  let controller: TuiController;
+  try {
+    if (io.args.resume) {
+      const resumed = await loadJsonlSession({ directory, id: io.args.resume });
+      controller = new TuiController({
+        session: resumed,
+        model,
+        contextManager: createContextManager(
+          {
+            root: resumed.header.workspaceRoot,
+            launchCwd: resumed.header.launchCwd,
+            extraRoots: resumed.header.extraRoots,
+          },
+          { home, contextWindow: settings.contextWindow },
+        ),
+        tools: createToolRegistry([
+          readTool,
+          writeTool,
+          editTool,
+          bashTool,
+          grepTool,
+          findTool,
+          lsTool,
+        ]),
+        workspace: {
+          root: resumed.header.workspaceRoot,
+          launchCwd: resumed.header.launchCwd,
+          extraRoots: resumed.header.extraRoots,
+        },
+        provider: settings.provider,
+        modelId: settings.model,
+        sessionId: resumed.header.id,
+        maxTurns: settings.maxTurns,
+        maxConcurrentTools: settings.maxConcurrentTools,
+        startupError,
+      });
+      if (!startupError) {
+        controller.notice(
+          `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
+        );
+      }
+    } else {
+      const session = await createJsonlSession({ directory, workspace });
+      controller = new TuiController({
+        session,
+        model,
+        contextManager: createContextManager(workspace, {
+          home,
+          contextWindow: settings.contextWindow,
+        }),
+        tools: createToolRegistry([
+          readTool,
+          writeTool,
+          editTool,
+          bashTool,
+          grepTool,
+          findTool,
+          lsTool,
+        ]),
+        workspace,
+        provider: settings.provider,
+        modelId: settings.model,
+        sessionId: session.header.id,
+        maxTurns: settings.maxTurns,
+        maxConcurrentTools: settings.maxConcurrentTools,
+        startupError,
+      });
+      if (!startupError) {
+        controller.notice(`New session ${session.header.id}. Type /help for commands.`);
+      }
+    }
+  } catch (error) {
+    io.stderr.write(`${messageOf(error)}\n`);
+    return 1;
+  }
+
+  try {
+    await runTuiRenderer({
+      controller,
+      home,
+      workspaceRoot: workspace.root,
+      sessionsDir: directory,
+      settings: {
+        provider: settings.provider,
+        model: settings.model,
+        maxTurns: settings.maxTurns,
+        maxConcurrentTools: settings.maxConcurrentTools,
+        contextWindow: settings.contextWindow,
+      },
+      signal: io.signal,
+      stderr: io.stderr,
+    });
+  } catch (error) {
+    io.stderr.write(`${messageOf(error)}\n`);
+    return 1;
+  } finally {
+    controller.dispose();
+  }
+  return 0;
+}
+
+interface RendererSettings {
+  provider: string;
+  model: string;
+  maxTurns: number;
+  maxConcurrentTools: number;
+  contextWindow: number;
+}
+
+/** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
+async function runTuiRenderer(options: {
+  controller: TuiController;
+  home: string;
+  workspaceRoot: string;
+  sessionsDir: string;
+  settings: RendererSettings;
+  signal?: AbortSignal;
+  stderr: TuiWriter;
+}): Promise<void> {
+  const { createCliRenderer, BoxRenderable, TextRenderable, InputRenderable, ScrollBoxRenderable } =
+    await import("@opentui/core");
+
+  const renderer = await createCliRenderer();
+  let quit = false;
+  let quitting = false;
+  const onAbort = () => {
+    quit = true;
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+
+  const finishQuit = () => {
+    if (quitting) {
+      return;
+    }
+    quitting = true;
+    quit = true;
+  };
+
+  try {
+    renderer.start();
+    const root = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      flexGrow: 1,
+      width: "100%",
+      height: "100%",
+    });
+    renderer.root.add(root);
+
+    const header = new TextRenderable(renderer, { content: "" });
+    root.add(header);
+
+    const transcriptBox = new ScrollBoxRenderable(renderer, {
+      flexGrow: 1,
+      stickyScroll: true,
+      stickyStart: "bottom",
+    });
+    root.add(transcriptBox);
+    const transcriptContent = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      flexGrow: 1,
+    });
+    transcriptBox.content.add(transcriptContent);
+
+    const statusLine = new TextRenderable(renderer, { content: "" });
+    root.add(statusLine);
+
+    const input = new InputRenderable(renderer, {
+      placeholder: "Type a prompt or /help (Esc cancels, Ctrl+C quits)",
+      flexGrow: 0,
+    });
+    root.add(input);
+    input.focus();
+
+    let lastRendered = "";
+    const render = () => {
+      const snapshot = options.controller.snapshot();
+      const headerText = `schway - ${snapshot.provider}/${snapshot.modelId} - session ${snapshot.sessionId} - ${snapshot.status}`;
+      try {
+        header.content = headerText;
+      } catch {
+        // Header updates are best-effort; transcript below is authoritative.
+      }
+      const lines = formatTranscript(snapshot.transcript.map((entry) => ({
+        kind: entry.kind,
+        text: entry.text,
+        toolName: entry.toolName,
+        toolStatus: entry.toolStatus,
+      })));
+      const statusText = formatStatus(snapshot.status);
+      const fingerprint = `${headerText}\n${lines}\n${statusText}`;
+      if (fingerprint === lastRendered) {
+        return;
+      }
+      lastRendered = fingerprint;
+      clearContainer(transcriptContent);
+      // Rebuild visible rows from the controller snapshot; sessions stay durable.
+      for (const line of lines.split("\n")) {
+        const row = new TextRenderable(renderer, { content: line });
+        transcriptContent.add(row);
+      }
+      try {
+        statusLine.content = statusText;
+      } catch {
+        // Ignore sticky render errors; next tick retries.
+      }
+    };
+
+    const submitPrompt = (value: string) => {
+      const text = value.trim();
+      if (text.length === 0) {
+        return;
+      }
+      const command = parseSlashCommand(text);
+      if (command) {
+        void handleSlashCommand(command.name, command.args, {
+          controller: options.controller,
+          home: options.home,
+          workspaceRoot: options.workspaceRoot,
+          sessionsDir: options.sessionsDir,
+          settings: options.settings,
+          finishQuit,
+          stderr: options.stderr,
+        });
+        return;
+      }
+      if (options.controller.running) {
+        options.controller.notice("Already running. Press Esc to cancel first.");
+        render();
+        return;
+      }
+      void options.controller.submit(text).then(render, render);
+    };
+
+    input.on("enter", () => {
+      const value = input.value;
+      input.value = "";
+      submitPrompt(value);
+      render();
+    });
+
+    renderer.keyInput.on("keypress", (key) => {
+      const name = key.name.toLowerCase();
+      if (key.ctrl && name === "c") {
+        if (options.controller.running) {
+          options.controller.cancel();
+        } else {
+          finishQuit();
+        }
+        return;
+      }
+      if (key.ctrl && name === "d") {
+        finishQuit();
+        return;
+      }
+      if (name === "escape") {
+        if (options.controller.running) {
+          options.controller.cancel();
+        }
+      }
+    });
+
+    render();
+    while (!quit && !quitting) {
+      render();
+      if (options.signal?.aborted) {
+        break;
+      }
+      await Bun.sleep(50);
+    }
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
+    options.controller.dispose();
+    try {
+      renderer.stop();
+    } catch {
+      // Stopping twice is harmless; destroy below restores the terminal.
+    }
+    try {
+      renderer.destroy();
+    } catch (error) {
+      options.stderr.write(`Failed to restore terminal: ${messageOf(error)}\n`);
+    }
+  }
+}
+
+/** Handle one slash command without leaving the interactive session. */
+async function handleSlashCommand(
+  name: string,
+  args: string,
+  ctx: {
+    controller: TuiController;
+    home: string;
+    workspaceRoot: string;
+    sessionsDir: string;
+    settings: RendererSettings;
+    finishQuit: () => void;
+    stderr: TuiWriter;
+  },
+): Promise<void> {
+  switch (name) {
+    case "new": {
+      const workspace = await resolveWorkspace(ctx.workspaceRoot);
+      const session = await createJsonlSession({
+        directory: ctx.sessionsDir,
+        workspace,
+      });
+      ctx.controller.replaceSession(session, session.header.id);
+      ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
+      return;
+    }
+    case "sessions": {
+      const listed = await listSessions(ctx.sessionsDir);
+      if (listed.length === 0) {
+        ctx.controller.notice("No saved sessions yet.");
+        return;
+      }
+      const lines = listed
+        .slice(0, 20)
+        .map((entry) => `- ${entry.id} (${entry.createdAt}, ${entry.workspaceRoot})`);
+      ctx.controller.notice(`Saved sessions:\n${lines.join("\n")}`);
+      return;
+    }
+    case "resume": {
+      if (!args) {
+        ctx.controller.fail("Usage: /resume <session-id>. See /sessions for ids.");
+        return;
+      }
+      try {
+        const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: args });
+        ctx.controller.replaceSession(resumed, resumed.header.id);
+        ctx.controller.notice(
+          `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
+        );
+      } catch (error) {
+        ctx.controller.fail(messageOf(error));
+      }
+      return;
+    }
+    case "model": {
+      const snapshot = ctx.controller.snapshot();
+      ctx.controller.notice(
+        `Provider ${snapshot.provider}, model ${snapshot.modelId}, session ${snapshot.sessionId}.`,
+      );
+      return;
+    }
+    case "help": {
+      ctx.controller.notice(helpText());
+      return;
+    }
+    case "quit": {
+      ctx.finishQuit();
+      return;
+    }
+    case "unknown": {
+      ctx.controller.fail("Unknown command. Type /help for commands.");
+      return;
+    }
+    default: {
+      ctx.controller.fail("Unknown command. Type /help for commands.");
+      return;
+    }
+  }
+}
+
+/** Remove all children from a container renderable. */
+function clearContainer(container: {
+  getChildren(): readonly unknown[];
+  remove(child: never): void;
+}): void {
+  for (const child of [...container.getChildren()]) {
+    container.remove(child as never);
+  }
+}
+
+/** Format transcript rows with tool state and bounded text for terminal display. */
+function formatTranscript(
+  entries: ReadonlyArray<{
+    kind: string;
+    text: string;
+    toolName?: string;
+    toolStatus?: string;
+  }>,
+): string {
+  const lines: string[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "user") {
+      lines.push(`› ${entry.text}`);
+    } else if (entry.kind === "assistant") {
+      lines.push(entry.text);
+    } else if (entry.kind === "tool") {
+      const state =
+        entry.toolStatus === "running"
+          ? "running"
+          : entry.toolStatus === "success"
+            ? "done"
+            : entry.toolStatus === "cancelled"
+              ? "cancelled"
+              : "error";
+      const firstLines = entry.text.split("\n").slice(0, 12).join("\n");
+      lines.push(`⚙ ${entry.toolName ?? "tool"} [${state}]\n${firstLines}`);
+    } else if (entry.kind === "error") {
+      lines.push(`! ${entry.text}`);
+    } else {
+      lines.push(`* ${entry.text}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+
+/** Format the running/idle/error status line. */
+function formatStatus(status: string): string {
+  if (status === "running") {
+    return "running… Esc cancels the turn.";
+  }
+  if (status === "error") {
+    return "error. Fix the issue and keep prompting, or /quit.";
+  }
+  return "idle. /help for commands.";
+}
+
+/** True when the user passed compatible connection flags on the CLI. */
+function hasCliConnectionOptions(args: CliArgs): boolean {
+  return (
+    args.baseUrl !== undefined ||
+    args.headers !== undefined ||
+    args.extraBody !== undefined ||
+    args.auth !== undefined
+  );
+}
+
+/** Gather runtime and environment API keys so errors can redact them. */
+function collectSecrets(
+  runtimeApiKey: string | undefined,
+  env: Record<string, string | undefined>,
+): string[] {
+  const secrets: string[] = [];
+  if (runtimeApiKey) {
+    secrets.push(runtimeApiKey);
+  }
+  const anthropicKey = env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    secrets.push(anthropicKey);
+  }
+  const openaiKey = env.OPENAI_API_KEY;
+  if (openaiKey) {
+    secrets.push(openaiKey);
+  }
+  return secrets;
+}
+
+/** Resolve credentials and construct the selected provider model for interactive use. */
+async function loadInteractiveModel(
+  provider: CliProvider,
+  modelId: string | undefined,
+  options: {
+    maxTokens?: number;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+    extraBody?: Record<string, unknown>;
+    auth?: CliAuthMode;
+    runtimeApiKey: string | undefined;
+    env: Record<string, string | undefined>;
+    fetch?: FetchLike;
+    createModel?: InteractiveIo["createModel"];
+    secrets: string[];
+  },
+): Promise<{ model: Model } | { error: string }> {
+  if (provider === "openai-compatible") {
+    const auth = options.auth ?? "optional";
+    const apiKey = options.runtimeApiKey?.trim() || undefined;
+    if (auth === "required" && apiKey === undefined) {
+      return {
+        error: "Missing API key for OpenAI-compatible endpoint. Pass --api-key.",
+      };
+    }
+    if (apiKey) {
+      options.secrets.push(apiKey);
+    }
+    try {
+      const model = options.createModel
+        ? await options.createModel({
+            apiKey,
+            provider,
+            model: modelId,
+            maxTokens: options.maxTokens,
+            baseUrl: options.baseUrl,
+            headers: options.headers,
+            extraBody: options.extraBody,
+            auth,
+          })
+        : await loadProviderModel(
+            {
+              provider,
+              apiKey,
+              model: modelId,
+              maxTokens: options.maxTokens,
+              baseUrl: options.baseUrl,
+              headers: options.headers,
+              extraBody: options.extraBody,
+              auth: options.auth,
+            },
+            options.fetch,
+          );
+      return { model };
+    } catch (error) {
+      return { error: redactSecrets(messageOf(error), options.secrets) };
+    }
+  }
+
+  const credential =
+    provider === "openai"
+      ? resolveOpenAIApiKey({ runtimeApiKey: options.runtimeApiKey, env: options.env })
+      : resolveAnthropicApiKey({ runtimeApiKey: options.runtimeApiKey, env: options.env });
+  if ("error" in credential) {
+    return credential;
+  }
+  options.secrets.push(credential.apiKey);
+  try {
+    const model = options.createModel
+      ? await options.createModel({
+          apiKey: credential.apiKey,
+          provider,
+          model: modelId,
+          maxTokens: options.maxTokens,
+        })
+      : await loadProviderModel(
+          {
+            provider,
+            apiKey: credential.apiKey,
+            model: modelId,
+            maxTokens: options.maxTokens,
+          },
+          options.fetch,
+        );
+    return { model };
+  } catch (error) {
+    return { error: redactSecrets(messageOf(error), options.secrets) };
+  }
+}
+
+/** Normalize thrown values into a printable error string. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
