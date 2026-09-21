@@ -1,0 +1,16 @@
+language: node_js
+node_js: "22"
+os: linux
+dist: jammy
+
+before_install:
+  - curl -fsSL https://bun.sh/install | bash
+  - export PATH="$HOME/.bun/bin:$PATH"
+  - bun --version
+
+install:
+  - bun install --frozen-lockfile
+
+script:
+  - bun run typecheck
+  - bun test

@@ -84,9 +84,9 @@ test("validating the release artifact does not publish it", async () => {
   const scriptText = Object.values(pkg.scripts).join("\n").toLowerCase();
   expect(scriptText.includes("npm publish")).toBe(false);
   expect(scriptText.includes("release")).toBe(false);
-  // CI validates with typecheck and tests only; no registry publish or release step.
-  const ci = await source(".github/workflows/ci.yml");
-  const lowered = ci.toLowerCase();
+  // Travis CI validates with typecheck and tests only; no registry publish or release step.
+  const travis = await source(".travis.yml");
+  const lowered = travis.toLowerCase();
   expect(lowered.includes("publish")).toBe(false);
   expect(lowered.includes("release")).toBe(false);
   expect(lowered.includes("typecheck")).toBe(true);
