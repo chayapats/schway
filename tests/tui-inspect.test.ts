@@ -19,6 +19,7 @@ import {
 import { listCatalog } from "../src/model/catalog.ts";
 import {
   formatToolFinishedText,
+  sanitizeBaseUrl,
   TuiController,
 } from "../src/tui/controller.ts";
 import { withTempDir } from "./helpers.ts";
@@ -266,6 +267,31 @@ test("config shows effective settings with secrets redacted as session-only", as
     expect(switched).toContain("Provider: anthropic");
     expect(switched).toContain("claude-sonnet-4-6");
     expect(switched).toContain(`${lookupModel("anthropic", "claude-sonnet-4-6").contextWindow}`);
+  });
+});
+
+test("config never leaks base-url credentials", async () => {
+  expect(sanitizeBaseUrl("https://user:s3cret@example.test:8080/v1?token=abc#frag")).toBe(
+    "https://example.test:8080/v1",
+  );
+  expect(sanitizeBaseUrl("not a url")).toBe("configured");
+  await withTempDir(async (dir) => {
+    const workspace = workspaceFor(dir);
+    const controller = new TuiController({
+      session: createSession(),
+      model: createScriptedModel({ text: "ok" }),
+      contextManager: createContextManager(workspace),
+      workspace,
+      provider: "openai-compatible",
+      modelId: "my-model",
+      sessionId: "sess-config-url",
+      baseUrl: "https://user:s3cret@example.test/v1?token=abc",
+      secrets: [],
+    });
+    const text = controller.describeConfig();
+    expect(text).not.toContain("s3cret");
+    expect(text).not.toContain("token=abc");
+    expect(text).toContain("example.test");
   });
 });
 

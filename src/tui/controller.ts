@@ -174,7 +174,7 @@ export class TuiController {
     }
     if (this.provider === "openai-compatible") {
       if (this.baseUrl !== undefined) {
-        lines.push(`Base URL: ${this.baseUrl}`);
+        lines.push(`Base URL: ${sanitizeBaseUrl(this.baseUrl)}`);
       }
       if (this.auth !== undefined) {
         lines.push(`Auth: ${this.auth}`);
@@ -590,6 +590,20 @@ export function boundDisplay(text: string, limit: number = MAX_TOOL_DISPLAY_CHAR
     return text;
   }
   return `${text.slice(0, limit)}\n… truncated. Full output is in the session file.`;
+}
+
+/** Strip credentials from a base URL for display; unparseable values show presence only. */
+export function sanitizeBaseUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return "configured";
+  }
 }
 
 /** One structured replacement from a successful edit, kept out of model content. */

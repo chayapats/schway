@@ -705,8 +705,13 @@ function formatTranscript(
             : entry.toolStatus === "cancelled"
               ? "cancelled"
               : "error";
-      const firstLines = entry.text.split("\n").slice(0, 12).join("\n");
-      lines.push(`⚙ ${entry.toolName ?? "tool"} [${state}]\n${firstLines}`);
+      // Completed entry text is already bounded; only live output gets a preview
+      // so a finished edit diff never loses its added lines to truncation.
+      const visibleText =
+        entry.toolStatus === "running"
+          ? entry.text.split("\n").slice(0, 12).join("\n")
+          : entry.text;
+      lines.push(`⚙ ${entry.toolName ?? "tool"} [${state}]\n${visibleText}`);
     } else if (entry.kind === "error") {
       lines.push(`! ${entry.text}`);
     } else {
