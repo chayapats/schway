@@ -4,6 +4,7 @@ import { STABLE_SYSTEM_PROMPT } from "../src/context/prompt.ts";
 import { createSession } from "../src/session/session.ts";
 import type {
   AssistantMessage,
+  ConversationItem,
   UserMessage,
 } from "../src/conversation/types.ts";
 
@@ -69,5 +70,5 @@ test("stable system prompt is assembled separately from environment context", as
       ].join("\n"),
     },
   ]);
-  expect(prepared.items).toEqual(session.items);
+  expect(prepared.items).toEqual(session.items as ConversationItem[]);
 });

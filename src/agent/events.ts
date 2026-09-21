@@ -1,3 +1,4 @@
+import type { CompactionReason } from "../context/compaction.ts";
 import type { ToolCallStatus } from "../tools/types.ts";
 
 /**
@@ -38,5 +39,19 @@ export type RuntimeEvent =
       status: ToolCallStatus;
       content: string;
       details?: unknown;
+    }
+  | { type: "compaction.started"; reason: CompactionReason }
+  | {
+      type: "compaction.finished";
+      reason: CompactionReason;
+      status: "completed";
+      recordId: string;
+      firstKeptId: string;
+    }
+  | {
+      type: "compaction.finished";
+      reason: CompactionReason;
+      status: "failed" | "noop";
+      message?: string;
     }
   | { type: "error"; message: string };

@@ -172,7 +172,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   for await (const event of runAgentLoop({
     session,
     model,
-    contextManager: createContextManager(workspace, { home }),
+    contextManager: createContextManager(workspace, {
+      home,
+      contextWindow: settings.contextWindow,
+    }),
     tools: createToolRegistry([
       readTool,
       writeTool,

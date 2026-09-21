@@ -1,16 +1,16 @@
-import type { ConversationItem } from "../conversation/types.ts";
+import type { SessionRecord } from "../conversation/types.ts";
 
-/** Linear conversation items. Persistence belongs to JsonlSession. */
+/** Linear durable records. Persistence belongs to JsonlSession. */
 export interface Session {
-  readonly items: readonly ConversationItem[];
-  append(...added: ConversationItem[]): void;
+  readonly items: readonly SessionRecord[];
+  append(...added: SessionRecord[]): void;
 }
 
-/** Create an in-memory session, optionally seeded with existing items. */
+/** Create an in-memory session, optionally seeded with existing records. */
 export function createSession(
-  initial: readonly ConversationItem[] = [],
+  initial: readonly SessionRecord[] = [],
 ): Session {
-  const items: ConversationItem[] = [...initial];
+  const items: SessionRecord[] = [...initial];
   return {
     get items() {
       return items;
