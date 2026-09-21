@@ -7,6 +7,7 @@ import {
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
+import { bashTool } from "../tools/bash.ts";
 import { editTool } from "../tools/edit.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
@@ -81,7 +82,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     session,
     model,
     contextManager: createContextManager(workspace),
-    tools: createToolRegistry([readTool, writeTool, editTool]),
+    tools: createToolRegistry([readTool, writeTool, editTool, bashTool]),
     workspace,
   })) {
     const safeEvent = redactEvent(event, secrets);
@@ -145,6 +146,12 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
       ...(event.details !== undefined
         ? { details: redactJsonValue(event.details, secrets) }
         : {}),
+    };
+  }
+  if (event.type === "tool.delta") {
+    return {
+      ...event,
+      text: redactSecrets(event.text, secrets),
     };
   }
   if (event.type === "model.delta") {

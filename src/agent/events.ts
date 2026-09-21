@@ -18,6 +18,13 @@ export type RuntimeEvent =
   | { type: "model.finished" }
   | { type: "tool.started"; toolCallId: string; name: string }
   | {
+      type: "tool.delta";
+      toolCallId: string;
+      name: string;
+      stream: "stdout" | "stderr";
+      text: string;
+    }
+  | {
       type: "tool.finished";
       toolCallId: string;
       name: string;

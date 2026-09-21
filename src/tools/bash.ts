@@ -1,0 +1,292 @@
+import { Type, type Static } from "@sinclair/typebox";
+import { spawn, type ChildProcess } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { abortError } from "./fs.ts";
+import { resolveToolPath } from "./path.ts";
+import type {
+  ToolContext,
+  ToolDefinition,
+  ToolExecutionResult,
+} from "./types.ts";
+
+/** Hard cap on model-facing stdout+stderr characters. */
+export const MAX_BASH_CHARS = 50_000;
+
+/** TypeBox schema for `bash`. Compiled once when the tool is registered. */
+export const bashInputSchema = Type.Object(
+  {
+    command: Type.String({
+      minLength: 1,
+      description: "Shell command to run in a fresh bash process.",
+    }),
+    cwd: Type.Optional(
+      Type.String({
+        description:
+          "Working directory. Relative paths resolve from the workspace root.",
+      }),
+    ),
+    timeout: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description: "Timeout in milliseconds. The command is killed when it elapses.",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+/** Validated arguments for the built-in `bash` tool. */
+export type BashInput = Static<typeof bashInputSchema>;
+
+/** Structured extras attached to a bash invocation. */
+export interface BashDetails {
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  outputPath?: string;
+  timedOut?: boolean;
+}
+
+/** Built-in shell runner. Declares exclusive execution. */
+export const bashTool: ToolDefinition<BashInput> = {
+  name: "bash",
+  description:
+    "Run a shell command in a fresh bash process. Defaults to the workspace root. A non-zero exit code is ordinary result data, not a tool failure. Output is bounded; oversized output is spilled to a temporary file.",
+  inputSchema: bashInputSchema,
+  execution: "exclusive",
+  execute: executeBash,
+};
+
+/**
+ * Run `command` in a fresh bash shell.
+ * Relative `cwd` resolves from the workspace root. Each call is isolated.
+ */
+export async function executeBash(
+  input: BashInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  if (ctx.signal?.aborted) {
+    throw abortError();
+  }
+
+  const cwd = input.cwd
+    ? resolveToolPath(ctx.workspace.root, input.cwd)
+    : ctx.workspace.root;
+
+  const collected = await runShell(input.command, cwd, input.timeout, ctx);
+  const truncated =
+    collected.stdout.length + collected.stderr.length > MAX_BASH_CHARS;
+  let outputPath: string | undefined;
+  if (truncated) {
+    outputPath = join(tmpdir(), `schway-bash-${crypto.randomUUID()}.log`);
+    await writeFile(
+      outputPath,
+      `stdout:\n${collected.stdout}\nstderr:\n${collected.stderr}\n`,
+    );
+  }
+  const bounded = boundStreams(
+    collected.stdout,
+    collected.stderr,
+    MAX_BASH_CHARS,
+  );
+
+  const details: BashDetails = {
+    command: input.command,
+    cwd,
+    exitCode: collected.exitCode,
+    stdout: bounded.stdout,
+    stderr: bounded.stderr,
+    truncated,
+    ...(outputPath ? { outputPath } : {}),
+    ...(collected.timedOut ? { timedOut: true } : {}),
+  };
+
+  return {
+    content: collected.timedOut
+      ? `Command timed out after ${input.timeout}ms.\n${formatContent(details)}`
+      : formatContent(details),
+    details,
+    ...(collected.timedOut ? { isError: true } : {}),
+  };
+}
+
+interface ShellOutput {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+}
+
+/** Spawn a fresh bash process, stream chunks, and wait for exit. */
+async function runShell(
+  command: string,
+  cwd: string,
+  timeout: number | undefined,
+  ctx: ToolContext,
+): Promise<ShellOutput> {
+  let child: ChildProcess | undefined;
+  let timedOut = false;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const killTree = (signal: NodeJS.Signals) => {
+    const pid = child?.pid;
+    if (pid === undefined || child?.exitCode !== null) {
+      return;
+    }
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      try {
+        child?.kill(signal);
+      } catch {
+        // already exited
+      }
+    }
+  };
+
+  const terminate = () => {
+    killTree("SIGTERM");
+    if (killTimer === undefined) {
+      killTimer = setTimeout(() => {
+        killTree("SIGKILL");
+      }, 200);
+    }
+  };
+
+  const onAbort = () => {
+    terminate();
+  };
+  ctx.signal?.addEventListener("abort", onAbort);
+
+  try {
+    if (ctx.signal?.aborted) {
+      throw abortError();
+    }
+
+    child = spawn("bash", ["-c", command], {
+      cwd,
+      env: process.env,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    if (timeout !== undefined) {
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        terminate();
+      }, timeout);
+    }
+
+    if (ctx.signal?.aborted) {
+      terminate();
+    }
+
+    const stdout = collectStream(child.stdout, "stdout", ctx);
+    const stderr = collectStream(child.stderr, "stderr", ctx);
+
+    let exitCode: number | null;
+    try {
+      exitCode = await new Promise<number | null>((resolve, reject) => {
+        child!.once("error", reject);
+        child!.once("exit", (code) => {
+          resolve(code);
+        });
+      });
+    } catch (error) {
+      terminate();
+      await Promise.allSettled([stdout, stderr]);
+      throw error;
+    }
+
+    const stdoutText = await stdout;
+    const stderrText = await stderr;
+    if (ctx.signal?.aborted) {
+      throw abortError();
+    }
+
+    return {
+      stdout: stdoutText,
+      stderr: stderrText,
+      exitCode,
+      timedOut,
+    };
+  } finally {
+    ctx.signal?.removeEventListener("abort", onAbort);
+    if (timeoutTimer !== undefined) {
+      clearTimeout(timeoutTimer);
+    }
+    if (killTimer !== undefined) {
+      clearTimeout(killTimer);
+    }
+  }
+}
+
+/** Decode a pipe as UTF-8, forwarding chunks to `onOutput`. */
+function collectStream(
+  stream: NodeJS.ReadableStream | null | undefined,
+  name: "stdout" | "stderr",
+  ctx: ToolContext,
+): Promise<string> {
+  if (!stream) {
+    return Promise.resolve("");
+  }
+  const decoder = new StringDecoder("utf8");
+  let text = "";
+  return new Promise((resolve, reject) => {
+    stream.on("data", (chunk: Buffer | string) => {
+      const piece =
+        typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (piece.length === 0) {
+        return;
+      }
+      text += piece;
+      ctx.onOutput?.({ stream: name, text: piece });
+    });
+    stream.once("error", reject);
+    stream.once("end", () => {
+      const tail = decoder.end();
+      if (tail.length > 0) {
+        text += tail;
+        ctx.onOutput?.({ stream: name, text: tail });
+      }
+      resolve(text);
+    });
+  });
+}
+
+/** Model-facing summary: exit code plus stdout/stderr. */
+function formatContent(details: BashDetails): string {
+  const sections = [`Exit code: ${details.exitCode ?? "(none)"}`];
+  if (details.stdout.length > 0) {
+    sections.push("", "stdout:", details.stdout);
+  }
+  if (details.stderr.length > 0) {
+    sections.push("", "stderr:", details.stderr);
+  }
+  if (details.truncated && details.outputPath) {
+    sections.push("", `... truncated. Full output: ${details.outputPath}`);
+  }
+  return sections.join("\n");
+}
+
+/** Cap combined stdout+stderr at `max`, preferring to keep stdout. */
+function boundStreams(
+  stdout: string,
+  stderr: string,
+  max: number,
+): { stdout: string; stderr: string } {
+  if (stdout.length + stderr.length <= max) {
+    return { stdout, stderr };
+  }
+  if (stdout.length >= max) {
+    return { stdout: stdout.slice(0, max), stderr: "" };
+  }
+  return { stdout, stderr: stderr.slice(0, max - stdout.length) };
+}
