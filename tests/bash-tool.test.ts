@@ -150,6 +150,23 @@ test("bash bounds oversized output and spills the full log to a temp file", asyn
     const spilled = await readFile(details.outputPath!, "utf8");
     expect(spilled).toContain("x".repeat(MAX_BASH_CHARS + extra));
     expect(result.content).toContain(details.outputPath!);
+    const spilledInfo = await stat(details.outputPath!);
+    expect(spilledInfo.mode & 0o777).toBe(0o600);
+  });
+});
+
+test("bash reaps background children that keep pipes open after the shell exits", async () => {
+  await withTempDir(async (dir) => {
+    const started = Date.now();
+    const result = await bashTool.execute(
+      {
+        command: "sleep 30 & echo started; exit 0",
+        timeout: 200,
+      },
+      contextFor(dir),
+    );
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(result.content).toContain("started");
   });
 });
 

@@ -1,6 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { chmod, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -88,7 +88,9 @@ export async function executeBash(
     await writeFile(
       outputPath,
       `stdout:\n${collected.stdout}\nstderr:\n${collected.stderr}\n`,
+      { mode: 0o600 },
     );
+    await chmod(outputPath, 0o600);
   }
   const bounded = boundStreams(
     collected.stdout,
@@ -131,17 +133,17 @@ async function runShell(
   ctx: ToolContext,
 ): Promise<ShellOutput> {
   let child: ChildProcess | undefined;
+  let pgid: number | undefined;
   let timedOut = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
   const killTree = (signal: NodeJS.Signals) => {
-    const pid = child?.pid;
-    if (pid === undefined || child?.exitCode !== null) {
+    if (pgid === undefined) {
       return;
     }
     try {
-      process.kill(-pid, signal);
+      process.kill(-pgid, signal);
     } catch {
       try {
         child?.kill(signal);
@@ -176,6 +178,7 @@ async function runShell(
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    pgid = child.pid;
 
     if (timeout !== undefined) {
       timeoutTimer = setTimeout(() => {
@@ -205,8 +208,16 @@ async function runShell(
       throw error;
     }
 
-    const stdoutText = await stdout;
-    const stderrText = await stderr;
+    const drainTimer = setTimeout(() => {
+      killTree("SIGKILL");
+    }, 200);
+    let stdoutText: string;
+    let stderrText: string;
+    try {
+      [stdoutText, stderrText] = await Promise.all([stdout, stderr]);
+    } finally {
+      clearTimeout(drainTimer);
+    }
     if (ctx.signal?.aborted) {
       throw abortError();
     }
