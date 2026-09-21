@@ -1,0 +1,284 @@
+{
+  "repository": "chayapats/schway",
+  "milestone_scope": "v0.1 only; specification section 89",
+  "state": "published-and-verified",
+  "publish_label": "ready-for-agent",
+  "blocking_relationship": "GitHub native issue dependencies; body references as fallback",
+  "tickets": [
+    {
+      "number": 1,
+      "title": "Stream a headless conversation through Schway's own agent loop",
+      "draft": "drafts/01-headless-anthropic.md",
+      "blocked_by": [],
+      "acceptance_criteria": 8,
+      "github_number": 1,
+      "github_id": 5501485525,
+      "github_url": "https://github.com/chayapats/schway/issues/1",
+      "native_blockers_added": [],
+      "verified": true
+    },
+    {
+      "number": 2,
+      "title": "Let the agent inspect files and continue from tool results",
+      "draft": "drafts/02-read-agent-loop.md",
+      "blocked_by": [
+        1
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 2,
+      "github_id": 5501485657,
+      "github_url": "https://github.com/chayapats/schway/issues/2",
+      "native_blockers_added": [
+        1
+      ],
+      "verified": true
+    },
+    {
+      "number": 3,
+      "title": "Create files and apply exact atomic edits",
+      "draft": "drafts/03-write-edit.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 6,
+      "github_number": 3,
+      "github_id": 5501485946,
+      "github_url": "https://github.com/chayapats/schway/issues/3",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 4,
+      "title": "Run shell commands with streaming bounded results",
+      "draft": "drafts/04-bash.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 6,
+      "github_number": 4,
+      "github_id": 5501486331,
+      "github_url": "https://github.com/chayapats/schway/issues/4",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 5,
+      "title": "Locate code with bounded grep, find, and ls tools",
+      "draft": "drafts/05-search-discovery.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 6,
+      "github_number": 5,
+      "github_id": 5501486584,
+      "github_url": "https://github.com/chayapats/schway/issues/5",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 6,
+      "title": "Execute parallel-safe tools around exclusive barriers",
+      "draft": "drafts/06-parallel-scheduling.md",
+      "blocked_by": [
+        3
+      ],
+      "acceptance_criteria": 6,
+      "github_number": 6,
+      "github_id": 5501487029,
+      "github_url": "https://github.com/chayapats/schway/issues/6",
+      "native_blockers_added": [
+        3
+      ],
+      "verified": true
+    },
+    {
+      "number": 7,
+      "title": "Save and resume conversations from versioned JSONL",
+      "draft": "drafts/07-save-resume.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 6,
+      "github_number": 7,
+      "github_id": 5501487313,
+      "github_url": "https://github.com/chayapats/schway/issues/7",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 8,
+      "title": "Apply project instructions with scoped dynamic context",
+      "draft": "drafts/08-project-instructions.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 6,
+      "github_number": 8,
+      "github_id": 5501487585,
+      "github_url": "https://github.com/chayapats/schway/issues/8",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 9,
+      "title": "Run coding conversations with the native OpenAI provider",
+      "draft": "drafts/09-openai-native.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 9,
+      "github_id": 5501488009,
+      "github_url": "https://github.com/chayapats/schway/issues/9",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 10,
+      "title": "Run coding conversations against OpenAI-compatible endpoints",
+      "draft": "drafts/10-openai-compatible.md",
+      "blocked_by": [
+        2
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 10,
+      "github_id": 5501488489,
+      "github_url": "https://github.com/chayapats/schway/issues/10",
+      "native_blockers_added": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "number": 11,
+      "title": "Select providers and models with validated basic configuration",
+      "draft": "drafts/11-config-model-catalog.md",
+      "blocked_by": [
+        9,
+        10
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 11,
+      "github_id": 5501488731,
+      "github_url": "https://github.com/chayapats/schway/issues/11",
+      "native_blockers_added": [
+        9,
+        10
+      ],
+      "verified": true
+    },
+    {
+      "number": 12,
+      "title": "Cancel and retry runs without corrupting session state",
+      "draft": "drafts/12-cancellation-retries.md",
+      "blocked_by": [
+        4,
+        7
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 12,
+      "github_id": 5501489131,
+      "github_url": "https://github.com/chayapats/schway/issues/12",
+      "native_blockers_added": [
+        4,
+        7
+      ],
+      "verified": true
+    },
+    {
+      "number": 13,
+      "title": "Continue long coding sessions with durable compaction",
+      "draft": "drafts/13-compaction.md",
+      "blocked_by": [
+        11,
+        12
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 13,
+      "github_id": 5501489697,
+      "github_url": "https://github.com/chayapats/schway/issues/13",
+      "native_blockers_added": [
+        11,
+        12
+      ],
+      "verified": true
+    },
+    {
+      "number": 14,
+      "title": "Use Schway interactively through OpenTUI",
+      "draft": "drafts/14-interactive-tui.md",
+      "blocked_by": [
+        12
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 14,
+      "github_id": 5501490275,
+      "github_url": "https://github.com/chayapats/schway/issues/14",
+      "native_blockers_added": [
+        12
+      ],
+      "verified": true
+    },
+    {
+      "number": 15,
+      "title": "Inspect edits and control models and compaction in the TUI",
+      "draft": "drafts/15-tui-coding-controls.md",
+      "blocked_by": [
+        3,
+        13,
+        14
+      ],
+      "acceptance_criteria": 7,
+      "github_number": 15,
+      "github_id": 5501490489,
+      "github_url": "https://github.com/chayapats/schway/issues/15",
+      "native_blockers_added": [
+        3,
+        13,
+        14
+      ],
+      "verified": true
+    },
+    {
+      "number": 16,
+      "title": "Verify the installable v0.1 coding workflow",
+      "draft": "drafts/16-v01-readiness.md",
+      "blocked_by": [
+        5,
+        6,
+        8,
+        15
+      ],
+      "acceptance_criteria": 8,
+      "github_number": 16,
+      "github_id": 5501491242,
+      "github_url": "https://github.com/chayapats/schway/issues/16",
+      "native_blockers_added": [
+        5,
+        6,
+        8,
+        15
+      ],
+      "verified": true
+    }
+  ],
+  "verification": {
+    "issues": 16,
+    "native_blocking_edges": 23,
+    "bodies_match_approved_drafts": true,
+    "label_verified": "ready-for-agent",
+    "all_open": true
+  }
+}
