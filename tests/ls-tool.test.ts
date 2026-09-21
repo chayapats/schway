@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MAX_LS_CHARS, lsTool } from "../src/tools/ls.ts";
 import type { ToolContext } from "../src/tools/types.ts";
@@ -59,9 +59,7 @@ test("ls resolves relative paths from the workspace root, not launch cwd", async
     await writeFile(join(dir, "app.ts"), "wrong-file\n");
     const nested = join(dir, "src");
     const result = await lsTool.execute({ path: "." }, contextFor(dir, nested));
-    expect(result.content).toContain("src/");
-    expect(result.content.includes("wrong-file")).toBe(false);
-    expect(result.content).toContain("app.ts");
+    expect(result.content).toBe("app.ts\nsrc/");
   });
 });
 
@@ -73,6 +71,26 @@ test("ls supports absolute paths", async () => {
     const result = await lsTool.execute({ path: nested }, contextFor(dir));
     expect(result.isError).toBeUndefined();
     expect(result.content).toContain("note.txt");
+  });
+});
+
+test("ls keeps the listing when a nested directory is unreadable", async () => {
+  await withTempDir(async (dir) => {
+    const locked = join(dir, "src", "secret");
+    await mkdir(locked, { recursive: true });
+    await writeFile(join(dir, "src", "app.ts"), "export {}\n");
+    await writeFile(join(locked, "hidden.ts"), "export {}\n");
+    await chmod(locked, 0);
+    try {
+      const result = await lsTool.execute(
+        { path: "src", depth: 2 },
+        contextFor(dir),
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.content).toBe("src/app.ts\nsrc/secret/");
+    } finally {
+      await chmod(locked, 0o755);
+    }
   });
 });
 

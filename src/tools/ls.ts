@@ -1,7 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { abortError, filesystemError, isAbortError } from "./fs.ts";
+import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
 import { displayToolPath, resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
@@ -90,7 +90,14 @@ export async function executeLs(
   const lines: string[] = [];
   let truncated = false;
   try {
-    truncated = await walkDirectory(resolvedPath, depth, ctx, lines, { chars: 0 });
+    truncated = await walkDirectory(
+      resolvedPath,
+      depth,
+      ctx,
+      lines,
+      { chars: 0 },
+      true,
+    );
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
@@ -126,11 +133,24 @@ async function walkDirectory(
   ctx: ToolContext,
   lines: string[],
   state: { chars: number },
+  topLevel = false,
 ): Promise<boolean> {
   if (ctx.signal?.aborted) {
     throw abortError();
   }
-  const entries = await readdir(dir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (
+      topLevel ||
+      isAbortError(error) ||
+      (!isErrno(error, "EACCES") && !isErrno(error, "EPERM"))
+    ) {
+      throw error;
+    }
+    return false;
+  }
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
     if (ctx.signal?.aborted) {

@@ -238,7 +238,7 @@ async function runRipgrep(
     },
     ctx.signal,
   );
-  const stderrTask = proc.stderr.text();
+  const stderrTask = proc.stderr.text().catch(() => "");
 
   try {
     await stdoutTask;
