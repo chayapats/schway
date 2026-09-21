@@ -31,8 +31,14 @@ import {
   type CliProvider,
 } from "../cli/args.ts";
 import { TuiController } from "./controller.ts";
-import { helpText, parseSlashCommand } from "./commands.ts";
+import {
+  formatModelPicker,
+  helpText,
+  parseModelArgs,
+  parseSlashCommand,
+} from "./commands.ts";
 import { loadProviderModel } from "../model/loader.ts";
+import { listCatalog, lookupModel } from "../model/catalog.ts";
 
 /** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
 export interface TuiWriter {
@@ -152,6 +158,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   }
 
   let controller: TuiController;
+  const managerOptions = contextManagerOptions(home, settings.explicitContextWindow);
   try {
     if (io.args.resume) {
       // Reuse the session handle loaded during startup, including settlements.
@@ -165,7 +172,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
             launchCwd: resumed.header.launchCwd,
             extraRoots: resumed.header.extraRoots,
           },
-          { home, contextWindow: settings.contextWindow },
+          managerOptions,
         ),
         tools: createToolRegistry([
           readTool,
@@ -186,6 +193,10 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         sessionId: resumed.header.id,
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
+        explicitContextWindow: settings.explicitContextWindow,
+        explicitMaxOutput: settings.explicitMaxOutput,
+        baseUrl: settings.baseUrl,
+        auth: settings.auth,
         startupError,
         secrets,
       });
@@ -199,10 +210,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       controller = new TuiController({
         session,
         model,
-        contextManager: createContextManager(workspace, {
-          home,
-          contextWindow: settings.contextWindow,
-        }),
+        contextManager: createContextManager(workspace, managerOptions),
         tools: createToolRegistry([
           readTool,
           writeTool,
@@ -218,6 +226,10 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         sessionId: session.header.id,
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
+        explicitContextWindow: settings.explicitContextWindow,
+        explicitMaxOutput: settings.explicitMaxOutput,
+        baseUrl: settings.baseUrl,
+        auth: settings.auth,
         startupError,
         secrets,
       });
@@ -242,7 +254,19 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
         contextWindow: settings.contextWindow,
+        maxOutput: settings.maxOutput,
+        explicitContextWindow: settings.explicitContextWindow,
+        explicitMaxOutput: settings.explicitMaxOutput,
+        baseUrl: settings.baseUrl,
+        headers: settings.headers,
+        extraBody: settings.extraBody,
+        auth: settings.auth,
       },
+      env,
+      runtimeApiKey: io.args.apiKey,
+      fetch: io.fetch,
+      createModel: io.createModel,
+      secrets,
       signal: io.signal,
       stderr: io.stderr,
     });
@@ -261,6 +285,13 @@ interface RendererSettings {
   maxTurns: number;
   maxConcurrentTools: number;
   contextWindow: number;
+  maxOutput: number;
+  explicitContextWindow?: number;
+  explicitMaxOutput?: number;
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+  auth?: CliAuthMode;
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
@@ -270,6 +301,11 @@ async function runTuiRenderer(options: {
   workspaceRoot: string;
   sessionsDir: string;
   settings: RendererSettings;
+  env: Record<string, string | undefined>;
+  runtimeApiKey?: string;
+  fetch?: FetchLike;
+  createModel?: InteractiveIo["createModel"];
+  secrets: string[];
   signal?: AbortSignal;
   stderr: TuiWriter;
 }): Promise<void> {
@@ -380,6 +416,11 @@ async function runTuiRenderer(options: {
           workspaceRoot: options.workspaceRoot,
           sessionsDir: options.sessionsDir,
           settings: options.settings,
+          env: options.env,
+          runtimeApiKey: options.runtimeApiKey,
+          fetch: options.fetch,
+          createModel: options.createModel,
+          secrets: options.secrets,
           finishQuit,
           stderr: options.stderr,
         }).catch((error: unknown) => {
@@ -457,10 +498,16 @@ async function handleSlashCommand(
     workspaceRoot: string;
     sessionsDir: string;
     settings: RendererSettings;
+    env: Record<string, string | undefined>;
+    runtimeApiKey?: string;
+    fetch?: FetchLike;
+    createModel?: InteractiveIo["createModel"];
+    secrets: string[];
     finishQuit: () => void;
     stderr: TuiWriter;
   },
 ): Promise<void> {
+  const managerOptions = contextManagerOptions(ctx.home, ctx.settings.explicitContextWindow);
   switch (name) {
     case "new": {
       const workspace = await resolveWorkspace(ctx.workspaceRoot);
@@ -470,10 +517,7 @@ async function handleSlashCommand(
       });
       ctx.controller.replaceSession(session, session.header.id, {
         workspace,
-        contextManager: createContextManager(workspace, {
-          home: ctx.home,
-          contextWindow: ctx.settings.contextWindow,
-        }),
+        contextManager: createContextManager(workspace, managerOptions),
       });
       ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
       return;
@@ -504,10 +548,7 @@ async function handleSlashCommand(
         };
         ctx.controller.replaceSession(resumed, resumed.header.id, {
           workspace,
-          contextManager: createContextManager(workspace, {
-            home: ctx.home,
-            contextWindow: ctx.settings.contextWindow,
-          }),
+          contextManager: createContextManager(workspace, managerOptions),
         });
         ctx.controller.notice(
           `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
@@ -518,10 +559,32 @@ async function handleSlashCommand(
       return;
     }
     case "model": {
+      if (!args) {
+        const snapshot = ctx.controller.snapshot();
+        ctx.controller.notice(
+          formatModelPicker(snapshot.provider, snapshot.modelId, listCatalog()),
+        );
+        return;
+      }
       const snapshot = ctx.controller.snapshot();
-      ctx.controller.notice(
-        `Provider ${snapshot.provider}, model ${snapshot.modelId}, session ${snapshot.sessionId}.`,
-      );
+      const selection = parseModelArgs(args, snapshot.provider);
+      if ("error" in selection) {
+        ctx.controller.fail(selection.error);
+        return;
+      }
+      if (ctx.controller.running) {
+        ctx.controller.notice("Already running. Press Esc to cancel first.");
+        return;
+      }
+      await switchInteractiveModel(selection.provider, selection.modelId, ctx);
+      return;
+    }
+    case "compact": {
+      await ctx.controller.compact();
+      return;
+    }
+    case "config": {
+      ctx.controller.notice(ctx.controller.describeConfig());
       return;
     }
     case "help": {
@@ -541,6 +604,71 @@ async function handleSlashCommand(
       return;
     }
   }
+}
+
+/** Switch the session model without persisting credentials or config files. */
+async function switchInteractiveModel(
+  provider: string,
+  modelId: string,
+  ctx: {
+    controller: TuiController;
+    settings: RendererSettings;
+    env: Record<string, string | undefined>;
+    runtimeApiKey?: string;
+    fetch?: FetchLike;
+    createModel?: InteractiveIo["createModel"];
+    secrets: string[];
+  },
+): Promise<void> {
+  const normalizedProvider = provider.toLowerCase();
+  if (
+    normalizedProvider !== "anthropic" &&
+    normalizedProvider !== "openai" &&
+    normalizedProvider !== "openai-compatible"
+  ) {
+    ctx.controller.fail(
+      `Unknown provider: ${provider}. Valid providers: anthropic, openai, openai-compatible`,
+    );
+    return;
+  }
+  const target = normalizedProvider as CliProvider;
+  const budgets = lookupModel(target, modelId, {
+    ...(ctx.settings.explicitContextWindow !== undefined
+      ? { contextWindow: ctx.settings.explicitContextWindow }
+      : {}),
+    ...(ctx.settings.explicitMaxOutput !== undefined
+      ? { maxOutput: ctx.settings.explicitMaxOutput }
+      : {}),
+  });
+  const loaded = await loadInteractiveModel(target, modelId, {
+    maxTokens: ctx.settings.explicitMaxOutput ?? budgets.maxOutput,
+    baseUrl: ctx.settings.baseUrl,
+    headers: ctx.settings.headers,
+    extraBody: ctx.settings.extraBody,
+    auth: ctx.settings.auth,
+    runtimeApiKey: ctx.runtimeApiKey,
+    env: ctx.env,
+    fetch: ctx.fetch,
+    createModel: ctx.createModel,
+    secrets: ctx.secrets,
+  });
+  if ("error" in loaded) {
+    ctx.controller.fail(loaded.error);
+    return;
+  }
+  ctx.controller.setModel(loaded.model, target, modelId);
+  ctx.settings.provider = target;
+  ctx.settings.model = modelId;
+  ctx.settings.contextWindow = budgets.contextWindow;
+  ctx.settings.maxOutput = budgets.maxOutput;
+  ctx.controller.notice(
+    `Switched to ${target}/${modelId} (${budgets.contextWindow} ctx). Applies to this session only.`,
+  );
+}
+
+/** Build context-manager options so catalog budgets follow model switches unless overridden. */
+function contextManagerOptions(home: string, explicitContextWindow?: number): { home: string; contextWindow?: number } {
+  return explicitContextWindow !== undefined ? { home, contextWindow: explicitContextWindow } : { home };
 }
 
 /** Remove all children from a container renderable. */

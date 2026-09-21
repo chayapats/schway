@@ -382,6 +382,8 @@ test("slash commands parse and help lists the supported interactions", () => {
   expect(parseSlashCommand("/resume abc")?.args).toBe("abc");
   expect(parseSlashCommand("/sessions")?.name).toBe("sessions");
   expect(parseSlashCommand("/model")?.name).toBe("model");
+  expect(parseSlashCommand("/compact")?.name).toBe("compact");
+  expect(parseSlashCommand("/config")?.name).toBe("config");
   expect(parseSlashCommand("/help")?.name).toBe("help");
   expect(parseSlashCommand("/quit")?.name).toBe("quit");
   expect(parseSlashCommand("/nope")?.name).toBe("unknown");
@@ -389,6 +391,9 @@ test("slash commands parse and help lists the supported interactions", () => {
   expect(help).toContain("/new");
   expect(help).toContain("/sessions");
   expect(help).toContain("/resume");
+  expect(help).toContain("/model");
+  expect(help).toContain("/compact");
+  expect(help).toContain("/config");
   expect(help).toContain("/help");
   expect(help).toContain("/quit");
 });

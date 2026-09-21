@@ -77,6 +77,10 @@ export interface ResolvedSettings {
   contextWindow: number;
   maxOutput: number;
   catalog: ModelInfo;
+  /** Explicit limit overrides that outrank catalog budgets across model switches. */
+  explicitContextWindow?: number;
+  /** Explicit output limit that outranks catalog budgets across model switches. */
+  explicitMaxOutput?: number;
   baseUrl?: string;
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
@@ -216,6 +220,12 @@ export function resolveSettings(input: {
     contextWindow: catalog.contextWindow,
     maxOutput: catalog.maxOutput,
     catalog,
+    ...(merged.contextWindow !== undefined
+      ? { explicitContextWindow: merged.contextWindow }
+      : {}),
+    ...(merged.maxOutput !== undefined
+      ? { explicitMaxOutput: merged.maxOutput }
+      : {}),
   };
 
   if (provider !== "openai-compatible") {
