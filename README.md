@@ -122,3 +122,56 @@ Schway loads `AGENTS.md` from general to specific:
 Nested files are discovered when work enters that subtree. Sibling directories are not loaded.
 
 Replace the base system prompt with `~/.schway/SYSTEM.md` and append with `~/.schway/APPEND_SYSTEM.md`. Project-local `SYSTEM.md` is ignored; put project instructions in `AGENTS.md`.
+
+## Workspace paths
+
+Tool-relative paths resolve from the primary workspace root: the nearest Git root, otherwise the launch directory. Both are canonicalized through real paths (symlinks resolved) before use.
+
+- `read`, `write`, `edit`, `grep`, `find`, and `ls` resolve `path` against the workspace root.
+- `bash` defaults `cwd` to the workspace root and accepts an explicit `cwd` under it.
+- Launching from a nested subdirectory keeps the Git root as the workspace root; nested `AGENTS.md` files are still discovered when work enters that subtree.
+
+## Tool output limits
+
+Every core tool returns bounded model-facing output; oversized results are truncated with continuation guidance and never flood model context.
+
+- `read`: ranged reads default to 2000 lines; model-facing text is capped at 50,000 characters with continuation info.
+- `bash`: streaming stdout/stderr is capped at 50,000 characters; oversized output spills the full content to a temporary file and reports its path.
+- `grep`: defaults to 100 matches; model-facing text is capped at 50,000 characters. Truncated searches say to narrow with `path`, `glob`, `maxResults`, or a more specific pattern.
+- `find`: model-facing text is capped at 50,000 characters. Truncated listings say to narrow with a more specific pattern or path.
+- `ls`: lists to depth 1 by default; model-facing text is capped at 50,000 characters.
+- A non-zero `bash` exit code is ordinary command data (`{ stdout, stderr, exitCode }`), not infrastructure failure.
+
+## Sessions: save and resume
+
+Headless and interactive runs persist versioned JSONL sessions under `~/.schway/sessions`. Config files are never created automatically, but sessions are written so work can resume.
+
+```bash
+schway -p "start the migration"
+schway -p "continue the migration" --resume <session-id>
+schway --resume <session-id>   # interactive resume
+```
+
+Resume rebuilds history from the saved JSONL without replaying old tool effects. Interrupted sessions settle unresolved tool calls on load instead of rerunning them. Partial or malformed trailing records are skipped without destroying valid history. Runtime-only stream deltas (`model.delta`, `tool.delta`) are never persisted; the durable file holds `session`, `user`, `assistant`, `tool_result`, and `compaction` records only.
+
+`--json` streams normalized runtime events as JSONL on stdout for tooling; diagnostics stay on stderr. Runtime JSONL and durable session JSONL are different concepts: the first is transient observability, the second is resumable state.
+
+## Compaction
+
+Long sessions compact context instead of failing when pressure builds.
+
+- Automatic pressure compaction triggers at 80% of the resolved context window and retains the 10 most recent complete turns plus the running summary.
+- Context overflow (`context_length_exceeded` / `prompt-too-long`) forces one compaction and retries once; repeated overflow terminates with a clear error instead of looping.
+- Compaction never splits a tool-call/result group: the retained window starts at a turn boundary.
+- Oversized tool output is pruned only for summarization input; raw history keeps the full records.
+- The summary plus retained records reconstruct identically after `--resume`.
+
+There is no interactive `/compact` command in v0.1 beyond the automatic path and the same recovery inside headless runs.
+
+## Cancellation
+
+Cancellation is orderly and never corrupts session state.
+
+- Headless: one `AbortSignal` flows from SIGINT/SIGTERM through model streaming, tools, and provider requests. Cancelling exits non-zero and still leaves a resumable session; cancelled streams are not written as durable assistant messages.
+- Interactive: Esc cancels the running turn and returns to the input editor; Ctrl+C cancels when running and quits when idle. Quitting restores the terminal and releases resources.
+- Provider retries cover transient failures only (network resets, 429, 5xx) up to three total attempts with exponential backoff and `Retry-After`. Authentication errors, malformed requests, and ordinary tool failures are not retried.
