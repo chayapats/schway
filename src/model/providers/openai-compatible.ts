@@ -1,4 +1,4 @@
-import { redactSecrets } from "../../auth/secrets.ts";
+import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../../auth/secrets.ts";
 import type {
   AssistantContent,
   AssistantMessage,
@@ -90,16 +90,6 @@ export function createOpenAICompatibleModel(options: {
     },
   };
 }
-
-/** Header names whose values are treated as credentials for error redaction. */
-const CREDENTIAL_HEADER_NAMES = new Set([
-  "authorization",
-  "proxy-authorization",
-  "x-api-key",
-  "api-key",
-  "x-auth-token",
-  "x-access-token",
-]);
 
 /** Collect API key and credential-header values that must not appear in errors. */
 function secretsToRedact(

@@ -410,5 +410,11 @@ function parsePositiveInt(
       error: `Invalid value for ${flag}: expected a positive integer`,
     };
   }
-  return Number(raw);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    return {
+      error: `Invalid value for ${flag}: expected a positive integer`,
+    };
+  }
+  return value;
 }

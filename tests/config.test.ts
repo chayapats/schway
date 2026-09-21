@@ -6,6 +6,7 @@ import {
   mergeConfigLayers,
   parseConfigObject,
   projectConfigPath,
+  resolveSettings,
   userConfigPath,
 } from "../src/config/config.ts";
 import { parseEnvFile } from "../src/config/env-file.ts";
@@ -108,6 +109,45 @@ test("layers merge built-in, user, project, then CLI overrides", () => {
     model: "gpt-5.4",
     maxConcurrentTools: 4,
   });
+});
+
+test("changing provider without a model drops the inherited model", () => {
+  const merged = mergeConfigLayers(
+    { provider: "openai", model: "gpt-5.4" },
+    { provider: "anthropic" },
+  );
+  expect(merged.provider).toBe("anthropic");
+  expect(merged.model).toBeUndefined();
+});
+
+test("a provider change without a model uses that provider's default model", () => {
+  const resolved = resolveSettings({
+    user: { provider: "openai", model: "gpt-5.4" },
+    cli: { provider: "anthropic" },
+  });
+  expect("error" in resolved).toBe(false);
+  if ("error" in resolved) {
+    throw new Error(resolved.error);
+  }
+  expect(resolved.provider).toBe("anthropic");
+  expect(resolved.model).toBe(DEFAULT_MODEL_IDS.anthropic);
+});
+
+test("credential headers are rejected in ordinary config", () => {
+  const result = parseConfigObject(
+    {
+      provider: "openai-compatible",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      headers: { Authorization: "Bearer sk-config-secret" },
+    },
+    "project-config",
+  );
+  expect("error" in result).toBe(true);
+  if (!("error" in result)) {
+    throw new Error("expected validation error");
+  }
+  expect(result.error).toContain("API key");
+  expect(result.error.includes("sk-config-secret")).toBe(false);
 });
 
 test("zero-config uses built-in defaults and does not create config files", async () => {

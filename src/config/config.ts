@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
   DEFAULT_MODEL_IDS,
   lookupModel,
@@ -145,7 +146,16 @@ export function parseConfigObject(
     };
   }
 
-  return normalizeLayer(value);
+  const layer = normalizeLayer(value);
+  const credentialHeader = Object.keys(layer.headers ?? {}).find((name) =>
+    CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()),
+  );
+  if (credentialHeader !== undefined) {
+    return {
+      error: `API keys must not be stored in ${source}. Use --api-key, --header at runtime, or environment variables.`,
+    };
+  }
+  return layer;
 }
 
 /** Later layers replace earlier values for the same key. Undefined layers are skipped. */
@@ -157,11 +167,19 @@ export function mergeConfigLayers(
     if (layer === undefined) {
       continue;
     }
+    const dropInheritedModel =
+      layer.provider !== undefined &&
+      merged.provider !== undefined &&
+      layer.provider !== merged.provider &&
+      layer.model === undefined;
     for (const key of CONFIG_SETTING_NAMES) {
       const value = layer[key];
       if (value !== undefined) {
         (merged[key] as typeof value) = value;
       }
+    }
+    if (dropInheritedModel) {
+      delete merged.model;
     }
   }
   return merged;

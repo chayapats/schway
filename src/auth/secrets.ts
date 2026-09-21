@@ -1,6 +1,16 @@
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
+/** Header names whose values are treated as credentials. */
+export const CREDENTIAL_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "api-key",
+  "x-auth-token",
+  "x-access-token",
+]);
+
 export const MISSING_ANTHROPIC_API_KEY =
   "Missing Anthropic API key. Set ANTHROPIC_API_KEY or pass --api-key.";
 export const MISSING_OPENAI_API_KEY =

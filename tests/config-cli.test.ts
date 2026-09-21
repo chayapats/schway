@@ -144,6 +144,21 @@ test("project config selects provider and model; CLI flags override them", async
       model: "from-cli",
       apiKey: "sk-anthropic",
     });
+
+    let providerOnly: CreateModelInput | undefined;
+    const switched = await run(["-p", "hello", "--provider", "anthropic"], {
+      env: { ANTHROPIC_API_KEY: "sk-anthropic", OPENAI_API_KEY: "sk-openai" },
+      cwd: dir,
+      createModel: async (input) => {
+        providerOnly = input;
+        return createScriptedModel({ text: "ok" });
+      },
+    });
+    expect(switched.exitCode).toBe(0);
+    expect(providerOnly).toMatchObject({
+      provider: "anthropic",
+      model: DEFAULT_MODEL_IDS.anthropic,
+    });
   });
 });
 
@@ -187,6 +202,31 @@ test("invalid and misspelled project config exit non-zero with the setting name"
     expect(result.stderr).toContain("modell");
     expect(result.stderr).toContain("model");
   });
+});
+
+test("runtime --header may send credential headers that config.json cannot store", async () => {
+  let used: CreateModelInput | undefined;
+  const result = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:8080/v1",
+      "--header",
+      "Authorization: Bearer sk-runtime-header",
+    ],
+    {
+      env: {},
+      createModel: async (input) => {
+        used = input;
+        return createScriptedModel({ text: "ok" });
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(used?.headers).toEqual({ Authorization: "Bearer sk-runtime-header" });
 });
 
 test("API keys in config.json are rejected and not printed", async () => {
@@ -282,6 +322,10 @@ test("invalid --max-turns and unknown options fail with actionable errors", asyn
   const zero = await run(["-p", "hello", "--max-turns", "0"]);
   expect(zero.exitCode).toBe(1);
   expect(zero.stderr).toContain("--max-turns");
+
+  const unsafe = await run(["-p", "hello", "--max-turns", "9007199254740993"]);
+  expect(unsafe.exitCode).toBe(1);
+  expect(unsafe.stderr).toContain("--max-turns");
 
   const missing = await run(["-p", "hello", "--env-file"]);
   expect(missing.exitCode).toBe(1);
