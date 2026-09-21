@@ -407,3 +407,14 @@ test("listSessions returns newest-first summaries and skips corrupt files", asyn
     expect(listed[0]?.workspaceRoot).toBe(dir);
   });
 });
+
+test("listSessions skips files with an overlong first line without reading them fully", async () => {
+  await withTempDir(async (dir) => {
+    const workspace = workspaceFor(dir);
+    const sessions = join(dir, "sessions");
+    const kept = await createJsonlSession({ directory: sessions, workspace });
+    await writeFile(join(sessions, "huge.jsonl"), `${"z".repeat(100_000)}\nmore\n`);
+    const listed = await listSessions(sessions);
+    expect(listed.map((entry) => entry.id)).toEqual([kept.header.id]);
+  });
+});

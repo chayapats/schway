@@ -115,7 +115,8 @@ async function readFirstLine(path: string): Promise<string | undefined> {
   const handle = await open(path, "r");
   try {
     // Session headers are a few hundred bytes; one small read covers them.
-    // Files with a longer first line fall back to a full read below.
+    // A first line longer than the window is treated as invalid so one
+    // corrupt or oversized file cannot force a full read during discovery.
     const chunk = Buffer.alloc(8192);
     const { bytesRead } = await handle.read(chunk, 0, chunk.length, 0);
     const text = chunk.subarray(0, bytesRead).toString("utf8");
@@ -127,8 +128,7 @@ async function readFirstLine(path: string): Promise<string | undefined> {
     if (bytesRead < chunk.length) {
       return text.length > 0 ? text : undefined;
     }
-    const full = await readFile(path, "utf8");
-    return full.split("\n").find((line) => line.length > 0);
+    return undefined;
   } finally {
     await handle.close();
   }
