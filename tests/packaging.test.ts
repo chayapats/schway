@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { withTempDir } from "./helpers.ts";
 
 /** Read a repo-relative source file as text. */
 async function source(path: string): Promise<string> {
@@ -77,8 +78,7 @@ test("v0.1 keeps later-milestone surfaces out of the base harness", async () => 
   }
 });
 
-test("validating the release artifact does not publish it", async () => {
-  const pkg = (await Bun.file("package.json").json()) as {
+test("validating the release artifact does not publish it", async () => {  const pkg = (await Bun.file("package.json").json()) as {
     scripts: Record<string, string>;
   };
   const scriptText = Object.values(pkg.scripts).join("\n").toLowerCase();
@@ -91,4 +91,49 @@ test("validating the release artifact does not publish it", async () => {
   expect(lowered.includes("release")).toBe(false);
   expect(lowered.includes("typecheck")).toBe(true);
   expect(lowered).toContain("bun test");
+});
+
+test("npm pack produces an installable tarball with the runtime files only", async () => {
+  await withTempDir(async (dir) => {
+    // Offline: pack the repository and inspect the artifact, never the checkout.
+    const pack = Bun.spawn(["npm", "pack", "--pack-destination", dir, "--silent"], {
+      cwd: join(import.meta.dir, ".."),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(pack.stdout).text(),
+      new Response(pack.stderr).text(),
+      pack.exited,
+    ]);
+    expect(`${stdout}${stderr}`.toLowerCase().includes("error")).toBe(false);
+    expect(exitCode).toBe(0);
+    const tarball = stdout.trim().split("\n").at(-1) ?? "";
+    expect(tarball.endsWith(".tgz")).toBe(true);
+
+    const list = Bun.spawn(["tar", "-tzf", join(dir, tarball)], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [entriesText, listExit] = await Promise.all([
+      new Response(list.stdout).text(),
+      list.exited,
+    ]);
+    expect(listExit).toBe(0);
+    const entries = entriesText.split("\n").filter((line) => line.length > 0);
+    for (const required of [
+      "package/bin/schway",
+      "package/src/cli/main.ts",
+      "package/src/tui/app.ts",
+      "package/package.json",
+      "package/README.md",
+      "package/LICENSE",
+    ]) {
+      expect(entries.includes(required)).toBe(true);
+    }
+    // Tests, CI config, and repo docs stay out of the installed artifact.
+    expect(entries.some((entry) => entry.startsWith("package/tests/"))).toBe(false);
+    expect(entries.some((entry) => entry.startsWith("package/.github/"))).toBe(false);
+    expect(entries.includes("package/.travis.yml")).toBe(false);
+  });
 });

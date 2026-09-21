@@ -155,7 +155,11 @@ test("v0.1 coding workflow locates, edits, verifies, resumes, and compacts", asy
                   {
                     id: "bash1",
                     name: "bash",
-                    arguments: { command: "grep -q FIXED src/app.ts && test -f NOTES.md" },
+                    arguments: {
+                      // Non-idempotent marker: a replayed run would append twice.
+                      command:
+                        "grep -q FIXED src/app.ts && test -f NOTES.md && echo verified >> MARKERS.txt",
+                    },
                   },
                 ],
               };
@@ -222,6 +226,10 @@ test("v0.1 coding workflow locates, edits, verifies, resumes, and compacts", asy
     const reread = await readFile(join(project, "src", "app.ts"), "utf8");
     expect(reread).toContain("FIXED");
 
+    // Resume did not replay the first run's side effects: exactly one marker.
+    const markers = await readFile(join(project, "MARKERS.txt"), "utf8");
+    expect(markers.trim().split("\n")).toEqual(["verified"]);
+
     // Compaction preserves a durable summary plus retained records.
     const manager = createContextManager(workspace, { keepTurns: 1 });
     const summaryModel = createScriptedModel({
@@ -233,7 +241,34 @@ test("v0.1 coding workflow locates, edits, verifies, resumes, and compacts", asy
 
     // Runtime-only deltas were never persisted to the durable JSONL.
     const persisted = await readFile(join(sessions, `${session.header.id}.jsonl`), "utf8");
+    const lines = persisted.split("\n").filter((line) => line.trim().length > 0);
+    expect(lines.length).toBeGreaterThan(0);
+    const durableTypes = new Set([
+      "session",
+      "user",
+      "assistant",
+      "tool_result",
+      "compaction",
+    ]);
+    for (const line of lines) {
+      const record = JSON.parse(line) as { type: string };
+      expect(durableTypes.has(record.type)).toBe(true);
+    }
+    expect(
+      lines.some((line) => line.includes("model.delta") || line.includes("tool.delta")),
+    ).toBe(false);
     expect(persisted.includes('"name":"environment"')).toBe(false);
-    expect(JSON.parse(persisted.split("\n")[0]).type).toBe("session");
+    expect(JSON.parse(lines[0]!).type).toBe("session");
   });
+});
+
+/** Search and read tools run in parallel; mutations are exclusive barriers. */
+test("core tools declare parallel reads around exclusive barriers", async () => {
+  expect(readTool.execution).toBe("parallel");
+  expect(grepTool.execution).toBe("parallel");
+  expect(findTool.execution).toBe("parallel");
+  expect(lsTool.execution).toBe("parallel");
+  expect(writeTool.execution).toBe("exclusive");
+  expect(editTool.execution).toBe("exclusive");
+  expect(bashTool.execution).toBe("exclusive");
 });
