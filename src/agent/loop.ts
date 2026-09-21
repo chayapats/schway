@@ -2,12 +2,11 @@ import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts
 import type { ContextManager } from "../context/manager.ts";
 import type { Model, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
-import { executeToolCall, type ExecutedToolCall } from "../tools/executor.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import { toPlainJsonSchema } from "../tools/schema.ts";
-import type { ToolOutputChunk } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
+import { scheduleToolCalls } from "./scheduler.ts";
 
 /** Safety bound on model rounds per `runAgentLoop` invocation. */
 export const DEFAULT_MAX_TURNS = 32;
@@ -100,29 +99,14 @@ export async function* runAgentLoop(
         return;
       }
 
-      for (const call of calls) {
-        yield {
-          type: "tool.started",
-          toolCallId: call.id,
-          name: call.name,
-        };
-        const executed = yield* streamToolOutput({
-          registry: options.tools,
-          call,
-          workspace: options.workspace,
-          signal: options.signal,
-        });
-        options.session.append(executed.result);
-        yield {
-          type: "tool.finished",
-          toolCallId: call.id,
-          name: call.name,
-          status: executed.status,
-          content: executed.result.content,
-          ...(executed.details !== undefined
-            ? { details: executed.details }
-            : {}),
-        };
+      const executed = yield* scheduleToolCalls({
+        calls,
+        registry: options.tools,
+        workspace: options.workspace,
+        signal: options.signal,
+      });
+      for (const item of executed) {
+        options.session.append(item.result);
       }
 
       if (options.signal?.aborted) {
@@ -136,69 +120,6 @@ export async function* runAgentLoop(
     yield { type: "error", message: errorMessage(error) };
     yield { type: "agent.finished", reason: "error" };
   }
-}
-
-/**
- * Run one tool call and yield stdout/stderr chunks as `tool.delta` while it runs.
- */
-async function* streamToolOutput(options: {
-  registry?: ToolRegistry;
-  call: ToolCallContent;
-  workspace?: Workspace;
-  signal?: AbortSignal;
-}): AsyncGenerator<RuntimeEvent, ExecutedToolCall> {
-  const queue: RuntimeEvent[] = [];
-  let wake: (() => void) | undefined;
-  let settled = false;
-  let result: ExecutedToolCall | undefined;
-  let failure: unknown;
-
-  const finished = executeToolCall({
-    ...options,
-    onOutput(chunk: ToolOutputChunk) {
-      if (chunk.text.length === 0) {
-        return;
-      }
-      queue.push({
-        type: "tool.delta",
-        toolCallId: options.call.id,
-        name: options.call.name,
-        stream: chunk.stream,
-        text: chunk.text,
-      });
-      wake?.();
-    },
-  }).then(
-    (value) => {
-      result = value;
-    },
-    (error) => {
-      failure = error;
-    },
-  ).finally(() => {
-    settled = true;
-    wake?.();
-  });
-
-  while (!settled || queue.length > 0) {
-    if (queue.length === 0) {
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-      });
-      wake = undefined;
-      continue;
-    }
-    yield queue.shift()!;
-  }
-
-  await finished;
-  if (failure !== undefined) {
-    throw failure;
-  }
-  if (!result) {
-    throw new Error("Tool execution finished without a result");
-  }
-  return result;
 }
 
 /** Collect tool_call blocks from an assembled assistant message. */
