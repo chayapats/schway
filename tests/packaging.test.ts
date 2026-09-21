@@ -8,6 +8,24 @@ async function source(path: string): Promise<string> {
   return Bun.file(join(import.meta.dir, "..", path)).text();
 }
 
+/** Run a command and collect piped output with its exit code. */
+async function runCommand(
+  argv: string[],
+  options: { cwd?: string },
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(argv, {
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode };
+}
+
 const CORE_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls"] as const;
 
 test("single npm-compatible package exposes the schway executable", async () => {
@@ -78,17 +96,19 @@ test("v0.1 keeps later-milestone surfaces out of the base harness", async () => 
   }
 });
 
-test("validating the release artifact does not publish it", async () => {  const pkg = (await Bun.file("package.json").json()) as {
+test("validating the release artifact does not publish it", async () => {
+  const pkg = (await Bun.file("package.json").json()) as {
     scripts: Record<string, string>;
   };
   const scriptText = Object.values(pkg.scripts).join("\n").toLowerCase();
   expect(scriptText.includes("npm publish")).toBe(false);
   expect(scriptText.includes("release")).toBe(false);
   // Travis CI validates with typecheck and tests only; no registry publish or release step.
+  // URLs are stripped first so the pinned toolchain download does not trip the check.
   const travis = await source(".travis.yml");
-  const lowered = travis.toLowerCase();
-  expect(lowered.includes("publish")).toBe(false);
-  expect(lowered.includes("release")).toBe(false);
+  const lowered = travis.toLowerCase().replace(/https?:\/\/\S+/g, "");
+  expect(/\bpublish\b/.test(lowered)).toBe(false);
+  expect(/\brelease\b/.test(lowered)).toBe(false);
   expect(lowered.includes("typecheck")).toBe(true);
   expect(lowered).toContain("bun test");
 });
@@ -135,5 +155,20 @@ test("npm pack produces an installable tarball with the runtime files only", asy
     expect(entries.some((entry) => entry.startsWith("package/tests/"))).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/.github/"))).toBe(false);
     expect(entries.includes("package/.travis.yml")).toBe(false);
+
+    // Install the tarball into an isolated directory and run the installed binary.
+    // This step needs registry access for the runtime dependencies.
+    const installDir = join(dir, "install");
+    const installed = await runCommand(
+      ["npm", "install", "--prefix", installDir, "--no-audit", "--no-fund", "--silent", join(dir, tarball)],
+      {},
+    );
+    expect(installed.exitCode).toBe(0);
+    const help = await runCommand(
+      [join(installDir, "node_modules", ".bin", "schway"), "--help"],
+      {},
+    );
+    expect(help.exitCode).toBe(0);
+    expect(help.stdout).toContain("Usage: schway");
   });
-});
+}, 180_000);

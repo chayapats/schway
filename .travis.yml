@@ -10,7 +10,15 @@ addons:
       - unzip
 
 before_install:
-  - curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.2"
+  - BUN_VERSION="bun-v1.4.2"
+  - case "$(uname -m)" in x86_64) BUN_ARCH="x64" ;; aarch64|arm64) BUN_ARCH="aarch64" ;; *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; esac
+  - BUN_BASE="https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}"
+  - curl -fsSL -o /tmp/bun-SHASUMS.txt "${BUN_BASE}/SHASUMS256.txt"
+  - curl -fsSL -o /tmp/bun.zip "${BUN_BASE}/bun-linux-${BUN_ARCH}.zip"
+  - grep " bun-linux-${BUN_ARCH}.zip$" /tmp/bun-SHASUMS.txt | (cd /tmp && sha256sum -c -)
+  - mkdir -p "$HOME/.bun/bin"
+  - unzip -q -o /tmp/bun.zip -d /tmp/bun-dist
+  - cp "/tmp/bun-dist/bun-linux-${BUN_ARCH}/bun" "$HOME/.bun/bin/bun"
   - export PATH="$HOME/.bun/bin:$PATH"
   - bun --version
   - rg --version
