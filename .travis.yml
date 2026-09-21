@@ -3,10 +3,17 @@ node_js: "22"
 os: linux
 dist: jammy
 
+addons:
+  apt:
+    packages:
+      - ripgrep
+      - unzip
+
 before_install:
   - curl -fsSL https://bun.sh/install | bash
   - export PATH="$HOME/.bun/bin:$PATH"
   - bun --version
+  - rg --version
 
 install:
   - bun install --frozen-lockfile
