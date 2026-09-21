@@ -48,6 +48,7 @@ test("core modules do not import provider SDKs", async () => {
     expect(source.includes('from "openai"')).toBe(false);
     expect(source.includes("providers/anthropic")).toBe(false);
     expect(source.includes("providers/openai")).toBe(false);
+    expect(source.includes("providers/openai-compatible")).toBe(false);
   }
 });
 
@@ -57,6 +58,8 @@ test("headless CLI loads a provider only after selection", async () => {
   expect(source.includes('from "openai"')).toBe(false);
   expect(source.includes('from "../model/providers/anthropic.ts"')).toBe(false);
   expect(source.includes('from "../model/providers/openai.ts"')).toBe(false);
+  expect(source.includes('from "../model/providers/openai-compatible.ts"')).toBe(false);
   expect(source.includes('import("../model/providers/anthropic.ts")')).toBe(true);
   expect(source.includes('import("../model/providers/openai.ts")')).toBe(true);
+  expect(source.includes('import("../model/providers/openai-compatible.ts")')).toBe(true);
 });
