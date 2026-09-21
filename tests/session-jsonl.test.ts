@@ -116,9 +116,18 @@ test("a partial trailing record is skipped without destroying valid history", as
       id: created.header.id,
     });
     expect(loaded.items).toEqual([user]);
-    expect(await Bun.file(path).text()).toBe(
-      `${valid}{"type":"assistant","id":"a1","parentId":"u1"`,
-    );
+    expect(await Bun.file(path).text()).toBe(valid);
+
+    loaded.append({
+      type: "user",
+      id: "u2",
+      content: [{ type: "text", text: "next" }],
+    });
+    const reloaded = await loadJsonlSession({
+      directory: dir,
+      id: created.header.id,
+    });
+    expect(reloaded.items.map((item) => item.id)).toEqual(["u1", "u2"]);
   });
 });
 
@@ -192,7 +201,54 @@ test("a malformed trailing record is skipped without destroying valid history", 
       id: created.header.id,
     });
     expect(loaded.items).toEqual([user]);
-    expect(await Bun.file(path).text()).toBe(`${valid}${trailing}`);
+    expect(await Bun.file(path).text()).toBe(valid);
+
+    loaded.append({
+      type: "user",
+      id: "u2",
+      content: [{ type: "text", text: "next" }],
+    });
+    const reloaded = await loadJsonlSession({
+      directory: dir,
+      id: created.header.id,
+    });
+    expect(reloaded.items.map((item) => item.id)).toEqual(["u1", "u2"]);
+  });
+});
+
+test("a record missing required fields is malformed", async () => {
+  await withTempDir(async (dir) => {
+    const created = await createJsonlSession({ directory: dir, workspace });
+    const user: UserMessage = {
+      type: "user",
+      id: "u1",
+      content: [{ type: "text", text: "keep me" }],
+    };
+    created.append(user);
+    const path = join(dir, `${created.header.id}.jsonl`);
+    const valid = await Bun.file(path).text();
+
+    await writeFile(
+      path,
+      `${valid}{"type":"user","parentId":"u1","content":[{"type":"text","text":"no id"}]}\n`,
+    );
+    const loaded = await loadJsonlSession({
+      directory: dir,
+      id: created.header.id,
+    });
+    expect(loaded.items).toEqual([user]);
+    expect(await Bun.file(path).text()).toBe(valid);
+
+    await writeFile(
+      path,
+      `${valid}{"type":"user","parentId":"u1","content":[{"type":"text","text":"no id"}]}\n{"type":"user","id":"u2","parentId":"u1","content":[{"type":"text","text":"later"}]}\n`,
+    );
+    await expect(
+      loadJsonlSession({ directory: dir, id: created.header.id }),
+    ).rejects.toThrow(/malformed record/);
+    expect(await Bun.file(path).text()).toBe(
+      `${valid}{"type":"user","parentId":"u1","content":[{"type":"text","text":"no id"}]}\n{"type":"user","id":"u2","parentId":"u1","content":[{"type":"text","text":"later"}]}\n`,
+    );
   });
 });
 
