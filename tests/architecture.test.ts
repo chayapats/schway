@@ -22,6 +22,8 @@ test("core modules do not import provider SDKs", async () => {
     "src/agent/events.ts",
     "src/conversation/types.ts",
     "src/context/manager.ts",
+    "src/context/prompt.ts",
+    "src/context/agents.ts",
     "src/session/session.ts",
     "src/session/jsonl.ts",
     "src/workspace/workspace.ts",
