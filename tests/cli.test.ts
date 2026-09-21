@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli/main.ts";
 import type { Model } from "../src/model/model.ts";
@@ -30,17 +31,28 @@ async function run(
     createModel?: (input: { apiKey: string }) => Promise<Model>;
   } = {},
 ) {
+  const isolatedHome =
+    options.env?.HOME ?? (await mkdtemp(join(tmpdir(), "schway-home-")));
   const stdout = capture();
   const stderr = capture();
-  const exitCode = await runCli(argv, {
-    stdout,
-    stderr,
-    env: options.env ?? { ANTHROPIC_API_KEY: "sk-test" },
-    cwd: options.cwd ?? process.cwd(),
-    model: options.model,
-    createModel: options.createModel,
-  });
-  return { exitCode, stdout: stdout.text, stderr: stderr.text };
+  try {
+    const exitCode = await runCli(argv, {
+      stdout,
+      stderr,
+      env: {
+        HOME: isolatedHome,
+        ...(options.env ?? { ANTHROPIC_API_KEY: "sk-test" }),
+      },
+      cwd: options.cwd ?? process.cwd(),
+      model: options.model,
+      createModel: options.createModel,
+    });
+    return { exitCode, stdout: stdout.text, stderr: stderr.text };
+  } finally {
+    if (options.env?.HOME === undefined) {
+      await rm(isolatedHome, { recursive: true, force: true });
+    }
+  }
 }
 
 /** True when any parsed JSONL value contains `secret` as a string, not as escaped JSON text. */
@@ -447,4 +459,109 @@ test("partial streamed text is terminated before an error diagnostic", async () 
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("Hel\n");
   expect(result.stderr).toContain("connection reset");
+});
+
+test("--resume requires a session id", async () => {
+  const result = await run(["-p", "hello", "--resume"], {
+    model: createScriptedModel({ text: "nope" }),
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Missing value for --resume");
+  expect(result.stdout).toBe("");
+});
+
+test("--resume of an unknown session exits with an actionable error", async () => {
+  await withTempDir(async (dir) => {
+    const result = await run(["-p", "hello", "--resume", "missing-id"], {
+      env: { HOME: dir, ANTHROPIC_API_KEY: "sk-test" },
+      model: createScriptedModel({ text: "nope" }),
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("missing-id");
+    expect(result.stdout).toBe("");
+  });
+});
+
+test("headless -p saves a session that --resume continues with workspace identity", async () => {
+  await withTempDir(async (dir) => {
+    const home = join(dir, "home");
+    const project = join(dir, "project");
+    const other = join(dir, "other");
+    await mkdir(home);
+    await mkdir(project);
+    await mkdir(other);
+    await writeFile(join(project, "note.txt"), "from-saved-workspace\n");
+
+    const first = await run(["-p", "read note", "--json"], {
+      env: { HOME: home, ANTHROPIC_API_KEY: "sk-test" },
+      cwd: project,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "t1",
+                name: "read",
+                arguments: { path: "note.txt" },
+              },
+            ],
+          },
+          (request) => {
+            const tool = request.items.find(
+              (item): item is ToolResult => item.type === "tool_result",
+            );
+            return { text: tool?.content ?? "missing" };
+          },
+        ],
+      }),
+    });
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout).toContain("from-saved-workspace");
+
+    const files = (await readdir(join(home, ".schway", "sessions"))).filter(
+      (name) => name.endsWith(".jsonl"),
+    );
+    expect(files).toHaveLength(1);
+    const sessionId = files[0]!.slice(0, -".jsonl".length);
+    const records = (await Bun.file(join(home, ".schway", "sessions", files[0]!)).text())
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as { type: string });
+    expect(records.map((record) => record.type)).toEqual([
+      "session",
+      "user",
+      "assistant",
+      "tool_result",
+      "assistant",
+    ]);
+    expect(JSON.stringify(records).includes("agent.started")).toBe(false);
+
+    const second = await run(
+      ["-p", "remind me", "--resume", sessionId, "--json"],
+      {
+        env: { HOME: home, ANTHROPIC_API_KEY: "sk-test" },
+        cwd: other,
+        model: createScriptedModel({
+          responses: [
+            (request) => {
+              const tool = request.items.find(
+                (item): item is ToolResult => item.type === "tool_result",
+              );
+              const environment = request.context.find(
+                (section) => section.name === "environment",
+              );
+              return {
+                text: `${tool?.content ?? "missing"}\n${environment?.content ?? ""}`,
+              };
+            },
+          ],
+        }),
+      },
+    );
+    expect(second.exitCode).toBe(0);
+    expect(second.stdout).toContain("from-saved-workspace");
+    const savedRoot = await realpath(project);
+    expect(second.stdout).toContain(`Workspace root: ${savedRoot}`);
+    expect(second.stdout.includes(await realpath(other))).toBe(false);
+  });
 });

@@ -24,6 +24,7 @@ bun run dev -- -p "hello"
 export ANTHROPIC_API_KEY=...
 schway -p "explain this repository"
 schway -p "explain this repository" --json
+schway -p "continue this work" --resume <session-id>
 ```
 
 `--json` streams normalized runtime events as JSONL on stdout. Diagnostics stay on stderr.
