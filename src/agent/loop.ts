@@ -7,6 +7,7 @@ import type { ToolRegistry } from "../tools/registry.ts";
 import { toPlainJsonSchema } from "../tools/schema.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
+import { streamModelTurn, systemClock, type AgentClock } from "./retry.ts";
 import { scheduleToolCalls } from "./scheduler.ts";
 
 /** Safety bound on model rounds per `runAgentLoop` invocation. */
@@ -22,6 +23,7 @@ export interface AgentLoopOptions {
   signal?: AbortSignal;
   maxTurns?: number;
   maxConcurrentTools?: number;
+  clock?: AgentClock;
 }
 
 /**
@@ -35,6 +37,7 @@ export async function* runAgentLoop(
   yield { type: "agent.started" };
 
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+  const clock = options.clock ?? systemClock();
 
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -44,58 +47,32 @@ export async function* runAgentLoop(
       }
 
       const prepared = await options.contextManager.prepare(options.session);
-      yield {
-        type: "model.started",
-        provider: options.model.provider,
-        model: options.model.id,
-      };
-
-      let complete: AssistantMessage | undefined;
-      try {
-        for await (const event of options.model.stream({
+      const outcome = yield* streamModelTurn({
+        model: options.model,
+        request: {
           systemPrompt: prepared.systemPrompt,
           context: prepared.context,
           items: prepared.items,
           tools: toModelTools(options.tools),
           signal: options.signal,
-        })) {
-          if (event.type === "text_delta") {
-            yield {
-              type: "model.delta",
-              content: { type: "text", text: event.text },
-            };
-          } else if (event.type === "thinking_delta") {
-            yield {
-              type: "model.delta",
-              content: { type: "thinking", text: event.text },
-            };
-          } else {
-            complete = event.message;
-          }
-        }
-      } catch (error) {
-        if (options.signal?.aborted) {
-          yield { type: "agent.finished", reason: "cancelled" };
-          return;
-        }
-        yield { type: "error", message: errorMessage(error) };
+        },
+        clock,
+        signal: options.signal,
+      });
+      if (outcome.kind === "cancelled") {
+        yield { type: "agent.finished", reason: "cancelled" };
+        return;
+      }
+      if (outcome.kind === "error") {
+        yield { type: "error", message: outcome.message };
         yield { type: "agent.finished", reason: "error" };
         return;
       }
 
-      if (!complete) {
-        yield {
-          type: "error",
-          message: "Model stream ended without a complete message",
-        };
-        yield { type: "agent.finished", reason: "error" };
-        return;
-      }
-
-      options.session.append(complete);
+      options.session.append(outcome.message);
       yield { type: "model.finished" };
 
-      const calls = toolCallsOf(complete);
+      const calls = toolCallsOf(outcome.message);
       if (calls.length === 0) {
         yield { type: "agent.finished", reason: "completed" };
         return;

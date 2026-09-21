@@ -28,6 +28,7 @@ async function run(
     env?: Record<string, string | undefined>;
     cwd?: string;
     model?: Model;
+    signal?: AbortSignal;
     createModel?: (input: {
       apiKey?: string;
       provider: string;
@@ -54,6 +55,7 @@ async function run(
       },
       cwd: options.cwd ?? process.cwd(),
       model: options.model,
+      signal: options.signal,
       createModel: options.createModel,
     });
     return { exitCode, stdout: stdout.text, stderr: stderr.text };
@@ -418,7 +420,10 @@ test("secrets are not printed when a run fails", async () => {
   const secret = "sk-secret-do-not-print";
   const result = await run(["-p", "hello", "--api-key", secret], {
     env: {},
-    model: createScriptedModel({ error: `unauthorized ${secret}` }),
+    model: createScriptedModel({
+      error: `unauthorized ${secret}`,
+      status: 401,
+    }),
   });
   expect(result.exitCode).toBe(1);
   expect(result.stdout.includes(secret)).toBe(false);
@@ -533,12 +538,58 @@ test("secrets are redacted from json edit details", async () => {
   });
 });
 
+test("CLI AbortSignal cancels model streaming and exits non-zero", async () => {
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | undefined;
+  let requestStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    requestStarted = resolve;
+  });
+  const pending = run(["-p", "hello", "--json"], {
+    signal: controller.signal,
+    model: {
+      provider: "scripted",
+      id: "scripted",
+      async *stream(request) {
+        seenSignal = request.signal;
+        requestStarted();
+        yield { type: "text_delta" as const, text: "Hel" };
+        await new Promise<void>((_resolve, reject) => {
+          const signal = request.signal;
+          if (signal?.aborted) {
+            const error = new Error("The operation was aborted");
+            error.name = "AbortError";
+            reject(error);
+            return;
+          }
+          signal?.addEventListener(
+            "abort",
+            () => {
+              const error = new Error("The operation was aborted");
+              error.name = "AbortError";
+              reject(error);
+            },
+            { once: true },
+          );
+        });
+      },
+    },
+  });
+  await started;
+  expect(seenSignal).toBe(controller.signal);
+  controller.abort();
+  const result = await pending;
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toContain('"reason":"cancelled"');
+  expect(result.stdout.includes("should not run")).toBe(false);
+});
+
 test("provider stream failure exits non-zero with an actionable error", async () => {
   const result = await run(["-p", "hello"], {
-    model: createScriptedModel({ error: "connection reset" }),
+    model: createScriptedModel({ error: "invalid request", status: 400 }),
   });
   expect(result.exitCode).toBe(1);
-  expect(result.stderr).toContain("connection reset");
+  expect(result.stderr).toContain("invalid request");
 });
 
 test("headless CLI uses the resolved workspace", async () => {
@@ -736,13 +787,13 @@ test("partial streamed text is terminated before an error diagnostic", async () 
       id: "scripted",
       async *stream() {
         yield { type: "text_delta" as const, text: "Hel" };
-        throw new Error("connection reset");
+        throw Object.assign(new Error("invalid request"), { status: 400 });
       },
     },
   });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("Hel\n");
-  expect(result.stderr).toContain("connection reset");
+  expect(result.stderr).toContain("invalid request");
 });
 
 test("--resume requires a session id", async () => {

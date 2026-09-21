@@ -20,6 +20,7 @@ test("core modules do not import provider SDKs", async () => {
     "src/agent/loop.ts",
     "src/agent/scheduler.ts",
     "src/agent/events.ts",
+    "src/agent/retry.ts",
     "src/conversation/types.ts",
     "src/context/manager.ts",
     "src/context/prompt.ts",

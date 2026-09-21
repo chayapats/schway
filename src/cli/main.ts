@@ -51,6 +51,7 @@ export interface CliIo {
   stderr: CliWriter;
   env: Record<string, string | undefined>;
   cwd: string;
+  signal?: AbortSignal;
   model?: Model;
   fetch?: FetchLike;
   createModel?: (input: {
@@ -182,6 +183,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       lsTool,
     ]),
     workspace,
+    signal: io.signal,
     maxTurns: settings.maxTurns,
     maxConcurrentTools: settings.maxConcurrentTools,
   })) {
@@ -194,6 +196,14 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     ) {
       io.stdout.write(safeEvent.content.text);
       printedText = true;
+    } else if (safeEvent.type === "model.retry") {
+      if (printedText) {
+        io.stdout.write("\n");
+        printedText = false;
+      }
+      io.stderr.write(
+        `Retrying provider request (${safeEvent.attempt}/${safeEvent.maxAttempts}) in ${safeEvent.delayMs}ms: ${safeEvent.message}\n`,
+      );
     }
 
     if (safeEvent.type === "error") {
@@ -245,7 +255,7 @@ function collectSecrets(
 
 /** Redact configured secrets from event fields that can reach stdout. */
 function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEvent {
-  if (event.type === "error") {
+  if (event.type === "error" || event.type === "model.retry") {
     return { ...event, message: redactSecrets(event.message, secrets) };
   }
   if (event.type === "tool.finished") {
@@ -414,12 +424,24 @@ async function loadSelectedModel(
 
 /** Process entrypoint for the `schway` binary. */
 async function main(): Promise<number> {
-  return runCli(process.argv.slice(2), {
-    stdout: { write: (chunk) => void process.stdout.write(chunk) },
-    stderr: { write: (chunk) => void process.stderr.write(chunk) },
-    env: process.env,
-    cwd: process.cwd(),
-  });
+  const controller = new AbortController();
+  const abort = () => {
+    controller.abort();
+  };
+  process.on("SIGINT", abort);
+  process.on("SIGTERM", abort);
+  try {
+    return await runCli(process.argv.slice(2), {
+      stdout: { write: (chunk) => void process.stdout.write(chunk) },
+      stderr: { write: (chunk) => void process.stderr.write(chunk) },
+      env: process.env,
+      cwd: process.cwd(),
+      signal: controller.signal,
+    });
+  } finally {
+    process.off("SIGINT", abort);
+    process.off("SIGTERM", abort);
+  }
 }
 
 if (import.meta.main) {

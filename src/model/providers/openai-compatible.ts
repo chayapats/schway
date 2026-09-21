@@ -326,7 +326,13 @@ async function endpointError(
     status === 401 || status === 403
       ? `OpenAI-compatible endpoint authentication failed${detail}`
       : `OpenAI-compatible endpoint error (${status})${detail}`;
-  return new Error(redactSecrets(message, secrets));
+  const error = new Error(redactSecrets(message, secrets)) as Error & {
+    status: number;
+    headers: Headers;
+  };
+  error.status = status;
+  error.headers = response.headers;
+  return error;
 }
 
 /** Read a provider error.message when the body is JSON. */

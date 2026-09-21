@@ -76,12 +76,12 @@ test("stream failure emits an error and does not complete successfully", async (
   const events = await collect(
     runAgentLoop({
       session,
-      model: createScriptedModel({ error: "connection reset" }),
+      model: createScriptedModel({ error: "invalid request", status: 400 }),
       contextManager: createContextManager(workspace),
     }),
   );
 
-  expect(events).toContainEqual({ type: "error", message: "connection reset" });
+  expect(events).toContainEqual({ type: "error", message: "invalid request" });
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "error" });
   expect(session.items).toHaveLength(1);
 });
