@@ -3,7 +3,9 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type {
   AssistantContent,
+  CompactionRecord,
   ConversationItem,
+  SessionRecord,
   ToolResult,
   UserContent,
 } from "../conversation/types.ts";
@@ -97,7 +99,7 @@ function sessionFilePath(directory: string, id: string): string {
 function openPersisted(
   path: string,
   header: SessionHeader,
-  items: readonly ConversationItem[],
+  items: readonly SessionRecord[],
   tipId: string,
 ): JsonlSession {
   const session = createSession(items);
@@ -122,7 +124,7 @@ function openPersisted(
 }
 
 /** Append explicit error results for durable tool calls that never got a result. */
-function settlementsFor(items: readonly ConversationItem[]): ToolResult[] {
+function settlementsFor(items: readonly SessionRecord[]): ToolResult[] {
   const resolved = new Set(
     items
       .filter((item): item is ToolResult => item.type === "tool_result")
@@ -152,7 +154,7 @@ function settlementsFor(items: readonly ConversationItem[]): ToolResult[] {
 /** Parse a version 1 session file into header, items, and the latest entry id. */
 function loadV1(text: string): {
   header: SessionHeader;
-  items: ConversationItem[];
+  items: SessionRecord[];
   tipId: string;
   text: string;
 } {
@@ -176,7 +178,7 @@ function loadV1(text: string): {
     );
   }
   const kept = [firstLine];
-  const items: ConversationItem[] = [];
+  const items: SessionRecord[] = [];
   let tipId = first.id;
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]!;
@@ -191,7 +193,7 @@ function loadV1(text: string): {
       throw error;
     }
     try {
-      const item = toConversationItem(record);
+      const item = toSessionRecord(record);
       items.push(item);
       tipId = item.id;
       kept.push(line);
@@ -234,7 +236,7 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-function toConversationItem(value: unknown): ConversationItem {
+function toSessionRecord(value: unknown): SessionRecord {
   if (!isPlainObject(value) || typeof value.id !== "string" || value.id.length === 0) {
     throw malformedRecord();
   }
@@ -283,6 +285,31 @@ function toConversationItem(value: unknown): ConversationItem {
       content: value.content,
       isError: value.isError,
     };
+  }
+  if (value.type === "compaction") {
+    if (
+      typeof value.summary !== "string" ||
+      typeof value.firstKeptId !== "string" ||
+      value.firstKeptId.length === 0
+    ) {
+      throw malformedRecord();
+    }
+    const record: CompactionRecord = {
+      type: "compaction",
+      id: value.id,
+      summary: value.summary,
+      firstKeptId: value.firstKeptId,
+    };
+    if (typeof value.tokensBefore === "number") {
+      record.tokensBefore = value.tokensBefore;
+    }
+    if (
+      typeof value.parentCompactionId === "string" &&
+      value.parentCompactionId.length > 0
+    ) {
+      record.parentCompactionId = value.parentCompactionId;
+    }
+    return record;
   }
   throw malformedRecord();
 }

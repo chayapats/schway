@@ -1,13 +1,18 @@
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
-import type { ContextManager } from "../context/manager.ts";
+import type { ContextManager, PreparedContext } from "../context/manager.ts";
 import type { Model, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import { toPlainJsonSchema } from "../tools/schema.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
-import { streamModelTurn, systemClock, type AgentClock } from "./retry.ts";
+import {
+  streamModelTurn,
+  systemClock,
+  type AgentClock,
+  type ModelTurnOutcome,
+} from "./retry.ts";
 import { scheduleToolCalls } from "./scheduler.ts";
 
 /** Safety bound on model rounds per `runAgentLoop` invocation. */
@@ -39,6 +44,99 @@ export async function* runAgentLoop(
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   const clock = options.clock ?? systemClock();
 
+  /** Force one compaction and retry the overflowed turn once; null when terminated. */
+  async function* recoverFromOverflow(): AsyncGenerator<
+    RuntimeEvent,
+    {
+      outcome: Exclude<ModelTurnOutcome, { kind: "overflow" }>;
+      prepared: PreparedContext;
+    } | null
+  > {
+    if (options.signal?.aborted) {
+      yield { type: "agent.finished", reason: "cancelled" };
+      return null;
+    }
+    yield { type: "compaction.started", reason: "overflow" };
+    const record = await options.contextManager.compact(options.session, options.model, {
+      reason: "overflow",
+      signal: options.signal,
+    });
+    if (options.signal?.aborted) {
+      if (record) {
+        yield {
+          type: "compaction.finished",
+          reason: "overflow",
+          status: "completed",
+          recordId: record.id,
+          firstKeptId: record.firstKeptId,
+        };
+      } else {
+        yield { type: "compaction.finished", reason: "overflow", status: "noop" };
+      }
+      yield { type: "agent.finished", reason: "cancelled" };
+      return null;
+    }
+    if (!record) {
+      yield {
+        type: "compaction.finished",
+        reason: "overflow",
+        status: "failed",
+        message: "compaction did not produce a record",
+      };
+      yield {
+        type: "error",
+        message:
+          "Context overflow: compaction did not free context. The session is unchanged; compact manually or shorten the history and retry.",
+      };
+      yield { type: "agent.finished", reason: "error" };
+      return null;
+    }
+    yield {
+      type: "compaction.finished",
+      reason: "overflow",
+      status: "completed",
+      recordId: record.id,
+      firstKeptId: record.firstKeptId,
+    };
+    const prepared = await options.contextManager.prepare(
+      options.session,
+      options.model,
+      { signal: options.signal },
+    );
+    if (prepared.compaction) {
+      yield { type: "compaction.started", reason: "pressure" };
+      yield {
+        type: "compaction.finished",
+        reason: "pressure",
+        status: "completed",
+        recordId: prepared.compaction.id,
+        firstKeptId: prepared.compaction.firstKeptId,
+      };
+    }
+    const outcome = yield* streamModelTurn({
+      model: options.model,
+      request: {
+        systemPrompt: prepared.systemPrompt,
+        context: prepared.context,
+        items: prepared.items,
+        tools: toModelTools(options.tools),
+        signal: options.signal,
+      },
+      clock,
+      signal: options.signal,
+    });
+    if (outcome.kind === "overflow") {
+      yield {
+        type: "error",
+        message:
+          "Repeated context overflow after compaction. The compaction record was kept; shorten the history or start a new session and retry.",
+      };
+      yield { type: "agent.finished", reason: "error" };
+      return null;
+    }
+    return { outcome, prepared };
+  }
+
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       if (options.signal?.aborted) {
@@ -46,8 +144,22 @@ export async function* runAgentLoop(
         return;
       }
 
-      const prepared = await options.contextManager.prepare(options.session);
-      const outcome = yield* streamModelTurn({
+      let prepared = await options.contextManager.prepare(
+        options.session,
+        options.model,
+        { signal: options.signal },
+      );
+      if (prepared.compaction) {
+        yield { type: "compaction.started", reason: "pressure" };
+        yield {
+          type: "compaction.finished",
+          reason: "pressure",
+          status: "completed",
+          recordId: prepared.compaction.id,
+          firstKeptId: prepared.compaction.firstKeptId,
+        };
+      }
+      let outcome = yield* streamModelTurn({
         model: options.model,
         request: {
           systemPrompt: prepared.systemPrompt,
@@ -59,6 +171,14 @@ export async function* runAgentLoop(
         clock,
         signal: options.signal,
       });
+      if (outcome.kind === "overflow") {
+        const recovered = yield* recoverFromOverflow();
+        if (!recovered) {
+          return;
+        }
+        outcome = recovered.outcome;
+        prepared = recovered.prepared;
+      }
       if (outcome.kind === "cancelled") {
         yield { type: "agent.finished", reason: "cancelled" };
         return;

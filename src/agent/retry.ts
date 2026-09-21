@@ -21,6 +21,7 @@ export interface AgentClock {
 export type ModelTurnOutcome =
   | { kind: "complete"; message: AssistantMessage }
   | { kind: "cancelled" }
+  | { kind: "overflow"; message: string }
   | { kind: "error"; message: string };
 
 const NETWORK_CODES = new Set([
@@ -126,6 +127,9 @@ export async function* streamModelTurn(options: {
         return { kind: "cancelled" };
       }
       const message = errorMessage(error);
+      if (isContextOverflowError(error)) {
+        return { kind: "overflow", message };
+      }
       const transient = isTransientProviderFailure(error);
       if (transient && attempt < MAX_TRANSIENT_ATTEMPTS) {
         const delayMs = retryDelayMs(error, attempt, clock.now());
@@ -195,6 +199,74 @@ function isTransientProviderFailure(error: unknown): boolean {
     }
   }
   return sawNetwork;
+}
+
+/** Distinct provider context-overflow signal; never treated as a transient retry. */
+const OVERFLOW_CODES = new Set([
+  "context_length_exceeded",
+  "context-length-exceeded",
+  "context_too_long",
+  "input_too_long",
+  "prompt_too_long",
+  "too_many_tokens",
+]);
+
+const OVERFLOW_MESSAGE =
+  /context\s*(length|window|size)?\s*(exceeded|too\s*(long|large|big))|maximum\s*context|(input|prompt|request|message)\s*(is\s+)?too\s*(long|large|big)|too\s*many\s*tokens|tokens\s*>\s*\d+\s*maximum|context_length_exceeded/i;
+
+/** True for actual provider context overflow, separate from transport retries. */
+export function isContextOverflowError(error: unknown): boolean {
+  if (isAbortError(error)) {
+    return false;
+  }
+  for (const item of errorChain(error)) {
+    if (isAbortError(item)) {
+      return false;
+    }
+    // Rate limits stay transient even if their message mentions tokens.
+    if (httpStatus(item) === 429) {
+      continue;
+    }
+    const code = overflowField(item, ["code", "type"]);
+    if (code && OVERFLOW_CODES.has(code.toLowerCase())) {
+      return true;
+    }
+    const message =
+      item instanceof Error ? item.message : String(item ?? "");
+    if (OVERFLOW_MESSAGE.test(message)) {
+      const status = httpStatus(item);
+      // Explicit overflow codes/messages win even without status; otherwise
+      // require a client error status so 5xx overloads stay transient.
+      if (status === undefined || (status >= 400 && status < 500)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Read a lowercase string field such as `code` or `type` from an error. */
+function overflowField(item: unknown, names: string[]): string | undefined {
+  if (typeof item !== "object" || item === null) {
+    return undefined;
+  }
+  const record = item as Record<string, unknown>;
+  for (const name of names) {
+    const value = record[name];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  const cause = (record as { cause?: unknown }).cause;
+  if (typeof cause === "object" && cause !== null) {
+    for (const name of names) {
+      const value = (cause as Record<string, unknown>)[name];
+      if (typeof value === "string" && value.length > 0) {
+        return value;
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Backoff for the failed attempt: Retry-After when present, otherwise exponential. */
