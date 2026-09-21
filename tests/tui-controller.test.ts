@@ -304,6 +304,70 @@ test("new sessions start from an empty transcript", async () => {
   }
 });
 
+test("snapshots redact runtime secrets from displayed transcript", async () => {
+  await withTempDir(async (dir) => {
+    const workspace = workspaceFor(dir);
+    const secret = "sk-live-12345";
+    const controller = new TuiController({
+      session: createSession(),
+      model: createScriptedModel({ text: `key is ${secret}` }),
+      contextManager: createContextManager(workspace),
+      tools: createToolRegistry([readTool]),
+      workspace,
+      provider: "scripted",
+      modelId: "scripted",
+      sessionId: "sess-secrets",
+      secrets: [secret],
+    });
+    await controller.submit("hi");
+    const snapshot = controller.snapshot();
+    expect(JSON.stringify(snapshot).includes(secret)).toBe(false);
+    expect(snapshot.transcript.some((entry) => entry.text.includes("***"))).toBe(true);
+  });
+});
+
+test("replaceSession rebinds workspace and context for later turns", async () => {
+  await withTempDir(async (dir) => {
+    const first = join(dir, "first");
+    const second = join(dir, "second");
+    await mkdir(first);
+    await mkdir(second);
+    await writeFile(join(second, "note.txt"), "from-second\n");
+    const wsA = workspaceFor(first);
+    const controller = new TuiController({
+      session: createSession(),
+      model: createScriptedModel({ text: "unused" }),
+      contextManager: createContextManager(wsA),
+      tools: createToolRegistry([readTool]),
+      workspace: wsA,
+      provider: "scripted",
+      modelId: "scripted",
+      sessionId: "old",
+    });
+    const wsB = workspaceFor(second);
+    controller.replaceSession(createSession(), "new", {
+      workspace: wsB,
+      contextManager: createContextManager(wsB),
+    });
+    controller.setModel(
+      createScriptedModel({
+        responses: [
+          {
+            toolCalls: [{ id: "c1", name: "read", arguments: { path: "note.txt" } }],
+          },
+          { text: "done" },
+        ],
+      }),
+      "scripted",
+      "scripted",
+    );
+    await controller.submit("read it");
+    const tool = controller.snapshot().transcript.find((entry) => entry.toolCallId === "c1");
+    expect(tool?.toolStatus).toBe("success");
+    expect(tool?.text).toContain("from-second");
+  });
+});
+
 test("bounded display truncates long tool output for the terminal", () => {
   const long = "y".repeat(5000);
   const bounded = boundDisplay(long);

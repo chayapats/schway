@@ -13,6 +13,7 @@ import {
   listSessions,
   loadJsonlSession,
   sessionsDirectory,
+  type JsonlSession,
 } from "../session/jsonl.ts";
 import { bashTool } from "../tools/bash.ts";
 import { editTool } from "../tools/edit.ts";
@@ -91,13 +92,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   const directory = sessionsDirectory(home);
   let workspace: Workspace;
+  let startupResumed: JsonlSession | undefined;
   try {
     if (io.args.resume) {
-      const resumed = await loadJsonlSession({ directory, id: io.args.resume });
+      startupResumed = await loadJsonlSession({ directory, id: io.args.resume });
       workspace = {
-        root: resumed.header.workspaceRoot,
-        launchCwd: resumed.header.launchCwd,
-        extraRoots: [...resumed.header.extraRoots],
+        root: startupResumed.header.workspaceRoot,
+        launchCwd: startupResumed.header.launchCwd,
+        extraRoots: [...startupResumed.header.extraRoots],
       };
     } else {
       workspace = await resolveWorkspace(io.cwd);
@@ -152,7 +154,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   let controller: TuiController;
   try {
     if (io.args.resume) {
-      const resumed = await loadJsonlSession({ directory, id: io.args.resume });
+      // Reuse the session handle loaded during startup, including settlements.
+      const resumed = startupResumed!;
       controller = new TuiController({
         session: resumed,
         model,
@@ -184,6 +187,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
         startupError,
+        secrets,
       });
       if (!startupError) {
         controller.notice(
@@ -215,6 +219,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
         startupError,
+        secrets,
       });
       if (!startupError) {
         controller.notice(`New session ${session.header.id}. Type /help for commands.`);
@@ -271,7 +276,13 @@ async function runTuiRenderer(options: {
   const { createCliRenderer, BoxRenderable, TextRenderable, InputRenderable, ScrollBoxRenderable } =
     await import("@opentui/core");
 
-  const renderer = await createCliRenderer();
+  const renderer = await createCliRenderer({
+    // The app owns Ctrl+C (cancel turn when running, quit when idle) and
+    // process signals via io.signal, so the renderer's built-in handlers
+    // must not destroy the terminal out from under the cleanup flow.
+    exitOnCtrlC: false,
+    exitSignals: [],
+  });
   let quit = false;
   let quitting = false;
   const onAbort = () => {
@@ -371,6 +382,8 @@ async function runTuiRenderer(options: {
           settings: options.settings,
           finishQuit,
           stderr: options.stderr,
+        }).catch((error: unknown) => {
+          options.controller.fail(messageOf(error));
         });
         return;
       }
@@ -455,7 +468,13 @@ async function handleSlashCommand(
         directory: ctx.sessionsDir,
         workspace,
       });
-      ctx.controller.replaceSession(session, session.header.id);
+      ctx.controller.replaceSession(session, session.header.id, {
+        workspace,
+        contextManager: createContextManager(workspace, {
+          home: ctx.home,
+          contextWindow: ctx.settings.contextWindow,
+        }),
+      });
       ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
       return;
     }
@@ -478,7 +497,18 @@ async function handleSlashCommand(
       }
       try {
         const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: args });
-        ctx.controller.replaceSession(resumed, resumed.header.id);
+        const workspace: Workspace = {
+          root: resumed.header.workspaceRoot,
+          launchCwd: resumed.header.launchCwd,
+          extraRoots: [...resumed.header.extraRoots],
+        };
+        ctx.controller.replaceSession(resumed, resumed.header.id, {
+          workspace,
+          contextManager: createContextManager(workspace, {
+            home: ctx.home,
+            contextWindow: ctx.settings.contextWindow,
+          }),
+        });
         ctx.controller.notice(
           `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
         );

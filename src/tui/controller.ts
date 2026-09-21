@@ -1,5 +1,6 @@
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
+import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type {
   SessionRecord,
@@ -48,6 +49,8 @@ export interface TuiControllerOptions {
   maxTurns?: number;
   maxConcurrentTools?: number;
   startupError?: string;
+  /** Runtime secrets redacted from every displayed transcript line. */
+  secrets?: readonly string[];
 }
 
 /** Bound on displayed tool-result characters; session data stays complete. */
@@ -61,9 +64,10 @@ export const MAX_TOOL_DISPLAY_CHARS = 2000;
 export class TuiController {
   private session: Session;
   private model?: Model;
-  private readonly contextManager: ContextManager;
+  private contextManager: ContextManager;
   private readonly tools?: ToolRegistry;
-  private readonly workspace?: Workspace;
+  private workspace?: Workspace;
+  private secrets: readonly string[];
   private provider: string;
   private modelId: string;
   private sessionId: string;
@@ -88,6 +92,7 @@ export class TuiController {
     this.sessionId = options.sessionId;
     this.maxTurns = options.maxTurns;
     this.maxConcurrentTools = options.maxConcurrentTools;
+    this.secrets = options.secrets ?? [];
     this.transcript = buildTranscriptFromSession(options.session.items);
     if (options.startupError) {
       this.transcript.push(this.systemEntry(options.startupError));
@@ -95,11 +100,15 @@ export class TuiController {
     }
   }
 
-  /** Current renderable state; transcript is a copy so renderers cannot mutate. */
+  /** Current renderable state; transcript is a scrubbed copy so renderers cannot mutate or leak secrets. */
   snapshot(): TuiSnapshot {
     return {
       status: this.status,
-      transcript: [...this.transcript],
+      transcript: this.transcript.map((entry) =>
+        this.secrets.length === 0
+          ? entry
+          : { ...entry, text: redactSecrets(entry.text, this.secrets) },
+      ),
       sessionId: this.sessionId,
       provider: this.provider,
       modelId: this.modelId,
@@ -118,11 +127,25 @@ export class TuiController {
     this.modelId = modelId;
   }
 
-  /** Point the controller at a new or resumed session without replaying tools. */
-  replaceSession(session: Session, sessionId: string): void {
+  /**
+   * Point the controller at a new or resumed session without replaying tools.
+   * Pass the session's workspace and a matching context manager so later turns
+   * execute tools and assemble context against the active session's workspace.
+   */
+  replaceSession(
+    session: Session,
+    sessionId: string,
+    options: { workspace?: Workspace; contextManager?: ContextManager } = {},
+  ): void {
     this.abortActiveTurn();
     this.session = session;
     this.sessionId = sessionId;
+    if (options.workspace !== undefined) {
+      this.workspace = options.workspace;
+    }
+    if (options.contextManager !== undefined) {
+      this.contextManager = options.contextManager;
+    }
     this.transcript = buildTranscriptFromSession(session.items);
     this.status = "idle";
     this.currentAssistantId = undefined;
