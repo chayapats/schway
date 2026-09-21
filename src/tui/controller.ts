@@ -6,6 +6,7 @@ import type {
   SessionRecord,
   ToolResult,
 } from "../conversation/types.ts";
+import { lookupModel } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
@@ -48,6 +49,14 @@ export interface TuiControllerOptions {
   sessionId: string;
   maxTurns?: number;
   maxConcurrentTools?: number;
+  /** Explicit budget overrides that persist across model switches. */
+  explicitContextWindow?: number;
+  /** Explicit output limit that persists across model switches. */
+  explicitMaxOutput?: number;
+  /** Connection settings shown by /config for compatible endpoints. */
+  baseUrl?: string;
+  /** Auth mode shown by /config for compatible endpoints. */
+  auth?: string;
   startupError?: string;
   /** Runtime secrets redacted from every displayed transcript line. */
   secrets?: readonly string[];
@@ -73,6 +82,10 @@ export class TuiController {
   private sessionId: string;
   private readonly maxTurns?: number;
   private readonly maxConcurrentTools?: number;
+  private readonly explicitContextWindow?: number;
+  private readonly explicitMaxOutput?: number;
+  private readonly baseUrl?: string;
+  private readonly auth?: string;
   private transcript: TuiTranscriptEntry[] = [];
   private status: TuiStatus = "idle";
   private activeAbort?: AbortController;
@@ -92,6 +105,10 @@ export class TuiController {
     this.sessionId = options.sessionId;
     this.maxTurns = options.maxTurns;
     this.maxConcurrentTools = options.maxConcurrentTools;
+    this.explicitContextWindow = options.explicitContextWindow;
+    this.explicitMaxOutput = options.explicitMaxOutput;
+    this.baseUrl = options.baseUrl;
+    this.auth = options.auth;
     this.secrets = options.secrets ?? [];
     this.transcript = buildTranscriptFromSession(options.session.items);
     if (options.startupError) {
@@ -125,6 +142,102 @@ export class TuiController {
     this.model = model;
     this.provider = provider;
     this.modelId = modelId;
+  }
+
+  /** Effective context and output budgets for the current model with overrides. */
+  effectiveBudgets(): { contextWindow: number; maxOutput: number } {
+    const info = lookupModel(this.provider, this.modelId, {
+      ...(this.explicitContextWindow !== undefined
+        ? { contextWindow: this.explicitContextWindow }
+        : {}),
+      ...(this.explicitMaxOutput !== undefined
+        ? { maxOutput: this.explicitMaxOutput }
+        : {}),
+    });
+    return { contextWindow: info.contextWindow, maxOutput: info.maxOutput };
+  }
+
+  /** Render effective basic settings with secrets redacted for `/config`. */
+  describeConfig(): string {
+    const budgets = this.effectiveBudgets();
+    const lines = [
+      `Provider: ${this.provider}`,
+      `Model: ${this.modelId}`,
+      `Context window: ${budgets.contextWindow}`,
+      `Max output: ${budgets.maxOutput}`,
+    ];
+    if (this.maxTurns !== undefined) {
+      lines.push(`Max turns: ${this.maxTurns}`);
+    }
+    if (this.maxConcurrentTools !== undefined) {
+      lines.push(`Max concurrent tools: ${this.maxConcurrentTools}`);
+    }
+    if (this.provider === "openai-compatible") {
+      if (this.baseUrl !== undefined) {
+        lines.push(`Base URL: ${sanitizeBaseUrl(this.baseUrl)}`);
+      }
+      if (this.auth !== undefined) {
+        lines.push(`Auth: ${this.auth}`);
+      }
+    }
+    lines.push(`Session: ${this.sessionId}`);
+    lines.push("Model overrides apply to this session only and are never written to config files.");
+    return redactSecrets(lines.join("\n"), this.secrets);
+  }
+
+  /** Run one manual compaction and keep the conversation usable on failure. */
+  async compact(): Promise<boolean> {
+    if (this.activeAbort) {
+      this.notice("Already running. Press Esc to cancel first.");
+      return false;
+    }
+    if (!this.model) {
+      this.fail(
+        "Missing credentials. Set ANTHROPIC_API_KEY or OPENAI_API_KEY and restart schway. Subscription login is not supported in v0.1.",
+      );
+      return false;
+    }
+    this.transcript.push(this.systemEntry("Compacting…"));
+    this.status = "running";
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    const task = this.contextManager.compact(this.session, this.model, {
+      reason: "manual",
+      signal: abort.signal,
+    });
+    const tracked = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.activeTurn = tracked;
+    let record: Awaited<typeof task>;
+    try {
+      record = await task;
+    } finally {
+      if (this.activeAbort === abort) {
+        this.activeAbort = undefined;
+      }
+      if (this.activeTurn === tracked) {
+        this.activeTurn = undefined;
+      }
+    }
+    if (abort.signal.aborted) {
+      this.transcript.push(this.systemEntry("Cancelled."));
+      this.status = "idle";
+      return false;
+    }
+    if (record) {
+      this.transcript.push(this.systemEntry("Context compacted."));
+      this.status = "idle";
+      return true;
+    }
+    this.transcript.push(
+      this.systemEntry(
+        "Compaction did not produce a record. The conversation is unchanged; try again after more turns.",
+      ),
+    );
+    this.status = "idle";
+    return false;
   }
 
   /**
@@ -308,16 +421,21 @@ export class TuiController {
       }
       case "tool.finished": {
         const entry = this.toolEntryByCallId.get(event.toolCallId);
-        const bounded = boundDisplay(event.content);
+        const display = formatToolFinishedText(
+          event.name,
+          event.content,
+          event.details,
+          event.status,
+        );
         if (entry) {
-          entry.text = bounded;
+          entry.text = display;
           entry.toolStatus =
             event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error";
         } else {
           this.transcript.push({
             id: this.nextId("tool"),
             kind: "tool",
-            text: bounded,
+            text: display,
             toolName: event.name,
             toolCallId: event.toolCallId,
             toolStatus: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error",
@@ -472,6 +590,110 @@ export function boundDisplay(text: string, limit: number = MAX_TOOL_DISPLAY_CHAR
     return text;
   }
   return `${text.slice(0, limit)}\n… truncated. Full output is in the session file.`;
+}
+
+/** Strip credentials from a base URL for display; unparseable values show presence only. */
+export function sanitizeBaseUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return "configured";
+  }
+}
+
+/** One structured replacement from a successful edit, kept out of model content. */
+export interface EditHunkDisplay {
+  startLine: number;
+  oldText: string;
+  newText: string;
+}
+
+/** Structured edit extras attached to tool.finished runtime events. */
+export interface EditDetailsDisplay {
+  path: string;
+  hunks?: EditHunkDisplay[];
+}
+
+/** Render tool completion from structured details while model content stays bounded. */
+export function formatToolFinishedText(
+  name: string,
+  content: string,
+  details: unknown,
+  status: "success" | "error" | "cancelled",
+): string {
+  if (status === "cancelled") {
+    return boundDisplay(content);
+  }
+  if (name === "edit") {
+    const edit = asEditDetails(details);
+    if (edit && status === "success" && edit.hunks && edit.hunks.length > 0) {
+      return boundDisplay(formatEditDiff(edit.path, edit.hunks, content));
+    }
+    if (edit && status === "error") {
+      return boundDisplay(`Edit failed for ${edit.path}: ${content}`);
+    }
+    if (status === "error") {
+      return boundDisplay(`Edit failed: ${content}`);
+    }
+  }
+  return boundDisplay(content);
+}
+
+/** Format applied edit hunks as a bounded unified-style diff for the transcript. */
+export function formatEditDiff(path: string, hunks: readonly EditHunkDisplay[], summary: string): string {
+  const lines = [summary];
+  const shown = hunks.slice(0, 8);
+  for (const hunk of shown) {
+    lines.push(`--- ${path}:${hunk.startLine}`);
+    for (const line of hunk.oldText.split("\n").slice(0, 12)) {
+      lines.push(`- ${line}`.slice(0, 300));
+    }
+    for (const line of hunk.newText.split("\n").slice(0, 12)) {
+      lines.push(`+ ${line}`.slice(0, 300));
+    }
+  }
+  if (hunks.length > shown.length) {
+    lines.push(`… ${hunks.length - shown.length} more replacements. Full diff is in the session file.`);
+  }
+  return lines.join("\n");
+}
+
+/** Narrow unknown tool details to the edit shape without coupling to tool internals. */
+function asEditDetails(details: unknown): EditDetailsDisplay | undefined {
+  if (typeof details !== "object" || details === null || Array.isArray(details)) {
+    return undefined;
+  }
+  const record = details as Record<string, unknown>;
+  if (typeof record.path !== "string") {
+    return undefined;
+  }
+  if (record.hunks === undefined) {
+    return { path: record.path };
+  }
+  if (!Array.isArray(record.hunks)) {
+    return undefined;
+  }
+  const hunks: EditHunkDisplay[] = [];
+  for (const hunk of record.hunks) {
+    if (typeof hunk !== "object" || hunk === null || Array.isArray(hunk)) {
+      return undefined;
+    }
+    const entry = hunk as Record<string, unknown>;
+    if (
+      typeof entry.startLine !== "number" ||
+      typeof entry.oldText !== "string" ||
+      typeof entry.newText !== "string"
+    ) {
+      return undefined;
+    }
+    hunks.push({ startLine: entry.startLine, oldText: entry.oldText, newText: entry.newText });
+  }
+  return { path: record.path, hunks };
 }
 
 /** Keep provider errors actionable and never suggest an interactive login flow. */
