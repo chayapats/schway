@@ -3,6 +3,7 @@ import type { RuntimeEvent } from "../agent/events.ts";
 import {
   redactSecrets,
   resolveAnthropicApiKey,
+  resolveOpenAIApiKey,
 } from "../auth/secrets.ts";
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
@@ -21,7 +22,7 @@ import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
-import { parseArgs, USAGE } from "./args.ts";
+import { parseArgs, USAGE, type CliProvider } from "./args.ts";
 
 /** Minimal writer used so tests can capture CLI output. */
 export interface CliWriter {
@@ -35,7 +36,11 @@ export interface CliIo {
   env: Record<string, string | undefined>;
   cwd: string;
   model?: Model;
-  createModel?: (input: { apiKey: string }) => Promise<Model>;
+  createModel?: (input: {
+    apiKey: string;
+    provider: string;
+    model?: string;
+  }) => Promise<Model>;
 }
 
 /**
@@ -68,18 +73,32 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   const secrets = collectSecrets(parsed.args.apiKey, io.env);
   let model = io.model;
   if (!model) {
-    const credential = resolveAnthropicApiKey({
-      runtimeApiKey: parsed.args.apiKey,
-      env: io.env,
-    });
+    const credential =
+      parsed.args.provider === "openai"
+        ? resolveOpenAIApiKey({
+            runtimeApiKey: parsed.args.apiKey,
+            env: io.env,
+          })
+        : resolveAnthropicApiKey({
+            runtimeApiKey: parsed.args.apiKey,
+            env: io.env,
+          });
     if ("error" in credential) {
       io.stderr.write(`${credential.error}\n`);
       return 1;
     }
     secrets.push(credential.apiKey);
     model = io.createModel
-      ? await io.createModel({ apiKey: credential.apiKey })
-      : await loadAnthropicModel(credential.apiKey);
+      ? await io.createModel({
+          apiKey: credential.apiKey,
+          provider: parsed.args.provider,
+          model: parsed.args.model,
+        })
+      : await loadSelectedModel({
+          provider: parsed.args.provider,
+          apiKey: credential.apiKey,
+          model: parsed.args.model,
+        });
   }
 
   const directory = sessionsDirectory(home);
@@ -174,9 +193,13 @@ function collectSecrets(
   if (runtimeApiKey) {
     secrets.push(runtimeApiKey);
   }
-  const envKey = env.ANTHROPIC_API_KEY;
-  if (envKey) {
-    secrets.push(envKey);
+  const anthropicKey = env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    secrets.push(anthropicKey);
+  }
+  const openaiKey = env.OPENAI_API_KEY;
+  if (openaiKey) {
+    secrets.push(openaiKey);
   }
   return secrets;
 }
@@ -232,10 +255,18 @@ function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
   return value;
 }
 
-/** Lazy-load the Anthropic adapter so unused providers stay off the startup path. */
-async function loadAnthropicModel(apiKey: string): Promise<Model> {
+/** Lazy-load only the selected provider adapter. */
+async function loadSelectedModel(input: {
+  provider: CliProvider;
+  apiKey: string;
+  model?: string;
+}): Promise<Model> {
+  if (input.provider === "openai") {
+    const { createOpenAIModel } = await import("../model/providers/openai.ts");
+    return createOpenAIModel({ apiKey: input.apiKey, model: input.model });
+  }
   const { createAnthropicModel } = await import("../model/providers/anthropic.ts");
-  return createAnthropicModel({ apiKey });
+  return createAnthropicModel({ apiKey: input.apiKey, model: input.model });
 }
 
 /** Process entrypoint for the `schway` binary. */
