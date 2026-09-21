@@ -19,10 +19,18 @@ export interface ToolExecutionResult {
   isError?: boolean;
 }
 
+/** A stdout or stderr chunk emitted while a tool is running. */
+export interface ToolOutputChunk {
+  stream: "stdout" | "stderr";
+  text: string;
+}
+
 /** Per-invocation context passed into every tool. */
 export interface ToolContext {
   workspace: Workspace;
   signal?: AbortSignal;
+  /** Live output for runtime events. Tools may call this as chunks arrive. */
+  onOutput?: (chunk: ToolOutputChunk) => void;
 }
 
 /** Public tool contract: schema for the model, execute for the harness. */
