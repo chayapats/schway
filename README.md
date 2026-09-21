@@ -38,11 +38,48 @@ schway -p "explain this repository" --provider openai-compatible \
 
 `--json` streams normalized runtime events as JSONL on stdout. Diagnostics stay on stderr.
 
-`--provider` selects `anthropic` (default), `openai`, or `openai-compatible`. `--model` is passed through even if it is not in a catalog.
+`--provider` selects `anthropic` (default), `openai`, or `openai-compatible`. `--model` is passed through even if it is not in a catalog. Unknown IDs use conservative defaults of a 32768-token context window and 16384 maximum output tokens; known catalog models supply richer context-window metadata. Override either limit with `--context-window`, `--max-output`, or the same keys in config.
 
 OpenAI-compatible endpoints use Schway's own Chat Completions fetch/SSE adapter. `--base-url` is required. `--header Name:Value` may be repeated, `--body` is a JSON object of extra request fields, and `--auth` is `required`, `optional` (default), or `none`. Compatible mode does not read `OPENAI_API_KEY`. Named provider profiles are not supported in v0.1.
 
-Runtime credentials (`--api-key`) take precedence over `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. Missing credentials fail with a non-zero exit and do not open an interactive login. Codex/ChatGPT subscription authentication is not supported in v0.1.
+Runtime credentials (`--api-key`) take precedence over environment variables, including keys loaded with `--env-file`. Project `.env` files are not loaded automatically. Missing credentials fail with a non-zero exit and do not open an interactive login. Codex/ChatGPT subscription authentication and OS keychain storage are not supported in v0.1. API keys must not be stored in `config.json`.
+
+`--max-turns` bounds agent rounds (default 32). `--max-concurrent-tools` caps overlapping parallel-safe tools (default 10).
+
+## Configuration
+
+Schway is zero-config-first. Valid credentials are enough to run `schway -p "..."`. Config files are never created automatically.
+
+Precedence, later wins:
+
+1. built-in defaults
+2. `~/.schway/config.json`
+3. `<workspace-root>/.schway/config.json`
+4. CLI flags
+
+Project config is read from the workspace root (nearest Git root, otherwise the launch directory), not from a nested launch cwd.
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5.4",
+  "maxTurns": 16,
+  "maxConcurrentTools": 4,
+  "contextWindow": 128000,
+  "maxOutput": 4096,
+  "baseUrl": "http://127.0.0.1:11434/v1",
+  "headers": { "X-Test": "ok" },
+  "extraBody": { "temperature": 0.2 },
+  "auth": "optional"
+}
+```
+
+Unknown or misspelled settings fail with an actionable error. `baseUrl`, `headers`, `extraBody`, and `auth` apply only when the selected provider is `openai-compatible`.
+
+```bash
+schway -p "explain this repository" --env-file ~/.config/my-ai.env
+schway -p "explain this repository" --max-turns 8 --max-output 2048
+```
 
 ## Project instructions
 

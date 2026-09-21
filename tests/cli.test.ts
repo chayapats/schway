@@ -32,6 +32,7 @@ async function run(
       apiKey?: string;
       provider: string;
       model?: string;
+      maxTokens?: number;
       baseUrl?: string;
       headers?: Record<string, string>;
       extraBody?: Record<string, unknown>;
@@ -205,6 +206,7 @@ test("OpenAI-compatible connection options are selectable from the headless CLI"
     apiKey?: string;
     provider?: string;
     model?: string;
+    maxTokens?: number;
     baseUrl?: string;
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
@@ -246,6 +248,7 @@ test("OpenAI-compatible connection options are selectable from the headless CLI"
     apiKey: "sk-compat",
     provider: "openai-compatible",
     model: "llama3.2",
+    maxTokens: 16_384,
     baseUrl: "http://127.0.0.1:11434/v1",
     headers: { "X-Test": "ok" },
     extraBody: { temperature: 0.2 },

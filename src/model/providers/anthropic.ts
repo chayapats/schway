@@ -13,6 +13,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
+import { DEFAULT_MODEL_IDS } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
@@ -21,7 +22,7 @@ import type {
 } from "../model.ts";
 
 /** Default Claude model when the caller does not specify one. */
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_ANTHROPIC_MODEL = DEFAULT_MODEL_IDS.anthropic;
 /** Default max_tokens for Anthropic Messages requests. */
 export const DEFAULT_ANTHROPIC_MAX_TOKENS = 16_384;
 

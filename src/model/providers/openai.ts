@@ -12,6 +12,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
+import { DEFAULT_MODEL_IDS } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
@@ -20,7 +21,7 @@ import type {
 } from "../model.ts";
 
 /** Default OpenAI model when the caller does not specify one. */
-export const DEFAULT_OPENAI_MODEL = "gpt-5.4";
+export const DEFAULT_OPENAI_MODEL = DEFAULT_MODEL_IDS.openai;
 /** Default max_output_tokens for OpenAI Responses requests. */
 export const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 16_384;
 

@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import {
@@ -5,6 +6,8 @@ import {
   resolveAnthropicApiKey,
   resolveOpenAIApiKey,
 } from "../auth/secrets.ts";
+import { loadResolvedSettings, type ResolvedSettings } from "../config/config.ts";
+import { applyEnvFiles } from "../config/env-file.ts";
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import {
@@ -23,8 +26,10 @@ import { createToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
+  cliOverridesFromArgs,
   parseArgs,
   USAGE,
+  type CliArgs,
   type CliAuthMode,
   type CliProvider,
 } from "./args.ts";
@@ -34,6 +39,12 @@ export interface CliWriter {
   write(chunk: string): void;
 }
 
+/** Optional fetch override used by protocol fixture tests. */
+type FetchLike = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
 /** Process I/O and optional injected model for headless runs. */
 export interface CliIo {
   stdout: CliWriter;
@@ -41,10 +52,12 @@ export interface CliIo {
   env: Record<string, string | undefined>;
   cwd: string;
   model?: Model;
+  fetch?: FetchLike;
   createModel?: (input: {
     apiKey?: string;
     provider: string;
     model?: string;
+    maxTokens?: number;
     baseUrl?: string;
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
@@ -79,20 +92,22 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
-  const secrets = collectSecrets(parsed.args.apiKey, io.env);
-  let model = io.model;
-  if (!model) {
-    const loaded = await loadCliModel(parsed.args, io, secrets);
-    if ("error" in loaded) {
-      io.stderr.write(`${loaded.error}\n`);
+  let env = io.env;
+  if (parsed.args.envFiles && parsed.args.envFiles.length > 0) {
+    const loadedEnv = await applyEnvFiles(
+      parsed.args.envFiles.map((path) => resolve(io.cwd, path)),
+      env,
+    );
+    if ("error" in loadedEnv) {
+      io.stderr.write(`${loadedEnv.error}\n`);
       return 1;
     }
-    model = loaded.model;
+    env = loadedEnv;
   }
 
   const directory = sessionsDirectory(home);
   let workspace: Workspace;
-  let session: JsonlSession;
+  let session: JsonlSession | undefined;
   if (parsed.args.resume) {
     try {
       session = await loadJsonlSession({
@@ -110,6 +125,39 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     };
   } else {
     workspace = await resolveWorkspace(io.cwd);
+  }
+
+  const settings = await loadResolvedSettings({
+    home,
+    workspaceRoot: workspace.root,
+    cli: cliOverridesFromArgs(parsed.args),
+  });
+  if ("error" in settings) {
+    io.stderr.write(`${settings.error}\n`);
+    return 1;
+  }
+  if (
+    hasCliConnectionOptions(parsed.args) &&
+    settings.provider !== "openai-compatible"
+  ) {
+    io.stderr.write(
+      `OpenAI-compatible connection options require --provider openai-compatible\n${USAGE}\n`,
+    );
+    return 1;
+  }
+
+  const secrets = collectSecrets(parsed.args.apiKey, env);
+  let model = io.model;
+  if (!model) {
+    const loaded = await loadCliModel(settings, parsed.args.apiKey, { ...io, env }, secrets);
+    if ("error" in loaded) {
+      io.stderr.write(`${loaded.error}\n`);
+      return 1;
+    }
+    model = loaded.model;
+  }
+
+  if (!session) {
     session = await createJsonlSession({ directory, workspace });
   }
   session.append({
@@ -134,6 +182,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       lsTool,
     ]),
     workspace,
+    maxTurns: settings.maxTurns,
+    maxConcurrentTools: settings.maxConcurrentTools,
   })) {
     const safeEvent = redactEvent(event, secrets);
     if (parsed.args.json) {
@@ -244,24 +294,26 @@ function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
   return value;
 }
 
-/** Resolve credentials and construct the selected provider model. */
+/** True when the user passed compatible connection flags on the CLI. */
+function hasCliConnectionOptions(args: CliArgs): boolean {
+  return (
+    args.baseUrl !== undefined ||
+    args.headers !== undefined ||
+    args.extraBody !== undefined ||
+    args.auth !== undefined
+  );
+}
+
 /** Resolve credentials and construct the selected provider model. */
 async function loadCliModel(
-  args: {
-    provider: CliProvider;
-    model?: string;
-    apiKey?: string;
-    baseUrl?: string;
-    headers?: Record<string, string>;
-    extraBody?: Record<string, unknown>;
-    auth?: CliAuthMode;
-  },
+  settings: ResolvedSettings,
+  runtimeApiKey: string | undefined,
   io: CliIo,
   secrets: string[],
 ): Promise<{ model: Model } | { error: string }> {
-  if (args.provider === "openai-compatible") {
-    const auth = args.auth ?? "optional";
-    const apiKey = args.apiKey?.trim() || undefined;
+  if (settings.provider === "openai-compatible") {
+    const auth = settings.auth ?? "optional";
+    const apiKey = runtimeApiKey?.trim() || undefined;
     if (auth === "required" && apiKey === undefined) {
       return {
         error:
@@ -273,28 +325,29 @@ async function loadCliModel(
     }
     const input = {
       apiKey,
-      provider: args.provider,
-      model: args.model,
-      baseUrl: args.baseUrl,
-      headers: args.headers,
-      extraBody: args.extraBody,
+      provider: settings.provider,
+      model: settings.model,
+      maxTokens: settings.maxOutput,
+      baseUrl: settings.baseUrl,
+      headers: settings.headers,
+      extraBody: settings.extraBody,
       auth,
     };
     return {
       model: io.createModel
         ? await io.createModel(input)
-        : await loadSelectedModel(input),
+        : await loadSelectedModel(input, io.fetch),
     };
   }
 
   const credential =
-    args.provider === "openai"
+    settings.provider === "openai"
       ? resolveOpenAIApiKey({
-          runtimeApiKey: args.apiKey,
+          runtimeApiKey,
           env: io.env,
         })
       : resolveAnthropicApiKey({
-          runtimeApiKey: args.apiKey,
+          runtimeApiKey,
           env: io.env,
         });
   if ("error" in credential) {
@@ -303,35 +356,42 @@ async function loadCliModel(
   secrets.push(credential.apiKey);
   const input = {
     apiKey: credential.apiKey,
-    provider: args.provider,
-    model: args.model,
+    provider: settings.provider,
+    model: settings.model,
+    maxTokens: settings.maxOutput,
   };
   return {
     model: io.createModel
       ? await io.createModel(input)
-      : await loadSelectedModel(input),
+      : await loadSelectedModel(input, io.fetch),
   };
 }
 
 /** Lazy-load only the selected provider adapter. */
-async function loadSelectedModel(input: {
-  provider: CliProvider;
-  apiKey?: string;
-  model?: string;
-  baseUrl?: string;
-  headers?: Record<string, string>;
-  extraBody?: Record<string, unknown>;
-  auth?: CliAuthMode;
-}): Promise<Model> {
+async function loadSelectedModel(
+  input: {
+    provider: CliProvider;
+    apiKey?: string;
+    model?: string;
+    maxTokens?: number;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+    extraBody?: Record<string, unknown>;
+    auth?: CliAuthMode;
+  },
+  fetchFn?: FetchLike,
+): Promise<Model> {
   if (input.provider === "openai-compatible") {
     const { createOpenAICompatibleModel } = await import("../model/providers/openai-compatible.ts");
     return createOpenAICompatibleModel({
       baseUrl: input.baseUrl ?? "",
       apiKey: input.apiKey,
       model: input.model,
+      maxTokens: input.maxTokens,
       headers: input.headers,
       extraBody: input.extraBody,
       auth: input.auth,
+      fetch: fetchFn,
     });
   }
   if (input.provider === "openai") {
@@ -339,12 +399,16 @@ async function loadSelectedModel(input: {
     return createOpenAIModel({
       apiKey: input.apiKey ?? "",
       model: input.model,
+      maxTokens: input.maxTokens,
+      fetch: fetchFn,
     });
   }
   const { createAnthropicModel } = await import("../model/providers/anthropic.ts");
   return createAnthropicModel({
     apiKey: input.apiKey ?? "",
     model: input.model,
+    maxTokens: input.maxTokens,
+    fetch: fetchFn,
   });
 }
 

@@ -125,6 +125,19 @@ test("project .env files are not loaded automatically", async () => {
   });
 });
 
+test("a missing --env-file path fails from the schway bin", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, ".env"), "ANTHROPIC_API_KEY=sk-from-dotenv\n");
+    const result = await spawnSchway(
+      ["-p", "hello", "--env-file", join(dir, "missing.env")],
+      { cwd: dir },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("missing.env");
+    expect(result.stderr.includes("sk-from-dotenv")).toBe(false);
+  });
+});
+
 test("the schway bin is executable", async () => {
   const info = await stat(bin);
   expect(info.mode & 0o111).not.toBe(0);
