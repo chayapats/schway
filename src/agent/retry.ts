@@ -8,6 +8,9 @@ const MAX_TRANSIENT_ATTEMPTS = 3;
 /** Backoff before the second attempt when the provider does not send Retry-After. */
 const DEFAULT_BACKOFF_MS = 1000;
 
+/** Upper bound for one backoff, so a provider hint cannot stall the run. */
+const MAX_BACKOFF_MS = 30_000;
+
 /** Injected time source so retry tests can control backoff without waiting. */
 export interface AgentClock {
   now(): number;
@@ -202,7 +205,7 @@ function retryDelayMs(
 ): number {
   const hinted = retryAfterMs(error, now);
   if (hinted !== undefined) {
-    return hinted;
+    return Math.min(hinted, MAX_BACKOFF_MS);
   }
   const exp = Math.max(0, failedAttempt - 1);
   return DEFAULT_BACKOFF_MS * 2 ** exp;

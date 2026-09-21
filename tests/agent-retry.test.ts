@@ -204,6 +204,38 @@ test("Retry-After seconds override exponential backoff", async () => {
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
 });
 
+test("Retry-After longer than 30s is capped so a provider cannot stall the run", async () => {
+  const clock = recordingClock();
+  const session = createSession([user("hello")]);
+  const events = await collect(
+    runAgentLoop({
+      session,
+      model: createScriptedModel({
+        responses: [
+          {
+            error: "rate limited",
+            status: 429,
+            headers: { "retry-after": "3600" },
+          },
+          { text: "ok" },
+        ],
+      }),
+      contextManager: createContextManager(workspace),
+      clock,
+    }),
+  );
+
+  expect(clock.delays).toEqual([30_000]);
+  expect(events).toContainEqual({
+    type: "model.retry",
+    attempt: 1,
+    maxAttempts: 3,
+    delayMs: 30_000,
+    message: "rate limited",
+  });
+  expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
+});
+
 test("Retry-After HTTP-date is converted using the injected clock", async () => {
   const retryAt = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");
   const clock = recordingClock(retryAt - 3500);
