@@ -59,14 +59,70 @@ test("core modules do not import provider SDKs", async () => {
   }
 });
 
-test("headless CLI loads a provider only after selection", async () => {
-  const source = await Bun.file("src/cli/main.ts").text();
-  expect(source.includes('from "@anthropic-ai/sdk"')).toBe(false);
-  expect(source.includes('from "openai"')).toBe(false);
-  expect(source.includes('from "../model/providers/anthropic.ts"')).toBe(false);
-  expect(source.includes('from "../model/providers/openai.ts"')).toBe(false);
-  expect(source.includes('from "../model/providers/openai-compatible.ts"')).toBe(false);
-  expect(source.includes('import("../model/providers/anthropic.ts")')).toBe(true);
-  expect(source.includes('import("../model/providers/openai.ts")')).toBe(true);
-  expect(source.includes('import("../model/providers/openai-compatible.ts")')).toBe(true);
+test("core modules never import the renderer", async () => {
+  const files = [
+    "src/agent/loop.ts",
+    "src/agent/scheduler.ts",
+    "src/agent/events.ts",
+    "src/agent/retry.ts",
+    "src/conversation/types.ts",
+    "src/context/manager.ts",
+    "src/context/prompt.ts",
+    "src/context/agents.ts",
+    "src/context/compaction.ts",
+    "src/context/tokens.ts",
+    "src/session/session.ts",
+    "src/session/jsonl.ts",
+    "src/workspace/workspace.ts",
+    "src/cli/args.ts",
+    "src/config/config.ts",
+    "src/config/defaults.ts",
+    "src/config/env-file.ts",
+    "src/model/catalog.ts",
+    "src/model/model.ts",
+    "src/model/loader.ts",
+    "src/tools/types.ts",
+    "src/tools/schema.ts",
+    "src/tools/registry.ts",
+    "src/tools/executor.ts",
+    "src/tools/read.ts",
+    "src/tools/write.ts",
+    "src/tools/edit.ts",
+    "src/tools/bash.ts",
+    "src/tools/grep.ts",
+    "src/tools/find.ts",
+    "src/tools/ls.ts",
+    "src/tools/fs.ts",
+    "src/tools/path.ts",
+  ];
+  for (const file of files) {
+    const source = await Bun.file(file).text();
+    expect(source.includes("@opentui")).toBe(false);
+    expect(source.includes("../tui/")).toBe(false);
+    expect(source.includes("./tui/")).toBe(false);
+  }
+});
+
+test("TUI controller stays renderer-free; only the app shell imports OpenTUI", async () => {
+  for (const file of ["src/tui/controller.ts", "src/tui/commands.ts"]) {
+    const source = await Bun.file(file).text();
+    expect(source.includes("@opentui")).toBe(false);
+  }
+  const app = await Bun.file("src/tui/app.ts").text();
+  expect(app.includes("@opentui/core")).toBe(true);
+});
+
+test("provider adapters load lazily through the shared loader", async () => {
+  for (const file of ["src/cli/main.ts", "src/tui/app.ts"]) {
+    const source = await Bun.file(file).text();
+    expect(source.includes('from "@anthropic-ai/sdk"')).toBe(false);
+    expect(source.includes('from "openai"')).toBe(false);
+    expect(source.includes('from "../model/providers/anthropic.ts"')).toBe(false);
+    expect(source.includes('from "../model/providers/openai.ts"')).toBe(false);
+    expect(source.includes('from "../model/providers/openai-compatible.ts"')).toBe(false);
+  }
+  const loader = await Bun.file("src/model/loader.ts").text();
+  expect(loader.includes('import("./providers/anthropic.ts")')).toBe(true);
+  expect(loader.includes('import("./providers/openai.ts")')).toBe(true);
+  expect(loader.includes('import("./providers/openai-compatible.ts")')).toBe(true);
 });

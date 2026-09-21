@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
+    "@opentui/core": "^0.5.11",
     "@sinclair/typebox": "^0.34.52",
     "openai": "^7.20.0"
   },

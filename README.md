@@ -16,7 +16,35 @@ bun install
 bun test
 bun run typecheck
 bun run dev -- -p "hello"
+bun run dev
 ```
+
+## Interactive usage
+
+```bash
+schway
+schway --resume <session-id>
+```
+
+Running without `-p` opens the OpenTUI terminal conversation. It uses the same
+agent loop, sessions, and runtime events as headless mode. The TUI is lazy-loaded;
+headless runs never initialize it.
+
+```text
+/new - start a new session
+/sessions - list saved sessions
+/resume <id> - resume a saved session
+/model - show the current provider and model
+/help - show help
+/quit - quit schway
+```
+
+Esc cancels the running turn through the shared AbortSignal path and returns to
+the input editor. Ctrl+C cancels when running and quits when idle. Quitting
+restores the terminal and releases resources. Resume rebuilds history from the
+saved JSONL without replaying old tool effects. Missing credentials and runtime
+failures appear as actionable errors; there is no interactive subscription login
+flow in v0.1.
 
 ## Headless usage
 

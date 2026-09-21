@@ -1,7 +1,7 @@
 import type { ConfigLayer } from "../config/config.ts";
 
 export const USAGE =
-  "Usage: schway -p <prompt> [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>]";
+  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>]";
 
 /** Built-in provider families selectable from the headless CLI. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";

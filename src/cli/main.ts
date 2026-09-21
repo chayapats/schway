@@ -24,6 +24,7 @@ import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
+import { loadProviderModel } from "../model/loader.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
   cliOverridesFromArgs,
@@ -31,7 +32,6 @@ import {
   USAGE,
   type CliArgs,
   type CliAuthMode,
-  type CliProvider,
 } from "./args.ts";
 
 /** Minimal writer used so tests can capture CLI output. */
@@ -67,7 +67,8 @@ export interface CliIo {
 }
 
 /**
- * Run a headless Schway invocation.
+ * Run a Schway invocation.
+ * Without `-p` this opens the interactive terminal; with `-p` it runs headless.
  * Returns a process exit code: 0 on success, 1 on usage, auth, or run failure.
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
@@ -83,8 +84,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   if (!parsed.args.prompt) {
-    io.stderr.write(`Missing prompt. Use schway -p "..." to run headless.\n`);
-    return 1;
+    return runInteractive(parsed.args, io);
   }
 
   const home = io.env.HOME;
@@ -349,7 +349,7 @@ async function loadCliModel(
     return {
       model: io.createModel
         ? await io.createModel(input)
-        : await loadSelectedModel(input, io.fetch),
+        : await loadProviderModel(input, io.fetch),
     };
   }
 
@@ -376,53 +376,34 @@ async function loadCliModel(
   return {
     model: io.createModel
       ? await io.createModel(input)
-      : await loadSelectedModel(input, io.fetch),
+      : await loadProviderModel(input, io.fetch),
   };
 }
 
-/** Lazy-load only the selected provider adapter. */
-async function loadSelectedModel(
-  input: {
-    provider: CliProvider;
-    apiKey?: string;
-    model?: string;
-    maxTokens?: number;
-    baseUrl?: string;
-    headers?: Record<string, string>;
-    extraBody?: Record<string, unknown>;
-    auth?: CliAuthMode;
-  },
-  fetchFn?: FetchLike,
-): Promise<Model> {
-  if (input.provider === "openai-compatible") {
-    const { createOpenAICompatibleModel } = await import("../model/providers/openai-compatible.ts");
-    return createOpenAICompatibleModel({
-      baseUrl: input.baseUrl ?? "",
-      apiKey: input.apiKey,
-      model: input.model,
-      maxTokens: input.maxTokens,
-      headers: input.headers,
-      extraBody: input.extraBody,
-      auth: input.auth,
-      fetch: fetchFn,
-    });
-  }
-  if (input.provider === "openai") {
-    const { createOpenAIModel } = await import("../model/providers/openai.ts");
-    return createOpenAIModel({
-      apiKey: input.apiKey ?? "",
-      model: input.model,
-      maxTokens: input.maxTokens,
-      fetch: fetchFn,
-    });
-  }
-  const { createAnthropicModel } = await import("../model/providers/anthropic.ts");
-  return createAnthropicModel({
-    apiKey: input.apiKey ?? "",
-    model: input.model,
-    maxTokens: input.maxTokens,
-    fetch: fetchFn,
+/** Open the interactive terminal without bundling it into headless startup. */
+async function runInteractive(args: CliArgs, io: CliIo): Promise<number> {
+  const tui = await loadInteractiveTui();
+  return tui.runInteractiveTui({
+    stdout: io.stdout,
+    stderr: io.stderr,
+    env: io.env,
+    cwd: io.cwd,
+    args,
+    signal: io.signal,
+    model: io.model,
+    fetch: io.fetch,
+    createModel: io.createModel,
   });
+}
+
+/**
+ * Lazy-load the TUI module through a runtime specifier.
+ * The joined segments keep the headless bundle free of the renderer
+ * while Bun still resolves the module relative to this file at runtime.
+ */
+async function loadInteractiveTui(): Promise<typeof import("../tui/app.ts")> {
+  const specifier = ["..", "tui", "app.ts"].join("/");
+  return (await import(specifier)) as typeof import("../tui/app.ts");
 }
 
 /** Process entrypoint for the `schway` binary. */
