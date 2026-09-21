@@ -340,6 +340,31 @@ test("cancellation stops new work and settles queued and running calls", async (
   });
 });
 
+test("a configured concurrency cap limits overlapping parallel work", async () => {
+  const controller = createController(["a", "b", "c"]);
+  const running = runTurn({
+    tools: [probeTool("scan", "parallel", controller)],
+    calls: [
+      call("c-a", "scan", "a"),
+      call("c-b", "scan", "b"),
+      call("c-c", "scan", "c"),
+    ],
+    maxConcurrentTools: 2,
+  });
+
+  await Promise.all([
+    controller.started.get("a")!.promise,
+    controller.started.get("b")!.promise,
+  ]);
+  expect(controller.executeCount.get("c") ?? 0).toBe(0);
+  controller.gates.get("a")!.open();
+  controller.gates.get("b")!.open();
+  await controller.started.get("c")!.promise;
+  controller.gates.get("c")!.open();
+  await running;
+  expect(controller.executeCount.get("c")).toBe(1);
+});
+
 test("queued work beyond the concurrency cap is cancelled without running", async () => {
   const keys = Array.from({ length: 11 }, (_, index) => String(index));
   const controller = createController(keys);
@@ -434,6 +459,7 @@ function runTurn(options: {
   tools: ToolDefinition[];
   calls: Array<{ id: string; name: string; arguments: unknown }>;
   signal?: AbortSignal;
+  maxConcurrentTools?: number;
 }): Promise<{ session: ReturnType<typeof createSession>; events: RuntimeEvent[] }> {
   const session = createSession([user("go")]);
   return collect(
@@ -449,6 +475,7 @@ function runTurn(options: {
       tools: createToolRegistry(options.tools),
       workspace,
       signal: options.signal,
+      maxConcurrentTools: options.maxConcurrentTools,
     }),
   ).then((events) => ({ session, events }));
 }

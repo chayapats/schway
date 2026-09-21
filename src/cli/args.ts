@@ -1,5 +1,7 @@
+import type { ConfigLayer } from "../config/config.ts";
+
 export const USAGE =
-  "Usage: schway -p <prompt> [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>]";
+  "Usage: schway -p <prompt> [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>]";
 
 /** Built-in provider families selectable from the headless CLI. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
@@ -11,7 +13,7 @@ export type CliAuthMode = "required" | "optional" | "none";
 export interface CliArgs {
   prompt?: string;
   json: boolean;
-  provider: CliProvider;
+  provider?: CliProvider;
   model?: string;
   apiKey?: string;
   resume?: string;
@@ -20,13 +22,18 @@ export interface CliArgs {
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   auth?: CliAuthMode;
+  maxTurns?: number;
+  maxConcurrentTools?: number;
+  contextWindow?: number;
+  maxOutput?: number;
+  envFiles?: string[];
 }
 
 /** Parse argv. Unknown options and missing flag values return an error. */
 export function parseArgs(
   argv: readonly string[],
 ): { args: CliArgs } | { error: string } {
-  const args: CliArgs = { json: false, help: false, provider: "anthropic" };
+  const args: CliArgs = { json: false, help: false };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -187,6 +194,32 @@ export function parseArgs(
       args.auth = auth;
       continue;
     }
+    const intFlag = parseIntegerFlag(arg, argv, i);
+    if (intFlag !== undefined) {
+      if ("error" in intFlag) {
+        return intFlag;
+      }
+      i = intFlag.index;
+      assignIntegerFlag(args, intFlag.name, intFlag.value);
+      continue;
+    }
+    if (arg === "--env-file") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { error: "Missing value for --env-file" };
+      }
+      i++;
+      args.envFiles = [...(args.envFiles ?? []), value];
+      continue;
+    }
+    if (arg.startsWith("--env-file=")) {
+      const value = arg.slice("--env-file=".length);
+      if (value.length === 0) {
+        return { error: "Missing value for --env-file" };
+      }
+      args.envFiles = [...(args.envFiles ?? []), value];
+      continue;
+    }
     if (arg.startsWith("-")) {
       return { error: `Unknown option: ${arg}` };
     }
@@ -254,24 +287,21 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
 }
 
 /**
- * Compatible endpoints need a base URL; connection flags are invalid on
- * other providers.
+ * Connection flags with an explicit non-compatible provider are invalid.
+ * Missing baseUrl is checked after config merge so project config can supply it.
  */
 function validateConnectionOptions(
   args: CliArgs,
 ): { args: CliArgs } | { error: string } {
-  if (args.provider === "openai-compatible") {
-    const baseUrl = args.baseUrl?.trim() ?? "";
-    if (baseUrl.length === 0) {
-      return { error: "Missing --base-url for OpenAI-compatible provider" };
-    }
-    return { args: { ...args, baseUrl, auth: args.auth ?? "optional" } };
-  }
-  if (
+  const hasConnection =
     args.baseUrl !== undefined ||
     args.headers !== undefined ||
     args.extraBody !== undefined ||
-    args.auth !== undefined
+    args.auth !== undefined;
+  if (
+    hasConnection &&
+    args.provider !== undefined &&
+    args.provider !== "openai-compatible"
   ) {
     return {
       error:
@@ -279,4 +309,106 @@ function validateConnectionOptions(
     };
   }
   return { args };
+}
+
+/** Map explicitly provided CLI flags onto a config overlay. Omitted flags stay unset. */
+export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
+  const layer: ConfigLayer = {};
+  if (args.provider !== undefined) {
+    layer.provider = args.provider;
+  }
+  if (args.model !== undefined) {
+    layer.model = args.model;
+  }
+  if (args.maxTurns !== undefined) {
+    layer.maxTurns = args.maxTurns;
+  }
+  if (args.maxConcurrentTools !== undefined) {
+    layer.maxConcurrentTools = args.maxConcurrentTools;
+  }
+  if (args.contextWindow !== undefined) {
+    layer.contextWindow = args.contextWindow;
+  }
+  if (args.maxOutput !== undefined) {
+    layer.maxOutput = args.maxOutput;
+  }
+  if (args.baseUrl !== undefined) {
+    layer.baseUrl = args.baseUrl;
+  }
+  if (args.headers !== undefined) {
+    layer.headers = args.headers;
+  }
+  if (args.extraBody !== undefined) {
+    layer.extraBody = args.extraBody;
+  }
+  if (args.auth !== undefined) {
+    layer.auth = args.auth;
+  }
+  return layer;
+}
+
+const INTEGER_FLAGS = {
+  "--max-turns": "maxTurns",
+  "--max-output": "maxOutput",
+  "--context-window": "contextWindow",
+  "--max-concurrent-tools": "maxConcurrentTools",
+} as const;
+
+type IntegerFlagName = (typeof INTEGER_FLAGS)[keyof typeof INTEGER_FLAGS];
+
+/** Parse `--flag <n>` or `--flag=n` as a positive integer, or undefined if not a known flag. */
+function parseIntegerFlag(
+  arg: string,
+  argv: readonly string[],
+  index: number,
+):
+  | { name: IntegerFlagName; value: number; index: number }
+  | { error: string }
+  | undefined {
+  for (const [flag, name] of Object.entries(INTEGER_FLAGS) as Array<
+    [keyof typeof INTEGER_FLAGS, IntegerFlagName]
+  >) {
+    if (arg === flag) {
+      const raw = argv[index + 1];
+      if (raw === undefined || raw.startsWith("-")) {
+        return { error: `Missing value for ${flag}` };
+      }
+      const value = parsePositiveInt(flag, raw);
+      if (typeof value === "object") {
+        return value;
+      }
+      return { name, value, index: index + 1 };
+    }
+    if (arg.startsWith(`${flag}=`)) {
+      const raw = arg.slice(`${flag}=`.length);
+      const value = parsePositiveInt(flag, raw);
+      if (typeof value === "object") {
+        return value;
+      }
+      return { name, value, index };
+    }
+  }
+  return undefined;
+}
+
+/** Assign a parsed integer CLI flag onto the args object. */
+function assignIntegerFlag(
+  args: CliArgs,
+  name: IntegerFlagName,
+  value: number,
+): void {
+  args[name] = value;
+}
+
+/** Reject zero, negatives, and non-integers for bounded numeric flags. */
+function parsePositiveInt(
+  flag: string,
+  raw: string,
+): number | { error: string } {
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    return {
+      error: `Invalid value for ${flag}: expected a positive integer`,
+    };
+  }
+  return Number(raw);
 }

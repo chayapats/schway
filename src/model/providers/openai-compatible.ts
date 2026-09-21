@@ -3,6 +3,7 @@ import type {
   AssistantContent,
   AssistantMessage,
 } from "../../conversation/types.ts";
+import { DEFAULT_MODEL_IDS } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
@@ -11,7 +12,8 @@ import type {
 } from "../model.ts";
 
 /** Default Chat Completions model when the caller does not specify one. */
-export const DEFAULT_OPENAI_COMPATIBLE_MODEL = "gpt-4o";
+export const DEFAULT_OPENAI_COMPATIBLE_MODEL =
+  DEFAULT_MODEL_IDS["openai-compatible"];
 
 /** How the adapter sends `Authorization` for a compatible endpoint. */
 export type OpenAICompatibleAuth = "required" | "optional" | "none";
@@ -33,6 +35,7 @@ export function createOpenAICompatibleModel(options: {
   auth?: OpenAICompatibleAuth;
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  maxTokens?: number;
   fetch?: FetchLike;
 }): Model {
   const modelId = options.model?.trim() || DEFAULT_OPENAI_COMPATIBLE_MODEL;
@@ -66,6 +69,9 @@ export function createOpenAICompatibleModel(options: {
           ...(options.extraBody ?? {}),
           model: modelId,
           stream: true,
+          ...(options.maxTokens !== undefined
+            ? { max_tokens: options.maxTokens }
+            : {}),
           messages: toChatMessages(request),
           ...(request.tools && request.tools.length > 0
             ? { tools: toChatTools(request.tools) }

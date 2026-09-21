@@ -1,4 +1,5 @@
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
+import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { Model, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
@@ -9,7 +10,7 @@ import type { RuntimeEvent } from "./events.ts";
 import { scheduleToolCalls } from "./scheduler.ts";
 
 /** Safety bound on model rounds per `runAgentLoop` invocation. */
-export const DEFAULT_MAX_TURNS = 32;
+export { DEFAULT_MAX_TURNS };
 
 /** Inputs for one agent run. Tools and workspace are required to execute calls. */
 export interface AgentLoopOptions {
@@ -20,6 +21,7 @@ export interface AgentLoopOptions {
   workspace?: Workspace;
   signal?: AbortSignal;
   maxTurns?: number;
+  maxConcurrentTools?: number;
 }
 
 /**
@@ -104,6 +106,7 @@ export async function* runAgentLoop(
         registry: options.tools,
         workspace: options.workspace,
         signal: options.signal,
+        maxConcurrentTools: options.maxConcurrentTools,
       });
       for (const item of executed) {
         options.session.append(item.result);

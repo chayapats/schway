@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../config/defaults.ts";
 import type { ToolCallContent } from "../conversation/types.ts";
 import {
   executeToolCall,
@@ -9,7 +10,7 @@ import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
 
 /** Default cap on consecutive parallel-safe tool calls. */
-export const DEFAULT_MAX_CONCURRENT_TOOLS = 10;
+export { DEFAULT_MAX_CONCURRENT_TOOLS };
 
 /**
  * Run accepted tool calls with parallel overlap around exclusive barriers.
@@ -21,8 +22,11 @@ export async function* scheduleToolCalls(options: {
   registry?: ToolRegistry;
   workspace?: Workspace;
   signal?: AbortSignal;
+  maxConcurrentTools?: number;
 }): AsyncGenerator<RuntimeEvent, ExecutedToolCall[]> {
   const { calls, registry, workspace, signal } = options;
+  const maxConcurrentTools =
+    options.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS;
   const results: Array<ExecutedToolCall | undefined> = Array.from({
     length: calls.length,
   });
@@ -59,7 +63,7 @@ export async function* scheduleToolCalls(options: {
     if (executionMode(call) === "exclusive" || exclusiveRunning()) {
       return false;
     }
-    return running.size < DEFAULT_MAX_CONCURRENT_TOOLS;
+    return running.size < maxConcurrentTools;
   };
 
   const start = (index: number): void => {
