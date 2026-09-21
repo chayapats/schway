@@ -70,7 +70,24 @@ export async function* scheduleToolCalls(options: {
       toolCallId: call.id,
       name: call.name,
     });
-    void executeToolCall({ registry, call, workspace, signal })
+    void executeToolCall({
+      registry,
+      call,
+      workspace,
+      signal,
+      onOutput(chunk) {
+        if (chunk.text.length === 0) {
+          return;
+        }
+        emit({
+          type: "tool.delta",
+          toolCallId: call.id,
+          name: call.name,
+          stream: chunk.stream,
+          text: chunk.text,
+        });
+      },
+    })
       .then((executed) => {
         results[index] = executed;
         emit({

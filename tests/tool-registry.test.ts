@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
+import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -18,7 +19,7 @@ function stub(schema: unknown): ToolDefinition {
 }
 
 test("registers TypeBox schemas and validates arguments before execution", () => {
-  const registry = createToolRegistry([readTool, writeTool, editTool]);
+  const registry = createToolRegistry([readTool, writeTool, editTool, bashTool]);
   const registered = registry.get("read");
   expect(registered).toBeDefined();
   expect(registered?.validate({ path: "a.ts" }).ok).toBe(true);
@@ -43,6 +44,11 @@ test("registers TypeBox schemas and validates arguments before execution", () =>
       edits: [{ oldText: "", newText: "b" }],
     }).ok,
   ).toBe(false);
+  expect(registry.get("bash")?.validate({ command: "echo ok" }).ok).toBe(true);
+  expect(registry.get("bash")?.validate({ command: "" }).ok).toBe(false);
+  expect(
+    registry.get("bash")?.validate({ command: "sleep 1", timeout: 500 }).ok,
+  ).toBe(true);
 });
 
 test("unsupported schemas fail early with an actionable error", () => {

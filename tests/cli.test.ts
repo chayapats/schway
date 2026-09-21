@@ -343,6 +343,65 @@ test("headless -p can create a file through the agent loop", async () => {
   });
 });
 
+test("headless -p can run a shell command through the agent loop", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "marker.txt"), "cli-bash\n");
+    const result = await run(["-p", "cat marker", "--json"], {
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "b1",
+                name: "bash",
+                arguments: { command: "cat marker.txt" },
+              },
+            ],
+          },
+          (request) => {
+            const tool = request.items.find(
+              (item): item is ToolResult => item.type === "tool_result",
+            );
+            return { text: tool?.content ?? "missing" };
+          },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("tool.delta");
+    expect(result.stdout).toContain("cli-bash");
+  });
+});
+
+test("secrets are redacted from bash tool.delta events", async () => {
+  const secret = "sk-secret-do-not-print";
+  await withTempDir(async (dir) => {
+    const result = await run(["-p", "echo secret", "--json", "--api-key", secret], {
+      env: {},
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "b1",
+                name: "bash",
+                arguments: { command: `echo ${secret}` },
+              },
+            ],
+          },
+          { text: "done" },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.includes(secret)).toBe(false);
+    expect(result.stderr.includes(secret)).toBe(false);
+    expect(result.stdout).toContain("***");
+  });
+});
+
 test("partial streamed text is terminated before an error diagnostic", async () => {
   const result = await run(["-p", "hello"], {
     model: {
