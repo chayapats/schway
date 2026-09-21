@@ -16,6 +16,7 @@ export interface ToolCallContent {
   id: string;
   name: string;
   arguments: unknown;
+  providerMetadata?: ProviderMetadata;
 }
 
 export type UserContent = TextContent;

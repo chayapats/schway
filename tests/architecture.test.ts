@@ -45,13 +45,18 @@ test("core modules do not import provider SDKs", async () => {
   for (const file of files) {
     const source = await Bun.file(file).text();
     expect(source.includes("@anthropic-ai/sdk")).toBe(false);
+    expect(source.includes('from "openai"')).toBe(false);
     expect(source.includes("providers/anthropic")).toBe(false);
+    expect(source.includes("providers/openai")).toBe(false);
   }
 });
 
-test("headless CLI loads the Anthropic provider only after selection", async () => {
+test("headless CLI loads a provider only after selection", async () => {
   const source = await Bun.file("src/cli/main.ts").text();
   expect(source.includes('from "@anthropic-ai/sdk"')).toBe(false);
+  expect(source.includes('from "openai"')).toBe(false);
   expect(source.includes('from "../model/providers/anthropic.ts"')).toBe(false);
+  expect(source.includes('from "../model/providers/openai.ts"')).toBe(false);
   expect(source.includes('import("../model/providers/anthropic.ts")')).toBe(true);
+  expect(source.includes('import("../model/providers/openai.ts")')).toBe(true);
 });

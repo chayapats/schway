@@ -10,7 +10,11 @@ function spawnEnv(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== "ANTHROPIC_API_KEY") {
+    if (
+      value !== undefined &&
+      key !== "ANTHROPIC_API_KEY" &&
+      key !== "OPENAI_API_KEY"
+    ) {
       env[key] = value;
     }
   }
@@ -59,6 +63,18 @@ test("schway -p without credentials fails from a non-Git workspace", async () =>
     const result = await spawnSchway(["-p", "hello"], { cwd: dir });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Missing Anthropic API key");
+    expect(result.stdout).toBe("");
+  });
+});
+
+test("schway -p --provider openai without credentials fails headlessly", async () => {
+  await withTempDir(async (dir) => {
+    const result = await spawnSchway(["-p", "hello", "--provider", "openai"], {
+      cwd: dir,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("Missing OpenAI API key");
+    expect(result.stderr.toLowerCase().includes("login")).toBe(false);
     expect(result.stdout).toBe("");
   });
 });

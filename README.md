@@ -25,11 +25,17 @@ export ANTHROPIC_API_KEY=...
 schway -p "explain this repository"
 schway -p "explain this repository" --json
 schway -p "continue this work" --resume <session-id>
+
+export OPENAI_API_KEY=...
+schway -p "explain this repository" --provider openai
+schway -p "explain this repository" --provider openai --model my-custom-gpt
 ```
 
 `--json` streams normalized runtime events as JSONL on stdout. Diagnostics stay on stderr.
 
-Runtime credentials (`--api-key`) take precedence over `ANTHROPIC_API_KEY`. Missing credentials fail with a non-zero exit and do not open an interactive login.
+`--provider` selects `anthropic` (default) or `openai`. `--model` is passed through even if it is not in a catalog.
+
+Runtime credentials (`--api-key`) take precedence over `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. Missing credentials fail with a non-zero exit and do not open an interactive login. Codex/ChatGPT subscription authentication is not supported in v0.1.
 
 ## Project instructions
 

@@ -28,7 +28,11 @@ async function run(
     env?: Record<string, string | undefined>;
     cwd?: string;
     model?: Model;
-    createModel?: (input: { apiKey: string }) => Promise<Model>;
+    createModel?: (input: {
+      apiKey: string;
+      provider: string;
+      model?: string;
+    }) => Promise<Model>;
   } = {},
 ) {
   const isolatedHome =
@@ -128,6 +132,93 @@ test("runtime --api-key takes precedence over the environment key", async () => 
   expect(result.exitCode).toBe(0);
   expect(usedKey).toBe("sk-runtime");
   expect(result.stdout).toContain("ok");
+});
+
+test("selecting OpenAI without OPENAI_API_KEY fails even when Anthropic is configured", async () => {
+  const result = await run(["-p", "hello", "--provider", "openai"], {
+    env: { ANTHROPIC_API_KEY: "sk-anthropic" },
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("Missing OpenAI API key");
+  expect(result.stderr.toLowerCase().includes("login")).toBe(false);
+  expect(result.stderr.toLowerCase().includes("codex")).toBe(false);
+});
+
+test("selecting OpenAI uses OPENAI_API_KEY and records the provider", async () => {
+  let used: { apiKey?: string; provider?: string; model?: string } = {};
+  const result = await run(["-p", "hello", "--provider", "openai"], {
+    env: { OPENAI_API_KEY: "sk-openai", ANTHROPIC_API_KEY: "sk-anthropic" },
+    createModel: async ({ apiKey, provider, model }) => {
+      used = { apiKey, provider, model };
+      return createScriptedModel({
+        provider: "openai",
+        id: model ?? "scripted",
+        text: "ok",
+      });
+    },
+  });
+  expect(result.exitCode).toBe(0);
+  expect(used.apiKey).toBe("sk-openai");
+  expect(used.provider).toBe("openai");
+  expect(result.stdout).toContain("ok");
+});
+
+test("OpenAI --api-key takes precedence over OPENAI_API_KEY", async () => {
+  let usedKey: string | undefined;
+  const result = await run(
+    ["-p", "hello", "--provider", "openai", "--api-key", "sk-runtime"],
+    {
+      env: { OPENAI_API_KEY: "sk-env" },
+      createModel: async ({ apiKey }) => {
+        usedKey = apiKey;
+        return createScriptedModel({ text: "ok" });
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(usedKey).toBe("sk-runtime");
+});
+
+test("a user-supplied model ID is passed through without catalog membership", async () => {
+  let usedModel: string | undefined;
+  const result = await run(
+    ["-p", "hello", "--provider", "openai", "--model", "my-custom-gpt"],
+    {
+      env: { OPENAI_API_KEY: "sk-openai" },
+      createModel: async ({ model }) => {
+        usedModel = model;
+        return createScriptedModel({ id: model, text: "ok" });
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(usedModel).toBe("my-custom-gpt");
+});
+
+test("unknown --provider exits with an actionable error", async () => {
+  const result = await run(["-p", "hello", "--provider", "codex"], {
+    env: { OPENAI_API_KEY: "sk-openai" },
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("Unknown provider: codex");
+});
+
+test("--provider does not treat the next flag as a provider", async () => {
+  const result = await run(["-p", "hello", "--provider", "--json"], {
+    env: {},
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Missing value for --provider");
+});
+
+test("--model does not treat the next flag as a model", async () => {
+  const result = await run(["-p", "hello", "--model", "--json"], {
+    env: {},
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Missing value for --model");
 });
 
 test("secrets are not printed when a run fails", async () => {
