@@ -54,7 +54,7 @@ export function sessionsDirectory(home: string): string {
   return join(home, ".schway", "sessions");
 }
 
-/** Load a previously saved session by identity. */
+/** Load a session, settle unresolved tool calls, and drop a corrupt trailing record. */
 export async function loadJsonlSession(options: {
   directory: string;
   id: string;
@@ -86,6 +86,7 @@ export async function loadJsonlSession(options: {
   return session;
 }
 
+/** Resolve `<id>.jsonl` under `directory`. Rejects ids that escape the directory. */
 function sessionFilePath(directory: string, id: string): string {
   if (id.length === 0 || id !== basename(id) || id === "." || id === "..") {
     throw new Error(`Invalid session id: ${id}`);

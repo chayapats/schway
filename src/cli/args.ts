@@ -1,6 +1,7 @@
 export const USAGE =
   'Usage: schway -p <prompt> [--json] [--api-key <key>] [--resume <session-id>]';
 
+/** Headless flags. `resume` is a session id, not a file path. */
 export interface CliArgs {
   prompt?: string;
   json: boolean;
@@ -9,6 +10,7 @@ export interface CliArgs {
   help: boolean;
 }
 
+/** Parse argv. Unknown options and missing flag values return an error. */
 export function parseArgs(
   argv: readonly string[],
 ): { args: CliArgs } | { error: string } {
