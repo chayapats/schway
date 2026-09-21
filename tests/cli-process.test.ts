@@ -79,6 +79,42 @@ test("schway -p --provider openai without credentials fails headlessly", async (
   });
 });
 
+test("schway -p --provider openai-compatible without --base-url fails headlessly", async () => {
+  await withTempDir(async (dir) => {
+    const result = await spawnSchway(
+      ["-p", "hello", "--provider", "openai-compatible"],
+      { cwd: dir },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("Missing --base-url");
+    expect(result.stdout).toBe("");
+  });
+});
+
+test("schway -p --provider openai-compatible --auth required without --api-key fails headlessly", async () => {
+  await withTempDir(async (dir) => {
+    const result = await spawnSchway(
+      [
+        "-p",
+        "hello",
+        "--provider",
+        "openai-compatible",
+        "--base-url",
+        "http://127.0.0.1:9/v1",
+        "--auth",
+        "required",
+      ],
+      { cwd: dir },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "Missing API key for OpenAI-compatible endpoint",
+    );
+    expect(result.stderr.toLowerCase().includes("login")).toBe(false);
+    expect(result.stdout).toBe("");
+  });
+});
+
 test("project .env files are not loaded automatically", async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, ".env"), "ANTHROPIC_API_KEY=sk-from-dotenv\n");

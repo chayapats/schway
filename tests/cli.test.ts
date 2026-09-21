@@ -29,9 +29,13 @@ async function run(
     cwd?: string;
     model?: Model;
     createModel?: (input: {
-      apiKey: string;
+      apiKey?: string;
       provider: string;
       model?: string;
+      baseUrl?: string;
+      headers?: Record<string, string>;
+      extraBody?: Record<string, unknown>;
+      auth?: "required" | "optional" | "none";
     }) => Promise<Model>;
   } = {},
 ) {
@@ -194,6 +198,192 @@ test("a user-supplied model ID is passed through without catalog membership", as
   );
   expect(result.exitCode).toBe(0);
   expect(usedModel).toBe("my-custom-gpt");
+});
+
+test("OpenAI-compatible connection options are selectable from the headless CLI", async () => {
+  let used: {
+    apiKey?: string;
+    provider?: string;
+    model?: string;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+    extraBody?: Record<string, unknown>;
+    auth?: string;
+  } = {};
+  const result = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:11434/v1",
+      "--model",
+      "llama3.2",
+      "--header",
+      "X-Test: ok",
+      "--body",
+      '{"temperature":0.2}',
+      "--auth",
+      "optional",
+      "--api-key",
+      "sk-compat",
+    ],
+    {
+      env: { OPENAI_API_KEY: "sk-openai" },
+      createModel: async (input) => {
+        used = input;
+        return createScriptedModel({
+          provider: "openai-compatible",
+          id: input.model,
+          text: "ok",
+        });
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(used).toEqual({
+    apiKey: "sk-compat",
+    provider: "openai-compatible",
+    model: "llama3.2",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    headers: { "X-Test": "ok" },
+    extraBody: { temperature: 0.2 },
+    auth: "optional",
+  });
+  expect(result.stdout).toContain("ok");
+});
+
+test("OpenAI-compatible optional auth works without a key and ignores OPENAI_API_KEY", async () => {
+  let used: { apiKey?: string; auth?: string } = {};
+  const result = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:8080/v1",
+    ],
+    {
+      env: { OPENAI_API_KEY: "sk-openai" },
+      createModel: async ({ apiKey, auth }) => {
+        used = { apiKey, auth };
+        return createScriptedModel({
+          provider: "openai-compatible",
+          text: "ok",
+        });
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(used.apiKey).toBeUndefined();
+  expect(used.auth).toBe("optional");
+});
+
+test("OpenAI-compatible required auth fails headlessly without --api-key", async () => {
+  const result = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:8080/v1",
+      "--auth",
+      "required",
+    ],
+    { env: { OPENAI_API_KEY: "sk-openai" } },
+  );
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("Missing API key for OpenAI-compatible endpoint");
+  expect(result.stderr.includes("sk-openai")).toBe(false);
+  expect(result.stderr.toLowerCase().includes("login")).toBe(false);
+});
+
+test("OpenAI-compatible absent auth is selectable even when --api-key is set", async () => {
+  let used: { apiKey?: string; auth?: string } = {};
+  const result = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:8080/v1",
+      "--auth",
+      "none",
+      "--api-key",
+      "sk-compat",
+    ],
+    {
+      env: {},
+      createModel: async ({ apiKey, auth }) => {
+        used = { apiKey, auth };
+        return createScriptedModel({
+          provider: "openai-compatible",
+          text: "ok",
+        });
+      },
+    },
+  );
+  expect(result.exitCode).toBe(0);
+  expect(used.auth).toBe("none");
+  expect(used.apiKey).toBe("sk-compat");
+});
+
+test("OpenAI-compatible provider requires --base-url", async () => {
+  const result = await run(["-p", "hello", "--provider", "openai-compatible"], {
+    env: {},
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Missing --base-url");
+});
+
+test("OpenAI-compatible connection flags are rejected for other providers", async () => {
+  const result = await run(
+    ["-p", "hello", "--base-url", "http://127.0.0.1:8080/v1"],
+    { env: { ANTHROPIC_API_KEY: "sk-test" } },
+  );
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain(
+    "OpenAI-compatible connection options require --provider openai-compatible",
+  );
+});
+
+test("invalid --body and --auth values fail with actionable errors", async () => {
+  const body = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:8080/v1",
+      "--body",
+      "[1]",
+    ],
+    { env: {} },
+  );
+  expect(body.exitCode).toBe(1);
+  expect(body.stderr).toContain("Invalid --body");
+
+  const auth = await run(
+    [
+      "-p",
+      "hello",
+      "--provider",
+      "openai-compatible",
+      "--base-url",
+      "http://127.0.0.1:8080/v1",
+      "--auth",
+      "bearer",
+    ],
+    { env: {} },
+  );
+  expect(auth.exitCode).toBe(1);
+  expect(auth.stderr).toContain("Unknown auth mode: bearer");
 });
 
 test("unknown --provider exits with an actionable error", async () => {

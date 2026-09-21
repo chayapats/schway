@@ -22,7 +22,12 @@ import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
-import { parseArgs, USAGE, type CliProvider } from "./args.ts";
+import {
+  parseArgs,
+  USAGE,
+  type CliAuthMode,
+  type CliProvider,
+} from "./args.ts";
 
 /** Minimal writer used so tests can capture CLI output. */
 export interface CliWriter {
@@ -37,9 +42,13 @@ export interface CliIo {
   cwd: string;
   model?: Model;
   createModel?: (input: {
-    apiKey: string;
+    apiKey?: string;
     provider: string;
     model?: string;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+    extraBody?: Record<string, unknown>;
+    auth?: CliAuthMode;
   }) => Promise<Model>;
 }
 
@@ -73,32 +82,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   const secrets = collectSecrets(parsed.args.apiKey, io.env);
   let model = io.model;
   if (!model) {
-    const credential =
-      parsed.args.provider === "openai"
-        ? resolveOpenAIApiKey({
-            runtimeApiKey: parsed.args.apiKey,
-            env: io.env,
-          })
-        : resolveAnthropicApiKey({
-            runtimeApiKey: parsed.args.apiKey,
-            env: io.env,
-          });
-    if ("error" in credential) {
-      io.stderr.write(`${credential.error}\n`);
+    const loaded = await loadCliModel(parsed.args, io, secrets);
+    if ("error" in loaded) {
+      io.stderr.write(`${loaded.error}\n`);
       return 1;
     }
-    secrets.push(credential.apiKey);
-    model = io.createModel
-      ? await io.createModel({
-          apiKey: credential.apiKey,
-          provider: parsed.args.provider,
-          model: parsed.args.model,
-        })
-      : await loadSelectedModel({
-          provider: parsed.args.provider,
-          apiKey: credential.apiKey,
-          model: parsed.args.model,
-        });
+    model = loaded.model;
   }
 
   const directory = sessionsDirectory(home);
@@ -255,18 +244,108 @@ function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
   return value;
 }
 
+/** Resolve credentials and construct the selected provider model. */
+/** Resolve credentials and construct the selected provider model. */
+async function loadCliModel(
+  args: {
+    provider: CliProvider;
+    model?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    headers?: Record<string, string>;
+    extraBody?: Record<string, unknown>;
+    auth?: CliAuthMode;
+  },
+  io: CliIo,
+  secrets: string[],
+): Promise<{ model: Model } | { error: string }> {
+  if (args.provider === "openai-compatible") {
+    const auth = args.auth ?? "optional";
+    const apiKey = args.apiKey?.trim() || undefined;
+    if (auth === "required" && apiKey === undefined) {
+      return {
+        error:
+          "Missing API key for OpenAI-compatible endpoint. Pass --api-key.",
+      };
+    }
+    if (apiKey) {
+      secrets.push(apiKey);
+    }
+    const input = {
+      apiKey,
+      provider: args.provider,
+      model: args.model,
+      baseUrl: args.baseUrl,
+      headers: args.headers,
+      extraBody: args.extraBody,
+      auth,
+    };
+    return {
+      model: io.createModel
+        ? await io.createModel(input)
+        : await loadSelectedModel(input),
+    };
+  }
+
+  const credential =
+    args.provider === "openai"
+      ? resolveOpenAIApiKey({
+          runtimeApiKey: args.apiKey,
+          env: io.env,
+        })
+      : resolveAnthropicApiKey({
+          runtimeApiKey: args.apiKey,
+          env: io.env,
+        });
+  if ("error" in credential) {
+    return credential;
+  }
+  secrets.push(credential.apiKey);
+  const input = {
+    apiKey: credential.apiKey,
+    provider: args.provider,
+    model: args.model,
+  };
+  return {
+    model: io.createModel
+      ? await io.createModel(input)
+      : await loadSelectedModel(input),
+  };
+}
+
 /** Lazy-load only the selected provider adapter. */
 async function loadSelectedModel(input: {
   provider: CliProvider;
-  apiKey: string;
+  apiKey?: string;
   model?: string;
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+  auth?: CliAuthMode;
 }): Promise<Model> {
+  if (input.provider === "openai-compatible") {
+    const { createOpenAICompatibleModel } = await import("../model/providers/openai-compatible.ts");
+    return createOpenAICompatibleModel({
+      baseUrl: input.baseUrl ?? "",
+      apiKey: input.apiKey,
+      model: input.model,
+      headers: input.headers,
+      extraBody: input.extraBody,
+      auth: input.auth,
+    });
+  }
   if (input.provider === "openai") {
     const { createOpenAIModel } = await import("../model/providers/openai.ts");
-    return createOpenAIModel({ apiKey: input.apiKey, model: input.model });
+    return createOpenAIModel({
+      apiKey: input.apiKey ?? "",
+      model: input.model,
+    });
   }
   const { createAnthropicModel } = await import("../model/providers/anthropic.ts");
-  return createAnthropicModel({ apiKey: input.apiKey, model: input.model });
+  return createAnthropicModel({
+    apiKey: input.apiKey ?? "",
+    model: input.model,
+  });
 }
 
 /** Process entrypoint for the `schway` binary. */
