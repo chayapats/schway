@@ -304,6 +304,37 @@ test("headless -p can read a workspace file through the agent loop", async () =>
   });
 });
 
+test("headless -p can grep a workspace file through the agent loop", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "app.ts"), "export const LocateMe = 1;\n");
+    const result = await run(["-p", "find LocateMe", "--json"], {
+      cwd: dir,
+      model: createScriptedModel({
+        responses: [
+          {
+            toolCalls: [
+              {
+                id: "g1",
+                name: "grep",
+                arguments: { pattern: "LocateMe" },
+              },
+            ],
+          },
+          (request) => {
+            const tool = request.items.find(
+              (item): item is ToolResult => item.type === "tool_result",
+            );
+            return { text: tool?.content ?? "missing" };
+          },
+        ],
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("app.ts:1:");
+    expect(result.stdout).toContain("LocateMe");
+  });
+});
+
 test("headless -p can create a file through the agent loop", async () => {
   await withTempDir(async (dir) => {
     const result = await run(["-p", "write note", "--json"], {

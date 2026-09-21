@@ -33,6 +33,9 @@ test("core modules do not import provider SDKs", async () => {
     "src/tools/write.ts",
     "src/tools/edit.ts",
     "src/tools/bash.ts",
+    "src/tools/grep.ts",
+    "src/tools/find.ts",
+    "src/tools/ls.ts",
     "src/tools/fs.ts",
     "src/tools/path.ts",
   ];

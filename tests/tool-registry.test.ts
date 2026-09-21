@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
+import { findTool } from "../src/tools/find.ts";
+import { grepTool } from "../src/tools/grep.ts";
+import { lsTool } from "../src/tools/ls.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
@@ -19,7 +22,15 @@ function stub(schema: unknown): ToolDefinition {
 }
 
 test("registers TypeBox schemas and validates arguments before execution", () => {
-  const registry = createToolRegistry([readTool, writeTool, editTool, bashTool]);
+  const registry = createToolRegistry([
+    readTool,
+    writeTool,
+    editTool,
+    bashTool,
+    grepTool,
+    findTool,
+    lsTool,
+  ]);
   const registered = registry.get("read");
   expect(registered).toBeDefined();
   expect(registered?.validate({ path: "a.ts" }).ok).toBe(true);
@@ -49,6 +60,15 @@ test("registers TypeBox schemas and validates arguments before execution", () =>
   expect(
     registry.get("bash")?.validate({ command: "sleep 1", timeout: 500 }).ok,
   ).toBe(true);
+  expect(registry.get("grep")?.validate({ pattern: "foo" }).ok).toBe(true);
+  expect(registry.get("grep")?.validate({ pattern: 1 }).ok).toBe(false);
+  expect(registry.get("find")?.validate({ pattern: "**/*.ts" }).ok).toBe(true);
+  expect(registry.get("find")?.validate({}).ok).toBe(false);
+  expect(registry.get("ls")?.validate({}).ok).toBe(true);
+  expect(registry.get("ls")?.validate({ depth: 0 }).ok).toBe(false);
+  expect(grepTool.execution).toBe("parallel");
+  expect(findTool.execution).toBe("parallel");
+  expect(lsTool.execution).toBe("parallel");
 });
 
 test("unsupported schemas fail early with an actionable error", () => {
