@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
+import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { findTool } from "../src/tools/find.ts";
 import { grepTool } from "../src/tools/grep.ts";
@@ -25,6 +26,7 @@ test("registers TypeBox schemas and validates arguments before execution", () =>
     readTool,
     writeTool,
     editTool,
+    bashTool,
     grepTool,
     findTool,
     lsTool,
@@ -53,6 +55,11 @@ test("registers TypeBox schemas and validates arguments before execution", () =>
       edits: [{ oldText: "", newText: "b" }],
     }).ok,
   ).toBe(false);
+  expect(registry.get("bash")?.validate({ command: "echo ok" }).ok).toBe(true);
+  expect(registry.get("bash")?.validate({ command: "" }).ok).toBe(false);
+  expect(
+    registry.get("bash")?.validate({ command: "sleep 1", timeout: 500 }).ok,
+  ).toBe(true);
   expect(registry.get("grep")?.validate({ pattern: "foo" }).ok).toBe(true);
   expect(registry.get("grep")?.validate({ pattern: 1 }).ok).toBe(false);
   expect(registry.get("find")?.validate({ pattern: "**/*.ts" }).ok).toBe(true);

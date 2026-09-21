@@ -1,7 +1,7 @@
 import type { ToolCallContent, ToolResult } from "../conversation/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { ToolRegistry } from "./registry.ts";
-import type { ToolCallStatus } from "./types.ts";
+import type { ToolCallStatus, ToolOutputChunk } from "./types.ts";
 
 const CANCELLED_CONTENT = "Tool call cancelled";
 
@@ -22,6 +22,7 @@ export async function executeToolCall(options: {
   call: ToolCallContent;
   workspace?: Workspace;
   signal?: AbortSignal;
+  onOutput?: (chunk: ToolOutputChunk) => void;
 }): Promise<ExecutedToolCall> {
   if (options.signal?.aborted) {
     return cancelled(options.call);
@@ -48,6 +49,7 @@ export async function executeToolCall(options: {
     const output = await registered.definition.execute(validated.value, {
       workspace: options.workspace,
       signal: options.signal,
+      onOutput: options.onOutput,
     });
     return {
       result: toolResult(options.call, output.content, output.isError === true),
