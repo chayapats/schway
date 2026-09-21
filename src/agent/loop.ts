@@ -2,11 +2,11 @@ import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts
 import type { ContextManager } from "../context/manager.ts";
 import type { Model, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
-import { executeToolCall } from "../tools/executor.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import { toPlainJsonSchema } from "../tools/schema.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
+import { scheduleToolCalls } from "./scheduler.ts";
 
 /** Safety bound on model rounds per `runAgentLoop` invocation. */
 export const DEFAULT_MAX_TURNS = 32;
@@ -99,29 +99,14 @@ export async function* runAgentLoop(
         return;
       }
 
-      for (const call of calls) {
-        yield {
-          type: "tool.started",
-          toolCallId: call.id,
-          name: call.name,
-        };
-        const executed = await executeToolCall({
-          registry: options.tools,
-          call,
-          workspace: options.workspace,
-          signal: options.signal,
-        });
-        options.session.append(executed.result);
-        yield {
-          type: "tool.finished",
-          toolCallId: call.id,
-          name: call.name,
-          status: executed.status,
-          content: executed.result.content,
-          ...(executed.details !== undefined
-            ? { details: executed.details }
-            : {}),
-        };
+      const executed = yield* scheduleToolCalls({
+        calls,
+        registry: options.tools,
+        workspace: options.workspace,
+        signal: options.signal,
+      });
+      for (const item of executed) {
+        options.session.append(item.result);
       }
 
       if (options.signal?.aborted) {

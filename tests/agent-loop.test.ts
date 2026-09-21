@@ -397,6 +397,7 @@ test("cancellation prevents later tool calls and yields cancelled results", asyn
     const controller = new AbortController();
     const abortingRead: ToolDefinition<ReadInput> = {
       ...readTool,
+      execution: "exclusive",
       async execute(input, ctx) {
         const output = await readTool.execute(input, ctx);
         controller.abort();
