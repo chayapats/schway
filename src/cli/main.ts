@@ -8,6 +8,9 @@ import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
 import { editTool } from "../tools/edit.ts";
+import { findTool } from "../tools/find.ts";
+import { grepTool } from "../tools/grep.ts";
+import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
@@ -81,7 +84,14 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     session,
     model,
     contextManager: createContextManager(workspace),
-    tools: createToolRegistry([readTool, writeTool, editTool]),
+    tools: createToolRegistry([
+      readTool,
+      writeTool,
+      editTool,
+      grepTool,
+      findTool,
+      lsTool,
+    ]),
     workspace,
   })) {
     const safeEvent = redactEvent(event, secrets);
