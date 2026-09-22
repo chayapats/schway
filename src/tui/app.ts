@@ -640,7 +640,7 @@ async function handleSlashCommand(
 }
 
 /** Run one explicit skill invocation as a single active-skill turn, clearing state on settle. */
-async function invokeSkillTurn(
+export async function invokeSkillTurn(
   invocation: { name: string; args: string; raw: string },
   ctx: {
     controller: TuiController;
@@ -664,6 +664,10 @@ async function invokeSkillTurn(
   });
   if (!prepared.ok) {
     ctx.controller.fail(prepared.error);
+    return;
+  }
+  if (ctx.controller.running) {
+    ctx.controller.notice("Already running. Press Esc to cancel first.");
     return;
   }
   manager.setActiveSkill({

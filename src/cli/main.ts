@@ -13,6 +13,7 @@ import {
   RESERVED_SKILL_NAMES,
   discoverSkills,
   formatSkillsListing,
+  isSkillNameToken,
   prepareSkillInvocation,
   splitSlashCommand,
   type SkillMetadata,
@@ -163,7 +164,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     io.stdout.write(`${formatSkillsListing(discovery)}\n`);
     return 0;
   }
-  if (slash && !RESERVED_SKILL_NAMES.includes(slash.name)) {
+  if (slash && !RESERVED_SKILL_NAMES.includes(slash.name) && isSkillNameToken(slash.name)) {
     const prepared = await prepareSkillInvocation({
       workspaceRoot: workspace.root,
       home,

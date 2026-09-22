@@ -108,6 +108,21 @@ export function splitSlashCommand(text: string): {
   };
 }
 
+/** Longest accepted skill name, matching the directory-name rule in the Agent Skills convention. */
+export const SKILL_NAME_MAX_LENGTH = 64;
+
+/** Valid skill invocation tokens: lowercase letters, digits, and interior hyphens. */
+export const SKILL_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+/** True when the token can name a skill; anything else stays an ordinary prompt. */
+export function isSkillNameToken(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= SKILL_NAME_MAX_LENGTH &&
+    SKILL_NAME_PATTERN.test(value)
+  );
+}
+
 /** Parse SKILL.md frontmatter (name, description, invocation flags) without retaining limits. */
 export function parseSkillFile(content: string): { ok: true; value: ParsedSkillFile } | { ok: false; error: string } {
   const lines = content.split("\n");
@@ -158,7 +173,7 @@ export function parseSkillFile(content: string): { ok: true; value: ParsedSkillF
   if (name.length === 0) {
     return { ok: false, error: "missing required frontmatter field 'name'" };
   }
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name) || name.length > 64) {
+  if (!isSkillNameToken(name)) {
     return {
       ok: false,
       error: `invalid skill name '${name}': use 1-64 lowercase letters, digits, or hyphens`,
@@ -441,6 +456,20 @@ function parseFlag(key: string, raw: string): { value: boolean } | { error: stri
   return { error: `frontmatter field '${key}' must be true or false, got '${raw}'` };
 }
 
+/** Extract a Node error code (such as ENOENT) when the failure carries one. */
+function scopeErrorCode(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+/** Normalize a scope-directory failure into a printable diagnostic reason. */
+function scopeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Read one skill scope directory, returning parsed candidates plus malformed-file diagnostics. */
 async function readSkillScope(
   scopeDir: string,
@@ -452,7 +481,14 @@ async function readSkillScope(
   let entries: string[];
   try {
     entries = (await readdir(scopeDir)).sort();
-  } catch {
+  } catch (error) {
+    if (scopeErrorCode(error) === "ENOENT") {
+      return { skills, diagnostics };
+    }
+    diagnostics.push({
+      source: scopeDir,
+      reason: `cannot list ${scope} skills directory: ${scopeErrorMessage(error)}`,
+    });
     return { skills, diagnostics };
   }
   const canonicalScope = await canonicalDir(scopeDir);

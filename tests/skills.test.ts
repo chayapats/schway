@@ -11,6 +11,7 @@ import {
   SKILL_BODY_LIMIT_CHARS,
   discoverSkills,
   formatSkillsListing,
+  isSkillNameToken,
   loadSkillBody,
   parseSkillFile,
   prepareSkillInvocation,
@@ -34,6 +35,7 @@ import {
   parseSlashCommand,
 } from "../src/tui/commands.ts";
 import { TuiController } from "../src/tui/controller.ts";
+import { invokeSkillTurn } from "../src/tui/app.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
@@ -673,5 +675,110 @@ test("headless built-in prompts keep ordinary prompt behavior", async () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("ordinary");
+  });
+});
+
+test("skill name tokens accept directory-style names and reject prompt text", () => {
+  expect(isSkillNameToken("review")).toBe(true);
+  expect(isSkillNameToken("to-spec")).toBe(true);
+  expect(isSkillNameToken("a")).toBe(true);
+  expect(isSkillNameToken("!!!")).toBe(false);
+  expect(isSkillNameToken("/etc/hosts")).toBe(false);
+  expect(isSkillNameToken("")).toBe(false);
+  expect(isSkillNameToken("-")).toBe(false);
+  expect(isSkillNameToken("Upper")).toBe(false);
+  expect(isSkillNameToken("a".repeat(64))).toBe(true);
+  expect(isSkillNameToken("a".repeat(65))).toBe(false);
+});
+
+test("headless invalid slash tokens flow as ordinary prompts", async () => {
+  await withTempDir(async (dir) => {
+    const home = join(dir, "home");
+    await mkdir(home, { recursive: true });
+    for (const prompt of ["/!!! hello", "/etc/hosts content"]) {
+      const requests: ModelRequest[] = [];
+      const result = await runHeadless(["-p", prompt], {
+        home,
+        cwd: dir,
+        model: createScriptedModel({
+          responses: [
+            (request: ModelRequest) => {
+              requests.push(request);
+              return { text: "ordinary" };
+            },
+          ],
+        }),
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("ordinary");
+      expect(result.stderr).toBe("");
+      expect(requests).toHaveLength(1);
+      expect(
+        requests[0]!.context.some((entry) => entry.name === ACTIVE_SKILL_SECTION_NAME),
+      ).toBe(false);
+    }
+  });
+});
+
+test("unreadable skills directories surface a diagnostic instead of silence", async () => {
+  await withTempDir(async (dir) => {
+    const agents = join(dir, ".agents");
+    await mkdir(agents, { recursive: true });
+    await writeFile(join(agents, "skills"), "not a directory");
+    const discovery = await discoverSkills({ workspaceRoot: dir });
+    expect(discovery.skills).toEqual([]);
+    expect(discovery.diagnostics.length).toBeGreaterThan(0);
+    const diagnostic = discovery.diagnostics[0]!;
+    expect(diagnostic.source).toContain(join(".agents", "skills"));
+    expect(diagnostic.reason).toContain("cannot list project skills directory");
+    expect(formatSkillsListing(discovery)).toContain("Invalid skill");
+  });
+});
+
+test("missing skills directories stay silent while other scopes report", async () => {
+  await withTempDir(async (dir) => {
+    const discovery = await discoverSkills({ workspaceRoot: dir });
+    expect(discovery.skills).toEqual([]);
+    expect(discovery.diagnostics).toEqual([]);
+  });
+});
+
+test("a skill turn starting while another turn runs is refused without activating", async () => {
+  await withTempDir(async (dir) => {
+    const skills = await projectSkillsDir(dir);
+    await writeSkill(skills, "review", REVIEW_FRONTMATTER, REVIEW_BODY);
+    const workspace = workspaceFor(dir);
+    const session = createSession();
+    const manager = createContextManager(workspace);
+    const controller = new TuiController({
+      session,
+      model: createScriptedModel({ waitForAbort: true, text: "never" }),
+      contextManager: manager,
+      tools: createToolRegistry([readTool]),
+      workspace,
+      provider: "scripted",
+      modelId: "scripted",
+      sessionId: "sess-skill-race",
+    });
+    const invoked = invokeSkillTurn(
+      { name: "review", args: "", raw: "/review" },
+      { controller, home: dir, skillScope: { manager, workspaceRoot: dir } },
+    );
+    const other = controller.submit("other prompt");
+    await invoked;
+    controller.cancel();
+    await other;
+    const snapshot = controller.snapshot();
+    expect(
+      snapshot.transcript.some((entry) => entry.text.includes("Already running")),
+    ).toBe(true);
+    const userTexts = session.items
+      .filter((item) => item.type === "user")
+      .flatMap((item) => item.content.map((block) => block.text));
+    expect(userTexts).toEqual(["other prompt"]);
+    const check = await manager.prepare(createSession());
+    expect(check.context.some((entry) => entry.name === ACTIVE_SKILL_SECTION_NAME)).toBe(
+      false,
+    );
   });
 });
