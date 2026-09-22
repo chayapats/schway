@@ -3,6 +3,7 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { RESERVED_SKILL_NAMES, type SkillDiscovery } from "../skills/skills.ts";
 import type { ExtensionCommand, ExtensionCommandContext, ExtensionEvent, ExtensionEventListener } from "./index.ts";
 import { ExtensionHooks } from "./hooks.ts";
+import { ExtensionToolHooks } from "./tool-hooks.ts";
 
 /** Maximum pending notifications per listener, excluding the currently executing callback. */
 export const OBSERVER_QUEUE_LIMIT = 128;
@@ -38,11 +39,14 @@ export class ExtensionRuntime {
   private sessionGeneration = 0;
   /** Ordered native request interventions sharing this runtime's registration lifetime. */
   readonly hooks: ExtensionHooks;
+  /** Tool interventions held inside the scheduler's native execution slots. */
+  readonly toolHooks: ExtensionToolHooks;
 
   /** Initialize empty registries with an out-of-band diagnostic sink and known credentials to mask. */
   constructor(private readonly options: { secrets?: readonly string[]; onDiagnostic?: (message: string) => void } = {}) {
     this.diagnostic = options.onDiagnostic ?? (() => {});
     this.hooks = new ExtensionHooks(this.signal, options.secrets);
+    this.toolHooks = new ExtensionToolHooks(this.signal, options.secrets);
   }
 
   /** Signal cancellation of extension-owned work when the runtime is disposed. */

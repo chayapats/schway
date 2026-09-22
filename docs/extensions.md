@@ -1,9 +1,9 @@
-# Extension requests, commands, and runtime observation
+# Extension requests, tools, commands, and runtime observation
 
 Load an explicitly enabled local TypeScript module with `--extension path.ts`.
 Its default `defineExtension` initializer receives the public contract from
 `schway/extensions`. Initializers run in flag order before model requests. Tool,
-command, prompt, request hook, observer, and disposal registration closes when the initializer returns.
+command, prompt, request hook, tool hook, observer, and disposal registration closes when the initializer returns.
 All registrations are staged together; any invalid or conflicting declaration
 fails startup even if the initializer catches the registration exception.
 
@@ -114,6 +114,79 @@ bun run dev -- -p "Explain this project" --extension examples/extensions/context
 For a request policy, a hook can return `{ deny: "Explain why this request cannot
 proceed." }`. Denial is a user-visible failure, not an assistant answer, and does
 not change the submitted durable user message.
+
+## Tool argument and result hooks
+
+`beforeTool(hook)` and `afterTool(hook)` cover every registered executable,
+including native file tools and `activate_skill`. Public types are
+`BeforeToolInput`, `BeforeToolHook`, `AfterToolInput`, and `AfterToolHook`.
+Both phases run in extension load order, then registration order, and await
+each handler. Inputs and accepted outputs are detached; `undefined` keeps the
+preceding value even if the handler mutated its input.
+
+`beforeTool` receives `{ id, name, arguments, inputSchema, execution, signal }`.
+Schway first validates the original tool name and arguments. Unknown names and
+invalid original arguments produce ordinary tool errors without invoking hooks.
+Return `{ arguments: replacement }` to replace finite JSON arguments, or
+`{ deny: "explanation" }` to deny the invocation. Each replacement is validated
+against the registered schema before another hook sees it and again before
+execution. ID, name, schema, and execution mode cannot be replaced. Invalid
+returns, denial, and exceptions settle one source-labelled bounded error without
+running the tool or `afterTool`.
+
+`afterTool` additionally receives `outcome: { status, content, isError, details? }`
+and the arguments actually passed to execution. It runs after executed successes,
+returned tool errors, and thrown execution errors. It does not run after rejected
+original inputs, before-hook failures, or cancelled execution. Return
+`{ content: "replacement", isError?, details? }` to replace the presentation.
+Omitting `isError` preserves its preceding value; omitting `details` removes
+preceding details. `outcome.status` always reports the original execution status,
+even after another hook changes error presentation. Final `tool.finished.status`
+follows the transformed `isError`. Hooks cannot supply a status, change result or
+call IDs, discard a result, or turn an unfinished invocation into a success.
+
+Text is bounded to 50,000 characters after masking configured credentials.
+Details must be JSON-serializable; nested string keys and values are redacted,
+and details exceeding 50,000 serialized characters become a bounded
+`{ truncated: true, preview }` object. Details remain runtime-only. Durable
+records retain the original requested arguments and exactly one transformed
+result per call in source order, regardless of completion order.
+
+If `afterTool` throws or returns an invalid value, execution is never replayed.
+One error explains that execution occurred, effects may already apply, and the
+original outcome should be inspected before retrying. `tool.finished.details`
+contains `{ afterToolFailure: true, execution: { status, content, isError, details } }`
+with a detached, bounded, redacted original outcome. This diagnostic does not
+change the durable session format or roll back filesystem changes.
+
+The scheduler owns the entire before/execute/after sequence. An exclusive tool
+holds its barrier through both waterfalls; independent parallel calls can run
+their hooks concurrently. Extension authors must coordinate shared mutable
+state and stop asynchronous work when the supplied signal aborts. These trusted
+local hooks provide policy building blocks, not a sandbox or a built-in
+permission framework.
+
+Cancellation or runtime disposal before execution prevents execution and skips
+remaining hooks. Cancellation may stop waiting for an uncooperative hook, with
+late rejections observed. Actual tool execution is always awaited so its effects
+settle once before a slot is released. If execution resolves despite cancellation,
+its settled result is preserved. Cancellation during `afterTool` discards partial
+transformations, preserves the original settled execution outcome, and skips
+remaining hooks; queued calls settle as cancelled without running.
+
+The shipped `examples/extensions/tool-policy.ts` denies `bash`, strips an initial
+`./` from edit paths, and annotates settled results:
+
+```sh
+bun run dev -- -p "Use edit to replace before with after in ./note.txt" --extension examples/extensions/tool-policy.ts
+# Installed package: copy the example beside your project, then use --extension ./tool-policy.ts.
+```
+
+Deterministic tests exercise real temporary-file edits through the loop, invalid
+and denied rewrites, post-execution failures without replay, scheduling barriers,
+parallel siblings, every cancellation phase, and durable JSONL reload. The
+headless CLI and installed-package tests use scripted/local protocol fixtures;
+they are not live-provider or human terminal evidence.
 
 ## Interactive commands
 

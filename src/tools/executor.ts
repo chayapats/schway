@@ -1,4 +1,5 @@
 import type { ToolCallContent, ToolResult } from "../conversation/types.ts";
+import type { ExtensionToolHooks } from "../extensions/tool-hooks.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { ToolRegistry } from "./registry.ts";
 import type { ToolCallStatus, ToolOutputChunk } from "./types.ts";
@@ -26,8 +27,11 @@ export async function executeToolCall(options: {
   workspace?: Workspace;
   signal?: AbortSignal;
   onOutput?: (chunk: ToolOutputChunk) => void;
+  toolHooks?: ExtensionToolHooks;
 }): Promise<ExecutedToolCall> {
-  if (options.signal?.aborted) {
+  const hooks = options.toolHooks?.active ? options.toolHooks : undefined;
+  const signal = hooks ? AbortSignal.any([hooks.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
+  if (signal?.aborted) {
     return cancelled(options.call);
   }
 
@@ -48,29 +52,54 @@ export async function executeToolCall(options: {
     return failure(options.call, "Workspace is not available");
   }
 
+  let args = validated.value;
+  if (hooks) {
+    try {
+      args = await hooks.prepare(options.call, registered, signal!);
+      const transformed = registered.validate(args);
+      if (!transformed.ok) return failure(options.call, hooks.safeText(`Invalid transformed arguments for tool ${options.call.name}: ${transformed.message}`));
+      args = transformed.value;
+    } catch (error) {
+      return signal?.aborted ? cancelled(options.call) : failure(options.call, hooks.safeText(messageOf(error)));
+    }
+  }
+  if (signal?.aborted) return cancelled(options.call);
+
+  // Keep invocation arguments for afterTool independent of tool-side input mutation.
+  let executedArgs: unknown;
+  try { executedArgs = hooks ? structuredClone(args) : args; }
+  catch (error) { return failure(options.call, hooks ? hooks.safeText(messageOf(error)) : messageOf(error)); }
+  let executed: ExecutedToolCall;
   try {
-    const output = await registered.definition.execute(validated.value, {
+    const output = await registered.definition.execute(args, {
       workspace: options.workspace,
-      signal: options.signal,
+      signal,
       onOutput: options.onOutput,
     });
-    return {
+    executed = {
       result: toolResult(options.call, output.content, output.isError === true),
       status: output.isError === true ? "error" : "success",
       details: output.details,
     };
   } catch (error) {
     if (
-      options.signal?.aborted ||
+      signal?.aborted ||
       (error instanceof Error && error.name === "AbortError")
     ) {
       return cancelled(options.call);
     }
-    return failure(
+    executed = failure(
       options.call,
-      error instanceof Error ? error.message : String(error),
+      hooks ? hooks.safeText(messageOf(error)) : messageOf(error),
     );
   }
+  return hooks ? hooks.finish(options.call, registered.definition, executedArgs, executed, signal!) : executed;
+}
+
+/** Render unexpected execution failures without allowing unprintable values to prevent settlement. */
+function messageOf(error: unknown): string {
+  try { return error instanceof Error ? error.message : String(error); }
+  catch { return "Unprintable tool failure"; }
 }
 
 /** Build a cancelled result for an accepted call that did not run. */

@@ -53,6 +53,7 @@ test("core modules do not import provider SDKs", async () => {
     "src/extensions/runtime.ts",
     "src/extensions/host.ts",
     "src/extensions/hooks.ts",
+    "src/extensions/tool-hooks.ts",
     "src/extensions/validation.ts",
   ];
   for (const file of files) {
@@ -105,6 +106,7 @@ test("core modules never import the renderer", async () => {
     "src/extensions/runtime.ts",
     "src/extensions/host.ts",
     "src/extensions/hooks.ts",
+    "src/extensions/tool-hooks.ts",
     "src/extensions/validation.ts",
   ];
   for (const file of files) {

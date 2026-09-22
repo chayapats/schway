@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../tools/types.ts";
+import type { JsonSchema, ToolCallStatus, ToolDefinition, ToolExecutionMode, ToolExecutionResult } from "../tools/types.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import type { ContextSection } from "../context/manager.ts";
 import type { UserMessage } from "../conversation/types.ts";
@@ -35,6 +35,28 @@ export interface ExtensionModelRequest extends ModelRequest { readonly signal: A
 /** Replace ephemeral request data, deny the request, or retain the preceding hook's result. */
 export type BeforeModelHook = (request: ExtensionModelRequest) =>
   void | ExtensionModelRequest | ExtensionDenial | Promise<void | ExtensionModelRequest | ExtensionDenial>;
+
+/** Detached validated invocation metadata; only an explicit arguments return may change execution input. */
+export interface BeforeToolInput {
+  readonly id: string;
+  readonly name: string;
+  arguments: unknown;
+  readonly inputSchema: JsonSchema;
+  readonly execution: ToolExecutionMode;
+  readonly signal: AbortSignal;
+}
+
+/** Replace tool arguments in load order, deny with an explanation, or leave the invocation unchanged. */
+export type BeforeToolHook = (input: BeforeToolInput) =>
+  void | { arguments: unknown } | ExtensionDenial | Promise<void | { arguments: unknown } | ExtensionDenial>;
+
+/** Settled execution status with the current model-facing presentation, copied for each afterTool handler. */
+export interface AfterToolInput extends BeforeToolInput {
+  readonly outcome: ToolExecutionResult & { readonly status: ToolCallStatus };
+}
+
+/** Transform settled output; returned isError sets terminal status, outcome.status stays original, and execution is never replayed. */
+export type AfterToolHook = (input: AfterToolInput) => void | ToolExecutionResult | Promise<void | ToolExecutionResult>;
 
 /** Public JSON Schema and invocation contracts shared with native tools. */
 export type {
@@ -78,6 +100,10 @@ export interface ExtensionContext {
   context(hook: ContextHook): void;
   /** Register an ordered native-request waterfall before each logical model request, excluding retries. */
   beforeModel(hook: BeforeModelHook): void;
+  /** Register an ordered argument-rewrite or denial waterfall inside each tool's scheduling slot. */
+  beforeTool(hook: BeforeToolHook): void;
+  /** Register an ordered presentation waterfall after an executed tool settles, without replaying it. */
+  afterTool(hook: AfterToolHook): void;
   /** Register a custom tool atomically with this module's other tools before initialization finishes. */
   registerTool<TInput = unknown>(tool: ToolDefinition<TInput>): void;
   /** Register an idle-only interactive slash command, rejecting core, skill, and extension collisions. */

@@ -1,5 +1,6 @@
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../config/defaults.ts";
 import type { ToolCallContent } from "../conversation/types.ts";
+import type { ExtensionToolHooks } from "../extensions/tool-hooks.ts";
 import {
   executeToolCall,
   type ExecutedToolCall,
@@ -24,8 +25,10 @@ export async function* scheduleToolCalls(options: {
   workspace?: Workspace;
   signal?: AbortSignal;
   maxConcurrentTools?: number;
+  toolHooks?: ExtensionToolHooks;
 }): AsyncGenerator<RuntimeEvent, ExecutedToolCall[]> {
-  const { calls, registry, workspace, signal } = options;
+  const { calls, registry, workspace, toolHooks } = options;
+  const signal = toolHooks?.active ? AbortSignal.any([toolHooks.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
   const maxConcurrentTools =
     options.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS;
   const results: Array<ExecutedToolCall | undefined> = Array.from({
@@ -80,6 +83,7 @@ export async function* scheduleToolCalls(options: {
       call,
       workspace,
       signal,
+      toolHooks,
       onOutput(chunk) {
         if (chunk.text.length === 0) {
           return;

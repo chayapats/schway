@@ -169,3 +169,52 @@ for (const deny of [false, true]) {
     });
   });
 }
+
+test("headless tool policy rewrites a native edit and denies a sibling with durable JSONL parity", async () => {
+  await withIsolatedCliDirs(async ({ work, home }) => {
+    await mkdir(join(work, ".git"));
+    await mkdir(join(work, "nested"));
+    await Bun.write(join(work, "note.txt"), "before");
+    await Bun.write(join(work, "denied.txt"), "before");
+    await Bun.write(join(work, "policy.ts"), `export default ctx => {
+      ctx.beforeTool(input => {
+        if (input.name !== 'edit') return;
+        if (input.arguments.path === 'denied.txt') return { deny: 'file is protected' };
+        return { arguments: { ...input.arguments, path: 'note.txt', edits: [{ oldText: 'before', newText: 'rewritten' }] } };
+      });
+      ctx.afterTool(({ outcome }) => ({ content: outcome.content + ' [reviewed]', isError: outcome.isError, details: outcome.details }));
+    };`);
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli(["-p", "edit files", "--json", "--extension", "policy.ts"], {
+      cwd: join(work, "nested"), env: { HOME: home },
+      stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } },
+      model: createScriptedModel({ responses: [{ toolCalls: [
+        { id: "allow", name: "edit", arguments: { path: "./note.txt", edits: [{ oldText: "before", newText: "after" }] } },
+        { id: "deny", name: "edit", arguments: { path: "denied.txt", edits: [{ oldText: "before", newText: "after" }] } },
+      ] }, request => {
+        expect(request.items.filter(item => item.type === "tool_result")).toMatchObject([
+          { toolCallId: "allow", isError: false, content: "Edited note.txt (1 replacement) [reviewed]" },
+          { toolCallId: "deny", isError: true },
+        ]);
+        return { text: "done" };
+      }] }),
+    });
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(await Bun.file(join(work, "note.txt")).text()).toBe("rewritten");
+    expect(await Bun.file(join(work, "denied.txt")).text()).toBe("before");
+    const events = stdout.trim().split("\n").map(line => JSON.parse(line));
+    expect(events.filter(event => event.type === "tool.finished")).toMatchObject([
+      { toolCallId: "allow", status: "success", content: "Edited note.txt (1 replacement) [reviewed]" },
+      { toolCallId: "deny", status: "error" },
+    ]);
+    const directory = join(home, ".schway/sessions");
+    const [file] = await readdir(directory);
+    const saved = (await Bun.file(join(directory, file!)).text()).trim().split("\n").map(line => JSON.parse(line));
+    const results = saved.filter(item => item.type === "tool_result");
+    expect(results.map(result => result.toolCallId)).toEqual(["allow", "deny"]);
+    expect(results[1].content).toContain("file is protected");
+    expect(saved.some(item => item.type === "tool.finished")).toBe(false);
+  });
+});
