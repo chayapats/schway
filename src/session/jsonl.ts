@@ -12,8 +12,8 @@ import type {
 import type { Workspace } from "../workspace/workspace.ts";
 import { createSession, type Session } from "./session.ts";
 
-/** First persisted session format. Loaders stay version-specific. */
-export const SESSION_FORMAT_VERSION = 1;
+/** Current session format, adding session-wide metadata outside conversation ancestry. */
+export const SESSION_FORMAT_VERSION = 2;
 
 /** Versioned first JSONL record identifying the session and the workspace restored when it is resumed. */
 export interface SessionHeader {
@@ -48,7 +48,7 @@ export async function createJsonlSession(options: {
   await mkdir(options.directory, { recursive: true });
   const path = sessionFilePath(options.directory, header.id);
   await writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
-  return openPersisted(path, header, [], header.id);
+  return openPersisted(path, header, [], header.id, header.extraRoots, header.version);
 }
 
 /** Join the supplied home directory with `.schway/sessions` without accessing the filesystem. */
@@ -154,7 +154,7 @@ export async function loadJsonlSession(options: {
     }
     throw error;
   }
-  const loaded = loadV1(text);
+  const loaded = loadRecords(text);
   if (loaded.text !== text) {
     await replaceFile(path, loaded.text);
   }
@@ -163,6 +163,8 @@ export async function loadJsonlSession(options: {
     loaded.header,
     loaded.items,
     loaded.tipId,
+    loaded.extraRoots,
+    loaded.version,
   );
   const settlements = settlementsFor(loaded.items);
   if (settlements.length > 0) {
@@ -179,16 +181,29 @@ function sessionFilePath(directory: string, id: string): string {
   return join(directory, `${id}.jsonl`);
 }
 
+/** Bind synchronous durable appends to conversation ancestry and separate session-wide metadata. */
 function openPersisted(
   path: string,
   header: SessionHeader,
   items: readonly SessionRecord[],
   tipId: string,
+  extraRoots: readonly string[],
+  version: number,
 ): JsonlSession {
-  const session = createSession(items);
+  const session = createSession(items, extraRoots);
   let parentId = tipId;
   return {
     header,
+    get metadata() { return session.metadata; },
+    setExtraRoots(roots) {
+      if (JSON.stringify(roots) === JSON.stringify(session.metadata.extraRoots)) return;
+      const records: object[] = [];
+      if (version === 1) records.push({ type: "session_format", version: SESSION_FORMAT_VERSION });
+      records.push({ type: "workspace_roots", version: 1, extraRoots: [...roots] });
+      appendFileSync(path, records.map(record => JSON.stringify(record)).join("\n") + "\n", "utf8");
+      version = SESSION_FORMAT_VERSION;
+      session.setExtraRoots(roots);
+    },
     get items() {
       return session.items;
     },
@@ -234,11 +249,13 @@ function settlementsFor(items: readonly SessionRecord[]): ToolResult[] {
   return settlements;
 }
 
-/** Parse a version 1 session file into header, items, and the latest entry id. */
-function loadV1(text: string): {
+/** Replay versioned conversation and session-wide metadata without moving ancestry for metadata records. */
+function loadRecords(text: string): {
   header: SessionHeader;
   items: SessionRecord[];
   tipId: string;
+  extraRoots: string[];
+  version: number;
   text: string;
 } {
   const lines = text.split("\n").filter((line) => line.length > 0);
@@ -255,14 +272,16 @@ function loadV1(text: string): {
   if (!isSessionHeader(first)) {
     throw new Error("Session file is missing a versioned header");
   }
-  if (first.version !== SESSION_FORMAT_VERSION) {
+  if (first.version !== 1 && first.version !== SESSION_FORMAT_VERSION) {
     throw new Error(
-      `Unsupported session format version ${first.version}. This Schway build reads version ${SESSION_FORMAT_VERSION}.`,
+      `Unsupported session format version ${first.version}. This Schway build reads versions 1 and ${SESSION_FORMAT_VERSION}.`,
     );
   }
   const kept = [firstLine];
   const items: SessionRecord[] = [];
   let tipId = first.id;
+  let extraRoots = [...first.extraRoots];
+  let version = first.version;
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]!;
     const trailing = i === lines.length - 1;
@@ -275,7 +294,23 @@ function loadV1(text: string): {
       }
       throw error;
     }
+    if (isPlainObject(record) && record.type === "session_format") {
+      if (record.version !== SESSION_FORMAT_VERSION || version !== 1 || "parentId" in record || "id" in record) throw new Error("Unsupported or invalid session format transition");
+      version = SESSION_FORMAT_VERSION;
+      kept.push(line);
+      continue;
+    }
+    if (isPlainObject(record) && record.type === "workspace_roots") {
+      if (record.version !== 1) throw new Error("Unsupported workspace metadata version");
+      if (version !== SESSION_FORMAT_VERSION) throw new Error("Workspace metadata requires session format 2");
+    }
     try {
+      if (isPlainObject(record) && record.type === "workspace_roots") {
+        if (!isRootList(record.extraRoots) || "parentId" in record || "id" in record) throw malformedRecord();
+        extraRoots = [...record.extraRoots];
+        kept.push(line);
+        continue;
+      }
       const item = toSessionRecord(record);
       items.push(item);
       tipId = item.id;
@@ -291,10 +326,18 @@ function loadV1(text: string): {
     header: first,
     items,
     tipId,
+    extraRoots,
+    version,
     text: `${kept.join("\n")}\n`,
   };
 }
 
+/** Accept only nonempty string identities in saved attachment lists. */
+function isRootList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(root => typeof root === "string" && root.length > 0);
+}
+
+/** Validate the initial workspace identity before interpreting any versioned records. */
 function isSessionHeader(value: unknown): value is SessionHeader {
   if (value === null || typeof value !== "object") {
     return false;
@@ -307,7 +350,7 @@ function isSessionHeader(value: unknown): value is SessionHeader {
     typeof record.createdAt === "string" &&
     typeof record.workspaceRoot === "string" &&
     typeof record.launchCwd === "string" &&
-    Array.isArray(record.extraRoots)
+    isRootList(record.extraRoots)
   );
 }
 

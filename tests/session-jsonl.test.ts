@@ -19,7 +19,7 @@ test("creating a session writes a versioned JSONL header with workspace identity
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]!)).toEqual({
       type: "session",
-      version: 1,
+      version: 2,
       id: session.header.id,
       createdAt: session.header.createdAt,
       workspaceRoot: "/tmp/project",
@@ -91,7 +91,7 @@ test("unsupported session versions fail with an actionable error", async () => {
     ).rejects.toThrow(/Unsupported session format version 99/);
     await expect(
       loadJsonlSession({ directory: dir, id: "sess-old" }),
-    ).rejects.toThrow(/version 1/);
+    ).rejects.toThrow(/versions 1 and 2/);
   });
 });
 

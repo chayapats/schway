@@ -29,49 +29,28 @@ export async function discoverAgentsInstructions(options: {
   home?: string;
   targetPaths: readonly string[];
 }): Promise<AgentsInstruction[]> {
-  const root = await canonicalPath(options.workspace.root);
-  const dirs = new Map<string, number>();
-  dirs.set(root, 0);
-
+  const primaryRoot = await canonicalPath(options.workspace.root);
+  const roots = [...new Set(await Promise.all([primaryRoot, ...options.workspace.extraRoots].map(canonicalPath)))];
+  const dirs = new Map<string, { depth: number; root: string; global: boolean }>();
   if (options.home !== undefined) {
-    dirs.set(
-      await canonicalPath(join(options.home, ".schway")),
-      GLOBAL_SCOPE_DEPTH,
-    );
+    const dir = await canonicalPath(join(options.home, ".schway"));
+    dirs.set(dir, { depth: GLOBAL_SCOPE_DEPTH, root: dir, global: true });
   }
-
-  for (const target of options.targetPaths) {
-    for (const dir of await ancestorDirsWithinRoot(target, root)) {
-      const depth = relative(root, dir).split(sep).filter(Boolean).length;
-      if (!dirs.has(dir)) {
-        dirs.set(dir, depth);
+  for (const root of roots) {
+    for (const target of options.targetPaths) {
+      for (const dir of await ancestorDirsWithinRoot(target, root)) {
+        if (!dirs.has(dir)) dirs.set(dir, { depth: dir.split(sep).filter(Boolean).length, root, global: false });
       }
     }
   }
-
-  const ordered = [...dirs.entries()].sort((a, b) => {
-    if (a[1] !== b[1]) {
-      return a[1] - b[1];
-    }
-    return a[0].localeCompare(b[0]);
-  });
-
+  const ordered = [...dirs.entries()].sort((a, b) => a[1].depth - b[1].depth || a[0].localeCompare(b[0]));
   const instructions: AgentsInstruction[] = [];
   const seen = new Set<string>();
-  for (const [dir, depth] of ordered) {
-    const allowedRoot = depth === GLOBAL_SCOPE_DEPTH ? dir : root;
-    const loaded = await readAgentsFile(join(dir, "AGENTS.md"), allowedRoot);
-    if (loaded === undefined || seen.has(loaded.path)) {
-      continue;
-    }
+  for (const [dir, scope] of ordered) {
+    const loaded = await readAgentsFile(join(dir, "AGENTS.md"), scope.root);
+    if (loaded === undefined || seen.has(loaded.path)) continue;
     seen.add(loaded.path);
-    instructions.push({
-      ...loaded,
-      displayPath:
-        depth === GLOBAL_SCOPE_DEPTH
-          ? loaded.path
-          : displayInstructionPath(loaded.path, root),
-    });
+    instructions.push({ ...loaded, displayPath: scope.global ? loaded.path : displayInstructionPath(loaded.path, primaryRoot) });
   }
   return instructions;
 }
@@ -148,12 +127,17 @@ function displayInstructionPath(path: string, workspaceRoot: string): string {
   return rel.split(sep).join("/");
 }
 
+/** Resolve existing ancestors as well as absent leaf files so symlinked write targets retain their actual scope. */
 async function canonicalPath(path: string): Promise<string> {
-  const absolute = resolve(path);
-  try {
-    return await realpath(absolute);
-  } catch {
-    return absolute;
+  let current = resolve(path);
+  const suffix: string[] = [];
+  while (true) {
+    try { return resolve(await realpath(current), ...suffix); } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(path);
+      suffix.unshift(relative(parent, current));
+      current = parent;
+    }
   }
 }
 

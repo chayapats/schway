@@ -43,7 +43,7 @@ export async function loadExtensions(options: {
       throw extensionError(declaration.source, error);
     }
   }
-  const skills = await discoverSkills({ workspaceRoot: options.workspace.root, home: options.home, packages, signal: options.signal });
+  const skills = await discoverSkills({ workspaceRoot: options.workspace.root, extraRoots: options.workspace.extraRoots, home: options.home, packages, signal: options.signal });
   options.signal?.throwIfAborted();
 
   const staged = forkToolRegistry(options.tools);

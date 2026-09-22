@@ -127,6 +127,8 @@ export function createContextManager(
           content: [
             `Workspace root: ${workspace.root}`,
             `Launch directory: ${workspace.launchCwd}`,
+            ...workspace.extraRoots.map(root => `Attached root: ${root}`),
+            ...(workspace.extraRoots.length ? ["Relative tool paths and default bash cwd use the workspace root. Attachments supply context, not filesystem permissions."] : []),
           ].join("\n"),
         },
       ];
@@ -141,7 +143,7 @@ export function createContextManager(
           content: formatAgentsInstructions(instructions),
         });
       }
-      const discovered = await discoverSkillsSafe(workspace.root, options.home);
+      const discovered = await discoverSkillsSafe(workspace, options.home);
       const modelSkills = discovered.filter((skill) => !skill.userOnly);
       if (modelSkills.length > 0) {
         base.push({
@@ -224,6 +226,7 @@ export function createContextManager(
       const scope = activationScope;
       const invocation = await prepareSkillInvocation({
         workspaceRoot: workspace.root,
+        extraRoots: workspace.extraRoots,
         home: options.home,
         name,
         modelInvocation: true,
@@ -309,41 +312,36 @@ export function createContextManager(
 
 /** Skill metadata for the available-skills section; discovery failures degrade to no section. */
 async function discoverSkillsSafe(
-  workspaceRoot: string,
+  workspace: Workspace,
   home: string | undefined,
 ): Promise<SkillMetadata[]> {
   try {
-    const discovered = await discoverSkills({ workspaceRoot, home });
+    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home });
     return discovered.skills;
   } catch {
     return [];
   }
 }
 
-/** Launch directory plus tool `path` / `cwd` arguments from the session. */
-function targetPathsFrom(
-  workspace: Workspace,
-  items: readonly SessionRecord[],
-): string[] {
-  const paths = [workspace.launchCwd];
-  for (const item of items) {
-    if (item.type !== "assistant") {
-      continue;
-    }
+/** Use the latest path-bearing tool batch in the current user turn, falling back to the launch directory. */
+function targetPathsFrom(workspace: Workspace, items: readonly SessionRecord[]): string[] {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.type === "user") break;
+    if (item.type !== "assistant") continue;
+    const paths: string[] = [];
     for (const block of item.content) {
-      if (block.type !== "tool_call" || !isPlainObject(block.arguments)) {
-        continue;
+      if (block.type !== "tool_call" || !isPlainObject(block.arguments)) continue;
+      for (const key of ["path", "cwd"]) {
+        const value = block.arguments[key];
+        if (typeof value === "string" && value.length > 0) paths.push(resolveToolPath(workspace.root, value));
       }
-      const args = block.arguments;
-      if (typeof args.path === "string" && args.path.length > 0) {
-        paths.push(resolveToolPath(workspace.root, args.path));
-      }
-      if (typeof args.cwd === "string" && args.cwd.length > 0) {
-        paths.push(resolveToolPath(workspace.root, args.cwd));
-      }
+      if (block.name === "bash" && !block.arguments.cwd) paths.push(workspace.root);
+      if (["ls", "find", "grep"].includes(block.name) && !block.arguments.path) paths.push(workspace.root);
     }
+    if (paths.length) return paths;
   }
-  return paths;
+  return [workspace.launchCwd];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

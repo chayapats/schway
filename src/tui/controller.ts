@@ -10,7 +10,7 @@ import { lookupModel } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
-import type { Workspace } from "../workspace/workspace.ts";
+import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { discoverSkills } from "../skills/skills.ts";
 
@@ -153,6 +153,57 @@ export class TuiController {
     return this.activeAbort !== undefined;
   }
 
+  /** Return a copy of the currently usable root identities for discovery and status. */
+  workspaceIdentity(): Workspace | undefined {
+    return this.workspace ? { ...this.workspace, extraRoots: [...this.workspace.extraRoots] } : undefined;
+  }
+
+  /** Validate and persist attachments while owning the idle boundary, publishing nothing on failure or cancellation. */
+  async addDirectories(directories: readonly string[]): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.running) {
+      this.notice("Busy: /add-dir was not run. Press Esc to cancel the active operation, then retry.");
+      return false;
+    }
+    if (!this.workspace || directories.length === 0) {
+      this.fail("Usage: /add-dir <directory>. Relative paths use the primary workspace root.");
+      return false;
+    }
+    const workspace = this.workspace;
+    const session = this.session;
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    this.status = "running";
+    const task = (async () => {
+      try {
+        const next = await addWorkspaceRoots(workspace, directories, abort.signal);
+        abort.signal.throwIfAborted();
+        if (this.disposed || this.activeAbort !== abort || this.session !== session) return false;
+        // Saved unavailable roots remain metadata even though the runtime excludes them.
+        session.setExtraRoots([...new Set([...session.metadata.extraRoots, ...next.extraRoots])]);
+        workspace.extraRoots = next.extraRoots;
+        this.contextManager.clearActiveSkill();
+        this.notice(`Workspace root: ${workspace.root}\nAttached roots: ${workspace.extraRoots.join(", ") || "none"}`);
+        this.status = "idle";
+        return true;
+      } catch (error) {
+        if (!this.disposed && this.activeAbort === abort) {
+          if (abort.signal.aborted) {
+            this.notice("Directory attachment cancelled. Roots are unchanged.");
+            this.status = "idle";
+          } else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+        }
+        return false;
+      }
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
   /** Return active extension command metadata for help and editor dispatch. */
   extensionCommands() { return this.extensions?.commandList() ?? []; }
 
@@ -184,7 +235,7 @@ export class TuiController {
     const current = () => this.activeAbort === abort && !this.disposed;
     try {
       if (this.workspace) {
-        const skills = await discoverSkills({ workspaceRoot: this.workspace.root, home: this.home, signal: abort.signal });
+        const skills = await discoverSkills({ workspaceRoot: this.workspace.root, extraRoots: this.workspace.extraRoots, home: this.home, signal: abort.signal });
         this.extensions!.assertNoSkillCollision(command, skills);
       }
       const result = await this.extensions!.executeCommand(command.name, args, {
@@ -259,6 +310,12 @@ export class TuiController {
       }
     }
     lines.push(`Session: ${this.sessionId}`);
+    if (this.workspace) {
+      lines.push(`Workspace root: ${this.workspace.root}`, `Launch directory: ${this.workspace.launchCwd}`);
+      lines.push(`Attached roots: ${this.workspace.extraRoots.join(", ") || "none"}`);
+      const unavailable = this.session.metadata.extraRoots.filter(root => !this.workspace!.extraRoots.includes(root));
+      if (unavailable.length) lines.push(`Unavailable saved roots: ${unavailable.join(", ")}`);
+    }
     lines.push("Model overrides apply to this session only and are never written to config files.");
     return redactSecrets(lines.join("\n"), this.secrets);
   }
