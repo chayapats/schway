@@ -84,7 +84,9 @@ test("all three provider families are selectable with headless and interactive m
 
 test("v0.1 keeps later-milestone surfaces out of the base harness", async () => {
   const entries = await readdir(join(import.meta.dir, "../src"));
-  for (const deferred of ["skills", "extensions", "server", "subagents", "workflows"]) {
+  // Agent Skills landed in v0.2 (issue #35); the remaining surfaces stay out.
+  expect(entries.includes("skills")).toBe(true);
+  for (const deferred of ["extensions", "server", "subagents", "workflows"]) {
     expect(entries.includes(deferred)).toBe(false);
   }
   const cli = await source("src/cli/main.ts");

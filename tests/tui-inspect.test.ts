@@ -66,15 +66,16 @@ function turns(count: number) {
   return items;
 }
 
-test("slash commands cover the v0.1 set only", () => {
+test("slash commands cover the v0.1 set plus skills", () => {
   expect(parseSlashCommand("/compact")?.name).toBe("compact");
   expect(parseSlashCommand("/config")?.name).toBe("config");
   expect(parseSlashCommand("/model openai/gpt-4o")?.args).toBe("openai/gpt-4o");
+  expect(parseSlashCommand("/skills")?.name).toBe("skills");
   const help = helpText();
-  for (const command of ["/new", "/sessions", "/resume", "/model", "/compact", "/config", "/help", "/quit"]) {
+  for (const command of ["/new", "/sessions", "/resume", "/model", "/compact", "/skills", "/config", "/help", "/quit"]) {
     expect(help).toContain(command);
   }
-  for (const outOfScope of ["/skills", "/add-dir", "/login", "/logout"]) {
+  for (const outOfScope of ["/add-dir", "/login", "/logout"]) {
     expect(help).not.toContain(outOfScope);
   }
 });

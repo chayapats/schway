@@ -76,6 +76,47 @@ Runtime credentials (`--api-key`) take precedence over environment variables, in
 
 Headless runs share one `AbortSignal` from the CLI (SIGINT/SIGTERM) through model streaming, tools, and provider requests. Transient provider failures (network resets, 429, 5xx) retry up to three total attempts with exponential backoff and `Retry-After`. Authentication errors, malformed requests, and ordinary tool failures are not retried. Cancelled or failed streams are not written as durable assistant messages; a cancelled run still leaves a resumable session.
 
+## Agent Skills
+
+Skills are reusable instruction packs discovered from project-local
+`.agents/skills/<name>/SKILL.md` and user-global `~/.schway/skills/<name>/SKILL.md`
+files. Each `SKILL.md` carries `name`/`description` frontmatter; only that
+metadata reaches the model until you invoke the skill. A project skill overrides
+a global skill of the same name. Skills marked user-only
+(`disable-model-invocation: true`) stay listed for you but are not advertised
+to the model.
+
+List them without calling a model, in the TUI or headlessly:
+
+```text
+/skills
+```
+
+```bash
+schway -p "/skills"
+```
+
+Runnable example — add a project skill, list it, then invoke it with arguments:
+
+```bash
+mkdir -p .agents/skills/greet
+cat > .agents/skills/greet/SKILL.md <<'EOF'
+---
+name: greet
+description: Greet the user warmly.
+---
+Greet the user warmly in pirate voice.
+EOF
+schway -p "/skills"            # lists greet, no model call
+schway -p "/greet Ahoy, crew"  # skill body plus arguments reach the model
+```
+
+In the TUI the same commands apply: `/skills` lists, `/greet Ahoy, crew`
+attaches the skill body to that turn only. The invocation text stays in
+history; later turns and resumed sessions start without the body. Duplicate
+names at one level and names colliding with built-in commands (for example
+`/compact`) are reported in the listing and cannot be invoked.
+
 ## Configuration
 
 Schway is zero-config-first. Valid credentials are enough to run `schway -p "..."`. Config files are never created automatically.
