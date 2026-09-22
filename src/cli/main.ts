@@ -166,7 +166,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   let extensions: ExtensionRuntime;
   try {
     const loaded = await loadExtensions({
-      modules: parsed.args.extensions ?? [], workspace, secrets, home,
+      modules: parsed.args.extensions ?? [], workspace, secrets, home, signal: io.signal,
       onDiagnostic: (message) => io.stderr.write(`${message}\n`),
       tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
     });

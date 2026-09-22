@@ -272,3 +272,38 @@ waterfalls, retries, pressure/overflow summaries, durable JSONL resume, invalid
 outputs, retained-reference mutation, and cancellation after tool settlement.
 Installed-package verification uses a local protocol fixture. These checks do
 not provide live-provider or human terminal validation.
+
+
+## Installed npm packages
+
+A config file's `packages` array enables installed npm package names in that
+scope. Project packages resolve directly in `<workspace-root>/node_modules`;
+user packages resolve in `~/.schway/node_modules` (install with
+`npm install --prefix "$HOME/.schway" schway <package>`). No installer or arbitrary
+node_modules scan runs inside Schway.
+
+A package's `schway` manifest accepts `extensions` (module files) and `skills`
+(skill directories containing `SKILL.md`). Entries are package-relative and must
+remain within the canonical package root. Schway validates every enabled manifest,
+path, and declared `peerDependencies.schway` range before importing any extension.
+Use `schway/extensions` from the installed Schway peer; keep other package
+requirements in your own `dependencies`. Declaring Schway in `dependencies`,
+`optionalDependencies`, `bundleDependencies`, or `bundledDependencies` is
+rejected to avoid bundling a second harness. Peer ranges must be valid npm
+semver ranges; package aliases, protocols, and dist-tags are rejected. Skills-only manifests execute no
+JavaScript entrypoint or lifecycle scripts during discovery.
+
+Initializers run global packages, then project packages, then explicit CLI modules;
+list order and manifest order are preserved. Canonical executable duplicates
+across these groups fail with both owners reported. Skill precedence is independent:
+project directories, project packages, global directories, global packages. Names
+ambiguous at the winning tier are unavailable until the duplicate is removed.
+
+Interactive session switches stage fresh capabilities, then dispose the old
+runtime only after success. Failure or cancellation disposes staged registrations
+and retains the previous session. Late registrations from a cancelled initializer
+are rejected. Initializers are trusted code: the host cannot undo arbitrary module
+side effects, so use `onDispose` and the lifetime signal for owned resources.
+
+See [the runnable mixed package](../examples/packages/greeting/package.json) and
+[installation and enablement instructions](../README.md#installed-skill-and-extension-packages).

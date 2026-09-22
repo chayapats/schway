@@ -63,6 +63,8 @@ export interface TuiControllerOptions {
   /** Known values to mask in displayed transcript text and configuration output. */
   secrets?: readonly string[];
   extensions?: ExtensionRuntime;
+  /** Stage fresh enabled modules for a workspace before publishing a session switch. */
+  loadWorkspaceExtensions?: (workspace: Workspace, signal: AbortSignal) => Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }>;
   home?: string;
 }
 
@@ -78,7 +80,7 @@ export class TuiController {
   private session: Session;
   private model?: Model;
   private contextManager: ContextManager;
-  private readonly tools?: ToolRegistry;
+  private tools?: ToolRegistry;
   private workspace?: Workspace;
   private secrets: readonly string[];
   private provider: string;
@@ -97,9 +99,10 @@ export class TuiController {
   private counter = 0;
   private currentAssistantId?: string;
   private toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
-  private readonly extensions?: ExtensionRuntime;
+  private extensions?: ExtensionRuntime;
   private readonly home?: string;
-  private readonly detachDiagnostics?: () => void;
+  private detachDiagnostics?: () => void;
+  private readonly loadWorkspaceExtensions?: TuiControllerOptions["loadWorkspaceExtensions"];
   private disposed = false;
 
   /** Initialize display history from the supplied session and dependencies without starting a model turn. */
@@ -121,6 +124,7 @@ export class TuiController {
     this.secrets = options.secrets ?? [];
     this.extensions = options.extensions;
     this.home = options.home;
+    this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
     if (options.startupError) {
@@ -315,6 +319,58 @@ export class TuiController {
     );
     this.status = "idle";
     return false;
+  }
+
+  /** Stage workspace capabilities and atomically switch sessions, preserving the current runtime on failure or cancellation. */
+  async switchSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.running) {
+      this.notice("Already running. Press Esc to cancel first.");
+      return false;
+    }
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    this.status = "running";
+    const task = this.stageSession(session, sessionId, options, abort);
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
+  /** Publish staged workspace capabilities only while this switch still owns the controller. */
+  private async stageSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }, abort: AbortController): Promise<boolean> {
+    let staged: { tools: ToolRegistry; runtime: ExtensionRuntime } | undefined;
+    try {
+      staged = await this.loadWorkspaceExtensions?.(options.workspace, abort.signal);
+      abort.signal.throwIfAborted();
+      if (this.disposed || this.activeAbort !== abort) return false;
+      const previous = this.extensions;
+      if (staged) {
+        this.detachDiagnostics?.();
+        this.extensions = staged.runtime;
+        this.tools = staged.tools;
+        this.detachDiagnostics = staged.runtime.attachDiagnostics(message => this.notice(message));
+      }
+      this.replaceSession(session, sessionId, options);
+      if (staged) {
+        staged = undefined;
+        previous?.dispose();
+      }
+      return true;
+    } catch (error) {
+      if (!this.disposed && this.activeAbort === abort) {
+        if (abort.signal.aborted) {
+          this.notice("Session switch cancelled. The previous session remains active.");
+          this.status = "idle";
+        } else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+      }
+      return false;
+    } finally {
+      staged?.runtime.dispose();
+    }
   }
 
   /**

@@ -17,6 +17,7 @@
     "bin",
     "src",
     "examples/extensions",
+    "examples/packages",
     "README.md",
     "LICENSE"
   ],
@@ -33,8 +34,10 @@
     "@anthropic-ai/sdk": "^0.127.0",
     "@opentui/core": "^0.5.11",
     "@sinclair/typebox": "^0.34.52",
+    "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",
-    "openai": "^7.20.0"
+    "openai": "^7.20.0",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

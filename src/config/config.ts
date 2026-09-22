@@ -26,6 +26,7 @@ export const CONFIG_SETTING_NAMES = [
   "headers",
   "extraBody",
   "auth",
+  "packages",
 ] as const;
 
 const ProviderSchema = Type.Union([
@@ -55,6 +56,7 @@ export const ConfigSchema = Type.Object(
     headers: Type.Optional(Type.Record(Type.String(), Type.String())),
     extraBody: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
     auth: Type.Optional(AuthSchema),
+    packages: Type.Optional(Type.Array(Type.String({ pattern: "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$" }), { uniqueItems: true })),
   },
   { additionalProperties: false },
 );

@@ -1,0 +1,12 @@
+{
+  "name": "schway-example-greeting",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "files": ["greet.ts", "skills"],
+  "peerDependencies": { "schway": "^0.1.0" },
+  "schway": {
+    "extensions": ["greet.ts"],
+    "skills": ["skills/greeting"]
+  }
+}

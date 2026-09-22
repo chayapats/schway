@@ -9,43 +9,51 @@ import type { ExtensionContext } from "./index.ts";
 import { guardExtensionTool } from "./runtime.ts";
 import { ExtensionRuntime } from "./host.ts";
 import { discoverSkills } from "../skills/skills.ts";
+import { discoverPackages } from "../packages/packages.ts";
 
 const NATIVE_TOOL_NAMES = new Set(["read", "write", "edit", "bash", "grep", "find", "ls", "activate_skill"]);
 
-/** Atomically load explicit modules in source order, returning tools and their separately owned extension runtime. */
+/** Atomically load enabled global/project package modules then explicit modules, returning tools and their separately owned runtime. */
 export async function loadExtensions(options: {
   modules: readonly string[];
   workspace: Workspace;
   tools: ToolRegistry;
   secrets?: readonly string[];
   home?: string;
+  signal?: AbortSignal;
   onDiagnostic?: (message: string) => void;
 }): Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }> {
-  const paths: string[] = [];
-  const identities = new Set<string>();
-  for (const module of options.modules) {
+  options.signal?.throwIfAborted();
+  const packages = await discoverPackages({ workspaceRoot: options.workspace.root, home: options.home, signal: options.signal });
+  const declarations = [
+    ...packages.flatMap(pkg => pkg.extensions.map(path => ({ path, source: `${pkg.source}: ${path}` }))),
+    ...options.modules.map(path => ({ path: resolve(options.workspace.root, path), source: `CLI module "${path}"` })),
+  ];
+  const paths: Array<{ path: string; source: string }> = [];
+  const identities = new Map<string, string>();
+  for (const declaration of declarations) {
     try {
-      const path = await realpath(resolve(options.workspace.root, module));
-      if (!(await stat(path)).isFile()) {
-        throw new Error("Expected a local module file");
-      }
-      if (identities.has(path)) {
-        throw new Error(`Duplicate extension identity: ${path}`);
-      }
-      identities.add(path);
-      paths.push(path);
+      const path = await realpath(declaration.path);
+      if (!(await stat(path)).isFile()) throw new Error("Expected a local module file");
+      const previous = identities.get(path);
+      if (previous) throw new Error(`Duplicate extension identity ${path}; enabled by both ${previous} and ${declaration.source}. Remove one enablement.`);
+      identities.set(path, declaration.source);
+      paths.push({ path, source: declaration.source });
     } catch (error) {
-      throw extensionError(module, error);
+      throw extensionError(declaration.source, error);
     }
   }
+  const skills = await discoverSkills({ workspaceRoot: options.workspace.root, home: options.home, packages, signal: options.signal });
+  options.signal?.throwIfAborted();
 
   const staged = forkToolRegistry(options.tools);
   const runtime = new ExtensionRuntime({ secrets: options.secrets, onDiagnostic: options.onDiagnostic });
   try {
-    const skills = paths.length ? await discoverSkills({ workspaceRoot: options.workspace.root, home: options.home }) : undefined;
-    for (const path of paths) {
+    for (const { path, source } of paths) {
+      options.signal?.throwIfAborted();
       try {
-        const module = await import(pathToFileURL(path).href);
+        const module = await cancellable(import(pathToFileURL(path).href), options.signal);
+        options.signal?.throwIfAborted();
         if (typeof module.default !== "function") {
           throw new Error("Expected a default extension initializer function");
         }
@@ -80,7 +88,8 @@ export async function loadExtensions(options: {
           onDispose: (cleanup: Parameters<ExtensionContext["onDispose"]>[0]) => register(() => runtime.onDispose(path, cleanup)),
         });
         try {
-          await module.default(context);
+          await cancellable(Promise.resolve().then(() => module.default(context)), options.signal);
+          options.signal?.throwIfAborted();
           if (registrationFailure) {
             throw registrationFailure;
           }
@@ -88,7 +97,7 @@ export async function loadExtensions(options: {
           open = false;
         }
       } catch (error) {
-        throw extensionError(path, error);
+        throw extensionError(source, error);
       }
     }
   } catch (error) {
@@ -136,4 +145,17 @@ function freezeJson<T>(value: T): T {
 /** Attribute all startup failures to the requested or canonical extension identity. */
 function extensionError(identity: string, error: unknown): Error {
   return new Error(`Extension "${identity}": ${error instanceof Error ? error.message : String(error)}`);
+}
+
+/** Stop waiting on uncooperative initializers while closing registration and disposing staged capabilities. */
+async function cancellable<T>(task: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return task;
+  signal.throwIfAborted();
+  let abort: () => void = () => {};
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = () => reject(signal.reason ?? new Error("Extension loading cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { return await Promise.race([task, cancelled]); }
+  finally { signal.removeEventListener("abort", abort); }
 }

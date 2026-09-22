@@ -80,7 +80,7 @@ Headless runs share one `AbortSignal` from the CLI (SIGINT/SIGTERM) through mode
 
 Skills are reusable instruction packs discovered from project-local
 `.agents/skills/<name>/SKILL.md` and user-global `~/.schway/skills/<name>/SKILL.md`
-files. Each `SKILL.md` carries `name`/`description` frontmatter; only that
+files, plus explicitly configured [npm packages](#installed-skill-and-extension-packages). Each `SKILL.md` carries `name`/`description` frontmatter; only that
 metadata reaches the model until you invoke the skill. A project skill overrides
 a global skill of the same name. Skills marked user-only
 (`disable-model-invocation: true`) stay listed for you but are not advertised
@@ -117,6 +117,83 @@ history; later turns and resumed sessions start without the body. Duplicate
 names at one level and names colliding with built-in commands (for example
 `/compact`) are reported in the listing and cannot be invoked.
 
+## Installed skill and extension packages
+
+Install an npm package yourself, then list its installed name in the appropriate
+config file. Schway only reads enabled packages; it never downloads packages or
+runs package lifecycle scripts. Normal `npm install` has npm's usual behavior.
+
+```bash
+# Project scope: run at the primary workspace root.
+npm install schway your-schway-package
+# Add to <workspace-root>/.schway/config.json:
+# { "packages": ["your-schway-package"] }
+
+# User scope: the installation directory is ~/.schway, not npm's -g prefix.
+npm install --prefix "$HOME/.schway" schway your-schway-package
+# Add to ~/.schway/config.json:
+# { "packages": ["your-schway-package"] }
+```
+
+Merge `packages` into existing config rather than replacing your other settings.
+Each config's list is independent: project enablement does not erase global
+packages. Only direct `node_modules/<name>` entries in that scope are resolved;
+missing packages report the matching `npm install --prefix ...` command. Versions,
+URLs, and paths belong in npm installation commands, not enablement lists.
+
+A package declares capabilities in its `package.json`:
+
+```json
+{
+  "name": "your-schway-package",
+  "version": "1.0.0",
+  "type": "module",
+  "peerDependencies": { "schway": "^0.1.0" },
+  "schway": {
+    "extensions": ["extensions/main.ts"],
+    "skills": ["skills/review"]
+  }
+}
+```
+
+Each extension entry is a module file with the default initializer described
+below; each skill entry is a directory containing `SKILL.md`. Either array may
+be omitted. Paths must stay inside the canonical package root, including symlinks.
+All manifests, paths, and declared Schway peer ranges are checked before any
+extension is imported. A skills-only package's JavaScript entrypoint is never
+imported. Extensions use the installed `schway/extensions` public API, declare
+Schway as a peer, and declare their own other dependencies normally; bundling
+Schway in `dependencies`, `optionalDependencies`, or either bundled-dependency
+list is rejected. Declared peer ranges must be valid npm semver ranges.
+
+Skills select the first defining tier: project `.agents/skills`, configured
+project packages, global `~/.schway/skills`, then configured global packages.
+Two distinct definitions at the same winning tier make that name unavailable
+with both sources reported; package list order never picks a skill winner.
+Extension initialization and hooks instead follow global package list order,
+project package list order, then `--extension` argument order, preserving each
+manifest's array order. Enabling the same canonical executable twice is an error,
+including aliases and enablement across scopes.
+
+Startup `--resume` uses the saved workspace. Interactive `/resume` and `/new`
+stage the destination workspace's enabled capabilities and replace the runtime
+only after successful initialization; failure or Esc cancellation keeps the
+previous session usable. Package enablement is read from config, never persisted
+as executable code in sessions.
+
+The shipped `examples/packages/greeting` directory is a complete mixed package.
+With Schway installed locally, try it without publishing anything:
+
+```bash
+npm pack ./node_modules/schway/examples/packages/greeting
+npm install ./schway-example-greeting-1.0.0.tgz
+# Add "packages": ["schway-example-greeting"] to .schway/config.json.
+schway -p "/skills"
+schway -p "/greeting Ada"
+schway
+# In the editor: /greeting Ada
+```
+
 ## Local TypeScript extensions
 
 Explicitly enable local extension modules with repeatable `--extension` flags. Both
@@ -135,8 +212,9 @@ launch directory), including when launched from a subdirectory. Absolute paths
 are also accepted. Symlinks resolve to their real paths; duplicate module
 identities fail before any enabled module runs. A startup `--resume` uses the
 saved workspace root. Pass the flags again on each process launch: extension
-enablement is not saved in sessions or read from `config.json`. There is no
-directory scan, package discovery, automatic install, or dependency guessing.
+CLI module enablement is not saved in sessions. Installed npm packages are
+enabled separately through [`config.json`](#installed-skill-and-extension-packages). There is no
+arbitrary directory scan, automatic install, or dependency guessing.
 Unmentioned modules are never imported by Schway.
 
 Use the installed package's public `schway/extensions` entry; extension authors
@@ -276,7 +354,7 @@ Precedence, later wins:
 3. `<workspace-root>/.schway/config.json`
 4. CLI flags
 
-Project config is read from the workspace root (nearest Git root, otherwise the launch directory), not from a nested launch cwd.
+Project config is read from the workspace root (nearest Git root, otherwise the launch directory), not from a nested launch cwd. The `packages` enablement lists are scope-specific and additive across user/project files; they do not follow scalar-setting replacement.
 
 ```json
 {
