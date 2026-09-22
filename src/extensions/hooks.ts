@@ -96,12 +96,14 @@ export class ExtensionHooks {
     return current;
   }
 
+  /** Append a callable hook with its source identity while the owning runtime remains active. */
   private register<T>(list: Array<Owned<T>>, source: string, hook: T): void {
     this.signal.throwIfAborted();
     if (typeof hook !== "function") throw new Error("Request hook must be a function");
     list.push({ source, value: hook });
   }
 
+  /** Await hook work until cancellation and attribute bounded, redacted failures to its source and phase. */
   private async invoke<T>(source: string, phase: string, signal: AbortSignal, work: () => Promise<T>): Promise<T> {
     let abort!: () => void;
     try {
@@ -127,6 +129,7 @@ export class ExtensionHooks {
   }
 }
 
+/** Reject a denial result with its validated explanation, leaving ordinary hook results unchanged. */
 function deny(value: unknown): void {
   if (value && typeof value === "object" && "deny" in value) {
     object(value, ["deny"]);

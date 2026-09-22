@@ -93,12 +93,14 @@ export function nonempty(value: unknown, label: string): asserts value is string
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a nonempty string`);
 }
 
+/** Accept absent metadata or require a plain object containing valid JSON values. */
 function metadata(value: unknown): void {
   if (value === undefined) return;
   object(value);
   json(value);
 }
 
+/** Reject non-JSON values, nonfinite numbers, and cycles while allowing shared acyclic references. */
 function json(value: unknown, ancestors = new Set<object>()): void {
   if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
   if (typeof value !== "object" || ancestors.has(value)) throw new Error("native metadata and arguments must be finite, acyclic JSON data");
