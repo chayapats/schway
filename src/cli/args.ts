@@ -2,7 +2,7 @@ import type { ConfigLayer } from "../config/config.ts";
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>]";
+  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
@@ -28,6 +28,7 @@ export interface CliArgs {
   contextWindow?: number;
   maxOutput?: number;
   envFiles?: string[];
+  extensions?: string[];
 }
 
 /** Parse argv. Unknown options and missing flag values return an error. */
@@ -202,6 +203,16 @@ export function parseArgs(
       }
       i = intFlag.index;
       assignIntegerFlag(args, intFlag.name, intFlag.value);
+      continue;
+    }
+    if (arg === "--extension" || arg.startsWith("--extension=")) {
+      const equals = arg.startsWith("--extension=");
+      const value = equals ? arg.slice("--extension=".length) : argv[i + 1];
+      if (!value || (!equals && value.startsWith("-"))) {
+        return { error: "Missing value for --extension" };
+      }
+      if (!equals) i++;
+      args.extensions = [...(args.extensions ?? []), value];
       continue;
     }
     if (arg === "--env-file") {

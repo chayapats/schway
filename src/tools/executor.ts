@@ -4,6 +4,8 @@ import type { ToolRegistry } from "./registry.ts";
 import type { ToolCallStatus, ToolOutputChunk } from "./types.ts";
 
 const CANCELLED_CONTENT = "Tool call cancelled";
+const MAX_RESULT_CHARS = 50_000;
+const TRUNCATED_RESULT = "\n[Tool output truncated; narrow the request or use pagination.]";
 
 /** Conversation tool result plus the status used in runtime events. */
 export interface ExecutedToolCall {
@@ -81,8 +83,11 @@ function cancelled(call: ToolCallContent): ExecutedToolCall {
 
 /** Build a model-visible error result without throwing. */
 function failure(call: ToolCallContent, content: string): ExecutedToolCall {
+  const bounded = content.length <= MAX_RESULT_CHARS
+    ? content
+    : content.slice(0, MAX_RESULT_CHARS - TRUNCATED_RESULT.length) + TRUNCATED_RESULT;
   return {
-    result: toolResult(call, content, true),
+    result: toolResult(call, bounded, true),
     status: "error",
   };
 }

@@ -1,0 +1,113 @@
+import { realpath, stat } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { forkToolRegistry, type ToolRegistry } from "../tools/registry.ts";
+import { toPlainJsonSchema } from "../tools/schema.ts";
+import type { ToolDefinition } from "../tools/types.ts";
+import type { Workspace } from "../workspace/workspace.ts";
+import type { ExtensionContext } from "./index.ts";
+import { guardExtensionTool } from "./runtime.ts";
+
+const NATIVE_TOOL_NAMES = new Set(["read", "write", "edit", "bash", "grep", "find", "ls", "activate_skill"]);
+
+/** Load only explicitly named local modules in order, returning all registrations or rejecting without changing the input registry. */
+export async function loadExtensions(options: {
+  modules: readonly string[];
+  workspace: Workspace;
+  tools: ToolRegistry;
+  secrets?: readonly string[];
+}): Promise<ToolRegistry> {
+  const paths: string[] = [];
+  const identities = new Set<string>();
+  for (const module of options.modules) {
+    try {
+      const path = await realpath(resolve(options.workspace.root, module));
+      if (!(await stat(path)).isFile()) {
+        throw new Error("Expected a local module file");
+      }
+      if (identities.has(path)) {
+        throw new Error(`Duplicate extension identity: ${path}`);
+      }
+      identities.add(path);
+      paths.push(path);
+    } catch (error) {
+      throw extensionError(module, error);
+    }
+  }
+
+  const staged = forkToolRegistry(options.tools);
+  for (const path of paths) {
+    try {
+      const module = await import(pathToFileURL(path).href);
+      if (typeof module.default !== "function") {
+        throw new Error("Expected a default extension initializer function");
+      }
+      let open = true;
+      let registrationFailure: Error | undefined;
+      const context: ExtensionContext = Object.freeze({
+        registerTool(tool: ToolDefinition) {
+          if (!open) {
+            throw extensionError(path, new Error("Tool registration is closed"));
+          }
+          try {
+            staged.register(guardExtensionTool(snapshotTool(tool), path, options.secrets ?? []));
+          } catch (error) {
+            registrationFailure ??= error instanceof Error ? error : new Error(String(error));
+            throw registrationFailure;
+          }
+        },
+      });
+      try {
+        await module.default(context);
+        if (registrationFailure) {
+          throw registrationFailure;
+        }
+      } finally {
+        open = false;
+      }
+    } catch (error) {
+      throw extensionError(path, error);
+    }
+  }
+  return staged;
+}
+
+/** Validate runtime declarations and detach model metadata from the extension's mutable objects. */
+function snapshotTool(tool: ToolDefinition): ToolDefinition {
+  if (!tool || typeof tool !== "object") {
+    throw new Error("Expected a tool definition object");
+  }
+  const { name, description, execution, execute } = tool;
+  if (typeof name !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(name)) {
+    throw new Error("Tool name must contain 1–64 letters, digits, underscores, or hyphens");
+  }
+  if (NATIVE_TOOL_NAMES.has(name)) {
+    throw new Error(`Tool name "${name}" is reserved by Schway`);
+  }
+  if (typeof description !== "string" || !description.trim()) {
+    throw new Error(`Tool "${name}" requires a nonempty description`);
+  }
+  if (execution !== "parallel" && execution !== "exclusive") {
+    throw new Error(`Tool "${name}" execution must be parallel or exclusive`);
+  }
+  if (typeof execute !== "function") {
+    throw new Error(`Tool "${name}" requires an execute function`);
+  }
+  return Object.freeze({ name, description, execution, execute, inputSchema: freezeJson(toPlainJsonSchema(tool.inputSchema)) });
+}
+
+/** Freeze detached JSON metadata so later mutation cannot diverge from the compiled validator. */
+function freezeJson<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const nested of Object.values(value)) {
+      freezeJson(nested);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** Attribute all startup failures to the requested or canonical extension identity. */
+function extensionError(identity: string, error: unknown): Error {
+  return new Error(`Extension "${identity}": ${error instanceof Error ? error.message : String(error)}`);
+}

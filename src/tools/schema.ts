@@ -1,5 +1,6 @@
-import type { TSchema } from "@sinclair/typebox";
-import { TypeCompiler } from "@sinclair/typebox/compiler";
+import Ajv from "ajv";
+
+const validatorCompiler = new Ajv({ strict: false, strictNumbers: true, allErrors: true });
 
 const ALLOWED_KEYWORDS = new Set([
   "type",
@@ -140,7 +141,12 @@ export function compileValidator(schema: unknown): SchemaValidator {
   assertSupportedJsonSchema(plain);
   let compiled;
   try {
-    compiled = TypeCompiler.Compile(schema as TSchema);
+    // The explicit subset guard handles unknown keywords; Ajv validates keyword
+    // shapes and compiles plain JSON without requiring TypeBox's private symbols.
+    compiled = validatorCompiler.compile(plain);
+    // Keep compiled closures on registries without retaining every schema in the
+    // process-wide compiler's cache; its shared meta-schema stays compiled.
+    validatorCompiler.removeSchema(plain);
   } catch (error) {
     throw new Error(
       `Unable to compile tool schema: ${error instanceof Error ? error.message : String(error)}`,
@@ -148,11 +154,11 @@ export function compileValidator(schema: unknown): SchemaValidator {
   }
 
   return (value: unknown) => {
-    if (compiled.Check(value)) {
+    if (compiled(value)) {
       return { ok: true, value };
     }
-    const errors = [...compiled.Errors(value)]
-      .map((entry) => `${entry.path || "/"} ${entry.message}`.trim())
+    const errors = (compiled.errors ?? [])
+      .map((entry) => `${entry.instancePath || "/"} ${entry.message}`.trim())
       .join("; ");
     return { ok: false, message: errors || "Invalid arguments" };
   };

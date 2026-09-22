@@ -21,7 +21,22 @@ export interface ToolRegistry {
 export function createToolRegistry(
   definitions: readonly ToolDefinition[] = [],
 ): ToolRegistry {
-  const tools = new Map<string, RegisteredTool>();
+  const registry = registryFromEntries(new Map());
+  for (const definition of definitions) {
+    registry.register(definition);
+  }
+  return registry;
+}
+
+/** Copy a registry's compiled entries so new registrations cannot partially mutate the original. */
+export function forkToolRegistry(source: ToolRegistry): ToolRegistry {
+  return registryFromEntries(new Map(source.definitions().map((definition) => [
+    definition.name, source.get(definition.name)!,
+  ])));
+}
+
+/** Wrap privately owned entries in the standard registry interface. */
+function registryFromEntries(tools: Map<string, RegisteredTool>): ToolRegistry {
 
   const registry: ToolRegistry = {
     /** Compile the input schema and store the tool. Duplicate names throw. */
@@ -50,8 +65,5 @@ export function createToolRegistry(
     },
   };
 
-  for (const definition of definitions) {
-    registry.register(definition);
-  }
   return registry;
 }

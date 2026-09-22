@@ -91,3 +91,31 @@ test("compiles validators once at registration", () => {
   const second = registry.get("stub")?.validate;
   expect(first).toBe(second);
 });
+
+test("plain JSON Schema validates without TypeBox symbols or argument coercion", () => {
+  const registry = createToolRegistry([stub({
+    type: "object",
+    properties: { name: { type: "string", minLength: 1 } },
+    required: ["name"],
+    additionalProperties: false,
+  })]);
+  const validate = registry.get("stub")!.validate;
+  expect(validate({ name: "Ada" }).ok).toBe(true);
+  expect(validate({ name: 1 }).ok).toBe(false);
+  expect(validate({}).ok).toBe(false);
+  expect(validate({ name: "" }).ok).toBe(false);
+  expect(validate({ name: "Ada", extra: true }).ok).toBe(false);
+  expect(registry.get("stub")!.validate).toBe(validate);
+});
+
+test("malformed supported schema keywords fail at registration", () => {
+  for (const schema of [
+    { type: "object", required: "name" },
+    { type: "string", minLength: "one" },
+    { type: "array", minItems: -1 },
+    { type: "object", additionalProperties: "yes" },
+    { type: "number", enum: [] },
+  ]) {
+    expect(() => createToolRegistry([stub(schema)])).toThrow("Invalid schema");
+  }
+});

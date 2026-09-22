@@ -31,7 +31,8 @@ import { findTool } from "../tools/find.ts";
 import { grepTool } from "../tools/grep.ts";
 import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
-import { createToolRegistry } from "../tools/registry.ts";
+import { loadExtensions } from "../extensions/loader.ts";
+import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { loadProviderModel } from "../model/loader.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
@@ -180,6 +181,17 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     skillTurn = { skill: prepared.skill, body: prepared.body };
   }
 
+  let tools: ToolRegistry;
+  try {
+    tools = await loadExtensions({
+      modules: parsed.args.extensions ?? [], workspace, secrets,
+      tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+    });
+  } catch (error) {
+    io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
+    return 1;
+  }
+
   let model = io.model;
   if (!model) {
     const loaded = await loadCliModel(settings, parsed.args.apiKey, { ...io, env }, secrets);
@@ -219,15 +231,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       session,
       model,
       contextManager,
-      tools: createToolRegistry([
-        readTool,
-        writeTool,
-        editTool,
-        bashTool,
-        grepTool,
-        findTool,
-        lsTool,
-      ]),
+      tools,
       workspace,
       signal: io.signal,
       maxTurns: settings.maxTurns,

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { withTempDir } from "./helpers.ts";
+import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
 /** Read a repo-relative source file as text. */
 async function source(path: string): Promise<string> {
@@ -10,10 +10,11 @@ async function source(path: string): Promise<string> {
 
 /** Run a command and collect piped output with its exit code. */async function runCommand(
   argv: string[],
-  options: { cwd?: string },
+  options: { cwd?: string; env?: Record<string, string> },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(argv, {
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.env ? { env: options.env } : {}),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -82,11 +83,12 @@ test("all three provider families are selectable with headless and interactive m
   expect(await Bun.file("src/tui/controller.ts").exists()).toBe(true);
 });
 
-test("v0.1 keeps later-milestone surfaces out of the base harness", async () => {
+test("only shipped extension surfaces are present in the base harness", async () => {
   const entries = await readdir(join(import.meta.dir, "../src"));
-  // Agent Skills landed in v0.2 (issue #35); the remaining surfaces stay out.
+  // Skills and explicit local tools are supported; broader orchestration remains deferred.
   expect(entries.includes("skills")).toBe(true);
-  for (const deferred of ["extensions", "server", "subagents", "workflows"]) {
+  expect(entries.includes("extensions")).toBe(true);
+  for (const deferred of ["server", "subagents", "workflows"]) {
     expect(entries.includes(deferred)).toBe(false);
   }
   const cli = await source("src/cli/main.ts");
@@ -114,7 +116,7 @@ test("validating the release artifact does not publish it", async () => {
   expect(lowered).toContain("bun test");
 });
 
-test("npm pack produces an installable tarball with the runtime files only", async () => {
+test("npm pack installs the public extension API and completes a headless tool round trip", async () => {
   await withTempDir(async (dir) => {
     // Offline: pack the repository and inspect the artifact, never the checkout.
     const pack = Bun.spawn(["npm", "pack", "--pack-destination", dir, "--silent"], {
@@ -146,6 +148,9 @@ test("npm pack produces an installable tarball with the runtime files only", asy
       "package/bin/schway",
       "package/src/cli/main.ts",
       "package/src/tui/app.ts",
+      "package/src/extensions/index.ts",
+      "package/src/extensions/loader.ts",
+      "package/examples/extensions/greet.ts",
       "package/package.json",
       "package/README.md",
       "package/LICENSE",
@@ -161,7 +166,7 @@ test("npm pack produces an installable tarball with the runtime files only", asy
     // This step needs registry access for the runtime dependencies.
     const installDir = join(dir, "install");
     const installed = await runCommand(
-      ["npm", "install", "--prefix", installDir, "--no-audit", "--no-fund", "--silent", join(dir, tarball)],
+      ["npm", "install", "--prefix", installDir, "--no-audit", "--no-fund", "--silent", join(dir, tarball), "@types/bun@1.4.2"],
       {},
     );
     expect(installed.exitCode).toBe(0);
@@ -171,6 +176,57 @@ test("npm pack produces an installable tarball with the runtime files only", asy
     );
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain("Usage: schway");
+
+    // A consumer uses only the public installed contract, with ordinary Bun types.
+    await Bun.write(join(installDir, "greet.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/greet.ts")).text());
+    const checked = await runCommand([
+      join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict", "--skipLibCheck",
+      "--moduleResolution", "bundler", "--module", "esnext", "--target", "esnext",
+      "--allowImportingTsExtensions", "--types", "bun", "greet.ts",
+    ], { cwd: installDir });
+    expect(checked.stdout + checked.stderr).toBe("");
+    expect(checked.exitCode).toBe(0);
+
+    // Missing renderer and unused SDK packages prove the installed headless path stays lazy.
+    for (const dependency of ["@opentui", "openai", "@anthropic-ai/sdk"]) {
+      await rm(join(installDir, "node_modules", dependency), { recursive: true, force: true });
+    }
+    const marker = join(installDir, "disabled-ran");
+    await Bun.write(join(installDir, "disabled.ts"), `await Bun.write(${JSON.stringify(marker)}, 'bad'); throw new Error('disabled extension ran');`);
+    const requests: Array<{ tools?: Array<{ function: { name: string } }>; messages?: Array<{ role: string; tool_call_id?: string; content?: string }> }> = [];
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+      requests.push(await request.json() as typeof requests[number]);
+      const first = requests.length === 1;
+      const delta = first
+        ? { tool_calls: [{ index: 0, id: "greet-call", type: "function", function: { name: "greet", arguments: '{"name":"Ada"}' } }] }
+        : { content: "Greeting complete" };
+      return new Response(`data: ${JSON.stringify({ id: "fixture", choices: [{ index: 0, delta, finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`, {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    } });
+    const isolatedHome = join(dir, "home");
+    await mkdir(isolatedHome);
+    try {
+      const conversation = await runCommand([
+        join(installDir, "node_modules/.bin/schway"), "-p", "greet Ada", "--json",
+        "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${server.port}/v1`,
+        "--model", "fixture", "--auth", "none", "--extension", "greet.ts",
+      ], { cwd: installDir, env: buildIsolatedCliEnv(isolatedHome) });
+      expect(conversation.stderr).toBe("");
+      expect(conversation.exitCode).toBe(0);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]!.tools?.some((tool) => tool.function.name === "greet")).toBe(true);
+      expect(requests[1]!.messages?.filter((message) => message.role === "tool"))
+        .toEqual([{ role: "tool", tool_call_id: "greet-call", content: "Hello, Ada!" }]);
+      const events = conversation.stdout.trim().split("\n").map((line) => JSON.parse(line));
+      expect(events.filter((event) => event.type === "tool.finished")).toMatchObject([
+        { toolCallId: "greet-call", status: "success", content: "Hello, Ada!" },
+      ]);
+      expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
+      expect(await Bun.file(marker).exists()).toBe(false);
+    } finally {
+      await server.stop(true);
+    }
   });
 }, 180_000);
 
