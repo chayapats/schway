@@ -607,9 +607,20 @@ async function readPackageSkills(packages: readonly EnabledPackage[], signal?: A
   for (const pkg of packages) {
     for (const dir of pkg.skills) {
       signal?.throwIfAborted();
-      const skillFile = await realpath(join(dir, "SKILL.md"));
+      const declaredFile = join(dir, "SKILL.md");
+      let skillFile: string;
+      let content: string;
+      try {
+        skillFile = await realpath(declaredFile);
+        content = await readFile(skillFile, { encoding: "utf8", signal });
+        signal?.throwIfAborted();
+      } catch {
+        signal?.throwIfAborted();
+        diagnostics.push({ source: `${pkg.source}: ${declaredFile}`, reason: "SKILL.md cannot be read" });
+        continue;
+      }
       const displayPath = `${pkg.source}: ${skillFile}`;
-      const parsed = parseSkillFile(await readFile(skillFile, { encoding: "utf8", signal }));
+      const parsed = parseSkillFile(content);
       if (!parsed.ok || !parsed.value.body.trim()) {
         diagnostics.push({ source: displayPath, reason: parsed.ok ? "skill has an empty body" : parsed.error });
         continue;

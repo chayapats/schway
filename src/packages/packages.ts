@@ -80,6 +80,7 @@ export async function discoverPackages(options: {
   return packages;
 }
 
+/** Resolve manifest entrypoints only when their canonical paths and required file types stay inside the package. */
 async function declaredPaths(root: string, value: unknown, kind: "extensions" | "skills", signal?: AbortSignal): Promise<string[]> {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some(entry => typeof entry !== "string" || !entry.trim())) {
@@ -113,11 +114,13 @@ async function declaredPaths(root: string, value: unknown, kind: "extensions" | 
   return paths;
 }
 
+/** Test whether a resolved path is the root itself or one of its descendants. */
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
+/** Narrow parsed manifest values to non-null objects while excluding arrays. */
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

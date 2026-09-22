@@ -340,6 +340,7 @@ export class TuiController {
     }
   }
 
+  /** Publish staged workspace capabilities only while this switch still owns the controller. */
   private async stageSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }, abort: AbortController): Promise<boolean> {
     let staged: { tools: ToolRegistry; runtime: ExtensionRuntime } | undefined;
     try {

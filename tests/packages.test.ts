@@ -17,10 +17,12 @@ import type { Workspace } from "../src/workspace/workspace.ts";
 import { withIsolatedCliDirs } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
+/** Write only the enabled package list to an isolated scope's configuration. */
 async function configure(root: string, packages: string[]): Promise<void> {
   await Bun.write(join(root, ".schway/config.json"), JSON.stringify({ packages }));
 }
 
+/** Materialize an installed package fixture with its declared manifest and requested files. */
 async function installed(root: string, name: string, manifest: unknown, files: Record<string, string> = {}): Promise<string> {
   const dir = join(root, "node_modules", name);
   await Bun.write(join(dir, "package.json"), JSON.stringify({ name, version: "1.0.0", type: "module", ...manifest as object }));
@@ -28,10 +30,12 @@ async function installed(root: string, name: string, manifest: unknown, files: R
   return dir;
 }
 
+/** Build valid model-eligible skill metadata and a supplied instruction body. */
 function skill(name: string, body = `Instructions for ${name}`): string {
   return `---\nname: ${name}\ndescription: Use ${name}\n---\n${body}\n`;
 }
 
+/** Build an initializer exposing one named tool and interactive command. */
 function extension(name: string): string {
   return `export default ctx => {
     ctx.registerTool({ name: '${name}', description: 'Packaged tool', execution: 'parallel', inputSchema: { type: 'object' },
@@ -40,6 +44,7 @@ function extension(name: string): string {
   };`;
 }
 
+/** Bind an isolated workspace fixture to one primary root without attachments. */
 function workspace(root: string): Workspace { return { root, launchCwd: root, extraRoots: [] }; }
 
 test("package enablement config accepts npm names and rejects executable specifiers, duplicates, and invalid types", () => {
@@ -160,6 +165,34 @@ test("canonical containment rejects symlink escapes in executable and skill decl
     await expect(discoverPackages({ workspaceRoot: work, home })).rejects.toThrow("inside the package root");
   });
 });
+
+for (const failure of ["missing", "directory"] as const) {
+  test(`a packaged skill becoming ${failure} after manifest validation reports a diagnostic and preserves remaining skills`, async () => {
+    await withIsolatedCliDirs(async ({ work, home }) => {
+      await installed(work, "read-failure", { schway: { skills: ["unavailable", "available"] } }, {
+        "unavailable/SKILL.md": skill("unavailable"), "available/SKILL.md": skill("available"),
+      });
+      await configure(work, ["read-failure"]);
+      const packages = await discoverPackages({ workspaceRoot: work, home });
+      const unavailableFile = join(packages[0]!.skills[0]!, "SKILL.md");
+      await rm(unavailableFile);
+      // A directory makes readFile fail even under root, avoiding permission-dependent fixtures.
+      if (failure === "directory") await mkdir(unavailableFile);
+      const discovered = await discoverSkills({ workspaceRoot: work, home, packages });
+      expect(discovered.skills.map(entry => entry.name)).toEqual(["available"]);
+      expect(discovered.skills[0]!.skillFile).toBe(await realpath(join(packages[0]!.skills[1]!, "SKILL.md")));
+      expect(discovered.diagnostics).toEqual([{
+        source: `${packages[0]!.source}: ${unavailableFile}`, reason: "SKILL.md cannot be read",
+      }]);
+      // Fresh manifest validation still rejects unavailable or non-file declared entrypoints.
+      await expect(discoverPackages({ workspaceRoot: work, home })).rejects.toThrow("SKILL.md");
+      const controller = new AbortController();
+      const cancelled = new Error("Skill discovery cancelled");
+      controller.abort(cancelled);
+      await expect(discoverSkills({ workspaceRoot: work, home, packages, signal: controller.signal })).rejects.toBe(cancelled);
+    });
+  });
+}
 
 test("all four skill precedence tiers work independently of package enablement order", async () => {
   await withIsolatedCliDirs(async ({ work, home }) => {
