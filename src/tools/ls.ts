@@ -11,10 +11,13 @@ import type {
 
 /** Default listing depth when the model omits `depth`. */
 export const DEFAULT_LS_DEPTH = 1;
-/** Hard cap on model-facing characters, including truncation notes. */
+/** Character budget checked before adding further entries; the first entry and truncation note may exceed it. */
 export const MAX_LS_CHARS = 50_000;
 
-/** TypeBox schema for `ls`. Compiled once when the tool is registered. */
+/**
+ * Accept an optional directory and positive listing depth, rejecting unknown keys during validation.
+ * Compiled once when the tool is registered.
+ */
 export const lsInputSchema = Type.Object(
   {
     path: Type.Optional(
@@ -34,10 +37,10 @@ export const lsInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `ls` tool. */
+/** Optional directory and depth accepted by the listing schema, defaulting to the workspace root and one level. */
 export type LsInput = Static<typeof lsInputSchema>;
 
-/** Structured extras attached to a successful or failed listing. */
+/** Successful listing metadata with searched paths, requested depth, returned count, and truncation state. */
 export interface LsDetails {
   path: string;
   resolvedPath: string;
@@ -46,7 +49,7 @@ export interface LsDetails {
   truncated: boolean;
 }
 
-/** Built-in directory lister. Declares parallel execution. */
+/** Bounded directory-listing definition eligible for parallel scheduling. */
 export const lsTool: ToolDefinition<LsInput> = {
   name: "ls",
   description:
@@ -58,7 +61,8 @@ export const lsTool: ToolDefinition<LsInput> = {
 
 /**
  * List a directory up to `depth` levels.
- * Relative paths resolve from the workspace root.
+ * Relative paths resolve from the workspace root; output observes a character budget.
+ * Filesystem failures return error results, nested permission failures are skipped, and detected cancellation rejects.
  */
 export async function executeLs(
   input: LsInput,

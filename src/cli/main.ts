@@ -45,6 +45,7 @@ import {
 
 /** Minimal writer used so tests can capture CLI output. */
 export interface CliWriter {
+  /** Write a text chunk to the chosen output destination without adding a newline. */
   write(chunk: string): void;
 }
 
@@ -54,7 +55,7 @@ type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-/** Process I/O and optional injected model for headless runs. */
+/** Process inputs, output sinks, and optional model/transport overrides for a CLI invocation. */
 export interface CliIo {
   stdout: CliWriter;
   stderr: CliWriter;
@@ -62,7 +63,9 @@ export interface CliIo {
   cwd: string;
   signal?: AbortSignal;
   model?: Model;
+  /** Override provider HTTP transport when the built-in model loader is used. */
   fetch?: FetchLike;
+  /** Construct a model from resolved provider settings instead of using the built-in loader. */
   createModel?: (input: {
     apiKey?: string;
     provider: string;
@@ -76,9 +79,9 @@ export interface CliIo {
 }
 
 /**
- * Run a Schway invocation.
+ * Dispatch CLI arguments to a persisted headless run or a lazily loaded interactive terminal.
  * Without `-p` this opens the interactive terminal; with `-p` it runs headless.
- * Returns a process exit code: 0 on success, 1 on usage, auth, or run failure.
+ * Returns 0 on success and 1 on handled usage, auth, or run failure; unhandled setup/I/O failures can reject.
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const parsed = parseArgs(argv);

@@ -70,7 +70,7 @@ export interface CompactOptions {
   signal?: AbortSignal;
 }
 
-/** Builds a model request payload that is not persisted into session history. */
+/** Prepare volatile model context and append compaction records while preserving original session history. */
 export interface ContextManager {
   /** Assemble system prompt and dynamic context; auto-compacts on pressure when a model is given. */
   prepare(
@@ -78,13 +78,13 @@ export interface ContextManager {
     model?: Model,
     options?: { signal?: AbortSignal },
   ): Promise<PreparedContext>;
-  /** Compact oldest complete turns and append a durable record; null when noop or failed. */
+  /** Summarize older turns and append a record, returning null for no boundary or an empty, rejected, or pre-aborted summary. */
   compact(
     session: Session,
     model: Model,
     options: CompactOptions,
   ): Promise<CompactionRecord | null>;
-  /** Attach an explicitly invoked skill body for the next submitted turn only. */
+  /** Attach skill context until cleared; the caller must clear it when the invoking turn settles. */
   setActiveSkill(skill: ActiveSkill): void;
   /** Drop any active skill without touching durable history. */
   clearActiveSkill(): void;

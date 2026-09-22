@@ -103,12 +103,12 @@ const SECRET_KEY_ALIASES = new Set([
   "credentials",
 ]);
 
-/** User-global config path: `~/.schway/config.json`. */
+/** Join the supplied home directory with `.schway/config.json` without reading or creating it. */
 export function userConfigPath(home: string): string {
   return join(home, ".schway", "config.json");
 }
 
-/** Project config path: `<workspaceRoot>/.schway/config.json`. */
+/** Join the primary workspace root with `.schway/config.json` without reading or creating it. */
 export function projectConfigPath(workspaceRoot: string): string {
   return join(workspaceRoot, ".schway", "config.json");
 }
@@ -162,7 +162,10 @@ export function parseConfigObject(
   return layer;
 }
 
-/** Later layers replace earlier values for the same key. Undefined layers are skipped. */
+/**
+ * Return merged settings with later defined values winning and inherited models cleared on provider changes.
+ * Undefined layers are skipped; nested values such as headers are replaced rather than merged.
+ */
 export function mergeConfigLayers(
   ...layers: Array<ConfigLayer | undefined>
 ): ConfigLayer {
@@ -190,8 +193,8 @@ export function mergeConfigLayers(
 }
 
 /**
- * Merge built-in defaults, optional file layers, and CLI overrides, then fill
- * catalog metadata. Does not create configuration files.
+ * Resolve defaults, user settings, project settings, and CLI overrides in increasing precedence with catalog budgets.
+ * Returns an error when a compatible endpoint has no base URL; does not create configuration files.
  */
 export function resolveSettings(input: {
   user?: ConfigLayer;
@@ -248,7 +251,7 @@ export function resolveSettings(input: {
   };
 }
 
-/** Read user-global and project config files, then resolve settings. */
+/** Read config under the supplied home and workspace root, returning resolved settings or the first file/settings error. */
 export async function loadResolvedSettings(input: {
   home: string;
   workspaceRoot: string;

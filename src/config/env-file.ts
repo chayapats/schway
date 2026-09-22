@@ -25,8 +25,8 @@ export function parseEnvFile(text: string): Record<string, string> {
 }
 
 /**
- * Apply explicit env files over `env`. Later files win per key.
- * Missing files return an actionable error rather than being skipped.
+ * Return a copy of `env` overlaid by explicit env files in order, with later files winning per key.
+ * Paths are used as supplied; any unreadable file returns an error without mutating the input environment.
  */
 export async function applyEnvFiles(
   paths: readonly string[],

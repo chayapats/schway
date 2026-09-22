@@ -9,12 +9,15 @@ export interface RegisteredTool {
 
 /** Name-indexed set of tools available to the agent loop. */
 export interface ToolRegistry {
+  /** Compile and store a tool's schema, throwing for duplicate names or unsupported schemas. */
   register(definition: ToolDefinition): void;
+  /** Return the registered definition and validator, or undefined for an unknown name. */
   get(name: string): RegisteredTool | undefined;
+  /** Return definitions in registration order, including their execute functions. */
   definitions(): readonly ToolDefinition[];
 }
 
-/** Create a registry and optionally register tools immediately. */
+/** Create a registry seeded in order, throwing if an initial tool has a duplicate name or invalid schema. */
 export function createToolRegistry(
   definitions: readonly ToolDefinition[] = [],
 ): ToolRegistry {

@@ -13,7 +13,10 @@ import type {
   ToolExecutionResult,
 } from "./types.ts";
 
-/** TypeBox schema for `edit`. Compiled once when the tool is registered. */
+/**
+ * Accept a file path and nonempty replacement list with nonempty old text, rejecting unknown keys during validation.
+ * Compiled once when the tool is registered.
+ */
 export const editInputSchema = Type.Object(
   {
     path: Type.String({
@@ -44,24 +47,24 @@ export const editInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `edit` tool. */
+/** File path and exact old/new text replacements accepted by the edit schema. */
 export type EditInput = Static<typeof editInputSchema>;
 
-/** One replacement, for TUI presentation without putting a full diff in model context. */
+/** Applied replacement with its original one-based start line and old/new text for display outside model context. */
 export interface EditHunk {
   startLine: number;
   oldText: string;
   newText: string;
 }
 
-/** Structured extras attached to a successful or failed edit. */
+/** Edit paths with applied hunks when successful, omitted when matching or filesystem work fails. */
 export interface EditDetails {
   path: string;
   resolvedPath: string;
   hunks?: EditHunk[];
 }
 
-/** Built-in exact editor. Declares exclusive execution. */
+/** Exact-replacement definition that runs behind an exclusive scheduling barrier. */
 export const editTool: ToolDefinition<EditInput> = {
   name: "edit",
   description:
@@ -74,6 +77,8 @@ export const editTool: ToolDefinition<EditInput> = {
 /**
  * Apply exact replacements atomically.
  * Matches are computed against the original file. Failures leave the file untouched.
+ * Relative paths resolve from the workspace root; missing, duplicate, or overlapping
+ * matches and filesystem failures return error results, while detected cancellation rejects.
  */
 export async function executeEdit(
   input: EditInput,

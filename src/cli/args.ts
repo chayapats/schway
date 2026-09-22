@@ -1,15 +1,16 @@
 import type { ConfigLayer } from "../config/config.ts";
 
+/** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
   "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>]";
 
-/** Built-in provider families selectable from the headless CLI. */
+/** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
 
 /** Authentication mode for OpenAI-compatible endpoints. */
 export type CliAuthMode = "required" | "optional" | "none";
 
-/** Headless flags. `resume` is a session id, not a file path. */
+/** Parsed CLI options for headless or interactive runs, with `resume` identifying a session rather than a path. */
 export interface CliArgs {
   prompt?: string;
   json: boolean;

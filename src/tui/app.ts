@@ -48,6 +48,7 @@ import { listCatalog, lookupModel } from "../model/catalog.ts";
 
 /** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
 export interface TuiWriter {
+  /** Write a text chunk to the chosen output destination without adding a newline. */
   write(chunk: string): void;
 }
 
@@ -65,7 +66,9 @@ export interface InteractiveIo {
   args: CliArgs;
   signal?: AbortSignal;
   model?: Model;
+  /** Override provider HTTP transport when the built-in model loader is used. */
   fetch?: FetchLike;
+  /** Construct a model from resolved provider settings instead of using the built-in loader. */
   createModel?: (input: {
     apiKey?: string;
     provider: string;
@@ -79,8 +82,8 @@ export interface InteractiveIo {
 }
 
 /**
- * Run the interactive terminal conversation.
- * Returns a process exit code: 0 on clean quit, 1 on startup failure.
+ * Open a persisted interactive conversation and handle input until quit or cancellation.
+ * Returns 0 on clean quit and 1 on handled startup failure; unhandled setup/I/O failures can reject.
  */
 export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   const home = io.env.HOME;

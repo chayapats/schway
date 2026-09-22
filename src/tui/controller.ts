@@ -28,7 +28,7 @@ export interface TuiTranscriptEntry {
   toolStatus?: TuiToolStatus;
 }
 
-/** Immutable view of controller state for the renderer. */
+/** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
 export interface TuiSnapshot {
   status: TuiStatus;
   transcript: readonly TuiTranscriptEntry[];
@@ -58,7 +58,7 @@ export interface TuiControllerOptions {
   /** Auth mode shown by /config for compatible endpoints. */
   auth?: string;
   startupError?: string;
-  /** Runtime secrets redacted from every displayed transcript line. */
+  /** Known values to mask in displayed transcript text and configuration output. */
   secrets?: readonly string[];
 }
 
@@ -94,6 +94,7 @@ export class TuiController {
   private currentAssistantId?: string;
   private toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
 
+  /** Initialize display history from the supplied session and dependencies without starting a model turn. */
   constructor(options: TuiControllerOptions) {
     this.session = options.session;
     this.model = options.model;
@@ -117,7 +118,7 @@ export class TuiController {
     }
   }
 
-  /** Current renderable state; transcript is a scrubbed copy so renderers cannot mutate or leak secrets. */
+  /** Return current state with a new transcript array, masking supplied known secrets in entry text. */
   snapshot(): TuiSnapshot {
     return {
       status: this.status,
@@ -132,12 +133,12 @@ export class TuiController {
     };
   }
 
-  /** True while a loop turn owns the shared cancellation signal. */
+  /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
     return this.activeAbort !== undefined;
   }
 
-  /** Update the model after a successful credential or model switch. */
+  /** Replace the adapter and displayed provider/model ids without changing session history. */
   setModel(model: Model | undefined, provider: string, modelId: string): void {
     this.model = model;
     this.provider = provider;
@@ -157,7 +158,7 @@ export class TuiController {
     return { contextWindow: info.contextWindow, maxOutput: info.maxOutput };
   }
 
-  /** Render effective basic settings with secrets redacted for `/config`. */
+  /** Render effective basic settings for `/config`, masking supplied known secrets and sanitizing the base URL. */
   describeConfig(): string {
     const budgets = this.effectiveBudgets();
     const lines = [
@@ -185,7 +186,7 @@ export class TuiController {
     return redactSecrets(lines.join("\n"), this.secrets);
   }
 
-  /** Run one manual compaction and keep the conversation usable on failure. */
+  /** Return whether manual compaction created a record, or false when busy, unavailable, cancelled, or unchanged. */
   async compact(): Promise<boolean> {
     if (this.activeAbort) {
       this.notice("Already running. Press Esc to cancel first.");
@@ -280,7 +281,7 @@ export class TuiController {
     this.status = "error";
   }
 
-  /** Stop the active turn through the shared AbortSignal path. */
+  /** Signal cancellation of the active turn without waiting for it to settle; idle calls do nothing. */
   cancel(): void {
     if (!this.activeAbort) {
       return;
@@ -288,7 +289,7 @@ export class TuiController {
     this.activeAbort.abort();
   }
 
-  /** Abort any active turn; used when switching sessions or tearing down the TUI. */
+  /** Clear active cancellation state and signal abort without awaiting the turn during terminal cleanup. */
   dispose(): void {
     this.abortActiveTurn();
   }
@@ -299,7 +300,7 @@ export class TuiController {
   }
 
   /**
-   * Submit one user prompt through the real agent loop.
+   * Append a nonempty prompt and run the shared agent loop, ignoring submissions while busy.
    * Appends the user record first so a cancelled turn still leaves resumable history.
    */
   async submit(prompt: string): Promise<void> {
@@ -592,7 +593,7 @@ export function boundDisplay(text: string, limit: number = MAX_TOOL_DISPLAY_CHAR
   return `${text.slice(0, limit)}\n… truncated. Full output is in the session file.`;
 }
 
-/** Strip credentials from a base URL for display; unparseable values show presence only. */
+/** Remove userinfo, query, and fragment from a displayed URL, or return `configured` if parsing fails. */
 export function sanitizeBaseUrl(url: string): string {
   try {
     const parsed = new URL(url);

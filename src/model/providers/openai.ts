@@ -32,8 +32,8 @@ type FetchLike = (
 ) => Promise<Response>;
 
 /**
- * OpenAI Responses adapter. Converts Schway requests and stream events,
- * disables SDK retries, and assembles function-call JSON before exposing a call.
+ * Create an OpenAI Responses adapter with SDK retries disabled and Schway-owned conversation records.
+ * Streaming forwards request cancellation and provider failures, and assembles function-call JSON before exposing a call.
  */
 export function createOpenAIModel(options: {
   apiKey: string;

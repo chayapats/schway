@@ -32,9 +32,9 @@ export interface AgentLoopOptions {
 }
 
 /**
- * Own the agent loop: prepare context, stream the model, execute tool calls,
- * append one result per accepted call, and repeat until a final answer, cancel,
- * or the turn bound.
+ * Stream runtime events while preparing context, calling the model, and persisting assistant and tool results.
+ * Repeats until a final answer, cancellation, failure, or the turn bound;
+ * failures emit error events, and accepted tool calls settle before cancellation finishes.
  */
 export async function* runAgentLoop(
   options: AgentLoopOptions,

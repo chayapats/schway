@@ -15,7 +15,7 @@ import type {
 export const DEFAULT_OPENAI_COMPATIBLE_MODEL =
   DEFAULT_MODEL_IDS["openai-compatible"];
 
-/** How the adapter sends `Authorization` for a compatible endpoint. */
+/** Control automatic bearer auth: require a key, send one if supplied, or omit automatic Authorization. */
 export type OpenAICompatibleAuth = "required" | "optional" | "none";
 
 /** Optional fetch override used by protocol tests. */
@@ -25,8 +25,8 @@ type FetchLike = (
 ) => Promise<Response>;
 
 /**
- * Schway-owned Chat Completions fetch/SSE adapter. Converts native requests
- * and streamed text/tool calls without a hidden retry loop.
+ * Create a Chat Completions fetch/SSE adapter that normalizes text and tool calls without automatic retries.
+ * Streaming passes through cancellation and rejects missing required keys, HTTP failures, and malformed streams.
  */
 export function createOpenAICompatibleModel(options: {
   baseUrl: string;

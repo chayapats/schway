@@ -10,14 +10,17 @@ import type {
 
 /** Default match cap when the model omits `maxResults`. */
 export const DEFAULT_GREP_MAX_RESULTS = 100;
-/** Hard cap on model-facing characters, including truncation notes. */
+/** Character budget for formatted matches before any truncation notice is appended. */
 export const MAX_GREP_CHARS = 50_000;
 
 /** Actionable setup text when ripgrep is not installed. */
 export const RIPGREP_MISSING_GUIDANCE =
   "ripgrep (rg) was not found on PATH. Install it to use grep, for example:\n  brew install ripgrep\n  apt install ripgrep";
 
-/** TypeBox schema for `grep`. Compiled once when the tool is registered. */
+/**
+ * Accept a nonempty regex with optional path, glob, case flag, and positive result limit, rejecting unknown keys.
+ * Compiled once when the tool is registered.
+ */
 export const grepInputSchema = Type.Object(
   {
     pattern: Type.String({
@@ -50,16 +53,16 @@ export const grepInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `grep` tool. */
+/** Regex, search scope, and match-limit options accepted by the grep schema. */
 export type GrepInput = Static<typeof grepInputSchema>;
 
-/** One match, for TUI presentation without stuffing every line into details. */
+/** Display path and one-based line number locating a match without repeating its text. */
 export interface GrepMatch {
   path: string;
   line: number;
 }
 
-/** Structured extras attached to a successful or failed search. */
+/** Successful search metadata with the returned match count, truncation state, and optional follow-up locations. */
 export interface GrepDetails {
   path: string;
   resolvedPath: string;
@@ -69,7 +72,7 @@ export interface GrepDetails {
   matches?: GrepMatch[];
 }
 
-/** Built-in content search. Declares parallel execution. */
+/** Ripgrep-backed content-search definition eligible for parallel scheduling. */
 export const grepTool: ToolDefinition<GrepInput> = {
   name: "grep",
   description:
@@ -80,8 +83,9 @@ export const grepTool: ToolDefinition<GrepInput> = {
 };
 
 /**
- * Search file contents with ripgrep.
- * Relative paths resolve from the workspace root.
+ * Search file contents with ripgrep and return bounded path:line:text matches.
+ * Relative paths resolve from the workspace root; missing ripgrep, inaccessible paths,
+ * and search failures without matches return error results, while detected cancellation rejects.
  */
 export async function executeGrep(
   input: GrepInput,
