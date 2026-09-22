@@ -128,6 +128,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       session = await loadJsonlSession({
         directory,
         id: parsed.args.resume,
+        branchId: parsed.args.branch,
       });
     } catch (error) {
       io.stderr.write(`${errorMessage(error)}\n`);

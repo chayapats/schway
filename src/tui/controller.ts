@@ -2,10 +2,7 @@ import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
-import type {
-  SessionRecord,
-  ToolResult,
-} from "../conversation/types.ts";
+import type { SessionRecord } from "../conversation/types.ts";
 import { lookupModel } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
@@ -35,6 +32,7 @@ export interface TuiSnapshot {
   status: TuiStatus;
   transcript: readonly TuiTranscriptEntry[];
   sessionId: string;
+  branchId: string;
   provider: string;
   modelId: string;
 }
@@ -143,6 +141,7 @@ export class TuiController {
           : { ...entry, text: redactSecrets(entry.text, this.secrets) },
       ),
       sessionId: this.sessionId,
+      branchId: this.session.activeBranchId,
       provider: this.provider,
       modelId: this.modelId,
     };
@@ -151,6 +150,38 @@ export class TuiController {
   /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
     return this.activeAbort !== undefined;
+  }
+
+  /** List saved branch identities or change the selected ancestry while all controller work is idle. */
+  branchCommand(args: string): boolean {
+    const [action, id, ...label] = args.trim().split(/\s+/);
+    if (action === "list" && id === undefined) {
+      const branches = this.session.listBranches();
+      const lines = [`Conversation root: ${this.session.rootId}`, "Branches (IDs are selectors; names are labels):"];
+      for (const branch of branches.slice(0, 50)) {
+        lines.push(`${branch.active ? "*" : "-"} ${branch.id}${branch.name ? ` (${branch.name})` : ""}: head ${branch.headId}, ${branch.entryCount} entries`);
+        lines.push(`  Recent complete-turn entries: ${branch.forkPoints.slice(-12).join(", ")}`);
+      }
+      if (branches.length > 50) lines.push("More branches are available through the session branch API.");
+      this.notice(lines.join("\n").slice(0, 50_000));
+      return true;
+    }
+    if (this.disposed) return false;
+    if (this.running) { this.notice("Busy: wait for the active operation to settle before changing branches."); return false; }
+    if (!id || (action !== "fork" && action !== "switch") || (action === "switch" && label.length)) {
+      this.fail("Usage: /branch list | /branch fork <entry-id> [name] | /branch switch <branch-id>. Branches do not undo file changes.");
+      return false;
+    }
+    try {
+      if (action === "fork") this.session.forkBranch(id, label.length ? label.join(" ") : undefined);
+      else this.session.selectBranch(id);
+      this.replaceSession(this.session, this.sessionId);
+      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes.`);
+      return true;
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : String(error));
+      return false;
+    }
   }
 
   /** Return a copy of the currently usable root identities for discovery and status. */
@@ -310,6 +341,7 @@ export class TuiController {
       }
     }
     lines.push(`Session: ${this.sessionId}`);
+    lines.push(`Branch: ${this.session.activeBranchId}`);
     if (this.workspace) {
       lines.push(`Workspace root: ${this.workspace.root}`, `Launch directory: ${this.workspace.launchCwd}`);
       lines.push(`Attached roots: ${this.workspace.extraRoots.join(", ") || "none"}`);
@@ -737,19 +769,10 @@ export class TuiController {
   }
 }
 
-/**
- * Rebuild display history from durable records without replaying tool effects.
- * Tool results are matched to their calls and shown bounded; compaction becomes
- * a short system line.
- */
+/** Rebuild bounded display history without replaying tools, pairing results chronologically within each accepted call group. */
 export function buildTranscriptFromSession(items: readonly SessionRecord[]): TuiTranscriptEntry[] {
   const transcript: TuiTranscriptEntry[] = [];
-  const results = new Map<string, ToolResult>();
-  for (const item of items) {
-    if (item.type === "tool_result") {
-      results.set(item.toolCallId, item);
-    }
-  }
+  const pending = new Map<string, TuiTranscriptEntry>();
   let counter = 0;
   const nextId = (prefix: string): string => {
     counter += 1;
@@ -769,20 +792,28 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
         } else if (block.type === "thinking") {
           // Thinking is runtime context, not resumed display history.
         } else if (block.type === "tool_call") {
-          const result = results.get(block.id);
-          transcript.push({
+          const entry: TuiTranscriptEntry = {
             id: nextId("tool"),
             kind: "tool",
-            text: result ? boundDisplay(result.content) : "Tool call interrupted before a result was persisted",
+            text: "Tool call interrupted before a result was persisted",
             toolName: block.name,
             toolCallId: block.id,
-            toolStatus: !result ? "cancelled" : result.isError ? "error" : "success",
-          });
+            toolStatus: "cancelled",
+          };
+          pending.set(block.id, entry);
+          transcript.push(entry);
         }
       }
       const text = textParts.join("");
       if (text.length > 0) {
         transcript.push({ id: nextId("asst"), kind: "assistant", text });
+      }
+    } else if (item.type === "tool_result") {
+      const entry = pending.get(item.toolCallId);
+      if (entry) {
+        entry.text = boundDisplay(item.content);
+        entry.toolStatus = item.isError ? "error" : "success";
+        pending.delete(item.toolCallId);
       }
     } else if (item.type === "compaction") {
       transcript.push({

@@ -18,6 +18,7 @@ export const RESERVED_SKILL_NAMES: readonly string[] = [
   "resume",
   "model",
   "compact",
+  "branch",
   "skills",
   "add-dir",
   "config",

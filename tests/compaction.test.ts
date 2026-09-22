@@ -462,7 +462,7 @@ test("Anthropic prompt-too-long text without a code still recovers", async () =>
   expect(session.items.some((item) => item.type === "compaction")).toBe(true);
 });
 
-test("aborting after a forced compaction keeps the record and reports completion", async () => {
+test("aborting during forced compaction discards a late summary and reports cancellation", async () => {
   const session = createSession(turns(12));
   const manager = createContextManager(workspace, { keepTurns: 10 });
   const controller = new AbortController();
@@ -503,6 +503,6 @@ test("aborting after a forced compaction keeps the record and reports completion
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "cancelled" });
   const finished = events.filter((e) => e.type === "compaction.finished");
   expect(finished).toHaveLength(1);
-  expect(finished[0]).toMatchObject({ status: "completed" });
-  expect(session.items.some((item) => item.type === "compaction")).toBe(true);
+  expect(finished[0]).toMatchObject({ status: "noop" });
+  expect(session.items.some((item) => item.type === "compaction")).toBe(false);
 });

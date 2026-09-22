@@ -34,6 +34,9 @@ headless runs never initialize it.
 /new - start a new session
 /sessions - list saved sessions
 /resume <id> - resume a saved session
+/branch list - show branch IDs, heads, and complete-turn fork points
+/branch fork <entry-id> [name] - create and select a conversation branch
+/branch switch <branch-id> - continue an existing conversation branch
 /add-dir <directory> - attach project context while idle
 /model - show the current provider and model
 /help - show help
@@ -54,6 +57,7 @@ export ANTHROPIC_API_KEY=...
 schway -p "explain this repository"
 schway -p "explain this repository" --json
 schway -p "continue this work" --resume <session-id>
+schway -p "continue the alternate path" --resume <session-id> --branch <branch-id>
 
 export OPENAI_API_KEY=...
 schway -p "explain this repository" --provider openai
@@ -419,7 +423,7 @@ Every core tool returns bounded model-facing output; oversized results are trunc
 - `ls`: lists to depth 1 by default; model-facing text is capped at 50,000 characters.
 - A non-zero `bash` exit code is ordinary command data (`{ stdout, stderr, exitCode }`), not infrastructure failure.
 
-## Sessions: save and resume
+## Sessions: save, branch, and resume
 
 Headless and interactive runs persist versioned JSONL sessions under `~/.schway/sessions`. Config files are never created automatically, but sessions are written so work can resume.
 
@@ -427,9 +431,14 @@ Headless and interactive runs persist versioned JSONL sessions under `~/.schway/
 schway -p "start the migration"
 schway -p "continue the migration" --resume <session-id>
 schway --resume <session-id>   # interactive resume
+schway --resume <session-id> --branch <branch-id>
 ```
 
-Resume rebuilds history from the saved JSONL without replaying old tool effects. Interrupted sessions settle unresolved tool calls on load instead of rerunning them. Partial or malformed trailing records are skipped without destroying valid history. Runtime-only stream deltas (`model.delta`, `tool.delta`) are never persisted; the durable file holds `session`, `user`, `assistant`, `tool_result`, `compaction`, and versioned session-wide metadata records. New files use format 2; format 1 gains an append-only upgrade marker on its first root change. See [session format](docs/sessions.md).
+Use `/branch list` to obtain exact branch IDs, entry IDs, and the empty conversation root ID. While idle, `/branch fork <entry-id> [name]` creates and selects an independent head at a complete user-turn boundary; `/branch switch <branch-id>` selects an existing head. Names are labels, so duplicate names are allowed and cannot select a branch. Each new reply advances only the selected branch. Branching changes conversation context; it does not undo file changes. Workspace attachments stay shared across branches.
+
+Resume rebuilds only the selected ancestry without replaying tool effects. Omit `--branch` to restore the saved active branch; `--branch` requires `--resume`. Interrupted accepted calls receive error results only on the selected ancestry. A syntactically torn final JSON write is repaired while preserving the preceding bytes; valid JSON with invalid ancestry or records is an error, even at the end of the file.
+
+New files use format 3 with atomic branch operations containing semantic `user`, `assistant`, `tool_result`, and `compaction` entries. Formats 1 and 2 load as one `main` branch and gain an append-only upgrade marker when branch data changes. Runtime-only deltas (`model.delta`, `tool.delta`) are never persisted. See [sessions](docs/sessions.md) for runnable examples, renderer-free APIs, compaction isolation, and recovery details.
 
 `--json` streams normalized runtime events as JSONL on stdout for tooling; diagnostics stay on stderr. Runtime JSONL and durable session JSONL are different concepts: the first is transient observability, the second is resumable state.
 

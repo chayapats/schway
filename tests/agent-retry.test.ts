@@ -19,7 +19,7 @@ import { readTool, type ReadInput } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import { writeTool, type WriteInput } from "../src/tools/write.ts";
-import { withTempDir } from "./helpers.ts";
+import { decodeStoredLine, withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 
 const workspace = {
@@ -547,7 +547,7 @@ test("graceful cancel settles tools once, persists source order, and resume does
     const records = (await Bun.file(join(sessions, `${session.header.id}.jsonl`)).text())
       .split("\n")
       .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as { type: string });
+      .flatMap(decodeStoredLine);
     expect(records.map((record) => record.type)).toEqual([
       "session",
       "user",

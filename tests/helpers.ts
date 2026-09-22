@@ -147,3 +147,13 @@ function isNotFound(error: unknown): boolean {
     (error as { code: unknown }).code === "ENOENT"
   );
 }
+
+/** Expose v3 appended entries and selection settlements with their parents, retaining other durable records. */
+export function decodeStoredLine(line: string): Array<{ type: string; [key: string]: unknown }> {
+  const record = JSON.parse(line);
+  if (record.type === "branch_append" || record.type === "branch_select") {
+    const entries = record.type === "branch_append" ? record.entries : record.settlements;
+    return entries.map((entry: { parentId: string; item: { type: string } }) => ({ ...entry.item, parentId: entry.parentId }));
+  }
+  return [record];
+}
