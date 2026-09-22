@@ -8,6 +8,7 @@ import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { toPlainJsonSchema } from "../tools/schema.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
+import type { ExtensionRuntime } from "../extensions/host.ts";
 import {
   streamModelTurn,
   systemClock,
@@ -30,6 +31,7 @@ export interface AgentLoopOptions {
   maxTurns?: number;
   maxConcurrentTools?: number;
   clock?: AgentClock;
+  extensions?: ExtensionRuntime;
 }
 
 /**
@@ -40,6 +42,15 @@ export interface AgentLoopOptions {
 export async function* runAgentLoop(
   options: AgentLoopOptions,
 ): AsyncGenerator<RuntimeEvent> {
+  const publish = options.extensions?.eventPublisher();
+  for await (const event of runAgentLoopInternal(options)) {
+    publish?.(event);
+    yield event;
+  }
+}
+
+/** Keep authoritative execution independent of extension notification delivery. */
+async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<RuntimeEvent> {
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   const clock = options.clock ?? systemClock();
   let tools = options.tools;

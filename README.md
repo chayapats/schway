@@ -119,7 +119,7 @@ names at one level and names colliding with built-in commands (for example
 
 ## Local TypeScript extensions
 
-Explicitly enable local tool modules with repeatable `--extension` flags. Both
+Explicitly enable local extension modules with repeatable `--extension` flags. Both
 interactive and headless startup await their default initializers in argument
 order before sending any tool definitions to the model:
 
@@ -169,11 +169,13 @@ export default defineExtension(({ registerTool }) => {
 ```
 
 `defineExtension` only supplies typing; a default function typed as `Extension`
-works too. The registration context exposes only `registerTool`. Await all
+works too. The registration context exposes `registerTool`, `registerCommand`,
+`onRuntimeEvent`, `onDispose`, and a runtime lifetime `signal`. Await all
 initialization work before returning; registration closes when initialization
 finishes. A thrown initializer, invalid tool/schema, duplicate name, or even a
 caught registration error fails startup with the extension's identity and leaves
-no partially installed tools. Interactive startup also exits with that error,
+no partially installed capabilities; registered cleanup runs on failure.
+Interactive startup also exits with that error,
 so fix the module and restart. Native tool names, including `activate_skill`,
 are reserved.
 
@@ -200,11 +202,41 @@ errors are bounded too. Known configured API keys are masked in extension
 results, errors, and output. Runtime deltas/details are not durable conversation
 records; each accepted call produces one durable tool result.
 
+Interactive commands declare a lowercase name, a help description, optional
+`arguments` usage text, and `execute(args, ctx)`. `/help` lists enabled commands
+and their source paths. Names conflicting with built-ins, discovered skills, or
+another extension fail with both owners identified. Commands run only while
+idle; a busy command leaves its input in the editor. Return display text, or
+call `ctx.submitPrompt(text)` once to queue a normal user turn after successful
+completion. Esc cancels a command through `ctx.signal`, discards its queued
+prompt, and releases the editor even when its promise never settles.
+
+`onRuntimeEvent((event, { signal }) => { ... })` observes the same native events
+as headless JSONL and the TUI, using detached, deeply frozen data. Listeners run
+in registration order with independent sequential queues; their promises never
+delay the model or tools. Each queue holds at most 128 notifications and 256,000
+serialized characters. Excess notifications are dropped with source-labelled
+diagnostics, preserving authoritative output and durable results. Keep callbacks
+short and heed their signal. Unsubscribe, session replacement, and disposal
+cancel pending listener work; late events from a replaced turn are fenced out.
+Headless diagnostics go to stderr, preserving JSONL stdout.
+
+See [the extension API guide](docs/extensions.md) for lifecycle details. The
+shipped `examples/extensions/commands-and-events.ts` provides `/event-counts`
+and `/ask-extension <prompt>`:
+
+```bash
+bun run dev -- --extension examples/extensions/commands-and-events.ts
+# In the editor: /help, /event-counts, /ask-extension explain this project
+```
+
 Extensions are trusted local code with the process's full filesystem, network,
 and environment access. This is not a sandbox, and startup cannot roll back
 arbitrary module side effects. The registration API does not expose replacements
 for Schway's loop, models, sessions, context management, or scheduler. Custom
-commands, observers, prompt hooks, and package installation are outside this API.
+prompt hooks and package installation are outside this API. JavaScript callbacks
+share the process thread; Schway cannot preempt synchronous blocking code or
+undo side effects from work that ignores cancellation.
 
 ## Configuration
 

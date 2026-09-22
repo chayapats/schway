@@ -1,4 +1,6 @@
 import { RESERVED_SKILL_NAMES, splitSlashCommand } from "../skills/skills.ts";
+import type { ExtensionCommandInfo } from "../extensions/host.ts";
+import type { TuiController } from "./controller.ts";
 
 /** Slash command requested from the TUI input editor. */
 export type SlashCommandName =
@@ -48,7 +50,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
 }
 
 /** Short interactive help shown for /help and unknown commands. */
-export function helpText(): string {
+export function helpText(commands: readonly ExtensionCommandInfo[] = []): string {
   return [
     "Commands:",
     "/new - start a new session",
@@ -61,8 +63,40 @@ export function helpText(): string {
     "/config - show effective basic settings with secrets redacted",
     "/help - show this help",
     "/quit - quit schway",
+    ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
     "Esc cancels the running turn. Ctrl+C quits when idle.",
   ].join("\n");
+}
+
+/** Dispatch the shared editor input, returning whether the editor may clear it; busy extension commands retain input. */
+export async function dispatchEditorInput(
+  input: string,
+  controller: TuiController,
+  builtin: (command: SlashCommand) => Promise<void>,
+  accepted: () => void = () => {},
+): Promise<boolean> {
+  const text = input.trim();
+  if (!text) return true;
+  const slash = parseSlashCommand(text);
+  const invocation = splitSlashCommand(text);
+  if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
+    const wasBusy = controller.running;
+    if (!wasBusy) accepted();
+    await controller.runExtensionCommand(invocation.name, invocation.args);
+    return !wasBusy;
+  }
+  if (slash) {
+    accepted();
+    await builtin(slash);
+    return true;
+  }
+  if (controller.running) {
+    controller.notice("Already running. Press Esc to cancel first.");
+    return false;
+  }
+  accepted();
+  await controller.submit(text);
+  return true;
 }
 
 /** Built-in slash names; a skill using one collides and is never invoked silently. */

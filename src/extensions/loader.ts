@@ -7,16 +7,20 @@ import type { ToolDefinition } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { ExtensionContext } from "./index.ts";
 import { guardExtensionTool } from "./runtime.ts";
+import { ExtensionRuntime } from "./host.ts";
+import { discoverSkills } from "../skills/skills.ts";
 
 const NATIVE_TOOL_NAMES = new Set(["read", "write", "edit", "bash", "grep", "find", "ls", "activate_skill"]);
 
-/** Load only explicitly named local modules in order, returning all registrations or rejecting without changing the input registry. */
+/** Atomically load explicit modules in source order, returning tools and their separately owned extension runtime. */
 export async function loadExtensions(options: {
   modules: readonly string[];
   workspace: Workspace;
   tools: ToolRegistry;
   secrets?: readonly string[];
-}): Promise<ToolRegistry> {
+  home?: string;
+  onDiagnostic?: (message: string) => void;
+}): Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }> {
   const paths: string[] = [];
   const identities = new Set<string>();
   for (const module of options.modules) {
@@ -36,40 +40,54 @@ export async function loadExtensions(options: {
   }
 
   const staged = forkToolRegistry(options.tools);
-  for (const path of paths) {
-    try {
-      const module = await import(pathToFileURL(path).href);
-      if (typeof module.default !== "function") {
-        throw new Error("Expected a default extension initializer function");
-      }
-      let open = true;
-      let registrationFailure: Error | undefined;
-      const context: ExtensionContext = Object.freeze({
-        registerTool(tool: ToolDefinition) {
-          if (!open) {
-            throw extensionError(path, new Error("Tool registration is closed"));
-          }
+  const runtime = new ExtensionRuntime({ secrets: options.secrets, onDiagnostic: options.onDiagnostic });
+  try {
+    const skills = paths.length ? await discoverSkills({ workspaceRoot: options.workspace.root, home: options.home }) : undefined;
+    for (const path of paths) {
+      try {
+        const module = await import(pathToFileURL(path).href);
+        if (typeof module.default !== "function") {
+          throw new Error("Expected a default extension initializer function");
+        }
+        let open = true;
+        let registrationFailure: Error | undefined;
+        const register = <T>(action: () => T): T => {
+          if (!open) throw extensionError(path, new Error("Extension registration is closed"));
           try {
-            staged.register(guardExtensionTool(snapshotTool(tool), path, options.secrets ?? []));
+            return action();
           } catch (error) {
             registrationFailure ??= error instanceof Error ? error : new Error(String(error));
             throw registrationFailure;
           }
-        },
-      });
-      try {
-        await module.default(context);
-        if (registrationFailure) {
-          throw registrationFailure;
+        };
+        const context: ExtensionContext = Object.freeze({
+          signal: runtime.signal,
+          registerTool(tool: ToolDefinition) {
+            register(() => {
+              staged.register(guardExtensionTool(snapshotTool(tool), path, options.secrets ?? []));
+            });
+          },
+          registerCommand: (command: Parameters<ExtensionContext["registerCommand"]>[0]) => register(() => runtime.registerCommand(path, command, skills)),
+          onRuntimeEvent: (listener: Parameters<ExtensionContext["onRuntimeEvent"]>[0]) => register(() => runtime.subscribe(path, listener)),
+          onDispose: (cleanup: Parameters<ExtensionContext["onDispose"]>[0]) => register(() => runtime.onDispose(path, cleanup)),
+        });
+        try {
+          await module.default(context);
+          if (registrationFailure) {
+            throw registrationFailure;
+          }
+        } finally {
+          open = false;
         }
-      } finally {
-        open = false;
+      } catch (error) {
+        throw extensionError(path, error);
       }
-    } catch (error) {
-      throw extensionError(path, error);
     }
+  } catch (error) {
+    runtime.dispose();
+    throw error;
   }
-  return staged;
+  return { tools: staged, runtime };
 }
 
 /** Validate runtime declarations and detach model metadata from the extension's mutable objects. */
