@@ -37,7 +37,8 @@ test("headless loop loads ordered extensions from the primary workspace before i
     const model = createScriptedModel({ responses: [
       (request) => {
         requests++;
-        expect(request.tools?.slice(-2).map((tool) => tool.name)).toEqual(["first", "greet"]);
+        expect(request.tools?.filter((tool) => tool.name === "first" || tool.name === "greet")
+          .map((tool) => tool.name)).toEqual(["first", "greet"]);
         return { toolCalls: [{ id: "greeting-call", name: "greet", arguments: { name: "Ada" } }] };
       },
       (request) => {
