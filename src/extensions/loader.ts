@@ -62,6 +62,10 @@ export async function loadExtensions(options: {
         };
         const context: ExtensionContext = Object.freeze({
           signal: runtime.signal,
+          registerPrompt: (section: Parameters<ExtensionContext["registerPrompt"]>[0]) => register(() => runtime.hooks.registerPrompt(path, section)),
+          beforeAgent: (hook: Parameters<ExtensionContext["beforeAgent"]>[0]) => register(() => runtime.hooks.beforeAgent(path, hook)),
+          context: (hook: Parameters<ExtensionContext["context"]>[0]) => register(() => runtime.hooks.context(path, hook)),
+          beforeModel: (hook: Parameters<ExtensionContext["beforeModel"]>[0]) => register(() => runtime.hooks.beforeModel(path, hook)),
           registerTool(tool: ToolDefinition) {
             register(() => {
               staged.register(guardExtensionTool(snapshotTool(tool), path, options.secrets ?? []));

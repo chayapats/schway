@@ -137,3 +137,35 @@ test("headless /skills reports a failed extension initializer without listing or
     await expect(stat(join(home, ".schway/sessions"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
+
+for (const deny of [false, true]) {
+  test(`headless native request hooks ${deny ? "deny safely" : "reach the actual model"} with clean JSONL`, async () => {
+    await withIsolatedCliDirs(async ({ work, home }) => {
+      await Bun.write(join(work, "context.ts"), `export default ctx => {
+        ctx.registerPrompt({ name: 'extension', content: 'registered context' });
+        ctx.beforeAgent(() => ({ context: [{ name: 'turn', content: 'turn context' }] }));
+        ctx.context(({ context }) => [...context, { name: 'waterfall', content: 'prepared context' }]);
+        ctx.beforeModel(request => ${deny ? "({ deny: 'request denied by policy' })" : "({ ...request, systemPrompt: request.systemPrompt + '\\nrequest transformed' })"});
+      };`);
+      let requests = 0;
+      let stdout = "";
+      let stderr = "";
+      const code = await runCli(["-p", "hello", "--json", "--extension", "context.ts"], {
+        cwd: work, env: { HOME: home }, stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } },
+        model: createScriptedModel({ responses: [request => {
+          requests++;
+          expect(request.systemPrompt).toContain("request transformed");
+          expect(request.context.map(s => s.name)).toEqual(["environment", "extension", "turn", "waterfall"]);
+          return { text: "done" };
+        }] }),
+      });
+      expect(code).toBe(deny ? 1 : 0);
+      expect(requests).toBe(deny ? 0 : 1);
+      if (deny) expect(stderr).toContain("request denied by policy");
+      else expect(stderr).toBe("");
+      const events = stdout.trim().split("\n").map(line => JSON.parse(line));
+      expect(events.at(-1)).toEqual({ type: "agent.finished", reason: deny ? "error" : "completed" });
+      if (deny) expect(events.find(e => e.type === "error")?.message).toContain("request denied by policy");
+    });
+  });
+}
