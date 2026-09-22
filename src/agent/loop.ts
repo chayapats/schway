@@ -55,6 +55,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
   const clock = options.clock ?? systemClock();
   let tools = options.tools;
   const hooks = options.extensions?.hooks.active ? options.extensions.hooks : undefined;
+  const toolHooks = options.extensions?.toolHooks.active ? options.extensions.toolHooks : undefined;
   const signal = hooks
     ? AbortSignal.any([options.extensions!.signal, ...(options.signal ? [options.signal] : [])])
     : options.signal;
@@ -234,12 +235,13 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         workspace: options.workspace,
         signal,
         maxConcurrentTools: options.maxConcurrentTools,
+        toolHooks,
       });
       for (const item of executed) {
         options.session.append(item.result);
       }
 
-      if (signal?.aborted) {
+      if (signal?.aborted || toolHooks?.signal.aborted) {
         yield { type: "agent.finished", reason: "cancelled" };
         return;
       }

@@ -66,6 +66,8 @@ export async function loadExtensions(options: {
           beforeAgent: (hook: Parameters<ExtensionContext["beforeAgent"]>[0]) => register(() => runtime.hooks.beforeAgent(path, hook)),
           context: (hook: Parameters<ExtensionContext["context"]>[0]) => register(() => runtime.hooks.context(path, hook)),
           beforeModel: (hook: Parameters<ExtensionContext["beforeModel"]>[0]) => register(() => runtime.hooks.beforeModel(path, hook)),
+          beforeTool: (hook: Parameters<ExtensionContext["beforeTool"]>[0]) => register(() => runtime.toolHooks.beforeTool(path, hook)),
+          afterTool: (hook: Parameters<ExtensionContext["afterTool"]>[0]) => register(() => runtime.toolHooks.afterTool(path, hook)),
           registerTool(tool: ToolDefinition) {
             register(() => {
               staged.register(guardExtensionTool(snapshotTool(tool), path, options.secrets ?? []));

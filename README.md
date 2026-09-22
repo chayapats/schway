@@ -238,6 +238,16 @@ The shipped context example works in either mode:
 bun run dev -- -p "Explain this project" --extension examples/extensions/context.ts
 ```
 
+Tool hooks run inside the native scheduler: `beforeTool` may return validated
+replacement arguments or deny an invocation; `afterTool` may transform settled
+content, details, and error presentation. Original inputs are validated before
+hooks, and rewritten inputs are validated again. A post-hook failure reports
+that execution occurred, preserves the original outcome in runtime details, and
+never replays the tool. Exclusive barriers include both phases; parallel tool
+hooks may overlap, so extensions must coordinate their shared state. Cancellation
+during result processing keeps the original settled outcome. See
+`examples/extensions/tool-policy.ts` for a runnable policy example.
+
 See [the extension API guide](docs/extensions.md) for lifecycle details. The
 shipped `examples/extensions/commands-and-events.ts` provides `/event-counts`
 and `/ask-extension <prompt>`:

@@ -153,6 +153,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/examples/extensions/greet.ts",
       "package/examples/extensions/commands-and-events.ts",
       "package/examples/extensions/context.ts",
+      "package/examples/extensions/tool-policy.ts",
       "package/package.json",
       "package/README.md",
       "package/LICENSE",
@@ -183,10 +184,11 @@ test("npm pack installs the public extension API and completes a headless tool r
     await Bun.write(join(installDir, "greet.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/greet.ts")).text());
     await Bun.write(join(installDir, "commands-and-events.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/commands-and-events.ts")).text());
     await Bun.write(join(installDir, "context.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/context.ts")).text());
+    await Bun.write(join(installDir, "tool-policy.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/tool-policy.ts")).text());
     const checked = await runCommand([
       join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict", "--skipLibCheck",
       "--moduleResolution", "bundler", "--module", "esnext", "--target", "esnext",
-      "--allowImportingTsExtensions", "--types", "bun", "greet.ts", "commands-and-events.ts", "context.ts",
+      "--allowImportingTsExtensions", "--types", "bun", "greet.ts", "commands-and-events.ts", "context.ts", "tool-policy.ts",
     ], { cwd: installDir });
     expect(checked.stdout + checked.stderr).toBe("");
     expect(checked.exitCode).toBe(0);
@@ -216,6 +218,7 @@ test("npm pack installs the public extension API and completes a headless tool r
         "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${server.port}/v1`,
         "--model", "fixture", "--auth", "none", "--extension", "greet.ts",
         "--extension", "commands-and-events.ts", "--extension", "context.ts",
+        "--extension", "tool-policy.ts",
       ], { cwd: installDir, env: buildIsolatedCliEnv(isolatedHome) });
       expect(conversation.stderr).toBe("");
       expect(conversation.exitCode).toBe(0);
@@ -227,10 +230,10 @@ test("npm pack installs the public extension API and completes a headless tool r
       }
       expect(requests[0]!.tools?.some((tool) => tool.function.name === "greet")).toBe(true);
       expect(requests[1]!.messages?.filter((message) => message.role === "tool"))
-        .toEqual([{ role: "tool", tool_call_id: "greet-call", content: "Hello, Ada!" }]);
+        .toEqual([{ role: "tool", tool_call_id: "greet-call", content: "Hello, Ada!\n[Tool policy reviewed greet.]" }]);
       const events = conversation.stdout.trim().split("\n").map((line) => JSON.parse(line));
       expect(events.filter((event) => event.type === "tool.finished")).toMatchObject([
-        { toolCallId: "greet-call", status: "success", content: "Hello, Ada!" },
+        { toolCallId: "greet-call", status: "success", content: "Hello, Ada!\n[Tool policy reviewed greet.]" },
       ]);
       expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
       expect(await Bun.file(marker).exists()).toBe(false);
