@@ -7,7 +7,7 @@ export const SKILL_BODY_LIMIT_CHARS = 32_000;
 /** Dynamic context section naming model-eligible skills without embedding bodies. */
 export const AVAILABLE_SKILLS_SECTION_NAME = "available-skills";
 
-/** Dynamic context section carrying the explicitly activated skill body for one turn. */
+/** Dynamic context section carrying the user- or model-activated skill body for one turn. */
 export const ACTIVE_SKILL_SECTION_NAME = "active-skill";
 
 /** Built-in slash names a skill must not shadow; the TUI dispatcher owns behavior, this list owns collision detection. */
@@ -209,12 +209,15 @@ export async function discoverSkills(options: {
   workspaceRoot: string;
   home?: string;
   reservedNames?: readonly string[];
+  signal?: AbortSignal;
 }): Promise<SkillDiscovery> {
+  options.signal?.throwIfAborted();
   const reserved = options.reservedNames ?? RESERVED_SKILL_NAMES;
   const project = await readSkillScope(
     join(await canonicalDir(options.workspaceRoot), ".agents", "skills"),
     "project",
     options.workspaceRoot,
+    options.signal,
   );
   const globalScope: { skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] } =
     options.home === undefined
@@ -222,7 +225,10 @@ export async function discoverSkills(options: {
       : await readSkillScope(
           join(await canonicalDir(options.home), ".schway", "skills"),
           "global",
+          undefined,
+          options.signal,
         );
+  options.signal?.throwIfAborted();
   const diagnostics: SkillDiagnostic[] = [...project.diagnostics, ...globalScope.diagnostics];
   const ambiguous: AmbiguousSkill[] = [];
   const projectSkills = selectScopeSkills(project.skills, diagnostics, ambiguous);
@@ -280,62 +286,84 @@ export function resolveSkillInvocation(
   return { ok: false, kind: "unknown", error: `Unknown skill '${lowered}'.${known}` };
 }
 
-/** Discover and load one explicitly named skill, returning a usable body or discovery, resolution, or body-validation error. */
+/** Discover and validate one named skill, enforcing model eligibility when requested and loading only its current body. */
 export async function prepareSkillInvocation(options: {
   workspaceRoot: string;
   home?: string;
   name: string;
   reservedNames?: readonly string[];
+  modelInvocation?: boolean;
+  signal?: AbortSignal;
 }): Promise<{ ok: true; skill: SkillMetadata; body: string } | { ok: false; error: string }> {
+  options.signal?.throwIfAborted();
+  if (options.modelInvocation && !isSkillNameToken(options.name)) {
+    return { ok: false, error: "Skill activation requires a discovered skill name, not a path or alias." };
+  }
   const discovery = await discoverSkills(options);
+  options.signal?.throwIfAborted();
   const resolved = resolveSkillInvocation(discovery, options.name);
   if (!resolved.ok) {
     return { ok: false, error: resolved.error };
   }
-  const loaded = await loadSkillBody(resolved.skill);
+  const loaded = await loadSkillBody(resolved.skill, options);
+  options.signal?.throwIfAborted();
   if (!loaded.ok) {
     return { ok: false, error: loaded.error };
   }
   return { ok: true, skill: resolved.skill, body: loaded.body };
 }
 
-/** Read a resolved skill's trimmed body, returning an error for unreadable, invalid, renamed, empty, or oversized content. */
+/** Read a resolved skill's current body, revalidating its canonical source, metadata, model eligibility, and size. */
 export async function loadSkillBody(
   skill: SkillMetadata,
+  options: { modelInvocation?: boolean; signal?: AbortSignal } = {},
 ): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
+  options.signal?.throwIfAborted();
+  const suffix = options.modelInvocation ? "" : " The model turn was not started.";
   let content: string;
   try {
-    content = await readFile(skill.skillFile, "utf8");
+    if (await realpath(skill.skillFile) !== skill.skillFile || await realpath(skill.dir) !== skill.dir) {
+      return { ok: false, error: `Skill '${skill.name}' changed source on disk; rediscover it and retry.${suffix}` };
+    }
+    if (!(await stat(skill.skillFile)).isFile()) {
+      return { ok: false, error: `Skill '${skill.name}' is unavailable: SKILL.md is not a file.${suffix}` };
+    }
+    content = await readFile(skill.skillFile, { encoding: "utf8", signal: options.signal });
   } catch {
+    options.signal?.throwIfAborted();
     return {
       ok: false,
-      error: `Skill '${skill.name}' is unavailable: cannot read body at ${skill.displayPath}. The model turn was not started.`,
+      error: `Skill '${skill.name}' is unavailable: cannot read body at ${skill.displayPath}.${suffix}`,
     };
   }
+  options.signal?.throwIfAborted();
   const parsed = parseSkillFile(content);
   if (!parsed.ok) {
     return {
       ok: false,
-      error: `Skill '${skill.name}' is unavailable: ${parsed.error} (${skill.displayPath}). The model turn was not started.`,
+      error: `Skill '${skill.name}' is unavailable: ${parsed.error} (${skill.displayPath}).${suffix}`,
     };
   }
   if (parsed.value.name !== skill.name) {
     return {
       ok: false,
-      error: `Skill '${skill.name}' changed on disk (now '${parsed.value.name}' at ${skill.displayPath}); re-run /skills and retry. The model turn was not started.`,
+      error: `Skill '${skill.name}' changed on disk (now '${parsed.value.name}' at ${skill.displayPath}); re-run /skills and retry.${suffix}`,
     };
+  }
+  if (options.modelInvocation && (skill.userOnly || parsed.value.userOnly)) {
+    return { ok: false, error: `Skill '${skill.name}' is user-only; only an explicit user invocation may activate it.` };
   }
   const body = parsed.value.body.trim();
   if (body.length === 0) {
     return {
       ok: false,
-      error: `Skill '${skill.name}' has an empty body (${skill.displayPath}); add instructions before invoking. The model turn was not started.`,
+      error: `Skill '${skill.name}' has an empty body (${skill.displayPath}); add instructions before invoking.${suffix}`,
     };
   }
   if (body.length > SKILL_BODY_LIMIT_CHARS) {
     return {
       ok: false,
-      error: `Skill '${skill.name}' exceeds the ${SKILL_BODY_LIMIT_CHARS} character body limit (${body.length} chars at ${skill.displayPath}); shorten SKILL.md before invoking. The model turn was not started.`,
+      error: `Skill '${skill.name}' exceeds the ${SKILL_BODY_LIMIT_CHARS} character body limit (${body.length} chars at ${skill.displayPath}); shorten SKILL.md before invoking.${suffix}`,
     };
   }
   return { ok: true, body };
@@ -344,7 +372,7 @@ export async function loadSkillBody(
 /** Format model-eligible skills as the metadata-only available-skills context section. */
 export function formatAvailableSkillsSection(skills: readonly SkillMetadata[]): string {
   const eligible = skills.filter((skill) => !skill.userOnly);
-  const lines = ["Available skills (invoke with /<skill-name> [arguments]):"];
+  const lines = ["Available skills (model: activate_skill with {\"name\": \"<skill-name>\"}; user: /<skill-name> [arguments]). One active skill lasts for this user turn; another activation replaces it:"];
   for (const skill of eligible) {
     lines.push(`- ${skill.name} - ${skill.description}`);
   }
@@ -378,7 +406,7 @@ export function formatSkillsListing(discovery: SkillDiscovery): string {
   for (const diagnostic of discovery.diagnostics) {
     lines.push(`Invalid skill at ${diagnostic.source}: ${diagnostic.reason}`);
   }
-  lines.push("Skill bodies load only on explicit invocation; resources resolve relative to their skill directory.");
+  lines.push("Skill bodies load on user invocation or eligible model activation for one user turn; resources resolve relative to their skill directory.");
   return lines.join("\n");
 }
 
@@ -478,7 +506,9 @@ async function readSkillScope(
   scopeDir: string,
   scope: SkillScope,
   workspaceRoot?: string,
+  signal?: AbortSignal,
 ): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
+  signal?.throwIfAborted();
   const skills: SkillMetadata[] = [];
   const diagnostics: SkillDiagnostic[] = [];
   let entries: string[];
@@ -496,6 +526,7 @@ async function readSkillScope(
   }
   const canonicalScope = await canonicalDir(scopeDir);
   for (const entry of entries) {
+    signal?.throwIfAborted();
     const dir = join(scopeDir, entry);
     let entryStat;
     try {
@@ -531,8 +562,9 @@ async function readSkillScope(
     }
     let content: string;
     try {
-      content = await readFile(canonicalSkillFile, "utf8");
+      content = await readFile(canonicalSkillFile, { encoding: "utf8", signal });
     } catch {
+      signal?.throwIfAborted();
       diagnostics.push({ source: display, reason: "SKILL.md cannot be read" });
       continue;
     }
