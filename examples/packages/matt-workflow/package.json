@@ -1,0 +1,17 @@
+{
+  "name": "schway-example-matt-workflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An explicit, artifact-driven coding workflow for Schway",
+  "license": "MIT",
+  "files": ["skills", "README.md"],
+  "schway": {
+    "skills": [
+      "skills/grill-with-docs",
+      "skills/to-spec",
+      "skills/to-tickets",
+      "skills/implement",
+      "skills/code-review"
+    ]
+  }
+}
