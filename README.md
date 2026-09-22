@@ -34,6 +34,7 @@ headless runs never initialize it.
 /new - start a new session
 /sessions - list saved sessions
 /resume <id> - resume a saved session
+/add-dir <directory> - attach project context while idle
 /model - show the current provider and model
 /help - show help
 /quit - quit schway
@@ -166,7 +167,7 @@ Schway as a peer, and declare their own other dependencies normally; bundling
 Schway in `dependencies`, `optionalDependencies`, or either bundled-dependency
 list is rejected. Declared peer ranges must be valid npm semver ranges.
 
-Skills select the first defining tier: project `.agents/skills`, configured
+Skills select the first defining tier: primary and attached project `.agents/skills`, configured
 project packages, global `~/.schway/skills`, then configured global packages.
 Two distinct definitions at the same winning tier make that name unavailable
 with both sources reported; package list order never picks a skill winner.
@@ -383,8 +384,8 @@ schway -p "explain this repository" --max-turns 8 --max-output 2048
 Schway loads `AGENTS.md` from general to specific:
 
 - `~/.schway/AGENTS.md`
-- the workspace root
-- nested directories on the launch path, then on tool `path` / `cwd` targets
+- applicable primary or attached project roots
+- nested directories on the current turn’s launch path or latest tool `path` / `cwd` targets
 
 Nested files are discovered when work enters that subtree. Sibling directories are not loaded.
 
@@ -395,8 +396,17 @@ Replace the base system prompt with `~/.schway/SYSTEM.md` and append with `~/.sc
 Tool-relative paths resolve from the primary workspace root: the nearest Git root, otherwise the launch directory. Both are canonicalized through real paths (symlinks resolved) before use.
 
 - `read`, `write`, `edit`, `grep`, `find`, and `ls` resolve `path` against the workspace root.
-- `bash` defaults `cwd` to the workspace root and accepts an explicit `cwd` under it.
+- `bash` defaults `cwd` to the workspace root; relative explicit `cwd` operands resolve there too.
 - Launching from a nested subdirectory keeps the Git root as the workspace root; nested `AGENTS.md` files are still discovered when work enters that subtree.
+
+Attach contextual projects with repeatable `--add-dir <directory>` flags, or `/add-dir <directory>` while idle. Operands resolve from the primary root and must identify accessible existing directories; symlink aliases and duplicate roots attach once. An invalid batch leaves roots unchanged. Relative tools and default bash cwd keep using the primary root; attachments are not filesystem permissions.
+
+```sh
+schway --add-dir ../library --add-dir ../service -p "/skills"
+schway --resume <session-id> --add-dir ../library
+```
+
+Attached project instructions apply only after work enters their scope, and attached local skills share primary-local precedence (same-tier duplicates are explicit ambiguities). Roots appear in model environment context, interactive status, and `/config`. Attachments persist session-wide; unavailable saved directories are reported and excluded from usable context while keeping their saved identity. See [workspaces](docs/workspaces.md) for scoping, recovery, public contracts, and a complete runnable example.
 
 ## Tool output limits
 
@@ -419,7 +429,7 @@ schway -p "continue the migration" --resume <session-id>
 schway --resume <session-id>   # interactive resume
 ```
 
-Resume rebuilds history from the saved JSONL without replaying old tool effects. Interrupted sessions settle unresolved tool calls on load instead of rerunning them. Partial or malformed trailing records are skipped without destroying valid history. Runtime-only stream deltas (`model.delta`, `tool.delta`) are never persisted; the durable file holds `session`, `user`, `assistant`, `tool_result`, and `compaction` records only.
+Resume rebuilds history from the saved JSONL without replaying old tool effects. Interrupted sessions settle unresolved tool calls on load instead of rerunning them. Partial or malformed trailing records are skipped without destroying valid history. Runtime-only stream deltas (`model.delta`, `tool.delta`) are never persisted; the durable file holds `session`, `user`, `assistant`, `tool_result`, `compaction`, and versioned session-wide metadata records. New files use format 2; format 1 gains an append-only upgrade marker on its first root change. See [session format](docs/sessions.md).
 
 `--json` streams normalized runtime events as JSONL on stdout for tooling; diagnostics stay on stderr. Runtime JSONL and durable session JSONL are different concepts: the first is transient observability, the second is resumable state.
 

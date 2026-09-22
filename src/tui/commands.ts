@@ -10,6 +10,7 @@ export type SlashCommandName =
   | "model"
   | "compact"
   | "skills"
+  | "add-dir"
   | "config"
   | "help"
   | "quit";
@@ -40,6 +41,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "model":
     case "compact":
     case "skills":
+    case "add-dir":
     case "config":
     case "help":
     case "quit":
@@ -59,6 +61,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/model [provider/model-id | provider model-id | model-id] - show or switch the model",
     "/compact - summarize older turns to free context",
     "/skills - list available skills",
+    "/add-dir <directory> - attach project context (relative to the primary root; idle only)",
     "/<skill-name> [arguments] - invoke an available skill for this turn",
     "/config - show effective basic settings with secrets redacted",
     "/help - show this help",

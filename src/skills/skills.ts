@@ -19,6 +19,7 @@ export const RESERVED_SKILL_NAMES: readonly string[] = [
   "model",
   "compact",
   "skills",
+  "add-dir",
   "config",
   "help",
   "quit",
@@ -207,6 +208,7 @@ export function parseSkillFile(content: string): { ok: true; value: ParsedSkillF
 /** Discover metadata in project directories, project packages, global directories, then global packages, excluding ambiguous names and command collisions. */
 export async function discoverSkills(options: {
   workspaceRoot: string;
+  extraRoots?: readonly string[];
   home?: string;
   reservedNames?: readonly string[];
   signal?: AbortSignal;
@@ -214,12 +216,15 @@ export async function discoverSkills(options: {
 }): Promise<SkillDiscovery> {
   options.signal?.throwIfAborted();
   const reserved = options.reservedNames ?? RESERVED_SKILL_NAMES;
-  const project = await readSkillScope(
-    join(await canonicalDir(options.workspaceRoot), ".agents", "skills"),
-    "project",
-    options.workspaceRoot,
-    options.signal,
-  );
+  const projectScopes = [];
+  const roots = new Set(await Promise.all([options.workspaceRoot, ...(options.extraRoots ?? [])].map(canonicalDir)));
+  for (const root of roots) {
+    projectScopes.push(await readSkillScope(join(root, ".agents", "skills"), "project", options.workspaceRoot, options.signal));
+  }
+  const project = {
+    skills: projectScopes.flatMap(scope => scope.skills),
+    diagnostics: projectScopes.flatMap(scope => scope.diagnostics),
+  };
   const globalScope: { skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] } =
     options.home === undefined
       ? { skills: [], diagnostics: [] }
@@ -293,6 +298,7 @@ export function resolveSkillInvocation(
 /** Discover and validate one named skill, enforcing model eligibility when requested and loading only its current body. */
 export async function prepareSkillInvocation(options: {
   workspaceRoot: string;
+  extraRoots?: readonly string[];
   home?: string;
   name: string;
   reservedNames?: readonly string[];

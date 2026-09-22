@@ -25,7 +25,7 @@ import { loadExtensions } from "../extensions/loader.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
-import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
+import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
   cliOverridesFromArgs,
   type CliArgs,
@@ -110,17 +110,18 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   const directory = sessionsDirectory(home);
   let workspace: Workspace;
   let startupResumed: JsonlSession | undefined;
+  const workspaceDiagnostics: string[] = [];
   try {
     if (io.args.resume) {
       startupResumed = await loadJsonlSession({ directory, id: io.args.resume });
-      workspace = {
-        root: startupResumed.header.workspaceRoot,
-        launchCwd: startupResumed.header.launchCwd,
-        extraRoots: [...startupResumed.header.extraRoots],
-      };
+      const restored = await restoreWorkspace({ root: startupResumed.header.workspaceRoot, launchCwd: startupResumed.header.launchCwd, extraRoots: [...startupResumed.metadata.extraRoots] });
+      workspace = restored.workspace;
+      workspaceDiagnostics.push(...restored.diagnostics);
     } else {
       workspace = await resolveWorkspace(io.cwd);
     }
+    workspace = await addWorkspaceRoots(workspace, io.args.addDirs ?? [], io.signal);
+    if (startupResumed && io.args.addDirs?.length) startupResumed.setExtraRoots([...new Set([...startupResumed.metadata.extraRoots, ...workspace.extraRoots])]);
   } catch (error) {
     io.stderr.write(`${messageOf(error)}\n`);
     return 1;
@@ -197,11 +198,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       if (io.args.resume) {
         // Reuse the session handle loaded during startup, including settlements.
         const resumed = startupResumed!;
-        const resumedWorkspace: Workspace = {
-          root: resumed.header.workspaceRoot,
-          launchCwd: resumed.header.launchCwd,
-          extraRoots: resumed.header.extraRoots,
-        };
+        const resumedWorkspace = workspace;
         const resumedManager = createContextManager(resumedWorkspace, managerOptions);
         skillScope.manager = resumedManager;
         skillScope.workspaceRoot = resumed.header.workspaceRoot;
@@ -266,6 +263,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       return 1;
     }
 
+    for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
       await runTuiRenderer({
         controller,
@@ -413,7 +411,9 @@ async function runTuiRenderer(options: {
         toolName: entry.toolName,
         toolStatus: entry.toolStatus,
       })));
-      const statusText = formatStatus(snapshot.status);
+      const roots = options.controller.workspaceIdentity();
+      const rootStatus = roots ? ` | Primary: ${roots.root} | Attached: ${roots.extraRoots.join(", ") || "none"}` : "";
+      const statusText = redactSecrets(formatStatus(snapshot.status) + rootStatus, options.secrets);
       const fingerprint = `${headerText}\n${lines}\n${statusText}`;
       if (fingerprint === lastRendered) {
         return;
@@ -565,15 +565,13 @@ async function handleSlashCommand(
       }
       try {
         const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: args });
-        const workspace: Workspace = {
-          root: resumed.header.workspaceRoot,
-          launchCwd: resumed.header.launchCwd,
-          extraRoots: [...resumed.header.extraRoots],
-        };
+        const restored = await restoreWorkspace({ root: resumed.header.workspaceRoot, launchCwd: resumed.header.launchCwd, extraRoots: [...resumed.metadata.extraRoots] });
+        const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
         if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return;
         ctx.skillScope.manager = manager;
         ctx.skillScope.workspaceRoot = workspace.root;
+        for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
         ctx.controller.notice(
           `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
         );
@@ -607,9 +605,14 @@ async function handleSlashCommand(
       await ctx.controller.compact();
       return;
     }
+    case "add-dir": {
+      await ctx.controller.addDirectories(args ? [args] : []);
+      return;
+    }
     case "skills": {
       const discovery = await discoverSkills({
         workspaceRoot: ctx.skillScope.workspaceRoot,
+        extraRoots: ctx.controller.workspaceIdentity()?.extraRoots,
         home: ctx.home,
       });
       ctx.controller.notice(formatSkillsListing(discovery));
@@ -661,8 +664,10 @@ export async function invokeSkillTurn(
     ctx.controller.fail("Skills are not ready yet; try again.");
     return;
   }
+  const workspaceIdentity = ctx.controller.workspaceIdentity();
   const prepared = await prepareSkillInvocation({
     workspaceRoot: ctx.skillScope.workspaceRoot,
+    extraRoots: workspaceIdentity?.extraRoots,
     home: ctx.home,
     name: invocation.name,
   });
@@ -674,7 +679,7 @@ export async function invokeSkillTurn(
     ctx.controller.notice("Already running. Press Esc to cancel first.");
     return;
   }
-  if (ctx.skillScope.manager !== manager) {
+  if (ctx.skillScope.manager !== manager || JSON.stringify(workspaceIdentity) !== JSON.stringify(ctx.controller.workspaceIdentity())) {
     ctx.controller.notice("The active session changed. Retry the skill when ready.");
     return;
   }

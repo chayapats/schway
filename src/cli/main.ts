@@ -36,7 +36,7 @@ import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { loadProviderModel } from "../model/loader.ts";
-import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
+import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
   cliOverridesFromArgs,
   parseArgs,
@@ -133,13 +133,19 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       io.stderr.write(`${errorMessage(error)}\n`);
       return 1;
     }
-    workspace = {
-      root: session.header.workspaceRoot,
-      launchCwd: session.header.launchCwd,
-      extraRoots: [...session.header.extraRoots],
-    };
+    const restored = await restoreWorkspace({ root: session.header.workspaceRoot, launchCwd: session.header.launchCwd, extraRoots: [...session.metadata.extraRoots] });
+    workspace = restored.workspace;
+    for (const diagnostic of restored.diagnostics) io.stderr.write(`${diagnostic}\n`);
   } else {
     workspace = await resolveWorkspace(io.cwd);
+  }
+
+  try {
+    workspace = await addWorkspaceRoots(workspace, parsed.args.addDirs ?? [], io.signal);
+    if (session && parsed.args.addDirs?.length) session.setExtraRoots([...new Set([...session.metadata.extraRoots, ...workspace.extraRoots])]);
+  } catch (error) {
+    io.stderr.write(`${errorMessage(error)}\n`);
+    return 1;
   }
 
   const settings = await loadResolvedSettings({
@@ -181,13 +187,14 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const slash = splitSlashCommand(parsed.args.prompt);
     let skillTurn: { skill: SkillMetadata; body: string } | undefined;
     if (slash && slash.name === "skills") {
-      const discovery = await discoverSkills({ workspaceRoot: workspace.root, home });
+      const discovery = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home });
       io.stdout.write(`${formatSkillsListing(discovery)}\n`);
       return 0;
     }
     if (slash && !RESERVED_SKILL_NAMES.includes(slash.name) && isSkillNameToken(slash.name)) {
       const prepared = await prepareSkillInvocation({
         workspaceRoot: workspace.root,
+        extraRoots: workspace.extraRoots,
         home,
         name: slash.name,
       });
