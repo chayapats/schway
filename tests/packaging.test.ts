@@ -154,6 +154,9 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/examples/extensions/commands-and-events.ts",
       "package/examples/extensions/context.ts",
       "package/examples/extensions/tool-policy.ts",
+      "package/examples/packages/greeting/package.json",
+      "package/examples/packages/greeting/greet.ts",
+      "package/examples/packages/greeting/skills/greeting/SKILL.md",
       "package/package.json",
       "package/README.md",
       "package/LICENSE",
@@ -185,10 +188,20 @@ test("npm pack installs the public extension API and completes a headless tool r
     await Bun.write(join(installDir, "commands-and-events.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/commands-and-events.ts")).text());
     await Bun.write(join(installDir, "context.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/context.ts")).text());
     await Bun.write(join(installDir, "tool-policy.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/tool-policy.ts")).text());
+    // Install the shipped mixed package using npm, without publishing or a registry fixture.
+    const packagePack = await runCommand(["npm", "pack", "--pack-destination", dir, "--silent"], {
+      cwd: join(installDir, "node_modules/schway/examples/packages/greeting"),
+    });
+    expect(packagePack.exitCode).toBe(0);
+    const packageInstall = await runCommand(["npm", "install", "--prefix", installDir, "--no-audit", "--no-fund", "--silent",
+      join(dir, packagePack.stdout.trim().split("\n").at(-1)!)], {});
+    expect(packageInstall.exitCode).toBe(0);
+    await Bun.write(join(installDir, ".schway/config.json"), JSON.stringify({ packages: ["schway-example-greeting"] }));
     const checked = await runCommand([
       join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict", "--skipLibCheck",
       "--moduleResolution", "bundler", "--module", "esnext", "--target", "esnext",
       "--allowImportingTsExtensions", "--types", "bun", "greet.ts", "commands-and-events.ts", "context.ts", "tool-policy.ts",
+      "node_modules/schway-example-greeting/greet.ts",
     ], { cwd: installDir });
     expect(checked.stdout + checked.stderr).toBe("");
     expect(checked.exitCode).toBe(0);
@@ -214,9 +227,9 @@ test("npm pack installs the public extension API and completes a headless tool r
     await mkdir(isolatedHome);
     try {
       const conversation = await runCommand([
-        join(installDir, "node_modules/.bin/schway"), "-p", "greet Ada", "--json",
+        join(installDir, "node_modules/.bin/schway"), "-p", "/greeting Ada", "--json",
         "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${server.port}/v1`,
-        "--model", "fixture", "--auth", "none", "--extension", "greet.ts",
+        "--model", "fixture", "--auth", "none",
         "--extension", "commands-and-events.ts", "--extension", "context.ts",
         "--extension", "tool-policy.ts",
       ], { cwd: installDir, env: buildIsolatedCliEnv(isolatedHome) });
@@ -224,6 +237,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       expect(conversation.exitCode).toBe(0);
       expect(requests).toHaveLength(2);
       for (const request of requests) {
+        expect(JSON.stringify(request.messages)).toContain("Finish by reporting the greeting or error actually returned by the tool.");
         expect(JSON.stringify(request.messages)).toContain("Distinguish observed results from assumptions.");
         expect(JSON.stringify(request.messages)).toContain("Explain changed behavior, observed checks, and remaining limits concisely.");
         expect(JSON.stringify(request.messages)).toContain("Use relevant deterministic checks before reporting success.");
@@ -237,6 +251,44 @@ test("npm pack installs the public extension API and completes a headless tool r
       ]);
       expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
       expect(await Bun.file(marker).exists()).toBe(false);
+      // The installed interactive controller uses the same package initializer and skill path.
+      await Bun.write(join(installDir, "interactive-fixture.ts"), `
+        import { loadExtensions } from './node_modules/schway/src/extensions/loader.ts';
+        import { createToolRegistry } from './node_modules/schway/src/tools/registry.ts';
+        import { createContextManager } from './node_modules/schway/src/context/manager.ts';
+        import { createSession } from './node_modules/schway/src/session/session.ts';
+        import { TuiController } from './node_modules/schway/src/tui/controller.ts';
+        import { invokeSkillTurn } from './node_modules/schway/src/tui/app.ts';
+        const workspace = { root: process.cwd(), launchCwd: process.cwd(), extraRoots: [] };
+        const home = process.env.HOME;
+        const loaded = await loadExtensions({ modules: [], workspace, home, tools: createToolRegistry() });
+        const manager = createContextManager(workspace, { home });
+        const session = createSession();
+        let calls = 0;
+        const model = { provider: 'scripted', id: 'fixture', async *stream(request) {
+          if (!request.context.some(section => section.name === 'active-skill' && section.content.includes('call greet once'))) throw Error('missing packaged skill');
+          if (!request.tools.some(tool => tool.name === 'greet')) throw Error('missing packaged tool');
+          calls++;
+          if (calls === 2 && !request.items.some(item => item.type === 'tool_result' && item.content === 'Hello, Ada!' && !item.isError)) throw Error('missing tool result');
+          yield { type: 'message_complete', message: { type: 'assistant', id: 'reply-' + calls,
+            content: calls === 1 ? [{ type: 'tool_call', id: 'interactive-greet', name: 'greet', arguments: { name: 'Ada' } }] : [{ type: 'text', text: 'done' }] } };
+        } };
+        const controller = new TuiController({ session, sessionId: 'installed', workspace, home, contextManager: manager,
+          tools: loaded.tools, extensions: loaded.runtime, model, provider: 'scripted', modelId: 'fixture' });
+        try {
+          await invokeSkillTurn({ name: 'greeting', args: 'Ada', raw: '/greeting Ada' }, { controller, home, skillScope: { manager, workspaceRoot: workspace.root } });
+          if (calls !== 2 || controller.snapshot().status !== 'idle') throw Error(JSON.stringify(controller.snapshot()));
+          if (JSON.stringify(session.items).includes('call greet once')) throw Error('skill body persisted');
+          console.log('installed interactive package round trip passed');
+        } finally { controller.dispose(); }
+      `);
+      const interactive = await runCommand([process.execPath, "--no-env-file", "interactive-fixture.ts"], {
+        cwd: installDir, env: buildIsolatedCliEnv(isolatedHome),
+      });
+      expect(interactive.stderr).toBe("");
+      expect(interactive.exitCode).toBe(0);
+      expect(interactive.stdout).toContain("installed interactive package round trip passed");
+
     } finally {
       await server.stop(true);
     }

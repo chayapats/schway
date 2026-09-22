@@ -1,5 +1,6 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { discoverPackages, type EnabledPackage } from "../packages/packages.ts";
 
 /** Maximum SKILL.md body characters injected as dynamic context; oversize invocations fail instead of truncating. */
 export const SKILL_BODY_LIMIT_CHARS = 32_000;
@@ -39,6 +40,8 @@ export interface SkillMetadata {
   skillFile: string;
   /** Human-readable source used in diagnostics and listings. */
   displayPath: string;
+  /** Enabled npm package name, when this definition came from a manifest. */
+  package?: string;
 }
 
 /** One unusable skill file with its source and actionable reason. */
@@ -201,15 +204,13 @@ export function parseSkillFile(content: string): { ok: true; value: ParsedSkillF
   };
 }
 
-/**
- * Discover metadata under `<workspaceRoot>/.agents/skills` and `<home>/.schway/skills` with project precedence.
- * Return diagnostics for unusable entries and exclude ambiguous names and reserved-command collisions.
- */
+/** Discover metadata in project directories, project packages, global directories, then global packages, excluding ambiguous names and command collisions. */
 export async function discoverSkills(options: {
   workspaceRoot: string;
   home?: string;
   reservedNames?: readonly string[];
   signal?: AbortSignal;
+  packages?: readonly EnabledPackage[];
 }): Promise<SkillDiscovery> {
   options.signal?.throwIfAborted();
   const reserved = options.reservedNames ?? RESERVED_SKILL_NAMES;
@@ -229,16 +230,19 @@ export async function discoverSkills(options: {
           options.signal,
         );
   options.signal?.throwIfAborted();
-  const diagnostics: SkillDiagnostic[] = [...project.diagnostics, ...globalScope.diagnostics];
+  const packages = options.packages ?? await discoverPackages(options);
+  const projectPackages = await readPackageSkills(packages.filter(pkg => pkg.scope === "project"), options.signal);
+  const globalPackages = await readPackageSkills(packages.filter(pkg => pkg.scope === "global"), options.signal);
+  const levels = [project, projectPackages, globalScope, globalPackages];
+  const diagnostics = levels.flatMap(level => level.diagnostics);
   const ambiguous: AmbiguousSkill[] = [];
-  const projectSkills = selectScopeSkills(project.skills, diagnostics, ambiguous);
-  const globalSkills = selectScopeSkills(globalScope.skills, diagnostics, ambiguous);
-  const projectNames = new Set(projectSkills.map((skill) => skill.name));
-  const skills: SkillMetadata[] = [...projectSkills];
-  for (const skill of globalSkills) {
-    if (!projectNames.has(skill.name)) {
-      skills.push(skill);
-    }
+  const skills: SkillMetadata[] = [];
+  const claimed = new Set<string>();
+  for (const level of levels) {
+    const candidates = level.skills.filter(skill => !claimed.has(skill.name));
+    skills.push(...selectScopeSkills(candidates, diagnostics, ambiguous));
+    // An ambiguous higher tier must never fall back to a lower-tier definition.
+    for (const skill of level.skills) claimed.add(skill.name);
   }
   skills.sort((a, b) => a.name.localeCompare(b.name));
   const collisions: SkillCollision[] = [];
@@ -389,7 +393,7 @@ export function formatSkillsListing(discovery: SkillDiscovery): string {
     for (const skill of discovery.skills) {
       const scope = skill.scope === "project" ? "project" : "global";
       const marker = skill.userOnly ? " (user-only)" : "";
-      lines.push(`- ${skill.name}${marker} - ${skill.description} [${scope}]`);
+      lines.push(`- ${skill.name}${marker} - ${skill.description} [${scope}${skill.package ? ` package ${skill.package}` : ""}]`);
     }
   }
   for (const dup of discovery.ambiguous) {
@@ -592,6 +596,27 @@ async function readSkillScope(
       skillFile: canonicalSkillFile,
       displayPath: display,
     });
+  }
+  return { skills, diagnostics };
+}
+
+/** Parse only manifest-declared skill directories, keeping package identity in diagnostics. */
+async function readPackageSkills(packages: readonly EnabledPackage[], signal?: AbortSignal): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
+  const skills: SkillMetadata[] = [];
+  const diagnostics: SkillDiagnostic[] = [];
+  for (const pkg of packages) {
+    for (const dir of pkg.skills) {
+      signal?.throwIfAborted();
+      const skillFile = await realpath(join(dir, "SKILL.md"));
+      const displayPath = `${pkg.source}: ${skillFile}`;
+      const parsed = parseSkillFile(await readFile(skillFile, { encoding: "utf8", signal }));
+      if (!parsed.ok || !parsed.value.body.trim()) {
+        diagnostics.push({ source: displayPath, reason: parsed.ok ? "skill has an empty body" : parsed.error });
+        continue;
+      }
+      skills.push({ name: parsed.value.name, description: parsed.value.description, userOnly: parsed.value.userOnly,
+        scope: pkg.scope, package: pkg.name, dir, skillFile, displayPath });
+    }
   }
   return { skills, diagnostics };
 }

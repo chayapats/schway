@@ -17,6 +17,7 @@
     "bin",
     "src",
     "examples/extensions",
+    "examples/packages",
     "README.md",
     "LICENSE"
   ],

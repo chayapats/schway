@@ -146,11 +146,15 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   }
 
   const secrets = collectSecrets(io.args.apiKey, env);
+  const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
+    modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal,
+    tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+  });
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   try {
     const loaded = await loadExtensions({
-      modules: io.args.extensions ?? [], workspace, secrets, home,
+      modules: io.args.extensions ?? [], workspace, secrets, home, signal: io.signal,
       onDiagnostic: (message) => io.stderr.write(`${message}\n`),
       tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
     });
@@ -207,6 +211,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           contextManager: resumedManager,
           tools,
           extensions,
+          loadWorkspaceExtensions,
           home,
           workspace: resumedWorkspace,
           provider: settings.provider,
@@ -237,6 +242,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           contextManager: freshManager,
           tools,
           extensions,
+          loadWorkspaceExtensions,
           home,
           workspace,
           provider: settings.provider,
@@ -521,6 +527,10 @@ async function handleSlashCommand(
   },
   raw?: string,
 ): Promise<void> {
+  if ((name === "new" || name === "resume") && ctx.controller.running) {
+    ctx.controller.notice("Already running. Press Esc to cancel first.");
+    return;
+  }
   const managerOptions = contextManagerOptions(ctx.home, ctx.settings.explicitContextWindow);
   switch (name) {
     case "new": {
@@ -530,12 +540,9 @@ async function handleSlashCommand(
         workspace,
       });
       const manager = createContextManager(workspace, managerOptions);
+      if (!await ctx.controller.switchSession(session, session.header.id, { workspace, contextManager: manager })) return;
       ctx.skillScope.manager = manager;
       ctx.skillScope.workspaceRoot = workspace.root;
-      ctx.controller.replaceSession(session, session.header.id, {
-        workspace,
-        contextManager: manager,
-      });
       ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
       return;
     }
@@ -564,12 +571,9 @@ async function handleSlashCommand(
           extraRoots: [...resumed.header.extraRoots],
         };
         const manager = createContextManager(workspace, managerOptions);
+        if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return;
         ctx.skillScope.manager = manager;
         ctx.skillScope.workspaceRoot = workspace.root;
-        ctx.controller.replaceSession(resumed, resumed.header.id, {
-          workspace,
-          contextManager: manager,
-        });
         ctx.controller.notice(
           `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
         );
@@ -668,6 +672,10 @@ export async function invokeSkillTurn(
   }
   if (ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
+    return;
+  }
+  if (ctx.skillScope.manager !== manager) {
+    ctx.controller.notice("The active session changed. Retry the skill when ready.");
     return;
   }
   manager.setActiveSkill({
