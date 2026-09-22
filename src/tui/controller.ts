@@ -2,10 +2,7 @@ import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
-import type {
-  SessionRecord,
-  ToolResult,
-} from "../conversation/types.ts";
+import type { SessionRecord } from "../conversation/types.ts";
 import { lookupModel } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
@@ -772,19 +769,10 @@ export class TuiController {
   }
 }
 
-/**
- * Rebuild display history from durable records without replaying tool effects.
- * Tool results are matched to their calls and shown bounded; compaction becomes
- * a short system line.
- */
+/** Rebuild bounded display history without replaying tools, pairing results chronologically within each accepted call group. */
 export function buildTranscriptFromSession(items: readonly SessionRecord[]): TuiTranscriptEntry[] {
   const transcript: TuiTranscriptEntry[] = [];
-  const results = new Map<string, ToolResult>();
-  for (const item of items) {
-    if (item.type === "tool_result") {
-      results.set(item.toolCallId, item);
-    }
-  }
+  const pending = new Map<string, TuiTranscriptEntry>();
   let counter = 0;
   const nextId = (prefix: string): string => {
     counter += 1;
@@ -804,20 +792,28 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
         } else if (block.type === "thinking") {
           // Thinking is runtime context, not resumed display history.
         } else if (block.type === "tool_call") {
-          const result = results.get(block.id);
-          transcript.push({
+          const entry: TuiTranscriptEntry = {
             id: nextId("tool"),
             kind: "tool",
-            text: result ? boundDisplay(result.content) : "Tool call interrupted before a result was persisted",
+            text: "Tool call interrupted before a result was persisted",
             toolName: block.name,
             toolCallId: block.id,
-            toolStatus: !result ? "cancelled" : result.isError ? "error" : "success",
-          });
+            toolStatus: "cancelled",
+          };
+          pending.set(block.id, entry);
+          transcript.push(entry);
         }
       }
       const text = textParts.join("");
       if (text.length > 0) {
         transcript.push({ id: nextId("asst"), kind: "assistant", text });
+      }
+    } else if (item.type === "tool_result") {
+      const entry = pending.get(item.toolCallId);
+      if (entry) {
+        entry.text = boundDisplay(item.content);
+        entry.toolStatus = item.isError ? "error" : "success";
+        pending.delete(item.toolCallId);
       }
     } else if (item.type === "compaction") {
       transcript.push({

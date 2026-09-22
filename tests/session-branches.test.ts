@@ -436,3 +436,32 @@ test("CLI branch selection and interactive commands use exact saved identities w
     controller.dispose();
   });
 });
+
+test("branch transcript rebuild pairs reused tool IDs within their chronological call groups", () => {
+  const calls = assistant("first-calls", "same");
+  calls.content.push({ type: "tool_call", id: "parallel", name: "read", arguments: { path: "other.txt" } });
+  const session = createSession([user("u"), calls,
+    { type: "tool_result", id: "parallel-result", toolCallId: "parallel", content: "PARALLEL SUCCESS", isError: false },
+    { type: "tool_result", id: "first-result", toolCallId: "same", content: "FIRST SUCCESS", isError: false }, assistant("done")]);
+  const sibling = session.forkBranch("done");
+  session.selectBranch("main");
+  session.append(user("next"), assistant("interrupted-call", "same"));
+  session.selectBranch(sibling);
+  const ws = workspace("/fixture");
+  const controller = new TuiController({ session, sessionId: "fixture", workspace: ws,
+    contextManager: createContextManager(ws), provider: "scripted", modelId: "scripted" });
+  try {
+    expect(controller.branchCommand("switch main")).toBe(true);
+    const toolRows = controller.snapshot().transcript.filter(entry => entry.kind === "tool");
+    expect(toolRows.map(entry => [entry.toolCallId, entry.toolStatus, entry.text])).toEqual([
+      ["same", "success", "FIRST SUCCESS"],
+      ["parallel", "success", "PARALLEL SUCCESS"],
+      ["same", "error", "Tool call interrupted before a result was persisted"],
+    ]);
+    expect(new Set(toolRows.map(entry => entry.id)).size).toBe(3);
+    expect(session.items.filter(item => item.type === "tool_result")).toHaveLength(3);
+    expect(controller.branchCommand(`switch ${sibling}`)).toBe(true);
+    expect(controller.snapshot().transcript.filter(entry => entry.kind === "tool").map(entry => entry.text)).toEqual(["FIRST SUCCESS", "PARALLEL SUCCESS"]);
+    expect(session.entries.filter(entry => entry.item.type === "tool_result")).toHaveLength(3);
+  } finally { controller.dispose(); }
+});
