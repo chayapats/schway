@@ -186,7 +186,10 @@ export class TuiController {
     return redactSecrets(lines.join("\n"), this.secrets);
   }
 
-  /** Return whether manual compaction created a record, or false when busy, unavailable, cancelled, or unchanged. */
+  /**
+   * Return whether manual compaction created a record, or false when busy, unavailable, cancelled, or unchanged.
+   * @throws Propagates rejection of the compaction promise after clearing its active operation tracking.
+   */
   async compact(): Promise<boolean> {
     if (this.activeAbort) {
       this.notice("Already running. Press Esc to cancel first.");
@@ -281,7 +284,10 @@ export class TuiController {
     this.status = "error";
   }
 
-  /** Signal cancellation of the active turn without waiting for it to settle; idle calls do nothing. */
+  /**
+   * Signal cancellation of the active operation without waiting; idle calls do nothing.
+   * Applies to both submitted turns and manual compaction.
+   */
   cancel(): void {
     if (!this.activeAbort) {
       return;
@@ -289,18 +295,22 @@ export class TuiController {
     this.activeAbort.abort();
   }
 
-  /** Clear active cancellation state and signal abort without awaiting the turn during terminal cleanup. */
+  /**
+   * Clear active cancellation state and abort the active operation without awaiting it.
+   * Applies to both submitted turns and manual compaction during terminal cleanup.
+   */
   dispose(): void {
     this.abortActiveTurn();
   }
 
-  /** Wait for the active turn to settle; used by tests and terminal cleanup. */
+  /** Wait for the tracked submitted turn or manual compaction to settle during tests or terminal cleanup. */
   async waitForIdle(): Promise<void> {
     await this.activeTurn;
   }
 
   /**
-   * Append a nonempty prompt and run the shared agent loop, ignoring submissions while busy.
+   * Append a nonempty prompt and run the shared agent loop when a model is available, ignoring submissions while busy.
+   * Without a model, displays an error and returns without appending a user record or starting the loop.
    * Appends the user record first so a cancelled turn still leaves resumable history.
    */
   async submit(prompt: string): Promise<void> {
