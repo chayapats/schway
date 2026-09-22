@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli/main.ts";
+import { encodeSse as encodeAnthropicSse, TEXT_STREAM_EVENTS as ANTHROPIC_TEXT } from "./fixtures/anthropic.ts";
+import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
+import { runCli, type CliIo } from "../src/cli/main.ts";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { credentialIdentity, type CredentialStore } from "../src/auth/store.ts";
 import type { Model } from "../src/model/model.ts";
 import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -28,6 +32,8 @@ async function run(
     env?: Record<string, string | undefined>;
     cwd?: string;
     model?: Model;
+    credentialStore?: CredentialStore;
+    fetch?: CliIo["fetch"];
     signal?: AbortSignal;
     createModel?: (input: {
       apiKey?: string;
@@ -55,7 +61,9 @@ async function run(
       },
       cwd: options.cwd ?? process.cwd(),
       model: options.model,
+      credentialStore: options.credentialStore ?? fakeCredentialStore(),
       signal: options.signal,
+      fetch: options.fetch,
       createModel: options.createModel,
     });
     return { exitCode, stdout: stdout.text, stderr: stderr.text };
@@ -899,4 +907,69 @@ test("headless -p saves a session that --resume continues with workspace identit
     expect(second.stdout).toContain(`Workspace root: ${savedRoot}`);
     expect(second.stdout.includes(await realpath(other))).toBe(false);
   });
+});
+
+test("headless provider construction consumes only the selected saved credential", async () => {
+  const store = fakeCredentialStore();
+  await store.set(credentialIdentity({ provider: "anthropic" }), "saved-anthropic-sentinel");
+  await store.set(credentialIdentity({ provider: "openai" }), "saved-openai-sentinel");
+  let selected: { apiKey?: string; provider?: string } = {};
+  const result = await run(["-p", "hello", "--provider", "openai"], {
+    env: {}, credentialStore: store,
+    createModel: async (input) => { selected = input; return createScriptedModel({ text: "ok" }); },
+  });
+  expect(result.exitCode).toBe(0);
+  expect(selected).toMatchObject({ apiKey: "saved-openai-sentinel", provider: "openai" });
+  expect(JSON.stringify(result)).not.toContain("sentinel");
+});
+
+for (const provider of ["anthropic", "openai", "openai-compatible"] as const) {
+  test(`saved ${provider} key reaches the real adapter without entering session JSONL or output`, async () => {
+    await withTempDir(async (home) => {
+      const store = fakeCredentialStore();
+      const baseUrl = "https://compatible.example.test/v1";
+      const key = `saved-${provider}-secret-sentinel`;
+      await store.set(credentialIdentity({ provider, baseUrl }), key);
+      let requestHeaders: Headers | undefined;
+      const result = await run(["-p", "hello", "--json", "--provider", provider,
+        ...(provider === "openai-compatible" ? ["--base-url", baseUrl, "--auth", "required"] : [])], {
+        env: { HOME: home }, credentialStore: store,
+        fetch: async (input, init) => {
+          requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+          const body = provider === "anthropic" ? encodeAnthropicSse(ANTHROPIC_TEXT)
+            : provider === "openai" ? encodeOpenAISse(OPENAI_TEXT)
+            : 'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n';
+          return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+        },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(requestHeaders?.get(provider === "anthropic" ? "x-api-key" : "authorization")).toBe(provider === "anthropic" ? key : `Bearer ${key}`);
+      expect(JSON.stringify(result)).not.toContain(key);
+      const records = join(home, ".schway", "sessions");
+      for (const file of await readdir(records)) {
+        expect(await Bun.file(join(records, file)).text()).not.toContain(key);
+      }
+      expect(await Bun.file(join(home, ".schway", "config.json")).exists()).toBe(false);
+    });
+  });
+}
+
+test("saved keys are redacted from model-construction diagnostics and unavailable reads never construct a provider", async () => {
+  const store = fakeCredentialStore();
+  await store.set(credentialIdentity({ provider: "openai" }), "stored-diagnostic-sentinel");
+  const result = await run(["-p", "hello", "--provider", "openai"], {
+    env: {}, credentialStore: store,
+    createModel: async ({ apiKey }) => { throw new Error(`failed with ${apiKey}`); },
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("failed with ***");
+  expect(result.stderr).not.toContain("sentinel");
+  const locked = await run(["-p", "hello"], {
+    env: {}, credentialStore: { ...store, async get() { throw new Error("locked-secret-sentinel"); } },
+    createModel: async () => { throw new Error("SHOULD_NOT_CONSTRUCT"); },
+  });
+  expect(locked.exitCode).toBe(1);
+  expect(locked.stderr).toContain("Unlock or allow access");
+  expect(locked.stderr).not.toContain("sentinel");
+  expect(locked.stderr).not.toContain("SHOULD_NOT_CONSTRUCT");
 });

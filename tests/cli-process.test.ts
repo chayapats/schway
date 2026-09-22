@@ -16,7 +16,10 @@ function spawnEnv(
   if (home === process.env.HOME) {
     throw new Error("CLI subprocess HOME must be an isolated temp dir");
   }
-  return buildIsolatedCliEnv(home, overrides);
+  return {
+    ...buildIsolatedCliEnv(home, overrides),
+    BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/credential-store-preload.ts")}`,
+  };
 }
 
 async function spawnSchway(
