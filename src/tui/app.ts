@@ -1,5 +1,6 @@
 import { createContextManager, type ContextManager } from "../context/manager.ts";
-import { loadResolvedSettings } from "../config/config.ts";
+import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
+import type { ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { resolve } from "node:path";
 import {
@@ -34,10 +35,8 @@ import {
 } from "../cli/args.ts";
 import { TuiController } from "./controller.ts";
 import {
-  formatModelPicker,
   dispatchEditorInput,
   helpText,
-  parseModelArgs,
   parseSkillInvocation,
 } from "./commands.ts";
 import {
@@ -46,7 +45,6 @@ import {
   prepareSkillInvocation,
 } from "../skills/skills.ts";
 import { loadProviderModel } from "../model/loader.ts";
-import { listCatalog, lookupModel } from "../model/catalog.ts";
 
 /** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
 export interface TuiWriter {
@@ -127,15 +125,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
 
-  const settings = await loadResolvedSettings({
-    home,
-    workspaceRoot: workspace.root,
-    cli: cliOverridesFromArgs(io.args),
-  });
-  if ("error" in settings) {
-    io.stderr.write(`${settings.error}\n`);
+  let configEditor: ConfigEditor;
+  try {
+    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args) });
+  } catch (error) {
+    io.stderr.write(`${messageOf(error)}\n`);
     return 1;
   }
+  let settings = configEditor.settings;
   if (
     hasCliConnectionOptions(io.args) &&
     settings.provider !== "openai-compatible"
@@ -194,6 +191,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
     };
+    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model) => stageInteractiveSettings(next, settings, {
+      model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
+      signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets,
+    });
+    const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
+      settings = next;
+      skillScope.manager = manager;
+    };
     try {
       if (io.args.resume) {
         // Reuse the session handle loaded during startup, including settlements.
@@ -210,6 +215,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           extensions,
           loadWorkspaceExtensions,
           home,
+          configEditor, stageSettings, onSettingsCommitted,
           workspace: resumedWorkspace,
           provider: settings.provider,
           modelId: settings.model,
@@ -241,6 +247,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           extensions,
           loadWorkspaceExtensions,
           home,
+          configEditor, stageSettings, onSettingsCommitted,
           workspace,
           provider: settings.provider,
           modelId: settings.model,
@@ -271,20 +278,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         workspaceRoot: workspace.root,
         skillScope,
         sessionsDir: directory,
-        settings: {
-          provider: settings.provider,
-          model: settings.model,
-          maxTurns: settings.maxTurns,
-          maxConcurrentTools: settings.maxConcurrentTools,
-          contextWindow: settings.contextWindow,
-          maxOutput: settings.maxOutput,
-          explicitContextWindow: settings.explicitContextWindow,
-          explicitMaxOutput: settings.explicitMaxOutput,
-          baseUrl: settings.baseUrl,
-          headers: settings.headers,
-          extraBody: settings.extraBody,
-          auth: settings.auth,
-        },
+        settings: () => settings,
         env,
         runtimeApiKey: io.args.apiKey,
         fetch: io.fetch,
@@ -305,19 +299,24 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   }
 }
 
-interface RendererSettings {
-  provider: string;
-  model: string;
-  maxTurns: number;
-  maxConcurrentTools: number;
-  contextWindow: number;
-  maxOutput: number;
-  explicitContextWindow?: number;
-  explicitMaxOutput?: number;
-  baseUrl?: string;
-  headers?: Record<string, string>;
-  extraBody?: Record<string, unknown>;
-  auth?: CliAuthMode;
+/** Stage a changed adapter and context budget, reusing the current adapter for edits that do not affect provider requests. */
+export async function stageInteractiveSettings(
+  next: ResolvedSettings,
+  previous: ResolvedSettings,
+  options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
+): Promise<{ model?: Model; contextManager: ContextManager }> {
+  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth"] as const;
+  let model = options.model;
+  if (adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
+    const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
+      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth,
+    });
+    options.signal.throwIfAborted();
+    if ("error" in loaded) throw new Error(loaded.error);
+    model = loaded.model;
+  }
+  options.signal.throwIfAborted();
+  return { model, contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
@@ -327,7 +326,7 @@ async function runTuiRenderer(options: {
   workspaceRoot: string;
   skillScope: { manager?: ContextManager; workspaceRoot: string };
   sessionsDir: string;
-  settings: RendererSettings;
+  settings: () => ResolvedSettings;
   env: Record<string, string | undefined>;
   runtimeApiKey?: string;
   fetch?: FetchLike;
@@ -399,18 +398,25 @@ async function runTuiRenderer(options: {
     let lastRendered = "";
     const render = () => {
       const snapshot = options.controller.snapshot();
-      const headerText = `schway - ${snapshot.provider}/${snapshot.modelId} - session ${snapshot.sessionId} - ${snapshot.status}`;
+      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
       try {
         header.content = headerText;
       } catch {
         // Header updates are best-effort; transcript below is authoritative.
       }
-      const lines = formatTranscript(snapshot.transcript.map((entry) => ({
+      let lines = formatTranscript(snapshot.transcript.map((entry) => ({
         kind: entry.kind,
         text: entry.text,
         toolName: entry.toolName,
         toolStatus: entry.toolStatus,
       })));
+      if (snapshot.modelPicker) {
+        const picker = snapshot.modelPicker;
+        lines += `\n\nSelect model — search or type provider/model (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}\n`;
+        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.provider}/${entry.modelId} (${entry.contextWindow} ctx, ${entry.maxOutput} output)${entry.custom ? " [typed ID]" : ""}`).join("\n");
+        if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID.";
+      }
+      lines = redactSecrets(lines, options.secrets);
       const roots = options.controller.workspaceIdentity();
       const rootStatus = roots ? ` | Primary: ${roots.root} | Attached: ${roots.extraRoots.join(", ") || "none"}` : "";
       const statusText = redactSecrets(formatStatus(snapshot.status) + rootStatus, options.secrets);
@@ -456,13 +462,23 @@ async function runTuiRenderer(options: {
     };
 
     input.on("enter", () => {
+      if (options.controller.snapshot().modelPicker) {
+        void options.controller.selectPickerModel().then(selected => { if (selected) input.value = ""; render(); });
+        return;
+      }
       const value = input.value;
       submitPrompt(value);
       render();
     });
+    input.on("input", () => { options.controller.searchModels(input.value); render(); });
 
     renderer.keyInput.on("keypress", (key) => {
       const name = key.name.toLowerCase();
+      if (options.controller.snapshot().modelPicker && (name === "up" || name === "down")) {
+        options.controller.moveModelPicker(name === "up" ? -1 : 1);
+        render();
+        return;
+      }
       if (key.ctrl && name === "c") {
         if (options.controller.running) {
           options.controller.cancel();
@@ -478,6 +494,10 @@ async function runTuiRenderer(options: {
       if (name === "escape") {
         if (options.controller.running) {
           options.controller.cancel();
+        } else if (options.controller.snapshot().modelPicker) {
+          options.controller.closeModelPicker();
+          input.value = "";
+          render();
         }
       }
     });
@@ -516,7 +536,7 @@ async function handleSlashCommand(
     workspaceRoot: string;
     skillScope: { manager?: ContextManager; workspaceRoot: string };
     sessionsDir: string;
-    settings: RendererSettings;
+    settings: () => ResolvedSettings;
     env: Record<string, string | undefined>;
     runtimeApiKey?: string;
     fetch?: FetchLike;
@@ -531,7 +551,7 @@ async function handleSlashCommand(
     ctx.controller.notice("Already running. Press Esc to cancel first.");
     return;
   }
-  const managerOptions = contextManagerOptions(ctx.home, ctx.settings.explicitContextWindow);
+  const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow);
   switch (name) {
     case "new": {
       const workspace = await resolveWorkspace(ctx.workspaceRoot);
@@ -541,7 +561,7 @@ async function handleSlashCommand(
       });
       const manager = createContextManager(workspace, managerOptions);
       if (!await ctx.controller.switchSession(session, session.header.id, { workspace, contextManager: manager })) return;
-      ctx.skillScope.manager = manager;
+      ctx.skillScope.manager = ctx.controller.activeContextManager();
       ctx.skillScope.workspaceRoot = workspace.root;
       ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
       return;
@@ -569,7 +589,7 @@ async function handleSlashCommand(
         const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
         if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return;
-        ctx.skillScope.manager = manager;
+        ctx.skillScope.manager = ctx.controller.activeContextManager();
         ctx.skillScope.workspaceRoot = workspace.root;
         for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
         ctx.controller.notice(
@@ -582,23 +602,10 @@ async function handleSlashCommand(
     }
     case "model": {
       if (!args) {
-        const snapshot = ctx.controller.snapshot();
-        ctx.controller.notice(
-          formatModelPicker(snapshot.provider, snapshot.modelId, listCatalog()),
-        );
+        ctx.controller.openModelPicker();
         return;
       }
-      const snapshot = ctx.controller.snapshot();
-      const selection = parseModelArgs(args, snapshot.provider);
-      if ("error" in selection) {
-        ctx.controller.fail(selection.error);
-        return;
-      }
-      if (ctx.controller.running) {
-        ctx.controller.notice("Already running. Press Esc to cancel first.");
-        return;
-      }
-      await switchInteractiveModel(selection.provider, selection.modelId, ctx);
+      await ctx.controller.selectModel(args);
       return;
     }
     case "branch": {
@@ -623,7 +630,7 @@ async function handleSlashCommand(
       return;
     }
     case "config": {
-      ctx.controller.notice(ctx.controller.describeConfig());
+      await ctx.controller.configCommand(args);
       return;
     }
     case "help": {
@@ -700,66 +707,6 @@ export async function invokeSkillTurn(
   } finally {
     manager.clearActiveSkill();
   }
-}
-
-/** Switch the session model without persisting credentials or config files. */
-async function switchInteractiveModel(
-  provider: string,
-  modelId: string,
-  ctx: {
-    controller: TuiController;
-    settings: RendererSettings;
-    env: Record<string, string | undefined>;
-    runtimeApiKey?: string;
-    fetch?: FetchLike;
-    createModel?: InteractiveIo["createModel"];
-    secrets: string[];
-  },
-): Promise<void> {
-  const normalizedProvider = provider.toLowerCase();
-  if (
-    normalizedProvider !== "anthropic" &&
-    normalizedProvider !== "openai" &&
-    normalizedProvider !== "openai-compatible"
-  ) {
-    ctx.controller.fail(
-      `Unknown provider: ${provider}. Valid providers: anthropic, openai, openai-compatible`,
-    );
-    return;
-  }
-  const target = normalizedProvider as CliProvider;
-  const budgets = lookupModel(target, modelId, {
-    ...(ctx.settings.explicitContextWindow !== undefined
-      ? { contextWindow: ctx.settings.explicitContextWindow }
-      : {}),
-    ...(ctx.settings.explicitMaxOutput !== undefined
-      ? { maxOutput: ctx.settings.explicitMaxOutput }
-      : {}),
-  });
-  const loaded = await loadInteractiveModel(target, modelId, {
-    maxTokens: ctx.settings.explicitMaxOutput ?? budgets.maxOutput,
-    baseUrl: ctx.settings.baseUrl,
-    headers: ctx.settings.headers,
-    extraBody: ctx.settings.extraBody,
-    auth: ctx.settings.auth,
-    runtimeApiKey: ctx.runtimeApiKey,
-    env: ctx.env,
-    fetch: ctx.fetch,
-    createModel: ctx.createModel,
-    secrets: ctx.secrets,
-  });
-  if ("error" in loaded) {
-    ctx.controller.fail(loaded.error);
-    return;
-  }
-  ctx.controller.setModel(loaded.model, target, modelId);
-  ctx.settings.provider = target;
-  ctx.settings.model = modelId;
-  ctx.settings.contextWindow = budgets.contextWindow;
-  ctx.settings.maxOutput = budgets.maxOutput;
-  ctx.controller.notice(
-    `Switched to ${target}/${modelId} (${budgets.contextWindow} ctx). Applies to this session only.`,
-  );
 }
 
 /** Build context-manager options so catalog budgets follow model switches unless overridden. */

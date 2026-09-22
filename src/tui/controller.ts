@@ -10,6 +10,10 @@ import type { ToolRegistry } from "../tools/registry.ts";
 import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { discoverSkills } from "../skills/skills.ts";
+import type { ConfigLayer, ResolvedSettings } from "../config/config.ts";
+import { EDITABLE_CONFIG_KEYS, type ConfigEditor, type ConfigScope, type ConfigTransaction } from "../config/editing.ts";
+import { parseModelArgs } from "./commands.ts";
+import { modelPickerEntries, type ModelPickerSnapshot } from "./model-picker.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -35,6 +39,7 @@ export interface TuiSnapshot {
   branchId: string;
   provider: string;
   modelId: string;
+  modelPicker?: ModelPickerSnapshot;
 }
 
 /** Dependencies for one interactive conversation; mirrors headless loop inputs. */
@@ -64,6 +69,11 @@ export interface TuiControllerOptions {
   /** Stage fresh enabled modules for a workspace before publishing a session switch. */
   loadWorkspaceExtensions?: (workspace: Workspace, signal: AbortSignal) => Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }>;
   home?: string;
+  configEditor?: ConfigEditor;
+  /** Construct the next adapter and matching context budget before committing any edit. */
+  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
+  /** Publish renderer-owned context references after a successful settings commit. */
+  onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
 }
 
 /** Bound on displayed tool-result characters; session data stays complete. */
@@ -84,12 +94,16 @@ export class TuiController {
   private provider: string;
   private modelId: string;
   private sessionId: string;
-  private readonly maxTurns?: number;
-  private readonly maxConcurrentTools?: number;
-  private readonly explicitContextWindow?: number;
-  private readonly explicitMaxOutput?: number;
-  private readonly baseUrl?: string;
-  private readonly auth?: string;
+  private maxTurns?: number;
+  private maxConcurrentTools?: number;
+  private explicitContextWindow?: number;
+  private explicitMaxOutput?: number;
+  private baseUrl?: string;
+  private auth?: string;
+  private configEditor?: ConfigEditor;
+  private readonly stageSettings?: TuiControllerOptions["stageSettings"];
+  private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
+  private modelPicker?: ModelPickerSnapshot;
   private transcript: TuiTranscriptEntry[] = [];
   private status: TuiStatus = "idle";
   private activeAbort?: AbortController;
@@ -122,6 +136,9 @@ export class TuiController {
     this.secrets = options.secrets ?? [];
     this.extensions = options.extensions;
     this.home = options.home;
+    this.configEditor = options.configEditor;
+    this.stageSettings = options.stageSettings;
+    this.onSettingsCommitted = options.onSettingsCommitted;
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
@@ -144,6 +161,7 @@ export class TuiController {
       branchId: this.session.activeBranchId,
       provider: this.provider,
       modelId: this.modelId,
+      modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
     };
   }
 
@@ -188,6 +206,9 @@ export class TuiController {
   workspaceIdentity(): Workspace | undefined {
     return this.workspace ? { ...this.workspace, extraRoots: [...this.workspace.extraRoots] } : undefined;
   }
+
+  /** Return the active context manager for explicit skill invocations after runtime changes. */
+  activeContextManager(): ContextManager { return this.contextManager; }
 
   /** Validate and persist attachments while owning the idle boundary, publishing nothing on failure or cancellation. */
   async addDirectories(directories: readonly string[]): Promise<boolean> {
@@ -304,6 +325,121 @@ export class TuiController {
     this.modelId = modelId;
   }
 
+  /** Open model search while idle, selecting the currently active entry. */
+  openModelPicker(): boolean {
+    if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
+    this.modelPicker = { query: "", selectedIndex: 0, entries: [] };
+    this.searchModels("");
+    return true;
+  }
+
+  /** Filter catalog choices and include a typed model ID with fallback budgets. */
+  searchModels(query: string): void {
+    if (!this.modelPicker || this.running) return;
+    this.modelPicker = { query, selectedIndex: 0, entries: modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }) };
+  }
+
+  /** Move the highlighted model with wraparound over the filtered choices. */
+  moveModelPicker(delta: number): void {
+    if (!this.modelPicker || this.running || !this.modelPicker.entries.length) return;
+    const count = this.modelPicker.entries.length;
+    this.modelPicker.selectedIndex = ((this.modelPicker.selectedIndex + delta) % count + count) % count;
+  }
+
+  /** Close the picker without changing the active model or settings. */
+  closeModelPicker(): void { this.modelPicker = undefined; }
+
+  /** Stage and commit the highlighted model, leaving the picker open on failure. */
+  async selectPickerModel(): Promise<boolean> {
+    const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
+    if (!selection) return false;
+    return this.selectModel(`${selection.provider}/${selection.modelId}`);
+  }
+
+  /** Apply the textual model form through the same atomic session settings path as the picker. */
+  async selectModel(args: string): Promise<boolean> {
+    if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
+    const selection = parseModelArgs(args, this.provider);
+    if ("error" in selection) { this.fail(selection.error); return false; }
+    return this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId), () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx). Applies to this session only.`);
+  }
+
+  /** Inspect settings or apply one validated session or explicitly scoped persisted edit. */
+  async configCommand(args: string): Promise<boolean> {
+    if (!args.trim()) { this.notice(this.describeConfig()); return true; }
+    if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
+    const scoped = args.trim().match(/\s+--scope\s+(\S+)$/);
+    const scopeValue = scoped?.[1];
+    if (scopeValue && !["user", "project", "session"].includes(scopeValue)) { this.fail("Config scope must be user, project or session."); return false; }
+    const command = scoped ? args.trim().slice(0, scoped.index) : args.trim();
+    const match = command.match(/^(set|reset)\s+(\S+)(?:\s+([\s\S]+))?$/);
+    if (!match) { this.fail("Usage: /config set <key> <value> [--scope user|project] or /config reset <key> [--scope user|project]."); return false; }
+    const [, action, key, raw] = match;
+    if ((action === "set" && !raw?.trim()) || (action === "reset" && raw?.trim()) || raw?.includes("--scope")) { this.fail("Usage: /config set <key> <value> or /config reset <key>, optionally followed by --scope user|project."); return false; }
+    const scope = (scopeValue ?? "session") as ConfigScope;
+    let value: unknown = raw;
+    if (action === "reset") value = undefined;
+    else if (["maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"].includes(key!)) value = Number(raw);
+    else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted config value."); return false; } }
+    return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
+      const origin = this.configEditor!.origins[key as keyof ConfigLayer];
+      const effective = this.configEditor!.settings[key as keyof ResolvedSettings];
+      const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
+      const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
+      const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
+      const shadowingSource = providerSource ? `${providerSource} provider selection` : origin;
+      const shadowed = action === "set" && source !== origin ? `; shadowed by ${shadowingSource}`
+        : action === "reset" && providerSource ? `; ${providerSource} provider selection uses its default model` : "";
+      return `${key} (${scope}): ${saved}. Effective: ${displaySetting(key!, effective)} [${origin}]${shadowed}.`;
+    });
+  }
+
+  private async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
+    if (!this.configEditor || !this.stageSettings) { this.fail("Interactive settings are unavailable in this session."); return false; }
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    this.status = "running";
+    const task = (async () => {
+      try {
+        const transaction = await prepare();
+        abort.signal.throwIfAborted();
+        const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model);
+        abort.signal.throwIfAborted();
+        if (this.disposed || this.activeAbort !== abort) return false;
+        await transaction.commit(abort.signal);
+        // Once the transaction commits, publish the matching runtime even if cancellation arrives at that boundary.
+        this.publishSettings(transaction.settings, staged);
+        this.modelPicker = undefined;
+        this.status = "idle";
+        this.notice(redactSecrets(message(), this.secrets));
+        return true;
+      } catch (error) {
+        if (abort.signal.aborted) { this.notice("Settings change cancelled. Previous settings remain active."); this.status = "idle"; }
+        else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+        return false;
+      }
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
+  private publishSettings(next: ResolvedSettings, staged: { model?: Model; contextManager: ContextManager }): void {
+    this.model = staged.model;
+    this.contextManager.clearActiveSkill();
+    this.contextManager = staged.contextManager;
+    this.provider = next.provider; this.modelId = next.model;
+    this.maxTurns = next.maxTurns; this.maxConcurrentTools = next.maxConcurrentTools;
+    this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
+    this.baseUrl = next.baseUrl; this.auth = next.auth;
+    this.onSettingsCommitted?.(next, staged.contextManager);
+  }
+
   /** Effective context and output budgets for the current model with overrides. */
   effectiveBudgets(): { contextWindow: number; maxOutput: number } {
     const info = lookupModel(this.provider, this.modelId, {
@@ -326,13 +462,20 @@ export class TuiController {
       `Context window: ${budgets.contextWindow}`,
       `Max output: ${budgets.maxOutput}`,
     ];
-    if (this.maxTurns !== undefined) {
+    if (this.configEditor) {
+      const settings = this.configEditor.settings;
+      const origins = this.configEditor.origins;
+      lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => settings[key] !== undefined).map(key => `${key}: ${displaySetting(key, settings[key])} [${origins[key]}${(key === "contextWindow" || key === "maxOutput") && origins[key] !== "catalog" ? "; explicit limit" : ""}]`));
+      if (settings.headers) lines.push(`headers: configured (values hidden) [${origins.headers}]`);
+      if (settings.extraBody) lines.push(`extraBody: configured (values hidden) [${origins.extraBody}]`);
+    }
+    if (!this.configEditor && this.maxTurns !== undefined) {
       lines.push(`Max turns: ${this.maxTurns}`);
     }
-    if (this.maxConcurrentTools !== undefined) {
+    if (!this.configEditor && this.maxConcurrentTools !== undefined) {
       lines.push(`Max concurrent tools: ${this.maxConcurrentTools}`);
     }
-    if (this.provider === "openai-compatible") {
+    if (!this.configEditor && this.provider === "openai-compatible") {
       if (this.baseUrl !== undefined) {
         lines.push(`Base URL: ${sanitizeBaseUrl(this.baseUrl)}`);
       }
@@ -348,7 +491,7 @@ export class TuiController {
       const unavailable = this.session.metadata.extraRoots.filter(root => !this.workspace!.extraRoots.includes(root));
       if (unavailable.length) lines.push(`Unavailable saved roots: ${unavailable.join(", ")}`);
     }
-    lines.push("Model overrides apply to this session only and are never written to config files.");
+    lines.push("Edits apply to this session only by default. Use --scope user or --scope project to save; /config reset removes that scope's override.");
     return redactSecrets(lines.join("\n"), this.secrets);
   }
 
@@ -433,6 +576,10 @@ export class TuiController {
   private async stageSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }, abort: AbortController): Promise<boolean> {
     let staged: { tools: ToolRegistry; runtime: ExtensionRuntime } | undefined;
     try {
+      const editor = await this.configEditor?.forWorkspace(options.workspace.root);
+      const nextSettings = editor?.settings;
+      const nextRuntime = nextSettings && this.stageSettings ? await this.stageSettings(nextSettings, abort.signal, options.workspace, this.model) : undefined;
+      abort.signal.throwIfAborted();
       staged = await this.loadWorkspaceExtensions?.(options.workspace, abort.signal);
       abort.signal.throwIfAborted();
       if (this.disposed || this.activeAbort !== abort) return false;
@@ -443,7 +590,11 @@ export class TuiController {
         this.tools = staged.tools;
         this.detachDiagnostics = staged.runtime.attachDiagnostics(message => this.notice(message));
       }
-      this.replaceSession(session, sessionId, options);
+      this.replaceSession(session, sessionId, { ...options, contextManager: nextRuntime?.contextManager ?? options.contextManager });
+      if (editor && nextSettings && nextRuntime) {
+        this.configEditor = editor;
+        this.publishSettings(nextSettings, nextRuntime);
+      }
       if (staged) {
         staged = undefined;
         previous?.dispose();
@@ -952,4 +1103,9 @@ function actionableError(message: string): string {
     return message;
   }
   return message;
+}
+
+function displaySetting(key: string, value: unknown): string {
+  if (key === "baseUrl" && typeof value === "string") return sanitizeBaseUrl(value);
+  return value === undefined ? "unset" : String(value);
 }
