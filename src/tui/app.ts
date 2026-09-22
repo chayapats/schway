@@ -113,7 +113,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   const workspaceDiagnostics: string[] = [];
   try {
     if (io.args.resume) {
-      startupResumed = await loadJsonlSession({ directory, id: io.args.resume });
+      startupResumed = await loadJsonlSession({ directory, id: io.args.resume, branchId: io.args.branch });
       const restored = await restoreWorkspace({ root: startupResumed.header.workspaceRoot, launchCwd: startupResumed.header.launchCwd, extraRoots: [...startupResumed.metadata.extraRoots] });
       workspace = restored.workspace;
       workspaceDiagnostics.push(...restored.diagnostics);
@@ -601,6 +601,10 @@ async function handleSlashCommand(
       await switchInteractiveModel(selection.provider, selection.modelId, ctx);
       return;
     }
+    case "branch": {
+      ctx.controller.branchCommand(args);
+      return;
+    }
     case "compact": {
       await ctx.controller.compact();
       return;
@@ -664,6 +668,7 @@ export async function invokeSkillTurn(
     ctx.controller.fail("Skills are not ready yet; try again.");
     return;
   }
+  const branchId = ctx.controller.snapshot().branchId;
   const workspaceIdentity = ctx.controller.workspaceIdentity();
   const prepared = await prepareSkillInvocation({
     workspaceRoot: ctx.skillScope.workspaceRoot,
@@ -679,7 +684,7 @@ export async function invokeSkillTurn(
     ctx.controller.notice("Already running. Press Esc to cancel first.");
     return;
   }
-  if (ctx.skillScope.manager !== manager || JSON.stringify(workspaceIdentity) !== JSON.stringify(ctx.controller.workspaceIdentity())) {
+  if (ctx.skillScope.manager !== manager || ctx.controller.snapshot().branchId !== branchId || JSON.stringify(workspaceIdentity) !== JSON.stringify(ctx.controller.workspaceIdentity())) {
     ctx.controller.notice("The active session changed. Retry the skill when ready.");
     return;
   }

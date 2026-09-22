@@ -122,7 +122,7 @@ function assistantMessage(turn: ScriptedTurn, chunks: string[]): AssistantMessag
   }
   return {
     type: "assistant",
-    id: "asst-scripted",
+    id: `asst-scripted-${crypto.randomUUID()}`,
     content,
   };
 }

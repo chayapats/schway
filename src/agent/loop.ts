@@ -42,11 +42,14 @@ export interface AgentLoopOptions {
 export async function* runAgentLoop(
   options: AgentLoopOptions,
 ): AsyncGenerator<RuntimeEvent> {
-  const publish = options.extensions?.eventPublisher();
-  for await (const event of runAgentLoopInternal(options)) {
-    publish?.(event);
-    yield event;
-  }
+  const release = options.session.acquireOperation();
+  try {
+    const publish = options.extensions?.eventPublisher();
+    for await (const event of runAgentLoopInternal(options)) {
+      publish?.(event);
+      yield event;
+    }
+  } finally { release(); }
 }
 
 /** Keep authoritative execution independent of extension notification delivery. */

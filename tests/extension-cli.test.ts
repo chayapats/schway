@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "../src/cli/args.ts";
 import { runCli } from "../src/cli/main.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { withIsolatedCliDirs } from "./helpers.ts";
+import { decodeStoredLine, withIsolatedCliDirs } from "./helpers.ts";
 
 test("repeatable extension flags preserve order in interactive and headless arguments", () => {
   for (const argv of [[], ["-p", "hello"]]) {
@@ -63,7 +63,7 @@ test("headless loop loads ordered extensions from the primary workspace before i
     ]);
     const sessionDir = join(home, ".schway/sessions");
     const files = await readdir(sessionDir);
-    const saved = (await Bun.file(join(sessionDir, files[0]!)).text()).trim().split("\n").map((line) => JSON.parse(line));
+    const saved = (await Bun.file(join(sessionDir, files[0]!)).text()).trim().split("\n").flatMap(decodeStoredLine);
     expect(saved.filter((item) => item.type === "tool_result")).toHaveLength(1);
     expect(saved.some((item) => item.type === "tool.delta")).toBe(false);
   });
@@ -211,7 +211,7 @@ test("headless tool policy rewrites a native edit and denies a sibling with dura
     ]);
     const directory = join(home, ".schway/sessions");
     const [file] = await readdir(directory);
-    const saved = (await Bun.file(join(directory, file!)).text()).trim().split("\n").map(line => JSON.parse(line));
+    const saved = (await Bun.file(join(directory, file!)).text()).trim().split("\n").flatMap(decodeStoredLine);
     const results = saved.filter(item => item.type === "tool_result");
     expect(results.map(result => result.toolCallId)).toEqual(["allow", "deny"]);
     expect(results[1].content).toContain("file is protected");

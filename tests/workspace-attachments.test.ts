@@ -220,7 +220,7 @@ test("controller attachments persist outside conversation history, activate atta
     const records = text.trim().split("\n").map(line => JSON.parse(line));
     const metadata = records.find(record => record.type === "workspace_roots");
     expect(metadata).toEqual({ type: "workspace_roots", version: 1, extraRoots: [extra] });
-    expect(records.find(record => record.type === "user").parentId).toBe(session.header.id);
+    expect(records.find(record => record.type === "branch_append").entries[0].parentId).toBe(session.header.id);
     const resumed = await loadJsonlSession({ directory, id: session.header.id });
     expect(resumed.header.extraRoots).toEqual([]);
     expect(resumed.metadata.extraRoots).toEqual([extra]);
@@ -240,6 +240,8 @@ test("controller reserves idle ownership before asynchronous validation and canc
     const { controller, session } = controllerFor(workspace);
     const pending = controller.addDirectories([extra]);
     expect(controller.running).toBe(true);
+    expect(controller.branchCommand(`fork ${session.rootId}`)).toBe(false);
+    expect(session.listBranches()).toHaveLength(1);
     await controller.submit("must not start during validation");
     expect(await controller.addDirectories([extra])).toBe(false);
     controller.cancel();
@@ -316,12 +318,13 @@ test("v1 upgrades append metadata without changing headers, records or conversat
     expect(text.startsWith(prefix)).toBe(true);
     const records = text.trim().split("\n").map(line => JSON.parse(line));
     expect(records[2]).toEqual({ type: "session_format", version: 2 });
-    expect(records[4].parentId).toBe("u1");
+    expect(records[4]).toEqual({ type: "session_format", version: 3 });
+    expect(records[5].entries[0].parentId).toBe("u1");
     const resumed = await loadJsonlSession({ directory, id: "legacy" });
     expect(resumed.metadata.extraRoots).toEqual(["/saved/extra"]);
     expect(resumed.items.map(item => item.id)).toEqual(["u1", "u2"]);
     resumed.setExtraRoots(["/saved/extra", "/saved/another"]);
-    expect((await readFile(path, "utf8")).match(/session_format/g)).toHaveLength(1);
+    expect((await readFile(path, "utf8")).match(/session_format/g)).toHaveLength(2);
   });
 });
 

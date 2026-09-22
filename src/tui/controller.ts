@@ -35,6 +35,7 @@ export interface TuiSnapshot {
   status: TuiStatus;
   transcript: readonly TuiTranscriptEntry[];
   sessionId: string;
+  branchId: string;
   provider: string;
   modelId: string;
 }
@@ -143,6 +144,7 @@ export class TuiController {
           : { ...entry, text: redactSecrets(entry.text, this.secrets) },
       ),
       sessionId: this.sessionId,
+      branchId: this.session.activeBranchId,
       provider: this.provider,
       modelId: this.modelId,
     };
@@ -151,6 +153,38 @@ export class TuiController {
   /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
     return this.activeAbort !== undefined;
+  }
+
+  /** List saved branch identities or change the selected ancestry while all controller work is idle. */
+  branchCommand(args: string): boolean {
+    const [action, id, ...label] = args.trim().split(/\s+/);
+    if (action === "list" && id === undefined) {
+      const branches = this.session.listBranches();
+      const lines = [`Conversation root: ${this.session.rootId}`, "Branches (IDs are selectors; names are labels):"];
+      for (const branch of branches.slice(0, 50)) {
+        lines.push(`${branch.active ? "*" : "-"} ${branch.id}${branch.name ? ` (${branch.name})` : ""}: head ${branch.headId}, ${branch.entryCount} entries`);
+        lines.push(`  Recent complete-turn entries: ${branch.forkPoints.slice(-12).join(", ")}`);
+      }
+      if (branches.length > 50) lines.push("More branches are available through the session branch API.");
+      this.notice(lines.join("\n").slice(0, 50_000));
+      return true;
+    }
+    if (this.disposed) return false;
+    if (this.running) { this.notice("Busy: wait for the active operation to settle before changing branches."); return false; }
+    if (!id || (action !== "fork" && action !== "switch") || (action === "switch" && label.length)) {
+      this.fail("Usage: /branch list | /branch fork <entry-id> [name] | /branch switch <branch-id>. Branches do not undo file changes.");
+      return false;
+    }
+    try {
+      if (action === "fork") this.session.forkBranch(id, label.length ? label.join(" ") : undefined);
+      else this.session.selectBranch(id);
+      this.replaceSession(this.session, this.sessionId);
+      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes.`);
+      return true;
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : String(error));
+      return false;
+    }
   }
 
   /** Return a copy of the currently usable root identities for discovery and status. */
@@ -310,6 +344,7 @@ export class TuiController {
       }
     }
     lines.push(`Session: ${this.sessionId}`);
+    lines.push(`Branch: ${this.session.activeBranchId}`);
     if (this.workspace) {
       lines.push(`Workspace root: ${this.workspace.root}`, `Launch directory: ${this.workspace.launchCwd}`);
       lines.push(`Attached roots: ${this.workspace.extraRoots.join(", ") || "none"}`);

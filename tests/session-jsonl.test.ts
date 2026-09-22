@@ -19,7 +19,7 @@ test("creating a session writes a versioned JSONL header with workspace identity
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]!)).toEqual({
       type: "session",
-      version: 2,
+      version: 3,
       id: session.header.id,
       createdAt: session.header.createdAt,
       workspaceRoot: "/tmp/project",
@@ -62,14 +62,9 @@ test("appended messages reload with parent identifiers and provider metadata", a
       .filter((line) => line.length > 0)
       .map((line) => JSON.parse(line) as { id: string; parentId?: string; type: string });
     expect(records[1]).toMatchObject({
-      type: "user",
-      id: "u1",
-      parentId: created.header.id,
-    });
-    expect(records[2]).toMatchObject({
-      type: "assistant",
-      id: "a1",
-      parentId: "u1",
+      type: "branch_append", version: 1, branchId: "main", entries: [
+        { parentId: created.header.id, item: user }, { parentId: "u1", item: assistant },
+      ],
     });
   });
 });
@@ -91,7 +86,7 @@ test("unsupported session versions fail with an actionable error", async () => {
     ).rejects.toThrow(/Unsupported session format version 99/);
     await expect(
       loadJsonlSession({ directory: dir, id: "sess-old" }),
-    ).rejects.toThrow(/versions 1 and 2/);
+    ).rejects.toThrow(/versions 1, 2 and 3/);
   });
 });
 
@@ -182,73 +177,21 @@ test("loading an interrupted session settles unresolved tool calls without rerun
   });
 });
 
-test("a malformed trailing record is skipped without destroying valid history", async () => {
-  await withTempDir(async (dir) => {
+test("semantic corruption at the tail is rejected without repairing valid JSON", async () => {
+  await withTempDir(async dir => {
     const created = await createJsonlSession({ directory: dir, workspace });
-    const user: UserMessage = {
-      type: "user",
-      id: "u1",
-      content: [{ type: "text", text: "keep me" }],
-    };
-    created.append(user);
+    created.append({ type: "user", id: "u1", content: [{ type: "text", text: "keep me" }] });
     const path = join(dir, `${created.header.id}.jsonl`);
     const valid = await Bun.file(path).text();
-    const trailing = '{"type":"not-a-message","id":"x","parentId":"u1"}\n';
-    await writeFile(path, `${valid}${trailing}`);
-
-    const loaded = await loadJsonlSession({
-      directory: dir,
-      id: created.header.id,
-    });
-    expect(loaded.items).toEqual([user]);
-    expect(await Bun.file(path).text()).toBe(valid);
-
-    loaded.append({
-      type: "user",
-      id: "u2",
-      content: [{ type: "text", text: "next" }],
-    });
-    const reloaded = await loadJsonlSession({
-      directory: dir,
-      id: created.header.id,
-    });
-    expect(reloaded.items.map((item) => item.id)).toEqual(["u1", "u2"]);
-  });
-});
-
-test("a record missing required fields is malformed", async () => {
-  await withTempDir(async (dir) => {
-    const created = await createJsonlSession({ directory: dir, workspace });
-    const user: UserMessage = {
-      type: "user",
-      id: "u1",
-      content: [{ type: "text", text: "keep me" }],
-    };
-    created.append(user);
-    const path = join(dir, `${created.header.id}.jsonl`);
-    const valid = await Bun.file(path).text();
-
-    await writeFile(
-      path,
-      `${valid}{"type":"user","parentId":"u1","content":[{"type":"text","text":"no id"}]}\n`,
-    );
-    const loaded = await loadJsonlSession({
-      directory: dir,
-      id: created.header.id,
-    });
-    expect(loaded.items).toEqual([user]);
-    expect(await Bun.file(path).text()).toBe(valid);
-
-    await writeFile(
-      path,
-      `${valid}{"type":"user","parentId":"u1","content":[{"type":"text","text":"no id"}]}\n{"type":"user","id":"u2","parentId":"u1","content":[{"type":"text","text":"later"}]}\n`,
-    );
-    await expect(
-      loadJsonlSession({ directory: dir, id: created.header.id }),
-    ).rejects.toThrow(/malformed record/);
-    expect(await Bun.file(path).text()).toBe(
-      `${valid}{"type":"user","parentId":"u1","content":[{"type":"text","text":"no id"}]}\n{"type":"user","id":"u2","parentId":"u1","content":[{"type":"text","text":"later"}]}\n`,
-    );
+    for (const record of [
+      { type: "not-a-message", id: "x", parentId: "u1" },
+      { type: "branch_append", version: 1, branchId: "main", entries: [{ parentId: "u1", item: { type: "user", content: [] } }] },
+    ]) {
+      const corrupt = valid + JSON.stringify(record) + "\n";
+      await writeFile(path, corrupt);
+      await expect(loadJsonlSession({ directory: dir, id: created.header.id })).rejects.toThrow();
+      expect(await Bun.file(path).text()).toBe(corrupt);
+    }
   });
 });
 

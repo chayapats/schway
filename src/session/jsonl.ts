@@ -6,14 +6,14 @@ import type {
   CompactionRecord,
   ConversationItem,
   SessionRecord,
-  ToolResult,
   UserContent,
 } from "../conversation/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import { createSession, type Session } from "./session.ts";
+import { applyBranchOperation, emptyBranchState, type BranchOperation, type BranchState, type SessionEntry } from "./branches.ts";
 
-/** Current session format, adding session-wide metadata outside conversation ancestry. */
-export const SESSION_FORMAT_VERSION = 2;
+/** Current session format, storing atomic branch operations separately from session-wide metadata. */
+export const SESSION_FORMAT_VERSION = 3;
 
 /** Versioned first JSONL record identifying the session and the workspace restored when it is resumed. */
 export interface SessionHeader {
@@ -48,7 +48,7 @@ export async function createJsonlSession(options: {
   await mkdir(options.directory, { recursive: true });
   const path = sessionFilePath(options.directory, header.id);
   await writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
-  return openPersisted(path, header, [], header.id, header.extraRoots, header.version);
+  return openPersisted(path, header, emptyBranchState(header.id), header.extraRoots, header.version);
 }
 
 /** Join the supplied home directory with `.schway/sessions` without accessing the filesystem. */
@@ -135,14 +135,11 @@ async function readFirstLine(path: string): Promise<string | undefined> {
   }
 }
 
-/**
- * Load and repair a persisted session, appending error results for unresolved tool calls without replaying tools.
- * Drops a corrupt trailing record, but rejects invalid ids, missing files, unsupported versions,
- * malformed headers or interior records, and filesystem failures.
- */
+/** Restore selected ancestry, rejecting semantic corruption and repairing torn tails and selected interrupted calls without tool replay. */
 export async function loadJsonlSession(options: {
   directory: string;
   id: string;
+  branchId?: string;
 }): Promise<JsonlSession> {
   const path = sessionFilePath(options.directory, options.id);
   let text: string;
@@ -155,21 +152,15 @@ export async function loadJsonlSession(options: {
     throw error;
   }
   const loaded = loadRecords(text);
-  if (loaded.text !== text) {
-    await replaceFile(path, loaded.text);
-  }
-  const session = openPersisted(
-    path,
-    loaded.header,
-    loaded.items,
-    loaded.tipId,
-    loaded.extraRoots,
-    loaded.version,
-  );
-  const settlements = settlementsFor(loaded.items);
-  if (settlements.length > 0) {
-    session.append(...settlements);
-  }
+  if (loaded.header.id !== options.id) throw new Error("Session header ID does not match the requested session");
+  // Validate selection and settlement before repairing bytes or writing any durable operation.
+  const staged: BranchOperation[] = [];
+  const candidate = createSession([], loaded.extraRoots, { state: loaded.state, writeOperation: operation => staged.push(operation) });
+  candidate.selectBranch(options.branchId ?? candidate.activeBranchId);
+  if (loaded.text !== text) await replaceFile(path, loaded.text);
+  const session = openPersisted(path, loaded.header, loaded.state, loaded.extraRoots, loaded.version);
+  // Recompute fresh settlement IDs only after validation and any safe trailing repair succeed.
+  if (staged.length) session.selectBranch(options.branchId ?? session.activeBranchId);
   return session;
 }
 
@@ -181,155 +172,94 @@ function sessionFilePath(directory: string, id: string): string {
   return join(directory, `${id}.jsonl`);
 }
 
-/** Bind synchronous durable appends to conversation ancestry and separate session-wide metadata. */
-function openPersisted(
-  path: string,
-  header: SessionHeader,
-  items: readonly SessionRecord[],
-  tipId: string,
-  extraRoots: readonly string[],
-  version: number,
-): JsonlSession {
-  const session = createSession(items, extraRoots);
-  let parentId = tipId;
-  return {
-    header,
-    get metadata() { return session.metadata; },
-    setExtraRoots(roots) {
+/** Bind atomic branch operations and separate workspace metadata to append-only version upgrades. */
+function openPersisted(path: string, header: SessionHeader, state: BranchState, extraRoots: readonly string[], version: number): JsonlSession {
+  let failed = false;
+  /** Fence this handle after uncertain I/O so retries cannot append behind a partial durable write. */
+  const write = (text: string): void => {
+    if (failed) throw new Error("Session storage previously failed; reload the session before writing again");
+    try { appendFileSync(path, text, "utf8"); } catch (error) { failed = true; throw error; }
+  };
+  const session = createSession([], extraRoots, {
+    state,
+    writeOperation(operation) {
+      const prefix = version < 3 ? JSON.stringify({ type: "session_format", version: 3 }) + "\n" : "";
+      const line = JSON.stringify(operation);
+      write(prefix + line + "\n");
+      version = 3;
+    },
+    writeRoots(roots) {
       if (JSON.stringify(roots) === JSON.stringify(session.metadata.extraRoots)) return;
-      const records: object[] = [];
-      if (version === 1) records.push({ type: "session_format", version: SESSION_FORMAT_VERSION });
-      records.push({ type: "workspace_roots", version: 1, extraRoots: [...roots] });
-      appendFileSync(path, records.map(record => JSON.stringify(record)).join("\n") + "\n", "utf8");
-      version = SESSION_FORMAT_VERSION;
-      session.setExtraRoots(roots);
+      const prefix = version === 1 ? JSON.stringify({ type: "session_format", version: 2 }) + "\n" : "";
+      write(prefix + JSON.stringify({ type: "workspace_roots", version: 1, extraRoots: [...roots] }) + "\n");
+      if (version === 1) version = 2;
     },
-    get items() {
-      return session.items;
-    },
-    append(...added) {
-      for (const item of added) {
-        appendFileSync(
-          path,
-          `${JSON.stringify({ ...item, parentId })}\n`,
-          "utf8",
-        );
-        parentId = item.id;
-        session.append(item);
-      }
-    },
-  };
+  });
+  return Object.assign(session, { header });
 }
 
-/** Append explicit error results for durable tool calls that never got a result. */
-function settlementsFor(items: readonly SessionRecord[]): ToolResult[] {
-  const resolved = new Set(
-    items
-      .filter((item): item is ToolResult => item.type === "tool_result")
-      .map((item) => item.toolCallId),
-  );
-  const settlements: ToolResult[] = [];
-  for (const item of items) {
-    if (item.type !== "assistant") {
-      continue;
-    }
-    for (const block of item.content) {
-      if (block.type === "tool_call" && !resolved.has(block.id)) {
-        settlements.push({
-          type: "tool_result",
-          id: crypto.randomUUID(),
-          toolCallId: block.id,
-          content: "Tool call interrupted before a result was persisted",
-          isError: true,
-        });
-        resolved.add(block.id);
-      }
-    }
-  }
-  return settlements;
-}
-
-/** Replay versioned conversation and session-wide metadata without moving ancestry for metadata records. */
-function loadRecords(text: string): {
-  header: SessionHeader;
-  items: SessionRecord[];
-  tipId: string;
-  extraRoots: string[];
-  version: number;
-  text: string;
-} {
-  const lines = text.split("\n").filter((line) => line.length > 0);
-  const firstLine = lines[0];
-  if (firstLine === undefined) {
-    throw new Error("Session file is missing a versioned header");
-  }
+/** Replay version-specific records without normalizing valid bytes or repairing semantic corruption. */
+function loadRecords(text: string): { header: SessionHeader; state: BranchState; extraRoots: string[]; version: number; text: string } {
+  const lines = [...text.matchAll(/([^\n]*)(\n|$)/g)].filter(match => match[0].length > 0);
   let first: unknown;
-  try {
-    first = JSON.parse(firstLine);
-  } catch {
-    throw new Error("Session file is missing a versioned header");
-  }
-  if (!isSessionHeader(first)) {
-    throw new Error("Session file is missing a versioned header");
-  }
-  if (first.version !== 1 && first.version !== SESSION_FORMAT_VERSION) {
-    throw new Error(
-      `Unsupported session format version ${first.version}. This Schway build reads versions 1 and ${SESSION_FORMAT_VERSION}.`,
-    );
-  }
-  const kept = [firstLine];
-  const items: SessionRecord[] = [];
-  let tipId = first.id;
-  let extraRoots = [...first.extraRoots];
+  try { first = JSON.parse(lines[0]?.[1] ?? ""); } catch { throw new Error("Session file is missing a versioned header"); }
+  if (!isSessionHeader(first)) throw new Error("Session file is missing a versioned header");
+  if (![1, 2, 3].includes(first.version)) throw new Error(`Unsupported session format version ${first.version}. This Schway build reads versions 1, 2 and 3.`);
+  let state = emptyBranchState(first.id);
   let version = first.version;
+  let extraRoots = [...first.extraRoots];
+  let validLength = text.length;
+  const lastNonempty = lines.findLastIndex(match => match[1]!.trim().length > 0);
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!;
-    const trailing = i === lines.length - 1;
+    const match = lines[i]!;
+    if (!match[1]!.trim()) continue;
     let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch (error) {
-      if (trailing) {
-        break;
-      }
-      throw error;
+    try { record = JSON.parse(match[1]!); } catch {
+      if (i !== lastNonempty) throw new Error("Session file contains malformed interior JSON");
+      validLength = match.index!;
+      break;
     }
-    if (isPlainObject(record) && record.type === "session_format") {
-      if (record.version !== SESSION_FORMAT_VERSION || version !== 1 || "parentId" in record || "id" in record) throw new Error("Unsupported or invalid session format transition");
-      version = SESSION_FORMAT_VERSION;
-      kept.push(line);
-      continue;
-    }
-    if (isPlainObject(record) && record.type === "workspace_roots") {
+    if (!isPlainObject(record)) throw malformedRecord();
+    if (record.type === "session_format") {
+      if (![2, 3].includes(record.version as number) || (record.version as number) <= version || "id" in record || "parentId" in record) throw new Error("Unsupported or invalid session format transition");
+      version = record.version as number;
+    } else if (record.type === "workspace_roots") {
       if (record.version !== 1) throw new Error("Unsupported workspace metadata version");
-      if (version !== SESSION_FORMAT_VERSION) throw new Error("Workspace metadata requires session format 2");
-    }
-    try {
-      if (isPlainObject(record) && record.type === "workspace_roots") {
-        if (!isRootList(record.extraRoots) || "parentId" in record || "id" in record) throw malformedRecord();
-        extraRoots = [...record.extraRoots];
-        kept.push(line);
-        continue;
-      }
-      const item = toSessionRecord(record);
-      items.push(item);
-      tipId = item.id;
-      kept.push(line);
-    } catch (error) {
-      if (trailing) {
-        break;
-      }
-      throw error;
-    }
+      if (version < 2) throw new Error("Workspace metadata requires session format 2 or 3");
+      if (!isRootList(record.extraRoots) || "id" in record || "parentId" in record) throw malformedRecord();
+      extraRoots = [...record.extraRoots];
+    } else state = version === 3 ? replayBranchRecord(state, record) : replayLegacyRecord(state, record);
   }
-  return {
-    header: first,
-    items,
-    tipId,
-    extraRoots,
-    version,
-    text: `${kept.join("\n")}\n`,
-  };
+  const prefix = text.slice(0, validLength);
+  return { header: first, state, extraRoots, version, text: prefix.endsWith("\n") ? prefix : prefix + "\n" };
+}
+
+/** Validate legacy linear parents before importing their entries into the single default branch. */
+function replayLegacyRecord(state: BranchState, record: Record<string, unknown>): BranchState {
+  if (typeof record.parentId !== "string") throw new Error("Legacy session record is missing its parent ID");
+  return applyBranchOperation(state, { type: "branch_append", version: 1, branchId: "main", entries: [{ parentId: record.parentId, item: toSessionRecord(record) }] });
+}
+
+/** Validate each v3 semantic operation before staging its graph and active head changes. */
+function replayBranchRecord(state: BranchState, record: Record<string, unknown>): BranchState {
+  if (record.version !== 1 || typeof record.branchId !== "string" || !record.branchId || "id" in record || "parentId" in record) throw new Error("Invalid branch operation version or identity");
+  const branchId = record.branchId;
+  if (record.type === "branch_fork") {
+    if (typeof record.headId !== "string" || (record.name !== undefined && typeof record.name !== "string")) throw new Error("Invalid branch fork head or label");
+    return applyBranchOperation(state, { type: "branch_fork", version: 1, branchId, headId: record.headId, ...(record.name === undefined ? {} : { name: record.name as string }) });
+  }
+  if (record.type === "branch_append") return applyBranchOperation(state, { type: "branch_append", version: 1, branchId, entries: parseEntries(record.entries) });
+  if (record.type === "branch_select") return applyBranchOperation(state, { type: "branch_select", version: 1, branchId, settlements: parseEntries(record.settlements) });
+  throw new Error("Session format 3 requires a valid branch operation");
+}
+
+/** Decode entry payloads without accepting malformed IDs, parents, or conversation shapes. */
+function parseEntries(value: unknown): SessionEntry[] {
+  if (!Array.isArray(value)) throw new Error("Branch operation entries must be an array");
+  return value.map(entry => {
+    if (!isPlainObject(entry) || typeof entry.parentId !== "string") throw new Error("Branch entry is missing a valid parent ID");
+    return { parentId: entry.parentId, item: toSessionRecord(entry.item) };
+  });
 }
 
 /** Accept only nonempty string identities in saved attachment lists. */
@@ -416,7 +346,9 @@ function toSessionRecord(value: unknown): SessionRecord {
     if (
       typeof value.summary !== "string" ||
       typeof value.firstKeptId !== "string" ||
-      value.firstKeptId.length === 0
+      value.firstKeptId.length === 0 ||
+      (value.parentCompactionId !== undefined &&
+        (typeof value.parentCompactionId !== "string" || !value.parentCompactionId))
     ) {
       throw malformedRecord();
     }

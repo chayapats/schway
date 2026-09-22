@@ -2,7 +2,7 @@ import type { ConfigLayer } from "../config/config.ts";
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
@@ -18,6 +18,7 @@ export interface CliArgs {
   model?: string;
   apiKey?: string;
   resume?: string;
+  branch?: string;
   help: boolean;
   baseUrl?: string;
   headers?: Record<string, string>;
@@ -85,6 +86,12 @@ export function parseArgs(
     }
     if (arg.startsWith("--resume=")) {
       args.resume = arg.slice("--resume=".length);
+      continue;
+    }
+    if (arg === "--branch" || arg.startsWith("--branch=")) {
+      const value = arg === "--branch" ? argv[++i] : arg.slice("--branch=".length);
+      if (!value || value.startsWith("-")) return { error: "Missing value for --branch" };
+      args.branch = value;
       continue;
     }
     if (arg === "--provider") {
@@ -329,6 +336,7 @@ function validateConnectionOptions(
         "OpenAI-compatible connection options require --provider openai-compatible",
     };
   }
+  if (args.branch !== undefined && !args.resume && !args.help) return { error: "--branch requires --resume <session-id>" };
   return { args };
 }
 

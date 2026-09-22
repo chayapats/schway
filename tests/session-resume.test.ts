@@ -12,7 +12,7 @@ import type { ModelRequest } from "../src/model/model.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
-import { withTempDir } from "./helpers.ts";
+import { decodeStoredLine, withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 
 test("a saved session continues after file tools without persisting runtime deltas", async () => {
@@ -137,7 +137,7 @@ async function readRecords(path: string): Promise<Array<{ type: string }>> {
   return text
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as { type: string });
+    .flatMap(decodeStoredLine);
 }
 
 /** Model-facing text of the first tool result in a request. */

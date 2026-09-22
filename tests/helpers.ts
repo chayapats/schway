@@ -147,3 +147,12 @@ function isNotFound(error: unknown): boolean {
     (error as { code: unknown }).code === "ENOENT"
   );
 }
+
+/** Decode v3 append payloads for semantic storage assertions while retaining non-conversation records. */
+export function decodeStoredLine(line: string): Array<{ type: string; [key: string]: unknown }> {
+  const record = JSON.parse(line);
+  if (record.type === "branch_append") {
+    return record.entries.map((entry: { parentId: string; item: { type: string } }) => ({ ...entry.item, parentId: entry.parentId }));
+  }
+  return [record];
+}

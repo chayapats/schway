@@ -267,46 +267,49 @@ export function createContextManager(
     if (compactOptions.signal?.aborted) {
       return null;
     }
-    const effective = getEffectiveConversation(session.items);
-    const boundary = findCompactionBoundary(effective, compactOptions.keepTurns);
-    if (!boundary) {
-      return null;
-    }
-    const latest = getLatestCompaction(session.items);
-    if (latest && latest.firstKeptId === boundary.firstKeptId) {
-      return null;
-    }
-    const splitIndex = effective.findIndex(
-      (item) => item.id === boundary.firstKeptId,
-    );
-    if (splitIndex <= 0) {
-      return null;
-    }
-    const compacted = effective.slice(0, splitIndex);
-    if (compacted.length === 0) {
-      return null;
-    }
-    const previousSummary = getEffectiveSummary(session.items);
-    const pruned = pruneForSummary(compacted, SUMMARY_PRUNE_CHARS);
-    const inputText = buildSummaryInputText({
-      previousSummary,
-      compacted: pruned,
-    });
-    const tokensBefore = estimateSessionTokens(session.items);
-    const summary = await summarizeWithModel(model, inputText, compactOptions.signal);
-    if (!summary) {
-      return null;
-    }
-    const record: CompactionRecord = {
-      type: "compaction",
-      id: crypto.randomUUID(),
-      summary,
-      firstKeptId: boundary.firstKeptId,
-      tokensBefore,
-      ...(latest ? { parentCompactionId: latest.id } : {}),
-    };
-    session.append(record);
-    return record;
+    const release = session.acquireOperation();
+    try {
+      const effective = getEffectiveConversation(session.items);
+      const boundary = findCompactionBoundary(effective, compactOptions.keepTurns);
+      if (!boundary) {
+        return null;
+      }
+      const latest = getLatestCompaction(session.items);
+      if (latest && latest.firstKeptId === boundary.firstKeptId) {
+        return null;
+      }
+      const splitIndex = effective.findIndex(
+        (item) => item.id === boundary.firstKeptId,
+      );
+      if (splitIndex <= 0) {
+        return null;
+      }
+      const compacted = effective.slice(0, splitIndex);
+      if (compacted.length === 0) {
+        return null;
+      }
+      const previousSummary = getEffectiveSummary(session.items);
+      const pruned = pruneForSummary(compacted, SUMMARY_PRUNE_CHARS);
+      const inputText = buildSummaryInputText({
+        previousSummary,
+        compacted: pruned,
+      });
+      const tokensBefore = estimateSessionTokens(session.items);
+      const summary = await summarizeWithModel(model, inputText, compactOptions.signal);
+      if (!summary || compactOptions.signal?.aborted) {
+        return null;
+      }
+      const record: CompactionRecord = {
+        type: "compaction",
+        id: crypto.randomUUID(),
+        summary,
+        firstKeptId: boundary.firstKeptId,
+        tokensBefore,
+        ...(latest ? { parentCompactionId: latest.id } : {}),
+      };
+      session.append(record);
+      return record;
+    } finally { release(); }
   }
 }
 

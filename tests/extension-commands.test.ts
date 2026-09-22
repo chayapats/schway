@@ -86,6 +86,8 @@ for (const action of ["cancel", "dispose", "replaceSession"] as const) {
         };`);
       const command = fixture.controller.runExtensionCommand("wait", "");
       await fixture.module.started;
+      expect(fixture.controller.branchCommand(`fork ${fixture.session.rootId}`)).toBe(false);
+      expect(fixture.session.listBranches()).toHaveLength(1);
       if (action === "replaceSession") fixture.controller.replaceSession(createSession(), "new");
       else fixture.controller[action]();
       await command;

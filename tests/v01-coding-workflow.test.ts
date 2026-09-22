@@ -249,6 +249,9 @@ test("v0.1 coding workflow locates, edits, verifies, resumes, and compacts", asy
       "assistant",
       "tool_result",
       "compaction",
+      "branch_append",
+      "branch_fork",
+      "branch_select",
     ]);
     for (const line of lines) {
       const record = JSON.parse(line) as { type: string };

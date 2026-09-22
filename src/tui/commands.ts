@@ -8,6 +8,7 @@ export type SlashCommandName =
   | "sessions"
   | "resume"
   | "model"
+  | "branch"
   | "compact"
   | "skills"
   | "add-dir"
@@ -39,6 +40,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "sessions":
     case "resume":
     case "model":
+    case "branch":
     case "compact":
     case "skills":
     case "add-dir":
@@ -60,6 +62,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/resume <id> - resume a saved session",
     "/model [provider/model-id | provider model-id | model-id] - show or switch the model",
     "/compact - summarize older turns to free context",
+    "/branch list | fork <entry-id> [name] | switch <branch-id> - continue a saved conversation path",
     "/skills - list available skills",
     "/add-dir <directory> - attach project context (relative to the primary root; idle only)",
     "/<skill-name> [arguments] - invoke an available skill for this turn",

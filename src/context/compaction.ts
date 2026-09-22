@@ -119,18 +119,16 @@ export function getEffectiveSummary(
 
 /**
  * Return conversation from the latest compaction boundary, excluding compaction markers.
- * If the boundary id is missing, retain only conversation records after that marker.
+ * Missing boundaries are corruption and never fall back to unrelated records.
  */
 export function getEffectiveConversation(
   records: readonly SessionRecord[],
 ): ConversationItem[] {
   const conversation: ConversationItem[] = [];
-  const positions: number[] = [];
   for (let i = 0; i < records.length; i++) {
     const record = records[i]!;
     if (!isCompactionRecord(record)) {
       conversation.push(record);
-      positions.push(i);
     }
   }
   const latest = getLatestCompaction(records);
@@ -141,15 +139,7 @@ export function getEffectiveConversation(
   if (byId >= 0) {
     return conversation.slice(byId);
   }
-  // firstKeptId missing (corrupt/hand-edited history): keep records after the marker.
-  const markerIndex = records.lastIndexOf(latest);
-  const retained: ConversationItem[] = [];
-  for (let k = 0; k < conversation.length; k++) {
-    if (positions[k]! > markerIndex) {
-      retained.push(conversation[k]!);
-    }
-  }
-  return retained;
+  throw new Error(`Compaction boundary ${latest.firstKeptId} is missing from selected ancestry`);
 }
 
 /** Render one conversation item as summarizer-facing text. */

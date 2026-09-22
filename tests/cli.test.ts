@@ -6,7 +6,7 @@ import { runCli } from "../src/cli/main.ts";
 import type { Model } from "../src/model/model.ts";
 import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { withTempDir } from "./helpers.ts";
+import { decodeStoredLine, withTempDir } from "./helpers.ts";
 
 /** Capture writes so CLI tests can assert stdout and stderr. */
 function capture() {
@@ -861,7 +861,7 @@ test("headless -p saves a session that --resume continues with workspace identit
     const records = (await Bun.file(join(home, ".schway", "sessions", files[0]!)).text())
       .split("\n")
       .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as { type: string });
+      .flatMap(decodeStoredLine);
     expect(records.map((record) => record.type)).toEqual([
       "session",
       "user",
