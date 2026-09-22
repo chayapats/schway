@@ -255,6 +255,7 @@ export class TuiController {
     options: { workspace?: Workspace; contextManager?: ContextManager } = {},
   ): void {
     this.abortActiveTurn();
+    this.contextManager.clearActiveSkill();
     this.session = session;
     this.sessionId = sessionId;
     if (options.workspace !== undefined) {
@@ -262,6 +263,7 @@ export class TuiController {
     }
     if (options.contextManager !== undefined) {
       this.contextManager = options.contextManager;
+      this.contextManager.clearActiveSkill();
     }
     this.transcript = buildTranscriptFromSession(session.items);
     this.status = "idle";
@@ -301,6 +303,7 @@ export class TuiController {
    */
   dispose(): void {
     this.abortActiveTurn();
+    this.contextManager.clearActiveSkill();
   }
 
   /** Wait for the tracked submitted turn or manual compaction to settle during tests or terminal cleanup. */
@@ -366,10 +369,13 @@ export class TuiController {
         maxTurns: this.maxTurns,
         maxConcurrentTools: this.maxConcurrentTools,
       })) {
-        this.applyEvent(event);
-        if (signal.aborted) {
-          break;
+        // Drain accepted calls on cancellation; replaced sessions ignore stale display events.
+        if (this.activeAbort?.signal === signal) {
+          this.applyEvent(event);
         }
+      }
+      if (this.activeAbort?.signal !== signal) {
+        return;
       }
       if (signal.aborted) {
         this.transcript.push(this.systemEntry("Cancelled."));
@@ -380,6 +386,9 @@ export class TuiController {
         this.status = "idle";
       }
     } catch (error) {
+      if (this.activeAbort?.signal !== signal) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.fail(actionableError(message));
     }

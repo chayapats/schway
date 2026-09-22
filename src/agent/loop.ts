@@ -3,7 +3,8 @@ import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
 import type { ContextManager, PreparedContext } from "../context/manager.ts";
 import type { Model, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
-import type { ToolRegistry } from "../tools/registry.ts";
+import { createActivateSkillTool } from "../skills/activate.ts";
+import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { toPlainJsonSchema } from "../tools/schema.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
@@ -39,10 +40,10 @@ export interface AgentLoopOptions {
 export async function* runAgentLoop(
   options: AgentLoopOptions,
 ): AsyncGenerator<RuntimeEvent> {
-  yield { type: "agent.started" };
-
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   const clock = options.clock ?? systemClock();
+  let tools = options.tools;
+  const finishTurn = options.contextManager.beginTurn();
 
   /** Force one compaction and retry the overflowed turn once; null when terminated. */
   async function* recoverFromOverflow(): AsyncGenerator<
@@ -119,7 +120,7 @@ export async function* runAgentLoop(
         systemPrompt: prepared.systemPrompt,
         context: prepared.context,
         items: prepared.items,
-        tools: toModelTools(options.tools),
+        tools: toModelTools(tools),
         signal: options.signal,
       },
       clock,
@@ -138,6 +139,13 @@ export async function* runAgentLoop(
   }
 
   try {
+    yield { type: "agent.started" };
+    if (options.workspace) {
+      tools = createToolRegistry([
+        ...(options.tools?.definitions() ?? []),
+        createActivateSkillTool(options.contextManager),
+      ]);
+    }
     for (let turn = 0; turn < maxTurns; turn++) {
       if (options.signal?.aborted) {
         yield { type: "agent.finished", reason: "cancelled" };
@@ -165,7 +173,7 @@ export async function* runAgentLoop(
           systemPrompt: prepared.systemPrompt,
           context: prepared.context,
           items: prepared.items,
-          tools: toModelTools(options.tools),
+          tools: toModelTools(tools),
           signal: options.signal,
         },
         clock,
@@ -200,7 +208,7 @@ export async function* runAgentLoop(
 
       const executed = yield* scheduleToolCalls({
         calls,
-        registry: options.tools,
+        registry: tools,
         workspace: options.workspace,
         signal: options.signal,
         maxConcurrentTools: options.maxConcurrentTools,
@@ -219,6 +227,8 @@ export async function* runAgentLoop(
   } catch (error) {
     yield { type: "error", message: errorMessage(error) };
     yield { type: "agent.finished", reason: "error" };
+  } finally {
+    finishTurn();
   }
 }
 

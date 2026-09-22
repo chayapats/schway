@@ -28,6 +28,7 @@ import {
   discoverSkills,
   formatActiveSkillSection,
   formatAvailableSkillsSection,
+  prepareSkillInvocation,
 } from "../skills/skills.ts";
 import type {
   CompactionRecord,
@@ -84,8 +85,12 @@ export interface ContextManager {
     model: Model,
     options: CompactOptions,
   ): Promise<CompactionRecord | null>;
-  /** Attach skill context until cleared; the caller must clear it when the invoking turn settles. */
+  /** Start the managed user turn retaining explicit activation, and return cleanup fenced against later turns. */
+  beginTurn(): () => void;
+  /** Attach a prepared user invocation before its managed turn and invalidate pending model replacements. */
   setActiveSkill(skill: ActiveSkill): void;
+  /** Load a model-eligible skill by name, replacing active context only after successful validation. */
+  activateSkill(name: string, options?: { signal?: AbortSignal }): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Drop any active skill without touching durable history. */
   clearActiveSkill(): void;
 }
@@ -97,6 +102,7 @@ export function createContextManager(
 ): ContextManager {
   const keepTurns = options.keepTurns ?? COMPACTION_KEEP_TURNS;
   let activeSkill: ActiveSkill | undefined;
+  let activationScope = {};
 
   /** Resolve the model-aware context window with explicit overrides first. */
   const resolveWindow = (model: Model): number => {
@@ -195,11 +201,52 @@ export function createContextManager(
       });
     },
 
+    beginTurn() {
+      const scope = activationScope = {};
+      return () => {
+        if (activationScope === scope) {
+          activeSkill = undefined;
+          activationScope = {};
+        }
+      };
+    },
+
     setActiveSkill(skill: ActiveSkill): void {
+      activationScope = {};
       activeSkill = skill;
     },
 
+    async activateSkill(name, activationOptions = {}) {
+      activationOptions.signal?.throwIfAborted();
+      const scope = activationScope;
+      const invocation = await prepareSkillInvocation({
+        workspaceRoot: workspace.root,
+        home: options.home,
+        name,
+        modelInvocation: true,
+        signal: activationOptions.signal,
+      });
+      activationOptions.signal?.throwIfAborted();
+      if (activationScope !== scope) {
+        return { ok: false, error: "Skill activation belongs to a turn that has ended." };
+      }
+      if (!invocation.ok) {
+        return invocation;
+      }
+      if (activeSkill?.dir !== invocation.skill.dir) {
+        activeSkill = {
+          name: invocation.skill.name,
+          body: invocation.body,
+          source: invocation.skill.displayPath,
+          scope: invocation.skill.scope,
+          dir: invocation.skill.dir,
+        };
+      }
+      return { ok: true };
+    },
+
     clearActiveSkill(): void {
+      activationScope = {};
       activeSkill = undefined;
     },
   };
