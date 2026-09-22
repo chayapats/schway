@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 
@@ -110,23 +110,40 @@ export async function assertIsolatedCliClean(dirs: IsolatedCliDirs): Promise<voi
     throw new Error("Isolated CLI run modified its sentinel file");
   }
   for (const outside of [join(dirs.work, ".schway"), join(dirs.root, ".schway")]) {
-    let entries: string[] | undefined;
+    let exists = true;
     try {
-      entries = await readdir(outside);
-    } catch {
-      entries = undefined;
+      await stat(outside);
+    } catch (error) {
+      if (isNotFound(error)) {
+        exists = false;
+      } else {
+        throw error;
+      }
     }
-    if (entries !== undefined && entries.length > 0) {
+    if (exists) {
       throw new Error(`Isolated CLI run wrote user state outside HOME: ${outside}`);
     }
   }
-  let sessions: string[] | undefined;
+  let sessionsExist = true;
   try {
-    sessions = await readdir(join(dirs.home, ".schway", "sessions"));
-  } catch {
-    sessions = undefined;
+    await stat(join(dirs.home, ".schway", "sessions"));
+  } catch (error) {
+    if (isNotFound(error)) {
+      sessionsExist = false;
+    } else {
+      throw error;
+    }
   }
-  if (sessions !== undefined && sessions.length > 0) {
+  if (sessionsExist) {
     throw new Error("Isolated CLI run created sessions on an early-failure path");
   }
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === "ENOENT"
+  );
 }

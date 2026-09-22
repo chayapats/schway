@@ -202,6 +202,13 @@ test("a conflicting global compatible-provider fixture is honored without leakin
   });
 });
 
+test("isolation check detects an empty .schway dir outside HOME", async () => {
+  await withIsolatedCliDirs(async (dirs) => {
+    await mkdir(join(dirs.work, ".schway"), { recursive: true });
+    await expect(assertIsolatedCliClean(dirs)).rejects.toThrow("outside HOME");
+  });
+});
+
 test("isolated CLI dirs clean up after an assertion failure", async () => {
   let capturedRoot = "";
   await expect(
