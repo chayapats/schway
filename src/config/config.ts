@@ -195,19 +195,21 @@ export function mergeConfigLayers(
 }
 
 /**
- * Resolve defaults, user settings, project settings, and CLI overrides in increasing precedence with catalog budgets.
+ * Resolve defaults, user, project, CLI and session overrides in increasing precedence with catalog budgets.
  * Returns an error when a compatible endpoint has no base URL; does not create configuration files.
  */
 export function resolveSettings(input: {
   user?: ConfigLayer;
   project?: ConfigLayer;
   cli?: ConfigLayer;
+  session?: ConfigLayer;
 }): ResolvedSettings | { error: string } {
   const merged = mergeConfigLayers(
     BUILTIN_DEFAULTS,
     input.user,
     input.project,
     input.cli,
+    input.session,
   );
   const provider = merged.provider ?? DEFAULT_PROVIDER;
   const model = merged.model?.trim() || DEFAULT_MODEL_IDS[provider];
