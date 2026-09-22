@@ -21,6 +21,8 @@ export interface AgentsInstruction {
 /**
  * Discover applicable AGENTS.md files from general to specific.
  * Nested files are included only for ancestor chains of `targetPaths`.
+ * Canonical paths deduplicate files and exclude targets outside the workspace;
+ * missing, empty, and unreadable instruction files are skipped.
  */
 export async function discoverAgentsInstructions(options: {
   workspace: Workspace;

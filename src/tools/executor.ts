@@ -15,7 +15,8 @@ export interface ExecutedToolCall {
 /**
  * Validate and run one accepted tool call.
  * Unknown tools, invalid arguments, and thrown errors become model-visible
- * results instead of crashing the loop. Aborted signals yield cancelled.
+ * results instead of crashing the loop. Pre-aborted calls and execution errors
+ * associated with cancellation yield cancelled results; a resolved tool result is kept.
  */
 export async function executeToolCall(options: {
   registry?: ToolRegistry;

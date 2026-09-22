@@ -94,8 +94,8 @@ export function listCatalog(): readonly ModelInfo[] {
 }
 
 /**
- * Resolve catalog metadata for a provider/id pair, filling unknown IDs with
- * conservative defaults and applying explicit limit overrides last.
+ * Return metadata for a provider/id pair with explicit limit overrides applied last.
+ * Unknown IDs receive conservative defaults; the catalog itself is unchanged.
  */
 export function lookupModel(
   provider: string,

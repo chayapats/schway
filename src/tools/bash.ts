@@ -12,10 +12,13 @@ import type {
   ToolExecutionResult,
 } from "./types.ts";
 
-/** Hard cap on model-facing stdout+stderr characters. */
+/** Combined stdout/stderr character cap before exit metadata and truncation notices are added. */
 export const MAX_BASH_CHARS = 50_000;
 
-/** TypeBox schema for `bash`. Compiled once when the tool is registered. */
+/**
+ * Accept a nonempty shell command with optional cwd and positive millisecond timeout, rejecting unknown keys.
+ * Compiled once when the tool is registered.
+ */
 export const bashInputSchema = Type.Object(
   {
     command: Type.String({
@@ -38,10 +41,10 @@ export const bashInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `bash` tool. */
+/** Shell command, optional working directory, and millisecond timeout accepted by the bash schema. */
 export type BashInput = Static<typeof bashInputSchema>;
 
-/** Structured extras attached to a bash invocation. */
+/** Shell exit status and bounded streams with optional timeout flag and full-output spill-file path. */
 export interface BashDetails {
   command: string;
   cwd: string;
@@ -53,7 +56,7 @@ export interface BashDetails {
   timedOut?: boolean;
 }
 
-/** Built-in shell runner. Declares exclusive execution. */
+/** Shell-execution definition that runs behind an exclusive scheduling barrier. */
 export const bashTool: ToolDefinition<BashInput> = {
   name: "bash",
   description:
@@ -65,7 +68,9 @@ export const bashTool: ToolDefinition<BashInput> = {
 
 /**
  * Run `command` in a fresh bash shell.
- * Relative `cwd` resolves from the workspace root. Each call is isolated.
+ * Relative `cwd` resolves from the workspace root; each call has its own process and streams live output.
+ * Oversized output spills to a temporary file; nonzero exits are result data and timeouts are tool errors.
+ * Cancellation terminates the process group and rejects; process or spill-file failures also reject.
  */
 export async function executeBash(
   input: BashInput,

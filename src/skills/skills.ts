@@ -68,7 +68,7 @@ export interface SkillDiscovery {
   diagnostics: SkillDiagnostic[];
 }
 
-/** Active skill body attached as dynamic context for exactly one submitted turn. */
+/** Loaded skill body and source attached as volatile context until the caller clears the activation. */
 export interface ActiveSkill {
   name: string;
   body: string;
@@ -123,7 +123,7 @@ export function isSkillNameToken(value: string): boolean {
   );
 }
 
-/** Parse SKILL.md frontmatter (name, description, invocation flags) without retaining limits. */
+/** Parse and validate required skill metadata and invocation flags, returning an error or an unbounded raw body. */
 export function parseSkillFile(content: string): { ok: true; value: ParsedSkillFile } | { ok: false; error: string } {
   const lines = content.split("\n");
   let start = 0;
@@ -201,7 +201,10 @@ export function parseSkillFile(content: string): { ok: true; value: ParsedSkillF
   };
 }
 
-/** Discover project-local and user-global skills, keeping metadata only and reporting everything unusable. */
+/**
+ * Discover metadata under `<workspaceRoot>/.agents/skills` and `<home>/.schway/skills` with project precedence.
+ * Return diagnostics for unusable entries and exclude ambiguous names and reserved-command collisions.
+ */
 export async function discoverSkills(options: {
   workspaceRoot: string;
   home?: string;
@@ -277,7 +280,7 @@ export function resolveSkillInvocation(
   return { ok: false, kind: "unknown", error: `Unknown skill '${lowered}'.${known}` };
 }
 
-/** Discover, resolve, and load one skill body for explicit user invocation. */
+/** Discover and load one explicitly named skill, returning a usable body or discovery, resolution, or body-validation error. */
 export async function prepareSkillInvocation(options: {
   workspaceRoot: string;
   home?: string;
@@ -296,7 +299,7 @@ export async function prepareSkillInvocation(options: {
   return { ok: true, skill: resolved.skill, body: loaded.body };
 }
 
-/** Read and validate the full SKILL.md body for an already-resolved skill. */
+/** Read a resolved skill's trimmed body, returning an error for unreadable, invalid, renamed, empty, or oversized content. */
 export async function loadSkillBody(
   skill: SkillMetadata,
 ): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
@@ -384,7 +387,7 @@ export function formatActiveSkillSection(skill: { name: string; source: string; 
   return `Skill: ${skill.name}\nSource: ${skill.source}\n${skill.body.replace(/\s+$/, "")}`;
 }
 
-/** Resolve a skill-relative resource path, refusing absolute paths and directory escapes. */
+/** Resolve a resource relative to the skill directory, rejecting empty, absolute, or lexical escape paths without resolving symlinks. */
 export function resolveSkillResource(
   skill: { dir: string },
   target: string,
@@ -404,7 +407,7 @@ export function resolveSkillResource(
   return { ok: true, path: resolved };
 }
 
-/** Read a skill-relative resource on demand, bounding content with the documented skill limit. */
+/** Read a skill-relative file on demand, returning an error for invalid paths, unreadable files, or oversized content. */
 export async function readSkillResource(
   skill: { dir: string; name?: string },
   target: string,

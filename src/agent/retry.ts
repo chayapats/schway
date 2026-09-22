@@ -13,7 +13,9 @@ const MAX_BACKOFF_MS = 30_000;
 
 /** Injected time source so retry tests can control backoff without waiting. */
 export interface AgentClock {
+  /** Return milliseconds since the Unix epoch for interpreting provider retry timestamps. */
   now(): number;
+  /** Wait for the requested milliseconds, rejecting when the supplied signal aborts. */
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
 }
 
@@ -50,7 +52,7 @@ const NETWORK_NAMES = new Set([
 const NETWORK_MESSAGE =
   /connection (reset|error|refused|aborted|closed)|network reset|network error|socket hang up|fetch failed|econnreset|etimedout|enotfound|temporarily unavailable/i;
 
-/** Real-time clock used by production runs. */
+/** Return a wall clock with abortable timer sleeps that reject with an AbortError. */
 export function systemClock(): AgentClock {
   return {
     now: () => Date.now(),
@@ -85,7 +87,10 @@ async function abortableSleep(
   });
 }
 
-/** Stream one model turn with bounded transport retries; the caller persists a complete message. */
+/**
+ * Stream turn events with bounded transport retries and return completion, cancellation, overflow, or error.
+ * Partial deltas may be emitted again after a retry; only the caller persists a complete message.
+ */
 export async function* streamModelTurn(options: {
   model: Model;
   request: ModelRequest;
@@ -214,7 +219,7 @@ const OVERFLOW_CODES = new Set([
 const OVERFLOW_MESSAGE =
   /context\s*(length|window|size)?\s*(exceeded|too\s*(long|large|big))|maximum\s*context|(input|prompt|request|message)\s*(is\s+)?too\s*(long|large|big)|too\s*many\s*tokens|tokens\s*>\s*\d+\s*maximum|context_length_exceeded/i;
 
-/** True for actual provider context overflow, separate from transport retries. */
+/** Recognize provider context-overflow codes or message patterns, excluding aborts and rate-limit entries. */
 export function isContextOverflowError(error: unknown): boolean {
   if (isAbortError(error)) {
     return false;

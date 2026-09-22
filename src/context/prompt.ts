@@ -10,8 +10,9 @@ export const STABLE_SYSTEM_PROMPT = `You are Schway, a coding agent.
 - Report outcomes clearly.`;
 
 /**
- * Replace the base prompt with `~/.schway/SYSTEM.md` when present, then append
- * `~/.schway/APPEND_SYSTEM.md`. Project-local replacements are ignored.
+ * Build the system prompt from the supplied home's `.schway/SYSTEM.md` and `.schway/APPEND_SYSTEM.md` overrides.
+ * A readable nonempty SYSTEM.md replaces the base prompt; APPEND_SYSTEM.md follows it.
+ * Missing, empty, or unreadable files are ignored, as are project-local replacements.
  */
 export async function assembleSystemPrompt(home?: string): Promise<string> {
   if (home === undefined) {

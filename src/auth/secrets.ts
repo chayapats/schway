@@ -1,4 +1,6 @@
+/** Environment variable consulted when no runtime Anthropic key is supplied. */
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
+/** Environment variable consulted when no runtime OpenAI key is supplied. */
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
 /** Header names whose values are treated as credentials. */
@@ -11,18 +13,22 @@ export const CREDENTIAL_HEADER_NAMES = new Set([
   "x-access-token",
 ]);
 
+/** Guidance returned when Anthropic credential resolution yields an empty key. */
 export const MISSING_ANTHROPIC_API_KEY =
   "Missing Anthropic API key. Set ANTHROPIC_API_KEY or pass --api-key.";
+/** Guidance returned when OpenAI credential resolution yields an empty key. */
 export const MISSING_OPENAI_API_KEY =
   "Missing OpenAI API key. Set OPENAI_API_KEY or pass --api-key.";
 
+/** Origin of a resolved key: an explicit runtime override or the supplied environment map. */
 export type CredentialSource = "runtime" | "env";
 
+/** Trimmed nonempty API key with its origin, or actionable missing-key guidance. */
 export type ResolvedCredential =
   | { apiKey: string; source: CredentialSource }
   | { error: string };
 
-/** Resolve an Anthropic API key from runtime override, then the environment. */
+/** Resolve a trimmed Anthropic key from runtime override or environment; an empty override returns an error. */
 export function resolveAnthropicApiKey(input: {
   runtimeApiKey?: string;
   env: Record<string, string | undefined>;
@@ -34,7 +40,7 @@ export function resolveAnthropicApiKey(input: {
   });
 }
 
-/** Resolve an OpenAI API key from runtime override, then the environment. */
+/** Resolve a trimmed OpenAI key from runtime override or environment; an empty override returns an error. */
 export function resolveOpenAIApiKey(input: {
   runtimeApiKey?: string;
   env: Record<string, string | undefined>;
@@ -66,6 +72,7 @@ function resolveApiKey(input: {
   return { apiKey, source: "env" };
 }
 
+/** Replace exact occurrences of supplied nonempty secrets with `***`; arbitrary secrets are not detected. */
 export function redactSecrets(text: string, secrets: readonly string[]): string {
   let redacted = text;
   for (const secret of secrets) {

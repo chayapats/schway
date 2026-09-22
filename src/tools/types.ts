@@ -4,8 +4,9 @@ import type { Workspace } from "../workspace/workspace.ts";
 export type JsonSchema = Record<string, unknown>;
 
 /**
- * How a tool may be scheduled relative to siblings.
- * Consecutive `parallel` calls may run together later; `exclusive` is a barrier.
+ * Declare whether sibling calls may overlap or must run behind an exclusive barrier.
+ * Consecutive `parallel` calls run up to the scheduler's concurrency limit;
+ * an `exclusive` call waits for preceding calls and finishes before later calls start.
  */
 export type ToolExecutionMode = "parallel" | "exclusive";
 
@@ -39,6 +40,7 @@ export interface ToolDefinition<TInput = unknown> {
   description: string;
   inputSchema: JsonSchema;
   execution: ToolExecutionMode;
+  /** Execute validated arguments in the supplied workspace; returned errors or rejections are normalized by the harness. */
   execute(input: TInput, ctx: ToolContext): Promise<ToolExecutionResult>;
 }
 

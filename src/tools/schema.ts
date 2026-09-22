@@ -38,12 +38,12 @@ const ALLOWED_TYPES = new Set([
   "null",
 ]);
 
-/** Compiled check for model-generated tool arguments. */
+/** Validate tool arguments without coercion, returning the original value or a diagnostic message. */
 export type SchemaValidator = (
   value: unknown,
 ) => { ok: true; value: unknown } | { ok: false; message: string };
 
-/** Clone a TypeBox or JSON Schema value into a plain JSON object. */
+/** JSON-round-trip a schema to remove TypeBox symbols, throwing on serialization failure or a non-object result. */
 export function toPlainJsonSchema(schema: unknown): Record<string, unknown> {
   const plain = JSON.parse(JSON.stringify(schema)) as unknown;
   if (typeof plain !== "object" || plain === null || Array.isArray(plain)) {

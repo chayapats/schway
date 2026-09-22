@@ -15,10 +15,13 @@ import type {
   ToolExecutionResult,
 } from "./types.ts";
 
-/** Hard cap on model-facing characters, including truncation notes. */
+/** Character budget checked before adding further paths; the first path and truncation note may exceed it. */
 export const MAX_FIND_CHARS = 50_000;
 
-/** TypeBox schema for `find`. Compiled once when the tool is registered. */
+/**
+ * Accept a nonempty glob and optional search directory, rejecting unknown keys during validation.
+ * Compiled once when the tool is registered.
+ */
 export const findInputSchema = Type.Object(
   {
     pattern: Type.String({
@@ -36,10 +39,10 @@ export const findInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `find` tool. */
+/** Glob pattern and optional directory accepted by the file-discovery schema. */
 export type FindInput = Static<typeof findInputSchema>;
 
-/** Structured extras attached to a successful or failed discovery. */
+/** Successful discovery metadata identifying the searched directory, pattern, returned count, and truncation state. */
 export interface FindDetails {
   path: string;
   resolvedPath: string;
@@ -48,7 +51,7 @@ export interface FindDetails {
   truncated: boolean;
 }
 
-/** Built-in file discovery. Declares parallel execution. */
+/** Glob-based file-discovery definition eligible for parallel scheduling. */
 export const findTool: ToolDefinition<FindInput> = {
   name: "find",
   description:
@@ -60,7 +63,8 @@ export const findTool: ToolDefinition<FindInput> = {
 
 /**
  * Discover files matching a glob under an optional search path.
- * Relative paths resolve from the workspace root.
+ * Relative paths resolve from the workspace root; results are sorted display paths with a character budget.
+ * Invalid paths and glob failures return error results, while detected cancellation rejects.
  */
 export async function executeFind(
   input: FindInput,

@@ -1,16 +1,20 @@
+/** Opaque adapter-owned data preserved alongside Schway's provider-independent conversation records. */
 export type ProviderMetadata = Record<string, unknown>;
 
+/** Plain text carried in a user or assistant message. */
 export interface TextContent {
   type: "text";
   text: string;
 }
 
+/** Assistant reasoning text with optional opaque metadata needed for provider replay. */
 export interface ThinkingContent {
   type: "thinking";
   text: string;
   providerMetadata?: ProviderMetadata;
 }
 
+/** Requested tool invocation whose id links its result and whose arguments require tool-schema validation. */
 export interface ToolCallContent {
   type: "tool_call";
   id: string;
@@ -19,15 +23,19 @@ export interface ToolCallContent {
   providerMetadata?: ProviderMetadata;
 }
 
+/** Content accepted in user messages, currently limited to plain text. */
 export type UserContent = TextContent;
+/** Allowed assistant content block: text, reasoning, or a requested tool invocation. */
 export type AssistantContent = TextContent | ThinkingContent | ToolCallContent;
 
+/** Identified user input stored in session history and sent to the model. */
 export interface UserMessage {
   type: "user";
   id: string;
   content: UserContent[];
 }
 
+/** Assembled assistant output with ordered content blocks and opaque metadata retained for adapter replay. */
 export interface AssistantMessage {
   type: "assistant";
   id: string;
@@ -35,6 +43,7 @@ export interface AssistantMessage {
   providerMetadata?: ProviderMetadata;
 }
 
+/** Model-facing outcome linked to a tool-call id, with errors marked explicitly. */
 export interface ToolResult {
   type: "tool_result";
   id: string;
@@ -43,6 +52,7 @@ export interface ToolResult {
   isError: boolean;
 }
 
+/** Provider-independent message or tool outcome that may be included in model context. */
 export type ConversationItem = UserMessage | AssistantMessage | ToolResult;
 
 /** Durable compaction marker. Never sent to providers; used to rebuild effective context. */

@@ -15,7 +15,7 @@ import { createSession, type Session } from "./session.ts";
 /** First persisted session format. Loaders stay version-specific. */
 export const SESSION_FORMAT_VERSION = 1;
 
-/** First JSONL record in a session file. */
+/** Versioned first JSONL record identifying the session and the workspace restored when it is resumed. */
 export interface SessionHeader {
   type: "session";
   version: number;
@@ -26,12 +26,12 @@ export interface SessionHeader {
   extraRoots: string[];
 }
 
-/** In-memory session whose appends are durable JSONL records. */
+/** Session with a persisted header whose appends synchronously write JSONL before updating in-memory history. */
 export interface JsonlSession extends Session {
   readonly header: SessionHeader;
 }
 
-/** Create a new append-oriented session file under `directory`. */
+/** Create a directory and UUID-named JSONL session with the supplied workspace header, rejecting on filesystem failure. */
 export async function createJsonlSession(options: {
   directory: string;
   workspace: Workspace;
@@ -51,12 +51,12 @@ export async function createJsonlSession(options: {
   return openPersisted(path, header, [], header.id);
 }
 
-/** Canonical per-user session directory: `~/.schway/sessions`. */
+/** Join the supplied home directory with `.schway/sessions` without accessing the filesystem. */
 export function sessionsDirectory(home: string): string {
   return join(home, ".schway", "sessions");
 }
 
-/** Lightweight header for session pickers; skips corrupt or unreadable files. */
+/** Session identity, creation timestamp, and workspace root shown by session pickers. */
 export interface SessionSummary {
   id: string;
   createdAt: string;
@@ -65,7 +65,8 @@ export interface SessionSummary {
 
 /**
  * List persisted sessions newest-first by header timestamp.
- * Missing directories yield an empty list; corrupt files are skipped.
+ * Missing directories yield an empty list; unreadable files and invalid or oversized headers are skipped.
+ * Other directory-read errors propagate, and conversation records are not inspected.
  */
 export async function listSessions(directory: string): Promise<SessionSummary[]> {
   let entries: string[];
@@ -134,7 +135,11 @@ async function readFirstLine(path: string): Promise<string | undefined> {
   }
 }
 
-/** Load a session, settle unresolved tool calls, and drop a corrupt trailing record. */
+/**
+ * Load and repair a persisted session, appending error results for unresolved tool calls without replaying tools.
+ * Drops a corrupt trailing record, but rejects invalid ids, missing files, unsupported versions,
+ * malformed headers or interior records, and filesystem failures.
+ */
 export async function loadJsonlSession(options: {
   directory: string;
   id: string;

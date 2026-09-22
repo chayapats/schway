@@ -1,7 +1,7 @@
 import { rename, unlink, writeFile } from "node:fs/promises";
 import type { ToolExecutionResult } from "./types.ts";
 
-/** Error used when an AbortSignal fires during a tool. */
+/** Create an Error named AbortError for tool cancellation handling. */
 export function abortError(): Error {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
@@ -33,7 +33,7 @@ export function filesystemError(path: string, error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Bounded tool error for an OS/filesystem failure. */
+/** Wrap a filesystem failure as model-visible error text with supplied and resolved paths in details. */
 export function filesystemFailure(
   path: string,
   resolvedPath: string,
@@ -46,7 +46,10 @@ export function filesystemFailure(
   };
 }
 
-/** Write `content` via a same-directory temp file, then rename over `path`. */
+/**
+ * Replace `path` by writing a same-directory temporary file and renaming it over the destination.
+ * Passes cancellation to the temporary write; failures attempt temporary-file cleanup and propagate.
+ */
 export async function writeFileAtomically(
   path: string,
   content: string,

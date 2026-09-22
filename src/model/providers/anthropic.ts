@@ -33,8 +33,8 @@ type FetchLike = (
 ) => Promise<Response>;
 
 /**
- * Anthropic Messages adapter. Converts Schway requests and stream events,
- * disables SDK retries, and assembles tool_use JSON before exposing a call.
+ * Create an Anthropic Messages adapter with SDK retries disabled and Schway-owned conversation records.
+ * Streaming forwards request cancellation and provider failures, and assembles tool_use JSON before exposing a call.
  */
 export function createAnthropicModel(options: {
   apiKey: string;

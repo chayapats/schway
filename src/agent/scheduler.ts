@@ -16,6 +16,7 @@ export { DEFAULT_MAX_CONCURRENT_TOOLS };
  * Run accepted tool calls with parallel overlap around exclusive barriers.
  * Yields `tool.started` / `tool.finished` as work is scheduled and settles.
  * Returns results in source call order even when completion order differs.
+ * Cancellation waits for running calls and settles queued calls as cancelled without executing their tools.
  */
 export async function* scheduleToolCalls(options: {
   calls: readonly ToolCallContent[];

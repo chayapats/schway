@@ -15,10 +15,13 @@ import type {
 
 /** Default number of lines returned when the model omits `limit`. */
 export const DEFAULT_READ_LINE_LIMIT = 2000;
-/** Hard cap on model-facing characters, including line-number prefixes. */
+/** Character budget for numbered file text before any truncation notice is appended. */
 export const MAX_READ_CHARS = 50_000;
 
-/** TypeBox schema for `read`. Compiled once when the tool is registered. */
+/**
+ * Accept a file path with optional positive line offset and limit, rejecting unknown keys during validation.
+ * Compiled once when the tool is registered.
+ */
 export const readInputSchema = Type.Object(
   {
     path: Type.String({
@@ -41,10 +44,10 @@ export const readInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `read` tool. */
+/** File path and optional one-based offset and line count accepted by the read schema. */
 export type ReadInput = Static<typeof readInputSchema>;
 
-/** Structured extras attached to a successful or failed read. */
+/** Read-window metadata with total line count, truncation state, and optional continuation offset. */
 export interface ReadDetails {
   path: string;
   resolvedPath: string;
@@ -55,7 +58,7 @@ export interface ReadDetails {
   nextOffset?: number;
 }
 
-/** Built-in file reader. Declares parallel execution. */
+/** File-reading definition declaring its input schema and parallel scheduling eligibility. */
 export const readTool: ToolDefinition<ReadInput> = {
   name: "read",
   description:
@@ -67,8 +70,9 @@ export const readTool: ToolDefinition<ReadInput> = {
 
 /**
  * Read a file as line-numbered, bounded text.
- * Relative paths resolve from the workspace root. Output never exceeds
- * {@link MAX_READ_CHARS}. AbortSignal cancels an in-flight stream.
+ * Relative paths resolve from the workspace root; numbered text uses the
+ * {@link MAX_READ_CHARS} budget before a truncation notice is appended.
+ * File, binary-content, and offset failures return error results; stream cancellation rejects.
  */
 export async function executeRead(
   input: ReadInput,

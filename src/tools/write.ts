@@ -15,7 +15,10 @@ import type {
   ToolExecutionResult,
 } from "./types.ts";
 
-/** TypeBox schema for `write`. Compiled once when the tool is registered. */
+/**
+ * Accept a destination path and complete replacement text, rejecting unknown keys during validation.
+ * Compiled once when the tool is registered.
+ */
 export const writeInputSchema = Type.Object(
   {
     path: Type.String({
@@ -29,17 +32,17 @@ export const writeInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Validated arguments for the built-in `write` tool. */
+/** Destination path and full file contents accepted by the write schema. */
 export type WriteInput = Static<typeof writeInputSchema>;
 
-/** Structured extras attached to a successful or failed write. */
+/** Successful-write paths and whether the destination was absent when checked before writing. */
 export interface WriteDetails {
   path: string;
   resolvedPath: string;
   created: boolean;
 }
 
-/** Built-in file writer. Declares exclusive execution. */
+/** Full-file writing definition that runs behind an exclusive scheduling barrier. */
 export const writeTool: ToolDefinition<WriteInput> = {
   name: "write",
   description:
@@ -50,8 +53,9 @@ export const writeTool: ToolDefinition<WriteInput> = {
 };
 
 /**
- * Create or fully replace a file.
- * Relative paths resolve from the workspace root.
+ * Create parent directories and atomically create or replace a file with the supplied content.
+ * Relative paths resolve from the workspace root; filesystem failures return error results
+ * and cancellation detected before or during the write rejects.
  */
 export async function executeWrite(
   input: WriteInput,

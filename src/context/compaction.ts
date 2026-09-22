@@ -8,7 +8,7 @@ import { isCompactionRecord } from "../conversation/types.ts";
 /** Reason a compaction runs; surfaced to presentation clients and events. */
 export type CompactionReason = "pressure" | "manual" | "overflow";
 
-/** Recent complete turns always retained; older turns become summary input. */
+/** Default number of recent user-delimited turns retained when older turns become summary input. */
 export const COMPACTION_KEEP_TURNS = 10;
 
 /** Fraction of the context window that triggers pressure compaction. */
@@ -20,7 +20,7 @@ export const SUMMARY_PRUNE_CHARS = 8_000;
 /** Dynamic context section name carrying the durable summary. */
 export const SUMMARY_SECTION_NAME = "summary";
 
-/** System prompt for the summarizer; enforces the coding-oriented structure. */
+/** System prompt requesting a coding-oriented summary with named progress and file sections. */
 export const SUMMARY_SYSTEM_PROMPT = [
   "You summarize a long coding session so work can continue from the summary plus recent turns.",
   "Write markdown with exactly these sections:",
@@ -37,12 +37,12 @@ export const SUMMARY_SYSTEM_PROMPT = [
   "Do not invent work that is not in the history.",
 ].join("\n");
 
-/** One user-delimited turn; splitting on users never splits tool-call groups. */
+/** Consecutive conversation items grouped by user-message boundaries, without validating turn completeness. */
 export interface CompactionTurn {
   items: ConversationItem[];
 }
 
-/** Split conversation into user-delimited complete turns. */
+/** Group conversation items at user messages, retaining any leading or unfinished group. */
 export function splitIntoTurns(
   items: readonly ConversationItem[],
 ): CompactionTurn[] {
@@ -61,7 +61,7 @@ export function splitIntoTurns(
   return turns;
 }
 
-/** Boundary for the next compaction: id of the first retained record. */
+/** Return the first retained id and older-turn count, or null when the requested retention leaves nothing to compact. */
 export function findCompactionBoundary(
   conversation: readonly ConversationItem[],
   keepTurns: number = COMPACTION_KEEP_TURNS,
@@ -117,7 +117,10 @@ export function getEffectiveSummary(
   return getLatestCompaction(records)?.summary;
 }
 
-/** Conversation visible to the model: retained records after the latest boundary. */
+/**
+ * Return conversation from the latest compaction boundary, excluding compaction markers.
+ * If the boundary id is missing, retain only conversation records after that marker.
+ */
 export function getEffectiveConversation(
   records: readonly SessionRecord[],
 ): ConversationItem[] {

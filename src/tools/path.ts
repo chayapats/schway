@@ -3,17 +3,17 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 /**
  * Resolve a tool path against the primary workspace root.
  *
- * Relative paths always mean `<workspaceRoot>/<path>`. Absolute paths are
- * used as-is when the OS permits them. The workspace is not a security
- * boundary.
+ * Relative paths always mean `<workspaceRoot>/<path>`; absolute paths are normalized independently.
+ * Resolution is lexical, with no filesystem access or symlink canonicalization;
+ * callers supply the canonical workspace root, which is not a security boundary.
  */
 export function resolveToolPath(workspaceRoot: string, path: string): string {
   return isAbsolute(path) ? resolve(path) : resolve(workspaceRoot, path);
 }
 
 /**
- * Path shown to the model: workspace-relative with `/` separators, or the
- * absolute path when the target is outside the workspace.
+ * Return a workspace-relative display path with `/` separators, or the supplied path when it lies outside.
+ * The root itself displays as `.`; relative names beginning with `..` also retain the supplied path.
  */
 export function displayToolPath(workspaceRoot: string, resolvedPath: string): string {
   const rel = relative(workspaceRoot, resolvedPath);

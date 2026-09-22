@@ -23,9 +23,10 @@ export type ModelStreamEvent =
   | { type: "thinking_delta"; text: string }
   | { type: "message_complete"; message: AssistantMessage };
 
-/** Schway model surface. Adapters convert to and from provider wire types. */
+/** Provider adapter contract using Schway conversation records while leaving retries and tool execution to the harness. */
 export interface Model {
   readonly provider: string;
   readonly id: string;
+  /** Stream normalized deltas and a completed assistant message, forwarding request cancellation and provider failures. */
   stream(request: ModelRequest): AsyncIterable<ModelStreamEvent>;
 }
