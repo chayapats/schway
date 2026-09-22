@@ -1,4 +1,4 @@
-import { createContextManager } from "../context/manager.ts";
+import { createContextManager, type ContextManager } from "../context/manager.ts";
 import { loadResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { resolve } from "node:path";
@@ -35,8 +35,14 @@ import {
   formatModelPicker,
   helpText,
   parseModelArgs,
+  parseSkillInvocation,
   parseSlashCommand,
 } from "./commands.ts";
+import {
+  discoverSkills,
+  formatSkillsListing,
+  prepareSkillInvocation,
+} from "../skills/skills.ts";
 import { loadProviderModel } from "../model/loader.ts";
 import { listCatalog, lookupModel } from "../model/catalog.ts";
 
@@ -159,21 +165,25 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   let controller: TuiController;
   const managerOptions = contextManagerOptions(home, settings.explicitContextWindow);
+  const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
+    workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
+  };
   try {
     if (io.args.resume) {
       // Reuse the session handle loaded during startup, including settlements.
       const resumed = startupResumed!;
+      const resumedWorkspace: Workspace = {
+        root: resumed.header.workspaceRoot,
+        launchCwd: resumed.header.launchCwd,
+        extraRoots: resumed.header.extraRoots,
+      };
+      const resumedManager = createContextManager(resumedWorkspace, managerOptions);
+      skillScope.manager = resumedManager;
+      skillScope.workspaceRoot = resumed.header.workspaceRoot;
       controller = new TuiController({
         session: resumed,
         model,
-        contextManager: createContextManager(
-          {
-            root: resumed.header.workspaceRoot,
-            launchCwd: resumed.header.launchCwd,
-            extraRoots: resumed.header.extraRoots,
-          },
-          managerOptions,
-        ),
+        contextManager: resumedManager,
         tools: createToolRegistry([
           readTool,
           writeTool,
@@ -183,11 +193,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           findTool,
           lsTool,
         ]),
-        workspace: {
-          root: resumed.header.workspaceRoot,
-          launchCwd: resumed.header.launchCwd,
-          extraRoots: resumed.header.extraRoots,
-        },
+        workspace: resumedWorkspace,
         provider: settings.provider,
         modelId: settings.model,
         sessionId: resumed.header.id,
@@ -207,10 +213,13 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       }
     } else {
       const session = await createJsonlSession({ directory, workspace });
+      const freshManager = createContextManager(workspace, managerOptions);
+      skillScope.manager = freshManager;
+      skillScope.workspaceRoot = workspace.root;
       controller = new TuiController({
         session,
         model,
-        contextManager: createContextManager(workspace, managerOptions),
+        contextManager: freshManager,
         tools: createToolRegistry([
           readTool,
           writeTool,
@@ -247,6 +256,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       controller,
       home,
       workspaceRoot: workspace.root,
+      skillScope,
       sessionsDir: directory,
       settings: {
         provider: settings.provider,
@@ -299,6 +309,7 @@ async function runTuiRenderer(options: {
   controller: TuiController;
   home: string;
   workspaceRoot: string;
+  skillScope: { manager?: ContextManager; workspaceRoot: string };
   sessionsDir: string;
   settings: RendererSettings;
   env: Record<string, string | undefined>;
@@ -414,6 +425,7 @@ async function runTuiRenderer(options: {
           controller: options.controller,
           home: options.home,
           workspaceRoot: options.workspaceRoot,
+          skillScope: options.skillScope,
           sessionsDir: options.sessionsDir,
           settings: options.settings,
           env: options.env,
@@ -423,7 +435,7 @@ async function runTuiRenderer(options: {
           secrets: options.secrets,
           finishQuit,
           stderr: options.stderr,
-        }).catch((error: unknown) => {
+        }, command.raw).catch((error: unknown) => {
           options.controller.fail(messageOf(error));
         });
         return;
@@ -496,6 +508,7 @@ async function handleSlashCommand(
     controller: TuiController;
     home: string;
     workspaceRoot: string;
+    skillScope: { manager?: ContextManager; workspaceRoot: string };
     sessionsDir: string;
     settings: RendererSettings;
     env: Record<string, string | undefined>;
@@ -506,6 +519,7 @@ async function handleSlashCommand(
     finishQuit: () => void;
     stderr: TuiWriter;
   },
+  raw?: string,
 ): Promise<void> {
   const managerOptions = contextManagerOptions(ctx.home, ctx.settings.explicitContextWindow);
   switch (name) {
@@ -515,9 +529,12 @@ async function handleSlashCommand(
         directory: ctx.sessionsDir,
         workspace,
       });
+      const manager = createContextManager(workspace, managerOptions);
+      ctx.skillScope.manager = manager;
+      ctx.skillScope.workspaceRoot = workspace.root;
       ctx.controller.replaceSession(session, session.header.id, {
         workspace,
-        contextManager: createContextManager(workspace, managerOptions),
+        contextManager: manager,
       });
       ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
       return;
@@ -546,9 +563,12 @@ async function handleSlashCommand(
           launchCwd: resumed.header.launchCwd,
           extraRoots: [...resumed.header.extraRoots],
         };
+        const manager = createContextManager(workspace, managerOptions);
+        ctx.skillScope.manager = manager;
+        ctx.skillScope.workspaceRoot = workspace.root;
         ctx.controller.replaceSession(resumed, resumed.header.id, {
           workspace,
-          contextManager: createContextManager(workspace, managerOptions),
+          contextManager: manager,
         });
         ctx.controller.notice(
           `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
@@ -583,6 +603,14 @@ async function handleSlashCommand(
       await ctx.controller.compact();
       return;
     }
+    case "skills": {
+      const discovery = await discoverSkills({
+        workspaceRoot: ctx.skillScope.workspaceRoot,
+        home: ctx.home,
+      });
+      ctx.controller.notice(formatSkillsListing(discovery));
+      return;
+    }
     case "config": {
       ctx.controller.notice(ctx.controller.describeConfig());
       return;
@@ -596,6 +624,11 @@ async function handleSlashCommand(
       return;
     }
     case "unknown": {
+      const invocation = raw ? parseSkillInvocation(raw) : null;
+      if (invocation) {
+        await invokeSkillTurn(invocation, ctx);
+        return;
+      }
       ctx.controller.fail("Unknown command. Type /help for commands.");
       return;
     }
@@ -603,6 +636,47 @@ async function handleSlashCommand(
       ctx.controller.fail("Unknown command. Type /help for commands.");
       return;
     }
+  }
+}
+
+/** Run one explicit skill invocation as a single active-skill turn, clearing state on settle. */
+async function invokeSkillTurn(
+  invocation: { name: string; args: string; raw: string },
+  ctx: {
+    controller: TuiController;
+    home: string;
+    skillScope: { manager?: ContextManager; workspaceRoot: string };
+  },
+): Promise<void> {
+  if (ctx.controller.running) {
+    ctx.controller.notice("Already running. Press Esc to cancel first.");
+    return;
+  }
+  const manager = ctx.skillScope.manager;
+  if (!manager) {
+    ctx.controller.fail("Skills are not ready yet; try again.");
+    return;
+  }
+  const prepared = await prepareSkillInvocation({
+    workspaceRoot: ctx.skillScope.workspaceRoot,
+    home: ctx.home,
+    name: invocation.name,
+  });
+  if (!prepared.ok) {
+    ctx.controller.fail(prepared.error);
+    return;
+  }
+  manager.setActiveSkill({
+    name: prepared.skill.name,
+    body: prepared.body,
+    source: prepared.skill.displayPath,
+    scope: prepared.skill.scope,
+    dir: prepared.skill.dir,
+  });
+  try {
+    await ctx.controller.submit(invocation.raw);
+  } finally {
+    manager.clearActiveSkill();
   }
 }
 

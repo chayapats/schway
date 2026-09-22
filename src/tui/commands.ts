@@ -1,3 +1,5 @@
+import { RESERVED_SKILL_NAMES, splitSlashCommand } from "../skills/skills.ts";
+
 /** Slash command requested from the TUI input editor. */
 export type SlashCommandName =
   | "new"
@@ -5,6 +7,7 @@ export type SlashCommandName =
   | "resume"
   | "model"
   | "compact"
+  | "skills"
   | "config"
   | "help"
   | "quit";
@@ -34,6 +37,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "resume":
     case "model":
     case "compact":
+    case "skills":
     case "config":
     case "help":
     case "quit":
@@ -52,11 +56,25 @@ export function helpText(): string {
     "/resume <id> - resume a saved session",
     "/model [provider/model-id | provider model-id | model-id] - show or switch the model",
     "/compact - summarize older turns to free context",
+    "/skills - list available skills",
+    "/<skill-name> [arguments] - invoke an available skill for this turn",
     "/config - show effective basic settings with secrets redacted",
     "/help - show this help",
     "/quit - quit schway",
     "Esc cancels the running turn. Ctrl+C quits when idle.",
   ].join("\n");
+}
+
+/** Built-in slash names; a skill using one collides and is never invoked silently. */
+export const BUILT_IN_COMMAND_NAMES: readonly string[] = RESERVED_SKILL_NAMES;
+
+/** Parse "/<skill-name> [arguments]" for non-builtin names; null for ordinary text or builtins. */
+export function parseSkillInvocation(input: string): { name: string; args: string; raw: string } | null {
+  const split = splitSlashCommand(input);
+  if (!split || BUILT_IN_COMMAND_NAMES.includes(split.name)) {
+    return null;
+  }
+  return split;
 }
 
 /** Provider families selectable from the interactive model picker. */

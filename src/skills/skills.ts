@@ -1,0 +1,579 @@
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { join, relative, resolve, sep } from "node:path";
+
+/** Maximum SKILL.md body characters injected as dynamic context; oversize invocations fail instead of truncating. */
+export const SKILL_BODY_LIMIT_CHARS = 32_000;
+
+/** Dynamic context section naming model-eligible skills without embedding bodies. */
+export const AVAILABLE_SKILLS_SECTION_NAME = "available-skills";
+
+/** Dynamic context section carrying the explicitly activated skill body for one turn. */
+export const ACTIVE_SKILL_SECTION_NAME = "active-skill";
+
+/** Built-in slash names a skill must not shadow; the TUI dispatcher owns behavior, this list owns collision detection. */
+export const RESERVED_SKILL_NAMES: readonly string[] = [
+  "new",
+  "sessions",
+  "resume",
+  "model",
+  "compact",
+  "skills",
+  "config",
+  "help",
+  "quit",
+];
+
+/** Where a skill definition was discovered; project definitions override global ones. */
+export type SkillScope = "project" | "global";
+
+/** Validated skill identity and invocation metadata; the body stays on disk until activation. */
+export interface SkillMetadata {
+  name: string;
+  description: string;
+  /** True when frontmatter disables model invocation; the skill stays user-invokable. */
+  userOnly: boolean;
+  scope: SkillScope;
+  /** Canonical skill directory; referenced resources resolve relative to it. */
+  dir: string;
+  /** Canonical SKILL.md path the metadata was parsed from. */
+  skillFile: string;
+  /** Human-readable source used in diagnostics and listings. */
+  displayPath: string;
+}
+
+/** One unusable skill file with its source and actionable reason. */
+export interface SkillDiagnostic {
+  source: string;
+  reason: string;
+}
+
+/** One skill name found twice at the same precedence level; never auto-resolved. */
+export interface AmbiguousSkill {
+  name: string;
+  sources: string[];
+}
+
+/** One skill name colliding with a built-in slash command; explicit invocation is refused. */
+export interface SkillCollision {
+  name: string;
+  command: string;
+  source: string;
+}
+
+/** Discovery result: invokable skills plus explicit reports for everything unusable. */
+export interface SkillDiscovery {
+  skills: SkillMetadata[];
+  ambiguous: AmbiguousSkill[];
+  collisions: SkillCollision[];
+  diagnostics: SkillDiagnostic[];
+}
+
+/** Active skill body attached as dynamic context for exactly one submitted turn. */
+export interface ActiveSkill {
+  name: string;
+  body: string;
+  source: string;
+  scope: SkillScope;
+  dir: string;
+}
+
+/** Validated SKILL.md frontmatter plus the raw body, which callers bound separately. */
+export interface ParsedSkillFile {
+  name: string;
+  description: string;
+  userOnly: boolean;
+  body: string;
+}
+
+/** Split "/name args" into a lowercase name plus trailing args; null for ordinary prompts. */
+export function splitSlashCommand(text: string): {
+  name: string;
+  args: string;
+  raw: string;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+  const space = trimmed.indexOf(" ");
+  const name =
+    (space === -1 ? trimmed.slice(1) : trimmed.slice(1, space)).toLowerCase();
+  if (name.length === 0) {
+    return null;
+  }
+  return {
+    name,
+    args: space === -1 ? "" : trimmed.slice(space + 1).trim(),
+    raw: trimmed,
+  };
+}
+
+/** Parse SKILL.md frontmatter (name, description, invocation flags) without retaining limits. */
+export function parseSkillFile(content: string): { ok: true; value: ParsedSkillFile } | { ok: false; error: string } {
+  const lines = content.split("\n");
+  let start = 0;
+  while (start < lines.length && lines[start]!.trim() === "") {
+    start++;
+  }
+  if (start >= lines.length || lines[start]!.trim() !== "---") {
+    return { ok: false, error: "missing frontmatter: SKILL.md must start with a '---' block" };
+  }
+  let end = -1;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i]!.trim() === "---") {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) {
+    return { ok: false, error: "malformed frontmatter: missing closing '---'" };
+  }
+  const fields = new Map<string, string>();
+  const front = lines.slice(start + 1, end);
+  for (let i = 0; i < front.length; i++) {
+    const line = front[i]!;
+    if (line.trim() === "" || line.trim().startsWith("#")) {
+      continue;
+    }
+    const separator = line.indexOf(":");
+    if (separator <= 0) {
+      return { ok: false, error: `malformed frontmatter line ${i + 1}: expected 'key: value'` };
+    }
+    const key = line.slice(0, separator).trim().toLowerCase();
+    let value = line.slice(separator + 1).trim();
+    if (value === ">" || value === ">-" || value === ">+" || value === "|" || value === "|-" || value === "|+") {
+      const folded = value.startsWith(">");
+      const collected: string[] = [];
+      while (i + 1 < front.length && /^[ \t]/.test(front[i + 1]!)) {
+        i++;
+        collected.push(front[i]!.replace(/^[ \t]+/, ""));
+      }
+      value = folded ? collected.join(" ") : collected.join("\n");
+    }
+    if (!fields.has(key)) {
+      fields.set(key, unquote(value));
+    }
+  }
+  const name = (fields.get("name") ?? "").trim();
+  if (name.length === 0) {
+    return { ok: false, error: "missing required frontmatter field 'name'" };
+  }
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name) || name.length > 64) {
+    return {
+      ok: false,
+      error: `invalid skill name '${name}': use 1-64 lowercase letters, digits, or hyphens`,
+    };
+  }
+  const description = (fields.get("description") ?? "").trim();
+  if (description.length === 0) {
+    return { ok: false, error: `skill '${name}' is missing required frontmatter field 'description'` };
+  }
+  let userOnly = false;
+  for (const key of ["disable-model-invocation", "user-only"]) {
+    const raw = fields.get(key);
+    if (raw === undefined) {
+      continue;
+    }
+    const parsed = parseFlag(key, raw);
+    if ("error" in parsed) {
+      return { ok: false, error: `skill '${name}': ${parsed.error}` };
+    }
+    userOnly = userOnly || parsed.value;
+  }
+  return {
+    ok: true,
+    value: { name, description, userOnly, body: lines.slice(end + 1).join("\n") },
+  };
+}
+
+/** Discover project-local and user-global skills, keeping metadata only and reporting everything unusable. */
+export async function discoverSkills(options: {
+  workspaceRoot: string;
+  home?: string;
+  reservedNames?: readonly string[];
+}): Promise<SkillDiscovery> {
+  const reserved = options.reservedNames ?? RESERVED_SKILL_NAMES;
+  const project = await readSkillScope(
+    join(await canonicalDir(options.workspaceRoot), ".agents", "skills"),
+    "project",
+    options.workspaceRoot,
+  );
+  const globalScope: { skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] } =
+    options.home === undefined
+      ? { skills: [], diagnostics: [] }
+      : await readSkillScope(
+          join(await canonicalDir(options.home), ".schway", "skills"),
+          "global",
+        );
+  const diagnostics: SkillDiagnostic[] = [...project.diagnostics, ...globalScope.diagnostics];
+  const ambiguous: AmbiguousSkill[] = [];
+  const projectSkills = selectScopeSkills(project.skills, diagnostics, ambiguous);
+  const globalSkills = selectScopeSkills(globalScope.skills, diagnostics, ambiguous);
+  const projectNames = new Set(projectSkills.map((skill) => skill.name));
+  const skills: SkillMetadata[] = [...projectSkills];
+  for (const skill of globalSkills) {
+    if (!projectNames.has(skill.name)) {
+      skills.push(skill);
+    }
+  }
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+  const collisions: SkillCollision[] = [];
+  const available: SkillMetadata[] = [];
+  for (const skill of skills) {
+    if (reserved.includes(skill.name)) {
+      collisions.push({ name: skill.name, command: `/${skill.name}`, source: skill.displayPath });
+      continue;
+    }
+    available.push(skill);
+  }
+  return { skills: available, ambiguous, collisions, diagnostics };
+}
+
+/** Resolve an available skill by name, distinguishing unknown from ambiguous or colliding names. */
+export function resolveSkillInvocation(
+  discovery: SkillDiscovery,
+  name: string,
+): { ok: true; skill: SkillMetadata } | { ok: false; kind: "unknown" | "ambiguous" | "collision"; error: string } {
+  const lowered = name.toLowerCase();
+  const found = discovery.skills.find((skill) => skill.name === lowered);
+  if (found) {
+    return { ok: true, skill: found };
+  }
+  const clash = discovery.collisions.find((entry) => entry.name === lowered);
+  if (clash) {
+    return {
+      ok: false,
+      kind: "collision",
+      error: `Skill '${lowered}' collides with built-in ${clash.command} (${clash.source}); rename the skill to invoke it explicitly.`,
+    };
+  }
+  const dup = discovery.ambiguous.find((entry) => entry.name === lowered);
+  if (dup) {
+    return {
+      ok: false,
+      kind: "ambiguous",
+      error: `Skill '${lowered}' is ambiguous; found in:\n${dup.sources.map((source) => `- ${source}`).join("\n")}\nRename or remove duplicates so one definition wins.`,
+    };
+  }
+  const known =
+    discovery.skills.length > 0
+      ? ` Available: ${discovery.skills.map((skill) => skill.name).join(", ")}.`
+      : " No skills are installed.";
+  return { ok: false, kind: "unknown", error: `Unknown skill '${lowered}'.${known}` };
+}
+
+/** Discover, resolve, and load one skill body for explicit user invocation. */
+export async function prepareSkillInvocation(options: {
+  workspaceRoot: string;
+  home?: string;
+  name: string;
+  reservedNames?: readonly string[];
+}): Promise<{ ok: true; skill: SkillMetadata; body: string } | { ok: false; error: string }> {
+  const discovery = await discoverSkills(options);
+  const resolved = resolveSkillInvocation(discovery, options.name);
+  if (!resolved.ok) {
+    return { ok: false, error: resolved.error };
+  }
+  const loaded = await loadSkillBody(resolved.skill);
+  if (!loaded.ok) {
+    return { ok: false, error: loaded.error };
+  }
+  return { ok: true, skill: resolved.skill, body: loaded.body };
+}
+
+/** Read and validate the full SKILL.md body for an already-resolved skill. */
+export async function loadSkillBody(
+  skill: SkillMetadata,
+): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
+  let content: string;
+  try {
+    content = await readFile(skill.skillFile, "utf8");
+  } catch {
+    return {
+      ok: false,
+      error: `Skill '${skill.name}' is unavailable: cannot read body at ${skill.displayPath}. The model turn was not started.`,
+    };
+  }
+  const parsed = parseSkillFile(content);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: `Skill '${skill.name}' is unavailable: ${parsed.error} (${skill.displayPath}). The model turn was not started.`,
+    };
+  }
+  if (parsed.value.name !== skill.name) {
+    return {
+      ok: false,
+      error: `Skill '${skill.name}' changed on disk (now '${parsed.value.name}' at ${skill.displayPath}); re-run /skills and retry. The model turn was not started.`,
+    };
+  }
+  const body = parsed.value.body.trim();
+  if (body.length === 0) {
+    return {
+      ok: false,
+      error: `Skill '${skill.name}' has an empty body (${skill.displayPath}); add instructions before invoking. The model turn was not started.`,
+    };
+  }
+  if (body.length > SKILL_BODY_LIMIT_CHARS) {
+    return {
+      ok: false,
+      error: `Skill '${skill.name}' exceeds the ${SKILL_BODY_LIMIT_CHARS} character body limit (${body.length} chars at ${skill.displayPath}); shorten SKILL.md before invoking. The model turn was not started.`,
+    };
+  }
+  return { ok: true, body };
+}
+
+/** Format model-eligible skills as the metadata-only available-skills context section. */
+export function formatAvailableSkillsSection(skills: readonly SkillMetadata[]): string {
+  const eligible = skills.filter((skill) => !skill.userOnly);
+  const lines = ["Available skills (invoke with /<skill-name> [arguments]):"];
+  for (const skill of eligible) {
+    lines.push(`- ${skill.name} - ${skill.description}`);
+  }
+  return lines.join("\n");
+}
+
+/** Format the user-facing /skills listing, including user-only marks and explicit diagnostics. */
+export function formatSkillsListing(discovery: SkillDiscovery): string {
+  const lines: string[] = [];
+  if (discovery.skills.length === 0) {
+    lines.push("No skills are installed.");
+  } else {
+    lines.push("Available skills (invoke with /<skill-name> [arguments]):");
+    for (const skill of discovery.skills) {
+      const scope = skill.scope === "project" ? "project" : "global";
+      const marker = skill.userOnly ? " (user-only)" : "";
+      lines.push(`- ${skill.name}${marker} - ${skill.description} [${scope}]`);
+    }
+  }
+  for (const dup of discovery.ambiguous) {
+    lines.push(`Ambiguous skill '${dup.name}' is unavailable; found in:`);
+    for (const source of dup.sources) {
+      lines.push(`- ${source}`);
+    }
+  }
+  for (const clash of discovery.collisions) {
+    lines.push(
+      `Skill '${clash.name}' collides with built-in ${clash.command} (${clash.source}) and cannot be invoked; rename the skill.`,
+    );
+  }
+  for (const diagnostic of discovery.diagnostics) {
+    lines.push(`Invalid skill at ${diagnostic.source}: ${diagnostic.reason}`);
+  }
+  lines.push("Skill bodies load only on explicit invocation; resources resolve relative to their skill directory.");
+  return lines.join("\n");
+}
+
+/** Format one activated skill body as the active-skill dynamic context section. */
+export function formatActiveSkillSection(skill: { name: string; source: string; body: string }): string {
+  return `Skill: ${skill.name}\nSource: ${skill.source}\n${skill.body.replace(/\s+$/, "")}`;
+}
+
+/** Resolve a skill-relative resource path, refusing absolute paths and directory escapes. */
+export function resolveSkillResource(
+  skill: { dir: string },
+  target: string,
+): { ok: true; path: string } | { ok: false; error: string } {
+  const trimmed = target.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, error: "Skill resource path must not be empty." };
+  }
+  if (trimmed.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(trimmed)) {
+    return { ok: false, error: `Skill resource '${target}' must be relative to its skill directory.` };
+  }
+  const resolved = resolve(skill.dir, trimmed);
+  const rel = relative(skill.dir, resolved);
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
+    return { ok: false, error: `Skill resource '${target}' escapes its skill directory.` };
+  }
+  return { ok: true, path: resolved };
+}
+
+/** Read a skill-relative resource on demand, bounding content with the documented skill limit. */
+export async function readSkillResource(
+  skill: { dir: string; name?: string },
+  target: string,
+): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
+  const resolved = resolveSkillResource(skill, target);
+  if (!resolved.ok) {
+    return resolved;
+  }
+  let content: string;
+  try {
+    const info = await stat(resolved.path);
+    if (!info.isFile()) {
+      return { ok: false, error: `Skill resource '${target}' is not a file.` };
+    }
+    content = await readFile(resolved.path, "utf8");
+  } catch {
+    return { ok: false, error: `Skill resource '${target}' cannot be read.` };
+  }
+  if (content.length > SKILL_BODY_LIMIT_CHARS) {
+    return {
+      ok: false,
+      error: `Skill resource '${target}' exceeds the ${SKILL_BODY_LIMIT_CHARS} character limit; read a smaller range instead.`,
+    };
+  }
+  return { ok: true, content };
+}
+
+/** Strip one layer of matching single or double quotes from a frontmatter value. */
+function unquote(value: string): string {
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+
+/** Parse a frontmatter invocation flag, accepting only explicit true/false text. */
+function parseFlag(key: string, raw: string): { value: boolean } | { error: string } {
+  const lowered = raw.trim().toLowerCase();
+  if (lowered === "true") {
+    return { value: true };
+  }
+  if (lowered === "false") {
+    return { value: false };
+  }
+  return { error: `frontmatter field '${key}' must be true or false, got '${raw}'` };
+}
+
+/** Read one skill scope directory, returning parsed candidates plus malformed-file diagnostics. */
+async function readSkillScope(
+  scopeDir: string,
+  scope: SkillScope,
+  workspaceRoot?: string,
+): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
+  const skills: SkillMetadata[] = [];
+  const diagnostics: SkillDiagnostic[] = [];
+  let entries: string[];
+  try {
+    entries = (await readdir(scopeDir)).sort();
+  } catch {
+    return { skills, diagnostics };
+  }
+  const canonicalScope = await canonicalDir(scopeDir);
+  for (const entry of entries) {
+    const dir = join(scopeDir, entry);
+    let entryStat;
+    try {
+      entryStat = await stat(dir);
+    } catch {
+      continue;
+    }
+    if (!entryStat.isDirectory()) {
+      continue;
+    }
+    const skillFile = join(dir, "SKILL.md");
+    let fileStat;
+    try {
+      fileStat = await stat(skillFile);
+    } catch {
+      continue;
+    }
+    if (!fileStat.isFile()) {
+      continue;
+    }
+    const canonicalSkillFile = await canonicalDir(skillFile);
+    const canonicalSkillDir = await canonicalDir(dir);
+    const display =
+      scope === "project" && workspaceRoot !== undefined
+        ? displaySkillPath(canonicalSkillFile, await canonicalDir(workspaceRoot))
+        : canonicalSkillFile;
+    if (!isInside(canonicalScope, canonicalSkillFile)) {
+      diagnostics.push({
+        source: display,
+        reason: `skill directory escapes ${scope} skills directory; refusing to load`,
+      });
+      continue;
+    }
+    let content: string;
+    try {
+      content = await readFile(canonicalSkillFile, "utf8");
+    } catch {
+      diagnostics.push({ source: display, reason: "SKILL.md cannot be read" });
+      continue;
+    }
+    const parsed = parseSkillFile(content);
+    if (!parsed.ok) {
+      diagnostics.push({ source: display, reason: parsed.error });
+      continue;
+    }
+    if (parsed.value.name !== entry) {
+      diagnostics.push({
+        source: display,
+        reason: `skill name '${parsed.value.name}' does not match directory '${entry}'; invoking as '${parsed.value.name}'`,
+      });
+    }
+    if (parsed.value.body.trim().length === 0) {
+      diagnostics.push({ source: display, reason: `skill '${entry}' has an empty body` });
+      continue;
+    }
+    skills.push({
+      name: parsed.value.name,
+      description: parsed.value.description,
+      userOnly: parsed.value.userOnly,
+      scope,
+      dir: canonicalSkillDir,
+      skillFile: canonicalSkillFile,
+      displayPath: display,
+    });
+  }
+  return { skills, diagnostics };
+}
+
+/** Keep singly-defined names; report same-scope duplicates as ambiguous without picking a winner. */
+function selectScopeSkills(
+  candidates: SkillMetadata[],
+  diagnostics: SkillDiagnostic[],
+  ambiguous: AmbiguousSkill[],
+): SkillMetadata[] {
+  void diagnostics;
+  const byName = new Map<string, SkillMetadata[]>();
+  for (const skill of candidates) {
+    const group = byName.get(skill.name) ?? [];
+    group.push(skill);
+    byName.set(skill.name, group);
+  }
+  const kept: SkillMetadata[] = [];
+  for (const [name, group] of [...byName.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const distinct = [...new Map(group.map((skill) => [skill.dir, skill] as const)).values()];
+    if (distinct.length > 1) {
+      ambiguous.push({
+        name,
+        sources: distinct.map((skill) => skill.displayPath).sort(),
+      });
+      continue;
+    }
+    kept.push(distinct[0]!);
+  }
+  return kept;
+}
+
+/** Render a canonical project skill path relative to the workspace root when possible. */
+function displaySkillPath(path: string, workspaceRoot: string): string {
+  const rel = relative(workspaceRoot, path);
+  if (rel === "" || rel.startsWith("..") || rel.startsWith("/")) {
+    return path;
+  }
+  return rel.split(sep).join("/");
+}
+
+/** Canonicalize a path, falling back to the resolved absolute path when missing. */
+async function canonicalDir(path: string): Promise<string> {
+  const absolute = resolve(path);
+  try {
+    return await realpath(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+/** True when a canonical path stays inside a canonical root directory. */
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+}

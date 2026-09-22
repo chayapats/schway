@@ -21,6 +21,14 @@ import {
   estimatePreparedTokens,
   estimateSessionTokens,
 } from "./tokens.ts";
+import type { ActiveSkill, SkillMetadata } from "../skills/skills.ts";
+import {
+  ACTIVE_SKILL_SECTION_NAME,
+  AVAILABLE_SKILLS_SECTION_NAME,
+  discoverSkills,
+  formatActiveSkillSection,
+  formatAvailableSkillsSection,
+} from "../skills/skills.ts";
 import type {
   CompactionRecord,
   ConversationItem,
@@ -76,6 +84,10 @@ export interface ContextManager {
     model: Model,
     options: CompactOptions,
   ): Promise<CompactionRecord | null>;
+  /** Attach an explicitly invoked skill body for the next submitted turn only. */
+  setActiveSkill(skill: ActiveSkill): void;
+  /** Drop any active skill without touching durable history. */
+  clearActiveSkill(): void;
 }
 
 /** Create a context manager bound to one workspace and optional user home. */
@@ -84,6 +96,7 @@ export function createContextManager(
   options: ContextManagerOptions = {},
 ): ContextManager {
   const keepTurns = options.keepTurns ?? COMPACTION_KEEP_TURNS;
+  let activeSkill: ActiveSkill | undefined;
 
   /** Resolve the model-aware context window with explicit overrides first. */
   const resolveWindow = (model: Model): number => {
@@ -120,6 +133,24 @@ export function createContextManager(
         base.push({
           name: "project-instructions",
           content: formatAgentsInstructions(instructions),
+        });
+      }
+      const discovered = await discoverSkillsSafe(workspace.root, options.home);
+      const modelSkills = discovered.filter((skill) => !skill.userOnly);
+      if (modelSkills.length > 0) {
+        base.push({
+          name: AVAILABLE_SKILLS_SECTION_NAME,
+          content: formatAvailableSkillsSection(modelSkills),
+        });
+      }
+      if (activeSkill) {
+        base.push({
+          name: ACTIVE_SKILL_SECTION_NAME,
+          content: formatActiveSkillSection({
+            name: activeSkill.name,
+            source: activeSkill.source,
+            body: activeSkill.body,
+          }),
         });
       }
 
@@ -162,6 +193,14 @@ export function createContextManager(
         signal: compactOptions.signal,
         keepTurns,
       });
+    },
+
+    setActiveSkill(skill: ActiveSkill): void {
+      activeSkill = skill;
+    },
+
+    clearActiveSkill(): void {
+      activeSkill = undefined;
     },
   };
 
@@ -214,6 +253,19 @@ export function createContextManager(
     };
     session.append(record);
     return record;
+  }
+}
+
+/** Skill metadata for the available-skills section; discovery failures degrade to no section. */
+async function discoverSkillsSafe(
+  workspaceRoot: string,
+  home: string | undefined,
+): Promise<SkillMetadata[]> {
+  try {
+    const discovered = await discoverSkills({ workspaceRoot, home });
+    return discovered.skills;
+  } catch {
+    return [];
   }
 }
 
