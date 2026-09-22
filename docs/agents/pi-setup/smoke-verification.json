@@ -1,0 +1,29 @@
+{
+  "passed": true,
+  "parallelChildren": 3,
+  "parentThinking": "xhigh",
+  "children": [
+    {
+      "lane": 1,
+      "result": "PI_PARALLEL_CHECK_1",
+      "state": "complete",
+      "startedAt": 1790051730764,
+      "endedAt": 1790051735995
+    },
+    {
+      "lane": 2,
+      "result": "PI_PARALLEL_CHECK_2",
+      "state": "complete",
+      "startedAt": 1790051730764,
+      "endedAt": 1790051740448
+    },
+    {
+      "lane": 3,
+      "result": "PI_PARALLEL_CHECK_3",
+      "state": "complete",
+      "startedAt": 1790051730763,
+      "endedAt": 1790051737468
+    }
+  ],
+  "commonOverlapMs": 5231
+}

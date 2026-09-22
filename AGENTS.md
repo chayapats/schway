@@ -16,6 +16,10 @@
 
 GitHub Issues for `chayapats/schway`, via `gh`. See `docs/agents/issue-tracker.md`.
 
+### Issue implementation ownership
+
+Before implementing or taking over a tracked issue, read `docs/agents/parallel-implementation.md`. Use an owned issue worktree and atomic claim; a shared GitHub assignee or `ready-for-agent` label is not ownership.
+
 ### Triage labels
 
 Default roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.

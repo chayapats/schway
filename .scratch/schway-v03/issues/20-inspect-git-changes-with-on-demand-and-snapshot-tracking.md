@@ -1,0 +1,78 @@
+# #52: Inspect Git changes with on-demand and snapshot tracking
+
+GitHub: https://github.com/chayapats/schway/issues/52
+
+<!-- schway-roadmap:v03:20 -->
+
+**Milestone:** v0.3
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+Users inspect repository state and changes made during a turn, choosing off, on-demand or snapshot tracking without Schway managing commits or branches. Scope: sections 35, 91.
+
+## Existing behavior and problem
+
+Workspace detection knows the Git root, but Schway does not yet expose configured change tracking or before/after turn snapshots. The spec calls for off/on-demand/snapshot with on-demand default, keeping Git itself as source of truth and avoiding commit/worktree management.
+
+## Prerequisite contract
+
+No blockers. Reuse canonical workspace identity and existing runtime turn completion/cancellation events; public snapshot summaries must remain renderer-free.
+
+## Required behavior and decisions
+
+1. Add validated git.changeTracking with off, on-demand and snapshot. Off disables change inspection; on-demand reads repository state only on explicit inspection; snapshot captures a baseline immediately before a user turn and compares after it settles.
+
+2. Provide a user-facing /changes action and status summary for branch, HEAD, dirty state and bounded changed-file inspection. Define how a detached HEAD and a non-Git workspace are displayed without blocking coding.
+
+3. Snapshot data must be sufficient to compare the turn's before/after working state, including files already modified at turn start. A list of dirty filenames alone cannot identify newly changed content.
+
+4. Handle staged and unstaged tracked changes, untracked additions, deletion, rename and binary content. Show pre-existing changes separately and avoid attributing all dirty work to Schway.
+
+5. Capture final state after completed, failed or cancelled turns once tool cleanup settles. If capture fails, report snapshot unavailable with the reason; do not fabricate an empty clean diff.
+
+6. Use bounded summaries/previews for large or binary files, with explicit truncation and ways to inspect further. Retention of snapshots is per current session/run with documented bounded storage and cleanup; it is not a restoration/checkpoint promise.
+
+7. Keep Git operations observational. Preserve index, HEAD, branches, working files and user Git configuration. Primary workspace remains the default inspection scope.
+
+8. Resume can show current on-demand state but must not claim a historical snapshot exists unless it was actually retained with a valid identity.
+
+## Scope boundary
+
+Observational change awareness. No automatic commits, checkpoint commits, stashing, branching, worktrees or rollback.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Dirty baseline | A pre-existing edit plus a new turn edit are correctly distinguished. |
+| Git variants | Staged/unstaged, untracked, deleted, renamed, binary and detached-HEAD fixtures have useful output. |
+| Mode behavior | Off performs no tracking; on-demand avoids per-turn capture; snapshot captures boundaries. |
+| Failure/cancellation | Settled partial edits are visible; failed snapshot is explicit, not clean. |
+| Read-only guarantee | Compare Git index/HEAD/branches/config and file contents before/after inspection. |
+
+## Acceptance criteria
+
+- [ ] Validate git.changeTracking with on-demand as the default; define when each mode reads Git and captures a baseline.
+- [ ] Expose branch/HEAD/dirty state and bounded change inspection; snapshot mode compares before/after a turn and distinguishes pre-existing modifications.
+- [ ] Include staged/unstaged/untracked/deleted/renamed and binary-file cases with explicit limits and useful summaries.
+- [ ] Use Git as source of truth; do not commit, alter index/branches, create worktrees, restore files or present snapshots as rollback checkpoints.
+- [ ] Temporary-repository/controller tests verify pre-existing changes, no-Git directories, failed/cancelled turns and unchanged Git state after inspection.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. Do not mark a required failed or pending acceptance item as passed.
+
+## Blocked by
+
+None (can start immediately).

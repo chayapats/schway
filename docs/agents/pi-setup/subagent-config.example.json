@@ -1,0 +1,8 @@
+{
+  "parallel": {
+    "maxTasks": 3,
+    "concurrency": 3
+  },
+  "globalConcurrencyLimit": 3,
+  "worktree": false
+}

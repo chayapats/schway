@@ -1,0 +1,82 @@
+# #49: Prove a Codex subscription integration compatible with Schway's loop
+
+GitHub: https://github.com/chayapats/schway/issues/49
+
+<!-- schway-roadmap:v03:17 -->
+
+**Milestone:** v0.3
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+Resolve the external integration uncertainty before implementing subscription login: demonstrate whether a supported authentication and model transport path can leave model/tool orchestration with Schway. Scope: sections 66–68, 94.
+
+## Existing behavior and problem
+
+Subscription authentication is a v0.3 target, but the existing implementation has API-key adapters only. Official Codex authentication documentation describes ChatGPT login for Codex clients, while App Server exposes Codex threads/turns and agent execution. Those observations do not by themselves establish a supported model-only transport for an independently owned Schway loop. This ticket resolves that concrete feasibility question.
+
+## Prerequisite contract
+
+No blockers. The required target contract and architecture invariant are fully stated here. Official starting references: https://learn.chatgpt.com/docs/auth and https://learn.chatgpt.com/docs/app-server; reverify current support at implementation time.
+
+## Required behavior and decisions
+
+1. Investigate current official authentication and transport interfaces, their allowed client usage, registration/account prerequisites, token lifetime/refresh and supported model request surface. Use dated official sources and distinguish documented support from inference.
+
+2. The required execution boundary is Schway prepares context → requests a model response → receives normalized tool calls → executes its own tools → submits its own results. Schway must retain scheduling, retries, compaction, cancellation and durable sessions.
+
+3. Produce a bounded prototype or replay that demonstrates text streaming, one tool-call/result round trip and cancellation at that boundary. Merely starting a Codex agent turn through its SDK/App Server does not prove this contract.
+
+4. Do not use another CLI's credential files, copy a private OAuth client identity, assume undocumented tokens work on arbitrary endpoints, or count an API-key request as subscription access.
+
+5. For a positive result, specify the verified client/auth flow, credential identity, token storage/refresh rules, request/response mapping, cancellation behavior, account prerequisites and unsupported cases. Include sanitized protocol fixtures or a reproducer and dates/versions.
+
+6. Copy the complete verified implementation handoff into the dependent subscription implementation issue itself, replacing its pending-contract section. A later agent must not need to search this research discussion to find the answer.
+
+7. For a negative or externally blocked result, state the exact missing support, authorization or product decision. Keep downstream implementation ineligible to start until that condition is resolved; do not let closing a research issue imply permission to weaken loop ownership.
+
+8. Live validation is optional and must use explicitly available authorized credentials with bounded calls. Offline replay proves mechanics only; label live evidence passed, failed or not run separately.
+
+## Scope boundary
+
+A bounded feasibility investigation/prototype. No production login UI or promise that third-party subscription transport is available.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Boundary proof | A concrete request/response trace shows Schway executing the requested tool itself. |
+| Cancellation | The prototype aborts a model request without delegating the entire run to another harness. |
+| Credential provenance | No credential scraping or unverified client reuse is involved. |
+| Decision artifact | Go/no-go, sources, unknowns and exact next prerequisite are explicit. |
+| Downstream handoff | The implementation issue contains the full positive contract, or a clear unresolved entry condition. |
+
+## Acceptance criteria
+
+- [ ] Review current official authentication/integration documentation and record dated references, account prerequisites and supported transport boundaries.
+- [ ] Build a bounded prototype or protocol replay demonstrating Schway-owned model → tool → model control and cancellation, without delegation to another agent loop.
+- [ ] Do not scrape another CLI's credential files or assume its OAuth client can be reused; state any missing authorization, protocol or support guarantees.
+- [ ] Deliver a concrete integration contract and go/no-go decision. A no-go lists the external prerequisite or spec decision needed and keeps production subscription implementation gated.
+- [ ] Keep this explicitly a feasibility ticket, not a claim that subscription support exists; offline evidence and live validation status are distinguished.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. For a no-go result, keep downstream implementation explicitly gated and include the complete reason in that issue.
+
+## Blocked by
+
+None (can start immediately).
+
+## Handoff destination
+
+The production implementation is #50. Before making that task ready to implement, replace its "Verified integration contract" section with the complete verified contract or the exact unresolved condition. The implementing agent must not need to read this research discussion.

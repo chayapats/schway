@@ -1,0 +1,76 @@
+# #36: Activate skills from model requests with a defined lifecycle
+
+GitHub: https://github.com/chayapats/schway/issues/36
+
+<!-- schway-roadmap:v03:04 -->
+
+**Milestone:** v0.2
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+The model can activate eligible skills when needed, while explicitly user-only workflows remain user-controlled. Active skill context behaves predictably across turns, compaction and resume.
+
+## Existing behavior and problem
+
+The prerequisite supplies metadata discovery, project-over-global precedence, explicit slash invocation, and a body loader with a canonical resource base. Its activation lasts for one submitted user turn and is dynamic context rather than repeated durable body text. Extend that same service so a model can activate eligible skills; do not create a second loader or different precedence.
+
+## Prerequisite contract
+
+Requires discovered entries with canonical identity, invocation eligibility, resource base, validated body loading and turn-scoped activation from explicit skill support. These capabilities are described here; the blocker link is scheduling metadata.
+
+## Required behavior and decisions
+
+1. Expose a validated native activation operation to the model, named activate_skill, accepting a discovered skill name. Register it through the existing tool contract so the request/result path is visible, cancellable and testable.
+
+2. Only skills without disable-model-invocation=true are eligible for model activation. Check eligibility again at execution; hiding a name from metadata alone is not enforcement.
+
+3. Successful activation makes the body available in active-skill context on the next model request within the same user turn. Return a short confirmation as the tool result instead of a full duplicate body.
+
+4. Maintain one active skill at a time. Activating a different skill replaces the earlier active body; activating the same identity again is idempotent. Use exclusive execution for activation so concurrent tool batches cannot race the selected context.
+
+5. Explicit user invocation can activate a user-only skill. Model attempts to replace it still follow eligibility for the target skill; they cannot invoke another user-only workflow through aliases or resource paths.
+
+6. Keep the active body available across pressure/overflow compaction within the turn. Completion, cancellation, error, new session and resume clear active state. On a resumed conversation a model or user may explicitly reactivate; historical invocation messages alone do not reactivate code or instructions.
+
+7. Unknown names, disabled invocation, changed/unreadable bodies and cancellation produce bounded tool errors without damaging sibling results or silently clearing a previously valid active skill.
+
+## Scope boundary
+
+Model-driven skill activation and shared lifecycle. Workflow ordering, plans and orchestration stay in skill instructions.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Eligible activation | Actual next request contains the selected body and normal project context. |
+| User-only target | Model operation returns an error; explicit slash invocation succeeds. |
+| Replacement and duplicate activation | Only one body is active; repeated same-skill activation creates no repeated context. |
+| Compaction/resume | Compaction during the turn retains active context; persisted/resumed history does not reactivate it. |
+| Concurrent calls and failure | Exclusive activation is ordered, every accepted call settles, previous valid state survives a failed replacement. |
+
+## Acceptance criteria
+
+- [ ] Expose eligible skill metadata and a validated activation path using Schway-native tool/context contracts.
+- [ ] Reject model activation of user-only skills; user activation from explicit user invocation still works.
+- [ ] Define and document activation scope, replacement/deactivation, and behavior on new session, resume and compaction; persist only semantic activation state if needed, without repeated body copies.
+- [ ] Keep skill bodies in dynamic context, separate from ordinary durable messages; preserve project instructions and system overrides.
+- [ ] Scripted multi-turn tests verify eligible activation, rejection, failure recovery and lifecycle across compaction/resume without a core workflow engine.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. Do not mark a required failed or pending acceptance item as passed.
+
+## Blocked by
+
+- #35: Discover and invoke project and global Agent Skills

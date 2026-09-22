@@ -1,0 +1,158 @@
+{
+  "1": {
+    "number": 33,
+    "url": "https://github.com/chayapats/schway/issues/33",
+    "title": "[v0.1 follow-up] Isolate CLI process tests from personal configuration",
+    "database_id": 5535153047
+  },
+  "2": {
+    "number": 34,
+    "url": "https://github.com/chayapats/schway/issues/34",
+    "title": "[v0.1 follow-up] Document exported function and type contracts",
+    "database_id": 5535153339
+  },
+  "3": {
+    "number": 35,
+    "url": "https://github.com/chayapats/schway/issues/35",
+    "title": "[v0.2] Discover and invoke project and global Agent Skills",
+    "database_id": 5535153551
+  },
+  "4": {
+    "number": 36,
+    "url": "https://github.com/chayapats/schway/issues/36",
+    "title": "[v0.2] Activate skills from model requests with a defined lifecycle",
+    "database_id": 5535153770
+  },
+  "5": {
+    "number": 37,
+    "url": "https://github.com/chayapats/schway/issues/37",
+    "title": "[v0.2] Run tools from explicitly enabled local TypeScript extensions",
+    "database_id": 5535154162
+  },
+  "6": {
+    "number": 38,
+    "url": "https://github.com/chayapats/schway/issues/38",
+    "title": "[v0.2] Add extension commands and isolated runtime observers",
+    "database_id": 5535154414
+  },
+  "7": {
+    "number": 39,
+    "url": "https://github.com/chayapats/schway/issues/39",
+    "title": "[v0.2] Contribute prompt context and intercept model requests",
+    "database_id": 5535154765
+  },
+  "8": {
+    "number": 40,
+    "url": "https://github.com/chayapats/schway/issues/40",
+    "title": "[v0.2] Intercept tool execution with validated extension hooks",
+    "database_id": 5535155133
+  },
+  "9": {
+    "number": 41,
+    "url": "https://github.com/chayapats/schway/issues/41",
+    "title": "[v0.2] Load skills and extensions from configured npm manifests",
+    "database_id": 5535155521
+  },
+  "10": {
+    "number": 42,
+    "url": "https://github.com/chayapats/schway/issues/42",
+    "title": "[v0.2] Add contextual workspace roots from CLI and TUI",
+    "database_id": 5535155971
+  },
+  "11": {
+    "number": 43,
+    "url": "https://github.com/chayapats/schway/issues/43",
+    "title": "[v0.2] Fork and resume branches within durable sessions",
+    "database_id": 5535156278
+  },
+  "12": {
+    "number": 44,
+    "url": "https://github.com/chayapats/schway/issues/44",
+    "title": "[v0.2] Improve interactive model selection and configuration editing",
+    "database_id": 5535156478
+  },
+  "13": {
+    "number": 45,
+    "url": "https://github.com/chayapats/schway/issues/45",
+    "title": "[v0.2] Dogfood the external Matt-style skills package",
+    "database_id": 5535156772
+  },
+  "14": {
+    "number": 46,
+    "url": "https://github.com/chayapats/schway/issues/46",
+    "title": "[v0.3] Store and manage API keys in the OS credential store",
+    "database_id": 5535157261
+  },
+  "15": {
+    "number": 47,
+    "url": "https://github.com/chayapats/schway/issues/47",
+    "title": "[v0.3] Select named OpenAI-compatible provider profiles",
+    "database_id": 5535157538
+  },
+  "16": {
+    "number": 48,
+    "url": "https://github.com/chayapats/schway/issues/48",
+    "title": "[v0.3] Control provider reasoning from CLI and TUI",
+    "database_id": 5535157767
+  },
+  "17": {
+    "number": 49,
+    "url": "https://github.com/chayapats/schway/issues/49",
+    "title": "[v0.3] Prove a Codex subscription integration compatible with Schway's loop",
+    "database_id": 5535157986
+  },
+  "18": {
+    "number": 50,
+    "url": "https://github.com/chayapats/schway/issues/50",
+    "title": "[v0.3] Log in with ChatGPT and run the Schway coding loop",
+    "database_id": 5535158211
+  },
+  "19": {
+    "number": 51,
+    "url": "https://github.com/chayapats/schway/issues/51",
+    "title": "[v0.3] Browse and switch conversation branches in the TUI",
+    "database_id": 5535158632
+  },
+  "20": {
+    "number": 52,
+    "url": "https://github.com/chayapats/schway/issues/52",
+    "title": "[v0.3] Inspect Git changes with on-demand and snapshot tracking",
+    "database_id": 5535158974
+  },
+  "21": {
+    "number": 53,
+    "url": "https://github.com/chayapats/schway/issues/53",
+    "title": "[v0.3] Write opt-in structured diagnostic logs",
+    "database_id": 5535159240
+  },
+  "22": {
+    "number": 54,
+    "url": "https://github.com/chayapats/schway/issues/54",
+    "title": "[v0.3] Diagnose installation and configured capabilities with doctor",
+    "database_id": 5535159490
+  },
+  "23": {
+    "number": 55,
+    "url": "https://github.com/chayapats/schway/issues/55",
+    "title": "[v0.3] Run opt-in live provider smoke tests",
+    "database_id": 5535160259
+  },
+  "24": {
+    "number": 56,
+    "url": "https://github.com/chayapats/schway/issues/56",
+    "title": "[v0.3] Run a graded coding eval and record provider usage",
+    "database_id": 5535160824
+  },
+  "25": {
+    "number": 57,
+    "url": "https://github.com/chayapats/schway/issues/57",
+    "title": "[v0.3] Expand coding evals to daily-driver regression scenarios",
+    "database_id": 5535161046
+  },
+  "26": {
+    "number": 58,
+    "url": "https://github.com/chayapats/schway/issues/58",
+    "title": "[v0.3 release gate] Verify the installable v0.2\u2013v0.3 daily-driver workflow",
+    "database_id": 5535161430
+  }
+}

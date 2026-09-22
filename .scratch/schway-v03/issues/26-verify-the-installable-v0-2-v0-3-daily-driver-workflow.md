@@ -1,0 +1,99 @@
+# #58: Verify the installable v0.2–v0.3 daily-driver workflow
+
+GitHub: https://github.com/chayapats/schway/issues/58
+
+<!-- schway-roadmap:v03:26 -->
+
+**Milestone:** v0.3 release gate
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+Validate the assembled milestone from an installed package: use external skills/extensions, switch configuration, branch/resume, authenticate, inspect changes and diagnose failures without regressing the v0.1 coding path.
+
+## Existing behavior and problem
+
+The baseline package already supports coding tools, three provider families, headless/TUI use, save/resume, compaction and cancellation. The audit at 875055e found 348 pass / 3 fail due to personal-config-sensitive process tests, plus missing public-contract TSDoc. Recorded v0.1 real Schway-development dogfood remained pending. This is the integrated installed-artifact gate after the new capability tickets, not a recreation of old implementation work.
+
+## Prerequisite contract
+
+All required capabilities are specified in scenarios A–E and the auth/eval requirements above. Blockers supply implementations of those named contracts; their issue bodies are not needed to understand the verification task. If a capability is absent or its gate unresolved, report that exact missing behavior.
+
+## Required behavior and decisions
+
+1. Install a packed artifact into a clean temporary consumer with isolated user state. Exercise the installed binary rather than accidentally importing the working checkout. Record revision, runtime and package identity.
+
+2. Verify the base path still works without optional capabilities: seven coding tools, all three existing provider families, text/JSON headless, TUI controller, lazy provider/TUI loading, bounded results, cancellation/retry and versioned resume/compaction.
+
+3. Scenario A: explicitly configure a skills/extension package; invoke a skill; run a custom tool under request/tool hooks; verify ordered hook changes and isolated observer failure from actual request/result evidence.
+
+4. Scenario B: attach a second root; use its instructions/skill while relative mutations still target the primary root; restart and resume with correct session-wide root metadata.
+
+5. Scenario C: change model/config scope, select two compatible profiles with isolated credentials and reasoning controls, and verify actual outgoing protocol fixtures and displayed effective values.
+
+6. Scenario D: fork a complete turn, diverge, compact one branch, switch through the TUI tree and resume both; verify no cross-branch summary leakage, unmatched calls or side-effect replay.
+
+7. Scenario E: inspect pre-existing/new Git changes in snapshot mode, emit redacted debug diagnostics and run doctor against both healthy and deliberately broken fixture installations.
+
+8. Verify secure API-key storage and subscription login/refresh/logout using injected stores/protocol fixtures. Real subscription readiness additionally requires the supported-path decision and honest live evidence.
+
+9. Run full deterministic tests and typecheck, and check public contract docs and package-consumer examples. Replace obsolete v0.1 assertions that forbid now-approved capabilities while keeping architectural invariants and remaining non-goals.
+
+10. Collect optional live smoke and coding eval reports plus a focused real dogfood task: use installed Schway to inspect code, make a small justified change in an isolated Schway checkout, run its relevant tests and resume the session. Record actual diff/test outcomes. Missing credentials or human participation leave this evidence pending.
+
+11. Summarize each v0.2/v0.3 target as passed/failed/pending with evidence. The overall release verdict cannot be fully passed while a required gate is failed or pending. The historical dogfood gap is described here; no reader needs another issue to understand it.
+
+## Scope boundary
+
+Integration verification and release documentation. Do not publish to a registry, create an external release, add MCP/subagents/server or invent passing evidence.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Artifact entrypoints | Installed headless/controller/doctor and public extension imports work outside the source checkout. |
+| Combined fixture scenarios | A–E above have observable assertions rather than only unit mocks. |
+| Compatibility | Old linear sessions and new branches/metadata resume without replay or data loss. |
+| Deterministic suite | bun test and bun run typecheck are green without real credentials or paid API calls. |
+| Live/eval/dogfood evidence | Every required report has an honest passed/failed/pending status with observed outcomes. |
+
+## Acceptance criteria
+
+- [ ] Install the packed artifact into a clean temporary environment; verify headless text/JSON and interactive-controller flows with fixtures.
+- [ ] Run deterministic checks and typecheck, preserve lazy loading/core ownership, and verify old-session compatibility plus branching/compaction reconstruction.
+- [ ] Exercise representative combined paths: packaged skill plus extension hooks/custom tool; added root plus resume; profile/reasoning switch; branch plus compaction; debug/doctor.
+- [ ] Map all v0.2/v0.3 targets to implementation and evidence; record live-provider/eval and real dogfood results as passed/failed/pending.
+- [ ] Carry the still-pending real Schway-development dogfood evidence from existing issue #16 rather than creating a duplicate implementation ticket or treating its closed status as proof.
+- [ ] Update user/extension documentation and obsolete v0.1-only feature-absence guards while retaining non-goals and invariants. Local release verification does not authorize registry publication.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. Do not mark a required failed or pending acceptance item as passed.
+
+## Blocked by
+
+- #33: Isolate CLI process tests from personal configuration
+- #34: Document exported function and type contracts
+- #38: Add extension commands and isolated runtime observers
+- #39: Contribute prompt context and intercept model requests
+- #40: Intercept tool execution with validated extension hooks
+- #42: Add contextual workspace roots from CLI and TUI
+- #44: Improve interactive model selection and configuration editing
+- #45: Dogfood the external Matt-style skills package
+- #48: Control provider reasoning from CLI and TUI
+- #51: Browse and switch conversation branches in the TUI
+- #52: Inspect Git changes with on-demand and snapshot tracking
+- #53: Write opt-in structured diagnostic logs
+- #54: Diagnose installation and configured capabilities with doctor
+- #55: Run opt-in live provider smoke tests
+- #57: Expand coding evals to daily-driver regression scenarios

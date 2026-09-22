@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement Parallel"
+  short_description: "Coordinate issue workers with claims and worktrees"
+  default_prompt: "Use $implement-parallel to implement ready-for-agent issues with at most three independent workers."

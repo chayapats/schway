@@ -1,0 +1,80 @@
+# #41: Load skills and extensions from configured npm manifests
+
+GitHub: https://github.com/chayapats/schway/issues/41
+
+<!-- schway-roadmap:v03:09 -->
+
+**Milestone:** v0.2
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+Users configure an already-installed npm package containing skills, extensions or both, and consume its declared capabilities without automatic execution of arbitrary dependencies. Scope: sections 46, 57–59.
+
+## Existing behavior and problem
+
+Local/global skill discovery and explicit local TypeScript extension loading are supplied by the prerequisites. Skills have metadata-only discovery and turn-scoped activation; extensions register custom tools through a public entry contract. Add resolution of capabilities declared by explicitly configured, already-installed npm packages.
+
+## Prerequisite contract
+
+Requires the shared skill discovery/activation service and local extension entry/runtime. Consume their source identities, canonical resource bases, atomic registration and schema validation. They do not need to know npm installation mechanics.
+
+## Required behavior and decisions
+
+1. Support explicit project and user-global package enablement lists in validated configuration. Resolve a package in the corresponding configured installation scope; report a missing package with ordinary npm installation guidance instead of downloading silently.
+
+2. Read the package's schway manifest with extensions and skills arrays. Entries are package-relative module files or skill directories. Validate types, existence and containment in the canonical package root; reject malformed or escaping declarations with package identity.
+
+3. Use this skill precedence, highest first: project-local directories, configured project packages, user-global directories, configured global packages. Ambiguity among packages at the same level is an explicit error for that skill name, not first-wins behavior.
+
+4. Load only enabled declared extension modules. Use a documented low-to-high extension order: configured global packages, configured project packages, then explicit local CLI modules; retain list/manifest order within each group. Hook order equals this load order.
+
+5. Canonicalize module identity and reject duplicate executable enablement across scopes with actionable source information. Skill shadowing follows its own precedence rules; executable modules are not silently overridden by package name.
+
+6. Support extensions-only, skills-only and mixed packages. A skills-only package is parsed without executing its JavaScript entrypoint or lifecycle scripts during Schway startup.
+
+7. Check declared Schway peer compatibility and provide a clear incompatible-version diagnostic. Public extension contracts resolve from the installed Schway package; packages own their own dependencies and do not bundle a second harness.
+
+8. Rebind project-scoped discovery when the active workspace changes through resume/new session. Stage activation atomically so failures do not leave tools from only part of a package installed.
+
+## Scope boundary
+
+Manifest validation and explicit package loading. No registry publication, package installer, arbitrary node_modules scanning or workflow engine.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Package variants | Isolated installed fixtures cover skills-only, tools-only and mixed capabilities. |
+| Real workflow | Packaged skill body reaches a model request; packaged custom tool executes through the real loop. |
+| Precedence | All four skill levels and same-level duplicate diagnostics are exercised. |
+| Explicit loading | Undeclared/unconfigured packages and skills-only JavaScript markers never execute. |
+| Invalid package | Bad manifest, escaping path, missing entry, incompatible peer and duplicate module fail actionably. |
+
+## Acceptance criteria
+
+- [ ] Read and validate the package manifest's Schway extension and skill declarations; support explicit project and global package lists.
+- [ ] Enforce discovery precedence: project-local skills, project packages, user-global skills, global packages; diagnose same-level ambiguity.
+- [ ] Resolve declared entries from their package and report absent/invalid entries. Skills-only packages execute no extension code.
+- [ ] Enabled extensions load in documented deterministic order; use peer dependency compatibility rather than duplicate harness runtimes.
+- [ ] An isolated installed-package fixture demonstrates a skill invocation and a custom-tool turn in both entry modes.
+- [ ] Document ordinary npm installation plus explicit enablement; do not build a package-manager subsystem or publish externally.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. Do not mark a required failed or pending acceptance item as passed.
+
+## Blocked by
+
+- #35: Discover and invoke project and global Agent Skills
+- #37: Run tools from explicitly enabled local TypeScript extensions

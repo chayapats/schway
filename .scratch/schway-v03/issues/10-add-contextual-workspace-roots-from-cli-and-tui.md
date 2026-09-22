@@ -1,0 +1,78 @@
+# #42: Add contextual workspace roots from CLI and TUI
+
+GitHub: https://github.com/chayapats/schway/issues/42
+
+<!-- schway-roadmap:v03:10 -->
+
+**Milestone:** v0.2
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+Users attach another project through --add-dir or /add-dir and its instructions and skills become available while relative tools still resolve from the original primary workspace.
+
+## Existing behavior and problem
+
+The existing Workspace has root, launchCwd and extraRoots, but root resolution always creates an empty extraRoots list and no CLI/TUI command changes it. Session headers already retain the initial workspace identity. Skills from the primary project/global scope are available through the prerequisite discovery service.
+
+## Prerequisite contract
+
+Requires local skill discovery with source identity, precedence and canonical resource bases. Workspace canonicalization, JSONL persistence and scoped AGENTS.md discovery already exist and must be extended rather than replaced.
+
+## Required behavior and decisions
+
+1. Implement repeatable --add-dir <directory> and interactive /add-dir <directory>. Resolve relative operands from the primary workspace root, canonicalize real paths and require an existing directory.
+
+2. Deduplicate realpath aliases including the primary root. Missing/inaccessible/non-directory targets report an error and leave the current root set unchanged. Extra roots are contextual attachments, not filesystem access permissions.
+
+3. Expose root identities in environment context and status. Relative read/write/edit/search paths and default bash cwd continue to resolve from the primary root; absolute paths can access other roots subject to the OS.
+
+4. Load applicable extra-root project instructions when work enters that root. Do not apply its instructions to unrelated primary/sibling paths; retain global/general-to-specific precedence and lazy nested discovery.
+
+5. Discover attached project skill directories at project-local precedence. Treat duplicate skill names across equally ranked primary/attached local roots as explicit ambiguity; global skills remain lower precedence.
+
+6. Persist accepted root changes as semantic metadata, using a deliberate format version/loader update if required. Do not rewrite the session header destructively or repeatedly append environment text. Resume reconstructs the current attached roots before preparing context.
+
+7. Treat attached roots as session-wide metadata, not branch-local conversation messages. If branching exists, all branches in that session share the root set; switching branches does not silently remove attachments.
+
+8. Apply interactive changes only while idle; otherwise show a busy diagnostic. During resume, unavailable saved roots are reported and excluded from usable context until corrected, while primary-root identity remains unchanged.
+
+## Scope boundary
+
+Add contextual roots and integrate existing instructions/skills. No permission boundary, root removal UI, worktree manager or automatic Git mutation.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Canonical identity | Symlink aliases and duplicate arguments attach once; invalid roots do not partially apply. |
+| Path semantics | A relative write still targets the primary root after attachment and after bash changes directory. |
+| Scoped instructions/skills | Extra-root context applies only to work there; ambiguous local skills are diagnosed. |
+| Persistence | Interactive attachment survives restart/resume without repeated dynamic-context bodies. |
+| Busy/missing saved root | No mid-turn mutation; missing attachments produce clear diagnostics and preserve usable primary context. |
+
+## Acceptance criteria
+
+- [ ] Canonicalize roots, reject missing/non-directory roots, deduplicate aliases and preserve the original workspace root and launch directory.
+- [ ] Additional roots contribute applicable scoped instructions and skill discovery with deterministic duplicate diagnostics; they are not permission boundaries.
+- [ ] Define current-directory interpretation for added paths and reflect roots in environment context and interactive status.
+- [ ] Persist interactive root changes deliberately in versioned durable session state and reconstruct them on resume without rewriting or losing existing history.
+- [ ] Real-loop/controller tests verify instructions, skill activation, symlinks, resume and unchanged primary-root-relative read/write/bash behavior.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. Do not mark a required failed or pending acceptance item as passed.
+
+## Blocked by
+
+- #35: Discover and invoke project and global Agent Skills

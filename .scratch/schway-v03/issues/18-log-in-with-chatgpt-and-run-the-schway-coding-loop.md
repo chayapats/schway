@@ -1,0 +1,85 @@
+# #50: Log in with ChatGPT and run the Schway coding loop
+
+GitHub: https://github.com/chayapats/schway/issues/50
+
+<!-- schway-roadmap:v03:18 -->
+
+**Milestone:** v0.3
+**Planning baseline:** revision `875055e`, package `0.1.0`. Inspect current code before implementation to reuse subsequently landed work. This issue contains its own product requirements and prerequisite contracts; other issue discussions are not required context.
+
+## What to build
+
+Once the feasibility gate establishes a supported path, users sign in with a ChatGPT subscription and run a coding conversation with Schway still controlling its tools, context and sessions.
+
+## Existing behavior and problem
+
+The existing harness runs native/API-compatible models using API keys. This feature must add real ChatGPT subscription access while keeping that same Schway-owned model/tool loop. Secure storage is supplied by a prerequisite. A separate feasibility gate must establish a supported auth and model transport path before production implementation starts.
+
+## Prerequisite contract
+
+Secure storage provides provider-identity get/set/delete with fake-store tests and runtime/env/store precedence. The positive feasibility contract must be embedded in this issue before this issue becomes implementable; GitHub blocker closure alone is insufficient when that contract is missing.
+
+## Verified integration contract
+
+**Pending feasibility evidence.** No supported endpoint, OAuth client or model-only subscription transport is assumed by this ticket. Before implementation begins, replace this paragraph with the verified authentication/transport contract, dated sources, account prerequisites, sanitized fixture references, token lifecycle and cancellation behavior. A negative result must state the unresolved condition here.
+
+## Required behavior and decisions
+
+1. Entry condition — currently pending: this issue must contain a verified positive integration contract covering allowed client/auth flow, account prerequisites, transport endpoint/protocol, token lifecycle, request conversion and cancellation. The feasibility task is responsible for copying that complete handoff here. If absent or negative, report the exact blocker; do not invent endpoints or implement a delegated Codex agent.
+
+2. Implement the verified browser/device login flow as an explicit interactive action, with progress, timeout/cancellation, callback cleanup and actionable denial/expired-code states. Use only the flow actually supported by the verified contract.
+
+3. Persist subscription credentials through the identity-based secure-store boundary. Refresh before expiry as required, prevent racing refreshes from corrupting state, and remove only the selected subscription identity on logout. Never scrape another CLI's cache.
+
+4. Expose OpenAI auth preference auto/codex/api-key separately from compatible endpoint auth required/optional/none. Explicit selection wins. In auto headless mode an explicit/runtime or environment API key wins over stored subscription state; no browser flow is started automatically.
+
+5. Keep Codex-specific auth and wire conversion in an isolated adapter layer. Normalize streaming text/thinking, tool-call assembly, usage when available and opaque round-trip metadata into native contracts.
+
+6. Drive read/edit/bash and other tools only through Schway's executor/scheduler; let Schway own retry and overflow compaction. Disable transport-client automatic retries where controllable.
+
+7. Missing/expired/revoked credentials and refresh failure are distinct actionable errors. No automatic switch to paid API-key billing after explicit codex selection. Cancellation reaches login/refresh/model operations and settles accepted tool calls.
+
+8. Subsequent ordinary resume reconstructs native conversation and uses the currently selected auth identity without replaying tools. Expose truthful auth source/status while redacting tokens from config, sessions and logs.
+
+## Scope boundary
+
+Production subscription login and model transport after a positive gate. No second agent loop, credential scraping or quiet fallback that changes billing.
+
+## Implementation constraints
+
+- Use Bun and TypeScript. Run `bun run typecheck`; run `bun test` for behavior changes. Deterministic checks use scripted models, protocol fixtures and temporary filesystems rather than paid APIs.
+- Schway owns the loop, session engine, context/compaction and tool scheduling. Provider SDKs are protocol clients with automatic retries disabled; core contracts use native conversation types.
+- Keep core independent of OpenTUI and provider wire types. Headless execution must not load the TUI; only selected providers and explicitly enabled executable extensions load.
+- Resolve tool-relative paths from the canonical primary workspace root (nearest Git root, otherwise launch cwd). Keep runtime events separate from durable semantic session records.
+- Document newly exported functions/types with a one-line TSDoc contract. Preserve bounded model-facing output, exactly one result per accepted call and existing credential redaction.
+
+## Verification scenarios
+
+| Scenario | Observable result |
+| --- | --- |
+| Login lifecycle | Fixture login succeeds, denies, expires and cancels with no leaked callback resources. |
+| Credentials | Secure storage, refresh serialization, revocation and logout use an injected store. |
+| Selection | Auto/codex/api-key combinations prove actual selected transport and deterministic headless behavior. |
+| Real Schway loop | Protocol fixture returns a tool call, real tool executes, result reaches the next model request. |
+| Recovery | Cancellation, transient retry, compaction/resume and metadata round trip preserve native session invariants. |
+| Live evidence | Optional bounded subscription smoke status is reported independently of offline fixture success. |
+
+## Acceptance criteria
+
+- [ ] Implement the verified interactive login flow with cancellation, expiry, secure persistence, refresh and logout in an isolated auth/provider layer.
+- [ ] Expose auto/codex/api-key preference separately from compatible required/optional/none auth, with deterministic explicit/environment behavior in headless mode.
+- [ ] Normalize streaming text/thinking/tool requests and required opaque metadata; use Schway scheduling, retries, cancellation and compaction, not a delegated agent.
+- [ ] Missing or expired headless credentials fail actionably without a browser; never read another CLI's cached credential files.
+- [ ] Fixtures plus a scripted real-loop tool round trip verify login/refresh failures, selection, resume and redaction; optional live evidence is reported separately.
+- [ ] If the feasibility investigation finds no supported path, do not silently substitute API-key access or weaken loop ownership; retain the explicit gate.
+- [ ] All required behavior and verification scenarios above are covered, including failure/cancellation cases relevant to this slice.
+- [ ] User-facing commands/configuration and public contracts introduced by this issue are documented with a runnable example where applicable.
+
+## Completion evidence
+
+Report the implemented user path, relevant checks with observed results, and any remaining limitations. A fixture success does not count as live-provider or human dogfood evidence. Label any required external evidence not run as pending. The unresolved supported-integration entry condition prevents implementation from being claimed complete.
+
+## Blocked by
+
+- #46: Store and manage API keys in the OS credential store
+- #49: Prove a Codex subscription integration compatible with Schway's loop

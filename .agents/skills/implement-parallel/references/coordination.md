@@ -1,0 +1,33 @@
+# Ownership protocol
+
+Use `bun <skill-directory>/scripts/claims.ts --repo <absolute-checkout> <command> ...`. The helper writes JSON only to the canonical `git rev-parse --git-common-dir` under `schway-agent-claims`. Linked worktrees therefore share one registry. It never changes Git branches, issues, PRs or user files.
+
+Commands return JSON on stdout, errors on stderr and nonzero on conflict. `status` hides tokens. Store acquisition tokens in the private run ledger and hand each worker only its own token.
+
+## Coordinator and issue reservations
+
+1. `status` shows current ownership. Acquire with `acquire --key coordinator --owner <unique-run-id> --session <unique-conversation-id>`; save its returned token and session identity. One coordinator can exist per clone. A different conversation must transfer ownership atomically, not reuse the saved coordinator token as its own.
+2. Before dispatch: `acquire --key issue-<number> --owner <worker-id> --run <run-id> --controller-token <coordinator-token> --base <commit-sha> --worktree <absolute-new-worktree> --branch <unique-branch> --resource path:<repo-relative-file-or-directory> [--resource contract:<shared-contract>]`. Include at least one path reservation. The helper atomically rejects duplicate issues and overlapping resources held by any run. A reserved directory conflicts with all descendants. `path:.` reserves the whole checkout for a genuinely broad change.
+3. After creating the worktree: `check --key issue-<number> --token <issue-token>` with `--repo` set to that worktree. It verifies ownership, current coordinator run, Git common directory, actual worktree and checked-out branch. Then `update --key ... --token ... --phase working`.
+4. Expand reservations before edits using `update --key ... --token ... --resource path:<additional-target>`. Expansion is atomic and additive. Existing reservations cannot be silently dropped mid-task. Read-only exploration needs no path reservation.
+5. Update progress using `--phase review|ready|blocked` and `--note <short-evidence>`. `reserved`/`working` represent actively owned preparation/implementation; `review` still retains ownership. Notes carry status, not secrets.
+6. Only the coordinator records terminal `integrated` or `abandoned`, with the issue token plus `--controller-token` and an evidence note. `integrated` means the result really landed in the target; `abandoned` means the worker is stopped and retained artifacts are accounted for, not that dirty work may be erased.
+7. Release terminal issue reservations with `release --key ... --token ... --controller-token ...`. Pending PRs keep their issue claims. Release the coordinator with its token only after no issues in its run remain reserved/working/review and all workers/processes have acknowledged stopping. Ready/blocked claims may remain across batch handoff.
+
+Path reservations resolve existing symlink ancestors and reject targets outside the worktree. Dangling symlinks fail closed; reserve the intended target explicitly and have the coordinator resolve the alias before writing through it. Keys are conservatively case-folded, including paths not created yet; this can serialize distinct case-sensitive filenames, in exchange for preventing case aliases from evading ownership. Reserve both a changed symlink and any target written through it.
+
+Creation of the worktree is a separate step: claim first, then `git worktree add -b <unique-branch> <absolute-worktree> <pinned-sha>`. If creation fails, keep and report the reservation until the coordinator records safe abandonment. Do not pick an existing branch to bypass a collision.
+
+## Resumption and recovery
+
+- The same still-active conversation can continue with its own token. A **new conversation** must first prove the previous coordinator/workers stopped and record workers as ready/blocked. Then use `resume --key coordinator --token <previous-token> --session <new-conversation-id> --note <stopped-owner-evidence>`. This atomically rotates the token; simultaneous resumers using the previous token have one winner. A losing resumer stops rather than reading the winner's new token and retrying takeover.
+- If the coordinator was already released, acquire it with the original run ID and a new session ID. In either transfer path, old worker claims remain reserved but their checks are fenced by session identity. Before dispatching a replacement, use `adopt --key issue-N --token <previous-issue-token> --controller-token <current-token> --owner <new-worker-id> --note <stopped-worker-evidence>`. This rotates that issue token and binds it to the new session without discarding worktree, branch or reservations.
+- Preserve the original identity/tokens in the private ledger until the atomic transfer succeeds, then record the returned values. Token possession alone is not proof the previous conversation stopped. A different run may schedule independent issues while old ready/blocked reservations remain; it must not erase them to increase concurrency.
+- An acquisition conflict is normal contention. Re-read status. A temporary `Registry mutation in progress` can be retried a few times after the other command completes; repeated conflict is not permission to remove its lock.
+- A crashed helper can leave `.mutation-lock`. A crashed agent can leave claims. Neither uses time-based expiry. Check live agents and their subprocesses, ledger, worktrees, dirty changes, HEADs and PR state. Stop the previous owner and obtain acknowledgement where possible.
+- If ownership cannot be proved stopped, leave the reservation intact and ask for a takeover decision identifying the run, issue and preserved work. Never use file age, PID alone, silence, the same login, or closed issue status as proof.
+- For a confirmed crashed helper, preserve a copy of the lock/claim records and remove only the proven orphan `.mutation-lock` directory. For a lost-token/abandoned run, get an explicit takeover decision, archive its exact records outside the active registry, preserve its worktrees, and then create fresh claims/tokens. Do not offer an automatic `--force` path.
+
+## Scope of protection
+
+The registry coordinates agents that follow this protocol in **one clone and its linked worktrees**. Independent clones/machines do not share that filesystem; use one dispatcher/clone or a real remote atomic lock before parallel work across them. GitHub assignees, labels and comments are visibility, not mutual exclusion. Filesystem access is not sandboxed: a nonparticipating agent can still edit files, which is why ownership checks and explicit workdirs remain required.
