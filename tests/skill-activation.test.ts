@@ -17,6 +17,7 @@ import { withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 import type { ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 
+/** Write a project skill fixture with optional invocation flags and return its file path. */
 async function skillFile(root: string, name: string, body: string, flags = ""): Promise<string> {
   const dir = join(root, ".agents", "skills", name);
   await mkdir(dir, { recursive: true });
@@ -25,14 +26,17 @@ async function skillFile(root: string, name: string, body: string, flags = ""): 
   return path;
 }
 
+/** Treat one isolated fixture directory as both the workspace root and launch directory. */
 function workspaceFor(root: string) {
   return { root, launchCwd: root, extraRoots: [] as string[] };
 }
 
+/** Build a scripted native activation request with the supplied call identity and skill name. */
 function activation(id: string, name: string) {
   return { id, name: "activate_skill", arguments: { name } };
 }
 
+/** Assert that prepared context contains at most one active skill and return its content. */
 function activeBody(request: Pick<ModelRequest, "context">): string | undefined {
   const sections = request.context.filter((section) => section.name === "active-skill");
   expect(sections.length).toBeLessThanOrEqual(1);

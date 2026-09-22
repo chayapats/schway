@@ -201,6 +201,7 @@ export function createContextManager(
       });
     },
 
+    /** Retain prepared activation and return cleanup that cannot clear a later turn's context. */
     beginTurn() {
       const scope = activationScope = {};
       return () => {
@@ -211,11 +212,13 @@ export function createContextManager(
       };
     },
 
+    /** Attach the prepared user skill while invalidating pending model replacements. */
     setActiveSkill(skill: ActiveSkill): void {
       activationScope = {};
       activeSkill = skill;
     },
 
+    /** Validate model eligibility and replace the active body only if this activation scope remains current. */
     async activateSkill(name, activationOptions = {}) {
       activationOptions.signal?.throwIfAborted();
       const scope = activationScope;
@@ -245,6 +248,7 @@ export function createContextManager(
       return { ok: true };
     },
 
+    /** Clear volatile skill context and invalidate unfinished activation requests. */
     clearActiveSkill(): void {
       activationScope = {};
       activeSkill = undefined;

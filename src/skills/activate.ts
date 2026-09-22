@@ -12,6 +12,7 @@ export function createActivateSkillTool(manager: ContextManager): ToolDefinition
       name: Type.String({ minLength: 1, maxLength: SKILL_NAME_MAX_LENGTH }),
     }, { additionalProperties: false }),
     execution: "exclusive",
+    /** Activate the validated skill with bounded confirmation or error text, preserving cancellation. */
     async execute({ name }, { signal }) {
       try {
         const result = await manager.activateSkill(name, { signal });
