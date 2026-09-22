@@ -11,6 +11,8 @@ import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import type { Workspace } from "../workspace/workspace.ts";
+import type { ExtensionRuntime } from "../extensions/host.ts";
+import { discoverSkills } from "../skills/skills.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -60,6 +62,8 @@ export interface TuiControllerOptions {
   startupError?: string;
   /** Known values to mask in displayed transcript text and configuration output. */
   secrets?: readonly string[];
+  extensions?: ExtensionRuntime;
+  home?: string;
 }
 
 /** Bound on displayed tool-result characters; session data stays complete. */
@@ -93,6 +97,10 @@ export class TuiController {
   private counter = 0;
   private currentAssistantId?: string;
   private toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
+  private readonly extensions?: ExtensionRuntime;
+  private readonly home?: string;
+  private readonly detachDiagnostics?: () => void;
+  private disposed = false;
 
   /** Initialize display history from the supplied session and dependencies without starting a model turn. */
   constructor(options: TuiControllerOptions) {
@@ -111,6 +119,9 @@ export class TuiController {
     this.baseUrl = options.baseUrl;
     this.auth = options.auth;
     this.secrets = options.secrets ?? [];
+    this.extensions = options.extensions;
+    this.home = options.home;
+    this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
     if (options.startupError) {
       this.transcript.push(this.systemEntry(options.startupError));
@@ -136,6 +147,68 @@ export class TuiController {
   /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
     return this.activeAbort !== undefined;
+  }
+
+  /** Return active extension command metadata for help and editor dispatch. */
+  extensionCommands() { return this.extensions?.commandList() ?? []; }
+
+  /** Run an extension command only while idle, preserving normal loop ownership for any requested prompt. */
+  async runExtensionCommand(name: string, args: string): Promise<boolean> {
+    const command = this.extensions?.command(name);
+    if (!command || this.disposed) return false;
+    if (this.running) {
+      this.notice(`Busy: /${name} was not run. Press Esc to cancel the active operation, then retry.`);
+      return true;
+    }
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    this.status = "running";
+    const task = this.executeExtensionCommand(command, args, abort);
+    this.activeTurn = task;
+    try { await task; } finally {
+      if (this.activeTurn === task) this.activeTurn = undefined;
+    }
+    return true;
+  }
+
+  private async executeExtensionCommand(
+    command: { name: string; source: string; description: string }, args: string, abort: AbortController,
+  ): Promise<void> {
+    let prompt: string | undefined;
+    let accepting = true;
+    let succeeded = false;
+    const current = () => this.activeAbort === abort && !this.disposed;
+    try {
+      if (this.workspace) {
+        const skills = await discoverSkills({ workspaceRoot: this.workspace.root, home: this.home, signal: abort.signal });
+        this.extensions!.assertNoSkillCollision(command, skills);
+      }
+      const result = await this.extensions!.executeCommand(command.name, args, {
+        signal: abort.signal,
+        submitPrompt: (text) => {
+          if (!accepting || !current() || abort.signal.aborted || this.extensions!.signal.aborted) throw new Error("Command prompt capability is closed");
+          if (typeof text !== "string" || !text.trim()) throw new Error("Command prompt must be nonempty text");
+          if (prompt !== undefined) throw new Error("A command may submit only one prompt");
+          prompt = text;
+        },
+      });
+      if (current() && !abort.signal.aborted) {
+        if (result) this.notice(result);
+        this.status = "idle";
+        succeeded = true;
+      }
+    } catch (error) {
+      if (current()) {
+        const detail = abort.signal.aborted ? "Cancelled. Retry the command when ready." : error instanceof Error ? error.message : String(error);
+        const prefix = `Extension "${command.source}" command /${command.name}: `;
+        this.notice(redactSecrets(detail.startsWith(prefix) ? detail : `${prefix}${detail}`, this.secrets).slice(0, 50_000));
+        this.status = "idle";
+      }
+    } finally {
+      accepting = false;
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+    }
+    if (succeeded && prompt !== undefined && !this.disposed && !abort.signal.aborted) await this.submit(prompt);
   }
 
   /** Replace the adapter and displayed provider/model ids without changing session history. */
@@ -255,6 +328,7 @@ export class TuiController {
     options: { workspace?: Workspace; contextManager?: ContextManager } = {},
   ): void {
     this.abortActiveTurn();
+    this.extensions?.replaceSession();
     this.contextManager.clearActiveSkill();
     this.session = session;
     this.sessionId = sessionId;
@@ -302,8 +376,11 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction during terminal cleanup.
    */
   dispose(): void {
+    this.disposed = true;
     this.abortActiveTurn();
     this.contextManager.clearActiveSkill();
+    this.detachDiagnostics?.();
+    this.extensions?.dispose();
   }
 
   /** Wait for the tracked submitted turn or manual compaction to settle during tests or terminal cleanup. */
@@ -318,7 +395,7 @@ export class TuiController {
    */
   async submit(prompt: string): Promise<void> {
     const text = prompt.trim();
-    if (text.length === 0 || this.activeAbort) {
+    if (text.length === 0 || this.activeAbort || this.disposed) {
       return;
     }
     if (!this.model) {
@@ -368,6 +445,7 @@ export class TuiController {
         signal,
         maxTurns: this.maxTurns,
         maxConcurrentTools: this.maxConcurrentTools,
+        extensions: this.extensions,
       })) {
         // Drain accepted calls on cancellation; replaced sessions ignore stale display events.
         if (this.activeAbort?.signal === signal) {

@@ -23,7 +23,7 @@ test("explicit local extension registers a plain-schema tool through the existin
     };`);
     const workspace = await resolveWorkspace(dir);
     const base = createToolRegistry();
-    const tools = await loadExtensions({ modules: ["greet.ts"], workspace, tools: base });
+    const { tools } = await loadExtensions({ modules: ["greet.ts"], workspace, tools: base });
     expect(base.definitions()).toHaveLength(0);
     expect(tools.definitions().map((tool) => tool.name)).toEqual(["greet"]);
     const chunks: string[] = [];
@@ -79,7 +79,7 @@ test("registration is sealed after initialization and registered metadata is det
       export function late() { ctx.registerTool({ ...tool, name: 'late' }); }
       export function mutate() { tool.name = 'mutated'; tool.execution = 'exclusive'; tool.inputSchema.type = 'string'; }
     `);
-    const tools = await loadExtensions({ modules: [path], workspace: await resolveWorkspace(dir), tools: createToolRegistry() });
+    const { tools } = await loadExtensions({ modules: [path], workspace: await resolveWorkspace(dir), tools: createToolRegistry() });
     const module = await import(pathToFileURL(await realpath(path)).href);
     expect(() => module.late()).toThrow("closed");
     module.mutate();
@@ -104,7 +104,7 @@ test("extension returns, thrown errors, and live output are bounded and redact k
       });
     };`);
     const workspace = await resolveWorkspace(dir);
-    const tools = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry(), secrets: ["private-key"] });
+    const { tools } = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry(), secrets: ["private-key"] });
     const chunks: string[] = [];
     for (const name of ["large", "throwing", "malformed"]) {
       const result = await executeToolCall({ registry: tools, workspace,
@@ -163,7 +163,7 @@ test("extension calls honor concurrency limits, exclusive barriers, and cancella
       };
     `);
     const workspace = await resolveWorkspace(dir);
-    const registry = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry() });
+    const { tools: registry } = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry() });
     const module = await import(pathToFileURL(await realpath(path)).href);
     const calls: ToolCallContent[] = ["parallel", "parallel", "parallel", "exclusive", "parallel"].map((name, index) => ({
       type: "tool_call", id: String(index), name, arguments: { id: String(index) },
@@ -204,7 +204,7 @@ test("invalid extension arguments produce one bounded error without executing", 
       async execute() { throw new Error('should not execute'); }
     });`);
     const workspace = await resolveWorkspace(dir);
-    const registry = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry() });
+    const { tools: registry } = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry() });
     const result = await executeToolCall({ registry, workspace,
       call: { type: "tool_call", id: "invalid", name: "custom", arguments: Array(5000).fill("invalid") },
     });
@@ -225,7 +225,7 @@ test("live extension output redacts credentials split across chunks", async () =
       }
     });`);
     const workspace = await resolveWorkspace(dir);
-    const registry = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry(), secrets: ["private-key"] });
+    const { tools: registry } = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry(), secrets: ["private-key"] });
     let output = "";
     const result = await executeToolCall({ registry, workspace,
       call: { type: "tool_call", id: "stream", name: "custom", arguments: {} },
@@ -251,7 +251,7 @@ test("load failures and cross-module duplicates identify the module and preserve
       expect(tools.definitions().map((tool) => tool.name)).toEqual(["existing"]);
       expect(tools.get("existing")!.validate).toBe(validator);
     }
-    const loaded = await loadExtensions({ modules: ["first.ts"], workspace, tools });
+    const { tools: loaded } = await loadExtensions({ modules: ["first.ts"], workspace, tools });
     expect(loaded.definitions().map((tool) => tool.name)).toEqual(["existing", "custom"]);
     expect(loaded.get("existing")!.validate).toBe(validator);
   });

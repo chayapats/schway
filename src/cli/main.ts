@@ -32,6 +32,7 @@ import { grepTool } from "../tools/grep.ts";
 import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
 import { loadExtensions } from "../extensions/loader.ts";
+import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { loadProviderModel } from "../model/loader.ts";
@@ -162,123 +163,132 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
   const secrets = collectSecrets(parsed.args.apiKey, env);
   let tools: ToolRegistry;
+  let extensions: ExtensionRuntime;
   try {
-    tools = await loadExtensions({
-      modules: parsed.args.extensions ?? [], workspace, secrets,
+    const loaded = await loadExtensions({
+      modules: parsed.args.extensions ?? [], workspace, secrets, home,
+      onDiagnostic: (message) => io.stderr.write(`${message}\n`),
       tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
     });
+    tools = loaded.tools;
+    extensions = loaded.runtime;
   } catch (error) {
     io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
     return 1;
   }
 
-  const slash = splitSlashCommand(parsed.args.prompt);
-  let skillTurn: { skill: SkillMetadata; body: string } | undefined;
-  if (slash && slash.name === "skills") {
-    const discovery = await discoverSkills({ workspaceRoot: workspace.root, home });
-    io.stdout.write(`${formatSkillsListing(discovery)}\n`);
-    return 0;
-  }
-  if (slash && !RESERVED_SKILL_NAMES.includes(slash.name) && isSkillNameToken(slash.name)) {
-    const prepared = await prepareSkillInvocation({
-      workspaceRoot: workspace.root,
-      home,
-      name: slash.name,
-    });
-    if (!prepared.ok) {
-      io.stderr.write(`${prepared.error}\n`);
-      return 1;
-    }
-    skillTurn = { skill: prepared.skill, body: prepared.body };
-  }
-
-  let model = io.model;
-  if (!model) {
-    const loaded = await loadCliModel(settings, parsed.args.apiKey, { ...io, env }, secrets);
-    if ("error" in loaded) {
-      io.stderr.write(`${loaded.error}\n`);
-      return 1;
-    }
-    model = loaded.model;
-  }
-
-  if (!session) {
-    session = await createJsonlSession({ directory, workspace });
-  }
-  session.append({
-    type: "user",
-    id: crypto.randomUUID(),
-    content: [{ type: "text", text: parsed.args.prompt }],
-  });
-
-  let failed = false;
-  let printedText = false;
-  const contextManager = createContextManager(workspace, {
-    home,
-    contextWindow: settings.contextWindow,
-  });
-  if (skillTurn) {
-    contextManager.setActiveSkill({
-      name: skillTurn.skill.name,
-      body: skillTurn.body,
-      source: skillTurn.skill.displayPath,
-      scope: skillTurn.skill.scope,
-      dir: skillTurn.skill.dir,
-    });
-  }
   try {
-    for await (const event of runAgentLoop({
-      session,
-      model,
-      contextManager,
-      tools,
-      workspace,
-      signal: io.signal,
-      maxTurns: settings.maxTurns,
-      maxConcurrentTools: settings.maxConcurrentTools,
-    })) {
-      const safeEvent = redactEvent(event, secrets);
-      if (parsed.args.json) {
-        io.stdout.write(`${JSON.stringify(safeEvent)}\n`);
-      } else if (
-        safeEvent.type === "model.delta" &&
-        safeEvent.content.type === "text"
-      ) {
-        io.stdout.write(safeEvent.content.text);
-        printedText = true;
-      } else if (safeEvent.type === "model.retry") {
-        if (printedText) {
-          io.stdout.write("\n");
-          printedText = false;
-        }
-        io.stderr.write(
-          `Retrying provider request (${safeEvent.attempt}/${safeEvent.maxAttempts}) in ${safeEvent.delayMs}ms: ${safeEvent.message}\n`,
-        );
-      }
-
-      if (safeEvent.type === "error") {
-        if (!parsed.args.json && printedText) {
-          io.stdout.write("\n");
-          printedText = false;
-        }
-        failed = true;
-        io.stderr.write(`${safeEvent.message}\n`);
-      } else if (
-        safeEvent.type === "agent.finished" &&
-        (safeEvent.reason === "error" || safeEvent.reason === "cancelled")
-      ) {
-        failed = true;
-      }
+    const slash = splitSlashCommand(parsed.args.prompt);
+    let skillTurn: { skill: SkillMetadata; body: string } | undefined;
+    if (slash && slash.name === "skills") {
+      const discovery = await discoverSkills({ workspaceRoot: workspace.root, home });
+      io.stdout.write(`${formatSkillsListing(discovery)}\n`);
+      return 0;
     }
+    if (slash && !RESERVED_SKILL_NAMES.includes(slash.name) && isSkillNameToken(slash.name)) {
+      const prepared = await prepareSkillInvocation({
+        workspaceRoot: workspace.root,
+        home,
+        name: slash.name,
+      });
+      if (!prepared.ok) {
+        io.stderr.write(`${prepared.error}\n`);
+        return 1;
+      }
+      skillTurn = { skill: prepared.skill, body: prepared.body };
+    }
+
+    let model = io.model;
+    if (!model) {
+      const loaded = await loadCliModel(settings, parsed.args.apiKey, { ...io, env }, secrets);
+      if ("error" in loaded) {
+        io.stderr.write(`${loaded.error}\n`);
+        return 1;
+      }
+      model = loaded.model;
+    }
+
+    if (!session) {
+      session = await createJsonlSession({ directory, workspace });
+    }
+    session.append({
+      type: "user",
+      id: crypto.randomUUID(),
+      content: [{ type: "text", text: parsed.args.prompt }],
+    });
+
+    let failed = false;
+    let printedText = false;
+    const contextManager = createContextManager(workspace, {
+      home,
+      contextWindow: settings.contextWindow,
+    });
+    if (skillTurn) {
+      contextManager.setActiveSkill({
+        name: skillTurn.skill.name,
+        body: skillTurn.body,
+        source: skillTurn.skill.displayPath,
+        scope: skillTurn.skill.scope,
+        dir: skillTurn.skill.dir,
+      });
+    }
+    try {
+      for await (const event of runAgentLoop({
+        session,
+        model,
+        contextManager,
+        tools,
+        extensions,
+        workspace,
+        signal: io.signal,
+        maxTurns: settings.maxTurns,
+        maxConcurrentTools: settings.maxConcurrentTools,
+      })) {
+        const safeEvent = redactEvent(event, secrets);
+        if (parsed.args.json) {
+          io.stdout.write(`${JSON.stringify(safeEvent)}\n`);
+        } else if (
+          safeEvent.type === "model.delta" &&
+          safeEvent.content.type === "text"
+        ) {
+          io.stdout.write(safeEvent.content.text);
+          printedText = true;
+        } else if (safeEvent.type === "model.retry") {
+          if (printedText) {
+            io.stdout.write("\n");
+            printedText = false;
+          }
+          io.stderr.write(
+            `Retrying provider request (${safeEvent.attempt}/${safeEvent.maxAttempts}) in ${safeEvent.delayMs}ms: ${safeEvent.message}\n`,
+          );
+        }
+
+        if (safeEvent.type === "error") {
+          if (!parsed.args.json && printedText) {
+            io.stdout.write("\n");
+            printedText = false;
+          }
+          failed = true;
+          io.stderr.write(`${safeEvent.message}\n`);
+        } else if (
+          safeEvent.type === "agent.finished" &&
+          (safeEvent.reason === "error" || safeEvent.reason === "cancelled")
+        ) {
+          failed = true;
+        }
+      }
+    } finally {
+      contextManager.clearActiveSkill();
+    }
+
+    if (!parsed.args.json && printedText && !failed) {
+      io.stdout.write("\n");
+    }
+
+    return failed ? 1 : 0;
   } finally {
-    contextManager.clearActiveSkill();
+    extensions.dispose();
   }
-
-  if (!parsed.args.json && printedText && !failed) {
-    io.stdout.write("\n");
-  }
-
-  return failed ? 1 : 0;
 }
 
 /** Normalize thrown values into a printable error string. */

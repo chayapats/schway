@@ -22,6 +22,7 @@ import { grepTool } from "../tools/grep.ts";
 import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
 import { loadExtensions } from "../extensions/loader.ts";
+import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
@@ -34,10 +35,10 @@ import {
 import { TuiController } from "./controller.ts";
 import {
   formatModelPicker,
+  dispatchEditorInput,
   helpText,
   parseModelArgs,
   parseSkillInvocation,
-  parseSlashCommand,
 } from "./commands.ts";
 import {
   discoverSkills,
@@ -146,146 +147,158 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   const secrets = collectSecrets(io.args.apiKey, env);
   let tools: ToolRegistry;
+  let extensions: ExtensionRuntime;
   try {
-    tools = await loadExtensions({
-      modules: io.args.extensions ?? [], workspace, secrets,
+    const loaded = await loadExtensions({
+      modules: io.args.extensions ?? [], workspace, secrets, home,
+      onDiagnostic: (message) => io.stderr.write(`${message}\n`),
       tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
     });
+    tools = loaded.tools;
+    extensions = loaded.runtime;
   } catch (error) {
     io.stderr.write(`${redactSecrets(messageOf(error), secrets)}\n`);
     return 1;
   }
 
-  let model = io.model;
-  let startupError: string | undefined;
-  if (!model) {
-    const loaded = await loadInteractiveModel(settings.provider, settings.model, {
-      maxTokens: settings.maxOutput,
-      baseUrl: settings.baseUrl,
-      headers: settings.headers,
-      extraBody: settings.extraBody,
-      auth: settings.auth,
-      runtimeApiKey: io.args.apiKey,
-      env,
-      fetch: io.fetch,
-      createModel: io.createModel,
-      secrets,
-    });
-    if ("error" in loaded) {
-      startupError = loaded.error;
-    } else {
-      model = loaded.model;
-    }
-  }
-
-  let controller: TuiController;
-  const managerOptions = contextManagerOptions(home, settings.explicitContextWindow);
-  const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
-    workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
-  };
   try {
-    if (io.args.resume) {
-      // Reuse the session handle loaded during startup, including settlements.
-      const resumed = startupResumed!;
-      const resumedWorkspace: Workspace = {
-        root: resumed.header.workspaceRoot,
-        launchCwd: resumed.header.launchCwd,
-        extraRoots: resumed.header.extraRoots,
-      };
-      const resumedManager = createContextManager(resumedWorkspace, managerOptions);
-      skillScope.manager = resumedManager;
-      skillScope.workspaceRoot = resumed.header.workspaceRoot;
-      controller = new TuiController({
-        session: resumed,
-        model,
-        contextManager: resumedManager,
-        tools,
-        workspace: resumedWorkspace,
-        provider: settings.provider,
-        modelId: settings.model,
-        sessionId: resumed.header.id,
-        maxTurns: settings.maxTurns,
-        maxConcurrentTools: settings.maxConcurrentTools,
-        explicitContextWindow: settings.explicitContextWindow,
-        explicitMaxOutput: settings.explicitMaxOutput,
-        baseUrl: settings.baseUrl,
-        auth: settings.auth,
-        startupError,
-        secrets,
-      });
-      if (!startupError) {
-        controller.notice(
-          `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
-        );
-      }
-    } else {
-      const session = await createJsonlSession({ directory, workspace });
-      const freshManager = createContextManager(workspace, managerOptions);
-      skillScope.manager = freshManager;
-      skillScope.workspaceRoot = workspace.root;
-      controller = new TuiController({
-        session,
-        model,
-        contextManager: freshManager,
-        tools,
-        workspace,
-        provider: settings.provider,
-        modelId: settings.model,
-        sessionId: session.header.id,
-        maxTurns: settings.maxTurns,
-        maxConcurrentTools: settings.maxConcurrentTools,
-        explicitContextWindow: settings.explicitContextWindow,
-        explicitMaxOutput: settings.explicitMaxOutput,
-        baseUrl: settings.baseUrl,
-        auth: settings.auth,
-        startupError,
-        secrets,
-      });
-      if (!startupError) {
-        controller.notice(`New session ${session.header.id}. Type /help for commands.`);
-      }
-    }
-  } catch (error) {
-    io.stderr.write(`${messageOf(error)}\n`);
-    return 1;
-  }
-
-  try {
-    await runTuiRenderer({
-      controller,
-      home,
-      workspaceRoot: workspace.root,
-      skillScope,
-      sessionsDir: directory,
-      settings: {
-        provider: settings.provider,
-        model: settings.model,
-        maxTurns: settings.maxTurns,
-        maxConcurrentTools: settings.maxConcurrentTools,
-        contextWindow: settings.contextWindow,
-        maxOutput: settings.maxOutput,
-        explicitContextWindow: settings.explicitContextWindow,
-        explicitMaxOutput: settings.explicitMaxOutput,
+    let model = io.model;
+    let startupError: string | undefined;
+    if (!model) {
+      const loaded = await loadInteractiveModel(settings.provider, settings.model, {
+        maxTokens: settings.maxOutput,
         baseUrl: settings.baseUrl,
         headers: settings.headers,
         extraBody: settings.extraBody,
         auth: settings.auth,
-      },
-      env,
-      runtimeApiKey: io.args.apiKey,
-      fetch: io.fetch,
-      createModel: io.createModel,
-      secrets,
-      signal: io.signal,
-      stderr: io.stderr,
-    });
-  } catch (error) {
-    io.stderr.write(`${messageOf(error)}\n`);
-    return 1;
+        runtimeApiKey: io.args.apiKey,
+        env,
+        fetch: io.fetch,
+        createModel: io.createModel,
+        secrets,
+      });
+      if ("error" in loaded) {
+        startupError = loaded.error;
+      } else {
+        model = loaded.model;
+      }
+    }
+
+    let controller: TuiController;
+    const managerOptions = contextManagerOptions(home, settings.explicitContextWindow);
+    const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
+      workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
+    };
+    try {
+      if (io.args.resume) {
+        // Reuse the session handle loaded during startup, including settlements.
+        const resumed = startupResumed!;
+        const resumedWorkspace: Workspace = {
+          root: resumed.header.workspaceRoot,
+          launchCwd: resumed.header.launchCwd,
+          extraRoots: resumed.header.extraRoots,
+        };
+        const resumedManager = createContextManager(resumedWorkspace, managerOptions);
+        skillScope.manager = resumedManager;
+        skillScope.workspaceRoot = resumed.header.workspaceRoot;
+        controller = new TuiController({
+          session: resumed,
+          model,
+          contextManager: resumedManager,
+          tools,
+          extensions,
+          home,
+          workspace: resumedWorkspace,
+          provider: settings.provider,
+          modelId: settings.model,
+          sessionId: resumed.header.id,
+          maxTurns: settings.maxTurns,
+          maxConcurrentTools: settings.maxConcurrentTools,
+          explicitContextWindow: settings.explicitContextWindow,
+          explicitMaxOutput: settings.explicitMaxOutput,
+          baseUrl: settings.baseUrl,
+          auth: settings.auth,
+          startupError,
+          secrets,
+        });
+        if (!startupError) {
+          controller.notice(
+            `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
+          );
+        }
+      } else {
+        const session = await createJsonlSession({ directory, workspace });
+        const freshManager = createContextManager(workspace, managerOptions);
+        skillScope.manager = freshManager;
+        skillScope.workspaceRoot = workspace.root;
+        controller = new TuiController({
+          session,
+          model,
+          contextManager: freshManager,
+          tools,
+          extensions,
+          home,
+          workspace,
+          provider: settings.provider,
+          modelId: settings.model,
+          sessionId: session.header.id,
+          maxTurns: settings.maxTurns,
+          maxConcurrentTools: settings.maxConcurrentTools,
+          explicitContextWindow: settings.explicitContextWindow,
+          explicitMaxOutput: settings.explicitMaxOutput,
+          baseUrl: settings.baseUrl,
+          auth: settings.auth,
+          startupError,
+          secrets,
+        });
+        if (!startupError) {
+          controller.notice(`New session ${session.header.id}. Type /help for commands.`);
+        }
+      }
+    } catch (error) {
+      io.stderr.write(`${messageOf(error)}\n`);
+      return 1;
+    }
+
+    try {
+      await runTuiRenderer({
+        controller,
+        home,
+        workspaceRoot: workspace.root,
+        skillScope,
+        sessionsDir: directory,
+        settings: {
+          provider: settings.provider,
+          model: settings.model,
+          maxTurns: settings.maxTurns,
+          maxConcurrentTools: settings.maxConcurrentTools,
+          contextWindow: settings.contextWindow,
+          maxOutput: settings.maxOutput,
+          explicitContextWindow: settings.explicitContextWindow,
+          explicitMaxOutput: settings.explicitMaxOutput,
+          baseUrl: settings.baseUrl,
+          headers: settings.headers,
+          extraBody: settings.extraBody,
+          auth: settings.auth,
+        },
+        env,
+        runtimeApiKey: io.args.apiKey,
+        fetch: io.fetch,
+        createModel: io.createModel,
+        secrets,
+        signal: io.signal,
+        stderr: io.stderr,
+      });
+    } catch (error) {
+      io.stderr.write(`${messageOf(error)}\n`);
+      return 1;
+    } finally {
+      controller.dispose();
+    }
+    return 0;
   } finally {
-    controller.dispose();
+    extensions.dispose();
   }
-  return 0;
 }
 
 interface RendererSettings {
@@ -414,13 +427,8 @@ async function runTuiRenderer(options: {
     };
 
     const submitPrompt = (value: string) => {
-      const text = value.trim();
-      if (text.length === 0) {
-        return;
-      }
-      const command = parseSlashCommand(text);
-      if (command) {
-        void handleSlashCommand(command.name, command.args, {
+      void dispatchEditorInput(value, options.controller, async (command) => {
+        await handleSlashCommand(command.name, command.args, {
           controller: options.controller,
           home: options.home,
           workspaceRoot: options.workspaceRoot,
@@ -434,22 +442,15 @@ async function runTuiRenderer(options: {
           secrets: options.secrets,
           finishQuit,
           stderr: options.stderr,
-        }, command.raw).catch((error: unknown) => {
-          options.controller.fail(messageOf(error));
-        });
-        return;
-      }
-      if (options.controller.running) {
-        options.controller.notice("Already running. Press Esc to cancel first.");
+        }, command.raw);
+      }, () => { input.value = ""; }).then(render, (error: unknown) => {
+        options.controller.fail(messageOf(error));
         render();
-        return;
-      }
-      void options.controller.submit(text).then(render, render);
+      });
     };
 
     input.on("enter", () => {
       const value = input.value;
-      input.value = "";
       submitPrompt(value);
       render();
     });
@@ -615,7 +616,7 @@ async function handleSlashCommand(
       return;
     }
     case "help": {
-      ctx.controller.notice(helpText());
+      ctx.controller.notice(helpText(ctx.controller.extensionCommands()));
       return;
     }
     case "quit": {
