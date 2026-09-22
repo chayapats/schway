@@ -386,7 +386,10 @@ export class TuiController {
       const effective = this.configEditor!.settings[key as keyof ResolvedSettings];
       const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
-      const shadowed = action === "set" && source !== origin ? `; shadowed by ${origin}` : "";
+      const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
+      const shadowingSource = providerSource ? `${providerSource} provider selection` : origin;
+      const shadowed = action === "set" && source !== origin ? `; shadowed by ${shadowingSource}`
+        : action === "reset" && providerSource ? `; ${providerSource} provider selection uses its default model` : "";
       return `${key} (${scope}): ${saved}. Effective: ${displaySetting(key!, effective)} [${origin}]${shadowed}.`;
     });
   }

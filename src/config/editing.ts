@@ -31,11 +31,20 @@ type Layers = { user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; se
 
 /** Resolve effective origins with the same provider-change model inheritance rules as settings. */
 export function configOrigins(layers: Layers): ConfigOrigins {
+  return traceOrigins(layers).origins;
+}
+
+function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSource?: string } {
   const origins: ConfigOrigins = {};
+  let modelFallbackSource: string | undefined;
   let merged: ConfigLayer = {};
   for (const [origin, layer] of [["built-in default", BUILTIN_DEFAULTS], ["user-global", layers.user], ["project", layers.project], ["CLI", layers.cli], ["current-session override", layers.session]] as const) {
     if (!layer) continue;
-    if (layer.provider !== undefined && layer.provider !== merged.provider && layer.model === undefined) delete origins.model;
+    if (layer.provider !== undefined && merged.provider !== undefined && layer.provider !== merged.provider && layer.model === undefined) {
+      delete origins.model;
+      modelFallbackSource = origin;
+    }
+    if (layer.model !== undefined) modelFallbackSource = undefined;
     for (const key of CONFIG_SETTING_NAMES) if (layer[key] !== undefined) origins[key] = origin;
     merged = mergeConfigLayers(merged, layer);
   }
@@ -43,7 +52,7 @@ export function configOrigins(layers: Layers): ConfigOrigins {
   origins.contextWindow ??= "catalog";
   origins.maxOutput ??= "catalog";
   origins.auth ??= "built-in default";
-  return origins;
+  return { origins, modelFallbackSource };
 }
 
 /** Own validated config layers and prepare edits without publishing partially staged settings. */
@@ -64,6 +73,9 @@ export class ConfigEditor {
 
   /** Return the source of each currently effective setting. */
   get origins(): ConfigOrigins { return configOrigins(this.layers); }
+
+  /** Identify the provider override that discarded an inherited model and selected a built-in model default. */
+  get modelFallbackSource(): string | undefined { return traceOrigins(this.layers).modelFallbackSource; }
 
   /** Stage a different primary workspace's project layer while retaining user, CLI and session settings. */
   async forWorkspace(workspaceRoot: string): Promise<ConfigEditor> {

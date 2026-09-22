@@ -45,6 +45,21 @@ test("controller scoped config edits show saved shadowing and reset session over
   });
 });
 
+test("a saved model suppressed by CLI provider selection explains the actual shadowing source", async () => {
+  await withTempDir(async root => {
+    const controller = await fixture(root, undefined, { provider: "openai" });
+    expect(await controller.configCommand("set model gpt-4o --scope project")).toBe(true);
+    expect(JSON.parse(await readFile(join(root, ".schway/config.json"), "utf8"))).toEqual({ model: "gpt-4o" });
+    expect(controller.snapshot().modelId).toBe("gpt-5.4");
+    const notice = controller.snapshot().transcript.at(-1)?.text;
+    expect(notice).toContain("saved gpt-4o");
+    expect(notice).toContain("Effective: gpt-5.4 [built-in default]");
+    expect(notice).toContain("shadowed by CLI provider selection");
+    expect(await controller.configCommand("reset model --scope project")).toBe(true);
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("CLI provider selection");
+  });
+});
+
 test("a session without startup credentials can configure and select an optional-auth compatible endpoint", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -56,7 +71,7 @@ test("a session without startup credentials can configure and select an optional
       provider: previous.provider, modelId: previous.model,
       contextManager: createContextManager(workspace),
       stageSettings: (settings, signal, currentWorkspace, model) => stageInteractiveSettings(settings, previous, {
-        model, signal, workspace: currentWorkspace!, home: join(root, "home"), env: {}, runtimeApiKey: undefined, secrets: [],
+        model, signal, workspace: currentWorkspace!, home: join(root, "home"), env: { OPENAI_API_KEY: "fixture-key" }, runtimeApiKey: undefined, secrets: [],
         createModel: async input => { loaded.push(input.provider); return createScriptedModel({ id: input.model, provider: input.provider, text: "compatible works" }); },
       }),
       onSettingsCommitted: settings => { previous = settings; },
@@ -68,6 +83,11 @@ test("a session without startup credentials can configure and select an optional
     expect(loaded).toEqual(["openai-compatible"]);
     await controller.submit("hello");
     expect(controller.snapshot().transcript.some(entry => entry.text === "compatible works")).toBe(true);
+    expect(await controller.selectModel("openai/gpt-4o")).toBe(true);
+    expect(previous.baseUrl).toBeUndefined();
+    expect(previous.auth).toBeUndefined();
+    expect(await controller.configCommand("set maxTurns 4")).toBe(true);
+    expect(loaded).toEqual(["openai-compatible", "openai"]);
     expect(await readdir(root)).toEqual([]);
   });
 });

@@ -132,7 +132,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     io.stderr.write(`${messageOf(error)}\n`);
     return 1;
   }
-  const settings = configEditor.settings;
+  let settings = configEditor.settings;
   if (
     hasCliConnectionOptions(io.args) &&
     settings.provider !== "openai-compatible"
@@ -196,9 +196,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets,
     });
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
-      Object.assign(settings, next);
-      settings.explicitContextWindow = next.explicitContextWindow;
-      settings.explicitMaxOutput = next.explicitMaxOutput;
+      settings = next;
       skillScope.manager = manager;
     };
     try {
@@ -280,7 +278,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         workspaceRoot: workspace.root,
         skillScope,
         sessionsDir: directory,
-        settings,
+        settings: () => settings,
         env,
         runtimeApiKey: io.args.apiKey,
         fetch: io.fetch,
@@ -321,21 +319,6 @@ export async function stageInteractiveSettings(
   return { model, contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
 }
 
-interface RendererSettings {
-  provider: string;
-  model: string;
-  maxTurns: number;
-  maxConcurrentTools: number;
-  contextWindow: number;
-  maxOutput: number;
-  explicitContextWindow?: number;
-  explicitMaxOutput?: number;
-  baseUrl?: string;
-  headers?: Record<string, string>;
-  extraBody?: Record<string, unknown>;
-  auth?: CliAuthMode;
-}
-
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
 async function runTuiRenderer(options: {
   controller: TuiController;
@@ -343,7 +326,7 @@ async function runTuiRenderer(options: {
   workspaceRoot: string;
   skillScope: { manager?: ContextManager; workspaceRoot: string };
   sessionsDir: string;
-  settings: RendererSettings;
+  settings: () => ResolvedSettings;
   env: Record<string, string | undefined>;
   runtimeApiKey?: string;
   fetch?: FetchLike;
@@ -553,7 +536,7 @@ async function handleSlashCommand(
     workspaceRoot: string;
     skillScope: { manager?: ContextManager; workspaceRoot: string };
     sessionsDir: string;
-    settings: RendererSettings;
+    settings: () => ResolvedSettings;
     env: Record<string, string | undefined>;
     runtimeApiKey?: string;
     fetch?: FetchLike;
@@ -568,7 +551,7 @@ async function handleSlashCommand(
     ctx.controller.notice("Already running. Press Esc to cancel first.");
     return;
   }
-  const managerOptions = contextManagerOptions(ctx.home, ctx.settings.explicitContextWindow);
+  const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow);
   switch (name) {
     case "new": {
       const workspace = await resolveWorkspace(ctx.workspaceRoot);
