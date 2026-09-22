@@ -73,7 +73,7 @@ test("attachment operands use the primary root, deduplicate realpath aliases, an
   });
 });
 
-test("an inaccessible directory rejects the entire attachment batch", async () => {
+test.skipIf(process.geteuid?.() === 0)("an inaccessible directory rejects the entire attachment batch", async () => {
   await withTempDir(async root => {
     const valid = await makeDir(join(root, "valid"));
     const denied = await makeDir(join(root, "denied"));
