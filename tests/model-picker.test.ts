@@ -170,7 +170,7 @@ test("an edited context budget drives compaction before the next actual request"
   });
 });
 
-test("configuration view and saved notices hide URL credentials and structured connection values", async () => {
+test("configuration view and session notices hide runtime URL credentials and structured connection values", async () => {
   await withTempDir(async root => {
     await mkdir(join(root, ".schway"));
     await writeFile(join(root, ".schway/config.json"), JSON.stringify({
@@ -178,13 +178,48 @@ test("configuration view and saved notices hide URL credentials and structured c
       headers: { "x-custom": "sensitive-header" }, extraBody: { nested: "sensitive-body" },
     }));
     const controller = await fixture(root);
-    expect(await controller.configCommand("set baseUrl https://next:password2@example.test/v2?key=hidden2 --scope project")).toBe(true);
+    expect(await controller.configCommand("set baseUrl https://next:password2@example.test/v2?key=hidden2")).toBe(true);
     const text = controller.describeConfig() + controller.snapshot().transcript.map(entry => entry.text).join("\n");
     for (const value of ["password", "secret-query", "password2", "hidden2", "sensitive-header", "sensitive-body"]) expect(text).not.toContain(value);
     expect(text).toContain("https://example.test/v2");
+    expect(await readFile(join(root, ".schway/config.json"), "utf8")).not.toContain("password2");
+    expect(await readFile(join(root, ".schway/config.json"), "utf8")).not.toContain("hidden2");
+    expect(await controller.configCommand("set baseUrl https://example.test/v3 --scope project")).toBe(true);
     const persisted = JSON.parse(await readFile(join(root, ".schway/config.json"), "utf8"));
+    expect(persisted.baseUrl).toBe("https://example.test/v3");
     expect(persisted.headers).toEqual({ "x-custom": "sensitive-header" });
     expect(persisted.extraBody).toEqual({ nested: "sensitive-body" });
+  });
+});
+
+test("persisted URL credential failures retain the live model and never echo submitted secrets", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, ".schway"));
+    const path = join(root, ".schway/config.json");
+    const original = '{"provider":"openai-compatible","baseUrl":"https://example.test/v1","maxTurns":7}';
+    await writeFile(path, original);
+    let staged = false;
+    const controller = await fixture(root, async () => {
+      staged = true;
+      return createScriptedModel();
+    });
+    const snapshot = controller.snapshot();
+    const sentinel = "unregistered-url-secret-sentinel";
+    for (const scope of ["user", "project"]) {
+      for (const url of [`https://user:${sentinel}@example.test/v2`, `https://example.test/v2?token=${sentinel}`]) {
+        expect(await controller.configCommand(`set baseUrl ${url} --scope ${scope}`)).toBe(false);
+        const error = controller.snapshot().transcript.at(-1)?.text;
+        expect(error).toContain("session scope");
+        expect(error).not.toContain(sentinel);
+        expect(await readFile(path, "utf8")).toBe(original);
+        expect(controller.snapshot().modelId).toBe(snapshot.modelId);
+        expect(controller.describeConfig()).toContain("https://example.test/v1");
+      }
+    }
+    expect(staged).toBe(false);
+    expect(await readdir(root)).toEqual([".schway"]);
+    await controller.submit("still usable");
+    expect(controller.snapshot().transcript.some(entry => entry.text === "previous usable")).toBe(true);
   });
 });
 

@@ -94,3 +94,55 @@ test("persisted edits replace only one validated key and reset restores inherita
     expect(await readdir(join(root, ".schway"))).toEqual(["config.json"]);
   });
 });
+
+test("persisted base URLs reject userinfo and queries without creating or changing either scope", async () => {
+  await withTempDir(async dir => {
+    const home = join(dir, "home"), root = join(dir, "project");
+    await mkdir(home); await mkdir(root);
+    const editor = await loadConfigEditor({ home, workspaceRoot: root });
+    const credential = "url-secret-sentinel";
+    const urls = [
+      `https://user:${credential}@example.test/v1`,
+      `https://${credential}@example.test/v1`,
+      `https://example.test/v1?token=${credential}`,
+      "https://example.test/v1?region=test",
+    ];
+    for (const scope of ["user", "project"] as const) {
+      const before = editor.settings;
+      const scopeRoot = scope === "user" ? home : root;
+      const path = join(scopeRoot, ".schway/config.json");
+      for (const value of urls) {
+        await expect(editor.prepare({ scope, key: "baseUrl", value })).rejects.toThrow("session scope");
+      }
+      expect(await readdir(scopeRoot)).toEqual([]);
+      await mkdir(join(scopeRoot, ".schway"));
+      const original = '{"baseUrl":"https://example.test/v1","maxTurns":7}';
+      await writeFile(path, original);
+      for (const value of urls) {
+        const error = await editor.prepare({ scope, key: "baseUrl", value }).catch(error => error as Error);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).not.toContain(credential);
+        expect(await readFile(path, "utf8")).toBe(original);
+      }
+      expect(editor.settings).toEqual(before);
+      await (await editor.prepare({ scope, key: "baseUrl", value: "https://safe.example.test:8443/v2" })).commit();
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ baseUrl: "https://safe.example.test:8443/v2", maxTurns: 7 });
+      expect(await readFile(path, "utf8")).not.toContain(credential);
+      expect(await readdir(join(scopeRoot, ".schway"))).toEqual(["config.json"]);
+    }
+  });
+});
+
+test("unrelated edits preserve existing URL values and resetting removes the selected override", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, ".schway"));
+    const path = join(root, ".schway/config.json");
+    const baseUrl = "https://legacy:existing-password@example.test/v1?region=legacy";
+    await writeFile(path, JSON.stringify({ baseUrl, maxTurns: 7 }));
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root });
+    await (await editor.prepare({ scope: "project", key: "maxTurns", value: 9 })).commit();
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ baseUrl, maxTurns: 9 });
+    await (await editor.prepare({ scope: "project", key: "baseUrl" })).commit();
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ maxTurns: 9 });
+  });
+});

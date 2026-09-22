@@ -117,6 +117,7 @@ export class ConfigEditor {
     const parsed = parseConfigObject(layer, scope);
     if ("error" in parsed) throw new Error(parsed.error);
     for (const edit of changes) if ((edit.key === "model" || edit.key === "baseUrl") && edit.value !== undefined && !parsed[edit.key]?.trim()) throw new Error(`${edit.key} must be a nonempty string.`);
+    if (scope !== "session" && changes.some(edit => edit.key === "baseUrl" && edit.value !== undefined)) validatePersistedBaseUrl(parsed.baseUrl!);
     const layers = { ...this.layers, [scope]: parsed };
     const settings = resolved(layers);
     return { settings, origins: configOrigins(layers), commit: async (signal) => {
@@ -136,6 +137,15 @@ export class ConfigEditor {
         this.revision++;
       } finally { this.committing = false; }
     } };
+  }
+}
+
+function validatePersistedBaseUrl(value: string): void {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("Persisted baseUrl must be an absolute URL without userinfo or query parameters. Use session scope for runtime-only URLs."); }
+  if (url.username || url.password || url.href.split("#", 1)[0]!.includes("?")) {
+    throw new Error("Persisted baseUrl must not contain userinfo or query parameters. Use session scope for runtime-only URLs.");
   }
 }
 
