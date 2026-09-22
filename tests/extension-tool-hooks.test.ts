@@ -22,6 +22,7 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 const user = { type: "user" as const, id: "user", content: [{ type: "text" as const, text: "go" }] };
 const editArgs = { path: "note.txt", edits: [{ oldText: "before", newText: "after" }] };
 
+/** Load isolated extension modules through canonical paths with the native edit tool and optional credential redaction. */
 async function fixture(dir: string, bodies: string[], secrets: string[] = []) {
   const paths: string[] = [];
   for (const [index, body] of bodies.entries()) {
@@ -36,10 +37,12 @@ async function fixture(dir: string, bodies: string[], secrets: string[] = []) {
   return { ...loaded, modules, workspace, home };
 }
 
+/** Build a native scripted invocation with explicit identity and optional tool input. */
 function call(id: string, name = "edit", args: unknown = editArgs): ToolCallContent {
   return { type: "tool_call", id, name, arguments: args };
 }
 
+/** Run one scripted tool round, asserting exactly one source-ordered result per call and optional durable reload parity. */
 async function turn(dir: string, runtime: ExtensionRuntime, tools: ReturnType<typeof createToolRegistry>, calls: ToolCallContent[], options: {
   signal?: AbortSignal; maxConcurrentTools?: number; events?: RuntimeEvent[]; durable?: boolean;
 } = {}) {

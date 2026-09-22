@@ -55,7 +55,7 @@ export interface AfterToolInput extends BeforeToolInput {
   readonly outcome: ToolExecutionResult & { readonly status: ToolCallStatus };
 }
 
-/** Replace settled content and optional details/error presentation, without changing execution status or replaying work. */
+/** Transform settled output; returned isError sets terminal status, outcome.status stays original, and execution is never replayed. */
 export type AfterToolHook = (input: AfterToolInput) => void | ToolExecutionResult | Promise<void | ToolExecutionResult>;
 
 /** Public JSON Schema and invocation contracts shared with native tools. */

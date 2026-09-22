@@ -1,5 +1,6 @@
 import { defineExtension } from "schway/extensions";
 
+/** Register a sample policy that denies shell commands, normalizes edit paths, and annotates settled results. */
 export default defineExtension((extension) => {
   extension.beforeTool(({ name, arguments: args, signal }) => {
     signal.throwIfAborted();

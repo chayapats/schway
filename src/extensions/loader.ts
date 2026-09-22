@@ -66,7 +66,9 @@ export async function loadExtensions(options: {
           beforeAgent: (hook: Parameters<ExtensionContext["beforeAgent"]>[0]) => register(() => runtime.hooks.beforeAgent(path, hook)),
           context: (hook: Parameters<ExtensionContext["context"]>[0]) => register(() => runtime.hooks.context(path, hook)),
           beforeModel: (hook: Parameters<ExtensionContext["beforeModel"]>[0]) => register(() => runtime.hooks.beforeModel(path, hook)),
+          /** Attribute an argument hook to this module and reject registration after initialization closes. */
           beforeTool: (hook: Parameters<ExtensionContext["beforeTool"]>[0]) => register(() => runtime.toolHooks.beforeTool(path, hook)),
+          /** Attribute a result hook to this module and reject registration after initialization closes. */
           afterTool: (hook: Parameters<ExtensionContext["afterTool"]>[0]) => register(() => runtime.toolHooks.afterTool(path, hook)),
           registerTool(tool: ToolDefinition) {
             register(() => {
