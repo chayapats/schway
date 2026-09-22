@@ -161,6 +161,17 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   const secrets = collectSecrets(parsed.args.apiKey, env);
+  let tools: ToolRegistry;
+  try {
+    tools = await loadExtensions({
+      modules: parsed.args.extensions ?? [], workspace, secrets,
+      tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+    });
+  } catch (error) {
+    io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
+    return 1;
+  }
+
   const slash = splitSlashCommand(parsed.args.prompt);
   let skillTurn: { skill: SkillMetadata; body: string } | undefined;
   if (slash && slash.name === "skills") {
@@ -179,17 +190,6 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       return 1;
     }
     skillTurn = { skill: prepared.skill, body: prepared.body };
-  }
-
-  let tools: ToolRegistry;
-  try {
-    tools = await loadExtensions({
-      modules: parsed.args.extensions ?? [], workspace, secrets,
-      tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
-    });
-  } catch (error) {
-    io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
-    return 1;
   }
 
   let model = io.model;

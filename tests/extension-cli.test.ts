@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli/args.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -85,7 +85,55 @@ for (const mode of ["headless", "interactive"]) {
       expect(stderr).toContain("failed with ***");
       expect(stderr).not.toContain("private-key");
       expect(modelLoads).toBe(0);
-      expect(await Bun.file(join(home, ".schway/sessions")).exists()).toBe(false);
+      await expect(stat(join(home, ".schway/sessions"))).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
 }
+
+test("headless /skills awaits ordered extension initializers without constructing a model or session", async () => {
+  await withIsolatedCliDirs(async ({ work, home }) => {
+    const marker = join(work, "initialization-order.txt");
+    await Bun.write(join(work, "first.ts"), `export default async () => {
+      await Bun.write(${JSON.stringify(marker)}, 'first\\n');
+    };`);
+    await Bun.write(join(work, "second.ts"), `export default async () => {
+      const before = await Bun.file(${JSON.stringify(marker)}).text();
+      await Bun.write(${JSON.stringify(marker)}, before + 'second\\n');
+    };`);
+    let stdout = "";
+    let stderr = "";
+    let modelLoads = 0;
+    const code = await runCli(["--extension", "first.ts", "--extension", "second.ts", "-p", "/skills"], {
+      cwd: work, env: { HOME: home },
+      stdout: { write: (text) => { stdout += text; } }, stderr: { write: (text) => { stderr += text; } },
+      createModel: async () => { modelLoads++; return createScriptedModel(); },
+    });
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout).toContain("No skills are installed.");
+    expect(await Bun.file(marker).text()).toBe("first\nsecond\n");
+    expect(modelLoads).toBe(0);
+    await expect(stat(join(home, ".schway/sessions"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+test("headless /skills reports a failed extension initializer without listing or creating a session", async () => {
+  await withIsolatedCliDirs(async ({ work, home }) => {
+    await Bun.write(join(work, "throwing.ts"), `export default async () => { throw new Error('failed with private-key'); };`);
+    let stdout = "";
+    let stderr = "";
+    let modelLoads = 0;
+    const code = await runCli(["--extension", "throwing.ts", "-p", "/skills"], {
+      cwd: work, env: { HOME: home, ANTHROPIC_API_KEY: "private-key" },
+      stdout: { write: (text) => { stdout += text; } }, stderr: { write: (text) => { stderr += text; } },
+      createModel: async () => { modelLoads++; return createScriptedModel(); },
+    });
+    expect(code).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("throwing.ts");
+    expect(stderr).toContain("failed with ***");
+    expect(stderr).not.toContain("private-key");
+    expect(modelLoads).toBe(0);
+    await expect(stat(join(home, ".schway/sessions"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
