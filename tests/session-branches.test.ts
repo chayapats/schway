@@ -14,7 +14,7 @@ import type { ToolDefinition } from "../src/tools/types.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { RESERVED_SKILL_NAMES } from "../src/skills/skills.ts";
-import { withIsolatedCliDirs, withTempDir } from "./helpers.ts";
+import { decodeStoredLine, withIsolatedCliDirs, withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 
 /** Create a uniquely identified user record with inspectable content. */
@@ -267,11 +267,19 @@ test("resume and switching settle only the selected branch, even when siblings r
     const loaded = await loadJsonlSession({ directory, id: session.header.id, branchId: "main" });
     expect(loaded.items.filter(item => item.type === "tool_result")).toHaveLength(1);
     expect(loaded.entries.filter(entry => entry.item.type === "tool_result")).toHaveLength(1);
+    const path = join(directory, `${session.header.id}.jsonl`);
+    const mainResults = (await readFile(path, "utf8")).trimEnd().split("\n").flatMap(decodeStoredLine).filter(item => item.type === "tool_result");
+    expect(mainResults).toMatchObject([{ parentId: "main-call", toolCallId: "same-call", isError: true }]);
     loaded.selectBranch(sibling);
     expect(loaded.items.filter(item => item.type === "tool_result")).toHaveLength(1);
     expect(loaded.entries.filter(entry => entry.item.type === "tool_result")).toHaveLength(2);
     const repeated = await loadJsonlSession({ directory, id: session.header.id, branchId: sibling });
     expect(repeated.entries.filter(entry => entry.item.type === "tool_result")).toHaveLength(2);
+    const allResults = (await readFile(path, "utf8")).trimEnd().split("\n").flatMap(decodeStoredLine).filter(item => item.type === "tool_result");
+    expect(allResults).toMatchObject([
+      { parentId: "main-call", toolCallId: "same-call", isError: true },
+      { parentId: "sibling-call", toolCallId: "same-call", isError: true },
+    ]);
     expect(await Bun.file(join(directory, "note.txt")).exists()).toBe(false);
   });
 });
