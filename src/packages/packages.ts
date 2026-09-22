@@ -1,5 +1,6 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { satisfies, validRange } from "semver";
 import { projectConfigPath, readConfigFile, userConfigPath } from "../config/config.ts";
 import { version } from "../../package.json";
 
@@ -47,11 +48,24 @@ export async function discoverPackages(options: {
         }
         if (schway.extensions === undefined && schway.skills === undefined) throw new Error("schway must declare extensions or skills");
         const peer = isObject(manifest.peerDependencies) ? manifest.peerDependencies.schway : undefined;
-        if (peer !== undefined && (typeof peer !== "string" || !peer.trim() || !Bun.semver.satisfies(version, peer))) {
-          throw new Error(`Incompatible Schway peer ${JSON.stringify(peer)}; installed Schway is ${version}. Install a compatible package version.`);
+        if (peer !== undefined) {
+          if (typeof peer !== "string" || !peer.trim() || validRange(peer) === null) {
+            throw new Error(`Invalid Schway peer range ${JSON.stringify(peer)}; peerDependencies.schway must be a nonempty npm semver range.`);
+          }
+          if (!satisfies(version, peer)) {
+            throw new Error(`Incompatible Schway peer ${JSON.stringify(peer)}; installed Schway is ${version}. Install a compatible package version.`);
+          }
         }
-        if (isObject(manifest.dependencies) && manifest.dependencies.schway !== undefined) {
-          throw new Error("Declare schway in peerDependencies instead of dependencies; packages must use the installed harness's public schway/extensions API.");
+        const dependencyField = ["dependencies", "optionalDependencies"].find(field => {
+          const dependencies = manifest[field];
+          return isObject(dependencies) && dependencies.schway !== undefined;
+        }) ?? ["bundleDependencies", "bundledDependencies"].find(field => {
+          const bundled = manifest[field];
+          return Array.isArray(bundled) && bundled.includes("schway");
+        });
+        // Boolean bundle-all declarations are covered by the direct dependency checks above.
+        if (dependencyField) {
+          throw new Error(`Declare schway in peerDependencies instead of ${dependencyField}; packages must use the installed harness's public schway/extensions API without bundling a second harness.`);
         }
         const extensions = await declaredPaths(packageRoot, schway.extensions, "extensions", options.signal);
         const skills = await declaredPaths(packageRoot, schway.skills, "skills", options.signal);

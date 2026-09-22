@@ -163,7 +163,8 @@ All manifests, paths, and declared Schway peer ranges are checked before any
 extension is imported. A skills-only package's JavaScript entrypoint is never
 imported. Extensions use the installed `schway/extensions` public API, declare
 Schway as a peer, and declare their own other dependencies normally; bundling
-Schway as a runtime dependency is rejected.
+Schway in `dependencies`, `optionalDependencies`, or either bundled-dependency
+list is rejected. Declared peer ranges must be valid npm semver ranges.
 
 Skills select the first defining tier: project `.agents/skills`, configured
 project packages, global `~/.schway/skills`, then configured global packages.

@@ -89,8 +89,11 @@ const invalidManifests: Array<[string, unknown, string]> = [
   ["file skill", { schway: { skills: ["main.ts"] } }, "skill directory"],
   ["missing skill file", { schway: { skills: ["empty"] } }, "missing SKILL.md"],
   ["incompatible peer", { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: ">=99" } }, "installed Schway is 0.1.0"],
-  ["malformed peer", { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: 42 } }, "Incompatible Schway peer"],
+  ["malformed peer", { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: 42 } }, "Invalid Schway peer range"],
   ["bundled harness", { schway: { extensions: ["main.ts"] }, dependencies: { schway: "*" } }, "peerDependencies instead"],
+  ...["garbage", "workspace:*", "latest", "not valid semver", ">=0.1.0 garbage", "npm:schway@^0.1.0", "file:../schway", ""].map(range => [
+    `malformed peer ${JSON.stringify(range)}`, { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: range } }, "Invalid Schway peer range",
+  ] as [string, unknown, string]),
 ];
 for (const [name, manifest, reason] of invalidManifests) {
   test(`${name} fails with package source before any enabled code executes`, async () => {
@@ -103,6 +106,41 @@ for (const [name, manifest, reason] of invalidManifests) {
       const error = await loadExtensions({ modules: [], workspace: workspace(work), home, tools: createToolRegistry() }).then(() => null, error => error);
       expect(String(error)).toContain('project package "bad"');
       expect(String(error)).toContain(reason);
+      expect(await Bun.file(marker).exists()).toBe(false);
+    });
+  });
+}
+
+for (const range of ["^0.1.0", "~0.1.0", ">=0.1.0 <0.2.0", "99.x || 0.1.x", "0.1.0 - 0.2.0", "*"]) {
+  test(`valid npm peer range ${range} enables a compatible installed package`, async () => {
+    await withIsolatedCliDirs(async ({ work, home }) => {
+      await installed(work, "compatible", { schway: { skills: [] }, peerDependencies: { schway: range } });
+      await configure(work, ["compatible"]);
+      expect((await discoverPackages({ workspaceRoot: work, home })).map(pkg => pkg.name)).toEqual(["compatible"]);
+    });
+  });
+}
+
+for (const declaration of [
+  { optionalDependencies: { schway: "99.0.0" } },
+  { bundleDependencies: ["schway"] },
+  { bundledDependencies: ["schway"] },
+  { bundleDependencies: true, dependencies: { schway: "99.0.0" } },
+  { bundledDependencies: true, optionalDependencies: { schway: "99.0.0" } },
+]) {
+  test(`second harness declaration ${JSON.stringify(declaration)} fails before importing its nested API`, async () => {
+    await withIsolatedCliDirs(async ({ work, home }) => {
+      const marker = join(work, "nested-api-ran");
+      const dir = await installed(work, "second-harness", { ...declaration, peerDependencies: { schway: "^0.1.0" }, schway: { extensions: ["main.ts"] } }, {
+        "main.ts": "import { defineExtension } from 'schway/extensions'; export default defineExtension(() => {});",
+      });
+      await installed(dir, "schway", { version: "99.0.0", exports: { "./extensions": "./api.js" } }, {
+        "api.js": `await Bun.write(${JSON.stringify(marker)}, 'bad'); export const defineExtension = fn => fn;`,
+      });
+      await configure(work, ["second-harness"]);
+      const error = await loadExtensions({ modules: [], workspace: workspace(work), home, tools: createToolRegistry() }).then(() => null, error => error);
+      expect(String(error)).toContain('project package "second-harness"');
+      expect(String(error)).toContain("peerDependencies instead");
       expect(await Bun.file(marker).exists()).toBe(false);
     });
   });
@@ -257,7 +295,7 @@ test("packaged skills activate through the model tool with metadata-only initial
 
 test("package modules resolve their own installed dependencies from the original package directory", async () => {
   await withIsolatedCliDirs(async ({ work, home }) => {
-    const dir = await installed(work, "owner", { dependencies: { "owned-helper": "1.0.0" }, schway: { extensions: ["main.ts"] } }, {
+    const dir = await installed(work, "owner", { dependencies: { "owned-helper": "1.0.0" }, bundleDependencies: true, schway: { extensions: ["main.ts"] } }, {
       "main.ts": "import message from 'owned-helper'; export default ctx => ctx.registerPrompt({ name: 'owned-dependency', content: message });",
     });
     await installed(dir, "owned-helper", { main: "index.js" }, { "index.js": "export default 'Loaded from package dependency';" });

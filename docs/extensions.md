@@ -287,8 +287,10 @@ A package's `schway` manifest accepts `extensions` (module files) and `skills`
 remain within the canonical package root. Schway validates every enabled manifest,
 path, and declared `peerDependencies.schway` range before importing any extension.
 Use `schway/extensions` from the installed Schway peer; keep other package
-requirements in your own `dependencies`. Declaring Schway in `dependencies` is
-rejected to avoid bundling a second harness. Skills-only manifests execute no
+requirements in your own `dependencies`. Declaring Schway in `dependencies`,
+`optionalDependencies`, `bundleDependencies`, or `bundledDependencies` is
+rejected to avoid bundling a second harness. Peer ranges must be valid npm
+semver ranges; package aliases, protocols, and dist-tags are rejected. Skills-only manifests execute no
 JavaScript entrypoint or lifecycle scripts during discovery.
 
 Initializers run global packages, then project packages, then explicit CLI modules;
