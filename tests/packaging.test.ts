@@ -152,6 +152,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/src/extensions/loader.ts",
       "package/examples/extensions/greet.ts",
       "package/examples/extensions/commands-and-events.ts",
+      "package/examples/extensions/context.ts",
       "package/package.json",
       "package/README.md",
       "package/LICENSE",
@@ -181,10 +182,11 @@ test("npm pack installs the public extension API and completes a headless tool r
     // A consumer uses only the public installed contract, with ordinary Bun types.
     await Bun.write(join(installDir, "greet.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/greet.ts")).text());
     await Bun.write(join(installDir, "commands-and-events.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/commands-and-events.ts")).text());
+    await Bun.write(join(installDir, "context.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/context.ts")).text());
     const checked = await runCommand([
       join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict", "--skipLibCheck",
       "--moduleResolution", "bundler", "--module", "esnext", "--target", "esnext",
-      "--allowImportingTsExtensions", "--types", "bun", "greet.ts", "commands-and-events.ts",
+      "--allowImportingTsExtensions", "--types", "bun", "greet.ts", "commands-and-events.ts", "context.ts",
     ], { cwd: installDir });
     expect(checked.stdout + checked.stderr).toBe("");
     expect(checked.exitCode).toBe(0);
@@ -213,11 +215,16 @@ test("npm pack installs the public extension API and completes a headless tool r
         join(installDir, "node_modules/.bin/schway"), "-p", "greet Ada", "--json",
         "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${server.port}/v1`,
         "--model", "fixture", "--auth", "none", "--extension", "greet.ts",
-        "--extension", "commands-and-events.ts",
+        "--extension", "commands-and-events.ts", "--extension", "context.ts",
       ], { cwd: installDir, env: buildIsolatedCliEnv(isolatedHome) });
       expect(conversation.stderr).toBe("");
       expect(conversation.exitCode).toBe(0);
       expect(requests).toHaveLength(2);
+      for (const request of requests) {
+        expect(JSON.stringify(request.messages)).toContain("Distinguish observed results from assumptions.");
+        expect(JSON.stringify(request.messages)).toContain("Explain changed behavior, observed checks, and remaining limits concisely.");
+        expect(JSON.stringify(request.messages)).toContain("Use relevant deterministic checks before reporting success.");
+      }
       expect(requests[0]!.tools?.some((tool) => tool.function.name === "greet")).toBe(true);
       expect(requests[1]!.messages?.filter((message) => message.role === "tool"))
         .toEqual([{ role: "tool", tool_call_id: "greet-call", content: "Hello, Ada!" }]);

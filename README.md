@@ -170,7 +170,8 @@ export default defineExtension(({ registerTool }) => {
 
 `defineExtension` only supplies typing; a default function typed as `Extension`
 works too. The registration context exposes `registerTool`, `registerCommand`,
-`onRuntimeEvent`, `onDispose`, and a runtime lifetime `signal`. Await all
+`registerPrompt`, `beforeAgent`, `context`, `beforeModel`, `onRuntimeEvent`,
+`onDispose`, and a runtime lifetime `signal`. Await all
 initialization work before returning; registration closes when initialization
 finishes. A thrown initializer, invalid tool/schema, duplicate name, or even a
 caught registration error fails startup with the extension's identity and leaves
@@ -221,6 +222,22 @@ short and heed their signal. Unsubscribe, session replacement, and disposal
 cancel pending listener work; late events from a replaced turn are fenced out.
 Headless diagnostics go to stderr, preserving JSONL stdout.
 
+`registerPrompt({ name, content })` adds named dynamic context to ordinary model
+requests. `beforeAgent` runs once per user turn and may add turn context or deny
+with an explanation. `context` transforms the assembled named sections, and
+`beforeModel` transforms a Schway-native request or denies it. Each waterfall
+awaits hooks in extension load order, using detached copies and validated returns.
+Changes are ephemeral; durable user messages and registered tools stay intact.
+Transport retries reuse the prepared request. Compaction summaries bypass hooks;
+normal request hooks run again after overflow recovery. See the guide for return
+contracts, structural section retention, cancellation, and tool selection.
+
+The shipped context example works in either mode:
+
+```bash
+bun run dev -- -p "Explain this project" --extension examples/extensions/context.ts
+```
+
 See [the extension API guide](docs/extensions.md) for lifecycle details. The
 shipped `examples/extensions/commands-and-events.ts` provides `/event-counts`
 and `/ask-extension <prompt>`:
@@ -234,7 +251,7 @@ Extensions are trusted local code with the process's full filesystem, network,
 and environment access. This is not a sandbox, and startup cannot roll back
 arbitrary module side effects. The registration API does not expose replacements
 for Schway's loop, models, sessions, context management, or scheduler. Custom
-prompt hooks and package installation are outside this API. JavaScript callbacks
+provider payload hooks and package installation are outside this API. JavaScript callbacks
 share the process thread; Schway cannot preempt synchronous blocking code or
 undo side effects from work that ignores cancellation.
 

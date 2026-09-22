@@ -1,9 +1,9 @@
-# Extension commands and runtime observation
+# Extension requests, commands, and runtime observation
 
 Load an explicitly enabled local TypeScript module with `--extension path.ts`.
 Its default `defineExtension` initializer receives the public contract from
 `schway/extensions`. Initializers run in flag order before model requests. Tool,
-command, observer, and disposal registration closes when the initializer returns.
+command, prompt, request hook, observer, and disposal registration closes when the initializer returns.
 All registrations are staged together; any invalid or conflicting declaration
 fails startup even if the initializer catches the registration exception.
 
@@ -34,6 +34,86 @@ export default defineExtension((extension) => {
   extension.onDispose(unsubscribe);
 });
 ```
+
+## Prompt contributions and native request hooks
+
+Register these capabilities during initialization through `schway/extensions`:
+
+| Registration | Input | Accepted return |
+| --- | --- | --- |
+| `registerPrompt(section)` | `{ name: string, content: string }` | No handler; a detached section is added to each normal request |
+| `beforeAgent(hook)` | `{ message: UserMessage, context: ContextSection[], signal }` | `{ context: [...] }`, `{ deny: "explanation" }`, or `undefined` |
+| `context(hook)` | `{ context: ContextSection[], signal }` | The next section list, or `undefined` |
+| `beforeModel(hook)` | `{ systemPrompt, context, items, tools?, signal }` | The next complete native request, `{ deny: "explanation" }`, or `undefined` |
+
+Handlers may return promises. Each phase runs in extension load order and then
+registration order within that extension, awaiting every handler before the next.
+Later handlers see earlier accepted changes. `undefined` means no change, even
+if the handler mutated its input. Inputs and accepted outputs are detached copies;
+retained references cannot alter durable records or later requests.
+
+`beforeAgent` runs once per submitted user turn, before the first model request.
+`message` is a copy of the submitted user message and cannot be rewritten through
+this phase. Its `context` starts empty. Return the accumulated list with additions
+appended; preceding sections must remain unchanged. Turn context survives tool
+rounds and overflow recovery, then is discarded when the turn ends. New or resumed
+turns start fresh. Denials require a nonempty explanation and stop the affected
+turn without sending an ordinary model request.
+
+`registerPrompt` names must be unique across enabled extensions. Schway reserves
+`environment`, `project-instructions`, `available-skills`, `active-skill`, and
+`summary`; prompt and turn contributions cannot claim these names. Duplicate
+prompt registration reports both source paths. Before each logical request,
+Schway prepares ordinary environment, applicable project instructions, skill
+metadata/body, and any compaction summary, then appends registered prompts and
+turn context. The `context` waterfall receives all of them. It may modify content,
+reorder sections, or append sections; every existing name must occur exactly once.
+This keeps structural sections identifiable throughout interception.
+
+`beforeModel` runs after the context waterfall. Its native `items` are conversation
+records (`user`, `assistant`, and `tool_result`), never provider wire messages or
+durable compaction markers. It may transform the ephemeral system prompt, context,
+and conversation. Keep existing context names and complete tool-call/result groups.
+The return must keep the exact supplied `signal`; spreading the input request is
+the simplest way to do that. Extra request or conversation fields are rejected.
+Opaque native `providerMetadata` is retained for replay, not a provider-payload
+interception API. Public types include `BeforeAgentInput`, `BeforeAgentHook`,
+`ContextHook`, `BeforeModelHook`, `ExtensionModelRequest`, `ExtensionDenial`,
+`ContextSection`, `ConversationItem`, `UserMessage`, and `ModelTool`.
+
+The optional `tools` list contains descriptions only. A hook may select or reorder
+registered definitions, including `activate_skill`, or return an empty/omitted
+list. It cannot invent tools, duplicate names, or alter names, descriptions, or
+schemas. Schway's executable registry and durable session remain unchanged.
+
+Transport retries reuse the same prepared request without rerunning hooks.
+Overflow recovery compacts, rebuilds normal context, and reruns `context` and
+`beforeModel`; it does not rerun `beforeAgent`. Pressure, manual, and overflow
+summarization use Schway's internal model request directly, without extension
+prompt contributions or hooks. Normal skill and extension context is reassembled
+afterward. System override files still supply the base system prompt before
+interception; replacing that prompt does not remove structural context.
+
+Throws, rejected promises, and invalid returns stop the affected request with a
+source-labelled phase error and retry/disable guidance. Errors redact configured
+credentials and are bounded to 50,000 characters. Later valid turns remain usable;
+already accepted tool calls have settled before the next request hook runs.
+Each invocation receives the turn/runtime cancellation signal. Cancellation stops
+waiting even for an unresolved hook promise and observes any late rejection.
+Extensions must still stop their own side effects when the signal aborts.
+
+The installed package includes `examples/extensions/context.ts`, exercising all
+three hooks and prompt contributions. Copy it into a project with Schway installed:
+
+```sh
+schway -p "Explain this project" --extension ./context.ts
+# From this repository:
+bun run dev -- -p "Explain this project" --extension examples/extensions/context.ts
+```
+
+For a request policy, a hook can return `{ deny: "Explain why this request cannot
+proceed." }`. Denial is a user-visible failure, not an assistant answer, and does
+not change the submitted durable user message.
 
 ## Interactive commands
 
@@ -114,4 +194,8 @@ From the repository, run `bun run dev -- --extension
 examples/extensions/commands-and-events.ts` on one line. Deterministic tests use
 the real controller and loop with scripted models, including cancellation,
 collisions, listener failures/mutation, bounded queues, JSONL parity, and new/resume
-cleanup. They do not provide live-provider or human terminal validation.
+cleanup. Request tests additionally cover actual scripted requests, ordered
+waterfalls, retries, pressure/overflow summaries, durable JSONL resume, invalid
+outputs, retained-reference mutation, and cancellation after tool settlement.
+Installed-package verification uses a local protocol fixture. These checks do
+not provide live-provider or human terminal validation.

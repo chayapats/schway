@@ -1,7 +1,7 @@
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
-import type { ContextManager, PreparedContext } from "../context/manager.ts";
-import type { Model, ModelTool } from "../model/model.ts";
+import type { ContextManager, ContextSection, PreparedContext } from "../context/manager.ts";
+import type { Model, ModelRequest, ModelTool } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import { createActivateSkillTool } from "../skills/activate.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
@@ -54,7 +54,26 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   const clock = options.clock ?? systemClock();
   let tools = options.tools;
+  const hooks = options.extensions?.hooks.active ? options.extensions.hooks : undefined;
+  const signal = hooks
+    ? AbortSignal.any([options.extensions!.signal, ...(options.signal ? [options.signal] : [])])
+    : options.signal;
+  let turnContext: ContextSection[] = [];
   const finishTurn = options.contextManager.beginTurn();
+
+  /** Intercept ordinary requests after native context assembly, sharing the path used after overflow. */
+  async function prepareRequest(prepared: PreparedContext): Promise<ModelRequest> {
+    const request: ModelRequest = {
+      systemPrompt: prepared.systemPrompt,
+      context: prepared.context,
+      items: prepared.items,
+      tools: toModelTools(tools),
+      signal,
+    };
+    return hooks
+      ? hooks.prepare(request, turnContext, signal!)
+      : request;
+  }
 
   /** Force one compaction and retry the overflowed turn once; null when terminated. */
   async function* recoverFromOverflow(): AsyncGenerator<
@@ -64,16 +83,16 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       prepared: PreparedContext;
     } | null
   > {
-    if (options.signal?.aborted) {
+    if (signal?.aborted) {
       yield { type: "agent.finished", reason: "cancelled" };
       return null;
     }
     yield { type: "compaction.started", reason: "overflow" };
     const record = await options.contextManager.compact(options.session, options.model, {
       reason: "overflow",
-      signal: options.signal,
+      signal,
     });
-    if (options.signal?.aborted) {
+    if (signal?.aborted) {
       if (record) {
         yield {
           type: "compaction.finished",
@@ -113,7 +132,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     const prepared = await options.contextManager.prepare(
       options.session,
       options.model,
-      { signal: options.signal },
+      { signal },
     );
     if (prepared.compaction) {
       yield { type: "compaction.started", reason: "pressure" };
@@ -127,15 +146,9 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     }
     const outcome = yield* streamModelTurn({
       model: options.model,
-      request: {
-        systemPrompt: prepared.systemPrompt,
-        context: prepared.context,
-        items: prepared.items,
-        tools: toModelTools(tools),
-        signal: options.signal,
-      },
+      request: await prepareRequest(prepared),
       clock,
-      signal: options.signal,
+      signal,
     });
     if (outcome.kind === "overflow") {
       yield {
@@ -157,8 +170,12 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         createActivateSkillTool(options.contextManager),
       ]);
     }
+    const user = options.session.items.findLast(item => item.type === "user");
+    if (hooks && user?.type === "user") {
+      turnContext = await hooks.beginTurn(user, signal!);
+    }
     for (let turn = 0; turn < maxTurns; turn++) {
-      if (options.signal?.aborted) {
+      if (signal?.aborted) {
         yield { type: "agent.finished", reason: "cancelled" };
         return;
       }
@@ -166,7 +183,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       let prepared = await options.contextManager.prepare(
         options.session,
         options.model,
-        { signal: options.signal },
+        { signal },
       );
       if (prepared.compaction) {
         yield { type: "compaction.started", reason: "pressure" };
@@ -180,15 +197,9 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       }
       let outcome = yield* streamModelTurn({
         model: options.model,
-        request: {
-          systemPrompt: prepared.systemPrompt,
-          context: prepared.context,
-          items: prepared.items,
-          tools: toModelTools(tools),
-          signal: options.signal,
-        },
+        request: await prepareRequest(prepared),
         clock,
-        signal: options.signal,
+        signal,
       });
       if (outcome.kind === "overflow") {
         const recovered = yield* recoverFromOverflow();
@@ -221,14 +232,14 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         calls,
         registry: tools,
         workspace: options.workspace,
-        signal: options.signal,
+        signal,
         maxConcurrentTools: options.maxConcurrentTools,
       });
       for (const item of executed) {
         options.session.append(item.result);
       }
 
-      if (options.signal?.aborted) {
+      if (signal?.aborted) {
         yield { type: "agent.finished", reason: "cancelled" };
         return;
       }
@@ -236,8 +247,12 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
 
     yield { type: "agent.finished", reason: "max_turns" };
   } catch (error) {
-    yield { type: "error", message: errorMessage(error) };
-    yield { type: "agent.finished", reason: "error" };
+    if (signal?.aborted) {
+      yield { type: "agent.finished", reason: "cancelled" };
+    } else {
+      yield { type: "error", message: errorMessage(error) };
+      yield { type: "agent.finished", reason: "error" };
+    }
   } finally {
     finishTurn();
   }

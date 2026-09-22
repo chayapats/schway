@@ -1,5 +1,40 @@
 import type { ToolDefinition } from "../tools/types.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
+import type { ContextSection } from "../context/manager.ts";
+import type { UserMessage } from "../conversation/types.ts";
+import type { ModelRequest } from "../model/model.ts";
+
+/** Named native dynamic context retained separately from the stable system prompt. */
+export type { ContextSection } from "../context/manager.ts";
+/** Native conversation and tool descriptions accepted by request hooks, without provider wire types. */
+export type { ConversationItem, UserMessage } from "../conversation/types.ts";
+/** Executable-free descriptions that request hooks may select without changing their definitions. */
+export type { ModelTool } from "../model/model.ts";
+
+/** Deny an agent turn or model request with a nonempty explanation shown to the user. */
+export interface ExtensionDenial { deny: string }
+
+/** Detached user input and accumulated turn-only context, supplied once per submitted turn. */
+export interface BeforeAgentInput {
+  message: UserMessage;
+  context: readonly ContextSection[];
+  readonly signal: AbortSignal;
+}
+
+/** Append turn-only sections, deny the turn, or leave the preceding hook's result unchanged. */
+export type BeforeAgentHook = (input: BeforeAgentInput) => void | { context: readonly ContextSection[] } | ExtensionDenial |
+  Promise<void | { context: readonly ContextSection[] } | ExtensionDenial>;
+
+/** Transform prepared dynamic sections in order while preserving each existing section's name. */
+export type ContextHook = (input: { context: readonly ContextSection[]; readonly signal: AbortSignal }) =>
+  void | readonly ContextSection[] | Promise<void | readonly ContextSection[]>;
+
+/** Detached provider-independent request with a cancellation signal owned by Schway. */
+export interface ExtensionModelRequest extends ModelRequest { readonly signal: AbortSignal }
+
+/** Replace ephemeral request data, deny the request, or retain the preceding hook's result. */
+export type BeforeModelHook = (request: ExtensionModelRequest) =>
+  void | ExtensionModelRequest | ExtensionDenial | Promise<void | ExtensionModelRequest | ExtensionDenial>;
 
 /** Public JSON Schema and invocation contracts shared with native tools. */
 export type {
@@ -35,6 +70,14 @@ export interface ExtensionCommand {
 /** Capabilities available while an explicitly enabled extension initializes, owned until runtime disposal. */
 export interface ExtensionContext {
   readonly signal: AbortSignal;
+  /** Add one named dynamic prompt section to every ordinary request, never to internal summaries. */
+  registerPrompt(section: ContextSection): void;
+  /** Register an ordered hook that adds context or denies once per submitted user turn. */
+  beforeAgent(hook: BeforeAgentHook): void;
+  /** Register an ordered waterfall after structural and extension context has been assembled. */
+  context(hook: ContextHook): void;
+  /** Register an ordered native-request waterfall before each logical model request, excluding retries. */
+  beforeModel(hook: BeforeModelHook): void;
   /** Register a custom tool atomically with this module's other tools before initialization finishes. */
   registerTool<TInput = unknown>(tool: ToolDefinition<TInput>): void;
   /** Register an idle-only interactive slash command, rejecting core, skill, and extension collisions. */
