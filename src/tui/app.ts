@@ -21,7 +21,8 @@ import { findTool } from "../tools/find.ts";
 import { grepTool } from "../tools/grep.ts";
 import { lsTool } from "../tools/ls.ts";
 import { readTool } from "../tools/read.ts";
-import { createToolRegistry } from "../tools/registry.ts";
+import { loadExtensions } from "../extensions/loader.ts";
+import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
@@ -144,6 +145,17 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   }
 
   const secrets = collectSecrets(io.args.apiKey, env);
+  let tools: ToolRegistry;
+  try {
+    tools = await loadExtensions({
+      modules: io.args.extensions ?? [], workspace, secrets,
+      tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+    });
+  } catch (error) {
+    io.stderr.write(`${redactSecrets(messageOf(error), secrets)}\n`);
+    return 1;
+  }
+
   let model = io.model;
   let startupError: string | undefined;
   if (!model) {
@@ -187,15 +199,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         session: resumed,
         model,
         contextManager: resumedManager,
-        tools: createToolRegistry([
-          readTool,
-          writeTool,
-          editTool,
-          bashTool,
-          grepTool,
-          findTool,
-          lsTool,
-        ]),
+        tools,
         workspace: resumedWorkspace,
         provider: settings.provider,
         modelId: settings.model,
@@ -223,15 +227,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         session,
         model,
         contextManager: freshManager,
-        tools: createToolRegistry([
-          readTool,
-          writeTool,
-          editTool,
-          bashTool,
-          grepTool,
-          findTool,
-          lsTool,
-        ]),
+        tools,
         workspace,
         provider: settings.provider,
         modelId: settings.model,

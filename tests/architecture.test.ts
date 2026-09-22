@@ -48,6 +48,9 @@ test("core modules do not import provider SDKs", async () => {
     "src/tools/ls.ts",
     "src/tools/fs.ts",
     "src/tools/path.ts",
+    "src/extensions/index.ts",
+    "src/extensions/loader.ts",
+    "src/extensions/runtime.ts",
   ];
   for (const file of files) {
     const source = await Bun.file(file).text();
@@ -94,6 +97,9 @@ test("core modules never import the renderer", async () => {
     "src/tools/ls.ts",
     "src/tools/fs.ts",
     "src/tools/path.ts",
+    "src/extensions/index.ts",
+    "src/extensions/loader.ts",
+    "src/extensions/runtime.ts",
   ];
   for (const file of files) {
     const source = await Bun.file(file).text();

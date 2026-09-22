@@ -117,6 +117,95 @@ history; later turns and resumed sessions start without the body. Duplicate
 names at one level and names colliding with built-in commands (for example
 `/compact`) are reported in the listing and cannot be invoked.
 
+## Local TypeScript extensions
+
+Explicitly enable local tool modules with repeatable `--extension` flags. Both
+interactive and headless startup await their default initializers in argument
+order before sending any tool definitions to the model:
+
+```bash
+schway --extension ./greet.ts
+schway -p "Use greet to greet Ada" --extension ./greet.ts --extension ./other.ts
+# From this checkout, with dependencies installed:
+bun run dev -- -p "Use greet to greet Ada" --extension examples/extensions/greet.ts
+```
+
+Paths resolve from the primary workspace root (nearest Git root, otherwise the
+launch directory), including when launched from a subdirectory. Absolute paths
+are also accepted. Symlinks resolve to their real paths; duplicate module
+identities fail before any enabled module runs. A startup `--resume` uses the
+saved workspace root. Pass the flags again on each process launch: extension
+enablement is not saved in sessions or read from `config.json`. There is no
+directory scan, package discovery, automatic install, or dependency guessing.
+Unmentioned modules are never imported by Schway.
+
+Use the installed package's public `schway/extensions` entry; extension authors
+do not need private source imports or TypeBox. Resolve this import from the
+extension's project with Schway installed locally. The same entry works for
+examples inside this checkout. A complete example is included in
+`examples/extensions/greet.ts` in the package:
+
+```ts
+import { defineExtension } from "schway/extensions";
+
+export default defineExtension(({ registerTool }) => {
+  registerTool<{ name: string }>({
+    name: "greet",
+    description: "Greet someone by name.",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string", minLength: 1 } },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    execution: "parallel",
+    async execute({ name }, ctx) {
+      ctx.signal?.throwIfAborted();
+      ctx.onOutput?.({ stream: "stdout", text: "Preparing greeting…\n" });
+      return { content: `Hello, ${name}!` };
+    },
+  });
+});
+```
+
+`defineExtension` only supplies typing; a default function typed as `Extension`
+works too. The registration context exposes only `registerTool`. Await all
+initialization work before returning; registration closes when initialization
+finishes. A thrown initializer, invalid tool/schema, duplicate name, or even a
+caught registration error fails startup with the extension's identity and leaves
+no partially installed tools. Interactive startup also exits with that error,
+so fix the module and restart. Native tool names, including `activate_skill`,
+are reserved.
+
+`ToolDefinition`, `ToolContext`, `ToolExecutionResult`, `ToolExecutionMode`,
+`ToolOutputChunk`, `JsonSchema`, and `Workspace` are public types. Schemas are
+ordinary JSON Schema objects, compiled once without argument coercion; TypeBox
+objects are accepted too. Supported constructs include primitive types, object
+properties/required/additionalProperties, array items, enum/const, anyOf/oneOf,
+nullable, and numeric/string/array bounds. Unsupported keywords such as `$ref`,
+`pattern`, and `format`, or malformed schemas, fail at registration.
+
+Calls use Schway's normal validator and scheduler. Choose `parallel` only when
+overlapping calls are safe; `exclusive` waits for preceding calls and blocks
+later calls. `--max-concurrent-tools` still applies. `ctx.workspace` supplies
+canonical workspace paths, `ctx.signal` carries cancellation, and `ctx.onOutput`
+emits stdout/stderr runtime deltas. Tools must cooperate with cancellation and
+resolve or reject; Schway waits for running calls and cancels queued calls.
+
+Return `{ content: string, isError?: boolean, details?: unknown }`; `details`
+must be JSON-serializable and appears only in runtime events. Extension results
+and thrown errors are capped at 50,000 characters with truncation guidance;
+live output has a separate 50,000-character per-call cap. Argument-validation
+errors are bounded too. Known configured API keys are masked in extension
+results, errors, and output. Runtime deltas/details are not durable conversation
+records; each accepted call produces one durable tool result.
+
+Extensions are trusted local code with the process's full filesystem, network,
+and environment access. This is not a sandbox, and startup cannot roll back
+arbitrary module side effects. The registration API does not expose replacements
+for Schway's loop, models, sessions, context management, or scheduler. Custom
+commands, observers, prompt hooks, and package installation are outside this API.
+
 ## Configuration
 
 Schway is zero-config-first. Valid credentials are enough to run `schway -p "..."`. Config files are never created automatically.
