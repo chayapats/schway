@@ -20,9 +20,13 @@ export interface CredentialStore {
 export interface CredentialTarget {
   provider: "anthropic" | "openai" | "openai-compatible";
   baseUrl?: string;
+  /** Active compatible profile that scopes the stored identity alongside the endpoint. */
+  profile?: string;
+  /** Optional non-secret store suffix referenced by the active profile. */
+  credentialIdentity?: string;
 }
 
-/** Derive an endpoint-isolated account; labels never disclose URL userinfo, path or query values. */
+/** Derive an endpoint-isolated account scoped to profile identity and canonical endpoint. */
 export function credentialIdentity(target: CredentialTarget): CredentialIdentity {
   if (target.provider !== "openai-compatible") {
     return { account: `api-key:${target.provider}`, label: target.provider };
@@ -36,10 +40,13 @@ export function credentialIdentity(target: CredentialTarget): CredentialIdentity
   }
   url.hash = "";
   url.pathname = url.pathname.replace(/\/+$/, "") || "/";
-  const digest = createHash("sha256").update(url.href).digest("hex");
+  const profileSuffix = target.profile?.trim() ? `profile:${target.profile.trim()}:` : "";
+  const customSuffix = target.credentialIdentity?.trim() ? `custom:${target.credentialIdentity.trim()}:` : "";
+  const digest = createHash("sha256").update(`${profileSuffix}${customSuffix}${url.href}`).digest("hex");
+  const profileLabel = target.profile?.trim() ? ` profile "${target.profile.trim()}" ` : " ";
   return {
     account: `api-key:openai-compatible:${digest}`,
-    label: `openai-compatible (${url.host}, identity ${digest.slice(0, 12)})`,
+    label: `openai-compatible${profileLabel}(${url.host}, identity ${digest.slice(0, 12)})`,
   };
 }
 

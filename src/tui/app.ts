@@ -146,7 +146,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
 
-  const secrets = collectSecrets(io.args.apiKey, env);
+  const secrets = collectSecrets(io.args.apiKey, env, settings.credentialEnv);
   const credentialStore = io.credentialStore ?? createNativeCredentialStore();
   const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
     modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal,
@@ -177,6 +177,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         headers: settings.headers,
         extraBody: settings.extraBody,
         auth: settings.auth,
+        profile: settings.profile,
+        credentialEnv: settings.credentialEnv,
+        credentialIdentity: settings.credentialIdentity,
         runtimeApiKey: io.args.apiKey,
         env,
         fetch: io.fetch,
@@ -204,7 +207,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       rememberSecret: (key: string) => { if (!secrets.includes(key)) secrets.push(key); },
       reload: () => loadInteractiveModel(settings.provider, settings.model, {
         maxTokens: settings.maxOutput, baseUrl: settings.baseUrl, headers: settings.headers,
-        extraBody: settings.extraBody, auth: settings.auth, runtimeApiKey: io.args.apiKey,
+        extraBody: settings.extraBody, auth: settings.auth, profile: settings.profile,
+        credentialEnv: settings.credentialEnv, credentialIdentity: settings.credentialIdentity,
+        runtimeApiKey: io.args.apiKey,
         env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
       }),
     };
@@ -239,6 +244,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
+          profile: settings.profile,
           startupError,
           secrets,
         });
@@ -271,6 +277,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
+          profile: settings.profile,
           startupError,
           secrets,
         });
@@ -318,11 +325,12 @@ export async function stageInteractiveSettings(
   previous: ResolvedSettings,
   options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
 ): Promise<{ model?: Model; contextManager: ContextManager }> {
-  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth"] as const;
+  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
   if (adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth,
+      profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
     options.signal.throwIfAborted();
     if ("error" in loaded) throw new Error(loaded.error);
@@ -424,7 +432,7 @@ async function runTuiRenderer(options: {
         input.visible = true;
         input.focus();
       }
-      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
+      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
       try {
         header.content = headerText;
       } catch {
@@ -438,9 +446,9 @@ async function runTuiRenderer(options: {
       })));
       if (snapshot.modelPicker) {
         const picker = snapshot.modelPicker;
-        lines += `\n\nSelect model — search or type provider/model (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}\n`;
-        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.provider}/${entry.modelId} (${entry.contextWindow} ctx, ${entry.maxOutput} output)${entry.custom ? " [typed ID]" : ""}`).join("\n");
-        if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID.";
+        lines += `\n\nSelect model or profile — search or type provider/model or profile:<name> (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}\n`;
+        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output)${entry.custom ? " [typed ID]" : ""}`).join("\n");
+        if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID or profile:<name>.";
       }
       lines = redactSecrets(lines, options.secrets);
       const roots = options.controller.workspaceIdentity();
@@ -818,7 +826,8 @@ function hasCliConnectionOptions(args: CliArgs): boolean {
     args.baseUrl !== undefined ||
     args.headers !== undefined ||
     args.extraBody !== undefined ||
-    args.auth !== undefined
+    args.auth !== undefined ||
+    args.profile !== undefined
   );
 }
 
@@ -826,6 +835,7 @@ function hasCliConnectionOptions(args: CliArgs): boolean {
 function collectSecrets(
   runtimeApiKey: string | undefined,
   env: Record<string, string | undefined>,
+  credentialEnv?: string,
 ): string[] {
   const secrets: string[] = [];
   if (runtimeApiKey) {
@@ -841,6 +851,10 @@ function collectSecrets(
   if (openaiKey) {
     secrets.push(openaiKey);
   }
+  if (credentialEnv && credentialEnv !== COMPATIBLE_API_KEY_ENV) {
+    const profileKey = env[credentialEnv];
+    if (profileKey) secrets.push(profileKey);
+  }
   return secrets;
 }
 
@@ -854,6 +868,9 @@ export async function loadInteractiveModel(
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    profile?: string;
+    credentialEnv?: string;
+    credentialIdentity?: string;
     runtimeApiKey: string | undefined;
     env: Record<string, string | undefined>;
     fetch?: FetchLike;
@@ -864,6 +881,7 @@ export async function loadInteractiveModel(
 ): Promise<{ model: Model } | { error: string }> {
   const credential = await resolveProviderCredential({
     provider, baseUrl: options.baseUrl, auth: options.auth,
+    profile: options.profile, credentialEnv: options.credentialEnv, credentialIdentity: options.credentialIdentity,
     runtimeApiKey: options.runtimeApiKey, env: options.env,
     store: options.credentialStore ?? createNativeCredentialStore(),
   });

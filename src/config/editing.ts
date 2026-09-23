@@ -1,10 +1,11 @@
-import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, mergeConfigLayers, parseConfigObject, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { isValidProfileBaseUrl } from "./profile-name.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -48,10 +49,52 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
     for (const key of CONFIG_SETTING_NAMES) if (layer[key] !== undefined) origins[key] = origin;
     merged = mergeConfigLayers(merged, layer);
   }
+  const selectedName = merged.profile?.trim() || undefined;
+  if (selectedName !== undefined && isValidProfileName(selectedName)) {
+    const definitionOrigin = layers.project?.profiles?.[selectedName] !== undefined
+      ? "project"
+      : layers.user?.profiles?.[selectedName] !== undefined
+        ? "user-global"
+        : layers.cli?.profiles?.[selectedName] !== undefined
+          ? "CLI"
+          : layers.session?.profiles?.[selectedName] !== undefined
+            ? "current-session override"
+            : origins.profiles;
+    const profileLabel = `profile "${selectedName}"${definitionOrigin ? ` [${definitionOrigin}]` : ""}`;
+    const cliSessionOverrides = mergeConfigLayers(layers.cli, layers.session);
+    const activeProfile = mergeProfileMaps(layers.user?.profiles, layers.project?.profiles, layers.cli?.profiles, layers.session?.profiles)[selectedName];
+    const profileLayer = activeProfile === undefined ? undefined : profileToLayer(activeProfile);
+    // File direct connection keys sit below the selected profile while file budgets stay intact.
+    const strippedConnectionKeys = ["baseUrl", "model", "headers", "extraBody", "auth"] as const;
+    const profileKeys = ["baseUrl", "model", "contextWindow", "maxOutput", "headers", "extraBody", "auth"] as const;
+    for (const key of profileKeys) {
+      if (cliSessionOverrides[key] !== undefined) {
+        continue;
+      }
+      if (profileLayer !== undefined) {
+        if (profileLayer[key] !== undefined) {
+          origins[key] = profileLabel;
+          continue;
+        }
+        if ((strippedConnectionKeys as readonly string[]).includes(key)) {
+          delete origins[key];
+          continue;
+        }
+        continue;
+      }
+      if (merged[key] !== undefined) {
+        origins[key] = profileLabel;
+      }
+    }
+    if (cliSessionOverrides.model === undefined && layers.user?.model === undefined && layers.project?.model === undefined) {
+      modelFallbackSource = undefined;
+    }
+  }
   origins.model ??= "built-in default";
   origins.contextWindow ??= "catalog";
   origins.maxOutput ??= "catalog";
   origins.auth ??= "built-in default";
+  origins.profile ??= selectedName !== undefined ? origins.profile ?? "built-in default" : origins.profile;
   return { origins, modelFallbackSource };
 }
 
@@ -74,6 +117,11 @@ export class ConfigEditor {
   /** Return the source of each currently effective setting. */
   get origins(): ConfigOrigins { return configOrigins(this.layers); }
 
+  /** Return merged compatible profiles with project definitions replacing whole same-name profiles. */
+  get profiles(): Record<string, CompatibleProfile> {
+    return structuredClone(mergeProfileMaps(this.layers.user?.profiles, this.layers.project?.profiles, this.layers.cli?.profiles, this.layers.session?.profiles));
+  }
+
   /** Identify the provider override that discarded an inherited model and selected a built-in model default. */
   get modelFallbackSource(): string | undefined { return traceOrigins(this.layers).modelFallbackSource; }
 
@@ -90,13 +138,34 @@ export class ConfigEditor {
     return this.prepareChanges(edit.scope, [edit]);
   }
 
-  /** Stage provider and model together as one session override. */
+  /** Stage provider and model together as one session override, clearing any profile selection. */
   async prepareModel(provider: string, model: string): Promise<ConfigTransaction> {
-    return this.prepareChanges("session", [{ key: "provider", value: provider }, { key: "model", value: model }]);
+    return this.prepareChanges("session", [
+      { key: "provider", value: provider },
+      { key: "model", value: model },
+      // Session-only null clears profile selections from user, project, and CLI layers.
+      { key: "profile", value: null },
+    ]);
+  }
+
+  /** Stage a named compatible profile switch as one session override, clearing shadowed direct keys. */
+  async prepareProfile(profile: string, scope: ConfigScope = "session"): Promise<ConfigTransaction> {
+    const connectionKeys = ["provider", "model", "baseUrl", "auth", "contextWindow", "maxOutput"];
+    return this.prepareChanges(scope, [
+      { key: "profile", value: profile },
+      ...(scope === "session"
+        ? connectionKeys.map((key) => ({ key, value: undefined as unknown as string | undefined }))
+        : []),
+    ]);
   }
 
   private async prepareChanges(scope: ConfigScope, changes: Array<{ key: string; value?: unknown }>): Promise<ConfigTransaction> {
     for (const edit of changes) if (!(EDITABLE_CONFIG_KEYS as readonly string[]).includes(edit.key)) throw new Error(`Unsupported or secret setting. Editable keys: ${EDITABLE_CONFIG_KEYS.join(", ")}. API-key/token fields are not ordinary configuration.`);
+    // A session reset of profile records the cleared marker so file and CLI selections stay cleared.
+    const normalized = scope === "session"
+      ? changes.map((edit) => edit.key === "profile" && edit.value === undefined ? { ...edit, value: null } : edit)
+      : changes;
+    const expanded = expandProfileSwitch(scope, normalized);
     const revision = this.revision;
     const path = scope === "session" ? undefined : this.paths[scope];
     const before = path ? await readText(path) : undefined;
@@ -110,14 +179,14 @@ export class ConfigEditor {
       source = json as ConfigLayer;
     }
     const layer = { ...source } as Record<string, unknown>;
-    for (const edit of changes) {
+    for (const edit of expanded) {
       if (edit.value === undefined) delete layer[edit.key];
       else layer[edit.key] = edit.value;
     }
     const parsed = parseConfigObject(layer, scope);
     if ("error" in parsed) throw new Error(parsed.error);
-    for (const edit of changes) if ((edit.key === "model" || edit.key === "baseUrl") && edit.value !== undefined && !parsed[edit.key]?.trim()) throw new Error(`${edit.key} must be a nonempty string.`);
-    if (scope !== "session" && changes.some(edit => edit.key === "baseUrl" && edit.value !== undefined)) validatePersistedBaseUrl(parsed.baseUrl!);
+    for (const edit of expanded) if ((edit.key === "model" || edit.key === "baseUrl" || edit.key === "profile") && typeof edit.value === "string" && !parsed[edit.key]?.trim()) throw new Error(`${edit.key} must be a nonempty string.`);
+    if (scope !== "session" && expanded.some(edit => edit.key === "baseUrl" && edit.value !== undefined)) validatePersistedBaseUrl(parsed.baseUrl!);
     const layers = { ...this.layers, [scope]: parsed };
     const settings = resolved(layers);
     return { settings, origins: configOrigins(layers), commit: async (signal) => {
@@ -126,7 +195,7 @@ export class ConfigEditor {
       this.committing = true;
       try {
         const saved = { ...source } as Record<string, unknown>;
-        for (const edit of changes) {
+        for (const edit of expanded) {
           if (edit.value === undefined) delete saved[edit.key];
           else saved[edit.key] = parsed[edit.key as keyof ConfigLayer];
         }
@@ -140,11 +209,30 @@ export class ConfigEditor {
   }
 }
 
+function expandProfileSwitch(scope: ConfigScope, changes: Array<{ key: string; value?: unknown }>): Array<{ key: string; value?: unknown }> {
+  const setsProfile = changes.some((edit) => edit.key === "profile" && typeof edit.value === "string");
+  if (scope !== "session" || !setsProfile) {
+    return changes;
+  }
+  const explicit = new Set(changes.map((edit) => edit.key));
+  const connectionKeys = ["provider", "model", "baseUrl", "auth", "contextWindow", "maxOutput"];
+  const cleared = connectionKeys
+    .filter((key) => !explicit.has(key))
+    .map((key) => ({ key, value: undefined as unknown as string | undefined }));
+  return [...changes, ...cleared];
+}
+
 function validatePersistedBaseUrl(value: string): void {
-  let url: URL;
-  try { url = new URL(value); }
-  catch { throw new Error("Persisted baseUrl must be an absolute URL without userinfo or query parameters. Use session scope for runtime-only URLs."); }
-  if (url.username || url.password || url.href.split("#", 1)[0]!.includes("?")) {
+  if (!isValidProfileBaseUrl(value)) {
+    let hasUrl = true;
+    try {
+      new URL(value);
+    } catch {
+      hasUrl = false;
+    }
+    if (!hasUrl) {
+      throw new Error("Persisted baseUrl must be an absolute URL without userinfo or query parameters. Use session scope for runtime-only URLs.");
+    }
     throw new Error("Persisted baseUrl must not contain userinfo or query parameters. Use session scope for runtime-only URLs.");
   }
 }

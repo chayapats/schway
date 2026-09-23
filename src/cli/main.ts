@@ -173,7 +173,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
-  const secrets = collectSecrets(parsed.args.apiKey, env);
+  const secrets = collectSecrets(parsed.args.apiKey, env, settings.credentialEnv);
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   try {
@@ -313,6 +313,7 @@ function errorMessage(error: unknown): string {
 function collectSecrets(
   runtimeApiKey: string | undefined,
   env: Record<string, string | undefined>,
+  credentialEnv?: string,
 ): string[] {
   const secrets: string[] = [];
   if (runtimeApiKey) {
@@ -327,6 +328,10 @@ function collectSecrets(
   const openaiKey = env.OPENAI_API_KEY;
   if (openaiKey) {
     secrets.push(openaiKey);
+  }
+  if (credentialEnv && credentialEnv !== COMPATIBLE_API_KEY_ENV) {
+    const profileKey = env[credentialEnv];
+    if (profileKey) secrets.push(profileKey);
   }
   return secrets;
 }
@@ -388,7 +393,8 @@ function hasCliConnectionOptions(args: CliArgs): boolean {
     args.baseUrl !== undefined ||
     args.headers !== undefined ||
     args.extraBody !== undefined ||
-    args.auth !== undefined
+    args.auth !== undefined ||
+    args.profile !== undefined
   );
 }
 
@@ -403,6 +409,9 @@ async function loadCliModel(
     provider: settings.provider,
     baseUrl: settings.baseUrl,
     auth: settings.auth,
+    profile: settings.profile,
+    credentialEnv: settings.credentialEnv,
+    credentialIdentity: settings.credentialIdentity,
     runtimeApiKey,
     env: io.env,
     store: io.credentialStore ?? createNativeCredentialStore(),
