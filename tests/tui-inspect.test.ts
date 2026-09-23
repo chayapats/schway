@@ -66,18 +66,17 @@ function turns(count: number) {
   return items;
 }
 
-test("slash commands cover the v0.1 set plus skills and workspace attachments", () => {
+test("slash commands include credential management and settings", () => {
   expect(parseSlashCommand("/compact")?.name).toBe("compact");
   expect(parseSlashCommand("/config")?.name).toBe("config");
   expect(parseSlashCommand("/model openai/gpt-4o")?.args).toBe("openai/gpt-4o");
   expect(parseSlashCommand("/skills")?.name).toBe("skills");
   const help = helpText();
-  for (const command of ["/new", "/sessions", "/resume", "/model", "/compact", "/skills", "/add-dir", "/config", "/help", "/quit"]) {
+  for (const command of ["/new", "/sessions", "/resume", "/model", "/compact", "/skills", "/add-dir", "/config", "/login", "/logout", "/help", "/quit"]) {
     expect(help).toContain(command);
   }
-  for (const outOfScope of ["/login", "/logout"]) {
-    expect(help).not.toContain(outOfScope);
-  }
+  expect(parseSlashCommand("/login openai")?.args).toBe("openai");
+  expect(parseSlashCommand("/logout openai")?.name).toBe("logout");
 });
 
 test("model args accept known, unknown, and provider-qualified ids", () => {

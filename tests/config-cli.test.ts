@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { runCli } from "../src/cli/main.ts";
 import type { Model } from "../src/model/model.ts";
 import { DEFAULT_MODEL_IDS } from "../src/model/catalog.ts";
@@ -67,6 +68,7 @@ async function run(
       },
       cwd: options.cwd ?? process.cwd(),
       model: options.model,
+      credentialStore: fakeCredentialStore(),
       createModel: options.createModel,
       fetch: options.fetch,
     });

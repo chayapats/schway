@@ -144,7 +144,7 @@ test("provider failures appear as actionable errors with error status", async ()
   });
 });
 
-test("missing credentials fail as an actionable UI error without a login flow", async () => {
+test("missing credentials explain the interactive login path", async () => {
   await withTempDir(async (dir) => {
     const workspace = workspaceFor(dir);
     const controller = new TuiController({
@@ -167,7 +167,7 @@ test("missing credentials fail as an actionable UI error without a login flow", 
     snapshot = controller.snapshot();
     const lastError = [...snapshot.transcript].reverse().find((entry) => entry.kind === "error");
     expect(lastError?.text).toContain("Missing credentials");
-    expect(lastError?.text).toContain("Subscription login is not supported");
+    expect(lastError?.text).toContain("/login <provider>");
     expect(snapshot.status).toBe("error");
   });
 });

@@ -1,11 +1,9 @@
 import { resolve } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
-import {
-  redactSecrets,
-  resolveAnthropicApiKey,
-  resolveOpenAIApiKey,
-} from "../auth/secrets.ts";
+import { redactSecrets } from "../auth/secrets.ts";
+import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential } from "../auth/credentials.ts";
+import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { loadResolvedSettings, type ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { createContextManager } from "../context/manager.ts";
@@ -65,6 +63,8 @@ export interface CliIo {
   cwd: string;
   signal?: AbortSignal;
   model?: Model;
+  /** Override OS credential storage for embedding or deterministic tests. */
+  credentialStore?: CredentialStore;
   /** Override provider HTTP transport when the built-in model loader is used. */
   fetch?: FetchLike;
   /** Construct a model from resolved provider settings instead of using the built-in loader. */
@@ -99,6 +99,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
   if (!parsed.args.prompt) {
     return runInteractive(parsed.args, io);
+  }
+
+  if (/^\s*\/(?:login|logout)(?:\s|$)/i.test(parsed.args.prompt)) {
+    io.stderr.write("Credential management requires interactive mode. Start schway without -p.\n");
+    return 1;
   }
 
   const home = io.env.HOME;
@@ -317,6 +322,8 @@ function collectSecrets(
   if (anthropicKey) {
     secrets.push(anthropicKey);
   }
+  const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
+  if (compatibleKey) secrets.push(compatibleKey);
   const openaiKey = env.OPENAI_API_KEY;
   if (openaiKey) {
     secrets.push(openaiKey);
@@ -392,60 +399,33 @@ async function loadCliModel(
   io: CliIo,
   secrets: string[],
 ): Promise<{ model: Model } | { error: string }> {
-  if (settings.provider === "openai-compatible") {
-    const auth = settings.auth ?? "optional";
-    const apiKey = runtimeApiKey?.trim() || undefined;
-    if (auth === "required" && apiKey === undefined) {
-      return {
-        error:
-          "Missing API key for OpenAI-compatible endpoint. Pass --api-key.",
-      };
-    }
-    if (apiKey) {
-      secrets.push(apiKey);
-    }
-    const input = {
-      apiKey,
-      provider: settings.provider,
-      model: settings.model,
-      maxTokens: settings.maxOutput,
-      baseUrl: settings.baseUrl,
-      headers: settings.headers,
-      extraBody: settings.extraBody,
-      auth,
-    };
-    return {
-      model: io.createModel
-        ? await io.createModel(input)
-        : await loadProviderModel(input, io.fetch),
-    };
-  }
-
-  const credential =
-    settings.provider === "openai"
-      ? resolveOpenAIApiKey({
-          runtimeApiKey,
-          env: io.env,
-        })
-      : resolveAnthropicApiKey({
-          runtimeApiKey,
-          env: io.env,
-        });
-  if ("error" in credential) {
-    return credential;
-  }
-  secrets.push(credential.apiKey);
+  const credential = await resolveProviderCredential({
+    provider: settings.provider,
+    baseUrl: settings.baseUrl,
+    auth: settings.auth,
+    runtimeApiKey,
+    env: io.env,
+    store: io.credentialStore ?? createNativeCredentialStore(),
+  });
+  if ("error" in credential) return credential;
+  if (credential.apiKey) secrets.push(credential.apiKey);
   const input = {
     apiKey: credential.apiKey,
     provider: settings.provider,
     model: settings.model,
     maxTokens: settings.maxOutput,
+    ...(settings.provider === "openai-compatible" ? {
+      baseUrl: settings.baseUrl,
+      headers: settings.headers,
+      extraBody: settings.extraBody,
+      auth: settings.auth ?? "optional",
+    } : {}),
   };
-  return {
-    model: io.createModel
-      ? await io.createModel(input)
-      : await loadProviderModel(input, io.fetch),
-  };
+  try {
+    return { model: io.createModel ? await io.createModel(input) : await loadProviderModel(input, io.fetch) };
+  } catch (error) {
+    return { error: redactSecrets(errorMessage(error), secrets) };
+  }
 }
 
 /** Open the interactive terminal without bundling it into headless startup. */
@@ -459,6 +439,7 @@ async function runInteractive(args: CliArgs, io: CliIo): Promise<number> {
     args,
     signal: io.signal,
     model: io.model,
+    credentialStore: io.credentialStore,
     fetch: io.fetch,
     createModel: io.createModel,
   });

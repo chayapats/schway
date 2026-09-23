@@ -22,6 +22,8 @@ export const RESERVED_SKILL_NAMES: readonly string[] = [
   "skills",
   "add-dir",
   "config",
+  "login",
+  "logout",
   "help",
   "quit",
 ];

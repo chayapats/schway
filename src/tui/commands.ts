@@ -13,6 +13,8 @@ export type SlashCommandName =
   | "skills"
   | "add-dir"
   | "config"
+  | "login"
+  | "logout"
   | "help"
   | "quit";
 
@@ -45,6 +47,8 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "skills":
     case "add-dir":
     case "config":
+    case "login":
+    case "logout":
     case "help":
     case "quit":
       return { name, raw: trimmed, args };
@@ -69,6 +73,8 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/config - show effective settings and their origins with secrets redacted",
     "/config set <key> <value> [--scope user|project] - edit settings (session only by default)",
     "/config reset <key> [--scope user|project] - remove an override and inherit its fallback",
+    "/login <anthropic|openai|openai-compatible> - enter an API key in a masked prompt",
+    "/logout <anthropic|openai|openai-compatible> - remove the selected stored API key",
     "/help - show this help",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
