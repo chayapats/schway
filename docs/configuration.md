@@ -21,7 +21,7 @@ Textual commands remain available:
 
 `/config` displays effective values and their origins: built-in default, user-global, project, CLI, or current-session override. Context/output limits show `catalog` when derived from model metadata (including conservative unknown-model fallback), and `explicit limit` when a layer supplies the limit. Connection headers and extra request bodies are shown as configured with values hidden; URLs omit credentials, queries and fragments, and known API keys are redacted.
 
-Editable keys are `provider`, `model`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, and `auth`. Limits must be positive integers. Providers are `anthropic`, `openai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile.
+Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, and `auth`. Limits must be positive integers. Providers are `anthropic`, `openai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. Thinking levels are `off`, `low`, `medium`, and `high`. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
 
 Saving `baseUrl` with `--scope user` or `--scope project` requires an absolute URL without userinfo (`user:password@`) or a query string. All query strings are runtime-only, including non-secret parameters. Use session scope for those URLs; errors do not echo the rejected value. For example, `/config set baseUrl https://example.test/v1 --scope project` is supported, while `/config set baseUrl https://example.test/v1?region=test` applies only to the current session. Existing files are not automatically migrated: edits to other keys preserve their existing URL. Use `/config reset baseUrl --scope project` (or `--scope user`) or save a safe replacement to remove that file's URL override.
 
@@ -39,7 +39,38 @@ OPENAI_API_KEY=your-key bun run start --provider openai --max-turns 8
 
 Then `/config set maxTurns 12 --scope project` saves 12 but reports that CLI value 8 remains effective. `/config set maxTurns 4` applies 4 immediately, and `/config reset maxTurns` restores CLI value 8. Restart without `--max-turns` to use the saved project value.
 
-The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider. These interfaces support deterministic controller/configuration tests without loading OpenTUI or using paid model APIs.
+The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider. These interfaces support deterministic controller/configuration tests without loading OpenTUI or using paid model APIs.
+
+## Reasoning levels
+
+Select reasoning with config `"thinking": "medium"`, CLI `--thinking medium`, interactive `/thinking medium`, or `/config set thinking medium` (session only by default). Precedence is built-in → user → project → CLI → session, so a session choice overrides files and flags. `/thinking` without arguments shows requested and effective values with provider/model; `/thinking reset` clears the session override. `/config` always shows `thinking` with origin and effective mapping, and the status header shows `(thinking <level>)` when set. Changing reasoning affects future requests only and never rewrites history; thinking and opaque provider metadata still round-trip across tool calls, compaction, and resume.
+
+Per-provider mapping follows current official docs without forcing identical wire semantics:
+
+- Anthropic extended thinking (`https://platform.claude.com/docs/en/build-with-claude/extended-thinking`): `off` on reasoning-capable models sends `thinking: { type: "disabled" }`, while `off` on unknown or known non-reasoning models sends no reasoning controls; `low`/`medium`/`high` send `thinking: { type: "enabled", budget_tokens: 1024/4096/8192 }`. Budgets require `budget_tokens >= 1024` and `< max_tokens`, so a level whose budget reaches `--max-output` fails before any request with the needed increase. Supported models are `claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5`; other Anthropic IDs expose only `off` as a no-op.
+- OpenAI reasoning (`https://developers.openai.com/api/docs/guides/reasoning`): `off` on reasoning-capable models sends `reasoning: { effort: "none" }`, while `off` on unknown or known non-reasoning models sends no reasoning controls; `low`/`medium`/`high` send `reasoning: { effort: "low"|"medium"|"high", summary: "auto" }`. Unmapped values `minimal`, `xhigh`, and `max` stay unused. Supported models are `gpt-5.4`; `gpt-4o` and other known OpenAI IDs expose only `off` as a no-op.
+- OpenAI-compatible Chat Completions has no standard reasoning field, so Schway never injects a vendor effort automatically. `off` (or unset) leaves provider defaults untouched and passes `extraBody` through unchanged. Explicit `low`/`medium`/`high` without a configured `extraBody` mapping fail before any request; configure reasoning directly via `--body '{"reasoning_effort":"medium"}'` or profile `extraBody` instead. Reasoning body keys are `reasoning`, `reasoning_effort`, `reasoningEffort`, `reasoning_budget`, `thinking`, `thinking_budget`, and `budget_tokens`. Bare `effort` is not treated as a reasoning control.
+
+Truthful capability handling:
+
+- Unset thinking leaves provider defaults untouched for every family, including unknown IDs. Explicit `off` on unknown or known non-reasoning models is likewise a no-op that sends no reasoning controls; only reasoning-capable models send the provider's documented disable control.
+- Explicit `low`/`medium`/`high` for a model without support fail before any request with `describeThinkingSupport` text naming supported levels; unknown IDs explain that support cannot be established instead of pretending a mapping applied. Only `off` is accepted as a safe no-op for those models.
+- `thinking` plus any reasoning body key in effective `extraBody` (direct or selected-profile `extraBody`) is rejected as `thinking "<level>" conflicts with extraBody.<key>`; remove one to define a single source of truth.
+- Model and profile switches recompute capability and effective reasoning. A requested level that becomes unsupported prevents the switch through the normal UI error path with previous settings retained; set a compatible level or reset thinking first.
+
+Runnable example (no paid APIs; fixtures in `tests/reasoning.test.ts` inspect outgoing controls):
+
+```sh
+# Anthropic budgets and OpenAI efforts via scripted fixtures
+bun test tests/reasoning.test.ts
+# Live-equivalent CLI (needs a key; shows validation, not fixtures)
+schway --provider anthropic --model claude-sonnet-4-6 --thinking medium -p 'plan only'
+schway --provider openai --model gpt-5.4 --thinking low -p 'plan only'
+# Compatible: reasoning via extraBody, thinking stays unset
+schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body '{"reasoning_effort":"medium"}' -p 'hello'
+```
+
+See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `src/model/providers/*` (`resolveAnthropicThinking`, `resolveOpenAIReasoning`, `resolveCompatibleThinking`), and `src/config/config.ts` (`validateThinking`, `describeEffectiveThinking`) for the reasoning-mapping contract.
 
 ## Named OpenAI-compatible profiles
 

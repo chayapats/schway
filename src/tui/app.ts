@@ -33,6 +33,7 @@ import {
   type CliArgs,
   type CliAuthMode,
   type CliProvider,
+  type CliThinking,
 } from "../cli/args.ts";
 import { TuiController } from "./controller.ts";
 import {
@@ -81,6 +82,7 @@ export interface InteractiveIo {
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    thinking?: CliThinking;
   }) => Promise<Model>;
 }
 
@@ -177,6 +179,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         headers: settings.headers,
         extraBody: settings.extraBody,
         auth: settings.auth,
+        thinking: settings.thinking,
         profile: settings.profile,
         credentialEnv: settings.credentialEnv,
         credentialIdentity: settings.credentialIdentity,
@@ -207,7 +210,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       rememberSecret: (key: string) => { if (!secrets.includes(key)) secrets.push(key); },
       reload: () => loadInteractiveModel(settings.provider, settings.model, {
         maxTokens: settings.maxOutput, baseUrl: settings.baseUrl, headers: settings.headers,
-        extraBody: settings.extraBody, auth: settings.auth, profile: settings.profile,
+        extraBody: settings.extraBody, auth: settings.auth, thinking: settings.thinking, profile: settings.profile,
         credentialEnv: settings.credentialEnv, credentialIdentity: settings.credentialIdentity,
         runtimeApiKey: io.args.apiKey,
         env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
@@ -244,6 +247,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
+          thinking: settings.thinking,
           profile: settings.profile,
           startupError,
           secrets,
@@ -277,6 +281,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
+          thinking: settings.thinking,
           profile: settings.profile,
           startupError,
           secrets,
@@ -325,11 +330,11 @@ export async function stageInteractiveSettings(
   previous: ResolvedSettings,
   options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
 ): Promise<{ model?: Model; contextManager: ContextManager }> {
-  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "profile", "credentialEnv", "credentialIdentity"] as const;
+  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "thinking", "effectiveThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
   if (adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
-      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth,
+      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, thinking: next.thinking,
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
     options.signal.throwIfAborted();
@@ -432,7 +437,7 @@ async function runTuiRenderer(options: {
         input.visible = true;
         input.focus();
       }
-      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
+      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}${snapshot.thinking ? ` (thinking ${snapshot.thinking})` : ""} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
       try {
         header.content = headerText;
       } catch {
@@ -642,6 +647,10 @@ async function handleSlashCommand(
         return;
       }
       await ctx.controller.selectModel(args);
+      return;
+    }
+    case "thinking": {
+      await ctx.controller.thinkingCommand(args);
       return;
     }
     case "branch": {
@@ -868,6 +877,7 @@ export async function loadInteractiveModel(
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    thinking?: CliThinking;
     profile?: string;
     credentialEnv?: string;
     credentialIdentity?: string;
@@ -889,6 +899,7 @@ export async function loadInteractiveModel(
   if (credential.apiKey) options.secrets.push(credential.apiKey);
   const input = {
     provider, model: modelId, apiKey: credential.apiKey, maxTokens: options.maxTokens,
+    ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
     ...(provider === "openai-compatible" ? {
       baseUrl: options.baseUrl, headers: options.headers, extraBody: options.extraBody, auth: options.auth ?? "optional",
     } : {}),

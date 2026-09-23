@@ -3,12 +3,13 @@ import type {
   AssistantContent,
   AssistantMessage,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
   ModelStreamEvent,
   ModelTool,
+  ThinkingLevel,
 } from "../model.ts";
 
 /** Default Chat Completions model when the caller does not specify one. */
@@ -17,6 +18,36 @@ export const DEFAULT_OPENAI_COMPATIBLE_MODEL =
 
 /** Control automatic bearer auth: require a key, send one if supplied, or omit automatic Authorization. */
 export type OpenAICompatibleAuth = "required" | "optional" | "none";
+
+/** Extra-body reasoning keys and conflict scanner; single source lives in the catalog for config validation. */
+export { COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey };
+
+/** Validate compatible thinking without injecting a vendor field; off is a no-op, others need explicit extraBody. */
+export function resolveCompatibleThinking(
+  level: ThinkingLevel | undefined,
+  modelId: string,
+  extraBody: Record<string, unknown> | undefined,
+): void {
+  const bodyKey = findCompatibleReasoningBodyKey(extraBody);
+  if (level !== undefined && bodyKey !== undefined) {
+    throw new Error(
+      `thinking "${level}" conflicts with extraBody.${bodyKey}; remove one to define a single source of truth for reasoning.`,
+    );
+  }
+  if (level === undefined) {
+    return;
+  }
+  if (!isThinkingSupported("openai-compatible", modelId, level)) {
+    throw new Error(
+      `Thinking level "${level}" is not supported for openai-compatible/${modelId}. ${describeThinkingSupport("openai-compatible", modelId)} Configure reasoning via extraBody instead or leave thinking unset.`,
+    );
+  }
+  if (level !== "off") {
+    throw new Error(
+      `Thinking level "${level}" is not mapped for openai-compatible/${modelId}. Configure reasoning via extraBody instead or leave thinking unset; no vendor effort field is injected automatically.`,
+    );
+  }
+}
 
 /** Optional fetch override used by protocol tests. */
 type FetchLike = (
@@ -36,17 +67,20 @@ export function createOpenAICompatibleModel(options: {
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   maxTokens?: number;
+  thinking?: ThinkingLevel;
   fetch?: FetchLike;
 }): Model {
   const modelId = options.model?.trim() || DEFAULT_OPENAI_COMPATIBLE_MODEL;
   const fetchFn = options.fetch ?? fetch;
   const auth = options.auth ?? "optional";
+  const defaultThinking = options.thinking;
 
   return {
     provider: "openai-compatible",
     id: modelId,
     /** Stream Schway events; tool-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      resolveCompatibleThinking(request.thinking ?? defaultThinking, modelId, options.extraBody);
       const apiKey = options.apiKey?.trim() ?? "";
       if (auth === "required" && apiKey.length === 0) {
         throw new Error(

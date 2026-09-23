@@ -12,18 +12,49 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
   ModelStreamEvent,
   ModelTool,
+  ThinkingLevel,
 } from "../model.ts";
 
 /** Default OpenAI model when the caller does not specify one. */
 export const DEFAULT_OPENAI_MODEL = DEFAULT_MODEL_IDS.openai;
 /** Default max_output_tokens for OpenAI Responses requests. */
 export const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 16_384;
+
+/** Named effort per level per reasoning guide (none disables; minimal/xhigh/max stay unmapped). */
+export const OPENAI_THINKING_EFFORTS: Record<ThinkingLevel, "none" | "low" | "medium" | "high"> = {
+  off: "none",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
+
+/** Resolve a provider-independent level to an OpenAI reasoning param, leaving defaults untouched when unset or off without disabling support. */
+export function resolveOpenAIReasoning(
+  level: ThinkingLevel | undefined,
+  modelId: string,
+): { effort: "none" } | { effort: "low" | "medium" | "high"; summary: "auto" } | undefined {
+  if (level === undefined) {
+    return undefined;
+  }
+  if (!isThinkingSupported("openai", modelId, level)) {
+    throw new Error(
+      `Thinking level "${level}" is not supported for openai/${modelId}. ${describeThinkingSupport("openai", modelId)}`,
+    );
+  }
+  if (level === "off") {
+    if (!getThinkingSupport("openai", modelId).supportsDisabling) {
+      return undefined;
+    }
+    return { effort: "none" };
+  }
+  return { effort: OPENAI_THINKING_EFFORTS[level], summary: "auto" };
+}
 
 /** Optional fetch override used by protocol tests. */
 type FetchLike = (
@@ -39,10 +70,12 @@ export function createOpenAIModel(options: {
   apiKey: string;
   model?: string;
   maxTokens?: number;
+  thinking?: ThinkingLevel;
   fetch?: FetchLike;
 }): Model {
   const modelId = options.model?.trim() || DEFAULT_OPENAI_MODEL;
   const maxTokens = options.maxTokens ?? DEFAULT_OPENAI_MAX_OUTPUT_TOKENS;
+  const defaultThinking = options.thinking;
   const client = new OpenAI({
     apiKey: options.apiKey,
     maxRetries: 0,
@@ -55,11 +88,13 @@ export function createOpenAIModel(options: {
     id: modelId,
     /** Stream Schway events; function-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      const reasoning = resolveOpenAIReasoning(request.thinking ?? defaultThinking, modelId);
       const stream = await client.responses.create(
         {
           model: modelId,
           stream: true,
           store: false,
+          ...(reasoning !== undefined ? { reasoning } : {}),
           instructions: toOpenAIInstructions(request),
           input: toOpenAIInput(request.items),
           max_output_tokens: maxTokens,

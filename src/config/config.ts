@@ -4,10 +4,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
+  ANTHROPIC_THINKING_BUDGETS,
   DEFAULT_MODEL_IDS,
+  describeThinkingSupport,
+  findCompatibleReasoningBodyKey,
+  getThinkingSupport,
   lookupModel,
   type ModelInfo,
 } from "../model/catalog.ts";
+import type { ThinkingLevel } from "../model/model.ts";
 import {
   DEFAULT_MAX_CONCURRENT_TOOLS,
   DEFAULT_MAX_TURNS,
@@ -26,6 +31,7 @@ export { PROFILE_NAME_PATTERN, isValidProfileName, isValidProfileBaseUrl };
 export const CONFIG_SETTING_NAMES = [
   "provider",
   "model",
+  "thinking",
   "maxTurns",
   "maxConcurrentTools",
   "contextWindow",
@@ -49,6 +55,14 @@ const AuthSchema = Type.Union([
   Type.Literal("required"),
   Type.Literal("optional"),
   Type.Literal("none"),
+]);
+
+/** Validated provider-independent reasoning levels without assuming identical wire semantics. */
+export const ThinkingSchema = Type.Union([
+  Type.Literal("off"),
+  Type.Literal("low"),
+  Type.Literal("medium"),
+  Type.Literal("high"),
 ]);
 
 const PositiveInt = Type.Integer({ minimum: 1 });
@@ -84,6 +98,7 @@ export const ConfigSchema = Type.Object(
   {
     provider: Type.Optional(ProviderSchema),
     model: Type.Optional(Type.String({ minLength: 1 })),
+    thinking: Type.Optional(ThinkingSchema),
     maxTurns: Type.Optional(PositiveInt),
     maxConcurrentTools: Type.Optional(PositiveInt),
     contextWindow: Type.Optional(PositiveInt),
@@ -118,6 +133,10 @@ export type CompatibleProfileMap = Record<string, CompatibleProfile>;
 export interface ResolvedSettings {
   provider: ProviderFamily;
   model: string;
+  /** Requested provider-independent reasoning level; undefined leaves provider defaults untouched. */
+  thinking?: ThinkingLevel;
+  /** Effective reasoning level after capability checks; undefined means provider defaults. */
+  effectiveThinking?: ThinkingLevel;
   maxTurns: number;
   maxConcurrentTools: number;
   contextWindow: number;
@@ -448,10 +467,16 @@ export function resolveSettings(input: {
     contextWindow: merged.contextWindow,
     maxOutput: merged.maxOutput,
   });
+  const thinking = merged.thinking as ThinkingLevel | undefined;
+  const thinkingError = validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput);
+  if (thinkingError !== undefined) {
+    return { error: thinkingError };
+  }
 
   const resolved: ResolvedSettings = {
     provider,
     model,
+    ...(thinking !== undefined ? { thinking, effectiveThinking: thinking } : {}),
     maxTurns: merged.maxTurns ?? DEFAULT_MAX_TURNS,
     maxConcurrentTools:
       merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
@@ -491,6 +516,69 @@ export function resolveSettings(input: {
     extraBody: merged.extraBody,
     auth: merged.auth ?? "optional",
   };
+}
+
+/** Validate a requested thinking level against capability, extra-body single-source-of-truth, and Anthropic budget rules. */
+export function validateThinking(
+  provider: string,
+  model: string,
+  thinking: ThinkingLevel | undefined,
+  extraBody: Record<string, unknown> | undefined,
+  maxOutput?: number,
+): string | undefined {
+  if (thinking === undefined) {
+    return undefined;
+  }
+  if (provider === "openai-compatible") {
+    const bodyKey = findCompatibleReasoningBodyKey(extraBody);
+    if (bodyKey !== undefined) {
+      return `thinking "${thinking}" conflicts with extraBody.${bodyKey}; remove one to define a single source of truth for reasoning.`;
+    }
+  }
+  const support = getThinkingSupport(provider, model);
+  if (!support.supported.includes(thinking)) {
+    return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
+  }
+  if (provider === "anthropic" && thinking !== "off" && maxOutput !== undefined) {
+    const budget = ANTHROPIC_THINKING_BUDGETS[thinking];
+    if (budget >= maxOutput) {
+      return `Thinking level "${thinking}" needs budget ${budget} < max output ${maxOutput} for anthropic/${model}. Increase maxOutput or choose a lower level.`;
+    }
+  }
+  return undefined;
+}
+
+/** Describe the effective wire control for a resolved thinking level without exposing provider field names in core. */
+export function describeEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined, modelId?: string): string {
+  if (thinking === undefined) {
+    return "provider default (no reasoning controls sent)";
+  }
+  if (thinking === "off") {
+    if (modelId !== undefined && !getThinkingSupport(provider, modelId).supportsDisabling) {
+      return "off (provider default, no reasoning controls sent)";
+    }
+    if (modelId === undefined && (provider !== "anthropic" && provider !== "openai")) {
+      return "off (provider default, no reasoning controls sent)";
+    }
+    if (provider === "anthropic" && modelId !== undefined) {
+      return "off (thinking disabled)";
+    }
+    if (provider === "openai" && modelId !== undefined) {
+      return "off (reasoning effort none)";
+    }
+    if (provider === "anthropic" || provider === "openai") {
+      return "off (disable control on reasoning-capable models; otherwise no reasoning controls sent)";
+    }
+    return "off (provider default, no reasoning controls sent)";
+  }
+  if (provider === "anthropic") {
+    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as Exclude<ThinkingLevel, "off">];
+    return `${thinking} (budget ${budget} tokens via thinking)`;
+  }
+  if (provider === "openai") {
+    return `${thinking} (reasoning effort ${thinking})`;
+  }
+  return `${thinking} (via extraBody when configured; no automatic mapping)`;
 }
 
 /** Expand one validated profile into a config layer that implies the compatible provider. */
