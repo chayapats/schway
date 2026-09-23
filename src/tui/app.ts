@@ -5,9 +5,10 @@ import { applyEnvFiles } from "../config/env-file.ts";
 import { resolve } from "node:path";
 import {
   redactSecrets,
-  resolveAnthropicApiKey,
-  resolveOpenAIApiKey,
 } from "../auth/secrets.ts";
+import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential } from "../auth/credentials.ts";
+import { bindCredentialInput, loadCredentialSafeTui } from "./credential-input.ts";
+import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
 import {
   createJsonlSession,
@@ -66,6 +67,8 @@ export interface InteractiveIo {
   args: CliArgs;
   signal?: AbortSignal;
   model?: Model;
+  /** Inject secure storage for embeddings and deterministic tests. */
+  credentialStore?: CredentialStore;
   /** Override provider HTTP transport when the built-in model loader is used. */
   fetch?: FetchLike;
   /** Construct a model from resolved provider settings instead of using the built-in loader. */
@@ -144,6 +147,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   }
 
   const secrets = collectSecrets(io.args.apiKey, env);
+  const credentialStore = io.credentialStore ?? createNativeCredentialStore();
   const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
     modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal,
     tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
@@ -177,7 +181,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         env,
         fetch: io.fetch,
         createModel: io.createModel,
-        secrets,
+        secrets, credentialStore,
       });
       if ("error" in loaded) {
         startupError = loaded.error;
@@ -193,8 +197,17 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     };
     const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model) => stageInteractiveSettings(next, settings, {
       model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
-      signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets,
+      signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
     });
+    const credentials = {
+      store: credentialStore, env, runtimeApiKey: io.args.apiKey,
+      rememberSecret: (key: string) => { if (!secrets.includes(key)) secrets.push(key); },
+      reload: () => loadInteractiveModel(settings.provider, settings.model, {
+        maxTokens: settings.maxOutput, baseUrl: settings.baseUrl, headers: settings.headers,
+        extraBody: settings.extraBody, auth: settings.auth, runtimeApiKey: io.args.apiKey,
+        env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
+      }),
+    };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
       settings = next;
       skillScope.manager = manager;
@@ -215,7 +228,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           extensions,
           loadWorkspaceExtensions,
           home,
-          configEditor, stageSettings, onSettingsCommitted,
+          configEditor, stageSettings, onSettingsCommitted, credentials,
           workspace: resumedWorkspace,
           provider: settings.provider,
           modelId: settings.model,
@@ -247,7 +260,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           extensions,
           loadWorkspaceExtensions,
           home,
-          configEditor, stageSettings, onSettingsCommitted,
+          configEditor, stageSettings, onSettingsCommitted, credentials,
           workspace,
           provider: settings.provider,
           modelId: settings.model,
@@ -336,7 +349,7 @@ async function runTuiRenderer(options: {
   stderr: TuiWriter;
 }): Promise<void> {
   const { createCliRenderer, BoxRenderable, TextRenderable, InputRenderable, ScrollBoxRenderable } =
-    await import("@opentui/core");
+    await loadCredentialSafeTui();
 
   const renderer = await createCliRenderer({
     // The app owns Ctrl+C (cancel turn when running, quit when idle) and
@@ -347,6 +360,7 @@ async function runTuiRenderer(options: {
   });
   let quit = false;
   let quitting = false;
+  let unbindCredentialInput: (() => void) | undefined;
   const onAbort = () => {
     quit = true;
   };
@@ -394,10 +408,22 @@ async function runTuiRenderer(options: {
     });
     root.add(input);
     input.focus();
+    const credentialLine = new TextRenderable(renderer, { content: "" });
+    root.add(credentialLine);
 
     let lastRendered = "";
     const render = () => {
       const snapshot = options.controller.snapshot();
+      if (snapshot.credentialEntry) {
+        input.blur();
+        input.visible = false;
+        credentialLine.visible = true;
+        credentialLine.content = `API key for ${snapshot.credentialEntry.label}: ${snapshot.credentialEntry.masked} (Enter saves, Esc cancels)`;
+      } else {
+        credentialLine.visible = false;
+        input.visible = true;
+        input.focus();
+      }
       const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
       try {
         header.content = headerText;
@@ -420,7 +446,7 @@ async function runTuiRenderer(options: {
       const roots = options.controller.workspaceIdentity();
       const rootStatus = roots ? ` | Primary: ${roots.root} | Attached: ${roots.extraRoots.join(", ") || "none"}` : "";
       const statusText = redactSecrets(formatStatus(snapshot.status) + rootStatus, options.secrets);
-      const fingerprint = `${headerText}\n${lines}\n${statusText}`;
+      const fingerprint = `${headerText}\n${lines}\n${statusText}\n${snapshot.credentialEntry?.masked ?? ""}`;
       if (fingerprint === lastRendered) {
         return;
       }
@@ -471,6 +497,7 @@ async function runTuiRenderer(options: {
       render();
     });
     input.on("input", () => { options.controller.searchModels(input.value); render(); });
+    unbindCredentialInput = bindCredentialInput(renderer.keyInput, options.controller, render);
 
     renderer.keyInput.on("keypress", (key) => {
       const name = key.name.toLowerCase();
@@ -511,6 +538,7 @@ async function runTuiRenderer(options: {
       await Bun.sleep(50);
     }
   } finally {
+    unbindCredentialInput?.();
     options.signal?.removeEventListener("abort", onAbort);
     options.controller.dispose();
     try {
@@ -631,6 +659,14 @@ async function handleSlashCommand(
     }
     case "config": {
       await ctx.controller.configCommand(args);
+      return;
+    }
+    case "login": {
+      ctx.controller.beginLogin(args);
+      return;
+    }
+    case "logout": {
+      await ctx.controller.logout(args);
       return;
     }
     case "help": {
@@ -799,6 +835,8 @@ function collectSecrets(
   if (anthropicKey) {
     secrets.push(anthropicKey);
   }
+  const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
+  if (compatibleKey) secrets.push(compatibleKey);
   const openaiKey = env.OPENAI_API_KEY;
   if (openaiKey) {
     secrets.push(openaiKey);
@@ -807,7 +845,7 @@ function collectSecrets(
 }
 
 /** Resolve credentials and construct the selected provider model for interactive use. */
-async function loadInteractiveModel(
+export async function loadInteractiveModel(
   provider: CliProvider,
   modelId: string | undefined,
   options: {
@@ -821,76 +859,24 @@ async function loadInteractiveModel(
     fetch?: FetchLike;
     createModel?: InteractiveIo["createModel"];
     secrets: string[];
+    credentialStore?: CredentialStore;
   },
 ): Promise<{ model: Model } | { error: string }> {
-  if (provider === "openai-compatible") {
-    const auth = options.auth ?? "optional";
-    const apiKey = options.runtimeApiKey?.trim() || undefined;
-    if (auth === "required" && apiKey === undefined) {
-      return {
-        error: "Missing API key for OpenAI-compatible endpoint. Pass --api-key.",
-      };
-    }
-    if (apiKey) {
-      options.secrets.push(apiKey);
-    }
-    try {
-      const model = options.createModel
-        ? await options.createModel({
-            apiKey,
-            provider,
-            model: modelId,
-            maxTokens: options.maxTokens,
-            baseUrl: options.baseUrl,
-            headers: options.headers,
-            extraBody: options.extraBody,
-            auth,
-          })
-        : await loadProviderModel(
-            {
-              provider,
-              apiKey,
-              model: modelId,
-              maxTokens: options.maxTokens,
-              baseUrl: options.baseUrl,
-              headers: options.headers,
-              extraBody: options.extraBody,
-              auth: options.auth,
-            },
-            options.fetch,
-          );
-      return { model };
-    } catch (error) {
-      return { error: redactSecrets(messageOf(error), options.secrets) };
-    }
-  }
-
-  const credential =
-    provider === "openai"
-      ? resolveOpenAIApiKey({ runtimeApiKey: options.runtimeApiKey, env: options.env })
-      : resolveAnthropicApiKey({ runtimeApiKey: options.runtimeApiKey, env: options.env });
-  if ("error" in credential) {
-    return credential;
-  }
-  options.secrets.push(credential.apiKey);
+  const credential = await resolveProviderCredential({
+    provider, baseUrl: options.baseUrl, auth: options.auth,
+    runtimeApiKey: options.runtimeApiKey, env: options.env,
+    store: options.credentialStore ?? createNativeCredentialStore(),
+  });
+  if ("error" in credential) return credential;
+  if (credential.apiKey) options.secrets.push(credential.apiKey);
+  const input = {
+    provider, model: modelId, apiKey: credential.apiKey, maxTokens: options.maxTokens,
+    ...(provider === "openai-compatible" ? {
+      baseUrl: options.baseUrl, headers: options.headers, extraBody: options.extraBody, auth: options.auth ?? "optional",
+    } : {}),
+  };
   try {
-    const model = options.createModel
-      ? await options.createModel({
-          apiKey: credential.apiKey,
-          provider,
-          model: modelId,
-          maxTokens: options.maxTokens,
-        })
-      : await loadProviderModel(
-          {
-            provider,
-            apiKey: credential.apiKey,
-            model: modelId,
-            maxTokens: options.maxTokens,
-          },
-          options.fetch,
-        );
-    return { model };
+    return { model: options.createModel ? await options.createModel(input) : await loadProviderModel(input, options.fetch) };
   } catch (error) {
     return { error: redactSecrets(messageOf(error), options.secrets) };
   }

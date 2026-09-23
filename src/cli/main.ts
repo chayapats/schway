@@ -101,6 +101,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return runInteractive(parsed.args, io);
   }
 
+  if (/^\s*\/(?:login|logout)(?:\s|$)/i.test(parsed.args.prompt)) {
+    io.stderr.write("Credential management requires interactive mode. Start schway without -p.\n");
+    return 1;
+  }
+
   const home = io.env.HOME;
   if (!home) {
     io.stderr.write("HOME is not set; cannot write session history.\n");
@@ -434,6 +439,7 @@ async function runInteractive(args: CliArgs, io: CliIo): Promise<number> {
     args,
     signal: io.signal,
     model: io.model,
+    credentialStore: io.credentialStore,
     fetch: io.fetch,
     createModel: io.createModel,
   });

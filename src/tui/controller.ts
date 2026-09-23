@@ -1,5 +1,8 @@
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
+import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
+import { credentialIdentity, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
+import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { SessionRecord } from "../conversation/types.ts";
@@ -40,6 +43,7 @@ export interface TuiSnapshot {
   provider: string;
   modelId: string;
   modelPicker?: ModelPickerSnapshot;
+  credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
 }
 
 /** Dependencies for one interactive conversation; mirrors headless loop inputs. */
@@ -64,12 +68,20 @@ export interface TuiControllerOptions {
   auth?: string;
   startupError?: string;
   /** Known values to mask in displayed transcript text and configuration output. */
-  secrets?: readonly string[];
+  secrets?: string[];
   extensions?: ExtensionRuntime;
   /** Stage fresh enabled modules for a workspace before publishing a session switch. */
   loadWorkspaceExtensions?: (workspace: Workspace, signal: AbortSignal) => Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }>;
   home?: string;
   configEditor?: ConfigEditor;
+  /** Secure credential management and forced adapter refresh for the current settings. */
+  credentials?: {
+    store: CredentialStore;
+    env: Record<string, string | undefined>;
+    runtimeApiKey?: string;
+    rememberSecret?: (key: string) => void;
+    reload: () => Promise<{ model: Model } | { error: string }>;
+  };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
   /** Publish renderer-owned context references after a successful settings commit. */
@@ -90,7 +102,7 @@ export class TuiController {
   private contextManager: ContextManager;
   private tools?: ToolRegistry;
   private workspace?: Workspace;
-  private secrets: readonly string[];
+  private secrets: string[];
   private provider: string;
   private modelId: string;
   private sessionId: string;
@@ -116,6 +128,10 @@ export class TuiController {
   private detachDiagnostics?: () => void;
   private readonly loadWorkspaceExtensions?: TuiControllerOptions["loadWorkspaceExtensions"];
   private disposed = false;
+  private readonly credentials?: TuiControllerOptions["credentials"];
+  private credentialEntry?: MaskedCredentialEntry;
+  private credentialTarget?: CredentialTarget;
+  private credentialMutation = false;
 
   /** Initialize display history from the supplied session and dependencies without starting a model turn. */
   constructor(options: TuiControllerOptions) {
@@ -137,6 +153,7 @@ export class TuiController {
     this.extensions = options.extensions;
     this.home = options.home;
     this.configEditor = options.configEditor;
+    this.credentials = options.credentials;
     this.stageSettings = options.stageSettings;
     this.onSettingsCommitted = options.onSettingsCommitted;
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
@@ -162,12 +179,119 @@ export class TuiController {
       provider: this.provider,
       modelId: this.modelId,
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
+      credentialEntry: this.credentialEntry?.snapshot(),
     };
   }
 
   /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
-    return this.activeAbort !== undefined;
+    return this.activeAbort !== undefined || this.credentialEntry !== undefined || this.credentialMutation;
+  }
+
+  /** Start masked entry for one explicit provider only while the conversation is idle. */
+  beginLogin(args: string): boolean {
+    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    const target = this.parseCredentialTarget(args);
+    if (!target || !this.credentials) return false;
+    let identity: CredentialIdentity;
+    try { identity = credentialIdentity(target); }
+    catch { this.fail("Select a valid compatible base URL before /login openai-compatible."); return false; }
+    this.closeModelPicker();
+    this.credentialTarget = target;
+    this.credentialEntry = new MaskedCredentialEntry({ identity, store: this.credentials.store,
+      rememberSecret: key => {
+        if (!this.secrets.includes(key)) this.secrets.push(key);
+        this.credentials?.rememberSecret?.(key);
+      },
+    });
+    return true;
+  }
+
+  /** Route secret text directly to the masked buffer without creating a transcript or session item. */
+  enterCredentialText(text: string): void { this.credentialEntry?.insert(text); }
+
+  /** Remove the last secret character without involving normal editor undo or recall. */
+  backspaceCredential(): void { this.credentialEntry?.backspace(); }
+
+  /** Commit one submitted key and refresh the active adapter, waiting for non-abortable storage. */
+  async submitCredential(): Promise<boolean> {
+    const entry = this.credentialEntry;
+    const target = this.credentialTarget;
+    if (!entry || !target || this.credentialMutation) return false;
+    this.credentialMutation = true;
+    const task = (async () => {
+      const result = await entry.submit();
+      this.notice(result.message);
+      if (!result.ok) { this.status = "error"; return false; }
+      const source = this.credentialOverrideNotice(target);
+      if (source) this.notice(source);
+      await this.refreshCredentialModel(credentialIdentity(target));
+      return true;
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      this.credentialEntry = undefined;
+      this.credentialTarget = undefined;
+      this.credentialMutation = false;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
+  /** Remove exactly one provider's saved credential without altering runtime or environment overrides. */
+  async logout(args: string): Promise<boolean> {
+    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    const target = this.parseCredentialTarget(args);
+    if (!target || !this.credentials) return false;
+    this.closeModelPicker();
+    this.credentialMutation = true;
+    const task = (async () => {
+      const result = await removeStoredCredential({ ...target, ...this.credentials! });
+      this.notice(result.message);
+      if (!result.ok) { this.status = "error"; return false; }
+      await this.refreshCredentialModel(credentialIdentity(target));
+      return true;
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      this.credentialMutation = false;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
+  private parseCredentialTarget(args: string): CredentialTarget | undefined {
+    const provider = args.trim().toLowerCase();
+    if (!["anthropic", "openai", "openai-compatible"].includes(provider)) {
+      this.fail("Usage: /login <anthropic|openai|openai-compatible> or /logout <provider>. Enter keys only in the masked prompt.");
+      return;
+    }
+    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return; }
+    return { provider: provider as CredentialTarget["provider"], baseUrl: this.configEditor?.settings.baseUrl ?? this.baseUrl };
+  }
+
+  private credentialOverrideNotice(target: CredentialTarget): string | undefined {
+    if (this.credentials?.runtimeApiKey !== undefined) return "The runtime --api-key override still takes precedence over the saved key.";
+    const variable = credentialEnvironmentVariable(target.provider);
+    if (this.credentials?.env[variable]?.trim()) return `${variable} still takes precedence over the saved key.`;
+    if (target.provider === "openai-compatible" && this.auth === "none") return "Automatic authentication is disabled by auth none; the saved key is not sent.";
+  }
+
+  private async refreshCredentialModel(identity: CredentialIdentity): Promise<void> {
+    if (this.disposed || !this.credentials) return;
+    const active = credentialIdentity({ provider: this.provider as CredentialTarget["provider"], baseUrl: this.baseUrl });
+    if (identity.account !== active.account) return;
+    // A removed/replaced saved key must never survive in a previously constructed adapter.
+    this.model = undefined;
+    try {
+      const loaded = await this.credentials.reload();
+      if (this.disposed) return;
+      if ("error" in loaded) { this.fail(loaded.error); return; }
+      this.model = loaded.model;
+      this.status = "idle";
+    } catch {
+      this.fail("Credential storage changed, but the provider could not be refreshed. Retry /login or restart after checking provider settings.");
+    }
   }
 
   /** List saved branch identities or change the selected ancestry while all controller work is idle. */
@@ -500,13 +624,13 @@ export class TuiController {
    * @throws Propagates rejection of the compaction promise after clearing its active operation tracking.
    */
   async compact(): Promise<boolean> {
-    if (this.activeAbort) {
+    if (this.running) {
       this.notice("Already running. Press Esc to cancel first.");
       return false;
     }
     if (!this.model) {
       this.fail(
-        "Missing credentials. Set ANTHROPIC_API_KEY or OPENAI_API_KEY and restart schway. Subscription login is not supported in v0.1.",
+        "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.",
       );
       return false;
     }
@@ -661,10 +785,15 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction.
    */
   cancel(): void {
-    if (!this.activeAbort) {
+    if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
+    if (this.credentialEntry) {
+      this.credentialEntry.cancel();
+      this.credentialEntry = undefined;
+      this.credentialTarget = undefined;
+      this.notice("Credential entry cancelled; nothing saved.");
       return;
     }
-    this.activeAbort.abort();
+    this.activeAbort?.abort();
   }
 
   /**
@@ -673,6 +802,7 @@ export class TuiController {
    */
   dispose(): void {
     this.disposed = true;
+    if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; }
     this.abortActiveTurn();
     this.contextManager.clearActiveSkill();
     this.detachDiagnostics?.();
@@ -691,12 +821,12 @@ export class TuiController {
    */
   async submit(prompt: string): Promise<void> {
     const text = prompt.trim();
-    if (text.length === 0 || this.activeAbort || this.disposed) {
+    if (text.length === 0 || this.running || this.disposed) {
       return;
     }
     if (!this.model) {
       this.fail(
-        "Missing credentials. Set ANTHROPIC_API_KEY or OPENAI_API_KEY and restart schway. Subscription login is not supported in v0.1.",
+        "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.",
       );
       return;
     }
@@ -1089,7 +1219,7 @@ function asEditDetails(details: unknown): EditDetailsDisplay | undefined {
   return { path: record.path, hunks };
 }
 
-/** Keep provider errors actionable and never suggest an interactive login flow. */
+/** Explain API-key recovery for interactive provider failures. */
 function actionableError(message: string): string {
   const lowered = message.toLowerCase();
   if (
@@ -1097,7 +1227,7 @@ function actionableError(message: string): string {
     lowered.includes("missing openai api key") ||
     lowered.includes("missing api key")
   ) {
-    return `${message} Set the key via --api-key or the environment and restart schway. Subscription login is not supported in v0.1.`;
+    return `${message} Use /login <provider> to save an API key, or set --api-key or the provider environment variable and restart schway.`;
   }
   if (lowered.includes("login")) {
     return message;

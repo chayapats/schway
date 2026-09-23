@@ -25,7 +25,7 @@ test("empty, invalid and failed entry do not replace saved credentials or disclo
   const store = fakeCredentialStore();
   const identity = credentialIdentity({ provider: "anthropic" });
   await store.set(identity, "original");
-  for (const value of ["  ", "invalid\nembedded-secret"]) {
+  for (const value of ["  ", "invalid\nembedded-secret", "🔒".repeat(4_097)]) {
     const entry = new MaskedCredentialEntry({ identity, store });
     entry.insert(value);
     expect((await entry.submit()).ok).toBe(false);

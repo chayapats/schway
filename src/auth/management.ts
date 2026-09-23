@@ -28,7 +28,7 @@ export class MaskedCredentialEntry {
   insert(text: string): void {
     if (this.#phase !== "entry") return;
     const value = text.replace(/[\r\n]+$/, "");
-    if (/[\x00-\x1f\x7f]/.test(value) || this.#buffer.length + value.length > 16_384) {
+    if (/[\x00-\x1f\x7f]/.test(value) || Buffer.byteLength(this.#buffer + value, "utf8") > 16_384) {
       this.#buffer = "";
       this.#phase = "failed";
       return;

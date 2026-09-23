@@ -11,6 +11,7 @@ import type { ResolvedSettings } from "../src/config/config.ts";
 import type { Model } from "../src/model/model.ts";
 import { createOpenAIModel } from "../src/model/providers/openai.ts";
 import { encodeSse, TEXT_STREAM_EVENTS } from "./fixtures/openai.ts";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { stageInteractiveSettings } from "../src/tui/app.ts";
 
 async function fixture(root: string, stage?: (settings: ResolvedSettings, signal: AbortSignal) => Promise<Model>, cli = {}) {
@@ -71,7 +72,7 @@ test("a session without startup credentials can configure and select an optional
       provider: previous.provider, modelId: previous.model,
       contextManager: createContextManager(workspace),
       stageSettings: (settings, signal, currentWorkspace, model) => stageInteractiveSettings(settings, previous, {
-        model, signal, workspace: currentWorkspace!, home: join(root, "home"), env: { OPENAI_API_KEY: "fixture-key" }, runtimeApiKey: undefined, secrets: [],
+        model, signal, workspace: currentWorkspace!, home: join(root, "home"), env: { OPENAI_API_KEY: "fixture-key" }, runtimeApiKey: undefined, secrets: [], credentialStore: fakeCredentialStore(),
         createModel: async input => { loaded.push(input.provider); return createScriptedModel({ id: input.model, provider: input.provider, text: "compatible works" }); },
       }),
       onSettingsCommitted: settings => { previous = settings; },

@@ -117,13 +117,17 @@ test("core modules never import the renderer", async () => {
   }
 });
 
-test("TUI controller stays renderer-free; only the app shell imports OpenTUI", async () => {
+test("TUI controller stays renderer-free; raw-input-safe renderer module loads OpenTUI lazily", async () => {
   for (const file of ["src/tui/controller.ts", "src/tui/commands.ts"]) {
     const source = await Bun.file(file).text();
     expect(source.includes("@opentui")).toBe(false);
   }
   const app = await Bun.file("src/tui/app.ts").text();
-  expect(app.includes("@opentui/core")).toBe(true);
+  const credentialInput = await Bun.file("src/tui/credential-input.ts").text();
+  expect(app.includes('from "./credential-input.ts"')).toBe(true);
+  expect(app.includes("@opentui/core")).toBe(false);
+  expect(credentialInput.includes('await import("@opentui/core")')).toBe(true);
+  expect(credentialInput.indexOf('process.env.OTUI_STDIN_LOG = ""')).toBeLessThan(credentialInput.indexOf('await import("@opentui/core")'));
 });
 
 test("provider adapters load lazily through the shared loader", async () => {
