@@ -59,9 +59,9 @@ The test checks real tool results and file contents at each handoff:
 | `workflow/decisions.md` | First contains unanswered questions; a second explicit grill turn records the user's answers and D1–D3. |
 | `workflow/spec.md` | Consumes decisions and records A1–A3, examples, scope, and verification command. |
 | `workflow/tickets/T1.md`, `workflow/tickets/index.md` | Local tracker includes independent implementation context, edit scope, criteria, prerequisites, and pending status. |
-| `greet.ts`, `greet.test.ts` | Implementation reads the ticket and spec, creates tests, observes two failures, edits the source, and reruns the tests. |
-| `workflow/tickets/T1-implementation.md` | Records affected files and actual before/after command outcomes; proposes a review invocation. |
-| `workflow/review.md` | Reads spec, ticket, source, tests, and implementation record; reruns the command and records criterion dispositions and limits. |
+| `greet.ts`, `greet.test.ts` | Implementation reads the ticket and spec, creates tests, observes two failures, edits the source, and reruns the tests. A review follow-up adds a tab-only whitespace assertion. |
+| `workflow/tickets/T1-implementation.md` | Records affected files and actual before/after command outcomes; the follow-up records the review finding's disposition and verification. |
+| `workflow/review.md` | The first review finds missing A2 regression coverage and requests a new `/implement` turn. A second review verifies the added test and marks the finding resolved. |
 
 Temporary files and local tarballs are removed by test teardown. Exact
 deterministic artifacts and invocations are in
@@ -80,14 +80,14 @@ revalidated on 2026-09-23 after rebasing onto the merged #44 changes:
 | Packed contents | Passed: package manifest, README, and five SKILL.md files only; no executable capability or install script. |
 | Ordinary package discovery and explicit turns | Passed: all five roles load from the installed package and receive artifact/task arguments in user messages. |
 | Model eligibility | Passed: all five attempted `activate_skill` calls return user-only errors; workflow bodies are absent from model discovery metadata. |
-| Artifact sequence | Passed: resolved decisions, spec, ticket, implementation record, and review are written and consumed through real tools. |
+| Artifact sequence | Passed: resolved decisions, spec, ticket, implementation record, review finding, follow-up implementation, and final review are written and consumed through real tools. |
 | Before implementation | Expected failing baseline: `bun test greet.test.ts` exits 1 with 1 pass and 2 fail. |
-| After implementation and review | Passed: the same command exits 0 with 3 pass and 0 fail, independently rerun during review. |
+| After implementation and review follow-up | Passed: the same command exits 0 with 3 pass and 0 fail, independently rerun during both reviews and after adding tab-only whitespace coverage. |
 | Overrides and duplicate declarations | Passed: project directories win; duplicate project package roles are ambiguous until resolved. |
 | Interrupted turns | Passed: provider failure and cancellation preserve written artifacts; ordinary resume has no active body, and explicit reinvocation works. |
 | Disabled package | Passed: removing its configured name removes skill discovery/invocation, while an ordinary resumed turn still runs the fixture tests. Artifacts remain intact. |
 | Focused package suite | Passed: 6 tests, 0 failures. |
-| Full repository suite | Passed on 2026-09-23: `bun test`, 625 tests, 0 failures, 3884 assertions across 49 files. |
+| Full repository suite | Passed on 2026-09-23: `bun test`, 625 tests, 0 failures, 3976 assertions across 49 files. |
 | Type checking | Passed: `bun run typecheck`. |
 | Live-provider execution | Pending: not run; deterministic validation uses a scripted model. |
 | Human dogfood on a real task | Pending: requires a separately chosen real task and human answers. |
@@ -119,6 +119,9 @@ exercise may use paid model calls; it is an opt-in procedure, not part of
    Inspect the source and independently run the review's verification commands.
    Compare results with each spec criterion; preserve the report at
    `workflow/review.md`.
+   If it has a failed or pending finding within the ticket scope, invoke
+   `/implement workflow/tickets/T1.md workflow/spec.md workflow/review.md`,
+   record the disposition and rerun the affected checks, then review again.
 6. Remove only this package's name from the `packages` array, start a fresh
    turn/session, inspect `/skills`, and ask ordinary Schway to read or test the
    changed code. Record whether the base coding workflow still works. Artifacts

@@ -117,8 +117,12 @@ const verification = [
   'test("A2 blank names greet world", () => { expect(greet("   ")).toBe("Hello, world!"); expect(greet("")).toBe("Hello, world!"); });',
   'test("A3 ordinary greeting", () => expect(greet("Lin")).toBe("Hello, Lin!"));',
 ].join("\n");
+const reviewedVerification = verification.replace(
+  'expect(greet("")).toBe("Hello, world!");',
+  'expect(greet("")).toBe("Hello, world!"); expect(greet("\\t")).toBe("Hello, world!");',
+);
 
-test("offline CLI turns hand off decisions, spec, local ticket, implementation, and observed review", async () => {
+test("offline CLI turns hand off artifacts and resolve a review finding through implementation", async () => {
   await withIsolatedCliDirs(async ({ work, home, sentinelPath, sentinelContent }) => {
     await install(work, home);
     await command(["git", "init", "--quiet"], work, home);
@@ -214,14 +218,63 @@ test("offline CLI turns hand off decisions, spec, local ticket, implementation, 
         expect(result(request, "review-check")).toContain("Exit code: 0");
         expect(result(request, "review-check")).toContain("3 pass");
         return { toolCalls: [write("review", "workflow/review.md",
-          "# Review\nSpecification: A1 trimming passed; A2 empty and whitespace fallback passed; A3 ordinary greeting passed.\nObserved: bun test greet.test.ts, exit 0, 3 pass, 0 fail.\nStandards: changes stay within T1 scope; no extra project standards in this fixture.\nFindings: none in scripted fixture.\nLive-provider and human dogfood: pending, not evaluated.\n")] };
+          "# Review\nSpecification: A1 trimming passed; A2 behavior passed but tab-only whitespace has no regression test; A3 ordinary greeting passed.\nObserved: bun test greet.test.ts, exit 0, 3 pass, 0 fail.\nStandards: changes stay within T1 scope; no extra project standards in this fixture.\nFinding: A2 test coverage pending in greet.test.ts; add a tab-only input assertion within ticket scope.\nNext: /implement workflow/tickets/T1.md workflow/spec.md workflow/review.md\nLive-provider and human dogfood: pending, not evaluated.\n")] };
       }, written("review"),
+    ], { resume });
+
+    await turn(work, home, "/implement workflow/tickets/T1.md workflow/spec.md workflow/review.md", [
+      { toolCalls: [
+        read("followup-ticket", "workflow/tickets/T1.md"), read("followup-spec", "workflow/spec.md"),
+        read("followup-review", "workflow/review.md"), read("followup-tests", "greet.test.ts"),
+        read("followup-record", "workflow/tickets/T1-implementation.md"),
+      ] },
+      request => {
+        expect(result(request, "followup-ticket")).toContain("Edit scope: greet.ts and greet.test.ts");
+        expect(result(request, "followup-spec")).toContain("A2: '' and '   '");
+        expect(result(request, "followup-review")).toContain("A2 test coverage pending in greet.test.ts");
+        expect(result(request, "followup-tests")).toContain('expect(greet("   ")).toBe("Hello, world!")');
+        expect(result(request, "followup-tests")).not.toContain('greet("\\t")');
+        expect(result(request, "followup-record")).toContain("before exit 1");
+        return { toolCalls: [{ id: "followup-edit", name: "edit", arguments: {
+          path: "greet.test.ts", edits: [{ oldText: verification, newText: reviewedVerification }],
+        } }] };
+      },
+      request => { result(request, "followup-edit"); return { toolCalls: [testCall("followup-check")] }; },
+      request => {
+        expect(result(request, "followup-check")).toContain("Exit code: 0");
+        expect(result(request, "followup-check")).toContain("3 pass");
+        return { toolCalls: [write("followup-record", "workflow/tickets/T1-implementation.md",
+          "# T1 implementation\nChanged: greet.ts, greet.test.ts.\nA1, A2, A3: passed.\nbun test greet.test.ts: before exit 1 (1 pass, 2 fail); after exit 0 (3 pass, 0 fail).\nReview follow-up: A2 tab-only whitespace coverage was pending in greet.test.ts; added the assertion within ticket scope, then bun test greet.test.ts exited 0 (3 pass, 0 fail). Finding resolved.\nHuman dogfood: pending.\nNext: /code-review workflow/tickets/T1.md workflow/spec.md workflow/tickets/T1-implementation.md\n")] };
+      }, written("followup-record"),
+    ], { resume });
+
+    await turn(work, home, "/code-review workflow/tickets/T1.md workflow/spec.md workflow/tickets/T1-implementation.md", [
+      { toolCalls: [
+        read("final-ticket", "workflow/tickets/T1.md"), read("final-spec", "workflow/spec.md"),
+        read("final-record", "workflow/tickets/T1-implementation.md"),
+        read("final-source", "greet.ts"), read("final-tests", "greet.test.ts"),
+      ] },
+      request => {
+        expect(result(request, "final-ticket")).toContain("A2: both empty and whitespace-only strings");
+        expect(result(request, "final-spec")).toContain("A2: '' and '   '");
+        expect(result(request, "final-record")).toContain("Finding resolved");
+        expect(result(request, "final-source")).toContain(fixedSource.trim());
+        expect(result(request, "final-tests")).toContain('expect(greet("\\t")).toBe("Hello, world!")');
+        return { toolCalls: [testCall("final-check")] };
+      },
+      request => {
+        expect(result(request, "final-check")).toContain("Exit code: 0");
+        return { toolCalls: [write("final-review", "workflow/review.md",
+          "# Review\nSpecification: A1, A2, A3 passed.\nObserved: bun test greet.test.ts, exit 0, 3 pass, 0 fail.\nStandards: changes stay within T1 scope.\nFinding: A2 tab-only whitespace regression test added and verified; resolved.\nLive-provider and human dogfood: pending, not evaluated.\n")] };
+      }, written("final-review"),
     ], { resume });
 
     expect(await Bun.file(join(work, "workflow/decisions.md")).text()).toBe(decisions);
     expect(await Bun.file(join(work, "workflow/spec.md")).text()).toBe(spec);
     expect(await Bun.file(join(work, "workflow/tickets/T1.md")).text()).toBe(ticket);
     expect(await Bun.file(join(work, "greet.ts")).text()).toBe(fixedSource);
+    expect(await Bun.file(join(work, "greet.test.ts")).text()).toBe(reviewedVerification);
+    expect(await Bun.file(join(work, "workflow/tickets/T1-implementation.md")).text()).toContain("Finding resolved");
     expect(await Bun.file(join(work, "workflow/review.md")).text()).toContain("3 pass, 0 fail");
     expect(await Bun.file(sentinelPath).text()).toBe(sentinelContent);
 
@@ -234,7 +287,7 @@ test("offline CLI turns hand off decisions, spec, local ticket, implementation, 
       request => { expect(result(request, "ordinary-check")).toContain("3 pass"); return { text: "Ordinary coding still works." }; },
     ], { resume });
     const persisted = await loadJsonlSession({ directory: sessionsDirectory(home), id: resume });
-    expect(persisted.items.filter(item => item.type === "user")).toHaveLength(8);
+    expect(persisted.items.filter(item => item.type === "user")).toHaveLength(10);
     const packageSkill = await Bun.file(join(work, "node_modules", packageName, "skills/implement/SKILL.md")).text();
     const encodedBody = JSON.stringify(packageSkill.split("---")[2]!.trim()).slice(1, -1);
     expect(JSON.stringify(persisted.items)).not.toContain(encodedBody);
