@@ -42,6 +42,8 @@ export interface TuiSnapshot {
   branchId: string;
   provider: string;
   modelId: string;
+  /** Active named compatible profile, when a selection is live. */
+  profile?: string;
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
 }
@@ -66,6 +68,8 @@ export interface TuiControllerOptions {
   baseUrl?: string;
   /** Auth mode shown by /config for compatible endpoints. */
   auth?: string;
+  /** Active named compatible profile shown in status and /config. */
+  profile?: string;
   startupError?: string;
   /** Known values to mask in displayed transcript text and configuration output. */
   secrets?: string[];
@@ -112,6 +116,7 @@ export class TuiController {
   private explicitMaxOutput?: number;
   private baseUrl?: string;
   private auth?: string;
+  private profile?: string;
   private configEditor?: ConfigEditor;
   private readonly stageSettings?: TuiControllerOptions["stageSettings"];
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
@@ -149,6 +154,7 @@ export class TuiController {
     this.explicitMaxOutput = options.explicitMaxOutput;
     this.baseUrl = options.baseUrl;
     this.auth = options.auth;
+    this.profile = options.profile ?? options.configEditor?.settings.profile;
     this.secrets = options.secrets ?? [];
     this.extensions = options.extensions;
     this.home = options.home;
@@ -178,6 +184,7 @@ export class TuiController {
       branchId: this.session.activeBranchId,
       provider: this.provider,
       modelId: this.modelId,
+      ...(this.profile !== undefined ? { profile: this.profile } : {}),
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
     };
@@ -267,19 +274,42 @@ export class TuiController {
       return;
     }
     if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return; }
-    return { provider: provider as CredentialTarget["provider"], baseUrl: this.configEditor?.settings.baseUrl ?? this.baseUrl };
+    const settings = this.configEditor?.settings;
+    return {
+      provider: provider as CredentialTarget["provider"],
+      baseUrl: settings?.baseUrl ?? this.baseUrl,
+      ...(provider === "openai-compatible" && (settings?.profile ?? this.profile) !== undefined
+        ? { profile: settings?.profile ?? this.profile }
+        : {}),
+      ...(provider === "openai-compatible" && settings?.credentialIdentity !== undefined
+        ? { credentialIdentity: settings.credentialIdentity }
+        : {}),
+    };
   }
 
   private credentialOverrideNotice(target: CredentialTarget): string | undefined {
     if (this.credentials?.runtimeApiKey !== undefined) return "The runtime --api-key override still takes precedence over the saved key.";
-    const variable = credentialEnvironmentVariable(target.provider);
-    if (this.credentials?.env[variable]?.trim()) return `${variable} still takes precedence over the saved key.`;
+    const settings = this.configEditor?.settings;
+    if (target.provider === "openai-compatible" && settings?.credentialEnv) {
+      if (this.credentials?.env[settings.credentialEnv]?.trim()) return `${settings.credentialEnv} still takes precedence over the saved key.`;
+    } else {
+      const variable = credentialEnvironmentVariable(target.provider);
+      if (this.credentials?.env[variable]?.trim()) return `${variable} still takes precedence over the saved key.`;
+    }
     if (target.provider === "openai-compatible" && this.auth === "none") return "Automatic authentication is disabled by auth none; the saved key is not sent.";
   }
 
   private async refreshCredentialModel(identity: CredentialIdentity): Promise<void> {
     if (this.disposed || !this.credentials) return;
-    const active = credentialIdentity({ provider: this.provider as CredentialTarget["provider"], baseUrl: this.baseUrl });
+    const settings = this.configEditor?.settings;
+    const active = credentialIdentity({
+      provider: this.provider as CredentialTarget["provider"],
+      baseUrl: settings?.baseUrl ?? this.baseUrl,
+      ...(this.provider === "openai-compatible" ? { profile: settings?.profile ?? this.profile } : {}),
+      ...(this.provider === "openai-compatible" && settings?.credentialIdentity !== undefined
+        ? { credentialIdentity: settings.credentialIdentity }
+        : {}),
+    });
     if (identity.account !== active.account) return;
     // A removed/replaced saved key must never survive in a previously constructed adapter.
     this.model = undefined;
@@ -443,10 +473,13 @@ export class TuiController {
   }
 
   /** Replace the adapter and displayed provider/model ids without changing session history. */
-  setModel(model: Model | undefined, provider: string, modelId: string): void {
+  setModel(model: Model | undefined, provider: string, modelId: string, profile?: string): void {
     this.model = model;
     this.provider = provider;
     this.modelId = modelId;
+    if (profile !== undefined) {
+      this.profile = profile;
+    }
   }
 
   /** Open model search while idle, selecting the currently active entry. */
@@ -457,10 +490,10 @@ export class TuiController {
     return true;
   }
 
-  /** Filter catalog choices and include a typed model ID with fallback budgets. */
+  /** Filter catalog and profile choices with fallback budgets for typed ids. */
   searchModels(query: string): void {
     if (!this.modelPicker || this.running) return;
-    this.modelPicker = { query, selectedIndex: 0, entries: modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }) };
+    this.modelPicker = { query, selectedIndex: 0, entries: modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile }) };
   }
 
   /** Move the highlighted model with wraparound over the filtered choices. */
@@ -473,18 +506,35 @@ export class TuiController {
   /** Close the picker without changing the active model or settings. */
   closeModelPicker(): void { this.modelPicker = undefined; }
 
-  /** Stage and commit the highlighted model, leaving the picker open on failure. */
+  /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
     if (!selection) return false;
+    if (selection.profile !== undefined) {
+      return this.selectProfile(selection.profile);
+    }
     return this.selectModel(`${selection.provider}/${selection.modelId}`);
   }
 
-  /** Apply the textual model form through the same atomic session settings path as the picker. */
+  /** Switch the named compatible profile as one staged change, retaining previous on failure. */
+  async selectProfile(name: string): Promise<boolean> {
+    if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
+    const trimmed = name.trim();
+    if (!trimmed) { this.fail("Usage: /model profile:<name>."); return false; }
+    return this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
+      const active = this.configEditor!.settings.profile ?? trimmed;
+      return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx). Applies to this session only.`;
+    });
+  }
+
+  /** Apply the textual model or profile form through the same atomic session settings path as the picker. */
   async selectModel(args: string): Promise<boolean> {
     if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
     const selection = parseModelArgs(args, this.provider);
     if ("error" in selection) { this.fail(selection.error); return false; }
+    if (selection.profile !== undefined) {
+      return this.selectProfile(selection.profile);
+    }
     return this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId), () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx). Applies to this session only.`);
   }
 
@@ -560,7 +610,7 @@ export class TuiController {
     this.provider = next.provider; this.modelId = next.model;
     this.maxTurns = next.maxTurns; this.maxConcurrentTools = next.maxConcurrentTools;
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
-    this.baseUrl = next.baseUrl; this.auth = next.auth;
+    this.baseUrl = next.baseUrl; this.auth = next.auth; this.profile = next.profile;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
 
@@ -577,10 +627,12 @@ export class TuiController {
     return { contextWindow: info.contextWindow, maxOutput: info.maxOutput };
   }
 
-  /** Render effective basic settings for `/config`, masking supplied known secrets and sanitizing the base URL. */
+  /** Render effective settings with active profile for `/config`, masking secrets and sanitizing URLs. */
   describeConfig(): string {
     const budgets = this.effectiveBudgets();
+    const activeProfile = this.configEditor?.settings.profile ?? this.profile;
     const lines = [
+      ...(activeProfile !== undefined ? [`Profile: ${activeProfile}`] : []),
       `Provider: ${this.provider}`,
       `Model: ${this.modelId}`,
       `Context window: ${budgets.contextWindow}`,
@@ -589,9 +641,11 @@ export class TuiController {
     if (this.configEditor) {
       const settings = this.configEditor.settings;
       const origins = this.configEditor.origins;
-      lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => settings[key] !== undefined).map(key => `${key}: ${displaySetting(key, settings[key])} [${origins[key]}${(key === "contextWindow" || key === "maxOutput") && origins[key] !== "catalog" ? "; explicit limit" : ""}]`));
+      lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`));
       if (settings.headers) lines.push(`headers: configured (values hidden) [${origins.headers}]`);
       if (settings.extraBody) lines.push(`extraBody: configured (values hidden) [${origins.extraBody}]`);
+      if (settings.credentialEnv) lines.push(`credentialEnv: ${settings.credentialEnv} [profile "${settings.profile}"]`);
+      if (settings.credentialIdentity) lines.push(`credentialIdentity: ${settings.credentialIdentity} [profile "${settings.profile}"]`);
     }
     if (!this.configEditor && this.maxTurns !== undefined) {
       lines.push(`Max turns: ${this.maxTurns}`);
