@@ -64,7 +64,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/new - start a new session",
     "/sessions - list saved sessions",
     "/resume <id> - resume a saved session",
-    "/model [provider/model-id | provider model-id | model-id] - open searchable picker or switch the model",
+    "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
     "/compact - summarize older turns to free context",
     "/branch list | fork <entry-id> [name] | switch <branch-id> - continue a saved conversation path",
     "/skills - list available skills",
@@ -135,20 +135,26 @@ export const MODEL_PICKER_PROVIDERS = [
 /** Provider name accepted by the interactive model picker. */
 export type ModelPickerProvider = (typeof MODEL_PICKER_PROVIDERS)[number];
 
-/** Resolved model selection from `/model` arguments. */
+/** Resolved model or profile selection from `/model` arguments. */
 export interface ModelSelection {
   provider: string;
   modelId: string;
+  /** Named compatible profile selection, when the arguments choose a profile. */
+  profile?: string;
 }
 
-/** Parse `/model` arguments into a provider and model id, allowing unknown ids. */
+/** Parse `/model` arguments into a provider/model id or a named profile, allowing unknown ids. */
 export function parseModelArgs(
   args: string,
   currentProvider: string,
 ): ModelSelection | { error: string } {
   const trimmed = args.trim();
   if (trimmed.length === 0) {
-    return { error: "Usage: /model [provider/model-id | provider model-id | model-id]" };
+    return { error: "Usage: /model [provider/model-id | provider model-id | model-id | profile:<name>]" };
+  }
+  const profileSelection = parseProfileSelection(trimmed);
+  if (profileSelection !== undefined) {
+    return profileSelection;
   }
   const slash = trimmed.indexOf("/");
   if (slash >= 0) {
@@ -171,17 +177,34 @@ export function parseModelArgs(
   if (parts.length === 1) {
     return { provider: currentProvider, modelId: parts[0]! };
   }
-  return { error: "Usage: /model [provider/model-id | provider model-id | model-id]" };
+  return { error: "Usage: /model [provider/model-id | provider model-id | model-id | profile:<name>]" };
 }
 
-/** Format the interactive model picker with current selection and known budgets. */
+/** Parse `profile:<name>` or `profile <name>` into a named profile selection. */
+export function parseProfileSelection(args: string): ModelSelection | { error: string } | undefined {
+  const colon = /^profile\s*:\s*(.+)$/i.exec(args);
+  const space = /^profile\s+(.+)$/i.exec(args);
+  const raw = colon?.[1] ?? space?.[1];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const name = raw.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) {
+    return { error: `Invalid profile "${raw.trim()}". Profile names must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$.` };
+  }
+  return { provider: "openai-compatible", modelId: "", profile: name };
+}
+
+/** Format the interactive model picker with current selection, known budgets, and named profiles. */
 export function formatModelPicker(
   currentProvider: string,
   currentModelId: string,
   catalog: ReadonlyArray<{ id: string; provider: string; contextWindow: number }>,
+  profiles?: Readonly<Record<string, { model?: string }>>,
+  activeProfile?: string,
 ): string {
   const lines = [
-    `Current: ${currentProvider}/${currentModelId}`,
+    activeProfile ? `Current: ${currentProvider}/${currentModelId} [profile ${activeProfile}]` : `Current: ${currentProvider}/${currentModelId}`,
     "Known models:",
   ];
   for (const provider of MODEL_PICKER_PROVIDERS) {
@@ -196,8 +219,15 @@ export function formatModelPicker(
       lines.push(`${marker}${entry.id} (${entry.contextWindow} ctx)`);
     }
   }
-  lines.push("Select with /model <model-id>, /model <provider>/<model-id>, or /model <provider> <model-id>.");
+  lines.push("Select with /model <model-id>, /model <provider>/<model-id>, /model <provider> <model-id>, or /model profile:<name>.");
   lines.push("Unknown ids are allowed and use conservative defaults.");
+  if (profiles && Object.keys(profiles).length > 0) {
+    lines.push("Profiles:");
+    for (const name of Object.keys(profiles).sort()) {
+      const marker = name === activeProfile ? "* " : "  ";
+      lines.push(`${marker}profile:${name}`);
+    }
+  }
   return lines.join("\n");
 }
 

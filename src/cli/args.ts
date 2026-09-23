@@ -2,7 +2,7 @@ import type { ConfigLayer } from "../config/config.ts";
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--api-key <key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--api-key <key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
@@ -16,6 +16,7 @@ export interface CliArgs {
   json: boolean;
   provider?: CliProvider;
   model?: string;
+  profile?: string;
   apiKey?: string;
   resume?: string;
   branch?: string;
@@ -126,6 +127,27 @@ export function parseArgs(
     }
     if (arg.startsWith("--model=")) {
       args.model = arg.slice("--model=".length);
+      continue;
+    }
+    if (arg === "--profile") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { error: "Missing value for --profile" };
+      }
+      i++;
+      const profile = parseProfile(value);
+      if (typeof profile === "object") {
+        return profile;
+      }
+      args.profile = profile;
+      continue;
+    }
+    if (arg.startsWith("--profile=")) {
+      const profile = parseProfile(arg.slice("--profile=".length));
+      if (typeof profile === "object") {
+        return profile;
+      }
+      args.profile = profile;
       continue;
     }
     if (arg === "--base-url") {
@@ -314,8 +336,20 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
   };
 }
 
+/** Validate a named compatible profile selection without loading configuration. */
+function parseProfile(value: string): string | { error: string } {
+  const name = value.trim();
+  if (!new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$").test(name)) {
+    return {
+      error: `Invalid profile "${value}". Profile names must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$.`,
+    };
+  }
+  return name;
+}
+
 /**
  * Connection flags with an explicit non-compatible provider are invalid.
+ * Profile selection implies the compatible provider; unknown profiles fail after config merge.
  * Missing baseUrl is checked after config merge so project config can supply it.
  */
 function validateConnectionOptions(
@@ -325,7 +359,8 @@ function validateConnectionOptions(
     args.baseUrl !== undefined ||
     args.headers !== undefined ||
     args.extraBody !== undefined ||
-    args.auth !== undefined;
+    args.auth !== undefined ||
+    args.profile !== undefined;
   if (
     hasConnection &&
     args.provider !== undefined &&
@@ -348,6 +383,9 @@ export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
   }
   if (args.model !== undefined) {
     layer.model = args.model;
+  }
+  if (args.profile !== undefined) {
+    layer.profile = args.profile;
   }
   if (args.maxTurns !== undefined) {
     layer.maxTurns = args.maxTurns;

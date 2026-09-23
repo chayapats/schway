@@ -15,18 +15,25 @@ export async function resolveProviderCredential(input: CredentialTarget & {
   runtimeApiKey?: string;
   env: Record<string, string | undefined>;
   auth?: "required" | "optional" | "none";
+  credentialEnv?: string;
   store: CredentialStore;
 }): Promise<ProviderCredential> {
+  const profileSuffix = input.profile?.trim() ? ` for profile "${input.profile.trim()}"` : "";
   const missing = input.provider === "anthropic" ? MISSING_ANTHROPIC_API_KEY
     : input.provider === "openai" ? MISSING_OPENAI_API_KEY
-    : "Missing API key for OpenAI-compatible endpoint. Pass --api-key, set OPENAI_COMPATIBLE_API_KEY, or save a key in interactive mode.";
+    : `Missing API key for OpenAI-compatible endpoint${profileSuffix}. Pass --api-key${input.credentialEnv ? `, set ${input.credentialEnv}` : ", set OPENAI_COMPATIBLE_API_KEY"}, or save a key in interactive mode.`;
   if (input.runtimeApiKey !== undefined && !input.runtimeApiKey.trim()) {
     return { error: "Explicit API key is empty. Supply a nonempty --api-key or omit the override." };
   }
   if (input.runtimeApiKey !== undefined) return { apiKey: input.runtimeApiKey.trim(), source: "runtime" };
   if (input.provider === "openai-compatible" && input.auth === "none") return { source: "none" };
-  const environmentKey = input.env[credentialEnvironmentVariable(input.provider)]?.trim();
-  if (environmentKey) return { apiKey: environmentKey, source: "env" };
+  if (input.provider === "openai-compatible" && input.credentialEnv) {
+    const profileKey = input.env[input.credentialEnv]?.trim();
+    if (profileKey) return { apiKey: profileKey, source: "env" };
+  } else {
+    const environmentKey = input.env[credentialEnvironmentVariable(input.provider)]?.trim();
+    if (environmentKey) return { apiKey: environmentKey, source: "env" };
+  }
   let identity;
   try { identity = credentialIdentity(input); }
   catch { return { error: "Select a valid HTTP(S) base URL before resolving OpenAI-compatible credentials." }; }
