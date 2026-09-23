@@ -262,7 +262,7 @@ Isolation trace: source scan asserts the prototype contains no `~/.codex/auth.js
 ## 13. Runnable example (uses only the replay; no credentials)
 
 ```ts
-import { createCodexFeasibilityModel } from "./src/model/providers/codex-feasibility.ts";
+import { createCodexFeasibilityModel } from "../src/model/providers/codex-feasibility.ts";
 
 const model = createCodexFeasibilityModel({
   turns: [
