@@ -72,7 +72,8 @@ implement an unfamiliar task, or judge its own work.
 
 ## Recorded evidence
 
-Observed on 2026-09-22 with Bun 1.4.2:
+Observed on 2026-09-22 with Bun 1.4.2; the full repository suite was
+revalidated on 2026-09-23 after rebasing onto the merged #44 changes:
 
 | Check | Outcome |
 | --- | --- |
@@ -86,7 +87,7 @@ Observed on 2026-09-22 with Bun 1.4.2:
 | Interrupted turns | Passed: provider failure and cancellation preserve written artifacts; ordinary resume has no active body, and explicit reinvocation works. |
 | Disabled package | Passed: removing its configured name removes skill discovery/invocation, while an ordinary resumed turn still runs the fixture tests. Artifacts remain intact. |
 | Focused package suite | Passed: 6 tests, 0 failures. |
-| Full repository suite | Passed: `bun test`, 608 tests, 0 failures, 3678 assertions across 47 files. |
+| Full repository suite | Passed on 2026-09-23: `bun test`, 625 tests, 0 failures, 3884 assertions across 49 files. |
 | Type checking | Passed: `bun run typecheck`. |
 | Live-provider execution | Pending: not run; deterministic validation uses a scripted model. |
 | Human dogfood on a real task | Pending: requires a separately chosen real task and human answers. |

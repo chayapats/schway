@@ -4,7 +4,7 @@ description: Implement a selected local ticket and record observed verification.
 disable-model-invocation: true
 ---
 
-Read the ticket and specification paths supplied as arguments, applicable repository instructions, and current source/tests. Check the ticket's prerequisite behavior in the checkout. Missing or contradictory inputs block dependent edits: record the precise gap and request corrected artifacts in a new `/implement` invocation.
+Read the ticket and specification paths supplied as arguments, any supplied review artifact, applicable repository instructions, and current source/tests. Check the ticket's prerequisite behavior in the checkout. For a review follow-up, check each failed or pending finding against the current source, address valid findings within the ticket's edit scope, and record the disposition and verification evidence. Keep findings requiring other work or unavailable evidence pending. Missing or contradictory inputs block dependent edits: record the precise gap and request corrected artifacts in a new `/implement` invocation.
 
 Implement the selected ticket within its edit scope. Use the repository's test commands to establish the relevant current behavior and verify the changed behavior. Capture actual command exit codes and meaningful output; a model's claim is not test evidence. Keep the tracker local unless the user separately requests external writes.
 
