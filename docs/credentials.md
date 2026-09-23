@@ -59,8 +59,9 @@ schway --provider openai-compatible --base-url https://example.com/v1 --auth req
 
 Changing the endpoint selects a different stored credential. With `--auth optional`
 (the compatible default), a missing key is allowed; when a key is available it is
-used. With `--auth none`, no automatic authentication header is sent and the OS
-store is not read. An explicitly empty runtime override is still rejected.
+used. If the OS store cannot be read, optional auth still runs without a key.
+With `--auth none`, no automatic authentication header is sent and the OS store
+is not read. An explicitly empty runtime override is still rejected.
 
 A later headless invocation may use the saved key:
 
@@ -85,11 +86,13 @@ Schway uses the experimental `Bun.secrets` API (developed with Bun 1.4.2):
 - Windows: Windows Credential Manager for the current user.
 
 See [Bun's Secrets documentation](https://bun.sh/docs/runtime/secrets).
-Denied, locked or unavailable reads, saves and deletions return recovery guidance
-without printing the native error or key. Restore OS access and retry. To bypass a
-failing read, supply the provider environment variable or `--api-key`. Saving and
-deleting still require working secure storage. No OAuth, subscription login or
-migration from another CLI is performed.
+Denied, locked or unavailable reads needed for native providers or required
+compatible auth, plus saves and deletions, return recovery guidance without
+printing the native error or key. Optional compatible auth runs without a key
+when a read fails. Restore OS access and retry to use a saved key, or supply the
+provider environment variable or `--api-key`. Saving and deleting still require
+working secure storage. No OAuth, subscription login or migration from another
+CLI is performed.
 
 ## Deterministic checks and opt-in native smoke
 

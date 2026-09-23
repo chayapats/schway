@@ -294,6 +294,32 @@ test("OpenAI-compatible optional auth works without a key and ignores OPENAI_API
   expect(used.auth).toBe("optional");
 });
 
+test("headless compatible default auth reaches the endpoint without a key when storage is locked", async () => {
+  let requestHeaders: Headers | undefined;
+  const result = await run(["-p", "hello", "--provider", "openai-compatible", "--base-url", "https://compatible.example.test/v1"], {
+    env: {},
+    credentialStore: unavailableCredentialStore(),
+    fetch: async (input, init) => {
+      requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      return new Response('data: {"choices":[{"delta":{"content":"from-local"}}]}\n\ndata: [DONE]\n\n', {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("from-local");
+  expect(requestHeaders?.get("authorization")).toBeNull();
+  expect(JSON.stringify(result)).not.toContain("locked-secret-sentinel");
+});
+
+function unavailableCredentialStore(): CredentialStore {
+  return {
+    async get() { throw new Error("locked-secret-sentinel"); },
+    async set() { throw new Error("locked-secret-sentinel"); },
+    async delete() { throw new Error("locked-secret-sentinel"); },
+  };
+}
+
 test("OpenAI-compatible required auth fails headlessly without --api-key", async () => {
   const result = await run(
     [

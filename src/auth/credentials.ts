@@ -32,7 +32,12 @@ export async function resolveProviderCredential(input: CredentialTarget & {
   catch { return { error: "Select a valid HTTP(S) base URL before resolving OpenAI-compatible credentials." }; }
   let stored: string | null;
   try { stored = await input.store.get(identity); }
-  catch { return { error: credentialStoreError("read") }; }
+  catch {
+    if (input.provider === "openai-compatible" && (input.auth ?? "optional") === "optional") {
+      return { source: "none" };
+    }
+    return { error: credentialStoreError("read") };
+  }
   const apiKey = stored?.trim();
   if (apiKey) return { apiKey, source: "stored" };
   if (input.provider === "openai-compatible" && (input.auth ?? "optional") === "optional") return { source: "none" };

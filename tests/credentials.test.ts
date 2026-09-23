@@ -107,10 +107,17 @@ test("higher priority keys bypass locked storage and an explicit empty override 
     for (const auth of ["required", "optional", "none"] as const) {
       expect(await resolveProviderCredential({ ...input, auth, runtimeApiKey: " " })).toEqual({ error: expect.stringContaining("Explicit API key is empty") });
     }
-    const failed = await resolveProviderCredential({ ...input, env: {} });
-    expect(JSON.stringify(failed)).not.toContain("secret-sentinel");
-    expect(failed).toMatchObject({ error: expect.stringContaining("Unlock or allow access") });
+    for (const auth of ["required", "optional", "none"] as const) {
+      const resolved = await resolveProviderCredential({ ...input, env: {}, auth });
+      expect(JSON.stringify(resolved)).not.toContain("secret-sentinel");
+      if (provider === "openai-compatible" && auth !== "required") {
+        expect(resolved).toEqual({ source: "none" });
+      } else {
+        expect(resolved).toMatchObject({ error: expect.stringContaining("Unlock or allow access") });
+      }
+    }
   }
+  expect(await resolveProviderCredential({ provider: "openai-compatible", baseUrl: "https://example.test/v1", store: unavailableStore, env: {} })).toEqual({ source: "none" });
 });
 
 test("compatible endpoint keys stay separate from native providers and other endpoints", async () => {
