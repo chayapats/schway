@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { STABLE_SYSTEM_PROMPT } from "../src/context/prompt.ts";
 import type { ModelRequest } from "../src/model/model.ts";
 import {
@@ -7,6 +9,10 @@ import {
   type CodexFeasibilityTurn,
   type CodexFeasibilityWireRequest,
 } from "../src/model/providers/codex-feasibility.ts";
+import { executeToolCall } from "../src/tools/executor.ts";
+import { createToolRegistry } from "../src/tools/registry.ts";
+import { readTool } from "../src/tools/read.ts";
+import { withTempDir } from "./helpers.ts";
 
 type FixtureTurn = {
   turn: CodexFeasibilityTurn;
@@ -87,7 +93,7 @@ test("streams replayed text without delegating tool execution", async () => {
   expect(seen).toHaveLength(1);
   expect(seen[0]?.instructions).toContain(STABLE_SYSTEM_PROMPT);
   expect(seen[0]?.tools).toEqual([
-    { name: "read", description: "Read a file" },
+    { name: "read", description: "Read a file", inputSchema: { type: "object" } },
   ]);
 });
 
@@ -119,44 +125,55 @@ test("Schway executes the requested tool itself and submits its own result", asy
   }
   const args = toolCall.arguments as { path: string };
   expect(args).toEqual({ path: "note.txt" });
-  const toolOutput = "note.txt says hello";
 
-  // Turn 2: Schway submits its own tool result and receives final text.
-  const followup: ModelRequest = {
-    ...sampleRequest(),
-    items: [
-      ...sampleRequest().items,
-      firstComplete.message,
-      {
-        type: "tool_result",
-        id: "result-1",
-        toolCallId: "call_read1",
-        content: toolOutput,
-        isError: false,
-      },
-    ],
-  };
-  const secondEvents = await collect(model.stream(followup));
-  const secondComplete = secondEvents.at(-1);
-  expect(secondComplete?.type).toBe("message_complete");
-  if (secondComplete?.type !== "message_complete") {
-    throw new Error("expected message_complete");
-  }
-  expect(secondComplete.message.content).toEqual([
-    { type: "text", text: "note.txt says hello" },
-  ]);
+  // Schway-owned execution through the real read tool on an isolated workspace.
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "note.txt"), "note.txt says hello\n");
+    const registry = createToolRegistry([readTool]);
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const executed = await executeToolCall({ registry, workspace, call: toolCall });
+    expect(executed.status).toBe("success");
+    expect(executed.result.isError).toBe(false);
+    const toolOutput = executed.result.content;
+    expect(toolOutput).toContain("note.txt says hello");
+
+    // Turn 2: Schway submits its own executed tool result and receives final text.
+    const followup: ModelRequest = {
+      ...sampleRequest(),
+      items: [
+        ...sampleRequest().items,
+        firstComplete.message,
+        {
+          type: "tool_result",
+          id: "result-1",
+          toolCallId: "call_read1",
+          content: toolOutput,
+          isError: false,
+        },
+      ],
+    };
+    const secondEvents = await collect(model.stream(followup));
+    const secondComplete = secondEvents.at(-1);
+    expect(secondComplete?.type).toBe("message_complete");
+    if (secondComplete?.type !== "message_complete") {
+      throw new Error("expected message_complete");
+    }
+    expect(secondComplete.message.content).toEqual([
+      { type: "text", text: "note.txt says hello" },
+    ]);
+    expect(seen).toHaveLength(2);
+    const secondInput = seen[1]?.input as Array<Record<string, unknown>>;
+    expect(
+      secondInput.some(
+        (entry) =>
+          entry["role"] === "tool" &&
+          entry["toolCallId"] === "call_read1" &&
+          entry["content"] === toolOutput,
+      ),
+    ).toBe(true);
+  });
   expect(model.requestCount).toBe(2);
   expect(model.executedTools).toBe(0);
-  expect(seen).toHaveLength(2);
-  const secondInput = seen[1]?.input as Array<Record<string, unknown>>;
-  expect(
-    secondInput.some(
-      (entry) =>
-        entry["role"] === "tool" &&
-        entry["toolCallId"] === "call_read1" &&
-        entry["content"] === toolOutput,
-    ),
-  ).toBe(true);
 });
 
 test("cancellation at the Schway boundary aborts without delegating the run", async () => {
@@ -164,11 +181,27 @@ test("cancellation at the Schway boundary aborts without delegating the run", as
     turns: [{ waitForAbort: true, chunks: ["partial"] }],
   });
   const controller = new AbortController();
-  const pending = collect(
-    model.stream(sampleRequest({ signal: controller.signal })),
-  );
+  const iterator = model.stream(sampleRequest({ signal: controller.signal }))[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  expect(first.done).toBe(false);
+  expect(first.value).toEqual({ type: "text_delta", text: "partial" });
+  const pending = iterator.next();
   controller.abort();
   await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  expect(model.executedTools).toBe(0);
+});
+
+test("aborting after the last delta prevents accepting the completed message", async () => {
+  const model = createCodexFeasibilityModel({
+    turns: [{ chunks: ["only"] }],
+  });
+  const controller = new AbortController();
+  const iterator = model.stream(sampleRequest({ signal: controller.signal }))[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  expect(first.done).toBe(false);
+  expect(first.value).toEqual({ type: "text_delta", text: "only" });
+  controller.abort();
+  await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" });
   expect(model.executedTools).toBe(0);
 });
 

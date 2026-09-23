@@ -31,7 +31,7 @@ export interface CodexFeasibilityWireRequest {
   model: string;
   instructions: string;
   input: unknown[];
-  tools: Array<{ name: string; description: string }>;
+  tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
 }
 
 /** Options for the isolated Codex subscription feasibility model. */
@@ -88,6 +88,7 @@ export function createCodexFeasibilityModel(
       } else if (turn.error) {
         throw new Error(redact(turn.error, secrets));
       }
+      throwIfAborted(request.signal, secrets);
       yield {
         type: "message_complete",
         message: toAssistantMessage(turn, modelId),
@@ -143,6 +144,7 @@ export function toWireRequest(
     tools: (request.tools ?? []).map((tool) => ({
       name: tool.name,
       description: tool.description,
+      inputSchema: tool.inputSchema,
     })),
   };
 }

@@ -110,7 +110,7 @@ No page above documents a subscription-backed, model-only completion endpoint
 | Schway boundary need | Codex subscription-supported equivalent found? |
 |---|---|
 | Send system/context/items/tools; receive text deltas | No. No documented subscription Chat Completions/Responses endpoint. |
-| Receive exactly one normalized tool call per turn for Schway to execute | No. `turn/start` streams Codex-executed tool progress, not executable requests. |
+| Receive exactly one normalized tool call per turn for Schway to execute | No. Experimental `dynamicTools` can send `item/tool/call` requests to the client and accept client-produced results, but App Server still owns the agent turn and continuation rather than exposing Schway's model-only contract. |
 | Submit Schway-executed tool results as the next model input | No. `turn/steer` appends user input to an in-flight Codex turn; `thread/inject_items` appends raw Responses items to a Codex-owned history — both stay inside Codex's loop. |
 | Cancel a pending model request via Schway's `AbortSignal`, keep session/scheduling | No. `turn/interrupt` cancels Codex's run; Schway does not retain the loop. |
 | Credential identity Schway can mint/store/refresh itself | No. Only Codex-client browser/device-code flows and Enterprise access tokens exist, both bound to Codex clients. |
@@ -181,10 +181,11 @@ Test `Schway executes the requested tool itself and submits its own result`:
    wire-equivalent observed via `onRequest`; replay streams `Let me read that.` then
    `message_complete` with `tool_call { id: call_read1, name: read, arguments: { path: note.txt } }`.
    Transport executed 0 tools (asserted).
-2. Schway-side execution (test stands in for `src/tools/read.ts`): parse arguments,
-   produce `note.txt says hello` locally.
+2. Schway-side execution via the real tool path (`executeToolCall` + `readTool` on an
+   isolated temp workspace): validate arguments, read `note.txt`, and submit the
+   executed file content as the Schway-owned `tool_result`.
 3. Turn 2 request: original items + assistant message + Schway's own
-   `tool_result { toolCallId: call_read1, content: note.txt says hello, isError: false }` →
+   `tool_result { toolCallId: call_read1, content: <executed read output>, isError: false }` →
    replay streams final `note.txt says hello` + `message_complete`.
 4. Assertions: `requestCount === 2`, `executedTools === 0` throughout, second wire input
    contains the Schway-submitted `role: tool` entry.
@@ -262,6 +263,8 @@ Isolation trace: source scan asserts the prototype contains no `~/.codex/auth.js
 ## 13. Runnable example (uses only the replay; no credentials)
 
 ```ts
+import type { AssistantMessage, ToolResult } from "../src/conversation/types.ts";
+import type { ModelRequest } from "../src/model/model.ts";
 import { createCodexFeasibilityModel } from "../src/model/providers/codex-feasibility.ts";
 
 const model = createCodexFeasibilityModel({
@@ -271,13 +274,35 @@ const model = createCodexFeasibilityModel({
   ],
 });
 
+const request: ModelRequest = {
+  systemPrompt: "You are Schway.",
+  context: [],
+  items: [{ type: "user", id: "user-1", content: [{ type: "text", text: "read note.txt" }] }],
+  tools: [{ name: "read", description: "Read a file", inputSchema: { type: "object" } }],
+};
+
 // Turn 1: Schway requests a model response.
 const first = await Array.fromAsync(model.stream(request)); // text_delta*, message_complete{tool_call}
+const firstComplete = first.find((event) => event.type === "message_complete");
+if (firstComplete?.type !== "message_complete") {
+  throw new Error("expected message_complete");
+}
+const assistantMsg: AssistantMessage = firstComplete.message;
 // Schway executes `read` itself via its own tools, producing "note.txt says hello".
+const toolResult: ToolResult = {
+  type: "tool_result",
+  id: "result-1",
+  toolCallId: "call_1",
+  content: "note.txt says hello",
+  isError: false,
+};
 // Turn 2: Schway submits its own tool_result and streams the follow-up text.
 const second = await Array.fromAsync(model.stream({ ...request, items: [...request.items, assistantMsg, toolResult] }));
 // Abort anytime via request.signal; the stream rejects with AbortError and executes nothing.
 ```
+
+Run from the docs directory with `bun docs-runnable-example.ts` after saving this block
+to `docs/docs-runnable-example.ts` (imports above resolve to `../src/...`).
 
 Full version with assertions: `tests/codex-feasibility.test.ts`.
 
@@ -291,7 +316,7 @@ Full version with assertions: `tests/codex-feasibility.test.ts`.
 >
 > **Credential identity/storage/refresh:** Codex caches login in `~/.codex/auth.json` (under `CODEX_HOME`) or OS credential store per `cli_auth_credentials_store = file|keyring|auto|ephemeral` (admin-enforceable); ChatGPT sessions auto-refresh before expiry; headless options are device-code beta, localhost-callback forwarding (`localhost:1455`), or copying `auth.json` with password-like handling. Schway must never read/replay this cache; prototype carries no credentials.
 >
-> **Request/response mapping:** No supported subscription model-only endpoint exists in the verified docs. SDK `thread.run` and App Server `turn/start` both delegate planning, tool execution, sandbox/approvals, and run lifecycle to Codex (`sandbox` presets `read_only|workspace_write|full_access`, `command/exec` under server sandbox, streamed `item/*` progress, `turn/completed`). `turn/steer` and `thread/inject_items` stay inside Codex's loop. None returns executable tool calls for Schway's executor.
+> **Request/response mapping:** No supported subscription model-only endpoint exists in the verified docs. SDK `thread.run` and App Server `turn/start` both delegate planning, tool execution, sandbox/approvals, and run lifecycle to Codex (`sandbox` presets `read_only|workspace_write|full_access`, `command/exec` under server sandbox, streamed `item/*` progress, `turn/completed`). `turn/steer` and `thread/inject_items` stay inside Codex's loop. Experimental `dynamicTools` can route selected tool calls to the client as `item/tool/call` requests and accept client-produced results back into the model tool pipeline, but Codex retains planning, continuation, and overall run ownership — still not Schway's model-only contract.
 >
 > **Cancellation:** Schway-side `AbortSignal` → replay rejects `AbortError` with zero tool execution (proven). Codex-side `turn/interrupt` → `status: interrupted` cancels Codex's run (documented, not equivalent, not used).
 >
