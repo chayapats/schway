@@ -1,4 +1,5 @@
 import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { isValidProfileBaseUrl } from "./profile-name.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
@@ -199,10 +200,16 @@ function expandProfileSwitch(scope: ConfigScope, changes: Array<{ key: string; v
 }
 
 function validatePersistedBaseUrl(value: string): void {
-  let url: URL;
-  try { url = new URL(value); }
-  catch { throw new Error("Persisted baseUrl must be an absolute URL without userinfo or query parameters. Use session scope for runtime-only URLs."); }
-  if (url.username || url.password || url.href.split("#", 1)[0]!.includes("?")) {
+  if (!isValidProfileBaseUrl(value)) {
+    let hasUrl = true;
+    try {
+      new URL(value);
+    } catch {
+      hasUrl = false;
+    }
+    if (!hasUrl) {
+      throw new Error("Persisted baseUrl must be an absolute URL without userinfo or query parameters. Use session scope for runtime-only URLs.");
+    }
     throw new Error("Persisted baseUrl must not contain userinfo or query parameters. Use session scope for runtime-only URLs.");
   }
 }

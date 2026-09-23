@@ -669,3 +669,91 @@ test("status and config display the active profile with redacted settings", asyn
     expect(text).not.toContain(secret);
   });
 });
+
+test("profile baseUrl values reject non-absolute userinfo and query URLs", () => {
+  for (const baseUrl of [
+    "not-a-url",
+    "https://user:pass@example.test/v1",
+    "https://user@example.test/v1",
+    "https://example.test/v1?region=test",
+    "https://example.test/v1?region=test#frag",
+  ]) {
+    const parsed = parseConfigObject({ profiles: { a: { baseUrl } } }, "test");
+    expect("error" in parsed).toBe(true);
+    if ("error" in parsed) {
+      expect(parsed.error).toContain("profiles.a.baseUrl");
+      expect(parsed.error.includes(baseUrl)).toBe(false);
+    }
+    const resolved = resolveSettings({
+      user: { profiles: { a: { baseUrl } }, profile: "a" },
+    });
+    expect("error" in resolved).toBe(true);
+    if ("error" in resolved) {
+      expect(resolved.error).toContain("profiles.a.baseUrl");
+    }
+  }
+});
+
+test("secret-like keys inside profile extraBody are rejected", () => {
+  for (const extraBody of [
+    { apiKey: "sk-extra-secret" },
+    { api_key: "sk-extra-secret" },
+    { "api-key": "sk-extra-secret" },
+    { token: "extra-token-secret" },
+    { SECRET: "extra-secret-value" },
+    { credentials: "extra-credentials" },
+  ]) {
+    const parsed = parseConfigObject(
+      { profiles: { a: { baseUrl: "https://example.test/v1", extraBody } } },
+      "test",
+    );
+    expect("error" in parsed).toBe(true);
+    if ("error" in parsed) {
+      expect(parsed.error).toContain("API key");
+      expect(parsed.error.includes("sk-extra-secret")).toBe(false);
+      expect(parsed.error.includes("extra-token-secret")).toBe(false);
+      expect(parsed.error.includes("extra-secret-value")).toBe(false);
+    }
+    const resolved = resolveSettings({
+      user: {
+        profiles: { a: { baseUrl: "https://example.test/v1", extraBody } as never },
+        profile: "a",
+      },
+    });
+    expect("error" in resolved).toBe(true);
+  }
+});
+
+test("bare model tokens never switch profiles", async () => {
+  await withTempDir(async (root) => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({
+      home: join(root, "home"),
+      workspaceRoot: root,
+      cli: {
+        profiles: {
+          alpha: { baseUrl: "https://alpha.example.test/v1", model: "alpha-model" },
+        },
+      },
+    });
+    const controller = new TuiController({
+      session: createSession(),
+      sessionId: "bare-name",
+      workspace,
+      configEditor: editor,
+      provider: "anthropic",
+      modelId: "test-model",
+      model: createScriptedModel({ text: "direct" }),
+      contextManager: createContextManager(workspace),
+      stageSettings: async (next, _signal, nextWorkspace) => ({
+        model: createScriptedModel({ provider: next.provider, id: next.model, text: "switched" }),
+        contextManager: createContextManager(nextWorkspace ?? workspace, { contextWindow: next.contextWindow }),
+      }),
+    });
+    expect(controller.snapshot().profile).toBeUndefined();
+    expect(await controller.selectModel("alpha")).toBe(true);
+    expect(controller.snapshot().profile).toBeUndefined();
+    expect(controller.snapshot().provider).toBe("anthropic");
+    expect(controller.snapshot().modelId).toBe("alpha");
+  });
+});

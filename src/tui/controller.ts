@@ -530,11 +530,6 @@ export class TuiController {
   /** Apply the textual model or profile form through the same atomic session settings path as the picker. */
   async selectModel(args: string): Promise<boolean> {
     if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
-    const trimmed = args.trim();
-    const profiles = this.configEditor?.profiles;
-    if (profiles && trimmed && profiles[trimmed] !== undefined && !trimmed.includes("/") && !trimmed.includes(" ") && !trimmed.toLowerCase().startsWith("profile")) {
-      return this.selectProfile(trimmed);
-    }
     const selection = parseModelArgs(args, this.provider);
     if ("error" in selection) { this.fail(selection.error); return false; }
     if (selection.profile !== undefined) {

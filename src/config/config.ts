@@ -13,6 +13,14 @@ import {
   DEFAULT_MAX_TURNS,
   DEFAULT_PROVIDER,
 } from "./defaults.ts";
+import {
+  PROFILE_NAME_PATTERN,
+  isValidProfileBaseUrl,
+  isValidProfileName,
+} from "./profile-name.ts";
+
+/** Shared profile-name pattern and validator; re-exported for existing config importers. */
+export { PROFILE_NAME_PATTERN, isValidProfileName, isValidProfileBaseUrl };
 
 /** First-party config keys. Unknown names are rejected rather than ignored. */
 export const CONFIG_SETTING_NAMES = [
@@ -44,9 +52,6 @@ const AuthSchema = Type.Union([
 ]);
 
 const PositiveInt = Type.Integer({ minimum: 1 });
-
-/** Profile names are filesystem- and CLI-safe identifiers without secrets. */
-export const PROFILE_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 
 /** Environment-variable names referenced by profiles, never secret values. */
 export const CREDENTIAL_ENV_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$";
@@ -244,6 +249,15 @@ function findNestedProfileSecret(record: Record<string, unknown>, source: string
     if (secretKey !== undefined) {
       return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
     }
+    const extraBody = (profile as Record<string, unknown>).extraBody;
+    if (extraBody !== null && typeof extraBody === "object" && !Array.isArray(extraBody)) {
+      const extraBodySecret = Object.keys(extraBody as Record<string, unknown>).find((key) =>
+        SECRET_KEY_ALIASES.has(normalizeKey(key)),
+      );
+      if (extraBodySecret !== undefined) {
+        return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
+      }
+    }
   }
   return undefined;
 }
@@ -265,8 +279,17 @@ function validateProfiles(
     if (secretKey !== undefined) {
       return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
     }
+    const extraBodySecret = Object.keys(profile.extraBody ?? {}).find((key) =>
+      SECRET_KEY_ALIASES.has(normalizeKey(key)),
+    );
+    if (extraBodySecret !== undefined) {
+      return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
+    }
     if (profile.baseUrl.trim().length === 0) {
       return `Invalid config at ${source}: profiles.${name}.baseUrl must be a nonempty string.`;
+    }
+    if (!isValidProfileBaseUrl(profile.baseUrl.trim())) {
+      return `Invalid config at ${source}: profiles.${name}.baseUrl must be an absolute URL without userinfo or query parameters.`;
     }
     if (profile.model !== undefined && profile.model.trim().length === 0) {
       return `Invalid config at ${source}: profiles.${name}.model must be a nonempty string.`;
@@ -291,11 +314,6 @@ function validateProfiles(
     }
   }
   return undefined;
-}
-
-/** True when a profile name uses only safe identifier characters. */
-export function isValidProfileName(name: string): boolean {
-  return new RegExp(PROFILE_NAME_PATTERN).test(name);
 }
 
 /** Merge profile maps by name with later definitions replacing the whole same-name profile. */

@@ -1,4 +1,5 @@
 import type { ConfigLayer } from "../config/config.ts";
+import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
@@ -339,9 +340,9 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
 /** Validate a named compatible profile selection without loading configuration. */
 function parseProfile(value: string): string | { error: string } {
   const name = value.trim();
-  if (!new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$").test(name)) {
+  if (!isValidProfileName(name)) {
     return {
-      error: `Invalid profile "${value}". Profile names must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$.`,
+      error: `Invalid profile "${value}". Profile names must match ${PROFILE_NAME_PATTERN}.`,
     };
   }
   return name;

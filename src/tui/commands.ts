@@ -1,5 +1,6 @@
 import { RESERVED_SKILL_NAMES, splitSlashCommand } from "../skills/skills.ts";
 import type { ExtensionCommandInfo } from "../extensions/host.ts";
+import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 import type { TuiController } from "./controller.ts";
 
 /** Slash command requested from the TUI input editor. */
@@ -189,8 +190,8 @@ export function parseProfileSelection(args: string): ModelSelection | { error: s
     return undefined;
   }
   const name = raw.trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) {
-    return { error: `Invalid profile "${raw.trim()}". Profile names must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$.` };
+  if (!isValidProfileName(name)) {
+    return { error: `Invalid profile "${raw.trim()}". Profile names must match ${PROFILE_NAME_PATTERN}.` };
   }
   return { provider: "openai-compatible", modelId: "", profile: name };
 }
