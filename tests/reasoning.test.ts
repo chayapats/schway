@@ -206,6 +206,46 @@ test("validateThinking and describeEffectiveThinking stay provider-independent",
   expect(describeEffectiveThinking("anthropic", undefined)).toContain("provider default");
 });
 
+test("anthropic thinking budgets are rejected at resolve time when max output is too small", () => {
+  const high = resolveSettings({
+    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high", maxOutput: 4096 },
+  });
+  expect("error" in high).toBe(true);
+  if (!("error" in high)) throw new Error("expected budget error");
+  expect(high.error).toContain("budget 8192");
+  const low = resolveSettings({
+    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "low", maxOutput: 1024 },
+  });
+  expect("error" in low).toBe(true);
+  if (!("error" in low)) throw new Error("expected budget error");
+  expect(low.error).toContain("budget 1024");
+});
+
+test("anthropic thinking budgets pass when the output limit fits and rejected edits keep prior settings", async () => {
+  const fitting = resolveSettings({
+    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high", maxOutput: 16384 },
+  });
+  expect("error" in fitting).toBe(false);
+  const catalogDefault = resolveSettings({
+    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" },
+  });
+  expect("error" in catalogDefault).toBe(false);
+  await withTempDir(async (dir) => {
+    const home = join(dir, "home");
+    const root = join(dir, "project");
+    await mkdir(home, { recursive: true });
+    await mkdir(root, { recursive: true });
+    const editor = await loadConfigEditor({
+      home,
+      workspaceRoot: root,
+      cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" },
+    });
+    const before = editor.settings;
+    await expect(editor.prepare({ scope: "session", key: "maxOutput", value: 4096 })).rejects.toThrow("budget");
+    expect(editor.settings).toEqual(before);
+  });
+});
+
 // CLI
 
 test("--thinking parses off/low/medium/high and rejects unknown levels", () => {

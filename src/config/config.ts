@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
+  ANTHROPIC_THINKING_BUDGETS,
   DEFAULT_MODEL_IDS,
   describeThinkingSupport,
   findCompatibleReasoningBodyKey,
@@ -467,7 +468,7 @@ export function resolveSettings(input: {
     maxOutput: merged.maxOutput,
   });
   const thinking = merged.thinking as ThinkingLevel | undefined;
-  const thinkingError = validateThinking(provider, model, thinking, merged.extraBody);
+  const thinkingError = validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
@@ -517,12 +518,13 @@ export function resolveSettings(input: {
   };
 }
 
-/** Validate a requested thinking level against capability and extra-body single-source-of-truth rules. */
+/** Validate a requested thinking level against capability, extra-body single-source-of-truth, and Anthropic budget rules. */
 export function validateThinking(
   provider: string,
   model: string,
   thinking: ThinkingLevel | undefined,
   extraBody: Record<string, unknown> | undefined,
+  maxOutput?: number,
 ): string | undefined {
   if (thinking === undefined) {
     return undefined;
@@ -536,6 +538,12 @@ export function validateThinking(
   const support = getThinkingSupport(provider, model);
   if (!support.supported.includes(thinking)) {
     return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
+  }
+  if (provider === "anthropic" && thinking !== "off" && maxOutput !== undefined) {
+    const budget = ANTHROPIC_THINKING_BUDGETS[thinking];
+    if (budget >= maxOutput) {
+      return `Thinking level "${thinking}" needs budget ${budget} < max output ${maxOutput} for anthropic/${model}. Increase maxOutput or choose a lower level.`;
+    }
   }
   return undefined;
 }
@@ -564,8 +572,8 @@ export function describeEffectiveThinking(provider: string, thinking: ThinkingLe
     return "off (provider default, no reasoning controls sent)";
   }
   if (provider === "anthropic") {
-    const budgets: Record<string, number> = { low: 1024, medium: 4096, high: 8192 };
-    return `${thinking} (budget ${budgets[thinking]} tokens via thinking)`;
+    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as Exclude<ThinkingLevel, "off">];
+    return `${thinking} (budget ${budget} tokens via thinking)`;
   }
   if (provider === "openai") {
     return `${thinking} (reasoning effort ${thinking})`;

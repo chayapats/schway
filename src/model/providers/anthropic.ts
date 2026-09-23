@@ -13,7 +13,10 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
+import { ANTHROPIC_THINKING_BUDGETS, DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
+
+/** Numeric Anthropic thinking budgets shared with resolve-time config validation; re-exported to preserve the provider import path. */
+export { ANTHROPIC_THINKING_BUDGETS };
 import type {
   Model,
   ModelRequest,
@@ -26,13 +29,6 @@ import type {
 export const DEFAULT_ANTHROPIC_MODEL = DEFAULT_MODEL_IDS.anthropic;
 /** Default max_tokens for Anthropic Messages requests. */
 export const DEFAULT_ANTHROPIC_MAX_TOKENS = 16_384;
-
-/** Numeric thinking budgets per level per extended-thinking docs (must stay below max_tokens, minimum 1024). */
-export const ANTHROPIC_THINKING_BUDGETS: Record<Exclude<ThinkingLevel, "off">, number> = {
-  low: 1024,
-  medium: 4096,
-  high: 8192,
-};
 
 /** Resolve a provider-independent level to an Anthropic thinking param, leaving defaults untouched when unset or off without disabling support. */
 export function resolveAnthropicThinking(

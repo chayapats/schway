@@ -133,6 +133,13 @@ const ANTHROPIC_THINKING_MODELS = new Set([
   "claude-haiku-4-5",
 ]);
 
+/** Numeric Anthropic thinking budgets per level per extended-thinking docs (must stay below max_tokens, minimum 1024). */
+export const ANTHROPIC_THINKING_BUDGETS: Record<Exclude<ThinkingLevel, "off">, number> = {
+  low: 1024,
+  medium: 4096,
+  high: 8192,
+};
+
 /** OpenAI reasoning-capable IDs per reasoning guide (named effort levels, none disables). */
 const OPENAI_THINKING_MODELS = new Set(["gpt-5.4"]);
 
