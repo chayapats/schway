@@ -1,0 +1,12 @@
+{
+  "fixture": "codex-feasibility/text-stream",
+  "version": 1,
+  "capturedAt": "2026-09-23",
+  "source": "synthetic offline replay for issue 49; not a live Codex subscription response",
+  "transport": "replay-only; no network, no credentials, no Codex CLI or App Server involved",
+  "schwayBaseline": "6088930c1a8b92e193209d20dd014d7d97f91a97",
+  "turn": {
+    "chunks": ["Hello", " world"],
+    "toolCalls": []
+  }
+}
