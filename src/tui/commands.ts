@@ -9,6 +9,7 @@ export type SlashCommandName =
   | "sessions"
   | "resume"
   | "model"
+  | "thinking"
   | "branch"
   | "compact"
   | "skills"
@@ -43,6 +44,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "sessions":
     case "resume":
     case "model":
+    case "thinking":
     case "branch":
     case "compact":
     case "skills":
@@ -66,6 +68,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/sessions - list saved sessions",
     "/resume <id> - resume a saved session",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
+    "/thinking [off|low|medium|high|reset] - show or switch reasoning level for future requests",
     "/compact - summarize older turns to free context",
     "/branch list | fork <entry-id> [name] | switch <branch-id> - continue a saved conversation path",
     "/skills - list available skills",
@@ -230,6 +233,24 @@ export function formatModelPicker(
     }
   }
   return lines.join("\n");
+}
+
+/** Provider-independent reasoning level accepted by /thinking and --thinking. */
+export type ThinkingSelection = "off" | "low" | "medium" | "high";
+
+/** Parse `/thinking` arguments into a reasoning level or a reset/show request. */
+export function parseThinkingArgs(args: string): ThinkingSelection | "show" | "reset" | { error: string } {
+  const trimmed = args.trim().toLowerCase();
+  if (trimmed.length === 0 || trimmed === "show" || trimmed === "status") {
+    return "show";
+  }
+  if (trimmed === "reset" || trimmed === "clear" || trimmed === "unset" || trimmed === "default") {
+    return "reset";
+  }
+  if (trimmed === "off" || trimmed === "low" || trimmed === "medium" || trimmed === "high") {
+    return trimmed;
+  }
+  return { error: "Usage: /thinking [off|low|medium|high|reset]. Shows requested and effective levels with provider/model." };
 }
 
 /** True when the value names a selectable model provider. */

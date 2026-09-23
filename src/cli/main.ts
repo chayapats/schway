@@ -41,6 +41,7 @@ import {
   USAGE,
   type CliArgs,
   type CliAuthMode,
+  type CliThinking,
 } from "./args.ts";
 
 /** Minimal writer used so tests can capture CLI output. */
@@ -77,6 +78,7 @@ export interface CliIo {
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    thinking?: CliThinking;
   }) => Promise<Model>;
 }
 
@@ -423,6 +425,7 @@ async function loadCliModel(
     provider: settings.provider,
     model: settings.model,
     maxTokens: settings.maxOutput,
+    ...(settings.thinking !== undefined ? { thinking: settings.thinking } : {}),
     ...(settings.provider === "openai-compatible" ? {
       baseUrl: settings.baseUrl,
       headers: settings.headers,

@@ -14,8 +14,9 @@ import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { discoverSkills } from "../skills/skills.ts";
 import type { ConfigLayer, ResolvedSettings } from "../config/config.ts";
+import { describeEffectiveThinking } from "../config/config.ts";
 import { EDITABLE_CONFIG_KEYS, type ConfigEditor, type ConfigScope, type ConfigTransaction } from "../config/editing.ts";
-import { parseModelArgs } from "./commands.ts";
+import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
 import { modelPickerEntries, type ModelPickerSnapshot } from "./model-picker.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
@@ -44,6 +45,10 @@ export interface TuiSnapshot {
   modelId: string;
   /** Active named compatible profile, when a selection is live. */
   profile?: string;
+  /** Requested thinking level shown with provider/model; undefined leaves provider defaults untouched. */
+  thinking?: string;
+  /** Effective reasoning description shown alongside the requested value. */
+  effectiveThinking?: string;
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
 }
@@ -70,6 +75,8 @@ export interface TuiControllerOptions {
   auth?: string;
   /** Active named compatible profile shown in status and /config. */
   profile?: string;
+  /** Requested thinking level shown in status and /config; undefined leaves provider defaults untouched. */
+  thinking?: string;
   startupError?: string;
   /** Known values to mask in displayed transcript text and configuration output. */
   secrets?: string[];
@@ -117,6 +124,7 @@ export class TuiController {
   private baseUrl?: string;
   private auth?: string;
   private profile?: string;
+  private thinking?: string;
   private configEditor?: ConfigEditor;
   private readonly stageSettings?: TuiControllerOptions["stageSettings"];
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
@@ -155,6 +163,7 @@ export class TuiController {
     this.baseUrl = options.baseUrl;
     this.auth = options.auth;
     this.profile = options.profile ?? options.configEditor?.settings.profile;
+    this.thinking = options.thinking ?? options.configEditor?.settings.thinking;
     this.secrets = options.secrets ?? [];
     this.extensions = options.extensions;
     this.home = options.home;
@@ -173,6 +182,8 @@ export class TuiController {
 
   /** Return current state with a new transcript array, masking supplied known secrets in entry text. */
   snapshot(): TuiSnapshot {
+    const thinking = this.configEditor?.settings.thinking ?? this.thinking;
+    const effective = describeEffectiveThinking(this.provider, thinking as never);
     return {
       status: this.status,
       transcript: this.transcript.map((entry) =>
@@ -185,6 +196,7 @@ export class TuiController {
       provider: this.provider,
       modelId: this.modelId,
       ...(this.profile !== undefined ? { profile: this.profile } : {}),
+      ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
     };
@@ -523,7 +535,7 @@ export class TuiController {
     if (!trimmed) { this.fail("Usage: /model profile:<name>."); return false; }
     return this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
       const active = this.configEditor!.settings.profile ?? trimmed;
-      return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx). Applies to this session only.`;
+      return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}). Applies to this session only.`;
     });
   }
 
@@ -535,7 +547,30 @@ export class TuiController {
     if (selection.profile !== undefined) {
       return this.selectProfile(selection.profile);
     }
-    return this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId), () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx). Applies to this session only.`);
+    return this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId), () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}). Applies to this session only.`);
+  }
+
+  /** Show or switch the reasoning level for future requests without rewriting history. */
+  async thinkingCommand(args: string): Promise<boolean> {
+    const selection = parseThinkingArgs(args);
+    if (typeof selection === "object") { this.fail(selection.error); return false; }
+    if (selection === "show") { this.notice(this.describeThinking()); return true; }
+    if (selection === "reset") {
+      return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: undefined }), () => `Thinking reset. ${this.describeThinking()}. Applies to this session only.`);
+    }
+    return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}. Applies to this session only.`);
+  }
+
+  /** Requested and effective reasoning with provider/model for truthful display. */
+  describeThinking(): string {
+    const requested = this.configEditor?.settings.thinking ?? this.thinking;
+    const effective = this.configEditor?.settings.effectiveThinking ?? (requested as never);
+    const origin = this.configEditor?.origins.thinking;
+    const effectiveDesc = describeEffectiveThinking(this.provider, (effective ?? requested) as never);
+    if (requested === undefined) {
+      return `Thinking: unset (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
+    }
+    return `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
   }
 
   /** Inspect settings or apply one validated session or explicitly scoped persisted edit. */
@@ -611,6 +646,7 @@ export class TuiController {
     this.maxTurns = next.maxTurns; this.maxConcurrentTools = next.maxConcurrentTools;
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
     this.baseUrl = next.baseUrl; this.auth = next.auth; this.profile = next.profile;
+    this.thinking = next.thinking;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
 
@@ -641,11 +677,25 @@ export class TuiController {
     if (this.configEditor) {
       const settings = this.configEditor.settings;
       const origins = this.configEditor.origins;
-      lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`));
+      lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => {
+        if (key === "thinking") {
+          const requested = (settings as unknown as Record<string, unknown>)[key];
+          const effective = describeEffectiveThinking(this.provider, requested as never);
+          return `${key}: ${displaySetting(key, requested)} [${origins[key as keyof ConfigLayer]}] (effective: ${effective})`;
+        }
+        return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
+      }));
+      if (settings.thinking === undefined) {
+        lines.push(`thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
+      }
       if (settings.headers) lines.push(`headers: configured (values hidden) [${origins.headers}]`);
       if (settings.extraBody) lines.push(`extraBody: configured (values hidden) [${origins.extraBody}]`);
       if (settings.credentialEnv) lines.push(`credentialEnv: ${settings.credentialEnv} [profile "${settings.profile}"]`);
       if (settings.credentialIdentity) lines.push(`credentialIdentity: ${settings.credentialIdentity} [profile "${settings.profile}"]`);
+    }
+    if (!this.configEditor) {
+      const thinking = this.thinking;
+      lines.push(thinking !== undefined ? `Thinking: ${thinking} (effective: ${describeEffectiveThinking(this.provider, thinking as never)})` : `Thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
     }
     if (!this.configEditor && this.maxTurns !== undefined) {
       lines.push(`Max turns: ${this.maxTurns}`);

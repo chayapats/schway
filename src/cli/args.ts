@@ -3,13 +3,16 @@ import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--api-key <key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high>] [--api-key <key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
 
 /** Authentication mode for OpenAI-compatible endpoints. */
 export type CliAuthMode = "required" | "optional" | "none";
+
+/** Provider-independent reasoning level selectable from config and the CLI. */
+export type CliThinking = "off" | "low" | "medium" | "high";
 
 /** Parsed CLI options for headless or interactive runs, with `resume` identifying a session rather than a path. */
 export interface CliArgs {
@@ -18,6 +21,7 @@ export interface CliArgs {
   provider?: CliProvider;
   model?: string;
   profile?: string;
+  thinking?: CliThinking;
   apiKey?: string;
   resume?: string;
   branch?: string;
@@ -149,6 +153,27 @@ export function parseArgs(
         return profile;
       }
       args.profile = profile;
+      continue;
+    }
+    if (arg === "--thinking") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { error: "Missing value for --thinking" };
+      }
+      i++;
+      const thinking = parseThinking(value);
+      if (typeof thinking === "object") {
+        return thinking;
+      }
+      args.thinking = thinking;
+      continue;
+    }
+    if (arg.startsWith("--thinking=")) {
+      const thinking = parseThinking(arg.slice("--thinking=".length));
+      if (typeof thinking === "object") {
+        return thinking;
+      }
+      args.thinking = thinking;
       continue;
     }
     if (arg === "--base-url") {
@@ -337,6 +362,17 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
   };
 }
 
+/** Validate a provider-independent thinking level without assuming identical wire semantics. */
+function parseThinking(value: string): CliThinking | { error: string } {
+  const level = value.trim().toLowerCase();
+  if (level === "off" || level === "low" || level === "medium" || level === "high") {
+    return level;
+  }
+  return {
+    error: `Unknown thinking level: ${value}. Use off, low, medium, or high.`,
+  };
+}
+
 /** Validate a named compatible profile selection without loading configuration. */
 function parseProfile(value: string): string | { error: string } {
   const name = value.trim();
@@ -411,6 +447,9 @@ export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
   }
   if (args.auth !== undefined) {
     layer.auth = args.auth;
+  }
+  if (args.thinking !== undefined) {
+    layer.thinking = args.thinking;
   }
   return layer;
 }

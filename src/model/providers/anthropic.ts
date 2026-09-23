@@ -13,18 +13,52 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
   ModelStreamEvent,
   ModelTool,
+  ThinkingLevel,
 } from "../model.ts";
 
 /** Default Claude model when the caller does not specify one. */
 export const DEFAULT_ANTHROPIC_MODEL = DEFAULT_MODEL_IDS.anthropic;
 /** Default max_tokens for Anthropic Messages requests. */
 export const DEFAULT_ANTHROPIC_MAX_TOKENS = 16_384;
+
+/** Numeric thinking budgets per level per extended-thinking docs (must stay below max_tokens, minimum 1024). */
+export const ANTHROPIC_THINKING_BUDGETS: Record<Exclude<ThinkingLevel, "off">, number> = {
+  low: 1024,
+  medium: 4096,
+  high: 8192,
+};
+
+/** Resolve a provider-independent level to an Anthropic thinking param, leaving defaults untouched when unset. */
+export function resolveAnthropicThinking(
+  level: ThinkingLevel | undefined,
+  modelId: string,
+  maxTokens: number,
+): { type: "disabled" } | { type: "enabled"; budget_tokens: number } | undefined {
+  if (level === undefined) {
+    return undefined;
+  }
+  if (!isThinkingSupported("anthropic", modelId, level)) {
+    throw new Error(
+      `Thinking level "${level}" is not supported for anthropic/${modelId}. ${describeThinkingSupport("anthropic", modelId)}`,
+    );
+  }
+  if (level === "off") {
+    return { type: "disabled" };
+  }
+  const budget = ANTHROPIC_THINKING_BUDGETS[level];
+  if (budget >= maxTokens) {
+    throw new Error(
+      `Thinking level "${level}" needs budget ${budget} < max output ${maxTokens} for anthropic/${modelId}. Increase --max-output or choose a lower level.`,
+    );
+  }
+  return { type: "enabled", budget_tokens: budget };
+}
 
 /** Optional fetch override used by protocol tests. */
 type FetchLike = (
@@ -40,10 +74,12 @@ export function createAnthropicModel(options: {
   apiKey: string;
   model?: string;
   maxTokens?: number;
+  thinking?: ThinkingLevel;
   fetch?: FetchLike;
 }): Model {
   const modelId = options.model ?? DEFAULT_ANTHROPIC_MODEL;
   const maxTokens = options.maxTokens ?? DEFAULT_ANTHROPIC_MAX_TOKENS;
+  const defaultThinking = options.thinking;
   const client = new Anthropic({
     apiKey: options.apiKey,
     maxRetries: 0,
@@ -56,11 +92,13 @@ export function createAnthropicModel(options: {
     id: modelId,
     /** Stream Schway events; tool_use JSON is assembled before message_complete. */
     async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      const thinking = resolveAnthropicThinking(request.thinking ?? defaultThinking, modelId, maxTokens);
       const stream = client.messages.stream(
         {
           model: modelId,
           max_tokens: maxTokens,
           stream: true,
+          ...(thinking !== undefined ? { thinking } : {}),
           system: toAnthropicSystem(request),
           messages: toAnthropicMessages(request.items),
           ...(request.tools && request.tools.length > 0

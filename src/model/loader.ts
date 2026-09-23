@@ -1,4 +1,4 @@
-import type { Model } from "./model.ts";
+import type { Model, ThinkingLevel } from "./model.ts";
 import type { CliAuthMode, CliProvider } from "../cli/args.ts";
 
 /** Optional fetch override used by protocol fixture tests. */
@@ -17,6 +17,8 @@ export interface ProviderLoaderInput {
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   auth?: CliAuthMode;
+  /** Provider-independent reasoning level mapped inside each adapter without shared wire semantics. */
+  thinking?: ThinkingLevel;
 }
 
 /**
@@ -37,6 +39,7 @@ export async function loadProviderModel(
       headers: input.headers,
       extraBody: input.extraBody,
       auth: input.auth,
+      thinking: input.thinking,
       fetch: fetchFn,
     });
   }
@@ -46,6 +49,7 @@ export async function loadProviderModel(
       apiKey: input.apiKey ?? "",
       model: input.model,
       maxTokens: input.maxTokens,
+      thinking: input.thinking,
       fetch: fetchFn,
     });
   }
@@ -54,6 +58,7 @@ export async function loadProviderModel(
     apiKey: input.apiKey ?? "",
     model: input.model,
     maxTokens: input.maxTokens,
+    thinking: input.thinking,
     fetch: fetchFn,
   });
 }
