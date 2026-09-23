@@ -3,7 +3,7 @@ import type {
   AssistantContent,
   AssistantMessage,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
@@ -19,21 +19,8 @@ export const DEFAULT_OPENAI_COMPATIBLE_MODEL =
 /** Control automatic bearer auth: require a key, send one if supplied, or omit automatic Authorization. */
 export type OpenAICompatibleAuth = "required" | "optional" | "none";
 
-/** Extra-body keys treated as reasoning controls; single source lives in the catalog for config validation. */
-export { COMPATIBLE_REASONING_BODY_KEYS };
-
-/** Name the first extra-body reasoning key present, if any, for single-source-of-truth errors. */
-export function findCompatibleReasoningBodyKey(extraBody: Record<string, unknown> | undefined): string | undefined {
-  if (!extraBody) {
-    return undefined;
-  }
-  for (const key of COMPATIBLE_REASONING_BODY_KEYS) {
-    if (extraBody[key] !== undefined) {
-      return key;
-    }
-  }
-  return undefined;
-}
+/** Extra-body reasoning keys and conflict scanner; single source lives in the catalog for config validation. */
+export { COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey };
 
 /** Validate compatible thinking without injecting a vendor field; off is a no-op, others need explicit extraBody. */
 export function resolveCompatibleThinking(

@@ -183,7 +183,7 @@ export class TuiController {
   /** Return current state with a new transcript array, masking supplied known secrets in entry text. */
   snapshot(): TuiSnapshot {
     const thinking = this.configEditor?.settings.thinking ?? this.thinking;
-    const effective = describeEffectiveThinking(this.provider, thinking as never);
+    const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId);
     return {
       status: this.status,
       transcript: this.transcript.map((entry) =>
@@ -566,7 +566,7 @@ export class TuiController {
     const requested = this.configEditor?.settings.thinking ?? this.thinking;
     const effective = this.configEditor?.settings.effectiveThinking ?? (requested as never);
     const origin = this.configEditor?.origins.thinking;
-    const effectiveDesc = describeEffectiveThinking(this.provider, (effective ?? requested) as never);
+    const effectiveDesc = describeEffectiveThinking(this.provider, (effective ?? requested) as never, this.modelId);
     if (requested === undefined) {
       return `Thinking: unset (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
     }
@@ -680,7 +680,7 @@ export class TuiController {
       lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => {
         if (key === "thinking") {
           const requested = (settings as unknown as Record<string, unknown>)[key];
-          const effective = describeEffectiveThinking(this.provider, requested as never);
+          const effective = describeEffectiveThinking(this.provider, requested as never, (settings as unknown as Record<string, unknown>).model as string | undefined ?? this.modelId);
           return `${key}: ${displaySetting(key, requested)} [${origins[key as keyof ConfigLayer]}] (effective: ${effective})`;
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
@@ -695,7 +695,7 @@ export class TuiController {
     }
     if (!this.configEditor) {
       const thinking = this.thinking;
-      lines.push(thinking !== undefined ? `Thinking: ${thinking} (effective: ${describeEffectiveThinking(this.provider, thinking as never)})` : `Thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
+      lines.push(thinking !== undefined ? `Thinking: ${thinking} (effective: ${describeEffectiveThinking(this.provider, thinking as never, this.modelId)})` : `Thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
     }
     if (!this.configEditor && this.maxTurns !== undefined) {
       lines.push(`Max turns: ${this.maxTurns}`);

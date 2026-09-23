@@ -5,6 +5,7 @@ import { parseConfigObject, resolveSettings, describeEffectiveThinking, validate
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { cliOverridesFromArgs, parseArgs, USAGE } from "../src/cli/args.ts";
 import { createContextManager } from "../src/context/manager.ts";
+import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { readTool } from "../src/tools/read.ts";
@@ -28,6 +29,8 @@ import {
   describeThinkingSupport,
   getThinkingSupport,
   isThinkingSupported,
+  COMPATIBLE_REASONING_BODY_KEYS,
+  findCompatibleReasoningBodyKey as findCompatibleCatalogKey,
 } from "../src/model/catalog.ts";
 import { isThinkingLevel } from "../src/model/model.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
@@ -634,4 +637,184 @@ test("controller configCommand edits thinking through the normal session path", 
     expect(controller.snapshot().thinking).toBeUndefined();
     controller.dispose();
   });
+});
+
+test("off on unknown and non-reasoning models sends no wire controls", async () => {
+  expect(resolveAnthropicThinking("off", "unknown-claude", 16384)).toBeUndefined();
+  expect(resolveOpenAIReasoning("off", "gpt-4o")).toBeUndefined();
+  expect(resolveOpenAIReasoning("off", "mystery-9")).toBeUndefined();
+  expect(resolveAnthropicThinking("off", "claude-sonnet-4-6", 16384)).toEqual({ type: "disabled" });
+  expect(resolveOpenAIReasoning("off", "gpt-5.4")).toEqual({ effort: "none" });
+
+  const anthropicUnknown: Captured = { calls: 0 };
+  await collect(
+    createAnthropicModel({ apiKey: "sk-test", model: "unknown-claude", thinking: "off", fetch: anthropicFetch(ANTHROPIC_TEXT, anthropicUnknown) }).stream(anthropicSample()),
+  );
+  expect(anthropicUnknown.calls).toBe(1);
+  expect("thinking" in ((anthropicUnknown.body as Record<string, unknown>) ?? {})).toBe(false);
+
+  const openaiKnown: Captured = { calls: 0 };
+  await collect(
+    createOpenAIModel({ apiKey: "sk-test", model: "gpt-4o", thinking: "off", fetch: openaiFetch(OPENAI_TEXT, openaiKnown) }).stream(openaiSample()),
+  );
+  expect(openaiKnown.calls).toBe(1);
+  expect("reasoning" in ((openaiKnown.body as Record<string, unknown>) ?? {})).toBe(false);
+
+  const openaiUnknown: Captured = { calls: 0 };
+  await collect(
+    createOpenAIModel({ apiKey: "sk-test", model: "mystery-9", thinking: "off", fetch: openaiFetch(OPENAI_TEXT, openaiUnknown) }).stream(openaiSample()),
+  );
+  expect(openaiUnknown.calls).toBe(1);
+  expect("reasoning" in ((openaiUnknown.body as Record<string, unknown>) ?? {})).toBe(false);
+});
+
+test("thinking support records disabling and describes off honestly", () => {
+  expect(getThinkingSupport("anthropic", "claude-sonnet-4-6").supportsDisabling).toBe(true);
+  expect(getThinkingSupport("openai", "gpt-5.4").supportsDisabling).toBe(true);
+  expect(getThinkingSupport("openai", "gpt-4o").supportsDisabling).toBe(false);
+  expect(getThinkingSupport("openai", "mystery-9").supportsDisabling).toBe(false);
+  expect(describeThinkingSupport("openai", "mystery-9")).toContain("no reasoning controls");
+  expect(describeThinkingSupport("openai", "gpt-4o")).toContain("no reasoning controls");
+  expect(describeThinkingSupport("openai", "gpt-5.4")).toContain("disable");
+  expect(describeThinkingSupport("anthropic", "claude-sonnet-4-6")).toContain("disable");
+  expect(describeEffectiveThinking("anthropic", "off", "unknown-claude")).toContain("no reasoning controls");
+  expect(describeEffectiveThinking("openai", "off", "gpt-4o")).toContain("no reasoning controls");
+  expect(describeEffectiveThinking("anthropic", "off", "claude-sonnet-4-6")).toContain("disabled");
+  expect(describeEffectiveThinking("openai", "off", "gpt-5.4")).toContain("none");
+});
+
+test("bare effort is not a compatible reasoning control and scanners share one source", () => {
+  expect((COMPATIBLE_REASONING_BODY_KEYS as readonly string[]).includes("effort")).toBe(false);
+  expect(findCompatibleReasoningBodyKey({ effort: "high", temperature: 0.2 })).toBeUndefined();
+  expect(findCompatibleCatalogKey({ effort: "high" })).toBeUndefined();
+  expect(findCompatibleReasoningBodyKey({ reasoning_effort: "low" })).toBe("reasoning_effort");
+  expect(findCompatibleCatalogKey({ reasoning_effort: "low" })).toBe("reasoning_effort");
+  expect(findCompatibleReasoningBodyKey).toBe(findCompatibleCatalogKey);
+  expect(validateThinking("openai-compatible", "gpt-4o", "off", { effort: "high" })).toBeUndefined();
+  expect(validateThinking("openai-compatible", "gpt-4o", "off", { reasoning_effort: "high" })).toContain("extraBody.reasoning_effort");
+  const noConflict = resolveSettings({
+    cli: {
+      provider: "openai-compatible",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      thinking: "off",
+      extraBody: { effort: "high" },
+    },
+  });
+  expect("error" in noConflict).toBe(false);
+});
+
+test("anthropic thinking metadata survives compaction and resume round trips", async () => {
+  const captured: Captured = { calls: 0 };
+  const source = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "low", fetch: anthropicFetch(ANTHROPIC_THINKING, captured) });
+  const events = await collect(source.stream(anthropicSample()));
+  const complete = events.at(-1);
+  if (complete?.type !== "message_complete") throw new Error("expected complete");
+  const thinkingBlock = complete.message.content.find((block) => block.type === "thinking");
+  expect(thinkingBlock).toMatchObject({ type: "thinking" });
+  if (thinkingBlock?.type !== "thinking") throw new Error("expected thinking");
+  expect(JSON.stringify(thinkingBlock.providerMetadata)).toContain("sig-");
+
+  await withTempDir(async (dir) => {
+    const workspace = workspaceFor(join(dir, "project"));
+    const { mkdir: makeDir } = await import("node:fs/promises");
+    await makeDir(workspace.root, { recursive: true });
+    const session = createSession([
+      { type: "user", id: "u0", content: [{ type: "text", text: "first" }] },
+      { type: "assistant", id: "a0", content: [{ type: "text", text: "one" }] },
+      { type: "user", id: "u1", content: [{ type: "text", text: "second" }] },
+      { type: "assistant", id: "a1", content: [{ type: "text", text: "two" }] },
+      { type: "user", id: "u2", content: [{ type: "text", text: "third" }] },
+      { type: "assistant", id: "a2", content: [{ type: "text", text: "three" }] },
+      { type: "user", id: "u3", content: [{ type: "text", text: "fourth" }] },
+      { ...complete.message, id: "a3" },
+    ]);
+    const manager = createContextManager(workspace, { keepTurns: 2 });
+    const record = await manager.compact(session, createScriptedModel({ text: "## Goal\nkept\n## Constraints\nnone\n## Progress\ndid\n## Key Decisions\nnone\n## Current State\nok\n## Next Steps\nmore\n## Files\n### Read\nnone\n### Modified\nnone" }), { reason: "manual" });
+    expect(record).not.toBeNull();
+    const stored = session.items.find((item) => item.type === "assistant" && item.id === "a3");
+    expect(JSON.stringify(stored)).toContain("sig-");
+    const prepared = await manager.prepare(session);
+    expect(JSON.stringify(prepared.items)).toContain("sig-");
+
+    const sessionsDir = join(dir, "sessions");
+    const persisted = await createJsonlSession({ directory: sessionsDir, workspace });
+    for (const item of session.items) persisted.append(item);
+    const resumed = await loadJsonlSession({ directory: sessionsDir, id: persisted.header.id });
+    expect(JSON.stringify(resumed.items)).toContain("sig-");
+
+    const replay: Captured = { calls: 0 };
+    const replayModel = createAnthropicModel({ apiKey: "sk-test", fetch: anthropicFetch(ANTHROPIC_TOOL, replay) });
+    await collect(replayModel.stream({ ...anthropicSample(), items: [...anthropicSample().items, ...(resumed.items.filter((item) => item.type !== "compaction") as never[]).slice(-1)] }));
+    expect(JSON.stringify((replay.body as { messages: unknown }).messages)).toContain("sig-");
+  });
+});
+
+test("openai thinking metadata survives compaction and resume round trips", async () => {
+  const captured: Captured = { calls: 0 };
+  const source = createOpenAIModel({ apiKey: "sk-test", model: "gpt-5.4", thinking: "medium", fetch: openaiFetch(OPENAI_THINKING, captured) });
+  const events = await collect(source.stream(openaiSample()));
+  const complete = events.at(-1);
+  if (complete?.type !== "message_complete") throw new Error("expected complete");
+  expect(JSON.stringify(complete.message.content)).toContain("enc-abc");
+
+  await withTempDir(async (dir) => {
+    const workspace = workspaceFor(join(dir, "project"));
+    const { mkdir: makeDir } = await import("node:fs/promises");
+    await makeDir(workspace.root, { recursive: true });
+    const session = createSession([
+      { type: "user", id: "u0", content: [{ type: "text", text: "first" }] },
+      { type: "assistant", id: "a0", content: [{ type: "text", text: "one" }] },
+      { type: "user", id: "u1", content: [{ type: "text", text: "second" }] },
+      { type: "assistant", id: "a1", content: [{ type: "text", text: "two" }] },
+      { type: "user", id: "u2", content: [{ type: "text", text: "third" }] },
+      { type: "assistant", id: "a2", content: [{ type: "text", text: "three" }] },
+      { type: "user", id: "u3", content: [{ type: "text", text: "fourth" }] },
+      { ...complete.message, id: "a3" },
+    ]);
+    const manager = createContextManager(workspace, { keepTurns: 2 });
+    const record = await manager.compact(session, createScriptedModel({ text: "## Goal\nkept\n## Constraints\nnone\n## Progress\ndid\n## Key Decisions\nnone\n## Current State\nok\n## Next Steps\nmore\n## Files\n### Read\nnone\n### Modified\nnone" }), { reason: "manual" });
+    expect(record).not.toBeNull();
+    expect(JSON.stringify(session.items)).toContain("enc-abc");
+    const prepared = await manager.prepare(session);
+    expect(JSON.stringify(prepared.items)).toContain("enc-abc");
+
+    const sessionsDir = join(dir, "sessions");
+    const persisted = await createJsonlSession({ directory: sessionsDir, workspace });
+    for (const item of session.items) persisted.append(item);
+    const resumed = await loadJsonlSession({ directory: sessionsDir, id: persisted.header.id });
+    expect(JSON.stringify(resumed.items)).toContain("enc-abc");
+
+    const replay: Captured = { calls: 0 };
+    const replayModel = createOpenAIModel({ apiKey: "sk-test", fetch: openaiFetch(OPENAI_TOOL, replay) });
+    await collect(replayModel.stream({ ...openaiSample(), items: [...openaiSample().items, ...(resumed.items.filter((item) => item.type !== "compaction") as never[]).slice(-1)] }));
+    expect(JSON.stringify((replay.body as { input: unknown }).input)).toContain("enc-abc");
+  });
+});
+
+test("openai thinking adapter forwards cancellation without pretending success", async () => {
+  const model = createOpenAIModel({ apiKey: "sk-test", model: "gpt-5.4", thinking: "medium", fetch: async (_input, init) => {
+    if (init?.signal?.aborted) {
+      const error = new Error("aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+    return new Response(encodeOpenAISse(OPENAI_TEXT), { headers: { "Content-Type": "text/event-stream" } });
+  } });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(collect(model.stream({ ...openaiSample(), signal: controller.signal }))).rejects.toThrow();
+});
+
+test("compatible adapter forwards cancellation without pretending success", async () => {
+  const model = createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:11434/v1", fetch: async (_input, init) => {
+    if (init?.signal?.aborted) {
+      const error = new Error("aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+    return new Response(encodeChatCompletionsSse(COMPATIBLE_TEXT), { headers: { "Content-Type": "text/event-stream" } });
+  } });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(collect(model.stream({ ...compatibleSample(), signal: controller.signal }))).rejects.toThrow();
 });

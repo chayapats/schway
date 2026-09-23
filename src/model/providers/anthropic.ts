@@ -13,7 +13,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
@@ -34,7 +34,7 @@ export const ANTHROPIC_THINKING_BUDGETS: Record<Exclude<ThinkingLevel, "off">, n
   high: 8192,
 };
 
-/** Resolve a provider-independent level to an Anthropic thinking param, leaving defaults untouched when unset. */
+/** Resolve a provider-independent level to an Anthropic thinking param, leaving defaults untouched when unset or off without disabling support. */
 export function resolveAnthropicThinking(
   level: ThinkingLevel | undefined,
   modelId: string,
@@ -49,6 +49,9 @@ export function resolveAnthropicThinking(
     );
   }
   if (level === "off") {
+    if (!getThinkingSupport("anthropic", modelId).supportsDisabling) {
+      return undefined;
+    }
     return { type: "disabled" };
   }
   const budget = ANTHROPIC_THINKING_BUDGETS[level];

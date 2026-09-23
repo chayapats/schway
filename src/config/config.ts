@@ -537,32 +537,38 @@ export function validateThinking(
   if (!support.supported.includes(thinking)) {
     return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
   }
-  if (!support.known && thinking !== "off") {
-    return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
-  }
   return undefined;
 }
 
 /** Describe the effective wire control for a resolved thinking level without exposing provider field names in core. */
-export function describeEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined): string {
+export function describeEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined, modelId?: string): string {
   if (thinking === undefined) {
     return "provider default (no reasoning controls sent)";
   }
-  if (provider === "anthropic") {
-    if (thinking === "off") {
-      return 'off (thinking disabled)';
+  if (thinking === "off") {
+    if (modelId !== undefined && !getThinkingSupport(provider, modelId).supportsDisabling) {
+      return "off (provider default, no reasoning controls sent)";
     }
+    if (modelId === undefined && (provider !== "anthropic" && provider !== "openai")) {
+      return "off (provider default, no reasoning controls sent)";
+    }
+    if (provider === "anthropic" && modelId !== undefined) {
+      return "off (thinking disabled)";
+    }
+    if (provider === "openai" && modelId !== undefined) {
+      return "off (reasoning effort none)";
+    }
+    if (provider === "anthropic" || provider === "openai") {
+      return "off (disable control on reasoning-capable models; otherwise no reasoning controls sent)";
+    }
+    return "off (provider default, no reasoning controls sent)";
+  }
+  if (provider === "anthropic") {
     const budgets: Record<string, number> = { low: 1024, medium: 4096, high: 8192 };
     return `${thinking} (budget ${budgets[thinking]} tokens via thinking)`;
   }
   if (provider === "openai") {
-    if (thinking === "off") {
-      return 'off (reasoning effort none)';
-    }
     return `${thinking} (reasoning effort ${thinking})`;
-  }
-  if (thinking === "off") {
-    return "off (provider default, no reasoning controls sent)";
   }
   return `${thinking} (via extraBody when configured; no automatic mapping)`;
 }

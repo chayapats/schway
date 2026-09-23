@@ -122,6 +122,8 @@ export interface ThinkingSupport {
   known: boolean;
   /** Levels that can be requested truthfully; unknown and non-reasoning models expose only off. */
   supported: readonly ThinkingLevel[];
+  /** True when explicit off sends a documented disable control; false means off leaves provider defaults untouched. */
+  supportsDisabling: boolean;
 }
 
 /** Anthropic thinking-capable IDs per extended-thinking docs (numeric budgets, disabled off). */
@@ -134,19 +136,19 @@ const ANTHROPIC_THINKING_MODELS = new Set([
 /** OpenAI reasoning-capable IDs per reasoning guide (named effort levels, none disables). */
 const OPENAI_THINKING_MODELS = new Set(["gpt-5.4"]);
 
-/** Return supported thinking levels; unknown IDs stay usable with only off as a safe no-op. */
+/** Return supported thinking levels; unknown IDs stay usable with off as a no-op that sends no controls. */
 export function getThinkingSupport(provider: string, modelId: string): ThinkingSupport {
   const known = CATALOG.some((entry) => entry.provider === provider && entry.id === modelId);
   if (provider === "anthropic" && ANTHROPIC_THINKING_MODELS.has(modelId)) {
-    return { known: true, supported: ["off", "low", "medium", "high"] };
+    return { known: true, supported: ["off", "low", "medium", "high"], supportsDisabling: true };
   }
   if (provider === "openai" && OPENAI_THINKING_MODELS.has(modelId)) {
-    return { known: true, supported: ["off", "low", "medium", "high"] };
+    return { known: true, supported: ["off", "low", "medium", "high"], supportsDisabling: true };
   }
   if (known) {
-    return { known: true, supported: ["off"] };
+    return { known: true, supported: ["off"], supportsDisabling: false };
   }
-  return { known: false, supported: ["off"] };
+  return { known: false, supported: ["off"], supportsDisabling: false };
 }
 
 /** True when the requested level can be applied truthfully for the provider/model pair. */
@@ -154,16 +156,16 @@ export function isThinkingSupported(provider: string, modelId: string, level: Th
   return getThinkingSupport(provider, modelId).supported.includes(level);
 }
 
-/** Human-readable capability summary naming supported levels for errors and disabled UI entries. */
+/** Human-readable capability summary naming supported levels and disabling support for errors and disabled UI entries. */
 export function describeThinkingSupport(provider: string, modelId: string): string {
   const support = getThinkingSupport(provider, modelId);
   if (!support.known) {
-    return `Unknown model "${provider}/${modelId}". Reasoning support cannot be established; leave thinking unset or use off. Explicit low/medium/high would pretend a mapping applied.`;
+    return `Unknown model "${provider}/${modelId}". Reasoning support cannot be established; leave thinking unset or use off. Explicit low/medium/high would pretend a mapping applied. Explicit off sends no reasoning controls.`;
   }
   if (support.supported.length === 1) {
     return `${provider}/${modelId} does not support reasoning; only thinking "off" (provider default, no reasoning controls) is supported.`;
   }
-  return `${provider}/${modelId} supports thinking off/low/medium/high.`;
+  return `${provider}/${modelId} supports thinking off/low/medium/high. Explicit off sends the provider's documented disable control.`;
 }
 
 /** Extra-body keys treated as reasoning controls for compatible single-source-of-truth checks. */
@@ -175,7 +177,6 @@ export const COMPATIBLE_REASONING_BODY_KEYS = [
   "thinking",
   "thinking_budget",
   "budget_tokens",
-  "effort",
 ] as const;
 
 /** Name the first extra-body reasoning key present, if any, for conflict errors. */

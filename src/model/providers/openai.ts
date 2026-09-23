@@ -12,7 +12,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
 import type {
   Model,
   ModelRequest,
@@ -34,7 +34,7 @@ export const OPENAI_THINKING_EFFORTS: Record<ThinkingLevel, "none" | "low" | "me
   high: "high",
 };
 
-/** Resolve a provider-independent level to an OpenAI reasoning param, leaving defaults untouched when unset. */
+/** Resolve a provider-independent level to an OpenAI reasoning param, leaving defaults untouched when unset or off without disabling support. */
 export function resolveOpenAIReasoning(
   level: ThinkingLevel | undefined,
   modelId: string,
@@ -48,6 +48,9 @@ export function resolveOpenAIReasoning(
     );
   }
   if (level === "off") {
+    if (!getThinkingSupport("openai", modelId).supportsDisabling) {
+      return undefined;
+    }
     return { effort: "none" };
   }
   return { effort: OPENAI_THINKING_EFFORTS[level], summary: "auto" };
