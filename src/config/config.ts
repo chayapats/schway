@@ -79,7 +79,7 @@ export const CompatibleProfileSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** TypeBox schema for one config.json object. Additional properties are errors. */
+/** TypeBox schema for one config layer; a null profile is a session-only marker that clears lower selections. */
 export const ConfigSchema = Type.Object(
   {
     provider: Type.Optional(ProviderSchema),
@@ -94,7 +94,7 @@ export const ConfigSchema = Type.Object(
     auth: Type.Optional(AuthSchema),
     packages: Type.Optional(Type.Array(Type.String({ pattern: "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$" }), { uniqueItems: true })),
     profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
-    profile: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -220,12 +220,17 @@ export function parseConfigObject(
   if (profilesError !== undefined) {
     return { error: profilesError };
   }
-  if (layer.profile !== undefined && !isValidProfileName(layer.profile.trim())) {
+  if (layer.profile === null && source !== "session") {
+    return {
+      error: `Invalid config at ${source}: profile must be a nonempty string. Null is a session-only cleared marker.`,
+    };
+  }
+  if (layer.profile !== undefined && layer.profile !== null && !isValidProfileName(layer.profile.trim())) {
     return {
       error: `Invalid config at ${source}: profile must match ${PROFILE_NAME_PATTERN}.`,
     };
   }
-  if (layer.profile !== undefined && layer.profile.trim().length === 0) {
+  if (layer.profile !== undefined && layer.profile !== null && layer.profile.trim().length === 0) {
     return {
       error: `Invalid config at ${source}: profile must be a nonempty string.`,
     };
@@ -413,10 +418,18 @@ export function resolveSettings(input: {
       return { error: profileError };
     }
     const profileLayer = profileToLayer(activeProfile);
+    const PROFILE_CONNECTION_KEYS = ["baseUrl", "model", "headers", "extraBody", "auth"] as const;
+    const fileLayer = (layer: ConfigLayer | undefined): ConfigLayer | undefined => {
+      const direct = omitProfileKeys(layer);
+      if (direct === undefined) return undefined;
+      const copy: ConfigLayer = { ...direct };
+      for (const key of PROFILE_CONNECTION_KEYS) delete copy[key];
+      return copy;
+    };
     merged = mergeConfigLayers(
       BUILTIN_DEFAULTS,
-      omitProfileKeys(input.user),
-      omitProfileKeys(input.project),
+      fileLayer(input.user),
+      fileLayer(input.project),
       profileLayer,
       omitProfileKeys(input.cli),
       omitProfileKeys(input.session),
@@ -569,7 +582,7 @@ function normalizeLayer(layer: ConfigLayer): ConfigLayer {
     ...layer,
     ...(layer.model !== undefined ? { model: layer.model.trim() } : {}),
     ...(layer.baseUrl !== undefined ? { baseUrl: layer.baseUrl.trim() } : {}),
-    ...(layer.profile !== undefined ? { profile: layer.profile.trim() } : {}),
+    ...(layer.profile !== undefined ? { profile: layer.profile === null ? null : layer.profile.trim() } : {}),
     ...(profiles !== undefined ? { profiles } : {}),
   };
 }

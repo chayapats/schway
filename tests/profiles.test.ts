@@ -757,3 +757,125 @@ test("bare model tokens never switch profiles", async () => {
     expect(controller.snapshot().modelId).toBe("alpha");
   });
 });
+
+test("selected profiles ignore direct file connection fields but keep file budgets", () => {
+  const resolved = resolveSettings({
+    user: {
+      profiles: {
+        a: { baseUrl: "https://a.example.test/v1", credentialEnv: "A_KEY" },
+      },
+      profile: "a",
+      provider: "openai-compatible",
+      baseUrl: "https://direct.example.test/v1",
+      model: "direct-model",
+      headers: { "X-Tenant": "other" },
+      extraBody: { temperature: 0.9 },
+      auth: "none",
+      contextWindow: 32000,
+      maxOutput: 4000,
+    },
+  });
+  expect("error" in resolved).toBe(false);
+  if ("error" in resolved) throw new Error(resolved.error);
+  expect(resolved.profile).toBe("a");
+  expect(resolved.baseUrl).toBe("https://a.example.test/v1");
+  expect(resolved.model).toBe("gpt-4o");
+  expect(resolved.headers).toBeUndefined();
+  expect(resolved.extraBody).toBeUndefined();
+  expect(resolved.auth).toBe("optional");
+  expect(resolved.credentialEnv).toBe("A_KEY");
+  expect(resolved.contextWindow).toBe(32000);
+  expect(resolved.maxOutput).toBe(4000);
+});
+
+test("profile origins attribute connection fields to the profile and keep file budgets", async () => {
+  const { ConfigEditor } = await import("../src/config/editing.ts");
+  const editor = new ConfigEditor(
+    {
+      user: {
+        profiles: {
+          a: { baseUrl: "https://a.example.test/v1", model: "model-a" },
+        },
+        profile: "a",
+        headers: { "X-Tenant": "other" },
+        model: "direct-model",
+        maxOutput: 4000,
+      },
+    },
+    { user: "user", project: "project" },
+  );
+  expect(editor.settings.headers).toBeUndefined();
+  expect(editor.origins.headers).toBeUndefined();
+  expect(editor.origins.baseUrl).toBe('profile "a" [user-global]');
+  expect(editor.settings.model).toBe("model-a");
+  expect(editor.origins.model).toBe('profile "a" [user-global]');
+  expect(editor.settings.maxOutput).toBe(4000);
+  expect(editor.origins.maxOutput).toBe("user-global");
+  const bare = new ConfigEditor(
+    {
+      user: {
+        profiles: { b: { baseUrl: "https://b.example.test/v1" } },
+        profile: "b",
+        provider: "openai-compatible",
+        model: "direct-model",
+      },
+    },
+    { user: "user", project: "project" },
+  );
+  expect(bare.settings.model).toBe("gpt-4o");
+  expect(bare.origins.model).toBe("built-in default");
+});
+
+test("direct model selection clears profiles selected through CLI layers", async () => {
+  await withTempDir(async (root) => {
+    const input = {
+      home: join(root, "home"),
+      workspaceRoot: root,
+      cli: {
+        profiles: { a: { baseUrl: "https://a.example.test/v1", model: "model-a" } },
+        profile: "a",
+      },
+    };
+    const editor = await loadConfigEditor(input);
+    expect(editor.settings.profile).toBe("a");
+    const staged = await editor.prepareModel("anthropic", "claude-sonnet-4-6");
+    expect(staged.settings.provider).toBe("anthropic");
+    expect(staged.settings.model).toBe("claude-sonnet-4-6");
+    expect(staged.settings.profile).toBeUndefined();
+    await staged.commit();
+    expect(editor.settings.profile).toBeUndefined();
+    expect(editor.settings.provider).toBe("anthropic");
+    const resetEditor = await loadConfigEditor(input);
+    const reset = await resetEditor.prepare({ scope: "session", key: "profile", value: undefined });
+    expect(reset.settings.profile).toBeUndefined();
+    await reset.commit();
+    expect(resetEditor.settings.profile).toBeUndefined();
+  });
+});
+
+test("non-HTTP(S) profile base URLs fail before any provider request", () => {
+  for (const baseUrl of ["ftp://host/v1", "file:///tmp/x", "data:text/plain,hi"]) {
+    const parsed = parseConfigObject({ profiles: { a: { baseUrl } } }, "test");
+    expect("error" in parsed).toBe(true);
+    const resolved = resolveSettings({
+      user: { profiles: { a: { baseUrl } }, profile: "a" },
+    });
+    expect("error" in resolved).toBe(true);
+    if ("error" in resolved) {
+      expect(resolved.error).toContain("profiles.a.baseUrl");
+    }
+  }
+  const ok = parseConfigObject(
+    { profiles: { a: { baseUrl: "https://example.test/v1" } } },
+    "test",
+  );
+  expect("error" in ok).toBe(false);
+});
+
+test("narrow picker queries do not surface unrelated profiles", () => {
+  const profiles = { a: { baseUrl: "https://a.example.test/v1", model: "model-a" } };
+  const unrelated = modelPickerEntries("claude", "anthropic", "claude-sonnet-4-6", {}, { profiles });
+  expect(unrelated.some((entry) => entry.profile === "a")).toBe(false);
+  const matched = modelPickerEntries("model-a", "anthropic", "claude-sonnet-4-6", {}, { profiles });
+  expect(matched.some((entry) => entry.profile === "a")).toBe(true);
+});

@@ -8,12 +8,15 @@ export function isValidProfileName(name: string): boolean {
   return PROFILE_NAME_RE.test(name);
 }
 
-/** True when a base URL is absolute and carries no userinfo or query string. */
+/** True when a base URL is an HTTP(S) URL without userinfo or query string. */
 export function isValidProfileBaseUrl(value: string): boolean {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
     return false;
   }
   if (url.username || url.password) {

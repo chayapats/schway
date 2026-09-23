@@ -31,11 +31,8 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   for (const [name, profile] of Object.entries(profiles)) {
     const model = profile.model?.trim() || "gpt-4o";
     const haystacks = [`profile:${name}`, `profile ${name}`, name, `openai-compatible/${model}`];
-    if (normalized.length > 0 && !haystacks.some(hay => hay.toLowerCase().includes(normalized) || normalized.includes(hay.toLowerCase().split("/").pop()!))) {
-      const combined = `${name} ${model}`.toLowerCase();
-      if (!combined.includes(normalized) && !`profile:${name}`.toLowerCase().includes(normalized)) {
-        continue;
-      }
+    if (normalized.length > 0 && !haystacks.some(hay => hay.toLowerCase().includes(normalized))) {
+      continue;
     }
     entries.push({
       provider: "openai-compatible",
