@@ -1,0 +1,17 @@
+{
+  "fixture": "codex-feasibility/tool-result-followup",
+  "version": 1,
+  "capturedAt": "2026-09-23",
+  "source": "synthetic offline replay for issue 49; not a live Codex subscription response",
+  "transport": "replay-only; Schway executes the tool itself and submits the result on the next request",
+  "schwayBaseline": "6088930c1a8b92e193209d20dd014d7d97f91a97",
+  "schwayExecutedTool": {
+    "name": "read",
+    "input": { "path": "note.txt" },
+    "output": "note.txt says hello"
+  },
+  "turn": {
+    "chunks": ["note.txt says hello"],
+    "toolCalls": []
+  }
+}
