@@ -3,13 +3,16 @@ import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high>] [--api-key <key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
 
 /** Authentication mode for OpenAI-compatible endpoints. */
 export type CliAuthMode = "required" | "optional" | "none";
+
+/** OpenAI credential preference selecting subscription login, API key, or automatic headless-safe choice. */
+export type CliOpenAIAuth = "auto" | "codex" | "api-key";
 
 /** Provider-independent reasoning level selectable from config and the CLI. */
 export type CliThinking = "off" | "low" | "medium" | "high";
@@ -30,6 +33,7 @@ export interface CliArgs {
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   auth?: CliAuthMode;
+  openaiAuth?: CliOpenAIAuth;
   maxTurns?: number;
   maxConcurrentTools?: number;
   contextWindow?: number;
@@ -252,6 +256,27 @@ export function parseArgs(
       args.auth = auth;
       continue;
     }
+    if (arg === "--openai-auth") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { error: "Missing value for --openai-auth" };
+      }
+      i++;
+      const openaiAuth = parseOpenAIAuth(value);
+      if (typeof openaiAuth === "object") {
+        return openaiAuth;
+      }
+      args.openaiAuth = openaiAuth;
+      continue;
+    }
+    if (arg.startsWith("--openai-auth=")) {
+      const openaiAuth = parseOpenAIAuth(arg.slice("--openai-auth=".length));
+      if (typeof openaiAuth === "object") {
+        return openaiAuth;
+      }
+      args.openaiAuth = openaiAuth;
+      continue;
+    }
     const intFlag = parseIntegerFlag(arg, argv, i);
     if (intFlag !== undefined) {
       if ("error" in intFlag) {
@@ -362,6 +387,17 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
   };
 }
 
+/** Accept the OpenAI credential preference separately from compatible auth modes. */
+function parseOpenAIAuth(value: string): CliOpenAIAuth | { error: string } {
+  const preference = value.trim().toLowerCase();
+  if (preference === "auto" || preference === "codex" || preference === "api-key") {
+    return preference;
+  }
+  return {
+    error: `Unknown OpenAI auth preference: ${value}. Use auto, codex, or api-key.`,
+  };
+}
+
 /** Validate a provider-independent thinking level without assuming identical wire semantics. */
 function parseThinking(value: string): CliThinking | { error: string } {
   const level = value.trim().toLowerCase();
@@ -409,6 +445,9 @@ function validateConnectionOptions(
     };
   }
   if (args.branch !== undefined && !args.resume && !args.help) return { error: "--branch requires --resume <session-id>" };
+  if (args.openaiAuth !== undefined && args.provider !== undefined && args.provider !== "openai") {
+    return { error: "OpenAI auth preference requires --provider openai" };
+  }
   return { args };
 }
 
@@ -447,6 +486,9 @@ export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
   }
   if (args.auth !== undefined) {
     layer.auth = args.auth;
+  }
+  if (args.openaiAuth !== undefined) {
+    layer.openaiAuth = args.openaiAuth;
   }
   if (args.thinking !== undefined) {
     layer.thinking = args.thinking;

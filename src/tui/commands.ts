@@ -81,7 +81,8 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/config set <key> <value> [--scope user|project] - edit settings (session only by default)",
     "/config reset <key> [--scope user|project] - remove an override and inherit its fallback",
     "/login <anthropic|openai|openai-compatible> - enter an API key in a masked prompt",
-    "/logout <anthropic|openai|openai-compatible> - remove the selected stored API key",
+    "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
+    "/logout <anthropic|openai|openai-compatible|codex> - remove the selected stored credential",
     "/help - show this help",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
@@ -260,4 +261,60 @@ export function parseThinkingArgs(args: string): ThinkingSelection | "show" | "r
 /** True when the value names a selectable model provider. */
 function isPickerProvider(value: string): value is ModelPickerProvider {
   return (MODEL_PICKER_PROVIDERS as readonly string[]).includes(value);
+}
+
+/** Usage guidance for credential commands, keeping API keys out of slash arguments. */
+export const LOGIN_USAGE =
+  "Usage: /login <anthropic|openai|openai-compatible> or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
+
+/** Requested credential action from /login or /logout arguments. */
+export type LoginTarget =
+  | { kind: "api-key"; provider: "anthropic" | "openai" | "openai-compatible" }
+  | { kind: "codex"; device: boolean; code?: string }
+  | { error: string };
+
+/** Parse /login and /logout arguments into an API-key provider or the ChatGPT subscription flow. */
+export function parseLoginTarget(args: string): LoginTarget {
+  const tokens = args.trim().split(/\s+/).filter((token) => token.length > 0);
+  const name = tokens[0]?.toLowerCase() ?? "";
+  if (name === "anthropic" || name === "openai" || name === "openai-compatible") {
+    if (tokens.length > 1) {
+      return { error: LOGIN_USAGE };
+    }
+    return { kind: "api-key", provider: name };
+  }
+  if (name === "codex") {
+    let device = false;
+    let code: string | undefined;
+    for (let i = 1; i < tokens.length; i++) {
+      const token = tokens[i]!;
+      if (token === "--device") {
+        device = true;
+        continue;
+      }
+      if (token === "--code") {
+        const value = tokens[i + 1];
+        if (!value) {
+          return { error: LOGIN_USAGE };
+        }
+        i++;
+        code = value;
+        continue;
+      }
+      if (token.startsWith("--code=")) {
+        const value = token.slice("--code=".length);
+        if (!value) {
+          return { error: LOGIN_USAGE };
+        }
+        code = value;
+        continue;
+      }
+      return { error: LOGIN_USAGE };
+    }
+    if (device && code !== undefined) {
+      return { error: "Usage: /login codex [--device] or /login codex --code <callback-url-or-code>. Device and pasted-code flows are separate attempts." };
+    }
+    return code !== undefined ? { kind: "codex", device, code } : { kind: "codex", device };
+  }
+  return { error: LOGIN_USAGE };
 }

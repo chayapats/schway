@@ -93,7 +93,8 @@ test("only shipped extension surfaces are present in the base harness", async ()
   }
   const cli = await source("src/cli/main.ts");
   const tui = await source("src/tui/app.ts");
-  for (const surface of ["mcp", "subagent", "doctor", "keychain", "subscription"]) {
+  // ChatGPT subscription login shipped with the Codex OAuth integration; the rest remain deferred.
+  for (const surface of ["mcp", "subagent", "doctor", "keychain"]) {
     expect(cli.toLowerCase().includes(surface)).toBe(false);
     expect(tui.toLowerCase().includes(surface)).toBe(false);
   }

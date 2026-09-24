@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import {
   redactSecrets,
 } from "../auth/secrets.ts";
-import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential } from "../auth/credentials.ts";
+import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
 import { bindCredentialInput, loadCredentialSafeTui } from "./credential-input.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
@@ -32,10 +32,12 @@ import {
   cliOverridesFromArgs,
   type CliArgs,
   type CliAuthMode,
+  type CliOpenAIAuth,
   type CliProvider,
   type CliThinking,
 } from "../cli/args.ts";
 import { TuiController, MAX_BRANCH_TREE_PREVIEW_ENTRIES } from "./controller.ts";
+import type { CodexLoginRunner } from "./controller.ts";
 import type { BranchTreeSnapshot } from "./controller.ts";
 import {
   dispatchEditorInput,
@@ -83,6 +85,7 @@ export interface InteractiveIo {
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
   }) => Promise<Model>;
 }
@@ -148,6 +151,10 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     );
     return 1;
   }
+  if (io.args.openaiAuth !== undefined && settings.provider !== "openai") {
+    io.stderr.write("OpenAI auth preference requires --provider openai\n");
+    return 1;
+  }
 
   const secrets = collectSecrets(io.args.apiKey, env, settings.credentialEnv);
   const credentialStore = io.credentialStore ?? createNativeCredentialStore();
@@ -173,6 +180,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   try {
     let model = io.model;
     let startupError: string | undefined;
+    let startupNotice: string | undefined;
     if (!model) {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {
         maxTokens: settings.maxOutput,
@@ -180,6 +188,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         headers: settings.headers,
         extraBody: settings.extraBody,
         auth: settings.auth,
+        openaiAuth: settings.openaiAuth,
         thinking: settings.thinking,
         profile: settings.profile,
         credentialEnv: settings.credentialEnv,
@@ -194,6 +203,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         startupError = loaded.error;
       } else {
         model = loaded.model;
+        startupNotice = loaded.notice;
       }
     }
 
@@ -206,16 +216,22 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
       signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
     });
+    const codexLogin = createCodexLoginRunner({ store: credentialStore, fetch: io.fetch, secrets });
     const credentials = {
       store: credentialStore, env, runtimeApiKey: io.args.apiKey,
       rememberSecret: (key: string) => { if (!secrets.includes(key)) secrets.push(key); },
-      reload: () => loadInteractiveModel(settings.provider, settings.model, {
-        maxTokens: settings.maxOutput, baseUrl: settings.baseUrl, headers: settings.headers,
-        extraBody: settings.extraBody, auth: settings.auth, thinking: settings.thinking, profile: settings.profile,
-        credentialEnv: settings.credentialEnv, credentialIdentity: settings.credentialIdentity,
-        runtimeApiKey: io.args.apiKey,
-        env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
-      }),
+      reload: (override?: ResolvedSettings) => {
+        const current = override ?? settings;
+        return loadInteractiveModel(current.provider, current.model, {
+          maxTokens: current.maxOutput, baseUrl: current.baseUrl, headers: current.headers,
+          extraBody: current.extraBody, auth: current.auth, openaiAuth: current.openaiAuth,
+          thinking: current.thinking, profile: current.profile,
+          credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
+          runtimeApiKey: io.args.apiKey,
+          env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
+        });
+      },
+      codexLogin,
     };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
       settings = next;
@@ -248,12 +264,16 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
+          openaiAuth: settings.openaiAuth,
           thinking: settings.thinking,
           profile: settings.profile,
           startupError,
           secrets,
         });
         if (!startupError) {
+          if (startupNotice) {
+            controller.notice(startupNotice);
+          }
           controller.notice(
             `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
           );
@@ -282,12 +302,16 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
+          openaiAuth: settings.openaiAuth,
           thinking: settings.thinking,
           profile: settings.profile,
           startupError,
           secrets,
         });
         if (!startupError) {
+          if (startupNotice) {
+            controller.notice(startupNotice);
+          }
           controller.notice(`New session ${session.header.id}. Type /help for commands.`);
         }
       }
@@ -331,11 +355,11 @@ export async function stageInteractiveSettings(
   previous: ResolvedSettings,
   options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
 ): Promise<{ model?: Model; contextManager: ContextManager }> {
-  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "thinking", "effectiveThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
+  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
   if (adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
-      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, thinking: next.thinking,
+      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
     options.signal.throwIfAborted();
@@ -733,7 +757,7 @@ async function handleSlashCommand(
       return;
     }
     case "login": {
-      ctx.controller.beginLogin(args);
+      await ctx.controller.login(args);
       return;
     }
     case "logout": {
@@ -946,6 +970,68 @@ function collectSecrets(
   return secrets;
 }
 
+/** Build the explicit subscription login runner, lazily loading the isolated Codex adapter only on use. */
+export function createCodexLoginRunner(options: {
+  store: CredentialStore;
+  fetch?: FetchLike;
+  secrets: string[];
+  openBrowser?: (url: string) => Promise<void> | void;
+}): CodexLoginRunner {
+  return async ({ device, code, signal, onProgress }) => {
+    const codex = await import("../model/providers/codex-subscription.ts");
+    try {
+      const tokens = device
+        ? await codex.loginWithDeviceFlow({
+          store: options.store,
+          signal,
+          deps: { fetch: options.fetch, onProgress },
+        })
+        : await codex.loginWithBrowserFlow({
+          store: options.store,
+          ...(code !== undefined ? { pastedCode: code } : {}),
+          signal,
+          deps: {
+            fetch: options.fetch,
+            openBrowser: options.openBrowser ?? openSubscriptionAuthorizeUrl,
+            waitForCallbackCode: (attempt) => codex.waitForLocalhostCallback(attempt),
+            onProgress,
+          },
+        });
+      signal.throwIfAborted();
+      if (!options.secrets.includes(tokens.accessToken)) {
+        options.secrets.push(tokens.accessToken);
+      }
+      return { ok: true as const, status: codex.formatSubscriptionStatus(tokens) };
+    } catch (error) {
+      if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw error instanceof Error ? error : new DOMException("Aborted", "AbortError");
+      }
+      return { ok: false as const, message: redactSecrets(messageOf(error), options.secrets) };
+    }
+  };
+}
+
+/** Resolve the platform launcher for the provider authorization URL without spawning it. */
+export function subscriptionAuthorizeLauncher(platform: string, url: string): { command: string; args: string[] } {
+  if (platform === "darwin") {
+    return { command: "open", args: [url] };
+  }
+  if (platform === "win32") {
+    return { command: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  }
+  return { command: "xdg-open", args: [url] };
+}
+
+/** Open the provider authorization URL with the platform launcher without blocking the login attempt. */
+async function openSubscriptionAuthorizeUrl(url: string): Promise<void> {
+  const { command, args } = subscriptionAuthorizeLauncher(process.platform, url);
+  const child = Bun.spawn([command, ...args], { stdout: "ignore", stderr: "ignore" });
+  await child.exited;
+  if (child.exitCode !== 0) {
+    throw new Error(`platform opener exited ${child.exitCode}`);
+  }
+}
+
 /** Resolve credentials and construct the selected provider model for interactive use. */
 export async function loadInteractiveModel(
   provider: CliProvider,
@@ -956,6 +1042,7 @@ export async function loadInteractiveModel(
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
     profile?: string;
     credentialEnv?: string;
@@ -967,12 +1054,35 @@ export async function loadInteractiveModel(
     secrets: string[];
     credentialStore?: CredentialStore;
   },
-): Promise<{ model: Model } | { error: string }> {
+): Promise<{ model: Model; notice?: string } | { error: string }> {
+  const store = options.credentialStore ?? createNativeCredentialStore();
+  if (provider === "openai") {
+    const selection = await selectOpenAITransport({
+      openaiAuth: options.openaiAuth,
+      runtimeApiKey: options.runtimeApiKey,
+      env: options.env,
+      store,
+    });
+    if ("error" in selection) return selection;
+    if (selection.transport === "codex") {
+      const input = {
+        provider, model: modelId, maxTokens: options.maxTokens,
+        ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
+        openaiAuth: "codex" as const,
+      };
+      try {
+        const model = options.createModel ? await options.createModel(input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
+        return selection.notice !== undefined ? { model, notice: selection.notice } : { model };
+      } catch (error) {
+        return { error: redactSecrets(messageOf(error), options.secrets) };
+      }
+    }
+  }
   const credential = await resolveProviderCredential({
     provider, baseUrl: options.baseUrl, auth: options.auth,
     profile: options.profile, credentialEnv: options.credentialEnv, credentialIdentity: options.credentialIdentity,
     runtimeApiKey: options.runtimeApiKey, env: options.env,
-    store: options.credentialStore ?? createNativeCredentialStore(),
+    store,
   });
   if ("error" in credential) return credential;
   if (credential.apiKey) options.secrets.push(credential.apiKey);

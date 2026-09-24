@@ -1,5 +1,7 @@
 import type { Model, ThinkingLevel } from "./model.ts";
-import type { CliAuthMode, CliProvider } from "../cli/args.ts";
+import type { CliAuthMode, CliOpenAIAuth, CliProvider } from "../cli/args.ts";
+import type { CredentialStore } from "../auth/store.ts";
+import type { CodexTokens } from "./providers/codex-subscription.ts";
 
 /** Optional fetch override used by protocol fixture tests. */
 export type FetchLike = (
@@ -19,6 +21,12 @@ export interface ProviderLoaderInput {
   auth?: CliAuthMode;
   /** Provider-independent reasoning level mapped inside each adapter without shared wire semantics. */
   thinking?: ThinkingLevel;
+  /** OpenAI credential preference; codex loads the isolated subscription adapter. */
+  openaiAuth?: CliOpenAIAuth;
+  /** Stored subscription tokens for the codex transport when no store-backed refresher is used. */
+  codexTokens?: CodexTokens;
+  /** Secure-store renewal channel for the codex transport; enables serialized pre-expiry refresh. */
+  codexStore?: CredentialStore;
 }
 
 /**
@@ -44,6 +52,17 @@ export async function loadProviderModel(
     });
   }
   if (input.provider === "openai") {
+    if (input.openaiAuth === "codex") {
+      const { createCodexSubscriptionModel } = await import("./providers/codex-subscription.ts");
+      return createCodexSubscriptionModel({
+        model: input.model,
+        maxTokens: input.maxTokens,
+        thinking: input.thinking,
+        tokens: input.codexTokens,
+        store: input.codexStore,
+        fetch: fetchFn,
+      });
+    }
     const { createOpenAIModel } = await import("./providers/openai.ts");
     return createOpenAIModel({
       apiKey: input.apiKey ?? "",

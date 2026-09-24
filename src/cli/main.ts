@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
-import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential } from "../auth/credentials.ts";
+import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { loadResolvedSettings, type ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
@@ -41,6 +41,7 @@ import {
   USAGE,
   type CliArgs,
   type CliAuthMode,
+  type CliOpenAIAuth,
   type CliThinking,
 } from "./args.ts";
 
@@ -78,6 +79,7 @@ export interface CliIo {
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
+    openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
   }) => Promise<Model>;
 }
@@ -174,6 +176,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     return 1;
   }
+  if (parsed.args.openaiAuth !== undefined && settings.provider !== "openai") {
+    io.stderr.write(
+      `OpenAI auth preference requires --provider openai\n${USAGE}\n`,
+    );
+    return 1;
+  }
 
   const secrets = collectSecrets(parsed.args.apiKey, env, settings.credentialEnv);
   let tools: ToolRegistry;
@@ -219,6 +227,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       if ("error" in loaded) {
         io.stderr.write(`${loaded.error}\n`);
         return 1;
+      }
+      if (loaded.notice) {
+        io.stderr.write(`${loaded.notice}\n`);
       }
       model = loaded.model;
     }
@@ -406,7 +417,34 @@ async function loadCliModel(
   runtimeApiKey: string | undefined,
   io: CliIo,
   secrets: string[],
-): Promise<{ model: Model } | { error: string }> {
+): Promise<{ model: Model; notice?: string } | { error: string }> {
+  const credentialStore = io.credentialStore ?? createNativeCredentialStore();
+  if (settings.provider === "openai") {
+    const selection = await selectOpenAITransport({
+      openaiAuth: settings.openaiAuth,
+      runtimeApiKey,
+      env: io.env,
+      store: credentialStore,
+    });
+    if ("error" in selection) return selection;
+    if (selection.transport === "codex") {
+      const input = {
+        provider: settings.provider,
+        model: settings.model,
+        maxTokens: settings.maxOutput,
+        ...(settings.thinking !== undefined ? { thinking: settings.thinking } : {}),
+        openaiAuth: "codex" as const,
+      };
+      try {
+        const model = io.createModel
+          ? await io.createModel(input)
+          : await loadProviderModel({ ...input, codexStore: credentialStore }, io.fetch);
+        return selection.notice !== undefined ? { model, notice: selection.notice } : { model };
+      } catch (error) {
+        return { error: redactSecrets(errorMessage(error), secrets) };
+      }
+    }
+  }
   const credential = await resolveProviderCredential({
     provider: settings.provider,
     baseUrl: settings.baseUrl,
@@ -416,7 +454,7 @@ async function loadCliModel(
     credentialIdentity: settings.credentialIdentity,
     runtimeApiKey,
     env: io.env,
-    store: io.credentialStore ?? createNativeCredentialStore(),
+    store: credentialStore,
   });
   if ("error" in credential) return credential;
   if (credential.apiKey) secrets.push(credential.apiKey);
