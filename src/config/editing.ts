@@ -5,7 +5,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "git"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -35,6 +35,7 @@ export function configOrigins(layers: Layers): ConfigOrigins {
   return traceOrigins(layers).origins;
 }
 
+/** Trace per-setting layer origins with provider-change model inheritance applied. */
 function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSource?: string } {
   const origins: ConfigOrigins = {};
   let modelFallbackSource: string | undefined;
@@ -209,6 +210,7 @@ export class ConfigEditor {
   }
 }
 
+/** Clear stale connection keys when a session profile switch would otherwise inherit them. */
 function expandProfileSwitch(scope: ConfigScope, changes: Array<{ key: string; value?: unknown }>): Array<{ key: string; value?: unknown }> {
   const setsProfile = changes.some((edit) => edit.key === "profile" && typeof edit.value === "string");
   if (scope !== "session" || !setsProfile) {
@@ -222,6 +224,7 @@ function expandProfileSwitch(scope: ConfigScope, changes: Array<{ key: string; v
   return [...changes, ...cleared];
 }
 
+/** Reject persisted base URLs that are not absolute or that carry userinfo or query parts. */
 function validatePersistedBaseUrl(value: string): void {
   if (!isValidProfileBaseUrl(value)) {
     let hasUrl = true;
@@ -237,11 +240,13 @@ function validatePersistedBaseUrl(value: string): void {
   }
 }
 
+/** Read a config file as text, returning undefined when the path does not exist. */
 async function readText(path: string): Promise<string | undefined> {
   try { return await readFile(path, "utf8"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
 }
 
+/** Persist one config layer atomically, failing when the file changed while staged. */
 async function atomicWrite(path: string, layer: ConfigLayer, before: string | undefined, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
   await mkdir(dirname(path), { recursive: true });
@@ -272,6 +277,7 @@ export async function loadConfigEditor(input: { home: string; workspaceRoot: str
   return new ConfigEditor({ user, project, cli: input.cli }, paths);
 }
 
+/** Resolve layers to settings, throwing a readable error when validation fails. */
 function resolved(layers: Layers): ResolvedSettings {
   const settings = resolveSettings(layers);
   if ("error" in settings) throw new Error(settings.error);

@@ -130,3 +130,42 @@ PROFILE_A_KEY=sentinel-a PROFILE_B_KEY=sentinel-b schway --profile b --model ove
 ```
 
 Each endpoint receives only its profile's model, body, headers, and sentinel credential; runtime overrides apply last; switching never leaks the earlier credential. See `tests/profiles.test.ts` for deterministic two-endpoint, precedence, isolation, auth-mode, and atomic-switch coverage.
+
+## Git change tracking
+
+Schway inspects repository state observationally; it never commits, stages, stashes, branches, worktrees, or restores files. Git remains the source of truth and the primary workspace root is the default inspection scope.
+
+```json
+{
+  "git": { "changeTracking": "on-demand" }
+}
+```
+
+Modes:
+
+- `off` disables change inspection and performs no Git reads.
+- `on-demand` (default) reads repository state only on explicit `/changes` inspection; no per-turn capture runs.
+- `snapshot` captures a content-hash baseline immediately before each user turn and compares after the turn settles (completed, failed, or cancelled, once tool cleanup settles). Hashes distinguish pre-existing dirt from new turn edits; a filename list alone is never used as the comparison.
+
+Inspect with:
+
+```text
+/changes
+/changes status
+/changes diff
+/changes diff -- <path>
+/changes mode
+/config
+/config set git {"changeTracking":"snapshot"}
+/config reset git
+```
+
+`/changes` shows branch, HEAD, dirty counts, and bounded changed files (staged, unstaged, untracked, deleted, renamed, binary). Detached HEAD renders as `detached HEAD at <sha>`; a non-Git workspace reports `Not a Git workspace` and keeps coding. Large outputs truncate explicitly (`… truncated`) with follow-ups (`git status --short`, `git diff -- <path>`). Binary content is summarized, never dumped. Snapshot comparisons list new turn changes separately from pre-existing files changed further and pre-existing files left untouched. A failed capture reports `Snapshot unavailable: <reason>` instead of a fabricated clean diff. Snapshots retain only the latest turn pair for the current session/run and cannot restore files. Resume shows current on-demand state and never claims a historical snapshot unless one was retained with a valid identity.
+
+Runnable example (no paid APIs; temporary filesystems in `tests/git-changes.test.ts`):
+
+```sh
+bun test tests/git-changes.test.ts
+```
+
+See `src/workspace/git.ts` (`inspectGitStatus`, `captureGitSnapshot`, `compareGitSnapshots`, `getGitDiffPreview`), `src/config/config.ts` (`git.changeTracking`, `DEFAULT_GIT_CHANGE_TRACKING`), and `src/tui/controller.ts` (`changesCommand`, `gitChangeTracking`) for the contract.

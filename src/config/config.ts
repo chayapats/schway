@@ -23,6 +23,10 @@ import {
   isValidProfileBaseUrl,
   isValidProfileName,
 } from "./profile-name.ts";
+import {
+  DEFAULT_GIT_CHANGE_TRACKING,
+  type GitChangeTrackingMode,
+} from "../workspace/git.ts";
 
 /** Shared profile-name pattern and validator; re-exported for existing config importers. */
 export { PROFILE_NAME_PATTERN, isValidProfileName, isValidProfileBaseUrl };
@@ -43,6 +47,7 @@ export const CONFIG_SETTING_NAMES = [
   "packages",
   "profiles",
   "profile",
+  "git",
 ] as const;
 
 const ProviderSchema = Type.Union([
@@ -64,6 +69,21 @@ export const ThinkingSchema = Type.Union([
   Type.Literal("medium"),
   Type.Literal("high"),
 ]);
+
+/** Validated Git change-tracking modes for observational inspection. */
+export const GitChangeTrackingSchema = Type.Union([
+  Type.Literal("off"),
+  Type.Literal("on-demand"),
+  Type.Literal("snapshot"),
+]);
+
+/** Observational Git settings; Schway never manages commits, branches, or worktrees. */
+export const GitConfigSchema = Type.Object(
+  {
+    changeTracking: Type.Optional(GitChangeTrackingSchema),
+  },
+  { additionalProperties: false },
+);
 
 const PositiveInt = Type.Integer({ minimum: 1 });
 
@@ -110,6 +130,7 @@ export const ConfigSchema = Type.Object(
     packages: Type.Optional(Type.Array(Type.String({ pattern: "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$" }), { uniqueItems: true })),
     profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
+    git: Type.Optional(GitConfigSchema),
   },
   { additionalProperties: false },
 );
@@ -128,6 +149,15 @@ export type CompatibleProfile = Static<typeof CompatibleProfileSchema>;
 
 /** Map of profile names to their whole definitions for global/project merging. */
 export type CompatibleProfileMap = Record<string, CompatibleProfile>;
+
+/** Observational Git change-tracking mode without commit or branch management. */
+export type { GitChangeTrackingMode };
+
+/** Validated Git settings with on-demand as the default inspection mode. */
+export type GitConfig = Static<typeof GitConfigSchema>;
+
+/** Default change-tracking mode that reads Git only on explicit inspection. */
+export { DEFAULT_GIT_CHANGE_TRACKING };
 
 /** Fully resolved runtime settings after precedence and catalog lookup. */
 export interface ResolvedSettings {
@@ -156,6 +186,8 @@ export interface ResolvedSettings {
   credentialEnv?: string;
   /** Secure-store identity suffix referenced by the active profile, never a secret value. */
   credentialIdentity?: string;
+  /** Observational Git change-tracking mode; on-demand reads only on explicit inspection. */
+  gitChangeTracking: GitChangeTrackingMode;
 }
 
 /** Lowest-precedence settings. Files and CLI override these; nothing writes them. */
@@ -163,6 +195,7 @@ export const BUILTIN_DEFAULTS: ConfigLayer = {
   provider: DEFAULT_PROVIDER,
   maxTurns: DEFAULT_MAX_TURNS,
   maxConcurrentTools: DEFAULT_MAX_CONCURRENT_TOOLS,
+  git: { changeTracking: DEFAULT_GIT_CHANGE_TRACKING },
 };
 
 const SECRET_KEY_ALIASES = new Set([
@@ -483,6 +516,7 @@ export function resolveSettings(input: {
     contextWindow: catalog.contextWindow,
     maxOutput: catalog.maxOutput,
     catalog,
+    gitChangeTracking: merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
     ...(merged.contextWindow !== undefined
       ? { explicitContextWindow: merged.contextWindow }
       : {}),
