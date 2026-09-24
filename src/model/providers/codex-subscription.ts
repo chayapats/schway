@@ -434,6 +434,15 @@ export function createSubscriptionTokenRefresher(input: {
         const refreshToken = stored.refreshToken;
         const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
         inFlight = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
+          .catch((error: unknown) => {
+            if (refreshSignal.aborted) {
+              throw new Error(
+                codexRefreshFailedError(`timed out after ${Math.round(CODEX_REFRESH_TIMEOUT_MS / 1000)}s`),
+                { cause: refreshSignal.reason ?? error },
+              );
+            }
+            throw error;
+          })
           .then(async (renewed) => {
             const merged: CodexTokens = {
               ...renewed,
@@ -475,10 +484,12 @@ export async function loginWithBrowserFlow(input: {
         "No active browser sign-in attempt. Start with /login codex to open the browser, then paste the newest redirect with /login codex --code <callback-url>.",
       );
     }
-    pendingBrowserAttempt = undefined;
     const extracted = extractCodeFromCallbackUrl(input.pastedCode, pending.state);
     if ("error" in extracted) {
       throw new Error(extracted.error);
+    }
+    if (pendingBrowserAttempt?.state === pending.state) {
+      pendingBrowserAttempt = undefined;
     }
     const code = extracted.code;
     throwIfAborted(signal);
@@ -510,20 +521,16 @@ export async function loginWithBrowserFlow(input: {
     );
   }
   const abort = AbortSignal.any(signal ? [signal] : []);
-  let code: string;
-  try {
-    code = await waitWithTimeout(
-      deps.waitForCallbackCode({ expectedState: state, signal: abort, timeoutMs }),
-      timeoutMs,
-      "ChatGPT sign-in timed out waiting for the browser callback. Retry /login codex, or use /login codex --device on headless machines.",
-      abort,
-    );
-  } catch (error) {
-    pendingBrowserAttempt = undefined;
-    throw error;
-  }
+  const code = await waitWithTimeout(
+    deps.waitForCallbackCode({ expectedState: state, signal: abort, timeoutMs }),
+    timeoutMs,
+    "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.",
+    abort,
+  );
   throwIfAborted(signal);
-  pendingBrowserAttempt = undefined;
+  if (pendingBrowserAttempt?.state === state) {
+    pendingBrowserAttempt = undefined;
+  }
   const tokens = await exchangeCodeForTokens({ code, verifier, fetch: deps.fetch, signal });
   throwIfAborted(signal);
   const enriched: CodexTokens = {
@@ -598,7 +605,7 @@ export function waitForLocalhostCallback(input: {
       },
     });
     const timer = setTimeout(() => {
-      settle(() => reject(new Error("ChatGPT sign-in timed out waiting for the browser callback. Retry /login codex, or use /login codex --device on headless machines.")));
+      settle(() => reject(new Error("ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.")));
     }, input.timeoutMs);
     const onAbort = () => {
       settle(() => reject(new DOMException("Aborted", "AbortError")));

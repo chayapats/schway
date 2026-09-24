@@ -1267,3 +1267,146 @@ test("explicit codex notice survives interactive model loading and the TUI reloa
     controller.dispose();
   });
 });
+
+test("shared refresh timeout fails actionably with cause while per-caller abort still cancels only that waiter", async () => {
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = (() => originalTimeout(15)) as unknown as typeof AbortSignal.timeout;
+  try {
+    const store = fakeCredentialStore();
+    await saveSubscriptionTokens(store, {
+      accessToken: "stale-token",
+      refreshToken: "shared-refresh",
+      expiresAt: Date.now() - 1_000,
+    });
+    const refresher = createSubscriptionTokenRefresher({
+      store,
+      fetch: (async (_input, init) => {
+        await new Promise<void>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+        throw new Error("unreachable: refresh fetch must hang until the shared timeout aborts it");
+      }) satisfies CodexFetchLike,
+    });
+    const firstController = new AbortController();
+    const first = refresher.getValidAccessToken(firstController.signal);
+    const second = refresher.getValidAccessToken();
+    firstController.abort();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    const failure = await second.then(
+      () => {
+        throw new Error("expected shared refresh timeout");
+      },
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) throw new Error("expected Error");
+    expect(failure.name).not.toBe("AbortError");
+    expect(failure.message).toMatch(/Refreshing.*timed out after/);
+    expect(failure.message).toContain(`${Math.round(CODEX_REFRESH_TIMEOUT_MS / 1000)}s`);
+    expect(failure.cause).toBeDefined();
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+});
+
+test("cancelled browser wait preserves the pending attempt for --code paste recovery", async () => {
+  clearPendingBrowserAttempt();
+  const store = fakeCredentialStore();
+  const controller = new AbortController();
+  const attempt = loginWithBrowserFlow({
+    store,
+    signal: controller.signal,
+    deps: {
+      openBrowser: () => {},
+      fetch: tokenEndpoint({ access_token: "never" }),
+      waitForCallbackCode: ({ signal }) =>
+        new Promise<string>((_, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        }),
+    },
+  });
+  controller.abort();
+  await expect(attempt).rejects.toMatchObject({ name: "AbortError" });
+  const preserved = getPendingBrowserAttempt();
+  expect(preserved?.state.length).toBeGreaterThan(0);
+  const callbackUrl = `${CODEX_REDIRECT_URI}?code=recovered-code&state=${preserved?.state}`;
+  const tokens = await loginWithBrowserFlow({
+    store,
+    pastedCode: callbackUrl,
+    deps: {
+      fetch: tokenEndpoint({ access_token: jwtWithAccount("acct-recovered"), refresh_token: "refresh-recovered", expires_in: 3600 }),
+    },
+  });
+  expect(tokens.accountId).toBe("acct-recovered");
+  expect(getPendingBrowserAttempt()).toBeUndefined();
+  expect((await loadSubscriptionTokens(store))?.accessToken).toBe(tokens.accessToken);
+  clearPendingBrowserAttempt();
+});
+
+test("timed-out browser wait preserves the pending attempt and reports the --code recovery path", async () => {
+  clearPendingBrowserAttempt();
+  const store = fakeCredentialStore();
+  const failure = await loginWithBrowserFlow({
+    store,
+    timeoutMs: 20,
+    deps: {
+      openBrowser: () => {},
+      waitForCallbackCode: ({ signal }) =>
+        new Promise<string>((_, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        }),
+    },
+  }).then(
+    () => {
+      throw new Error("expected browser callback timeout");
+    },
+    (error: unknown) => error,
+  );
+  expect(String(failure instanceof Error ? failure.message : failure)).toContain("--code");
+  expect(getPendingBrowserAttempt()?.state.length).toBeGreaterThan(0);
+  expect(await loadSubscriptionTokens(store)).toBeNull();
+  clearPendingBrowserAttempt();
+});
+
+test("mismatched pasted state preserves the attempt while matching state clears it", async () => {
+  clearPendingBrowserAttempt();
+  const store = fakeCredentialStore();
+  await expect(loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } })).rejects.toThrow(/callback is unavailable/);
+  const pending = getPendingBrowserAttempt();
+  expect(pending?.state.length).toBeGreaterThan(0);
+  await expect(
+    loginWithBrowserFlow({
+      store,
+      pastedCode: `${CODEX_REDIRECT_URI}?code=code-1&state=wrong-state`,
+      deps: { fetch: tokenEndpoint({ access_token: "never" }) },
+    }),
+  ).rejects.toThrow(/state/);
+  expect(getPendingBrowserAttempt()?.state).toBe(pending?.state);
+  expect(await loadSubscriptionTokens(store)).toBeNull();
+  const tokens = await loginWithBrowserFlow({
+    store,
+    pastedCode: `${CODEX_REDIRECT_URI}?code=code-1&state=${pending?.state}`,
+    deps: {
+      fetch: tokenEndpoint({ access_token: jwtWithAccount("acct-match"), refresh_token: "refresh-match", expires_in: 3600 }),
+    },
+  });
+  expect(tokens.accountId).toBe("acct-match");
+  expect(getPendingBrowserAttempt()).toBeUndefined();
+  clearPendingBrowserAttempt();
+});
+
+test("successful browser callback clears only the owning attempt", async () => {
+  clearPendingBrowserAttempt();
+  const store = fakeCredentialStore();
+  const tokens = await loginWithBrowserFlow({
+    store,
+    deps: {
+      openBrowser: () => {},
+      waitForCallbackCode: async () => "callback-code-1",
+      fetch: tokenEndpoint({ access_token: jwtWithAccount("acct-callback"), refresh_token: "refresh-callback", expires_in: 3600 }),
+    },
+  });
+  expect(tokens.accountId).toBe("acct-callback");
+  expect(getPendingBrowserAttempt()).toBeUndefined();
+  clearPendingBrowserAttempt();
+});
