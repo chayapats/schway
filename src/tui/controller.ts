@@ -670,14 +670,12 @@ export class TuiController {
     return this.selectBranchTreeNode(headId);
   }
 
-  /** Select one stable entry or root ID for preview, keeping the old selection on unknown IDs. */
+  /** Select one stable entry or root ID for preview, rejecting ancestry-broken IDs without moving selection. */
   selectBranchTreeNode(id: string): boolean {
     if (!this.branchTreeOpen || this.disposed || !id) return false;
     if (id !== this.session.rootId) {
-      let known = false;
-      try { branchTreeAncestryRecords(this.session, id); known = true; }
-      catch { known = this.session.entries.some(entry => entry.item.id === id); }
-      if (!known) return false;
+      try { branchTreeAncestryRecords(this.session, id); }
+      catch { return false; }
     }
     if (this.branchTreeSelectedId === id && this.branchTreeCache?.selectedId === id) return true;
     this.branchTreeSelectedId = id;

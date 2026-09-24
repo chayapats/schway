@@ -42,7 +42,7 @@ The header and status line always show the durable branch as `session <id> [bran
 
 - `Up`/`Down` moves the preview highlight across branches and fork points.
 - `Enter` switches when the highlight is a branch head, otherwise forks its complete turn (the input line becomes the optional new-branch name).
-- `Esc` closes the tree without changing branches.
+- `Esc` cancels a running turn first, otherwise closes the tree without changing branches.
 - `/branch list | fork <entry-id> [name] | switch <branch-id>` still works for scripts and retains exact-ID selection.
 - `/resume <session-id> [branch-id]` restores one saved branch; a missing branch reports an error and keeps the current session.
 

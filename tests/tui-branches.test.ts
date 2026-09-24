@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
 import type { AssistantMessage, UserMessage } from "../src/conversation/types.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
@@ -12,6 +14,7 @@ import {
   buildBranchTreeSnapshot,
 } from "../src/tui/controller.ts";
 import { formatBranchTree } from "../src/tui/app.ts";
+import { emptyBranchState } from "../src/session/branches.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
@@ -430,6 +433,110 @@ test("branch-tree layout smoke check marks selection and the active head", async
       expect(text).toContain(">"); // selected row
       expect(text).toContain("*"); // active branch/head
       expect(text).toContain("[fork]"); // complete-turn boundary
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+test("resume without branchId restores the persisted active head", async () => {
+  await withTempDir(async (dir) => {
+    const directory = join(dir, "sessions");
+    const ws = workspace(dir);
+    const session = await createJsonlSession({ directory, workspace: ws });
+    session.append(user("u"), assistant("a"));
+    const branch = session.forkBranch("a", "resumed");
+    session.append(user("b"), assistant("b-done"));
+    expect(session.activeBranchId).toBe(branch);
+    const resumed = await loadJsonlSession({ directory, id: session.header.id });
+    expect(resumed.activeBranchId).toBe(branch);
+    expect(ids(resumed)).toEqual(["u", "a", "b", "b-done"]);
+    const controller = controllerFor(resumed, resumed.header.id, dir, createScriptedModel({ text: "ok" }));
+    try {
+      controller.openBranchTree();
+      expect(controller.snapshot().branchId).toBe(branch);
+      expect(controller.branchTreeSnapshot()?.activeBranchId).toBe(branch);
+      expect(controller.snapshot().transcript.some((entry) => entry.text === "b-done")).toBe(true);
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+test("corrupt persisted graph reports an error and keeps the previous valid branch", async () => {
+  await withTempDir(async (dir) => {
+    const directory = join(dir, "sessions");
+    const ws = workspace(dir);
+    const session = await createJsonlSession({ directory, workspace: ws });
+    session.append(user("u"), assistant("a"));
+    const branch = session.forkBranch("a", "kept");
+    session.append(user("b"), assistant("b-done"));
+    const controller = controllerFor(session, session.header.id, dir, createScriptedModel({ text: "ok" }));
+    try {
+      controller.openBranchTree();
+      expect(controller.snapshot().branchId).toBe(branch);
+      const transcriptBefore = JSON.stringify(controller.snapshot().transcript);
+      const itemsBefore = ids(session);
+      const path = join(directory, `${session.header.id}.jsonl`);
+      const valid = await readFile(path, "utf8");
+      const corrupt = { type: "branch_append", version: 1, branchId: "main", entries: [{ parentId: "missing", item: { type: "user", id: "bad", content: [{ type: "text", text: "bad" }] } }] };
+      await writeFile(path, `${valid}${JSON.stringify(corrupt)}\n`, "utf8");
+      await expect(loadJsonlSession({ directory, id: session.header.id })).rejects.toThrow();
+      expect(await readFile(path, "utf8")).toBe(`${valid}${JSON.stringify(corrupt)}\n`);
+      expect(controller.snapshot().branchId).toBe(branch);
+      expect(session.activeBranchId).toBe(branch);
+      expect(ids(session)).toEqual(itemsBefore);
+      expect(JSON.stringify(controller.snapshot().transcript)).toBe(transcriptBefore);
+      expect(controller.snapshot().transcript.some((entry) => entry.text === "b-done")).toBe(true);
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+test("corrupt ancestry surfaces branchTreeError without switching branches or model context", async () => {
+  await withTempDir(async (dir) => {
+    const state = emptyBranchState("corrupt-root");
+    (state.entries as Map<string, { parentId: string; item: ReturnType<typeof user> }>).set("orphan", { parentId: "missing-parent", item: user("orphan") });
+    (state.branches as Map<string, { id: string; headId: string }>).set("bad", { id: "bad", headId: "orphan" });
+    const corrupt = createSession([], [], { state });
+    expect(corrupt.activeBranchId).toBe("main");
+    const itemsBefore = corrupt.items.map((item) => item.id);
+    const controller = controllerFor(corrupt, "tree-corrupt", dir, createScriptedModel({ text: "ok" }));
+    try {
+      expect(controller.openBranchTree()).toBe(true);
+      const transcriptBefore = JSON.stringify(controller.snapshot().transcript);
+      const snapshot = controller.snapshot();
+      expect(snapshot.branchTree).toBeUndefined();
+      expect(snapshot.branchTreeError).toMatch(/Missing session parent or head/);
+      expect(snapshot.branchId).toBe("main");
+      expect(corrupt.activeBranchId).toBe("main");
+      expect(corrupt.items.map((item) => item.id)).toEqual(itemsBefore);
+      expect(JSON.stringify(controller.snapshot().transcript)).toBe(transcriptBefore);
+      expect(() => controller.branchTreeSnapshot()).toThrow(/Missing session parent or head/);
+      expect(controller.snapshot().branchId).toBe("main");
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+test("select rejects ancestry-broken IDs without moving preview selection", async () => {
+  await withTempDir(async (dir) => {
+    const base = createSession([user("A"), assistant("B")], []);
+    const withOrphan = { ...base, entries: [...base.entries, { parentId: "missing-parent", item: user("orphan") }] };
+    const controller = controllerFor(withOrphan, "tree-select", dir, createScriptedModel({ text: "ok" }));
+    try {
+      controller.openBranchTree();
+      const selectedBefore = controller.branchTreeSnapshot()?.selectedId;
+      expect(typeof selectedBefore).toBe("string");
+      expect(controller.selectBranchTreeNode("orphan")).toBe(false);
+      expect(controller.branchTreeSnapshot()?.selectedId).toBe(selectedBefore);
+      expect(controller.snapshot().branchId).toBe("main");
+      expect(() => controller.previewBranchTreeNode("orphan")).toThrow(/Missing session parent/);
+      expect(controller.branchTreeSnapshot()?.selectedId).toBe(selectedBefore);
+      expect(controller.selectBranchTreeNode("A")).toBe(true);
+      expect(controller.branchTreeSnapshot()?.selectedId).toBe("A");
     } finally {
       controller.dispose();
     }
