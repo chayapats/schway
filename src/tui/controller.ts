@@ -1091,8 +1091,15 @@ export class TuiController {
     const abort = new AbortController();
     this.activeAbort = abort;
     this.currentAssistantId = undefined;
-    await this.captureTurnBaseline();
-    const turn = this.runTurn(abort.signal);
+    // The baseline capture runs inside the tracked turn so a spawn failure still clears ownership below.
+    const turn = (async () => {
+      try {
+        await this.captureTurnBaseline();
+      } catch (error) {
+        this.gitSnapshotError = error instanceof Error ? error.message : String(error);
+      }
+      await this.runTurn(abort.signal);
+    })();
     this.activeTurn = turn;
     try {
       await turn;
@@ -1485,6 +1492,7 @@ function actionableError(message: string): string {
   return message;
 }
 
+/** Render one resolved setting with secrets masked and structured values summarized. */
 function displaySetting(key: string, value: unknown): string {
   if (key === "baseUrl" && typeof value === "string") return sanitizeBaseUrl(value);
   if (key === "git" && typeof value === "object" && value !== null) return JSON.stringify(value);

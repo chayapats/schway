@@ -127,14 +127,32 @@ export async function findGitRoot(start: string): Promise<string | undefined> {
 
 /** Run one observational Git command without touching index, HEAD, branches, or config. */
 async function runGit(root: string, args: readonly string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["git", "--no-pager", ...args], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat", PAGER: "cat" },
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text().catch(() => ""), proc.stderr.text().catch(() => ""), proc.exited]);
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_OBJECT_DIRECTORY;
+  env.GIT_OPTIONAL_LOCKS = "0";
+  env.GIT_PAGER = "cat";
+  env.PAGER = "cat";
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn(["git", "--no-pager", ...args], {
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+      env: env as Record<string, string>,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { exitCode: -1, stdout: "", stderr: `git unavailable: ${message}` };
+  }
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout as ReadableStream).text().catch(() => ""),
+    new Response(proc.stderr as ReadableStream).text().catch(() => ""),
+    proc.exited,
+  ]);
   return { exitCode, stdout, stderr };
 }
 
@@ -191,19 +209,13 @@ function parsePorcelainV2(output: string): ParsedStatus {
       continue;
     }
     if (record.startsWith("2 ")) {
-      const tab = record.indexOf("\t");
-      let headLine: string;
+      // Porcelain v2 is always requested with -z, so the rename destination arrives as the next NUL record.
+      const headLine = record;
       let origPath: string | undefined;
-      if (tab !== -1) {
-        headLine = record.slice(0, tab);
-        origPath = record.slice(tab + 1) || undefined;
-      } else {
-        headLine = record;
-        const next = records[i + 1];
-        if (next !== undefined && next.length > 0 && !next.startsWith("# ") && !next.startsWith("? ") && !next.startsWith("! ") && !next.startsWith("1 ") && !next.startsWith("2 ") && !next.startsWith("u ")) {
-          origPath = next;
-          i++;
-        }
+      const next = records[i + 1];
+      if (next !== undefined && next.length > 0 && !next.startsWith("# ") && !next.startsWith("? ") && !next.startsWith("! ") && !next.startsWith("1 ") && !next.startsWith("2 ") && !next.startsWith("u ")) {
+        origPath = next;
+        i++;
       }
       const parts = headLine.split(" ");
       if (parts.length < 10) continue;
@@ -356,7 +368,7 @@ export async function captureGitSnapshot(root: string): Promise<GitSnapshot | { 
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}). Coding continues; use /changes in a Git checkout for inspection.` };
   const toplevel = resolved.toplevel;
-  const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z"]);
+  const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"]);
   if (status.exitCode !== 0) {
     return { error: `Git snapshot unavailable: ${(status.stderr.trim() || status.stdout.trim() || "status failed").slice(0, 500)}` };
   }
@@ -382,6 +394,7 @@ export async function captureGitSnapshot(root: string): Promise<GitSnapshot | { 
   }
   entries.sort((a, b) => a.path.localeCompare(b.path));
   const totalFiles = entries.length;
+  // Comparison always runs over the complete entry list; the snapshot limit is display-only.
   const truncated = totalFiles > MAX_GIT_SNAPSHOT_FILES;
   return {
     id: crypto.randomUUID(),
@@ -390,7 +403,7 @@ export async function captureGitSnapshot(root: string): Promise<GitSnapshot | { 
     ...(parsed.branch !== undefined ? { branch: parsed.branch } : {}),
     detached: parsed.detached,
     head: parsed.head || "(unknown)",
-    entries: truncated ? entries.slice(0, MAX_GIT_SNAPSHOT_FILES) : entries,
+    entries,
     totalFiles,
     truncated,
   };
@@ -398,6 +411,7 @@ export async function captureGitSnapshot(root: string): Promise<GitSnapshot | { 
 
 /** Compare before/after snapshots by content hash so untouched pre-existing dirt stays separate. */
 export function compareGitSnapshots(before: GitSnapshot, after: GitSnapshot): GitTurnComparison | { error: string } {
+  // Snapshots retain complete entry lists, so classification never runs on truncated data.
   if (before.root !== after.root) return { error: `Git snapshot unavailable: workspace root changed (${before.root} -> ${after.root}).` };
   if (!before.id || !after.id) return { error: "Git snapshot unavailable: missing snapshot identity." };
   const beforeByPath = new Map(before.entries.map((entry) => [entry.path, entry]));

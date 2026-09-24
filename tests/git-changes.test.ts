@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
@@ -26,7 +26,12 @@ import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_OBJECT_DIRECTORY;
+  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", env: env as Record<string, string> });
   const [out, err, code] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
   if (code !== 0) throw new Error(`git ${args.join(" ")} failed: ${err || out}`);
   return out.trim();
@@ -384,5 +389,159 @@ test("resume shows current state without claiming a retained snapshot", async ()
     const notice = lastNotice(second);
     expect(notice).toContain("No retained snapshot");
     expect(notice).not.toContain("Baseline ");
+  });
+});
+
+test("inspection ignores ambient GIT_DIR-style overrides", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await withTempDir(async (other) => {
+      await initRepo(other);
+      const saved = {
+        GIT_DIR: process.env.GIT_DIR,
+        GIT_WORK_TREE: process.env.GIT_WORK_TREE,
+        GIT_INDEX_FILE: process.env.GIT_INDEX_FILE,
+        GIT_OBJECT_DIRECTORY: process.env.GIT_OBJECT_DIRECTORY,
+      };
+      process.env.GIT_DIR = join(other, ".git");
+      process.env.GIT_WORK_TREE = other;
+      process.env.GIT_INDEX_FILE = join(other, ".git", "index");
+      process.env.GIT_OBJECT_DIRECTORY = join(other, ".git", "objects");
+      try {
+        const status = await inspectGitStatus(dir);
+        if ("error" in status) throw new Error(status.error);
+        expect(status.isGit).toBe(true);
+        if (!status.isGit) return;
+        expect(status.root).toBe(await git(dir, "rev-parse", "--show-toplevel"));
+        const snapshot = await captureGitSnapshot(dir);
+        if ("error" in snapshot) throw new Error(snapshot.error);
+        expect(snapshot.root).toBe(status.root);
+      } finally {
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    });
+  });
+});
+
+test("snapshot lists untracked directory contents so turn edits stay visible", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await mkdir(join(dir, "scratch"), { recursive: true });
+    await writeFile(join(dir, "scratch", "old.txt"), "pre-existing\n");
+    const before = await captureGitSnapshot(dir);
+    if ("error" in before) throw new Error(before.error);
+    expect(before.entries.map((entry) => entry.path)).toContain("scratch/old.txt");
+    await writeFile(join(dir, "scratch", "turn.txt"), "turn edit\n");
+    const after = await captureGitSnapshot(dir);
+    if ("error" in after) throw new Error(after.error);
+    const comparison = compareGitSnapshots(before, after);
+    if ("error" in comparison) throw new Error(comparison.error);
+    expect(comparison.newChanges).toContain("scratch/turn.txt");
+    expect(comparison.preExistingUnchanged).toContain("scratch/old.txt");
+  });
+});
+
+test("large snapshots compare complete entry lists with display-only truncation", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    for (let i = 0; i < 210; i++) {
+      await writeFile(join(dir, `wide-${i}.txt`), `file ${i}\n`);
+    }
+    const before = await captureGitSnapshot(dir);
+    if ("error" in before) throw new Error(before.error);
+    expect(before.truncated).toBe(true);
+    expect(before.entries.length).toBe(before.totalFiles);
+    expect(before.entries.length).toBeGreaterThan(200);
+    await writeFile(join(dir, "wide-0.txt"), "changed\n");
+    await writeFile(join(dir, "wide-new.txt"), "new\n");
+    const after = await captureGitSnapshot(dir);
+    if ("error" in after) throw new Error(after.error);
+    const comparison = compareGitSnapshots(before, after);
+    if ("error" in comparison) throw new Error(comparison.error);
+    expect(comparison.newChanges).toContain("wide-new.txt");
+    expect(comparison.updatedPreExisting).toContain("wide-0.txt");
+    expect(comparison.preExistingUnchanged).toContain("wide-1.txt");
+    expect(comparison.newChanges).not.toContain("wide-1.txt");
+  });
+});
+
+test("missing git leaves turns usable and the next submit recovers", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const controller = controllerFor(dir, "snapshot", createScriptedModel({ responses: [{ text: "first" }, { text: "second" }] }));
+    const realSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+      throw new Error("spawn git ENOENT");
+    }) as typeof Bun.spawn;
+    try {
+      const snapshot = await captureGitSnapshot(dir);
+      expect("error" in snapshot).toBe(true);
+      if ("error" in snapshot) expect(snapshot.error).toContain("unavailable");
+      await controller.submit("hello without git");
+      expect(controller.snapshot().status).toBe("idle");
+      expect(controller.running).toBe(false);
+      expect(await controller.changesCommand("")).toBe(true);
+      expect(lastNotice(controller)).toContain("Snapshot unavailable");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = realSpawn;
+    }
+    await controller.submit("hello with git back");
+    expect(controller.snapshot().status).toBe("idle");
+    expect(await controller.changesCommand("")).toBe(true);
+    expect(lastNotice(controller)).toContain("Snapshot comparison");
+  });
+});
+
+test("staged rename with further unstaged edit stays linked as updated", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, "plain.txt"), "same content\n");
+    await git(dir, "add", "plain.txt");
+    await git(dir, "commit", "-qm", "plain");
+    // Dirty at baseline so the later rename links back to a retained entry.
+    await writeFile(join(dir, "plain.txt"), "same content\nbaseline edit\n");
+    const before = await captureGitSnapshot(dir);
+    if ("error" in before) throw new Error(before.error);
+    await git(dir, "mv", "plain.txt", "moved.txt");
+    await writeFile(join(dir, "moved.txt"), "same content\nplus an unstaged edit\n");
+    const after = await captureGitSnapshot(dir);
+    if ("error" in after) throw new Error(after.error);
+    const moved = after.entries.find((entry) => entry.path === "moved.txt");
+    expect(moved?.origPath).toBe("plain.txt");
+    expect(moved?.staged).toBe("R");
+    expect(moved?.unstaged).toBe("M");
+    const comparison = compareGitSnapshots(before, after);
+    if ("error" in comparison) throw new Error(comparison.error);
+    expect(comparison.updatedPreExisting).toContain("moved.txt");
+    expect(comparison.newChanges).not.toContain("moved.txt");
+    expect(comparison.resolved ?? []).not.toContain("plain.txt");
+  });
+});
+
+test("worktree-only move reports deleted plus untracked without dropping entries", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, "plain.txt"), "same content\n");
+    await git(dir, "add", "plain.txt");
+    await git(dir, "commit", "-qm", "plain");
+    // Pre-existing dirt plus a clean file, so the turn move is separable.
+    await writeFile(join(dir, "tracked.txt"), "pre-existing edit\n");
+    const before = await captureGitSnapshot(dir);
+    if ("error" in before) throw new Error(before.error);
+    // No staging: Git reports a deletion plus an untracked path with no rename linkage.
+    await rename(join(dir, "plain.txt"), join(dir, "moved.txt"));
+    const after = await captureGitSnapshot(dir);
+    if ("error" in after) throw new Error(after.error);
+    const paths = after.entries.map((entry) => entry.path);
+    expect(paths).toContain("plain.txt");
+    expect(paths).toContain("moved.txt");
+    const comparison = compareGitSnapshots(before, after);
+    if ("error" in comparison) throw new Error(comparison.error);
+    expect(comparison.newChanges).toContain("plain.txt");
+    expect(comparison.newChanges).toContain("moved.txt");
+    expect(comparison.preExistingUnchanged).toContain("tracked.txt");
   });
 });
