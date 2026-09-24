@@ -31,6 +31,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
   delete env.GIT_OBJECT_DIRECTORY;
+  delete env.GIT_COMMON_DIR;
   const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", env: env as Record<string, string> });
   const [out, err, code] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
   if (code !== 0) throw new Error(`git ${args.join(" ")} failed: ${err || out}`);
@@ -395,27 +396,38 @@ test("resume shows current state without claiming a retained snapshot", async ()
 test("inspection ignores ambient GIT_DIR-style overrides", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);
+    await writeFile(join(dir, "requested-marker.txt"), "requested\n");
     await withTempDir(async (other) => {
       await initRepo(other);
+      await writeFile(join(other, "other-marker.txt"), "other\n");
+      const expectedHead = await git(dir, "rev-parse", "HEAD");
       const saved = {
         GIT_DIR: process.env.GIT_DIR,
         GIT_WORK_TREE: process.env.GIT_WORK_TREE,
         GIT_INDEX_FILE: process.env.GIT_INDEX_FILE,
         GIT_OBJECT_DIRECTORY: process.env.GIT_OBJECT_DIRECTORY,
+        GIT_COMMON_DIR: process.env.GIT_COMMON_DIR,
       };
       process.env.GIT_DIR = join(other, ".git");
       process.env.GIT_WORK_TREE = other;
       process.env.GIT_INDEX_FILE = join(other, ".git", "index");
       process.env.GIT_OBJECT_DIRECTORY = join(other, ".git", "objects");
+      process.env.GIT_COMMON_DIR = join(other, ".git");
       try {
         const status = await inspectGitStatus(dir);
         if ("error" in status) throw new Error(status.error);
         expect(status.isGit).toBe(true);
         if (!status.isGit) return;
         expect(status.root).toBe(await git(dir, "rev-parse", "--show-toplevel"));
+        expect(status.head).toBe(expectedHead);
+        const paths = status.files.map((file) => file.path);
+        expect(paths).toContain("requested-marker.txt");
+        expect(paths).not.toContain("other-marker.txt");
         const snapshot = await captureGitSnapshot(dir);
         if ("error" in snapshot) throw new Error(snapshot.error);
         expect(snapshot.root).toBe(status.root);
+        expect(snapshot.head).toBe(expectedHead);
+        expect(snapshot.entries.map((entry) => entry.path)).toContain("requested-marker.txt");
       } finally {
         for (const [key, value] of Object.entries(saved)) {
           if (value === undefined) delete process.env[key];
@@ -423,6 +435,40 @@ test("inspection ignores ambient GIT_DIR-style overrides", async () => {
         }
       }
     });
+  });
+});
+
+test("stale baseline capture does not repopulate a replaced session", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const controller = controllerFor(dir, "snapshot", createScriptedModel({ text: "ok" }));
+    const access = controller as unknown as {
+      activeAbort?: AbortController;
+      captureTurnBaseline(signal: AbortSignal): Promise<void>;
+    };
+    const owner = new AbortController();
+    access.activeAbort = owner;
+    const pending = access.captureTurnBaseline(owner.signal);
+    controller.replaceSession(createSession(), "replaced");
+    await pending;
+    expect(await controller.changesCommand("")).toBe(true);
+    const notice = lastNotice(controller);
+    expect(notice).toContain("No retained snapshot");
+    expect(notice).not.toContain("Snapshot unavailable");
+  });
+  await withTempDir(async (plain) => {
+    const controller = controllerFor(plain, "snapshot", createScriptedModel({ text: "ok" }));
+    const access = controller as unknown as {
+      activeAbort?: AbortController;
+      captureTurnBaseline(signal: AbortSignal): Promise<void>;
+    };
+    const owner = new AbortController();
+    access.activeAbort = owner;
+    const pending = access.captureTurnBaseline(owner.signal);
+    controller.replaceSession(createSession(), "replaced-plain");
+    await pending;
+    expect(await controller.changesCommand("")).toBe(true);
+    expect(lastNotice(controller)).not.toContain("Snapshot unavailable");
   });
 });
 

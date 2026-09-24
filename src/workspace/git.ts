@@ -132,6 +132,7 @@ async function runGit(root: string, args: readonly string[]): Promise<{ exitCode
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
   delete env.GIT_OBJECT_DIRECTORY;
+  delete env.GIT_COMMON_DIR;
   env.GIT_OPTIONAL_LOCKS = "0";
   env.GIT_PAGER = "cat";
   env.PAGER = "cat";

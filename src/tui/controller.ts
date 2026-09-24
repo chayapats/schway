@@ -452,8 +452,8 @@ export class TuiController {
     return true;
   }
 
-  /** Capture a snapshot baseline immediately before a turn when snapshot mode is active. */
-  private async captureTurnBaseline(): Promise<void> {
+  /** Capture a snapshot baseline for the owning turn signal, dropping stale results after replacement. */
+  private async captureTurnBaseline(signal: AbortSignal): Promise<void> {
     this.gitSnapshotError = undefined;
     if (this.gitChangeTracking() !== "snapshot" || !this.workspace || this.disposed) {
       this.gitBaseline = undefined;
@@ -462,6 +462,7 @@ export class TuiController {
       return;
     }
     const snapshot = await captureGitSnapshot(this.workspace.root);
+    if (this.disposed || this.activeAbort?.signal !== signal) return;
     if ("error" in snapshot) {
       this.gitBaseline = undefined;
       this.gitAfter = undefined;
@@ -1094,9 +1095,11 @@ export class TuiController {
     // The baseline capture runs inside the tracked turn so a spawn failure still clears ownership below.
     const turn = (async () => {
       try {
-        await this.captureTurnBaseline();
+        await this.captureTurnBaseline(abort.signal);
       } catch (error) {
-        this.gitSnapshotError = error instanceof Error ? error.message : String(error);
+        if (this.activeAbort?.signal === abort.signal) {
+          this.gitSnapshotError = error instanceof Error ? error.message : String(error);
+        }
       }
       await this.runTurn(abort.signal);
     })();
