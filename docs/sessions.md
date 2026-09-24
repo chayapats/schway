@@ -30,6 +30,49 @@ schway --resume <session-id> --branch <branch-id> -p "Continue this approach"
 
 Conversation branching does **not** undo file changes, create Git branches, or restore an earlier filesystem. Primary workspace identity and attached roots remain session-wide. Extensions remain enabled according to the current workspace's configuration.
 
+## Browsing branches in the TUI
+
+Open the interactive tree, then browse with stable IDs while the durable head stays put until confirmation:
+
+```text
+/branch tree
+```
+
+The header and status line always show the durable branch as `session <id> [branch <branch-id>]`. The tree shows parent/child entries with branch labels, `*` for the active head, `o` for other heads, `>` for the preview selection, and `[fork]` for complete-turn fork points. Previews are bounded to one line; the preview pane shows the last 8 transcript rows for the highlight without changing model context or persistence.
+
+- `Up`/`Down` moves the preview highlight across branches and fork points.
+- `Enter` switches when the highlight is a branch head, otherwise forks its complete turn (the input line becomes the optional new-branch name).
+- `Esc` cancels a running turn first, otherwise closes the tree without changing branches.
+- `/branch list | fork <entry-id> [name] | switch <branch-id>` still works for scripts and retains exact-ID selection.
+- `/resume <session-id> [branch-id]` restores one saved branch; a missing branch reports an error and keeps the current session.
+
+Previewing never persists: only `Enter`, `/branch fork`, and `/branch switch` change ancestry, and they rebuild the transcript from the selected path without replaying tools. Compaction markers render as `Context compacted: …` only on their own branch. While a turn is active, switching and forking refuse with `Busy: … Press Esc to cancel the turn first`; `Esc` still cancels explicitly, and the tree refreshes after the turn settles. Large histories render at most 200 nodes with root, heads, and selection pinned; the snapshot is cached while a turn streams so text deltas never rebuild a huge tree.
+
+From a checkout with `bun install` completed, this example builds the same renderer-free snapshot the TUI renders, without a model or terminal:
+
+```sh
+bun --no-env-file --eval '
+import { createSession } from "./src/session/session.ts";
+import { buildBranchTreeSnapshot } from "./src/tui/controller.ts";
+
+const session = createSession([
+  { type: "user", id: "A", content: [{ type: "text", text: "Start" }] },
+  { type: "assistant", id: "B", content: [{ type: "text", text: "Ready" }] },
+]);
+const alt = session.forkBranch("B", "alternate");
+session.append(
+  { type: "user", id: "C", content: [{ type: "text", text: "Try C" }] },
+  { type: "assistant", id: "D", content: [{ type: "text", text: "C done" }] },
+);
+session.selectBranch("main");
+const tree = buildBranchTreeSnapshot(session, "D");
+console.log(tree.activeBranchId, tree.selectedId, tree.nodes.map(node => node.id).join(","));
+console.log(tree.branches.map(branch => `${branch.active ? "*" : "-"}${branch.id}->${branch.headId}`).join(" "));
+'
+```
+
+`buildBranchTreeSnapshot(session, selectedId?)` returns stable entry IDs, parent links, bounded previews, fork/head flags, and branch rows. `TuiController` wraps it with `openBranchTree()`, `moveBranchTreeSelection()`, `focusBranchTreeForkPoint()`, `focusBranchTreeBranch()`, `selectBranchTreeNode()`, `previewBranchTreeNode()`, `activateBranchTreeBranch()`, `forkBranchTreeNode()`, and `confirmBranchTreeSelection()`; previews never touch `ContextManager`, and activation uses `forkBranch`/`selectBranch` plus a transcript rebuild.
+
 ## Renderer-free source API
 
 From a checkout with `bun install` completed, this example creates, saves, forks, and reloads a session without a model or TUI:
