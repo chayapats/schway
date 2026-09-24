@@ -181,7 +181,36 @@ test("staged, unstaged, untracked, deleted, renamed, and binary variants are use
     expect(text).toContain("untracked");
     const preview = await getGitDiffPreview(dir, "tracked.txt");
     if ("error" in preview) throw new Error(preview.error);
-    expect(preview.diff.length).toBeGreaterThan(0);
+    expect(preview.diff).toContain("staged change");
+    expect(preview.diff).toContain("Staged:");
+    const untrackedPreview = await getGitDiffPreview(dir, "new-untracked.txt");
+    if ("error" in untrackedPreview) throw new Error(untrackedPreview.error);
+    expect(untrackedPreview.diff).toContain("hello");
+    expect(untrackedPreview.diff).toContain("Untracked:");
+  });
+});
+
+test("rename links origPath to updated pre-existing instead of new plus resolved", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const base = "line1\nline2\nline3\nline4\nline5\n";
+    await writeFile(join(dir, "old.txt"), base);
+    await git(dir, "add", "old.txt");
+    await git(dir, "commit", "-qm", "old");
+    await writeFile(join(dir, "old.txt"), `${base}line6\n`);
+    const before = await captureGitSnapshot(dir);
+    if ("error" in before) throw new Error(before.error);
+    expect(before.entries.map((entry) => entry.path)).toContain("old.txt");
+    await git(dir, "mv", "old.txt", "new.txt");
+    const after = await captureGitSnapshot(dir);
+    if ("error" in after) throw new Error(after.error);
+    const moved = after.entries.find((entry) => entry.path === "new.txt");
+    expect(moved?.origPath).toBe("old.txt");
+    const comparison = compareGitSnapshots(before, after);
+    if ("error" in comparison) throw new Error(comparison.error);
+    expect(comparison.updatedPreExisting).toContain("new.txt");
+    expect(comparison.newChanges).not.toContain("new.txt");
+    expect(comparison.resolved ?? []).not.toContain("old.txt");
   });
 });
 

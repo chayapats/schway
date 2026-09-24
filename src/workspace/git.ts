@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 /** Change-tracking mode for observational Git inspection without managing commits or branches. */
 export type GitChangeTrackingMode = "off" | "on-demand" | "snapshot";
 
-/** Valid change-tracking modes in display order. */
+/** Valid change-tracking modes in display order for validation and help text. */
 export const GIT_CHANGE_TRACKING_MODES: readonly GitChangeTrackingMode[] = ["off", "on-demand", "snapshot"] as const;
 
 /** Default mode that reads repository state only on explicit inspection. */
@@ -21,13 +21,14 @@ export const MAX_GIT_DIFF_CHARS = 8000;
 
 /** True when the value names a supported change-tracking mode. */
 export function isGitChangeTrackingMode(value: unknown): value is GitChangeTrackingMode {
-  return value === "off" || value === "on-demand" || value === "snapshot";
+  return (GIT_CHANGE_TRACKING_MODES as readonly unknown[]).includes(value);
 }
 
+// Retained display/validation helper for git.changeTracking; tested contract and docs reference it.
 /** Validate a raw config value as a change-tracking mode with a named error. */
 export function parseGitChangeTracking(value: unknown): GitChangeTrackingMode | { error: string } {
   if (isGitChangeTrackingMode(value)) return value;
-  return { error: `Invalid git.changeTracking ${JSON.stringify(value)}. Valid modes: off, on-demand, snapshot.` };
+  return { error: `Invalid git.changeTracking ${JSON.stringify(value)}. Valid modes: ${GIT_CHANGE_TRACKING_MODES.join(", ")}.` };
 }
 
 /** One tracked path with staged/unstaged states, rename origin, and binary marking. */
@@ -151,7 +152,8 @@ function parsePorcelainV2(output: string): ParsedStatus {
   let head = "";
   const files: ParsedStatus["files"] = [];
   const records = output.split("\0");
-  for (const record of records) {
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]!;
     if (!record) continue;
     if (record.startsWith("# branch.head ")) {
       const name = record.slice("# branch.head ".length).trim();
@@ -190,9 +192,20 @@ function parsePorcelainV2(output: string): ParsedStatus {
     }
     if (record.startsWith("2 ")) {
       const tab = record.indexOf("\t");
-      const head = tab === -1 ? record : record.slice(0, tab);
-      const origPath = tab === -1 ? undefined : record.slice(tab + 1) || undefined;
-      const parts = head.split(" ");
+      let headLine: string;
+      let origPath: string | undefined;
+      if (tab !== -1) {
+        headLine = record.slice(0, tab);
+        origPath = record.slice(tab + 1) || undefined;
+      } else {
+        headLine = record;
+        const next = records[i + 1];
+        if (next !== undefined && next.length > 0 && !next.startsWith("# ") && !next.startsWith("? ") && !next.startsWith("! ") && !next.startsWith("1 ") && !next.startsWith("2 ") && !next.startsWith("u ")) {
+          origPath = next;
+          i++;
+        }
+      }
+      const parts = headLine.split(" ");
       if (parts.length < 10) continue;
       const xy = parts[1] ?? "..";
       const headHash = parts[6];
@@ -393,9 +406,15 @@ export function compareGitSnapshots(before: GitSnapshot, after: GitSnapshot): Gi
   const updatedPreExisting: string[] = [];
   const newChanges: string[] = [];
   const resolved: string[] = [];
+  const renamedOrigPaths = new Set<string>();
   for (const [path, afterEntry] of afterByPath) {
     const beforeEntry = beforeByPath.get(path);
     if (!beforeEntry) {
+      if (afterEntry.origPath !== undefined && beforeByPath.has(afterEntry.origPath)) {
+        updatedPreExisting.push(path);
+        renamedOrigPaths.add(afterEntry.origPath);
+        continue;
+      }
       newChanges.push(path);
       continue;
     }
@@ -406,10 +425,9 @@ export function compareGitSnapshots(before: GitSnapshot, after: GitSnapshot): Gi
     } else {
       updatedPreExisting.push(path);
     }
-    void afterEntry;
   }
   for (const path of beforeByPath.keys()) {
-    if (!afterByPath.has(path)) resolved.push(path);
+    if (!afterByPath.has(path) && !renamedOrigPaths.has(path)) resolved.push(path);
   }
   const all = [...preExistingUnchanged, ...updatedPreExisting, ...newChanges, ...resolved];
   const truncated = before.truncated || after.truncated;
@@ -419,7 +437,7 @@ export function compareGitSnapshots(before: GitSnapshot, after: GitSnapshot): Gi
 /** Render branch, HEAD, dirty state, and bounded files without renderer dependencies. */
 export function formatGitStatus(summary: GitStatusSummary): string {
   if (!summary.isGit) return `Not a Git workspace (${summary.root}). Coding continues; Git inspection is unavailable here.`;
-  const headShort = summary.head.length > 40 ? summary.head.slice(0, 12) : summary.head.length === 40 ? summary.head.slice(0, 12) : summary.head;
+  const headShort = summary.head.length >= 40 ? summary.head.slice(0, 12) : summary.head;
   const branch = summary.detached ? `detached HEAD at ${headShort}` : summary.branch !== undefined ? summary.branch : `detached HEAD at ${headShort}`;
   const lines = [`Branch: ${branch}`, `HEAD: ${summary.head}`, `Dirty: ${summary.dirty ? "yes" : "no"} (staged ${summary.stagedCount}, unstaged ${summary.unstagedCount}, untracked ${summary.untrackedCount})`];
   if (!summary.dirty) {
@@ -473,20 +491,54 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}).` };
   const toplevel = resolved.toplevel;
-  const args = path ? ["diff", "--no-color", "--no-ext-diff", "--stat", "--patch", "--", path] : ["diff", "--no-color", "--no-ext-diff", "--stat", "--patch", "--"];
-  const result = await runGit(toplevel, args);
-  if (result.exitCode !== 0) {
-    return { error: `Git diff failed: ${(result.stderr.trim() || result.stdout.trim() || "unknown error").slice(0, 500)}` };
+  const unstagedArgs = path ? ["diff", "--no-color", "--no-ext-diff", "--stat", "--patch", "--", path] : ["diff", "--no-color", "--no-ext-diff", "--stat", "--patch", "--"];
+  const stagedArgs = path ? ["diff", "--cached", "--no-color", "--no-ext-diff", "--stat", "--patch", "--", path] : ["diff", "--cached", "--no-color", "--no-ext-diff", "--stat", "--patch", "--"];
+  const [unstaged, staged] = await Promise.all([runGit(toplevel, unstagedArgs), runGit(toplevel, stagedArgs)]);
+  if (unstaged.exitCode !== 0) {
+    return { error: `Git diff failed: ${(unstaged.stderr.trim() || unstaged.stdout.trim() || "unknown error").slice(0, 500)}` };
   }
+  if (staged.exitCode !== 0) {
+    return { error: `Git diff failed: ${(staged.stderr.trim() || staged.stdout.trim() || "unknown error").slice(0, 500)}` };
+  }
+  const sections: string[] = [];
+  if (unstaged.stdout.trim().length > 0) sections.push(`Unstaged:\n${unstaged.stdout.trimEnd()}`);
+  if (staged.stdout.trim().length > 0) sections.push(`Staged:\n${staged.stdout.trimEnd()}`);
+  const combined = sections.join("\n\n");
+  if (combined.length === 0 && path !== undefined) {
+    const untracked = await readUntrackedPreview(toplevel, path, maxChars);
+    if (untracked) return untracked;
+  }
+  const source = combined.length > 0 ? combined : "";
   const binaryFiles: string[] = [];
-  for (const line of result.stdout.split("\n")) {
+  for (const line of source.split("\n")) {
     if (line.includes("Binary files ") && line.includes(" differ")) binaryFiles.push(line.trim().slice(0, 200));
   }
-  if (result.stdout.length > maxChars) {
-    return { ...(path !== undefined ? { path } : {}), diff: `${result.stdout.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff -- ${path ?? "--stat"} in ${toplevel} for the full diff.`, truncated: true, binaryFiles: binaryFiles.slice(0, 10) };
+  if (source.length > maxChars) {
+    return { ...(path !== undefined ? { path } : {}), diff: `${source.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff -- ${path ?? "--stat"} in ${toplevel} for the full diff.`, truncated: true, binaryFiles: binaryFiles.slice(0, 10) };
   }
-  const diff = result.stdout.trim().length === 0 ? "No textual diff. Staged, untracked, or binary-only changes may still be listed by /changes status." : result.stdout;
+  const diff = source.trim().length === 0 ? "No textual diff. Staged, untracked, or binary-only changes may still be listed by /changes status." : source;
   return { ...(path !== undefined ? { path } : {}), diff, truncated: false, binaryFiles: binaryFiles.slice(0, 10) };
+}
+
+/** Return a bounded preview for an untracked path without mutating Git state. */
+async function readUntrackedPreview(root: string, path: string, maxChars: number): Promise<GitDiffPreview | undefined> {
+  const listed = await runGit(root, ["ls-files", "--others", "--exclude-standard", "--", path]);
+  if (listed.exitCode !== 0) return undefined;
+  const matches = listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (matches.length === 0) return undefined;
+  const candidate = join(root, path);
+  const file = Bun.file(candidate);
+  if (!(await file.exists())) return undefined;
+  const isBinary = await hasNullByte(root, path);
+  if (isBinary) {
+    return { path, diff: `Untracked binary file ${path}. Content summarized, not shown. Use git status --short in ${root} for details.`, truncated: false, binaryFiles: [path.slice(0, 200)] };
+  }
+  const text = await file.slice(0, maxChars + 1).text().catch(() => undefined);
+  if (text === undefined) return undefined;
+  if (text.length > maxChars) {
+    return { path, diff: `Untracked:\n${text.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff --no-index /dev/null -- ${path} in ${root} for the full content.`, truncated: true, binaryFiles: [] };
+  }
+  return { path, diff: `Untracked:\n${text}`, truncated: false, binaryFiles: [] };
 }
 
 /** Render a diff preview with explicit truncation and follow-up guidance. */

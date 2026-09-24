@@ -23,6 +23,10 @@ import {
   isValidProfileBaseUrl,
   isValidProfileName,
 } from "./profile-name.ts";
+import {
+  DEFAULT_GIT_CHANGE_TRACKING,
+  type GitChangeTrackingMode,
+} from "../workspace/git.ts";
 
 /** Shared profile-name pattern and validator; re-exported for existing config importers. */
 export { PROFILE_NAME_PATTERN, isValidProfileName, isValidProfileBaseUrl };
@@ -147,13 +151,13 @@ export type CompatibleProfile = Static<typeof CompatibleProfileSchema>;
 export type CompatibleProfileMap = Record<string, CompatibleProfile>;
 
 /** Observational Git change-tracking mode without commit or branch management. */
-export type GitChangeTrackingMode = "off" | "on-demand" | "snapshot";
+export type { GitChangeTrackingMode };
 
 /** Validated Git settings with on-demand as the default inspection mode. */
 export type GitConfig = Static<typeof GitConfigSchema>;
 
 /** Default change-tracking mode that reads Git only on explicit inspection. */
-export const DEFAULT_GIT_CHANGE_TRACKING: GitChangeTrackingMode = "on-demand";
+export { DEFAULT_GIT_CHANGE_TRACKING };
 
 /** Fully resolved runtime settings after precedence and catalog lookup. */
 export interface ResolvedSettings {
