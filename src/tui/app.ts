@@ -526,6 +526,11 @@ async function runTuiRenderer(options: {
     input.on("enter", () => {
       const current = options.controller.snapshot();
       if (current.branchTree) {
+        if (isBranchTreeCommandInput(input.value)) {
+          submitPrompt(input.value);
+          render();
+          return;
+        }
         const name = input.value.trim() || undefined;
         options.controller.confirmBranchTreeSelection(name);
         if (name) input.value = "";
@@ -824,6 +829,11 @@ function clearContainer(container: {
   for (const child of [...container.getChildren()]) {
     container.remove(child as never);
   }
+}
+
+/** Report whether branch-tree input must take the slash-command path instead of becoming a fork name. */
+export function isBranchTreeCommandInput(value: string): boolean {
+  return value.trim().startsWith("/");
 }
 
 /** Format the bounded branch tree with stable IDs, active head and selection for terminal display. */

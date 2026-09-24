@@ -295,10 +295,16 @@ export function buildBranchTreeSnapshot(session: Session, selectedId?: string, l
   let nodes: BranchTreeNode[] = full;
   let truncated = full.length > maxNodes || totalNodeCount > maxNodes;
   if (full.length > maxNodes) {
-    const pinned = new Set<string>([session.rootId, activeHeadId, selected, ...heads.keys()]);
     const byOrder = new Map(full.map((node, index) => [node.id, index] as const));
     const keep = new Set<string>();
-    for (const id of pinned) if (byOrder.has(id)) keep.add(id);
+    for (const id of [session.rootId, activeHeadId, selected]) {
+      if (keep.size >= maxNodes) break;
+      if (byOrder.has(id)) keep.add(id);
+    }
+    for (const id of heads.keys()) {
+      if (keep.size >= maxNodes) break;
+      if (byOrder.has(id)) keep.add(id);
+    }
     const headRoom = Math.min(full.length, Math.max(0, maxNodes - keep.size));
     const tailStart = Math.max(0, full.length - headRoom);
     for (let i = tailStart; i < full.length && keep.size < maxNodes; i++) keep.add(full[i]!.id);

@@ -13,7 +13,8 @@ import {
   branchTreePreviewForRecord,
   buildBranchTreeSnapshot,
 } from "../src/tui/controller.ts";
-import { formatBranchTree } from "../src/tui/app.ts";
+import { formatBranchTree, isBranchTreeCommandInput } from "../src/tui/app.ts";
+import { dispatchEditorInput, parseSlashCommand } from "../src/tui/commands.ts";
 import { emptyBranchState } from "../src/session/branches.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -541,4 +542,59 @@ test("select rejects ancestry-broken IDs without moving preview selection", asyn
       controller.dispose();
     }
   });
+});
+
+test("branch-tree slash input routes to commands instead of becoming a fork name", async () => {
+  await withTempDir(async (dir) => {
+    const session = createSession([user("A"), assistant("B")], []);
+    const controller = controllerFor(session, "tree-slash", dir, createScriptedModel({ text: "ok" }));
+    try {
+      controller.openBranchTree();
+      const selectedBefore = controller.branchTreeSnapshot()?.selectedId;
+      expect(typeof selectedBefore).toBe("string");
+      const branchCount = session.listBranches().length;
+      // Routing decision mirrors the TUI Enter handler while the tree is open.
+      expect(isBranchTreeCommandInput("/help")).toBe(true);
+      expect(isBranchTreeCommandInput("  /branch list")).toBe(true);
+      expect(isBranchTreeCommandInput("my fork")).toBe(false);
+      expect(isBranchTreeCommandInput("")).toBe(false);
+      expect(parseSlashCommand("/help")).not.toBeNull();
+      // The fixed path dispatches slash input as a command, never as a fork name.
+      let commanded: string | undefined;
+      const input = "/help";
+      if (isBranchTreeCommandInput(input)) {
+        await dispatchEditorInput(input, controller, async (command) => { commanded = command.name; });
+      } else {
+        controller.confirmBranchTreeSelection(input);
+      }
+      expect(commanded).toBe("help");
+      expect(session.listBranches()).toHaveLength(branchCount);
+      expect(session.listBranches().some((branch) => branch.name === "/help")).toBe(false);
+      expect(controller.branchTreeSnapshot()?.selectedId).toBe(selectedBefore);
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+test("capped tree keeps at most maxNodes when heads outnumber the limit", () => {
+  const session = createSession([], []);
+  const turns = 30;
+  for (let i = 0; i < turns; i++) session.append(user(`u-${i}`), assistant(`a-${i}`));
+  for (let i = 0; i < turns; i++) {
+    session.forkBranch(`a-${i}`, `fork-${i}`);
+    session.selectBranch("main");
+  }
+  const distinctHeads = new Set(session.listBranches().map((branch) => branch.headId));
+  expect(distinctHeads.size).toBeGreaterThan(20);
+  const maxNodes = 20;
+  const built = buildBranchTreeSnapshot(session, undefined, { maxNodes });
+  expect(built.nodes.length).toBeLessThanOrEqual(maxNodes);
+  const seen = new Set(built.nodes.map((node) => node.id));
+  expect(seen.has(session.rootId)).toBe(true);
+  const activeHead = session.listBranches().find((branch) => branch.id === session.activeBranchId)?.headId;
+  expect(typeof activeHead).toBe("string");
+  expect(seen.has(activeHead!)).toBe(true);
+  expect(seen.has(built.selectedId)).toBe(true);
+  expect(built.truncated).toBe(true);
 });
