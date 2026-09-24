@@ -180,6 +180,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   try {
     let model = io.model;
     let startupError: string | undefined;
+    let startupNotice: string | undefined;
     if (!model) {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {
         maxTokens: settings.maxOutput,
@@ -202,6 +203,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         startupError = loaded.error;
       } else {
         model = loaded.model;
+        startupNotice = loaded.notice;
       }
     }
 
@@ -269,6 +271,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           secrets,
         });
         if (!startupError) {
+          if (startupNotice) {
+            controller.notice(startupNotice);
+          }
           controller.notice(
             `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
           );
@@ -304,6 +309,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           secrets,
         });
         if (!startupError) {
+          if (startupNotice) {
+            controller.notice(startupNotice);
+          }
           controller.notice(`New session ${session.header.id}. Type /help for commands.`);
         }
       }
@@ -1003,11 +1011,21 @@ export function createCodexLoginRunner(options: {
   };
 }
 
+/** Resolve the platform launcher for the provider authorization URL without spawning it. */
+export function subscriptionAuthorizeLauncher(platform: string, url: string): { command: string; args: string[] } {
+  if (platform === "darwin") {
+    return { command: "open", args: [url] };
+  }
+  if (platform === "win32") {
+    return { command: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  }
+  return { command: "xdg-open", args: [url] };
+}
+
 /** Open the provider authorization URL with the platform launcher without blocking the login attempt. */
 async function openSubscriptionAuthorizeUrl(url: string): Promise<void> {
-  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-  const args = process.platform === "darwin" ? [url] : process.platform === "win32" ? ["/c", "start", "", url] : [url];
-  const child = Bun.spawn([opener, ...args], { stdout: "ignore", stderr: "ignore" });
+  const { command, args } = subscriptionAuthorizeLauncher(process.platform, url);
+  const child = Bun.spawn([command, ...args], { stdout: "ignore", stderr: "ignore" });
   await child.exited;
   if (child.exitCode !== 0) {
     throw new Error(`platform opener exited ${child.exitCode}`);
@@ -1036,7 +1054,7 @@ export async function loadInteractiveModel(
     secrets: string[];
     credentialStore?: CredentialStore;
   },
-): Promise<{ model: Model } | { error: string }> {
+): Promise<{ model: Model; notice?: string } | { error: string }> {
   const store = options.credentialStore ?? createNativeCredentialStore();
   if (provider === "openai") {
     const selection = await selectOpenAITransport({
@@ -1053,7 +1071,8 @@ export async function loadInteractiveModel(
         openaiAuth: "codex" as const,
       };
       try {
-        return { model: options.createModel ? await options.createModel(input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch) };
+        const model = options.createModel ? await options.createModel(input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
+        return selection.notice !== undefined ? { model, notice: selection.notice } : { model };
       } catch (error) {
         return { error: redactSecrets(messageOf(error), options.secrets) };
       }

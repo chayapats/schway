@@ -17,10 +17,12 @@ import {
   CODEX_CLIENT_ID,
   CODEX_DEVICE_TIMEOUT_MS,
   CODEX_REDIRECT_URI,
+  CODEX_REFRESH_TIMEOUT_MS,
   CODEX_RESPONSES_URL,
   CODEX_SCOPE,
   accountIdFromAccessToken,
   buildCodexAuthorizeUrl,
+  clearPendingBrowserAttempt,
   clearSubscriptionTokens,
   codexRequestHeaders,
   createCodexSubscriptionModel,
@@ -29,6 +31,7 @@ import {
   exchangeCodeForTokens,
   extractCodeFromCallbackUrl,
   formatSubscriptionStatus,
+  getPendingBrowserAttempt,
   loadSubscriptionTokens,
   loginWithBrowserFlow,
   loginWithDeviceFlow,
@@ -42,7 +45,7 @@ import {
   toCodexResponsesBody,
   type CodexFetchLike,
 } from "../src/model/providers/codex-subscription.ts";
-import { createCodexLoginRunner, loadInteractiveModel } from "../src/tui/app.ts";
+import { createCodexLoginRunner, loadInteractiveModel, subscriptionAuthorizeLauncher } from "../src/tui/app.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { parseLoginTarget } from "../src/tui/commands.ts";
 import { createSession } from "../src/session/session.ts";
@@ -246,19 +249,31 @@ test("code exchange maps denial and expiry to distinct actionable errors", async
 });
 
 test("pasted-code browser login persists only the subscription identity with a token-free status", async () => {
+  clearPendingBrowserAttempt();
   const store = fakeCredentialStore();
   await store.set(credentialIdentity({ provider: "openai" }), "api-key-sentinel");
   const progress: string[] = [];
+  const seen: Array<{ url: string; body: string }> = [];
+  await expect(
+    loginWithBrowserFlow({
+      store,
+      deps: { openBrowser: () => {}, },
+    }),
+  ).rejects.toThrow(/callback is unavailable/);
+  const pending = getPendingBrowserAttempt();
+  expect(pending?.verifier.length).toBeGreaterThan(0);
+  expect(pending?.state.length).toBeGreaterThan(0);
+  const callbackUrl = `${CODEX_REDIRECT_URI}?code=pasted-code-1&state=${pending?.state}`;
   let openerCalled = false;
   const tokens = await loginWithBrowserFlow({
     store,
-    pastedCode: "pasted-code-1",
+    pastedCode: callbackUrl,
     deps: {
       fetch: tokenEndpoint({
         access_token: jwtWithAccount("acct-paste"),
         refresh_token: "refresh-paste",
         expires_in: 3600,
-      }),
+      }, 200, seen),
       openBrowser: () => {
         openerCalled = true;
       },
@@ -270,24 +285,38 @@ test("pasted-code browser login persists only the subscription identity with a t
   });
   expect(openerCalled).toBe(false);
   expect(tokens.accountId).toBe("acct-paste");
+  expect(seen).toHaveLength(1);
+  const body = new URLSearchParams(seen[0]?.body ?? "");
+  expect(body.get("code")).toBe("pasted-code-1");
+  expect(body.get("code_verifier")).toBe(pending?.verifier ?? "");
+  expect(getPendingBrowserAttempt()).toBeUndefined();
   const stored = await loadSubscriptionTokens(store);
   expect(stored?.accessToken).toBe(tokens.accessToken);
   expect(await store.get(credentialIdentity({ provider: "openai" }))).toBe("api-key-sentinel");
   expect(JSON.stringify(progress)).not.toContain(tokens.accessToken);
   expect(formatSubscriptionStatus(tokens)).toContain("acct-paste");
   expect(formatSubscriptionStatus(tokens)).not.toContain(tokens.accessToken);
+  clearPendingBrowserAttempt();
 });
 
 test("browser login denial saves nothing and stays actionable", async () => {
+  clearPendingBrowserAttempt();
   const store = fakeCredentialStore();
+  await expect(
+    loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } }),
+  ).rejects.toThrow(/callback is unavailable/);
+  const pending = getPendingBrowserAttempt();
+  expect(pending?.state.length).toBeGreaterThan(0);
+  const callbackUrl = `${CODEX_REDIRECT_URI}?code=denied-code&state=${pending?.state}`;
   await expect(
     loginWithBrowserFlow({
       store,
-      pastedCode: "denied-code",
+      pastedCode: callbackUrl,
       deps: { fetch: tokenEndpoint({ error: "access_denied" }, 400) },
     }),
   ).rejects.toThrow(/denied/i);
   expect(await loadSubscriptionTokens(store)).toBeNull();
+  clearPendingBrowserAttempt();
 });
 
 test("browser login cancellation settles without persisting tokens", async () => {
@@ -861,9 +890,11 @@ test("login target parsing routes subscription flags separately from API-key pro
 
 test("interactive subscription login succeeds, denies, and cancels through the controller", async () => {
   await withTempDir(async (root) => {
+    clearPendingBrowserAttempt();
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const store = fakeCredentialStore();
     const secrets: string[] = [];
+    const seen: Array<{ url: string; body: string }> = [];
     const runner = createCodexLoginRunner({
       store,
       secrets,
@@ -871,7 +902,7 @@ test("interactive subscription login succeeds, denies, and cancels through the c
         access_token: jwtWithAccount("acct-tui"),
         refresh_token: "refresh-tui",
         expires_in: 3600,
-      }),
+      }, 200, seen),
       openBrowser: () => {
         throw new Error("headless test must use the pasted-code path");
       },
@@ -888,12 +919,21 @@ test("interactive subscription login succeeds, denies, and cancels through the c
       contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: scripted, codexLogin: runner },
     });
-    expect(await controller.login("codex --code pasted-tui-code")).toBe(true);
+    await expect(
+      loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } }),
+    ).rejects.toThrow(/callback is unavailable/);
+    const pending = getPendingBrowserAttempt();
+    expect(pending?.verifier.length).toBeGreaterThan(0);
+    const callbackUrl = `${CODEX_REDIRECT_URI}?code=pasted-tui-code&state=${pending?.state}`;
+    expect(await controller.login(`codex --code ${callbackUrl}`)).toBe(true);
     expect((await loadSubscriptionTokens(store))?.accountId).toBe("acct-tui");
+    expect(seen).toHaveLength(1);
+    expect(new URLSearchParams(seen[0]?.body ?? "").get("code_verifier")).toBe(pending?.verifier ?? "");
     const snapshot = JSON.stringify(controller.snapshot());
     expect(snapshot).toContain("acct-tui");
     expect(snapshot).not.toContain("pasted-tui-code");
     controller.dispose();
+    clearPendingBrowserAttempt();
   });
 
   await withTempDir(async (root) => {
@@ -1079,5 +1119,151 @@ test("headless codex selection reaches the loop without a browser and fails acti
     });
     expect(exitCode).toBe(1);
     expect(stderr.join("")).toContain("/login codex");
+  });
+});
+
+test("aborted refresh waiter does not cancel the shared renewal or drop the rotated token", async () => {
+  expect(CODEX_REFRESH_TIMEOUT_MS).toBe(30_000);
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, {
+    accessToken: "stale-token",
+    refreshToken: "shared-refresh",
+    expiresAt: Date.now() - 1_000,
+  });
+  const refresher = createSubscriptionTokenRefresher({
+    store,
+    fetch: (async (_input, init) => {
+      const signal = init?.signal;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 30);
+        signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+      return new Response(
+        JSON.stringify({ access_token: "fresh-token", refresh_token: "rotated-refresh", expires_in: 3600 }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    }) satisfies CodexFetchLike,
+  });
+  const firstController = new AbortController();
+  const first = refresher.getValidAccessToken(firstController.signal);
+  const second = refresher.getValidAccessToken();
+  firstController.abort();
+  await expect(first).rejects.toMatchObject({ name: "AbortError" });
+  const renewed = await second;
+  expect(renewed.accessToken).toBe("fresh-token");
+  expect((await loadSubscriptionTokens(store))?.accessToken).toBe("fresh-token");
+  expect((await loadSubscriptionTokens(store))?.refreshToken).toBe("rotated-refresh");
+});
+
+test("pasted browser code requires the active attempt and rejects expired or missing attempts", async () => {
+  clearPendingBrowserAttempt();
+  const store = fakeCredentialStore();
+  await expect(
+    loginWithBrowserFlow({
+      store,
+      pastedCode: `${CODEX_REDIRECT_URI}?code=orphan&state=orphan-state`,
+      deps: { fetch: tokenEndpoint({ access_token: "never" }) },
+    }),
+  ).rejects.toThrow(/No active browser sign-in attempt/);
+  expect(await loadSubscriptionTokens(store)).toBeNull();
+
+  await expect(
+    loginWithBrowserFlow({ store, timeoutMs: 5, deps: { openBrowser: () => {} } }),
+  ).rejects.toThrow(/callback is unavailable/);
+  const pending = getPendingBrowserAttempt();
+  expect(pending?.state.length).toBeGreaterThan(0);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await expect(
+    loginWithBrowserFlow({
+      store,
+      pastedCode: `${CODEX_REDIRECT_URI}?code=stale&state=${pending?.state}`,
+      deps: { fetch: tokenEndpoint({ access_token: "never" }) },
+    }),
+  ).rejects.toThrow(/expired/);
+  expect(getPendingBrowserAttempt()).toBeUndefined();
+  expect(await loadSubscriptionTokens(store)).toBeNull();
+  clearPendingBrowserAttempt();
+});
+
+test("pasted callback with a stale state fails instead of exchanging with the wrong verifier", async () => {
+  clearPendingBrowserAttempt();
+  const store = fakeCredentialStore();
+  await expect(
+    loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } }),
+  ).rejects.toThrow(/callback is unavailable/);
+  const pending = getPendingBrowserAttempt();
+  expect(pending?.state.length).toBeGreaterThan(0);
+  await expect(
+    loginWithBrowserFlow({
+      store,
+      pastedCode: `${CODEX_REDIRECT_URI}?code=code-1&state=wrong-state`,
+      deps: { fetch: tokenEndpoint({ access_token: "never" }) },
+    }),
+  ).rejects.toThrow(/state/);
+  expect(await loadSubscriptionTokens(store)).toBeNull();
+  clearPendingBrowserAttempt();
+});
+
+test("subscription URL launcher keeps OAuth query intact per platform", () => {
+  const url = `${CODEX_AUTHORIZE_URL}?client_id=${CODEX_CLIENT_ID}&scope=a%20b&state=x&code_challenge=y`;
+  expect(subscriptionAuthorizeLauncher("darwin", url)).toEqual({ command: "open", args: [url] });
+  expect(subscriptionAuthorizeLauncher("win32", url)).toEqual({
+    command: "rundll32",
+    args: ["url.dll,FileProtocolHandler", url],
+  });
+  expect(subscriptionAuthorizeLauncher("linux", url)).toEqual({ command: "xdg-open", args: [url] });
+  const windows = subscriptionAuthorizeLauncher("win32", url);
+  expect(JSON.stringify(windows)).not.toContain("cmd");
+  expect(windows.args.at(-1)).toBe(url);
+});
+
+test("explicit codex notice survives interactive model loading and the TUI reload path", async () => {
+  const subscribed = fakeCredentialStore();
+  await saveSubscriptionTokens(subscribed, {
+    accessToken: "stored-token",
+    refreshToken: "stored-refresh",
+    expiresAt: Date.now() + 3_600_000,
+  });
+  const stub = async () => createScriptedModel({ text: "ok" });
+  const loaded = await loadInteractiveModel("openai", "gpt-5.4", {
+    runtimeApiKey: "runtime-key",
+    openaiAuth: "codex",
+    env: {},
+    credentialStore: subscribed,
+    secrets: [],
+    createModel: stub,
+  });
+  expect(loaded).toMatchObject({ notice: expect.stringContaining("ignores") });
+  if ("error" in loaded) throw new Error("expected codex model with notice");
+  expect(loaded.model).toBeDefined();
+
+  await withTempDir(async (root) => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const reloadStore = fakeCredentialStore();
+    await saveSubscriptionTokens(reloadStore, {
+      accessToken: "sub-token",
+      refreshToken: "sub-refresh",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const controller = new TuiController({
+      session: createSession(),
+      sessionId: "codex-notice",
+      workspace,
+      secrets: [],
+      provider: "openai",
+      modelId: "gpt-5.4",
+      contextManager: createContextManager(workspace),
+      credentials: {
+        store: reloadStore,
+        env: {},
+        reload: async () => ({ model: createScriptedModel({ text: "ok" }), notice: "Explicit codex selection ignores the runtime/environment API key; subscription billing applies." }),
+      },
+    });
+    expect(await controller.logout("codex")).toBe(true);
+    expect(JSON.stringify(controller.snapshot())).toContain("ignores");
+    controller.dispose();
   });
 });

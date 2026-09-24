@@ -111,7 +111,7 @@ export interface TuiControllerOptions {
     env: Record<string, string | undefined>;
     runtimeApiKey?: string;
     rememberSecret?: (key: string) => void;
-    reload: (settings?: ResolvedSettings) => Promise<{ model: Model } | { error: string }>;
+    reload: (settings?: ResolvedSettings) => Promise<{ model: Model; notice?: string } | { error: string }>;
     /** Explicit subscription login runner; production wires the verified OAuth flow. */
     codexLogin?: CodexLoginRunner;
   };
@@ -616,6 +616,9 @@ export class TuiController {
       if (this.disposed) return;
       if ("error" in loaded) { this.fail(loaded.error); return; }
       this.model = loaded.model;
+      if (loaded.notice) {
+        this.notice(loaded.notice);
+      }
       this.status = "idle";
     } catch {
       this.fail("Credential storage changed, but the provider could not be refreshed. Retry /login or restart after checking provider settings.");
@@ -663,6 +666,9 @@ export class TuiController {
           return false;
         }
         this.model = loaded.model;
+        if (loaded.notice) {
+          this.notice(loaded.notice);
+        }
         this.status = "idle";
         return true;
       } catch (error) {
@@ -714,6 +720,9 @@ export class TuiController {
           return false;
         }
         this.model = loaded.model;
+        if (loaded.notice) {
+          this.notice(loaded.notice);
+        }
         this.status = "idle";
         return true;
       } catch {

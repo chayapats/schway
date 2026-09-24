@@ -50,6 +50,8 @@ export const CODEX_ACCOUNT_HEADER = "ChatGPT-Account-Id";
 export const CODEX_ACCOUNT_CLAIM = "https://api.openai.com/auth";
 /** Refresh skew that renews short-lived access tokens before they expire mid-turn. */
 export const CODEX_REFRESH_SKEW_MS = 60_000;
+/** Independent timeout for one shared subscription refresh, keeping caller cancellation per-waiter. */
+export const CODEX_REFRESH_TIMEOUT_MS = 30_000;
 /** Default browser-login ceiling before the attempt fails actionably instead of hanging. */
 export const CODEX_LOGIN_TIMEOUT_MS = 10 * 60_000;
 /** Device-flow polling ceiling matching the verified beta timeout. */
@@ -112,6 +114,25 @@ export interface CodexDeviceAuthorization {
   expiresIn?: number;
   /** Suggested poll interval in seconds, when the server reports it. */
   interval?: number;
+}
+
+/** Most-recent browser PKCE attempt reused when the user pastes the redirect URL. */
+export interface PendingBrowserLoginAttempt {
+  verifier: string;
+  state: string;
+  expiresAt: number;
+}
+
+let pendingBrowserAttempt: PendingBrowserLoginAttempt | undefined;
+
+/** Read the most-recent browser PKCE attempt without consuming it. */
+export function getPendingBrowserAttempt(): PendingBrowserLoginAttempt | undefined {
+  return pendingBrowserAttempt ? { ...pendingBrowserAttempt } : undefined;
+}
+
+/** Clear the retained browser PKCE attempt for deterministic tests. */
+export function clearPendingBrowserAttempt(): void {
+  pendingBrowserAttempt = undefined;
 }
 
 /** Generate a PKCE verifier, S256 challenge, and state for one browser login attempt. */
@@ -411,7 +432,8 @@ export function createSubscriptionTokenRefresher(input: {
       }
       if (!inFlight) {
         const refreshToken = stored.refreshToken;
-        inFlight = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal })
+        const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
+        inFlight = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
           .then(async (renewed) => {
             const merged: CodexTokens = {
               ...renewed,
@@ -442,38 +464,66 @@ export async function loginWithBrowserFlow(input: {
   const timeoutMs = input.timeoutMs ?? CODEX_LOGIN_TIMEOUT_MS;
   const signal = input.signal;
   throwIfAborted(signal);
-  const { verifier, challenge, state } = createPkceChallenge(deps.randomBytes);
-  const authorizeUrl = buildCodexAuthorizeUrl({ challenge, state });
-  let code: string;
   if (input.pastedCode !== undefined) {
-    const extracted = extractCodeFromCallbackUrl(input.pastedCode, state);
+    const pending = pendingBrowserAttempt;
+    if (!pending || pending.expiresAt <= Date.now()) {
+      pendingBrowserAttempt = undefined;
+      if (pending) {
+        throw new Error(codexExpiredCodeError());
+      }
+      throw new Error(
+        "No active browser sign-in attempt. Start with /login codex to open the browser, then paste the newest redirect with /login codex --code <callback-url>.",
+      );
+    }
+    pendingBrowserAttempt = undefined;
+    const extracted = extractCodeFromCallbackUrl(input.pastedCode, pending.state);
     if ("error" in extracted) {
       throw new Error(extracted.error);
     }
-    code = extracted.code;
-  } else {
-    deps.onProgress?.(`Open this URL to sign in with ChatGPT: ${authorizeUrl}`);
-    if (deps.openBrowser) {
-      try {
-        await deps.openBrowser(authorizeUrl);
-      } catch {
-        deps.onProgress?.("The browser could not be opened automatically; use the printed URL instead.");
-      }
+    const code = extracted.code;
+    throwIfAborted(signal);
+    const tokens = await exchangeCodeForTokens({ code, verifier: pending.verifier, fetch: deps.fetch, signal });
+    throwIfAborted(signal);
+    const enriched: CodexTokens = {
+      ...tokens,
+      accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
+      obtainedAt: Date.now(),
+    };
+    await saveSubscriptionTokens(input.store, enriched);
+    deps.onProgress?.(formatSubscriptionStatus(enriched));
+    return enriched;
+  }
+  const { verifier, challenge, state } = createPkceChallenge(deps.randomBytes);
+  const authorizeUrl = buildCodexAuthorizeUrl({ challenge, state });
+  pendingBrowserAttempt = { verifier, state, expiresAt: Date.now() + timeoutMs };
+  deps.onProgress?.(`Open this URL to sign in with ChatGPT: ${authorizeUrl}`);
+  if (deps.openBrowser) {
+    try {
+      await deps.openBrowser(authorizeUrl);
+    } catch {
+      deps.onProgress?.("The browser could not be opened automatically; use the printed URL instead.");
     }
-    if (!deps.waitForCallbackCode) {
-      throw new Error(
-        "The localhost callback is unavailable in this environment. Retry with /login codex --device, or paste the redirect with /login codex --code <callback-url>.",
-      );
-    }
-    const abort = AbortSignal.any(signal ? [signal] : []);
+  }
+  if (!deps.waitForCallbackCode) {
+    throw new Error(
+      "The localhost callback is unavailable in this environment. Retry with /login codex --device, or paste the redirect with /login codex --code <callback-url>.",
+    );
+  }
+  const abort = AbortSignal.any(signal ? [signal] : []);
+  let code: string;
+  try {
     code = await waitWithTimeout(
       deps.waitForCallbackCode({ expectedState: state, signal: abort, timeoutMs }),
       timeoutMs,
       "ChatGPT sign-in timed out waiting for the browser callback. Retry /login codex, or use /login codex --device on headless machines.",
       abort,
     );
+  } catch (error) {
+    pendingBrowserAttempt = undefined;
+    throw error;
   }
   throwIfAborted(signal);
+  pendingBrowserAttempt = undefined;
   const tokens = await exchangeCodeForTokens({ code, verifier, fetch: deps.fetch, signal });
   throwIfAborted(signal);
   const enriched: CodexTokens = {
