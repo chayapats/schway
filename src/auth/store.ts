@@ -50,6 +50,16 @@ export function credentialIdentity(target: CredentialTarget): CredentialIdentity
   };
 }
 
+/** Stable secure-store account for the ChatGPT subscription (Codex OAuth) credential, separate from API-key identities. */
+export const CODEX_SUBSCRIPTION_ACCOUNT = "codex-subscription:chatgpt";
+/** Safe display label for the subscription identity used in login/logout notices. */
+export const CODEX_SUBSCRIPTION_LABEL = "ChatGPT subscription (Codex OAuth)";
+
+/** Return the identity-based secure-store address for the selected ChatGPT subscription credential. */
+export function codexSubscriptionIdentity(): CredentialIdentity {
+  return { account: CODEX_SUBSCRIPTION_ACCOUNT, label: CODEX_SUBSCRIPTION_LABEL };
+}
+
 /** Non-secret recovery guidance for an unavailable, locked or denied secure-store operation. */
 export function credentialStoreError(operation: "read" | "save" | "delete"): string {
   return `Cannot ${operation} credential in the OS secure store. Unlock or allow access to your OS credential store; on Linux install libsecret and start a Secret Service. Retry after restoring access. For reads, --api-key or the provider API-key environment variable bypasses the store. No plaintext fallback is used.`;

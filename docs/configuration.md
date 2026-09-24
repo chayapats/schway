@@ -21,7 +21,7 @@ Textual commands remain available:
 
 `/config` displays effective values and their origins: built-in default, user-global, project, CLI, or current-session override. Context/output limits show `catalog` when derived from model metadata (including conservative unknown-model fallback), and `explicit limit` when a layer supplies the limit. Connection headers and extra request bodies are shown as configured with values hidden; URLs omit credentials, queries and fragments, and known API keys are redacted.
 
-Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, and `auth`. Limits must be positive integers. Providers are `anthropic`, `openai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. Thinking levels are `off`, `low`, `medium`, and `high`. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
+Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`. Limits must be positive integers. Providers are `anthropic`, `openai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking levels are `off`, `low`, `medium`, and `high`. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
 
 Saving `baseUrl` with `--scope user` or `--scope project` requires an absolute URL without userinfo (`user:password@`) or a query string. All query strings are runtime-only, including non-secret parameters. Use session scope for those URLs; errors do not echo the rejected value. For example, `/config set baseUrl https://example.test/v1 --scope project` is supported, while `/config set baseUrl https://example.test/v1?region=test` applies only to the current session. Existing files are not automatically migrated: edits to other keys preserve their existing URL. Use `/config reset baseUrl --scope project` (or `--scope user`) or save a safe replacement to remove that file's URL override.
 
@@ -70,7 +70,50 @@ schway --provider openai --model gpt-5.4 --thinking low -p 'plan only'
 schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body '{"reasoning_effort":"medium"}' -p 'hello'
 ```
 
-See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `src/model/providers/*` (`resolveAnthropicThinking`, `resolveOpenAIReasoning`, `resolveCompatibleThinking`), and `src/config/config.ts` (`validateThinking`, `describeEffectiveThinking`) for the reasoning-mapping contract.
+See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `src/model/providers/*` (`resolveAnthropicThinking`, `resolveOpenAIReasoning`, `resolveCompatibleThinking`, `resolveCodexReasoning`), and `src/config/config.ts` (`validateThinking`, `describeEffectiveThinking`) for the reasoning-mapping contract.
+
+## ChatGPT subscription (Codex OAuth)
+
+Sign in with a ChatGPT Plus/Pro subscription and run the same Schway-owned coding loop: Schway keeps its tools, context, sessions, retries, and compaction, while the isolated Codex adapter only translates the model transport (`POST https://chatgpt.com/backend-api/codex/responses` with a Bearer subscription token). There is no delegated Codex agent run, no sandbox delegation, and transport retries are disabled. Account prerequisites follow the provider docs: ChatGPT Plus/Pro with workspace membership/provisioning plus seat/role entitlements; MFA rules for Codex cloud; device-code beta enabled for headless login; Enterprise token permission for automation. Schway never reads another CLI's credential cache (`~/.codex/auth.json` or OS-store copies owned by other tools); you sign in directly to Schway.
+
+Choose the credential explicitly so billing never changes silently:
+
+```json
+{
+  "provider": "openai",
+  "openaiAuth": "codex"
+}
+```
+
+- `openaiAuth: "codex"` uses the stored subscription login only. Missing, expired, revoked, or refresh-failed sessions fail with distinct actionable errors and never fall back to paid API-key billing.
+- `openaiAuth: "api-key"` uses only `--api-key`, `OPENAI_API_KEY`, or the stored native OpenAI key, and never touches the subscription.
+- `openaiAuth: "auto"` (default) prefers an explicit/runtime or environment API key when one is set, otherwise uses a stored subscription login. Headless runs never start a browser automatically.
+
+This preference is independent of compatible-endpoint `auth` (`required`/`optional`/`none`). Set it with config `"openaiAuth": "codex"`, CLI `--openai-auth codex`, or live with `/config set openaiAuth codex` (session only by default); `/config` shows its value and origin with tokens redacted.
+
+Sign in interactively (never paste secrets after the slash command):
+
+```text
+/login codex
+/login codex --device
+/login codex --code <callback-url-or-authorization-code>
+/logout codex
+```
+
+`/login codex` opens the provider browser flow with a localhost callback and per-attempt PKCE/state; denial, expiry, timeout, and Esc cancellation settle without leaked listeners. On machines where the browser cannot reach the loopback callback, `/login codex --device` prints a user code to approve at `https://auth.openai.com/codex/device` (beta, 900 s timeout), and `--code` exchanges a manually pasted redirect URL or code. Tokens (short-lived access plus `offline_access` refresh) live only at the subscription secure-store identity with serialized pre-expiry refresh; `/logout codex` removes exactly that identity. Resume rebuilds the native conversation under the currently selected auth identity without replaying tools, and prior provider metadata round-trips across auth switches.
+
+Runnable examples (deterministic; no paid APIs or live subscription calls):
+
+```sh
+# Scripted login/refresh/selection/resume/redaction coverage plus a real tool round trip
+bun test tests/codex-subscription.test.ts
+# Deterministic headless behavior without credentials: fails actionably, starts no browser
+schway --provider openai --openai-auth codex -p 'hello'
+# Live-equivalent API-key path (needs a key; shows validation, not fixtures)
+schway --provider openai --openai-auth api-key -p 'hello'
+```
+
+See `src/model/providers/codex-subscription.ts` (verified OAuth/Responses contract, token lifecycle, wire conversion), `src/auth/credentials.ts` (`selectOpenAITransport`), and `src/auth/store.ts` (`codexSubscriptionIdentity`) for the implementation contract. Optional bounded live smoke stays separate evidence and is reported independently of fixture success.
 
 ## Named OpenAI-compatible profiles
 

@@ -1,7 +1,7 @@
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
-import { credentialIdentity, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
+import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
@@ -17,7 +17,7 @@ import { discoverSkills } from "../skills/skills.ts";
 import type { ConfigLayer, ResolvedSettings } from "../config/config.ts";
 import { DEFAULT_GIT_CHANGE_TRACKING, describeEffectiveThinking, type GitChangeTrackingMode } from "../config/config.ts";
 import { EDITABLE_CONFIG_KEYS, type ConfigEditor, type ConfigScope, type ConfigTransaction } from "../config/editing.ts";
-import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
+import { parseLoginTarget, parseModelArgs, parseThinkingArgs, LOGIN_USAGE } from "./commands.ts";
 import {
   captureGitSnapshot,
   compareGitSnapshots,
@@ -57,6 +57,8 @@ export interface TuiSnapshot {
   modelId: string;
   /** Active named compatible profile, when a selection is live. */
   profile?: string;
+  /** OpenAI credential preference shown with provider/model; auto prefers explicit keys over stored subscription. */
+  openaiAuth?: string;
   /** Requested thinking level shown with provider/model; undefined leaves provider defaults untouched. */
   thinking?: string;
   /** Effective reasoning description shown alongside the requested value. */
@@ -91,6 +93,8 @@ export interface TuiControllerOptions {
   auth?: string;
   /** Active named compatible profile shown in status and /config. */
   profile?: string;
+  /** OpenAI credential preference shown in status and /config. */
+  openaiAuth?: string;
   /** Requested thinking level shown in status and /config; undefined leaves provider defaults untouched. */
   thinking?: string;
   startupError?: string;
@@ -107,7 +111,9 @@ export interface TuiControllerOptions {
     env: Record<string, string | undefined>;
     runtimeApiKey?: string;
     rememberSecret?: (key: string) => void;
-    reload: () => Promise<{ model: Model } | { error: string }>;
+    reload: (settings?: ResolvedSettings) => Promise<{ model: Model } | { error: string }>;
+    /** Explicit subscription login runner; production wires the verified OAuth flow. */
+    codexLogin?: CodexLoginRunner;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
@@ -116,6 +122,14 @@ export interface TuiControllerOptions {
   /** Explicit change-tracking fallback when no config editor supplies effective settings. */
   changeTracking?: GitChangeTrackingMode;
 }
+
+/** Explicit subscription login runner injected for tests; production wires the verified browser/device OAuth flow. */
+export type CodexLoginRunner = (input: {
+  device: boolean;
+  code?: string;
+  signal: AbortSignal;
+  onProgress: (message: string) => void;
+}) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
 
 /** Bound on displayed tool-result characters; session data stays complete. */
 export const MAX_TOOL_DISPLAY_CHARS = 2000;
@@ -344,6 +358,7 @@ export class TuiController {
   private explicitMaxOutput?: number;
   private baseUrl?: string;
   private auth?: string;
+  private openaiAuth?: string;
   private profile?: string;
   private thinking?: string;
   private configEditor?: ConfigEditor;
@@ -369,6 +384,8 @@ export class TuiController {
   private credentialEntry?: MaskedCredentialEntry;
   private credentialTarget?: CredentialTarget;
   private credentialMutation = false;
+  /** Active subscription sign-in abort; unlike submitted OS writes, the OAuth wait stays cancellable. */
+  private codexLoginAbort?: AbortController;
   private explicitChangeTracking?: GitChangeTrackingMode;
   private gitBaseline?: GitSnapshot;
   private gitAfter?: GitSnapshot;
@@ -391,6 +408,7 @@ export class TuiController {
     this.explicitMaxOutput = options.explicitMaxOutput;
     this.baseUrl = options.baseUrl;
     this.auth = options.auth;
+    this.openaiAuth = options.openaiAuth ?? options.configEditor?.settings.openaiAuth;
     this.profile = options.profile ?? options.configEditor?.settings.profile;
     this.thinking = options.thinking ?? options.configEditor?.settings.thinking;
     this.secrets = options.secrets ?? [];
@@ -427,6 +445,7 @@ export class TuiController {
       provider: this.provider,
       modelId: this.modelId,
       ...(this.profile !== undefined ? { profile: this.profile } : {}),
+      ...(this.openaiAuth !== undefined ? { openaiAuth: this.openaiAuth } : {}),
       ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
@@ -438,6 +457,19 @@ export class TuiController {
   /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
     return this.activeAbort !== undefined || this.credentialEntry !== undefined || this.credentialMutation;
+  }
+
+  /** Route /login arguments to masked API-key entry or the explicit ChatGPT subscription action. */
+  async login(args: string): Promise<boolean> {
+    const routed = parseLoginTarget(args);
+    if ("error" in routed) {
+      this.fail(routed.error);
+      return false;
+    }
+    if (routed.kind === "codex") {
+      return this.runCodexLogin(routed);
+    }
+    return this.beginLogin(routed.provider);
   }
 
   /** Start masked entry for one explicit provider only while the conversation is idle. */
@@ -493,8 +525,29 @@ export class TuiController {
   /** Remove exactly one provider's saved credential without altering runtime or environment overrides. */
   async logout(args: string): Promise<boolean> {
     if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
-    const target = this.parseCredentialTarget(args);
-    if (!target || !this.credentials) return false;
+    const routed = parseLoginTarget(args);
+    if ("error" in routed) {
+      this.fail(routed.error);
+      return false;
+    }
+    if (routed.kind === "codex") {
+      if (routed.device || routed.code !== undefined) {
+        this.fail("Usage: /logout codex takes no flags.");
+        return false;
+      }
+      return this.runCodexLogout();
+    }
+    const target: CredentialTarget = {
+      provider: routed.provider,
+      baseUrl: this.configEditor?.settings.baseUrl ?? this.baseUrl,
+      ...(routed.provider === "openai-compatible" && (this.configEditor?.settings.profile ?? this.profile) !== undefined
+        ? { profile: this.configEditor?.settings.profile ?? this.profile }
+        : {}),
+      ...(routed.provider === "openai-compatible" && this.configEditor?.settings.credentialIdentity !== undefined
+        ? { credentialIdentity: this.configEditor?.settings.credentialIdentity }
+        : {}),
+    };
+    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
     this.closeModelPicker();
     this.credentialMutation = true;
     const task = (async () => {
@@ -515,7 +568,7 @@ export class TuiController {
   private parseCredentialTarget(args: string): CredentialTarget | undefined {
     const provider = args.trim().toLowerCase();
     if (!["anthropic", "openai", "openai-compatible"].includes(provider)) {
-      this.fail("Usage: /login <anthropic|openai|openai-compatible> or /logout <provider>. Enter keys only in the masked prompt.");
+      this.fail(LOGIN_USAGE);
       return;
     }
     if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return; }
@@ -566,6 +619,113 @@ export class TuiController {
       this.status = "idle";
     } catch {
       this.fail("Credential storage changed, but the provider could not be refreshed. Retry /login or restart after checking provider settings.");
+    }
+  }
+
+  /** Run the explicit ChatGPT subscription sign-in, persisting only the subscription identity on success. */
+  private async runCodexLogin(target: { device: boolean; code?: string }): Promise<boolean> {
+    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
+    const runner = this.credentials.codexLogin;
+    if (!runner) { this.fail("ChatGPT subscription sign-in is unavailable in this session. Restart schway to enable it."); return false; }
+    this.closeModelPicker();
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    this.codexLoginAbort = abort;
+    this.credentialMutation = true;
+    this.status = "running";
+    this.notice(target.device ? "Starting ChatGPT subscription device sign-in. Press Esc to cancel." : "Starting ChatGPT subscription browser sign-in. Press Esc to cancel.");
+    const task = (async (): Promise<boolean> => {
+      try {
+        const result = await runner({
+          device: target.device,
+          ...(target.code !== undefined ? { code: target.code } : {}),
+          signal: abort.signal,
+          onProgress: (message) => this.notice(redactSecrets(message, this.secrets)),
+        });
+        abort.signal.throwIfAborted();
+        if (this.disposed || this.activeAbort !== abort) return false;
+        if (!result.ok) {
+          this.fail(result.message);
+          return false;
+        }
+        this.notice(redactSecrets(result.status, this.secrets));
+        if (this.provider !== "openai") {
+          this.status = "idle";
+          this.notice("Signed in. Set provider openai with openaiAuth codex (or auto) to run the subscription transport.");
+          return true;
+        }
+        this.model = undefined;
+        const loaded = await this.credentials!.reload(this.configEditor?.settings);
+        if (this.disposed || this.activeAbort !== abort) return false;
+        if ("error" in loaded) {
+          this.fail(loaded.error);
+          return false;
+        }
+        this.model = loaded.model;
+        this.status = "idle";
+        return true;
+      } catch (error) {
+        if (abort.signal.aborted) {
+          this.notice("ChatGPT sign-in cancelled. Nothing was saved.");
+          this.status = "idle";
+        } else {
+          this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+        }
+        return false;
+      }
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      this.credentialMutation = false;
+      if (this.codexLoginAbort === abort) this.codexLoginAbort = undefined;
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
+  /** Remove only the selected subscription identity, refreshing the adapter when it served OpenAI. */
+  private async runCodexLogout(): Promise<boolean> {
+    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
+    this.closeModelPicker();
+    this.credentialMutation = true;
+    const task = (async (): Promise<boolean> => {
+      let deleted: boolean;
+      try {
+        deleted = await this.credentials!.store.delete(codexSubscriptionIdentity());
+      } catch {
+        this.fail(credentialStoreError("delete"));
+        return false;
+      }
+      this.notice(
+        deleted
+          ? "Removed the ChatGPT subscription login. Explicit codex selection now fails actionably until the next /login codex."
+          : "No ChatGPT subscription login found; nothing was removed.",
+      );
+      if (this.provider !== "openai") return true;
+      // A removed subscription must never survive in a previously constructed adapter.
+      this.model = undefined;
+      try {
+        const loaded = await this.credentials!.reload(this.configEditor?.settings);
+        if (this.disposed) return false;
+        if ("error" in loaded) {
+          this.fail(loaded.error);
+          return false;
+        }
+        this.model = loaded.model;
+        this.status = "idle";
+        return true;
+      } catch {
+        this.fail("Subscription storage changed, but the provider could not be refreshed. Retry /login codex or restart after checking provider settings.");
+        return false;
+      }
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      this.credentialMutation = false;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
   }
 
@@ -1192,7 +1352,7 @@ export class TuiController {
     this.provider = next.provider; this.modelId = next.model;
     this.maxTurns = next.maxTurns; this.maxConcurrentTools = next.maxConcurrentTools;
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
-    this.baseUrl = next.baseUrl; this.auth = next.auth; this.profile = next.profile;
+    this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
@@ -1452,6 +1612,7 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction.
    */
   cancel(): void {
+    if (this.codexLoginAbort) { this.codexLoginAbort.abort(); return; }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.credentialEntry) {
       this.credentialEntry.cancel();

@@ -1,5 +1,5 @@
 import { MISSING_ANTHROPIC_API_KEY, MISSING_OPENAI_API_KEY } from "./secrets.ts";
-import { credentialIdentity, credentialStoreError, type CredentialStore, type CredentialTarget } from "./store.ts";
+import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialStore, type CredentialTarget } from "./store.ts";
 
 /** Dedicated environment override for the selected compatible endpoint, separate from native OpenAI. */
 export const COMPATIBLE_API_KEY_ENV = "OPENAI_COMPATIBLE_API_KEY";
@@ -54,4 +54,81 @@ export async function resolveProviderCredential(input: CredentialTarget & {
 /** Return the environment variable explicitly scoped to the selected provider family. */
 export function credentialEnvironmentVariable(provider: CredentialTarget["provider"]): string {
   return provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : COMPATIBLE_API_KEY_ENV;
+}
+
+/** OpenAI credential preference: subscription login, API key, or automatic headless-safe selection. */
+export type OpenAIAuthPreference = "auto" | "codex" | "api-key";
+
+/** True when the value names a supported OpenAI auth preference. */
+export function isOpenAIAuthPreference(value: unknown): value is OpenAIAuthPreference {
+  return value === "auto" || value === "codex" || value === "api-key";
+}
+
+/** Guidance returned when explicit codex selection has no stored subscription login. */
+export const MISSING_CODEX_SUBSCRIPTION =
+  "No ChatGPT subscription login found. Sign in in interactive mode with /login codex (or /login codex --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
+
+/** Selected OpenAI transport, or actionable guidance that never silently changes billing. */
+export type OpenAITransport =
+  | { transport: "api-key"; notice?: string }
+  | { transport: "codex"; notice?: string }
+  | { error: string };
+
+/** Select the OpenAI transport without starting any interactive flow; explicit preference always wins. */
+export async function selectOpenAITransport(input: {
+  openaiAuth?: OpenAIAuthPreference;
+  runtimeApiKey?: string;
+  env: Record<string, string | undefined>;
+  store: CredentialStore;
+}): Promise<OpenAITransport> {
+  const preference = input.openaiAuth ?? "auto";
+  if (!isOpenAIAuthPreference(preference)) {
+    return { error: `Unknown OpenAI auth preference: ${String(input.openaiAuth)}. Use auto, codex, or api-key.` };
+  }
+  if (input.runtimeApiKey !== undefined && !input.runtimeApiKey.trim()) {
+    return { error: "Explicit API key is empty. Supply a nonempty --api-key or omit the override." };
+  }
+  const runtimeKey = input.runtimeApiKey?.trim() ? input.runtimeApiKey.trim() : undefined;
+  const envKey = input.env["OPENAI_API_KEY"]?.trim() ? input.env["OPENAI_API_KEY"]!.trim() : undefined;
+  if (preference === "codex") {
+    let stored: string | null;
+    try {
+      stored = await input.store.get(codexSubscriptionIdentity());
+    } catch {
+      return { error: credentialStoreError("read") };
+    }
+    if (!stored?.trim()) {
+      return { error: MISSING_CODEX_SUBSCRIPTION };
+    }
+    const notice = runtimeKey !== undefined || envKey !== undefined
+      ? "Explicit codex selection ignores the runtime/environment API key; subscription billing applies."
+      : undefined;
+    return notice !== undefined ? { transport: "codex", notice } : { transport: "codex" };
+  }
+  if (preference === "api-key") {
+    return { transport: "api-key" };
+  }
+  if (runtimeKey !== undefined || envKey !== undefined) {
+    return { transport: "api-key" };
+  }
+  let subscription: string | null;
+  let storedApiKey: string | null;
+  try {
+    [subscription, storedApiKey] = await Promise.all([
+      input.store.get(codexSubscriptionIdentity()),
+      input.store.get(credentialIdentity({ provider: "openai" })),
+    ]);
+  } catch {
+    return { error: credentialStoreError("read") };
+  }
+  if (subscription?.trim()) {
+    return { transport: "codex" };
+  }
+  if (storedApiKey?.trim()) {
+    return { transport: "api-key" };
+  }
+  return {
+    error:
+      `${MISSING_OPENAI_API_KEY} No stored subscription login was found either; sign in in interactive mode with /login codex, or stay on API-key billing.`,
+  };
 }

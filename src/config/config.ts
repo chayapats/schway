@@ -44,6 +44,7 @@ export const CONFIG_SETTING_NAMES = [
   "headers",
   "extraBody",
   "auth",
+  "openaiAuth",
   "packages",
   "profiles",
   "profile",
@@ -60,6 +61,13 @@ const AuthSchema = Type.Union([
   Type.Literal("required"),
   Type.Literal("optional"),
   Type.Literal("none"),
+]);
+
+/** Validated OpenAI credential preference, independent of compatible required/optional/none auth. */
+export const OpenAIAuthSchema = Type.Union([
+  Type.Literal("auto"),
+  Type.Literal("codex"),
+  Type.Literal("api-key"),
 ]);
 
 /** Validated provider-independent reasoning levels without assuming identical wire semantics. */
@@ -127,6 +135,7 @@ export const ConfigSchema = Type.Object(
     headers: Type.Optional(Type.Record(Type.String(), Type.String())),
     extraBody: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
     auth: Type.Optional(AuthSchema),
+    openaiAuth: Type.Optional(OpenAIAuthSchema),
     packages: Type.Optional(Type.Array(Type.String({ pattern: "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$" }), { uniqueItems: true })),
     profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
@@ -143,6 +152,9 @@ export type ProviderFamily = NonNullable<ConfigLayer["provider"]>;
 
 /** Authentication mode for OpenAI-compatible endpoints. */
 export type AuthMode = NonNullable<ConfigLayer["auth"]>;
+
+/** OpenAI credential preference selecting subscription login, API key, or automatic headless-safe choice. */
+export type OpenAIAuthMode = NonNullable<ConfigLayer["openaiAuth"]>;
 
 /** Validated named OpenAI-compatible endpoint with reference-only credentials. */
 export type CompatibleProfile = Static<typeof CompatibleProfileSchema>;
@@ -180,6 +192,8 @@ export interface ResolvedSettings {
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   auth?: AuthMode;
+  /** OpenAI credential preference; auto prefers explicit/runtime/environment API keys over a stored subscription. */
+  openaiAuth?: OpenAIAuthMode;
   /** Active named compatible profile, when a selection resolved successfully. */
   profile?: string;
   /** Environment-variable name referenced by the active profile, never a secret value. */
@@ -517,6 +531,7 @@ export function resolveSettings(input: {
     maxOutput: catalog.maxOutput,
     catalog,
     gitChangeTracking: merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
+    openaiAuth: merged.openaiAuth ?? "auto",
     ...(merged.contextWindow !== undefined
       ? { explicitContextWindow: merged.contextWindow }
       : {}),

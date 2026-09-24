@@ -138,9 +138,19 @@ test("provider adapters load lazily through the shared loader", async () => {
     expect(source.includes('from "../model/providers/anthropic.ts"')).toBe(false);
     expect(source.includes('from "../model/providers/openai.ts"')).toBe(false);
     expect(source.includes('from "../model/providers/openai-compatible.ts"')).toBe(false);
+    expect(source.includes('from "../model/providers/codex-subscription.ts"')).toBe(false);
   }
   const loader = await Bun.file("src/model/loader.ts").text();
   expect(loader.includes('import("./providers/anthropic.ts")')).toBe(true);
   expect(loader.includes('import("./providers/openai.ts")')).toBe(true);
   expect(loader.includes('import("./providers/openai-compatible.ts")')).toBe(true);
+  expect(loader.includes('import("./providers/codex-subscription.ts")')).toBe(true);
+});
+
+test("subscription adapter stays headless-safe without TUI or provider SDK imports", async () => {
+  const source = await Bun.file("src/model/providers/codex-subscription.ts").text();
+  expect(source.includes("@opentui")).toBe(false);
+  expect(source.includes("../tui/")).toBe(false);
+  expect(source.includes('from "openai"')).toBe(false);
+  expect(source.includes("~/.codex/auth.json")).toBe(false);
 });

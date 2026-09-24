@@ -5,7 +5,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "git"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "git"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -95,6 +95,7 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
   origins.contextWindow ??= "catalog";
   origins.maxOutput ??= "catalog";
   origins.auth ??= "built-in default";
+  origins.openaiAuth ??= "built-in default";
   origins.profile ??= selectedName !== undefined ? origins.profile ?? "built-in default" : origins.profile;
   return { origins, modelFallbackSource };
 }

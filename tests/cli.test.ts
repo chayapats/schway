@@ -156,8 +156,7 @@ test("selecting OpenAI without OPENAI_API_KEY fails even when Anthropic is confi
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toContain("Missing OpenAI API key");
-  expect(result.stderr.toLowerCase().includes("login")).toBe(false);
-  expect(result.stderr.toLowerCase().includes("codex")).toBe(false);
+  expect(result.stderr).toContain("/login codex");
 });
 
 test("selecting OpenAI uses OPENAI_API_KEY and records the provider", async () => {
