@@ -68,11 +68,11 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "Commands:",
     "/new - start a new session",
     "/sessions - list saved sessions",
-    "/resume <id> - resume a saved session",
+    "/resume <id> [branch-id] - resume a saved session on its active branch or one stable branch ID",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
     "/thinking [off|low|medium|high|reset] - show or switch reasoning level for future requests",
     "/compact - summarize older turns to free context",
-    "/branch list | fork <entry-id> [name] | switch <branch-id> - continue a saved conversation path",
+    "/branch list | tree | fork <entry-id> [name] | switch <branch-id> - browse the session tree or continue a saved conversation path",
     "/changes [status|diff [-- <path>]] - show Git branch, HEAD, and bounded working-tree changes",
     "/skills - list available skills",
     "/add-dir <directory> - attach project context (relative to the primary root; idle only)",
@@ -86,6 +86,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
     "Esc cancels the running turn. Ctrl+C quits when idle.",
+    "In the branch tree: Up/Down browses, Enter switches or forks the highlight, Esc closes.",
   ].join("\n");
 }
 

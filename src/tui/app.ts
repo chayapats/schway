@@ -35,7 +35,8 @@ import {
   type CliProvider,
   type CliThinking,
 } from "../cli/args.ts";
-import { TuiController } from "./controller.ts";
+import { TuiController, MAX_BRANCH_TREE_PREVIEW_ENTRIES } from "./controller.ts";
+import type { BranchTreeSnapshot } from "./controller.ts";
 import {
   dispatchEditorInput,
   helpText,
@@ -425,6 +426,8 @@ async function runTuiRenderer(options: {
     root.add(credentialLine);
 
     let lastRendered = "";
+    let lastTreePreviewKey = "";
+    let lastTreePreviewText = "";
     const render = () => {
       const snapshot = options.controller.snapshot();
       if (snapshot.credentialEntry) {
@@ -437,7 +440,7 @@ async function runTuiRenderer(options: {
         input.visible = true;
         input.focus();
       }
-      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}${snapshot.thinking ? ` (thinking ${snapshot.thinking})` : ""} - session ${snapshot.sessionId} - ${snapshot.status}`, options.secrets);
+      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}${snapshot.thinking ? ` (thinking ${snapshot.thinking})` : ""} - session ${snapshot.sessionId} [branch ${snapshot.branchId}] - ${snapshot.status}`, options.secrets);
       try {
         header.content = headerText;
       } catch {
@@ -449,6 +452,25 @@ async function runTuiRenderer(options: {
         toolName: entry.toolName,
         toolStatus: entry.toolStatus,
       })));
+      if (snapshot.branchTree) {
+        const tree = snapshot.branchTree;
+        const previewKey = `${tree.activeBranchId}|${tree.selectedId}|${tree.nodes.length}|${tree.totalNodeCount}`;
+        if (previewKey !== lastTreePreviewKey) {
+          lastTreePreviewKey = previewKey;
+          try {
+            const preview = options.controller.previewBranchTreeNode(tree.selectedId);
+            const tail = preview.slice(-MAX_BRANCH_TREE_PREVIEW_ENTRIES);
+            lastTreePreviewText = tail.length
+              ? tail.map(entry => formatTranscript([{ kind: entry.kind, text: entry.text, toolName: entry.toolName, toolStatus: entry.toolStatus }])).join("\n")
+              : "(empty preview - no durable records on this path yet)";
+          } catch (error) {
+            lastTreePreviewText = `Preview unavailable: ${messageOf(error)}`;
+          }
+        }
+        lines = `${formatBranchTree(tree)}\n\nPreview of ${tree.selectedId} (Enter switches or forks, Esc closes):\n${lastTreePreviewText}`;
+      } else if (snapshot.branchTreeError) {
+        lines += `\n\nBranch tree unavailable: ${snapshot.branchTreeError}`;
+      }
       if (snapshot.modelPicker) {
         const picker = snapshot.modelPicker;
         lines += `\n\nSelect model or profile — search or type provider/model or profile:<name> (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}\n`;
@@ -458,8 +480,9 @@ async function runTuiRenderer(options: {
       lines = redactSecrets(lines, options.secrets);
       const roots = options.controller.workspaceIdentity();
       const rootStatus = roots ? ` | Primary: ${roots.root} | Attached: ${roots.extraRoots.join(", ") || "none"}` : "";
-      const statusText = redactSecrets(formatStatus(snapshot.status) + rootStatus, options.secrets);
-      const fingerprint = `${headerText}\n${lines}\n${statusText}\n${snapshot.credentialEntry?.masked ?? ""}`;
+      const branchStatus = ` | Branch: ${snapshot.branchId}`;
+      const statusText = redactSecrets(formatStatus(snapshot.status) + branchStatus + rootStatus, options.secrets);
+      const fingerprint = `${headerText}\n${lines}\n${statusText}\n${snapshot.credentialEntry?.masked ?? ""}\n${snapshot.branchTree?.selectedId ?? ""}\n${snapshot.branchTreeError ?? ""}`;
       if (fingerprint === lastRendered) {
         return;
       }
@@ -501,7 +524,15 @@ async function runTuiRenderer(options: {
     };
 
     input.on("enter", () => {
-      if (options.controller.snapshot().modelPicker) {
+      const current = options.controller.snapshot();
+      if (current.branchTree) {
+        const name = input.value.trim() || undefined;
+        options.controller.confirmBranchTreeSelection(name);
+        if (name) input.value = "";
+        render();
+        return;
+      }
+      if (current.modelPicker) {
         void options.controller.selectPickerModel().then(selected => { if (selected) input.value = ""; render(); });
         return;
       }
@@ -509,11 +540,20 @@ async function runTuiRenderer(options: {
       submitPrompt(value);
       render();
     });
-    input.on("input", () => { options.controller.searchModels(input.value); render(); });
+    input.on("input", () => {
+      if (options.controller.snapshot().branchTree) { render(); return; }
+      options.controller.searchModels(input.value); render();
+    });
     unbindCredentialInput = bindCredentialInput(renderer.keyInput, options.controller, render);
 
     renderer.keyInput.on("keypress", (key) => {
       const name = key.name.toLowerCase();
+      const treeOpen = options.controller.snapshot().branchTree !== undefined;
+      if (treeOpen && (name === "up" || name === "down")) {
+        options.controller.moveBranchTreeSelection(name === "up" ? -1 : 1);
+        render();
+        return;
+      }
       if (options.controller.snapshot().modelPicker && (name === "up" || name === "down")) {
         options.controller.moveModelPicker(name === "up" ? -1 : 1);
         render();
@@ -534,6 +574,10 @@ async function runTuiRenderer(options: {
       if (name === "escape") {
         if (options.controller.running) {
           options.controller.cancel();
+        } else if (options.controller.snapshot().branchTree) {
+          options.controller.closeBranchTree();
+          input.value = "";
+          render();
         } else if (options.controller.snapshot().modelPicker) {
           options.controller.closeModelPicker();
           input.value = "";
@@ -620,12 +664,13 @@ async function handleSlashCommand(
       return;
     }
     case "resume": {
-      if (!args) {
-        ctx.controller.fail("Usage: /resume <session-id>. See /sessions for ids.");
+      const [sessionId, branchId, ...extra] = args.trim().split(/\s+/);
+      if (!sessionId || extra.length || !sessionId.trim()) {
+        ctx.controller.fail("Usage: /resume <session-id> [branch-id]. See /sessions for ids.");
         return;
       }
       try {
-        const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: args });
+        const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: sessionId, ...(branchId ? { branchId } : {}) });
         const restored = await restoreWorkspace({ root: resumed.header.workspaceRoot, launchCwd: resumed.header.launchCwd, extraRoots: [...resumed.metadata.extraRoots] });
         const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
@@ -634,7 +679,7 @@ async function handleSlashCommand(
         ctx.skillScope.workspaceRoot = workspace.root;
         for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
         ctx.controller.notice(
-          `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
+          `Resumed session ${resumed.header.id} [branch ${resumed.activeBranchId}] with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
         );
       } catch (error) {
         ctx.controller.fail(messageOf(error));
@@ -779,6 +824,26 @@ function clearContainer(container: {
   for (const child of [...container.getChildren()]) {
     container.remove(child as never);
   }
+}
+
+/** Format the bounded branch tree with stable IDs, active head and selection for terminal display. */
+export function formatBranchTree(tree: BranchTreeSnapshot): string {
+  const lines = [
+    `Branches (IDs are selectors; Up/Down browses, Enter switches or forks, Esc closes):`,
+    ...tree.branches.map(branch => `${branch.active ? "*" : "-"} ${branch.id}${branch.name ? ` (${branch.name})` : ""} → ${branch.headId} (${branch.entryCount}) ${branch.preview}`),
+    "",
+    `Tree rooted at ${tree.rootId} — active ${tree.activeBranchId}${tree.truncated ? ` (showing ${tree.nodes.length} of ${tree.totalNodeCount})` : ""}:`,
+    ...tree.nodes.map(node => {
+      const marker = node.id === tree.selectedId ? ">" : " ";
+      const head = node.isActiveHead ? "*" : node.isHead ? "o" : " ";
+      const fork = node.isForkPoint ? "[fork]" : "      ";
+      const indent = "  ".repeat(Math.min(node.depth, 12));
+      const heads = node.headBranchIds.length ? ` <${node.headBranchIds.join(",")}>` : "";
+      return `${marker}${head} ${fork} ${indent}${node.id} [${node.kind}]${heads} ${node.preview}`.trimEnd();
+    }),
+  ];
+  if (tree.truncated) lines.push(`… truncated to ${tree.nodes.length} of ${tree.totalNodeCount} nodes. Use /branch list for IDs.`);
+  return lines.join("\n");
 }
 
 /** Format transcript rows with tool state and bounded text for terminal display. */
