@@ -14,9 +14,20 @@ import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { discoverSkills } from "../skills/skills.ts";
 import type { ConfigLayer, ResolvedSettings } from "../config/config.ts";
-import { describeEffectiveThinking } from "../config/config.ts";
+import { DEFAULT_GIT_CHANGE_TRACKING, describeEffectiveThinking, type GitChangeTrackingMode } from "../config/config.ts";
 import { EDITABLE_CONFIG_KEYS, type ConfigEditor, type ConfigScope, type ConfigTransaction } from "../config/editing.ts";
 import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
+import {
+  captureGitSnapshot,
+  compareGitSnapshots,
+  formatGitComparison,
+  formatGitDiffPreview,
+  formatGitStatus,
+  getGitDiffPreview,
+  inspectGitStatus,
+  type GitSnapshot,
+  type GitTurnComparison,
+} from "../workspace/git.ts";
 import { modelPickerEntries, type ModelPickerSnapshot } from "./model-picker.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
@@ -97,6 +108,8 @@ export interface TuiControllerOptions {
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
+  /** Explicit change-tracking fallback when no config editor supplies effective settings. */
+  changeTracking?: GitChangeTrackingMode;
 }
 
 /** Bound on displayed tool-result characters; session data stays complete. */
@@ -145,6 +158,11 @@ export class TuiController {
   private credentialEntry?: MaskedCredentialEntry;
   private credentialTarget?: CredentialTarget;
   private credentialMutation = false;
+  private explicitChangeTracking?: GitChangeTrackingMode;
+  private gitBaseline?: GitSnapshot;
+  private gitAfter?: GitSnapshot;
+  private gitComparison?: GitTurnComparison;
+  private gitSnapshotError?: string;
 
   /** Initialize display history from the supplied session and dependencies without starting a model turn. */
   constructor(options: TuiControllerOptions) {
@@ -169,6 +187,7 @@ export class TuiController {
     this.home = options.home;
     this.configEditor = options.configEditor;
     this.credentials = options.credentials;
+    this.explicitChangeTracking = options.changeTracking;
     this.stageSettings = options.stageSettings;
     this.onSettingsCommitted = options.onSettingsCommitted;
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
@@ -366,6 +385,118 @@ export class TuiController {
       this.fail(error instanceof Error ? error.message : String(error));
       return false;
     }
+  }
+
+  /** Return the effective observational change-tracking mode with on-demand as the default. */
+  gitChangeTracking(): GitChangeTrackingMode {
+    return this.configEditor?.settings.gitChangeTracking ?? this.explicitChangeTracking ?? DEFAULT_GIT_CHANGE_TRACKING;
+  }
+
+  /** Show Git branch, HEAD, dirty state, and bounded changes without managing commits or branches. */
+  async changesCommand(args: string): Promise<boolean> {
+    if (this.disposed) return false;
+    const mode = this.gitChangeTracking();
+    if (mode === "off") {
+      this.notice("Change tracking is off (git.changeTracking=\"off\"). No Git state was read. Set git.changeTracking to \"on-demand\" or \"snapshot\" to inspect changes.");
+      return true;
+    }
+    if (!this.workspace) {
+      this.fail("No workspace is active. Open a workspace before inspecting Git changes.");
+      return false;
+    }
+    const trimmed = args.trim();
+    const [sub, ...rest] = trimmed.split(/\s+/);
+    const action = !sub ? "status" : sub.toLowerCase();
+    if (action === "mode") {
+      const origin = this.configEditor?.origins.git ? ` [${this.configEditor.origins.git}]` : "";
+      this.notice(`Change tracking: ${mode}${origin}. Off disables inspection; on-demand reads only here; snapshot captures a baseline before each turn and compares after it settles.`);
+      return true;
+    }
+    if (action === "diff") {
+      const path = rest.join(" ").replace(/^(--\s+)?/, "").trim() || undefined;
+      const preview = await getGitDiffPreview(this.workspace.root, path);
+      if ("error" in preview) {
+        if (preview.error.startsWith("Not a Git workspace")) {
+          this.notice(`${preview.error} Coding continues; Git inspection is unavailable here.`);
+          return true;
+        }
+        this.fail(preview.error);
+        return false;
+      }
+      this.notice(redactSecrets(formatGitDiffPreview(preview), this.secrets).slice(0, 50_000));
+      return true;
+    }
+    if (action !== "status" && trimmed.length > 0) {
+      this.fail("Usage: /changes [status|diff [-- <path>]]. Change tracking itself is configured with git.changeTracking.");
+      return false;
+    }
+    const status = await inspectGitStatus(this.workspace.root);
+    if ("error" in status) {
+      this.fail(status.error);
+      return false;
+    }
+    const lines = [`Change tracking: ${mode}.`, formatGitStatus(status)];
+    if (mode === "snapshot") {
+      if (this.gitSnapshotError) {
+        lines.push(`Snapshot unavailable: ${this.gitSnapshotError}`);
+      } else if (this.gitBaseline && this.gitAfter && this.gitComparison && this.gitBaseline.root === this.gitAfter.root) {
+        lines.push("", formatGitComparison(this.gitBaseline, this.gitAfter, this.gitComparison));
+      } else if (this.gitBaseline) {
+        lines.push("", `Baseline ${this.gitBaseline.id} captured at ${this.gitBaseline.capturedAt}. Run a turn to compare, or use /changes diff for content.`);
+      } else {
+        lines.push("", "No retained snapshot for this workspace yet. The next turn captures a baseline before it runs.");
+      }
+      lines.push("Snapshots cover the current session/run only and cannot restore files.");
+    }
+    this.notice(redactSecrets(lines.join("\n"), this.secrets).slice(0, 50_000));
+    return true;
+  }
+
+  /** Capture a snapshot baseline immediately before a turn when snapshot mode is active. */
+  private async captureTurnBaseline(): Promise<void> {
+    this.gitSnapshotError = undefined;
+    if (this.gitChangeTracking() !== "snapshot" || !this.workspace || this.disposed) {
+      this.gitBaseline = undefined;
+      this.gitAfter = undefined;
+      this.gitComparison = undefined;
+      return;
+    }
+    const snapshot = await captureGitSnapshot(this.workspace.root);
+    if ("error" in snapshot) {
+      this.gitBaseline = undefined;
+      this.gitAfter = undefined;
+      this.gitComparison = undefined;
+      this.gitSnapshotError = snapshot.error;
+      return;
+    }
+    this.gitBaseline = snapshot;
+    this.gitAfter = undefined;
+    this.gitComparison = undefined;
+  }
+
+  /** Capture final state after a settled turn and compare it against the baseline. */
+  private async captureTurnResult(): Promise<void> {
+    if (this.gitChangeTracking() !== "snapshot" || !this.workspace || this.disposed) return;
+    const baseline = this.gitBaseline;
+    if (!baseline) return;
+    const after = await captureGitSnapshot(this.workspace.root);
+    if ("error" in after) {
+      this.gitAfter = undefined;
+      this.gitComparison = undefined;
+      this.gitSnapshotError = after.error;
+      return;
+    }
+    const comparison = compareGitSnapshots(baseline, after);
+    if ("error" in comparison) {
+      this.gitAfter = undefined;
+      this.gitComparison = undefined;
+      this.gitSnapshotError = comparison.error;
+      return;
+    }
+    // Retain only the latest turn pair with a valid identity; older snapshots are dropped.
+    this.gitAfter = after;
+    this.gitComparison = comparison;
+    this.gitSnapshotError = undefined;
   }
 
   /** Return a copy of the currently usable root identities for discovery and status. */
@@ -589,10 +720,11 @@ export class TuiController {
     let value: unknown = raw;
     if (action === "reset") value = undefined;
     else if (["maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"].includes(key!)) value = Number(raw);
+    else if (key === "git" && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail('Invalid git value. Use JSON like {"changeTracking":"snapshot"}.'); return false; } }
     else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted config value."); return false; } }
     return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
       const origin = this.configEditor!.origins[key as keyof ConfigLayer];
-      const effective = this.configEditor!.settings[key as keyof ResolvedSettings];
+      const effective = key === "git" ? this.configEditor!.settings.gitChangeTracking : this.configEditor!.settings[key as keyof ResolvedSettings];
       const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
       const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
@@ -685,6 +817,11 @@ export class TuiController {
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
       }));
+      const gitMode = settings.gitChangeTracking;
+      const gitOrigin = origins.git !== undefined ? ` [${origins.git}]` : "";
+      if (!lines.some((line) => line.startsWith("git:"))) {
+        lines.push(`git: {"changeTracking":"${gitMode}"}${gitOrigin}`);
+      }
       if (settings.thinking === undefined) {
         lines.push(`thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
       }
@@ -696,6 +833,7 @@ export class TuiController {
     if (!this.configEditor) {
       const thinking = this.thinking;
       lines.push(thinking !== undefined ? `Thinking: ${thinking} (effective: ${describeEffectiveThinking(this.provider, thinking as never, this.modelId)})` : `Thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
+      lines.push(`git: {"changeTracking":"${this.gitChangeTracking()}"}`);
     }
     if (!this.configEditor && this.maxTurns !== undefined) {
       lines.push(`Max turns: ${this.maxTurns}`);
@@ -867,6 +1005,10 @@ export class TuiController {
     this.status = "idle";
     this.currentAssistantId = undefined;
     this.toolEntryByCallId.clear();
+    this.gitBaseline = undefined;
+    this.gitAfter = undefined;
+    this.gitComparison = undefined;
+    this.gitSnapshotError = undefined;
   }
 
   /** Append a system line without touching session history. */
@@ -949,6 +1091,7 @@ export class TuiController {
     const abort = new AbortController();
     this.activeAbort = abort;
     this.currentAssistantId = undefined;
+    await this.captureTurnBaseline();
     const turn = this.runTurn(abort.signal);
     this.activeTurn = turn;
     try {
@@ -988,17 +1131,20 @@ export class TuiController {
       if (signal.aborted) {
         this.transcript.push(this.systemEntry("Cancelled."));
         this.status = "idle";
+        await this.captureTurnResult();
         return;
       }
       if (this.status === "running") {
         this.status = "idle";
       }
+      await this.captureTurnResult();
     } catch (error) {
       if (this.activeAbort?.signal !== signal) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
       this.fail(actionableError(message));
+      await this.captureTurnResult();
     }
   }
 
@@ -1341,5 +1487,6 @@ function actionableError(message: string): string {
 
 function displaySetting(key: string, value: unknown): string {
   if (key === "baseUrl" && typeof value === "string") return sanitizeBaseUrl(value);
+  if (key === "git" && typeof value === "object" && value !== null) return JSON.stringify(value);
   return value === undefined ? "unset" : String(value);
 }

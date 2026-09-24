@@ -5,7 +5,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "git"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";

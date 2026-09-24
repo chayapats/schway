@@ -657,6 +657,10 @@ async function handleSlashCommand(
       ctx.controller.branchCommand(args);
       return;
     }
+    case "changes": {
+      await ctx.controller.changesCommand(args);
+      return;
+    }
     case "compact": {
       await ctx.controller.compact();
       return;

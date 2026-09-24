@@ -11,6 +11,7 @@ export type SlashCommandName =
   | "model"
   | "thinking"
   | "branch"
+  | "changes"
   | "compact"
   | "skills"
   | "add-dir"
@@ -46,6 +47,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "model":
     case "thinking":
     case "branch":
+    case "changes":
     case "compact":
     case "skills":
     case "add-dir":
@@ -71,6 +73,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/thinking [off|low|medium|high|reset] - show or switch reasoning level for future requests",
     "/compact - summarize older turns to free context",
     "/branch list | fork <entry-id> [name] | switch <branch-id> - continue a saved conversation path",
+    "/changes [status|diff [-- <path>]] - show Git branch, HEAD, and bounded working-tree changes",
     "/skills - list available skills",
     "/add-dir <directory> - attach project context (relative to the primary root; idle only)",
     "/<skill-name> [arguments] - invoke an available skill for this turn",
