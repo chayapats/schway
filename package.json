@@ -18,12 +18,15 @@
     "src",
     "examples/extensions",
     "examples/packages",
+    "docs/live-providers.md",
+    "docs/doctor.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "dev": "bun --no-env-file src/cli/main.ts",
     "start": "bun --no-env-file src/cli/main.ts",
+    "live-smoke": "bun --no-env-file src/live/cli.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
