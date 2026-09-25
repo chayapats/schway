@@ -15,8 +15,9 @@ export function boundedSmokeFetch(options: {
     if (exceeded) throw new Error("Live smoke response byte budget exceeded");
     const originalSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     const signal = originalSignal ? AbortSignal.any([options.signal, originalSignal]) : options.signal;
-    // Retain Request/URL, body, headers and all SDK-supplied fetch options verbatim.
-    const response = await (options.fetch ?? fetch)(input, { ...init, signal });
+    // Preserve request bodies/headers but never let an SDK or Request follow a redirect:
+    // an HTTPS endpoint must not forward Bearer credentials to a plaintext target.
+    const response = await (options.fetch ?? fetch)(input, { ...init, signal, redirect: "error" });
     if (!response.body) return response;
     const reader = response.body.getReader();
     const body = new ReadableStream<Uint8Array>({

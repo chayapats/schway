@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSafeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
+import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 
 const providers: readonly string[] = ["anthropic", "openai-api-key", "compatible", "codex"];
 const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
@@ -23,6 +23,7 @@ export function parseWorkerInput(value: unknown): Omit<SmokeSelection, "env" | "
     if (Object.keys(config).some(key => !["baseUrl", "auth", "profile", "credentialEnv", "credentialIdentity"].includes(key))
       || typeof config.baseUrl !== "string" || !isSafeEndpoint(config.baseUrl)
       || (config.auth !== "required" && config.auth !== "none")
+      || !isSafeSmokeEndpoint(config.baseUrl, config.auth)
       || ["profile", "credentialIdentity"].some(key => config[key] !== undefined && (typeof config[key] !== "string" || !safeOption.test(config[key])))
       || (config.credentialEnv !== undefined && (typeof config.credentialEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.credentialEnv)))) throw Error("invalid instruction");
     compatible = config as SmokeSelection["compatible"];

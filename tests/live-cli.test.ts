@@ -11,6 +11,11 @@ test("CLI rejects implicit providers, invalid options and missing compatible URL
   expect(parseLiveArgs(["--provider", "anthropic", "--model", "anthropic=bad\nsecret"])).toHaveProperty("error");
   expect(parseLiveArgs(["--provider", "compatible", "--enable-live", "--base-url", "https://user:password@example.org/v1"])).toHaveProperty("error");
   expect(parseLiveArgs(["--provider", "compatible", "--enable-live", "--base-url", "https://example.org/v1?token=secret"])).toHaveProperty("error");
+  expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://127.0.0.1:1234/v1"])).toHaveProperty("error");
+  expect(parseLiveArgs(["--enable-live", "--provider", "all", "--base-url", "http://localhost:1234/v1", "--auth", "required"])).toHaveProperty("error");
+  expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://example.org/v1", "--auth", "none"])).toHaveProperty("error");
+  expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "https://example.org/v1"])).toHaveProperty("selection");
+  expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://[::1]:1234/v1", "--auth", "none"])).toHaveProperty("selection");
 });
 
 test("disabled CLI emits redacted, dated incomplete report and no credential discovery", async () => {

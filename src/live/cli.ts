@@ -1,4 +1,4 @@
-import { isSafeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
+import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 import { runLiveProcesses } from "./process.ts";
 
 const PROVIDERS: readonly SmokeProvider[] = ["anthropic", "openai-api-key", "compatible", "codex"];
@@ -41,6 +41,7 @@ export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeS
   if (selection.providers.length === 0) return { error: "Select --provider anthropic|openai-api-key|compatible|codex|all (or a comma-separated list)." };
   if (selection.models && Object.keys(selection.models).some(p => !selection.providers.includes(p as SmokeProvider))) return { error: "Model override must target a selected provider." };
   if (selection.providers.includes("compatible") && !url && selection.enabled) return { error: "Select --base-url for the compatible endpoint." };
+  if (url && !isSafeSmokeEndpoint(url, auth)) return { error: "Use HTTPS for compatible credentials; local HTTP requires explicit --auth none." };
   if ((url || auth !== "required" || profile || credentialEnv || credentialIdentity) && !selection.providers.includes("compatible")) return { error: "Compatible connection options require --provider compatible." };
   if (url) selection.compatible = { baseUrl: url, auth, profile, credentialEnv, credentialIdentity };
   return { selection };

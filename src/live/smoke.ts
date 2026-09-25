@@ -248,6 +248,10 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
   if (provider === "compatible" && (!selection.compatible || !isSafeEndpoint(selection.compatible.baseUrl))) {
     result.status = "pending"; result.reason = "compatible_endpoint_required"; return;
   }
+  // Reject before even constructing the OS store: no credential may travel over HTTP.
+  if (provider === "compatible" && !isSafeSmokeEndpoint(selection.compatible!.baseUrl, selection.compatible!.auth)) {
+    result.status = "failed_runner"; result.reason = "insecure_endpoint"; return;
+  }
   const store = provider === "compatible" && selection.compatible?.auth === "none"
     ? undefined : (deps.createStore ?? createNativeCredentialStore)();
   if (provider === "codex") {
@@ -274,7 +278,7 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
     provider: family, baseUrl: selection.compatible?.baseUrl, auth: selection.compatible?.auth,
     profile: selection.compatible?.profile, credentialEnv: selection.compatible?.credentialEnv,
     credentialIdentity: selection.compatible?.credentialIdentity,
-    runtimeApiKey: selection.runtimeKeys?.[provider], env: selection.env,
+    runtimeApiKey: provider === "compatible" && selection.compatible?.auth === "none" ? undefined : selection.runtimeKeys?.[provider], env: selection.env,
     store: store ?? { get: async () => null, set: async () => {}, delete: async () => false },
   });
   if ("error" in credential) {
@@ -300,6 +304,14 @@ async function awaitSetup<T>(operation: Promise<T>, signal: AbortSignal): Promis
       error => { signal.removeEventListener("abort", abort); reject(error); },
     );
   });
+}
+
+/** Permit TLS smoke endpoints or explicit no-auth local HTTP; reject all credentialed plaintext connections. */
+export function isSafeSmokeEndpoint(value: string, auth: "required" | "none"): boolean {
+  if (!isSafeEndpoint(value)) return false;
+  const url = new URL(value);
+  return url.protocol === "https:" || auth === "none" && url.protocol === "http:"
+    && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase());
 }
 
 /** Accept only HTTP(S) compatible endpoints without URL-embedded secrets or fragments. */

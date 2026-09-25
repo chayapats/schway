@@ -26,6 +26,13 @@ test("worker rejects secrets, commands and oversize private instructions before 
   const safe = { provider: "compatible", model: "gpt-4o", timeoutMs: 500, workspaceRoot: join(tmpdir(), "schway-live-fixture"),
     compatible: { baseUrl: "http://127.0.0.1:1234/v1", auth: "none" } };
   expect(parseWorkerInput(safe).providers).toEqual(["compatible"]);
+  const unsafe = { ...safe, compatible: { ...safe.compatible, auth: "required" } };
+  expect(() => parseWorkerInput(unsafe)).toThrow();
+  await expect(runWorker(new ReadableStream<Uint8Array>({ start(stream) {
+    stream.enqueue(new TextEncoder().encode(JSON.stringify(unsafe)));
+    stream.close();
+  } }), { OPENAI_COMPATIBLE_API_KEY: "fixture-key-not-real" })).rejects.toThrow("invalid instruction");
+  expect(() => parseWorkerInput({ ...safe, compatible: { ...safe.compatible, baseUrl: "http://example.org/v1" } })).toThrow();
   expect(() => parseWorkerInput({ ...safe, apiKey: "PRIVATE_SECRET" })).toThrow();
   expect(() => parseWorkerInput({ ...safe, model: "secret\nhello" })).toThrow();
   expect(() => parseWorkerInput({ ...safe, workspaceRoot: "/tmp/other" })).toThrow();
@@ -140,6 +147,7 @@ test("non-cooperative output-limit worker is hard stopped without changing provi
 }, 10_000);
 
 test("oversized stdout and malformed worker response are rejected without echo, cleaned up and reaped", async () => {
+  if (process.platform === "win32") return;
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     let root = "";
@@ -196,11 +204,32 @@ test("selected worker fake succeeds without loading a sibling or printing an inj
   });
 });
 
+test("installed live command rejects credentialed HTTP before a local fake endpoint receives any request", async () => {
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+    calls++;
+    return new Response("not a model", { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    const secret = "fixture-key-not-real";
+    const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible",
+      "--base-url", `http://127.0.0.1:${server.port}/v1`, "--auth", "required", "--timeout-ms", "1000"], {
+      cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: secret }, stdout: "pipe", stderr: "pipe",
+    });
+    const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    expect(exit).toBe(1);
+    expect(calls).toBe(0);
+    expect(stderr).toContain("HTTPS");
+    expect(stdout + stderr).not.toContain(secret);
+  } finally { server.stop(true); }
+}, 15_000);
+
 test("installed command uses supervised child and local fake compatible HTTP transport for actual tool evidence", async () => {
+  if (process.platform === "win32") return;
   let calls = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     calls++;
-    expect(request.headers.get("authorization")).toBe("Bearer LOCAL_FAKE_SECRET");
+    expect(request.headers.get("authorization")).toBeNull();
     const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
     const tool = body.messages.find(message => message.role === "tool")?.content;
     const marker = tool?.match(/1\|([a-f0-9]{40})/)?.[1];
@@ -212,7 +241,7 @@ test("installed command uses supervised child and local fake compatible HTTP tra
   } });
   try {
     const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible", "--base-url",
-      `http://127.0.0.1:${server.port}/v1`, "--auth", "required", "--timeout-ms", "5000"], {
+      `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", "5000"], {
       cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "LOCAL_FAKE_SECRET" }, stdout: "pipe", stderr: "pipe",
     });
     const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -220,6 +249,6 @@ test("installed command uses supervised child and local fake compatible HTTP tra
     expect(stderr).not.toContain("error:");
     expect(calls).toBe(2);
     expect(stdout + stderr).not.toContain("LOCAL_FAKE_SECRET");
-    expect(JSON.parse(stdout)).toMatchObject({ aggregate: "passed", scenarios: [{ status: "passed", toolRoundTrip: true }] });
+    expect(JSON.parse(stdout)).toMatchObject({ aggregate: "passed", scenarios: [{ status: "passed", toolRoundTrip: true, authSource: "none" }] });
   } finally { server.stop(true); }
 }, 15_000);

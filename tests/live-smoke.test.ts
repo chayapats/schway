@@ -80,12 +80,30 @@ test("runtime override wins over environment and store-backed API credentials us
   expect(JSON.stringify(report)).not.toMatch(/runtime-secret|stored-openai-secret|environment-secret/);
 });
 
+test("programmatic credentialed HTTP is rejected before secure-store or provider discovery", async () => {
+  let stores = 0;
+  let models = 0;
+  const report = await runLiveSmoke({ ...selection(["compatible"]),
+    compatible: { baseUrl: "http://127.0.0.1:12345/v1", auth: "required" },
+    env: { OPENAI_COMPATIBLE_API_KEY: "fake-credential-not-real" },
+  }, {
+    createStore: () => { stores++; return missingStore; },
+    createModel: async () => { models++; return validModel([]); },
+  });
+  expect(stores).toBe(0);
+  expect(models).toBe(0);
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "insecure_endpoint", authSource: "unavailable" });
+  expect(JSON.stringify(report)).not.toContain("fake-credential-not-real");
+});
+
 test("no-auth compatible requires explicit selection and can use isolated endpoint", async () => {
-  const report = await runLiveSmoke({ ...selection(["compatible"]), compatible: { baseUrl: "http://localhost:4000/v1", auth: "none" } }, {
+  const report = await runLiveSmoke({ ...selection(["compatible"]), compatible: { baseUrl: "http://localhost:4000/v1", auth: "none" },
+    runtimeKeys: { compatible: "ignored-fixture-runtime-key" } }, {
     createStore: () => { throw Error("should not read secure store"); },
-    createModel: async () => validModel([]),
+    createModel: async input => { expect(input.apiKey).toBeUndefined(); return validModel([]); },
   });
   expect(report.scenarios[0]).toMatchObject({ status: "passed", authSource: "none" });
+  expect(JSON.stringify(report)).not.toContain("ignored-fixture-runtime-key");
 });
 
 test("tool-free final statement and incorrect read never pass", async () => {
@@ -253,14 +271,16 @@ test("a late keychain resolution cannot change a published timeout report or sta
   expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "timeout" });
 });
 
-test("local fake HTTP transport uses the selected compatible adapter and sends tool output back", async () => {
+test("fake HTTPS transport forwards selected compatible authorization and tool output", async () => {
   const bodies: unknown[] = [];
   const urls: string[] = [];
-  const report = await runLiveSmoke({ ...selection(["compatible"]), compatible: { baseUrl: "http://127.0.0.1:12345/v1", auth: "required" },
+  const authorizations: Array<string | null> = [];
+  const report = await runLiveSmoke({ ...selection(["compatible"]), compatible: { baseUrl: "https://127.0.0.1:12345/v1", auth: "required" },
     env: { OPENAI_COMPATIBLE_API_KEY: "fake-http-secret" } }, {
     createStore: () => missingStore,
     createModel: input => loadProviderModel(input, async (url, init) => {
       urls.push(String(url));
+      authorizations.push(new Headers(init?.headers ?? (url instanceof Request ? url.headers : undefined)).get("authorization"));
       const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
       bodies.push(body);
       const marker = body.messages.find(message => message.role === "tool")?.content.match(/1\|([a-f0-9]{40})/)?.[1];
@@ -272,7 +292,8 @@ test("local fake HTTP transport uses the selected compatible adapter and sends t
   });
   expect(report.scenarios[0]).toMatchObject({ status: "passed", toolRoundTrip: true });
   expect(bodies).toHaveLength(2);
-  expect(urls).toEqual(["http://127.0.0.1:12345/v1/chat/completions", "http://127.0.0.1:12345/v1/chat/completions"]);
+  expect(urls).toEqual(["https://127.0.0.1:12345/v1/chat/completions", "https://127.0.0.1:12345/v1/chat/completions"]);
+  expect(authorizations).toEqual(["Bearer fake-http-secret", "Bearer fake-http-secret"]);
   expect(JSON.stringify(report)).not.toContain("fake-http-secret");
 });
 
@@ -280,7 +301,7 @@ test("bounded fetch forwards request/options and charges the cumulative byte bud
   const scope = new AbortController();
   const original = new AbortController();
   const request = new Request("http://127.0.0.1:1234/v1", {
-    method: "POST", headers: { "x-fixture": "forwarded" }, signal: original.signal,
+    method: "POST", headers: { "x-fixture": "forwarded" }, signal: original.signal, redirect: "follow",
   });
   let seenInput: string | URL | Request | undefined;
   let seenInit: RequestInit | undefined;
@@ -301,12 +322,13 @@ test("bounded fetch forwards request/options and charges the cumulative byte bud
       }), { headers: { "content-type": "text/event-stream", "x-response": "preserved" } });
     },
   });
-  const options = { headers: { authorization: "Bearer fixture" }, signal: original.signal };
+  const options: RequestInit = { headers: { authorization: "Bearer fixture" }, signal: original.signal, redirect: "follow" };
   const first = await fake(request, options);
   expect(first.headers.get("x-response")).toBe("preserved");
   expect((await first.arrayBuffer()).byteLength).toBeGreaterThan(MAX_SMOKE_WIRE_BYTES / 2);
   expect(seenInput).toBe(request);
   expect(new Headers(seenInit?.headers).get("authorization")).toBe("Bearer fixture");
+  expect(seenInit?.redirect).toBe("error");
   expect((seenInput as Request).headers.get("x-fixture")).toBe("forwarded");
   const second = await fake(request, options);
   await expect(second.arrayBuffer()).rejects.toThrow();
@@ -329,11 +351,13 @@ test("bounded fetch prevents four selected adapters from consuming an oversized 
     let requests = 0;
     let requestSignal: AbortSignal | undefined;
     let requestHeaders: Headers | undefined;
+    let requestRedirect: RequestInit["redirect"];
     const fake = boundedSmokeFetch({ signal: controller.signal, onLimit: () => { exceeded++; controller.abort(); },
       fetch: async (input, init) => {
         requests++;
         requestSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
         requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        requestRedirect = init?.redirect;
         return new Response(new ReadableStream<Uint8Array>({ start(stream) {
           stream.enqueue(new TextEncoder().encode(`data: ${"x".repeat(MAX_SMOKE_WIRE_BYTES + 1)}`));
           stream.close();
@@ -349,7 +373,26 @@ test("bounded fetch prevents four selected adapters from consuming an oversized 
     expect(requests).toBe(1);
     expect(requestSignal?.aborted).toBe(true);
     expect(requestHeaders).toBeDefined();
+    expect(requestRedirect).toBe("error");
   }
+});
+
+test("live fetch forbids following even same-origin redirects from a credential-bearing Request", async () => {
+  let targetCalls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    if (new URL(request.url).pathname === "/redirect") return Response.redirect(new URL("/target", request.url).href, 302);
+    targetCalls++;
+    return new Response("unexpected");
+  } });
+  try {
+    const scope = new AbortController();
+    const guarded = boundedSmokeFetch({ signal: scope.signal, onLimit: () => {} });
+    const request = new Request(`http://127.0.0.1:${server.port}/redirect`, {
+      headers: { authorization: "Bearer fixture-not-real" }, redirect: "follow",
+    });
+    await expect(guarded(request, { redirect: "follow" })).rejects.toThrow();
+    expect(targetCalls).toBe(0);
+  } finally { server.stop(true); }
 });
 
 test("bounded fetch preserves valid streaming and message completion for all four adapter lanes", async () => {
@@ -400,11 +443,11 @@ test("production compatible fetch seam completes a real local two-request tool r
   } });
   try {
     const report = await runLiveSmoke({ ...selection(["compatible"]), timeoutMs: 2000,
-      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "required" },
+      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" },
       env: { OPENAI_COMPATIBLE_API_KEY: "fake-local-key" } });
-    expect(report.scenarios[0]).toMatchObject({ status: "passed", toolRoundTrip: true });
+    expect(report.scenarios[0]).toMatchObject({ status: "passed", toolRoundTrip: true, authSource: "none" });
     expect(seen).toHaveLength(2);
-    expect(seen.every(request => request.authorization === "Bearer fake-local-key" && request.url.endsWith("/v1/chat/completions"))).toBe(true);
+    expect(seen.every(request => request.authorization === null && request.url.endsWith("/v1/chat/completions"))).toBe(true);
     expect(JSON.stringify(seen[1]!.body)).toMatch(/1\|[a-f0-9]{40}/);
     expect(JSON.stringify(report)).not.toContain("fake-local-key");
   } finally { server.stop(true); }
