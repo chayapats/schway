@@ -358,6 +358,13 @@ test("grader evidence bounds candidate observations and redacts arbitrary secret
   expect(JSON.stringify(result)).not.toContain(secret);
 });
 
+test("trusted probe result remains valid when correct candidate logs to stdout", async () => {
+  const result = await runCodingEval({ caseId: "failing-tests", sourceRevision: revision, model: script([
+    { toolCalls: [put("src/cart.ts", 'export function cartTotal(items: {price: number; quantity: number}[]): number { console.log("calculating"); return items.reduce((sum, item) => sum + item.price * item.quantity, 0); }\n')] }, done,
+  ]) });
+  expect(result.outcome).toBe("success");
+});
+
 test("untrusted daily-case code cannot read parent credentials and infinite probes have a process deadline", async () => {
   const key = "SCHWAY_EVAL_VM_PROOF";
   const previous = process.env[key];
