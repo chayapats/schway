@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import { resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
-import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { createContextManager } from "../context/manager.ts";
 import { DEFAULT_MODEL_IDS } from "../model/catalog.ts";
 import { loadProviderModel, type ProviderLoaderInput } from "../model/loader.ts";
@@ -241,11 +241,14 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
     let integration: typeof import("../model/providers/codex-subscription.ts");
     try { integration = await import("../model/providers/codex-subscription.ts"); }
     catch { result.status = "pending"; result.reason = "integration_unavailable"; return; }
-    const { loadSubscriptionTokens, subscriptionAccessExpired } = integration;
+    // Separate an unavailable OS keychain from malformed/expired stored login data.
+    let raw: string | null;
+    try { raw = await store!.get(codexSubscriptionIdentity()); }
+    catch { result.status = "pending"; result.reason = "credential_store_unavailable"; return; }
     let tokens;
-    try { tokens = await loadSubscriptionTokens(store!); }
+    try { tokens = raw?.trim() ? integration.parseSubscriptionTokens(raw) : null; }
     catch { result.status = "pending"; result.reason = "subscription_requires_login"; return; }
-    if (!tokens || (subscriptionAccessExpired(tokens) && !tokens.refreshToken)) {
+    if (!tokens || (integration.subscriptionAccessExpired(tokens) && !tokens.refreshToken)) {
       result.status = "pending"; result.reason = "subscription_requires_login"; return;
     }
     result.authSource = "stored-subscription";

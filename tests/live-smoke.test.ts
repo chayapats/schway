@@ -269,6 +269,33 @@ test("runner setup failure is not misreported as a provider failure", async () =
   expect(JSON.stringify(report)).not.toContain("private setup error");
 });
 
+test("second subscription store read failure is store-unavailable, not expired login, without leaking errors", async () => {
+  let reads = 0;
+  let constructions = 0;
+  const report = await runLiveSmoke(selection(["codex"]), {
+    createStore: () => ({ ...missingStore, get: async () => {
+      reads++;
+      if (reads === 1) return JSON.stringify({ accessToken: "stored-private-token" });
+      throw Error("keychain denied read: stored-private-token");
+    } }),
+    createModel: async () => { constructions++; return validModel([]); },
+  });
+  expect(reads).toBe(2);
+  expect(constructions).toBe(0);
+  expect(report.scenarios[0]).toMatchObject({ status: "pending", reason: "credential_store_unavailable", authSource: "unavailable" });
+  expect(JSON.stringify(report)).not.toContain("stored-private-token");
+});
+
+test("malformed subscription payload remains a re-login problem rather than a store failure", async () => {
+  let reads = 0;
+  const report = await runLiveSmoke(selection(["codex"]), {
+    createStore: () => ({ ...missingStore, get: async () => ++reads === 1 ? "nonempty-private-token" : "{invalid-token" }),
+    createModel: async () => { throw Error("must not instantiate"); },
+  });
+  expect(report.scenarios[0]).toMatchObject({ status: "pending", reason: "subscription_requires_login" });
+  expect(JSON.stringify(report)).not.toContain("nonempty-private-token");
+});
+
 test("expired subscription without refresh is pending and never starts login", async () => {
   const report = await runLiveSmoke(selection(["codex"]), {
     createStore: () => ({ ...missingStore, get: async () => JSON.stringify({ accessToken: "private", expiresAt: 1 }) }),
