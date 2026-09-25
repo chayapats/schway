@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { parseLiveArgs, runLiveCli } from "../src/live/cli.ts";
 import { withTempDir } from "./helpers.ts";
@@ -16,6 +16,32 @@ test("CLI rejects implicit providers, invalid options and missing compatible URL
   expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://example.org/v1", "--auth", "none"])).toHaveProperty("error");
   expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "https://example.org/v1"])).toHaveProperty("selection");
   expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://[::1]:1234/v1", "--auth", "none"])).toHaveProperty("selection");
+});
+
+test("compatible profile and credential identity reject control chars and >200 chars before any worker", async () => {
+  for (const flag of ["--profile", "--credential-identity"]) {
+    for (const value of ["bad\nvalue", "bad\tvalue", "bad\x7fvalue", "x".repeat(201)]) {
+      expect(parseLiveArgs(["--provider", "compatible", "--base-url", "https://example.org/v1", flag, value])).toHaveProperty("error");
+    }
+  }
+  const accepted = parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "https://example.org/v1",
+    "--profile", "p".repeat(200), "--credential-identity", "with spaces " + "i".repeat(188)]);
+  expect(accepted).toMatchObject({ selection: { compatible: {
+    profile: "p".repeat(200), credentialIdentity: "with spaces " + "i".repeat(188),
+  } } });
+  const spawned = spyOn(Bun, "spawn");
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const code = await runLiveCli(["--provider", "compatible", "--base-url", "https://example.org/v1", "--credential-identity", "bad\nvalue"], {
+      env: { OPENAI_COMPATIBLE_API_KEY: "fixture-key-not-real" }, revision: "fixture-revision",
+      out: text => output.push(text), err: text => errors.push(text),
+    });
+    expect(code).toBe(1);
+    expect(spawned).not.toHaveBeenCalled();
+  } finally { spawned.mockRestore(); }
+  expect(output).toEqual([]);
+  expect(errors.join("")).not.toContain("fixture-key-not-real");
 });
 
 test("disabled CLI emits redacted, dated incomplete report and no credential discovery", async () => {

@@ -3,6 +3,7 @@ import { runLiveProcesses } from "./process.ts";
 
 const PROVIDERS: readonly SmokeProvider[] = ["anthropic", "openai-api-key", "compatible", "codex"];
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
+const SAFE_OPTION = /^[^\x00-\x1f\x7f]{1,200}$/;
 /** Argument parser that never inspects the environment or OS credential store. */
 export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeSelection, "env" | "revision"> } | { error: string } {
   const selection: Omit<SmokeSelection, "env" | "revision"> = {
@@ -33,9 +34,9 @@ export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeS
       url = new URL(value).href;
     } else if (flag === "--auth" && (value === "required" || value === "none")) auth = value;
     else if (flag === "--timeout-ms" && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 120_000) selection.timeoutMs = Number(value);
-    else if (flag === "--profile") profile = value;
+    else if (flag === "--profile" && SAFE_OPTION.test(value)) profile = value;
     else if (flag === "--credential-env" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) credentialEnv = value;
-    else if (flag === "--credential-identity") credentialIdentity = value;
+    else if (flag === "--credential-identity" && SAFE_OPTION.test(value)) credentialIdentity = value;
     else return { error: "Invalid live smoke option or value." };
   }
   if (selection.providers.length === 0) return { error: "Select --provider anthropic|openai-api-key|compatible|codex|all (or a comma-separated list)." };
