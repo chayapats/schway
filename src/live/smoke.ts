@@ -14,6 +14,7 @@ import { readTool, type ReadInput } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
+import { boundedSmokeFetch } from "./transport.ts";
 
 /** Independently selectable provider/auth lanes; API-key OpenAI never silently switches to subscription billing. */
 export type SmokeProvider = "anthropic" | "openai-api-key" | "compatible" | "codex";
@@ -131,7 +132,10 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
       if (signal.aborted) { result.status = selection.signal?.aborted ? "pending" : "failed_runner"; result.reason = selection.signal?.aborted ? "cancelled" : "timeout"; }
       return;
     }
-    const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input)))(input), signal);
+    // Bound selected production adapters' SSE response bytes before their parsers
+    // can accumulate streamed arguments without emitting normalized model events.
+    const fetchFn = boundedSmokeFetch({ signal, onLimit: () => { outputLimit = true; controller.abort(); } });
+    const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input, fetchFn)))(input), signal);
     result.model = SAFE_ID.test(model.id) ? model.id : "invalid-model-id";
     // The loop registers activate_skill whenever it has a workspace. Do not
     // advertise that unrelated tool to the selected smoke transport.

@@ -3,9 +3,13 @@ import { access } from "node:fs/promises";
 import type { Model, ModelRequest } from "../src/model/model.ts";
 import type { CredentialStore } from "../src/auth/store.ts";
 import { runLiveSmoke, type SmokeSelection } from "../src/live/smoke.ts";
-import { createScriptedModel } from "./helpers/scripted-model.ts";
+import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
+import { boundedSmokeFetch, MAX_SMOKE_WIRE_BYTES } from "../src/live/transport.ts";
+import { sampleRequest } from "./fixtures/openai-compatible.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
-import { encodeChatCompletionsSse } from "./fixtures/openai-compatible.ts";
+import { encodeChatCompletionsSse, TEXT_STREAM_CHUNKS } from "./fixtures/openai-compatible.ts";
+import { encodeSse as encodeAnthropicSse, TEXT_STREAM_EVENTS as ANTHROPIC_TEXT_EVENTS } from "./fixtures/anthropic.ts";
+import { encodeSse as encodeOpenAiSse, TEXT_STREAM_EVENTS as OPENAI_TEXT_EVENTS } from "./fixtures/openai.ts";
 
 const missingStore: CredentialStore = { get: async () => null, set: async () => {}, delete: async () => false };
 const selection = (providers: SmokeSelection["providers"]): SmokeSelection => ({
@@ -248,6 +252,159 @@ test("local fake HTTP transport uses the selected compatible adapter and sends t
   expect(bodies).toHaveLength(2);
   expect(urls).toEqual(["http://127.0.0.1:12345/v1/chat/completions", "http://127.0.0.1:12345/v1/chat/completions"]);
   expect(JSON.stringify(report)).not.toContain("fake-http-secret");
+});
+
+test("bounded fetch forwards request/options and charges the cumulative byte budget across responses", async () => {
+  const scope = new AbortController();
+  const original = new AbortController();
+  const request = new Request("http://127.0.0.1:1234/v1", {
+    method: "POST", headers: { "x-fixture": "forwarded" }, signal: original.signal,
+  });
+  let seenInput: string | URL | Request | undefined;
+  let seenInit: RequestInit | undefined;
+  let hit = 0;
+  let cancelled = 0;
+  let replies = 0;
+  const fake = boundedSmokeFetch({ signal: scope.signal, onLimit: () => { hit++; scope.abort(); },
+    fetch: async (input, init) => {
+      seenInput = input;
+      seenInit = init;
+      replies++;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(stream) {
+          stream.enqueue(new Uint8Array(MAX_SMOKE_WIRE_BYTES / 2 + 4).fill(120));
+          if (replies === 1) stream.close();
+        },
+        cancel() { cancelled++; },
+      }), { headers: { "content-type": "text/event-stream", "x-response": "preserved" } });
+    },
+  });
+  const options = { headers: { authorization: "Bearer fixture" }, signal: original.signal };
+  const first = await fake(request, options);
+  expect(first.headers.get("x-response")).toBe("preserved");
+  expect((await first.arrayBuffer()).byteLength).toBeGreaterThan(MAX_SMOKE_WIRE_BYTES / 2);
+  expect(seenInput).toBe(request);
+  expect(new Headers(seenInit?.headers).get("authorization")).toBe("Bearer fixture");
+  expect((seenInput as Request).headers.get("x-fixture")).toBe("forwarded");
+  const second = await fake(request, options);
+  await expect(second.arrayBuffer()).rejects.toThrow();
+  expect(hit).toBe(1);
+  expect(seenInit?.signal?.aborted).toBe(true);
+  await Bun.sleep(0);
+  expect(cancelled).toBeGreaterThanOrEqual(1);
+});
+
+test("bounded fetch prevents four selected adapters from consuming an oversized undelimited SSE chunk", async () => {
+  const lanes = [
+    { provider: "anthropic" as const, apiKey: "fake-anthropic" },
+    { provider: "openai" as const, openaiAuth: "api-key" as const, apiKey: "fake-openai" },
+    { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const },
+    { provider: "openai" as const, openaiAuth: "codex" as const, codexTokens: { accessToken: "fake-codex", accountId: "account" } },
+  ];
+  for (const lane of lanes) {
+    const controller = new AbortController();
+    let exceeded = 0;
+    let requests = 0;
+    let requestSignal: AbortSignal | undefined;
+    let requestHeaders: Headers | undefined;
+    const fake = boundedSmokeFetch({ signal: controller.signal, onLimit: () => { exceeded++; controller.abort(); },
+      fetch: async (input, init) => {
+        requests++;
+        requestSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        return new Response(new ReadableStream<Uint8Array>({ start(stream) {
+          stream.enqueue(new TextEncoder().encode(`data: ${"x".repeat(MAX_SMOKE_WIRE_BYTES + 1)}`));
+          stream.close();
+        } }), { headers: { "content-type": "text/event-stream" } });
+      },
+    });
+    const model = await loadProviderModel(lane, fake);
+    let failed = false;
+    try { await collect(model.stream({ ...sampleRequest(), signal: controller.signal })); }
+    catch { failed = true; }
+    expect(failed).toBe(true);
+    expect(exceeded).toBe(1);
+    expect(requests).toBe(1);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(requestHeaders).toBeDefined();
+  }
+});
+
+test("bounded fetch preserves valid streaming and message completion for all four adapter lanes", async () => {
+  const codexEvents = [
+    { type: "response.created", response: { id: "resp_1", status: "in_progress" } },
+    { type: "response.output_item.added", output_index: 0, item: { type: "message" } },
+    { type: "response.output_text.delta", output_index: 0, delta: "Hello" },
+    { type: "response.output_item.done", output_index: 0, item: { type: "message" } },
+    { type: "response.completed", response: { id: "resp_1", status: "completed" } },
+  ];
+  const codexSse = `${codexEvents.map(event => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+  const lanes = [
+    { input: { provider: "anthropic" as const, apiKey: "fixture" }, sse: encodeAnthropicSse(ANTHROPIC_TEXT_EVENTS) },
+    { input: { provider: "openai" as const, openaiAuth: "api-key" as const, apiKey: "fixture" }, sse: encodeOpenAiSse(OPENAI_TEXT_EVENTS) },
+    { input: { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const }, sse: encodeChatCompletionsSse(TEXT_STREAM_CHUNKS) },
+    { input: { provider: "openai" as const, openaiAuth: "codex" as const, codexTokens: { accessToken: "fixture", accountId: "account" } }, sse: codexSse },
+  ];
+  for (const lane of lanes) {
+    const controller = new AbortController();
+    let tripped = false;
+    let calls = 0;
+    const guarded = boundedSmokeFetch({ signal: controller.signal, onLimit: () => { tripped = true; controller.abort(); },
+      fetch: async () => {
+        calls++;
+        return new Response(lane.sse, { headers: { "content-type": "text/event-stream" } });
+      },
+    });
+    const model = await loadProviderModel(lane.input, guarded);
+    const events = await collect(model.stream({ ...sampleRequest(), signal: controller.signal }));
+    expect(events.at(-1)?.type).toBe("message_complete");
+    expect(tripped).toBe(false);
+    expect(calls).toBe(1);
+  }
+});
+
+test("production compatible fetch seam completes a real local two-request tool round trip", async () => {
+  const seen: Array<{ url: string; authorization: string | null; body: unknown }> = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
+    seen.push({ url: request.url, authorization: request.headers.get("authorization"), body });
+    const result = body.messages.find(message => message.role === "tool")?.content;
+    const marker = result?.match(/1\|([a-f0-9]{40})/)?.[1];
+    const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: { name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
+    const chunk = (payload: object, finish_reason: string | null) => ({ id: "fixture", object: "chat.completion.chunk", created: 0, model: "gpt-4o",
+      choices: [{ index: 0, delta: payload, finish_reason }] });
+    return new Response(encodeChatCompletionsSse([chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]),
+      { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    const report = await runLiveSmoke({ ...selection(["compatible"]), timeoutMs: 2000,
+      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "required" },
+      env: { OPENAI_COMPATIBLE_API_KEY: "fake-local-key" } });
+    expect(report.scenarios[0]).toMatchObject({ status: "passed", toolRoundTrip: true });
+    expect(seen).toHaveLength(2);
+    expect(seen.every(request => request.authorization === "Bearer fake-local-key" && request.url.endsWith("/v1/chat/completions"))).toBe(true);
+    expect(JSON.stringify(seen[1]!.body)).toMatch(/1\|[a-f0-9]{40}/);
+    expect(JSON.stringify(report)).not.toContain("fake-local-key");
+  } finally { server.stop(true); }
+});
+
+test("compatible live runner classifies undelimited SSE over wire budget as output_limit", async () => {
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+    calls++;
+    return new Response(new ReadableStream<Uint8Array>({ start(stream) {
+      const chunk = new TextEncoder().encode(`data: ${"x".repeat(2048)}`);
+      for (let i = 0; i < MAX_SMOKE_WIRE_BYTES / chunk.byteLength + 2; i++) stream.enqueue(chunk);
+      stream.close();
+    } }), { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    const report = await runLiveSmoke({ ...selection(["compatible"]), timeoutMs: 2000,
+      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } });
+    expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
+    expect(report.aggregate).toBe("failed");
+    expect(calls).toBe(1);
+  } finally { server.stop(true); }
 });
 
 test("rejected subscription refresh asks for interactive re-login without starting one", async () => {
