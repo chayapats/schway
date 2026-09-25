@@ -1,6 +1,6 @@
 # Installed v0.2-v0.3 release gate (#58)
 
-Status: **pending**, not release-approved. Checked on 2026-09-25 from the #58 issue worktree based on `15d6bf5` (which includes #57); package identity `schway@0.1.0`, Bun `1.4.2` on macOS arm64. This is a local packed-artifact and offline-fixture check, not a registry publication, a live-provider call or human dogfood. Record the final candidate SHA and rerun checks if the PR changes.
+Status: **pending**, not release-approved. Checked on 2026-09-25 from the #58 issue worktree based on `15d6bf5` (which includes #57); package identity `schway@0.1.0`, Bun `1.4.2` on macOS arm64. The original gate was a local packed-artifact and offline-fixture check; the later subscription catalog follow-up added one bounded live model-list check. No registry publication, live inference, or human dogfood was performed. Record the final candidate SHA and rerun checks if the PR changes.
 
 ## Reproduce the installed path
 
@@ -26,7 +26,7 @@ bun run live-smoke --provider all # no --enable-live: records skips, exits 2
 | #45 external Matt-style package | Passed offline / human pending | `tests/matt-workflow.test.ts` verifies configured external package contract; no human workflow recorded here. |
 | #46 secure key storage | Passed injected / native pending | `tests/credential-store.test.ts`, `tests/credential-management.test.ts` inject a store; native OS secure-store smoke not run. |
 | #47 profiles, #48 reasoning | Passed fixtures / live pending | Installed two profiles produce distinct HTTP Authorization, model and `reasoning_effort`; `tests/reasoning.test.ts` covers provider-specific controls. No remote reasoning response checked. |
-| #49 subscription feasibility, #50 login/refresh/logout | Passed injected / live pending | `docs/research-codex-subscription.md` records the earlier feasibility handoff and issue #50 records the later positive transport decision; `tests/codex-subscription.test.ts` exercises injected OAuth/refresh/store and no billing fallback. `tests/subscription-models.test.ts` checks account-scoped Codex model discovery and picker selection against protocol fixtures. No real subscription sign-in, model list or live confirmation. |
+| #49 subscription feasibility, #50 login/refresh/logout | Passed injected / live pending | `docs/research-codex-subscription.md` records the earlier feasibility handoff and issue #50 records the later positive transport decision; `tests/codex-subscription.test.ts` exercises injected OAuth/refresh/store and no billing fallback. `tests/subscription-models.test.ts` checks account-scoped Codex model discovery and picker selection against protocol fixtures. A real already-stored subscription returned 7 visible model IDs on 2026-09-25; the TUI displayed all seven, and the live controller selected `gpt-6-astra` without an inference call. Login/refresh/logout and live inference are not confirmed here. |
 | #51 TUI branch tree | Passed controller / UI pending | Installed controller tree switching after compaction and `tests/tui-branches.test.ts`; no human terminal screenshot/visual check. |
 | #52 Git changes, #53 diagnostics, #54 doctor | Passed offline | Installed snapshot distinguishes pre-existing and new files; installed `--debug-file` emits metadata without model/tool text; doctor reports healthy and broken session storage. More failure cases in corresponding deterministic tests. |
 | #55 live smoke | Pending | `bun run live-smoke --provider all` returned `incomplete`, all four lanes `skipped/live_disabled`; no `--enable-live`, consent, keys or subscription used. |
@@ -34,6 +34,10 @@ bun run live-smoke --provider all # no --enable-live: records skips, exits 2
 | #58 installed milestone gate | **Pending** | Deterministic and installed-fixture gate passed; required live smoke/eval, native/human terminal evidence and real Schway-development dogfood are outstanding. |
 
 Historical #16 closed with the real Schway-development dogfood check **pending**; closure and scripted/package fixtures do not turn that into a pass. A focused real task still needs an authorized installed Schway session using an actual provider in an isolated Schway checkout: inspect source, make a justified small edit, run relevant tests, resume, then record the actual diff, test output, revision and session outcome. An installed scripted fixture or an agent editing this repository directly is not that evidence.
+
+## Subscription catalog incident (2026-09-25)
+
+The initial `client_version=0.1.0` (Schway's package version) made the actual Codex `/models` endpoint return HTTP 200 with `{"models":[]}` on two reproducible calls. Omitting `client_version` returned HTTP 400. Using the installed official Codex client version `0.156.1` returned HTTP 200 with 9 entries (7 `list`, 2 `hide`). After pinning this verified protocol compatibility version, `fetchSubscriptionModels` returned the seven visible IDs, and a real pseudo-terminal session displayed all seven **only after** `/model`. A controller backed by the real OS secure store selected `gpt-6-astra` and remained idle; no paid inference was attempted. The TUI tests created new empty sessions in the user's session directory; existing sessions were not edited or removed. This is live **model discovery** evidence only, not proof of successful streaming turns, subscription refresh, or multi-account availability.
 
 ## External evidence to collect
 

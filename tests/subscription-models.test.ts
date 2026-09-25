@@ -35,6 +35,20 @@ test("subscription discovery uses Codex account auth and the official catalog, n
   expect(JSON.stringify(models)).not.toContain("subscription-secret");
 });
 
+test("Codex catalog uses a compatible client version rather than Schway's package version", async () => {
+  const store = fakeCredentialStore();
+  await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", expiresAt: Date.now() + 600_000 }));
+  const seen: string[] = [];
+  const models = await fetchSubscriptionModels({ store, fetch: async url => {
+    const clientVersion = new URL(String(url)).searchParams.get("client_version") ?? "";
+    seen.push(clientVersion);
+    // The real backend returned zero models for Schway 0.1.0, but visible models for Codex 0.156.1.
+    return Response.json(clientVersion === "0.156.1" ? catalog : { models: [] });
+  } });
+  expect(seen).toEqual(["0.156.1"]);
+  expect(models).toEqual(["real-codex"]);
+});
+
 test("catalog rejects absent auth, malformed/oversized responses and status errors without leaking secrets", async () => {
   const store = fakeCredentialStore();
   let contacted = 0;
