@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runEvalCli } from "../src/eval/cli.ts";
+import { runEvalCli, summarizeEvalResults } from "../src/eval/cli.ts";
+import { runCodingEval, skippedCodingEval, resolveEvalSettings } from "../src/eval/coding.ts";
+import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 
 test("paid selection requires both model and explicit opt-in, without calling a provider", async () => {
@@ -51,4 +53,28 @@ test("offline command writes a bounded artifact with the observed grader result"
     expect(result.grader.passed).toBe(true);
     expect(result.metrics.toolCalls).toBe(3);
   });
+});
+
+test("matrix runs the selected case/config grid, records skips and never treats them as success", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "matrix.json");
+    expect(await runEvalCli(["--matrix", "scripted:offline-v1,openai:gpt-fixture", "--allow-paid", "--case", "all", "--output", output], {})).toBe(1);
+    const artifact = JSON.parse(await readFile(output, "utf8")) as { results: Array<{ case: { id: string }; settings: unknown; outcome: string; metrics: unknown }>; summary: Record<string, number> };
+    expect(artifact.results).toHaveLength(14);
+    expect(artifact.summary.success).toBe(7);
+    expect(artifact.summary.skipped_prerequisites).toBe(7);
+    expect(artifact.summary.grader_failure).toBe(0);
+    expect(new Set(artifact.results.map(row => row.case.id)).size).toBe(7);
+    expect(artifact.results.every(row => row.settings && row.metrics)).toBe(true);
+    expect(JSON.stringify(artifact)).not.toContain("apiKey");
+  });
+  expect(await runEvalCli(["--matrix", "scripted:offline-v1,openai:gpt-fixture", "--case", "all"], {})).toBe(2);
+});
+
+test("mixed pass, fail and skip aggregates only observed outcomes", async () => {
+  const failed = await runCodingEval({ caseId: "parallel-read", model: createScriptedModel({ text: "done" }), sourceRevision: "fixture" });
+  const skip = skippedCodingEval("openai", "unavailable", "fixture", resolveEvalSettings(), "parallel-read");
+  const summary = summarizeEvalResults([{ ...failed, outcome: "success" }, failed, skip]);
+  expect(summary).toMatchObject({ success: 1, grader_failure: 1, skipped_prerequisites: 1, model_failure: 0 });
+  expect(skip.case.id).toBe("parallel-read");
 });
