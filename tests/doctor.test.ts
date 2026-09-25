@@ -36,6 +36,24 @@ test("independently diagnoses invalid configuration, storage and search availabi
   expect(doctorExitCode(report)).toBe(1);
 });
 
+test("env-file HOME cannot replace the launch process HOME for storage or user config", async () => {
+  const { workspace, home, root } = await fixture();
+  const overlayHome = join(root, "overlay-home"); await mkdir(join(home, ".schway"), { recursive: true });
+  await mkdir(join(overlayHome, ".schway"), { recursive: true });
+  await writeFile(join(home, ".schway", "config.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://localhost:11434/v1", auth: "none" }));
+  await writeFile(join(overlayHome, ".schway", "config.json"), JSON.stringify({ provider: "openai" }));
+  await writeFile(join(workspace, ".diagnose.env"), `HOME=${overlayHome}\nANTHROPIC_API_KEY=from-file\n`);
+  const options = { ...args, envFiles: [".diagnose.env"] };
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: options, store: store(null) });
+  expect(report.provider).toBe("openai-compatible");
+  expect(report.authSource).toBe("none");
+  expect(check(report, "config.user")?.status).toBe("ok");
+  const missing = await diagnose({ cwd: workspace, env: {}, args: options, store: store(null) });
+  expect(check(missing, "sessions")?.status).toBe("error");
+  expect(missing.provider).toBe("anthropic");
+  expect(missing.authSource).toBe("environment");
+});
+
 test("auth modes isolate selected credentials, locked store and subscription expiry", async () => {
   const { workspace, home } = await fixture();
   const run = (override: Record<string, string | undefined>, options: Parameters<typeof diagnose>[0]["args"], value: string | null | Error) =>
@@ -100,6 +118,20 @@ test("auto OpenAI reports a locked identity even if the other store identity has
   }
 });
 
+test("whitespace-only stored subscription allows auto fallback to stored OpenAI API key", async () => {
+  const { workspace, home } = await fixture();
+  const inspected: string[] = [];
+  const splitStore: CredentialStore = { ...store(null), get: async identity => {
+    inspected.push(identity.account);
+    return identity.account === "api-key:openai" ? "private-stored-api-key" : "  \n ";
+  } };
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, provider: "openai" }, store: splitStore });
+  expect(report.authSource).toBe("secure-store");
+  expect(check(report, "auth")?.status).toBe("ok");
+  expect(inspected).toEqual(["codex-subscription:chatgpt", "api-key:openai"]);
+  expect(JSON.stringify(report)).not.toContain("private-stored-api-key");
+});
+
 test("profile identity selects only its configured credential source", async () => {
   const { workspace, home } = await fixture();
   await mkdir(join(workspace, ".schway"));
@@ -123,7 +155,7 @@ test("skill duplicates, invalid metadata and attached roots are independently re
   await writeFile(join(attach, ".agents", "skills", "repeat", "SKILL.md"), "---\nname: repeat\ndescription: second\n---\nSecond instruction.\n");
   await writeFile(join(workspace, ".agents", "skills", "invalid", "SKILL.md"), "invalid frontmatter");
   const report = await diagnose({ cwd: workspace, env: { HOME: home, ANTHROPIC_API_KEY: "key" }, args: { ...args, addDirs: [attach] }, store: store(null) });
-  expect(check(report, "skill.duplicate.repeat")?.status).toBe("error");
+  expect(check(report, "skill.duplicate.0")?.status).toBe("error");
   expect(check(report, "skill.invalid.0")?.status).toBe("error");
   expect(check(report, "skill.invalid.0")?.summary).toContain("invalid");
   expect(check(report, "attachments")?.status).toBe("ok");
@@ -149,12 +181,46 @@ test("manifest errors are independent and extension code never executes", async 
   expect(inspected.diagnostics).toHaveLength(2); expect(inspected.packages).toHaveLength(1);
   expect(inspected.issues).toEqual([
     { scope: "project", name: "bad-one", kind: "manifest" },
-    { scope: "project", name: "bad-two", kind: "missing" },
+    { scope: "project", name: "bad-two", kind: "entry", entry: "missing.ts" },
   ]);
   const report = await diagnose({ cwd: workspace, env: { HOME: home, ANTHROPIC_API_KEY: "key" }, args: { ...args, extensions: ["node_modules/valid/extension.ts"] }, store: store(null) });
   expect(report.checks.filter(c => c.id.startsWith("package.") && c.status === "error")).toHaveLength(2);
   expect(report.checks.some(c => c.summary.includes("Duplicate enabled extension"))).toBe(true);
   expect(await Bun.file(marker).exists()).toBe(false);
+});
+
+test("duplicate skill names never print credential values in check IDs or summaries", async () => {
+  const { workspace, home, root } = await fixture();
+  const secret = "private-secret-credential";
+  const attach = join(root, "attached");
+  for (const path of [workspace, attach]) {
+    const skill = join(path, ".agents", "skills", secret);
+    await mkdir(skill, { recursive: true });
+    await writeFile(join(skill, "SKILL.md"), `---\nname: ${secret}\ndescription: A duplicate skill.\n---\nRun safely.\n`);
+  }
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, addDirs: [attach], apiKey: secret }, store: store(null) });
+  expect(check(report, "skill.duplicate.0")?.status).toBe("error");
+  expect(check(report, "skill.duplicate.0")?.summary).toContain("***");
+  expect(JSON.stringify(report)).not.toContain(secret);
+});
+
+test("missing manifest paths are distinct from missing installs and safely identify the entry", async () => {
+  const { workspace, home } = await fixture();
+  const secret = "private-secret-credential";
+  await mkdir(join(workspace, ".schway"));
+  await writeFile(join(workspace, ".schway", "config.json"), JSON.stringify({ packages: ["valid", "absent"] }));
+  await mkdir(join(workspace, "node_modules", "valid"), { recursive: true });
+  await writeFile(join(workspace, "node_modules", "valid", "package.json"), JSON.stringify({ schway: { extensions: ["existing.ts", `missing-${secret}.ts`] } }));
+  await writeFile(join(workspace, "node_modules", "valid", "existing.ts"), "export default () => {};");
+  const inspected = await inspectPackages({ workspaceRoot: workspace, home });
+  expect(inspected.issues).toEqual([
+    { scope: "project", name: "valid", kind: "entry", entry: `missing-${secret}.ts` },
+    { scope: "project", name: "absent", kind: "missing" },
+  ]);
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, apiKey: secret }, store: store(null) });
+  expect(check(report, "package.0")?.summary).toContain("missing-***.ts");
+  expect(check(report, "package.1")?.summary).toContain("installation");
+  expect(JSON.stringify(report)).not.toContain(secret);
 });
 
 test("missing extensions and malformed skills expose bounded, redacted source identifiers", async () => {

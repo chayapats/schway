@@ -89,7 +89,8 @@ export async function diagnose(input: {
       else { env = loaded; add("env-files", "ok", "Explicit environment files loaded for presence checks."); }
     } catch { add("env-files", "error", "Environment file inspection failed.", "Check --env-file paths and permissions."); }
   }
-  const home = env.HOME;
+  // Normal CLI requires process HOME before reading --env-file; overlays may provide keys but cannot move storage.
+  const home = input.env.HOME;
   if (!home) add("sessions", "error", "HOME is unset; session storage unavailable.", "Set HOME to a writable home directory.");
   else {
     const directory = sessionsDirectory(home);
@@ -154,7 +155,7 @@ export async function diagnose(input: {
     const subscription = async (): Promise<"present" | "missing" | "unavailable" | "refresh" | "expired" | "invalid"> => {
       try {
         const raw = await store.get(codexSubscriptionIdentity());
-        if (!raw) return "missing";
+        if (!raw?.trim()) return "missing";
         let parsed: unknown;
         try { parsed = JSON.parse(raw); } catch { return "invalid"; }
         if (typeof parsed !== "object" || !parsed || !("accessToken" in parsed) || typeof parsed.accessToken !== "string" || !parsed.accessToken.trim()) return "invalid";
@@ -226,11 +227,15 @@ export async function diagnose(input: {
       const secrets = [input.args.apiKey, ...Object.values(input.args.headers ?? {}), ...Object.values(env)]
         .filter((value): value is string => !!value).sort((a, b) => b.length - a.length);
       const safeName = (value: string) => redactSecrets(value, secrets).replace(/[^a-zA-Z0-9._*/-]/g, "?").slice(0, 64);
+      const safeEntry = (value: string) => {
+        const redacted = redactSecrets(value, secrets).replace(/[^a-zA-Z0-9._*/-]/g, "?");
+        return redacted.length > 64 ? `...${redacted.slice(-61)}` : redacted;
+      };
       for (let i = 0; i < inspected.issues.length; i++) {
         const issue = inspected.issues[i]!;
         const subject = issue.name ? `${issue.scope} package ${safeName(issue.name)}` : `${issue.scope} package configuration`;
-        const category = issue.kind === "configuration" ? "is invalid or unreadable" : issue.kind === "missing" ? "has a missing installation or declared entry" : issue.kind === "peer" ? "has an invalid or incompatible peer declaration" : "has an invalid manifest";
-        add(`package.${i}`, "error", `${subject} ${category}.`, issue.name ? `Inspect the schway manifest and declared paths for ${safeName(issue.name)}; install it in its configured scope or remove its enablement.` : "Correct the invalid package configuration or restore access to it.");
+        const category = issue.kind === "configuration" ? "is invalid or unreadable" : issue.kind === "missing" ? "has a missing installation" : issue.kind === "entry" ? `has missing declared entry ${safeEntry(issue.entry ?? "unknown")}` : issue.kind === "peer" ? "has an invalid or incompatible peer declaration" : "has an invalid manifest";
+        add(`package.${i}`, "error", `${subject} ${category}.`, issue.kind === "entry" ? `Restore declared path ${safeEntry(issue.entry ?? "unknown")} inside ${safeName(issue.name ?? "package")}, or remove it from that package's schway manifest.` : issue.name ? `Inspect the schway manifest and declared paths for ${safeName(issue.name)}; install it in its configured scope or remove its enablement.` : "Correct the invalid package configuration or restore access to it.");
       }
       // Discovery accepts already validated packages and never imports extension registration code.
       try {
@@ -241,8 +246,8 @@ export async function diagnose(input: {
           const identifier = safeName(basename(source.endsWith("SKILL.md") ? dirname(source) : source));
           add(`skill.invalid.${i}`, "error", `Skill metadata invalid or unreadable in ${identifier}.`, `Repair SKILL.md for ${identifier} (frontmatter, body or permissions) under .agents/skills, ~/.schway/skills or its configured package.`);
         }
-        for (const duplicate of skills.ambiguous) add(`skill.duplicate.${duplicate.name}`, "error", `Duplicate skill name: ${duplicate.name}.`, "Rename or remove a duplicate skill in the same precedence tier.");
-        for (const collision of skills.collisions) add(`skill.collision.${collision.name}`, "error", `Skill ${collision.name} collides with a built-in command.`, "Rename the skill.");
+        for (const [i, duplicate] of skills.ambiguous.entries()) add(`skill.duplicate.${i}`, "error", `Duplicate skill name: ${safeName(duplicate.name)}.`, "Rename or remove a duplicate skill in the same precedence tier.");
+        for (const [i, collision] of skills.collisions.entries()) add(`skill.collision.${i}`, "error", `Skill ${safeName(collision.name)} collides with a built-in command.`, "Rename the skill.");
       } catch {
         input.signal?.throwIfAborted();
         add("skills", "error", "Unable to inspect skill metadata.", "Check skill directories and permissions.");

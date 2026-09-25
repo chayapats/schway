@@ -18,7 +18,9 @@ export interface EnabledPackage {
 export interface PackageIssue {
   scope: "project" | "global";
   name?: string;
-  kind: "configuration" | "missing" | "manifest" | "peer";
+  kind: "configuration" | "missing" | "entry" | "manifest" | "peer";
+  /** Raw declared relative entry path; callers must redact and bound it before display. */
+  entry?: string;
 }
 
 /** Resolve enabled packages, retaining the first error as the runtime loader always has. */
@@ -57,6 +59,7 @@ export async function inspectPackages(options: {
       options.signal?.throwIfAborted();
       const source = `${scope} package "${name}" (${config})`;
       let kind: PackageIssue["kind"] = "manifest";
+      let missingEntry: string | undefined;
       try {
         let packageRoot: string;
         try {
@@ -101,7 +104,10 @@ export async function inspectPackages(options: {
           extensions = await declaredPaths(packageRoot, schway.extensions, "extensions", options.signal);
           skills = await declaredPaths(packageRoot, schway.skills, "skills", options.signal);
         } catch (error) {
-          if (error instanceof Error && /(?: is missing|missing SKILL\.md)/.test(error.message)) kind = "missing";
+          if (error instanceof MissingPackageEntryError) {
+            kind = "entry";
+            missingEntry = error.entry;
+          }
           throw error;
         }
         packages.push({ name, scope, root: packageRoot, source, extensions, skills });
@@ -110,12 +116,17 @@ export async function inspectPackages(options: {
         // Native filesystem errors can include untrusted path or OS detail; keep diagnostics bounded.
         const message = error instanceof Error ? error.message : "Unable to inspect package";
         diagnostics.push(message.startsWith(`Missing ${source}.`) ? message : `${source}: ${message.slice(0, 500)}`);
-        issues.push({ scope, name, kind });
+        issues.push({ scope, name, kind, ...(missingEntry !== undefined ? { entry: missingEntry } : {}) });
       }
     }
   }
   options.signal?.throwIfAborted();
   return { packages, diagnostics, issues };
+}
+
+/** Carry a missing manifest entry without inferring its identity from an error string. */
+class MissingPackageEntryError extends Error {
+  constructor(readonly entry: string, message: string) { super(message); }
 }
 
 /** Resolve manifest entrypoints only when their canonical paths and required file types stay inside the package. */
@@ -133,7 +144,7 @@ async function declaredPaths(root: string, value: unknown, kind: "extensions" | 
     }
     let canonical: string;
     try { canonical = await realpath(path); } catch {
-      throw new Error(`schway.${kind} entry ${JSON.stringify(entry)} is missing`);
+      throw new MissingPackageEntryError(entry, `schway.${kind} entry ${JSON.stringify(entry)} is missing`);
     }
     if (!inside(root, canonical)) throw new Error(`schway.${kind} entry ${JSON.stringify(entry)} escapes the canonical package root`);
     const info = await stat(canonical);
@@ -143,7 +154,7 @@ async function declaredPaths(root: string, value: unknown, kind: "extensions" | 
     if (kind === "skills") {
       let file: string;
       try { file = await realpath(join(canonical, "SKILL.md")); } catch {
-        throw new Error(`schway.skills entry ${JSON.stringify(entry)} is missing SKILL.md`);
+        throw new MissingPackageEntryError(join(entry, "SKILL.md"), `schway.skills entry ${JSON.stringify(entry)} is missing SKILL.md`);
       }
       if (!inside(root, file) || !(await stat(file)).isFile()) throw new Error(`schway.skills entry ${JSON.stringify(entry)} must contain SKILL.md inside the package root`);
     }
