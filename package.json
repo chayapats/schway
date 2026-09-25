@@ -20,6 +20,13 @@
     "examples/packages",
     "docs/live-providers.md",
     "docs/doctor.md",
+    "docs/configuration.md",
+    "docs/credentials.md",
+    "docs/diagnostics.md",
+    "docs/evals.md",
+    "docs/extensions.md",
+    "docs/sessions.md",
+    "docs/workspaces.md",
     "README.md",
     "LICENSE"
   ],
