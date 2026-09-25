@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { dirname } from "node:path";
+import { dirname, relative } from "node:path";
+import { resolveToolPath } from "../tools/path.ts";
 import { DAILY_CASES, type EvalCase } from "./cases.ts";
 import { constants } from "node:fs";
 import { mkdtemp, mkdir, open, rm, writeFile } from "node:fs/promises";
@@ -146,7 +147,7 @@ export async function runCodingEval(options: {
         if (message?.type === "assistant") for (const block of message.content) {
           if (block.type === "tool_call" && block.name === "read" && block.arguments && typeof block.arguments === "object" && !Array.isArray(block.arguments)) {
             const path = (block.arguments as { path?: unknown }).path;
-            if (typeof path === "string") readPaths.set(block.id, path);
+            if (typeof path === "string") readPaths.set(block.id, relative(workspace.root, resolveToolPath(workspace.root, path)));
           }
         }
       }
@@ -172,7 +173,7 @@ export async function runCodingEval(options: {
     else if (reason !== "completed") outcome = errorOrigin === "harness" ? "harness_error" : "model_failure";
     else {
       grader = selected
-        ? await gradeDaily(selected, project, signal, options.graderExecutable ?? "bun", completedReads, recoveredRead)
+        ? await gradeDaily(selected, project, signal, subprocessEnv, options.graderExecutable ?? "bun", completedReads, recoveredRead)
         : await grade(project, join(directory, "grading"), signal, subprocessEnv, options.graderExecutable ?? "bun");
       outcome = signal.aborted ? controller.signal.aborted ? "timeout" : "model_failure" : grader.passed ? "success" : "grader_failure";
     }
@@ -222,7 +223,7 @@ async function grade(project: string, gradingCopy: string, signal: AbortSignal, 
 }
 
 /** Grade bounded case files and immutable fixtures independently of the model's reported success. */
-async function gradeDaily(selected: EvalCase, project: string, signal: AbortSignal, executable: string, reads: ReadonlySet<string>, recoveredRead: boolean): Promise<{ passed: boolean; exitCode: number | null; evidence: string }> {
+async function gradeDaily(selected: EvalCase, project: string, signal: AbortSignal, env: NodeJS.ProcessEnv, executable: string, reads: ReadonlySet<string>, recoveredRead: boolean): Promise<{ passed: boolean; exitCode: number | null; evidence: string }> {
   // The same prerequisite as the clamp grader; unavailable Bun is an explicit skip.
   try { await exec(executable, ["--version"], { timeout: 3000, signal, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } }); }
   catch (error) {
@@ -238,11 +239,13 @@ async function gradeDaily(selected: EvalCase, project: string, signal: AbortSign
   }
   const requiredReads = selected.id === "parallel-read" ? ["input/customer.txt", "input/item.txt", "input/count.txt"] : [];
   const missingReads = requiredReads.filter(path => !reads.has(path));
-  const behaviorPassed = selected.check(files);
+  const behaviorPassed = await selected.check(files, env, signal);
+  signal.throwIfAborted();
   const passed = behaviorPassed && missingReads.length === 0 && (selected.id !== "tool-error-recovery" || recoveredRead);
   const evidence = missingReads.length ? `missing_reads:${missingReads.join(",")}` :
     selected.id === "tool-error-recovery" && !recoveredRead ? "missing_recovery" : passed ? "checked" :
-      `behavior_mismatch:${selected.diagnose(files)}`;
+      `behavior_mismatch:${await selected.diagnose(files, env, signal)}`;
+  signal.throwIfAborted();
   return { passed, exitCode: passed ? 0 : 1, evidence };
 }
 

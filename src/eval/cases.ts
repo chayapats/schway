@@ -1,4 +1,7 @@
-import { runInNewContext } from "node:vm";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const exec = promisify(execFile);
 
 /** Seed, allowed paths, and independent checks for one bounded coding scenario. */
 export interface EvalCase {
@@ -10,9 +13,9 @@ export interface EvalCase {
   verifyCommand?: string;
   verifyFile?: string;
   /** Check only bounded candidate files copied out of the isolated workspace. */
-  check(files: Readonly<Record<string, string>>): boolean;
+  check(files: Readonly<Record<string, string>>, env: NodeJS.ProcessEnv, signal: AbortSignal): boolean | Promise<boolean>;
   /** Bounded expected-versus-observed diagnostics with unknown candidate values redacted. */
-  diagnose(files: Readonly<Record<string, string>>): string;
+  diagnose(files: Readonly<Record<string, string>>, env: NodeJS.ProcessEnv, signal: AbortSignal): string | Promise<string>;
   /** Older complete turns supplied to the real context manager for the compaction case. */
   history?: readonly string[];
   contextWindow?: number;
@@ -40,15 +43,21 @@ function answerEvidence(files: Readonly<Record<string, string>>, expected: Recor
   catch { return diagnose(expected, null); }
 }
 
-function codeEvidence(files: Readonly<Record<string, string>>, paths: string[], expression: string, expected: readonly unknown[]): string {
-  try { return diagnose(expected, JSON.parse(String(evaluate(files, paths, expression)))); }
+async function codeEvidence(files: Readonly<Record<string, string>>, paths: string[], expression: string, expected: readonly unknown[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string> {
+  try { return diagnose(expected, JSON.parse(String(await evaluate(files, paths, expression, env, signal)))); }
   catch { return diagnose(expected, null); }
 }
 
-function evaluate(files: Readonly<Record<string, string>>, paths: string[], expression: string): unknown {
+async function evaluate(files: Readonly<Record<string, string>>, paths: string[], expression: string, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<unknown> {
   const javascript = paths.map(path => new Bun.Transpiler({ loader: "ts" }).transformSync(files[path]!)
     .replace(/^\s*import .*?;\s*$/gm, "").replace(/^\s*export\s+/gm, "")).join("\n");
-  return runInNewContext(`${javascript}\n${expression}`, {}, { timeout: 250 });
+  // Bun's node:vm is not a security boundary and does not implement its timeout.
+  // The child has no provider credentials and an OS-level deadline/output cap.
+  const source = `import { runInNewContext } from "node:vm";\nconst value = runInNewContext(${JSON.stringify(`${javascript}\n${expression}`)}, {}, { timeout: 250 });\nconsole.log(JSON.stringify(value));`;
+  const result = await exec("bun", ["--no-env-file", "-e", source], {
+    cwd: env.HOME, env, timeout: 1000, maxBuffer: 2048, signal,
+  });
+  return JSON.parse(result.stdout.trim()) as unknown;
 }
 
 const refactorSeed = {
@@ -76,13 +85,13 @@ export const DAILY_CASES: readonly EvalCase[] = [
     id: "multi-file-refactor", version: 1,
     task: "Refactor normalizeName and its displayName caller to collapse internal whitespace while preserving name casing. Keep the provided test and run bun test test/display.test.ts.",
     seed: refactorSeed, writable: ["src/normalize.ts", "src/display.ts"], verifyCommand: "bun test test/display.test.ts", verifyFile: "test/display.test.ts",
-    check: files => {
+    check: async (files, env, signal) => {
       try {
         return ["src/normalize.ts", "src/display.ts"].every(path => files[path] !== refactorSeed[path as keyof typeof refactorSeed]) &&
-          evaluate(files, ["src/normalize.ts", "src/display.ts"], REFACTOR_PROBE) === JSON.stringify(REFACTOR_EXPECTED);
+          await evaluate(files, ["src/normalize.ts", "src/display.ts"], REFACTOR_PROBE, env, signal) === JSON.stringify(REFACTOR_EXPECTED);
       } catch { return false; }
     },
-    diagnose: files => codeEvidence(files, ["src/normalize.ts", "src/display.ts"], REFACTOR_PROBE, REFACTOR_EXPECTED),
+    diagnose: (files, env, signal) => codeEvidence(files, ["src/normalize.ts", "src/display.ts"], REFACTOR_PROBE, REFACTOR_EXPECTED, env, signal),
   },
   {
     id: "locate-implementation", version: 1,
@@ -101,13 +110,13 @@ export const DAILY_CASES: readonly EvalCase[] = [
     id: "failing-tests", version: 1,
     task: "Diagnose the failing cart tests, fix the real quantity behavior without editing or disabling the tests, then run bun test test/cart.test.ts.",
     seed: cartSeed, writable: ["src/cart.ts"], verifyCommand: "bun test test/cart.test.ts", verifyFile: "test/cart.test.ts",
-    check: files => {
+    check: async (files, env, signal) => {
       try {
         return files["src/cart.ts"] !== cartSeed["src/cart.ts"] &&
-          evaluate(files, ["src/cart.ts"], CART_PROBE) === JSON.stringify(CART_EXPECTED);
+          await evaluate(files, ["src/cart.ts"], CART_PROBE, env, signal) === JSON.stringify(CART_EXPECTED);
       } catch { return false; }
     },
-    diagnose: files => codeEvidence(files, ["src/cart.ts"], CART_PROBE, CART_EXPECTED),
+    diagnose: (files, env, signal) => codeEvidence(files, ["src/cart.ts"], CART_PROBE, CART_EXPECTED, env, signal),
   },
   {
     id: "long-context", version: 1,

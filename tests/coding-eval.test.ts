@@ -334,6 +334,20 @@ test("parallel reads overlap in the controlled fixture but timing is not the gra
   expect(guessed.grader?.evidence).toContain("missing_reads");
 });
 
+test("equivalent relative read paths count toward recovery and parallel input evidence", async () => {
+  const recovered = await runCodingEval({ caseId: "tool-error-recovery", model: script([
+    { toolCalls: [call("bad", "read", { path: "./src/missing-config.ts" })] },
+    { toolCalls: [call("good", "read", { path: "./src/config.ts" })] },
+    { toolCalls: [put("answer.json", JSON.stringify({ region: "ap-south", revision: 7 }))] }, done,
+  ]), sourceRevision: revision });
+  expect(recovered.outcome).toBe("success");
+  const parallel = await runCodingEval({ caseId: "parallel-read", model: script([
+    { toolCalls: [call("a", "read", { path: "./input/customer.txt" }), call("b", "read", { path: "./input/item.txt" }), call("c", "read", { path: "./input/count.txt" })] },
+    { toolCalls: [put("answer.json", JSON.stringify({ customer: "mina", sku: "Q42", quantity: 3 }))] }, done,
+  ]), sourceRevision: revision });
+  expect(parallel.outcome).toBe("success");
+});
+
 test("grader evidence bounds candidate observations and redacts arbitrary secrets", async () => {
   const secret = "sk-fixture-sensitive-value";
   const result = await runCodingEval({ caseId: "locate-implementation", model: script([
@@ -342,6 +356,28 @@ test("grader evidence bounds candidate observations and redacts arbitrary secret
   expect(result.outcome).toBe("grader_failure");
   expect(result.grader?.evidence).toContain('"actual":{"path":"[redacted]","symbol":"[redacted]"}');
   expect(JSON.stringify(result)).not.toContain(secret);
+});
+
+test("untrusted daily-case code cannot read parent credentials and infinite probes have a process deadline", async () => {
+  const key = "SCHWAY_EVAL_VM_PROOF";
+  const previous = process.env[key];
+  process.env[key] = "fixture-secret";
+  try {
+    const leaked = await runCodingEval({ caseId: "failing-tests", sourceRevision: revision, model: script([
+      { toolCalls: [put("src/cart.ts", 'export function cartTotal(items: {price: number; quantity: number}[]): number { return globalThis.constructor.constructor("return process")().env.SCHWAY_EVAL_VM_PROOF ? 999 : items.reduce((sum, item) => sum + item.price, 0); }\n')] }, done,
+    ]) });
+    expect(leaked.outcome).toBe("grader_failure");
+    expect(leaked.grader?.evidence).toContain('"actual":[10,0,4,2]');
+    expect(JSON.stringify(leaked)).not.toContain("fixture-secret");
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
+  const stalled = await runCodingEval({ caseId: "failing-tests", sourceRevision: revision, model: script([
+    { toolCalls: [put("src/cart.ts", 'export function cartTotal(): number { while (true) {} }\n')] }, done,
+  ]) });
+  expect(stalled.outcome).toBe("grader_failure");
+  expect(stalled.durationMs).toBeLessThan(5000);
 });
 
 test("daily-case timeout and cancellation do not report success", async () => {
