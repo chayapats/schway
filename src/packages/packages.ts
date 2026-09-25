@@ -14,13 +14,35 @@ export interface EnabledPackage {
   skills: string[];
 }
 
-/** Resolve only explicitly enabled installed packages, validating every declaration without executing code. */
+/** Safe identity and failure category for a configured package, separate from its runtime error text. */
+export interface PackageIssue {
+  scope: "project" | "global";
+  name?: string;
+  kind: "configuration" | "missing" | "entry" | "manifest" | "peer";
+  /** Raw declared relative entry path; callers must redact and bound it before display. */
+  entry?: string;
+}
+
+/** Resolve enabled packages, retaining the first error as the runtime loader always has. */
 export async function discoverPackages(options: {
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
 }): Promise<EnabledPackage[]> {
+  const inspected = await inspectPackages(options);
+  if (inspected.diagnostics.length) throw new Error(inspected.diagnostics[0]);
+  return inspected.packages;
+}
+
+/** Inspect each configured package independently without evaluating extension entrypoints. */
+export async function inspectPackages(options: {
+  workspaceRoot: string;
+  home?: string;
+  signal?: AbortSignal;
+}): Promise<{ packages: EnabledPackage[]; diagnostics: string[]; issues: PackageIssue[] }> {
   const packages: EnabledPackage[] = [];
+  const diagnostics: string[] = [];
+  const issues: PackageIssue[] = [];
   const scopes = [
     ...(options.home ? [{ scope: "global" as const, root: join(options.home, ".schway"), config: userConfigPath(options.home) }] : []),
     { scope: "project" as const, root: options.workspaceRoot, config: projectConfigPath(options.workspaceRoot) },
@@ -28,17 +50,24 @@ export async function discoverPackages(options: {
   for (const { scope, root, config } of scopes) {
     options.signal?.throwIfAborted();
     const layer = await readConfigFile(config);
-    if (layer && "error" in layer) throw new Error(layer.error);
+    if (layer && "error" in layer) {
+      diagnostics.push(layer.error);
+      issues.push({ scope, kind: "configuration" });
+      continue;
+    }
     for (const name of layer?.packages ?? []) {
       options.signal?.throwIfAborted();
       const source = `${scope} package "${name}" (${config})`;
-      let packageRoot: string;
+      let kind: PackageIssue["kind"] = "manifest";
+      let missingEntry: string | undefined;
       try {
-        packageRoot = await realpath(join(root, "node_modules", name));
-      } catch {
-        throw new Error(`Missing ${source}. Install it with npm install --prefix ${JSON.stringify(root)} ${name}; Schway never installs packages automatically.`);
-      }
-      try {
+        let packageRoot: string;
+        try {
+          packageRoot = await realpath(join(root, "node_modules", name));
+        } catch {
+          kind = "missing";
+          throw new Error(`Missing ${source}. Install it with npm install --prefix ${JSON.stringify(root)} ${name}; Schway never installs packages automatically.`);
+        }
         const manifest: unknown = JSON.parse(await readFile(join(packageRoot, "package.json"), { encoding: "utf8", signal: options.signal }));
         if (!isObject(manifest)) throw new Error("package.json must be an object");
         const schway = manifest.schway;
@@ -50,9 +79,11 @@ export async function discoverPackages(options: {
         const peer = isObject(manifest.peerDependencies) ? manifest.peerDependencies.schway : undefined;
         if (peer !== undefined) {
           if (typeof peer !== "string" || !peer.trim() || validRange(peer) === null) {
+            kind = "peer";
             throw new Error(`Invalid Schway peer range ${JSON.stringify(peer)}; peerDependencies.schway must be a nonempty npm semver range.`);
           }
           if (!satisfies(version, peer)) {
+            kind = "peer";
             throw new Error(`Incompatible Schway peer ${JSON.stringify(peer)}; installed Schway is ${version}. Install a compatible package version.`);
           }
         }
@@ -67,17 +98,35 @@ export async function discoverPackages(options: {
         if (dependencyField) {
           throw new Error(`Declare schway in peerDependencies instead of ${dependencyField}; packages must use the installed harness's public schway/extensions API without bundling a second harness.`);
         }
-        const extensions = await declaredPaths(packageRoot, schway.extensions, "extensions", options.signal);
-        const skills = await declaredPaths(packageRoot, schway.skills, "skills", options.signal);
+        let extensions: string[];
+        let skills: string[];
+        try {
+          extensions = await declaredPaths(packageRoot, schway.extensions, "extensions", options.signal);
+          skills = await declaredPaths(packageRoot, schway.skills, "skills", options.signal);
+        } catch (error) {
+          if (error instanceof MissingPackageEntryError) {
+            kind = "entry";
+            missingEntry = error.entry;
+          }
+          throw error;
+        }
         packages.push({ name, scope, root: packageRoot, source, extensions, skills });
       } catch (error) {
         options.signal?.throwIfAborted();
-        throw new Error(`${source}: ${error instanceof Error ? error.message : String(error)}`);
+        // Native filesystem errors can include untrusted path or OS detail; keep diagnostics bounded.
+        const message = error instanceof Error ? error.message : "Unable to inspect package";
+        diagnostics.push(message.startsWith(`Missing ${source}.`) ? message : `${source}: ${message.slice(0, 500)}`);
+        issues.push({ scope, name, kind, ...(missingEntry !== undefined ? { entry: missingEntry } : {}) });
       }
     }
   }
   options.signal?.throwIfAborted();
-  return packages;
+  return { packages, diagnostics, issues };
+}
+
+/** Carry a missing manifest entry without inferring its identity from an error string. */
+class MissingPackageEntryError extends Error {
+  constructor(readonly entry: string, message: string) { super(message); }
 }
 
 /** Resolve manifest entrypoints only when their canonical paths and required file types stay inside the package. */
@@ -95,7 +144,7 @@ async function declaredPaths(root: string, value: unknown, kind: "extensions" | 
     }
     let canonical: string;
     try { canonical = await realpath(path); } catch {
-      throw new Error(`schway.${kind} entry ${JSON.stringify(entry)} is missing`);
+      throw new MissingPackageEntryError(entry, `schway.${kind} entry ${JSON.stringify(entry)} is missing`);
     }
     if (!inside(root, canonical)) throw new Error(`schway.${kind} entry ${JSON.stringify(entry)} escapes the canonical package root`);
     const info = await stat(canonical);
@@ -105,7 +154,7 @@ async function declaredPaths(root: string, value: unknown, kind: "extensions" | 
     if (kind === "skills") {
       let file: string;
       try { file = await realpath(join(canonical, "SKILL.md")); } catch {
-        throw new Error(`schway.skills entry ${JSON.stringify(entry)} is missing SKILL.md`);
+        throw new MissingPackageEntryError(join(entry, "SKILL.md"), `schway.skills entry ${JSON.stringify(entry)} is missing SKILL.md`);
       }
       if (!inside(root, file) || !(await stat(file)).isFile()) throw new Error(`schway.skills entry ${JSON.stringify(entry)} must contain SKILL.md inside the package root`);
     }

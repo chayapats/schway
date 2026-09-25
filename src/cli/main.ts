@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
@@ -37,6 +38,7 @@ import { loadProviderModel } from "../model/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
   cliOverridesFromArgs,
+  hasCliConnectionOptions,
   parseArgs,
   USAGE,
   type CliArgs,
@@ -86,10 +88,29 @@ export interface CliIo {
 
 /**
  * Dispatch CLI arguments to a persisted headless run or a lazily loaded interactive terminal.
- * Without `-p` this opens the interactive terminal; with `-p` it runs headless.
- * Returns 0 on success and 1 on handled usage, auth, or run failure; unhandled setup/I/O failures can reject.
+ * `doctor` runs diagnostics; otherwise `-p` runs headless and no prompt opens the interactive terminal.
+ * Returns 0 on success, 1 on diagnosed/handled failures, or 2 if doctor cannot complete; unhandled non-doctor setup/I/O failures can reject.
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+  if (argv[0] === "doctor") {
+    const parsedDoctor = parseArgs(argv.slice(1));
+    if ("error" in parsedDoctor || parsedDoctor.args.prompt || parsedDoctor.args.resume || parsedDoctor.args.branch) {
+      io.stderr.write(`Invalid doctor options. ${"error" in parsedDoctor ? "Check doctor flags." : "Doctor does not accept prompts or session resume."}\n${USAGE}\n`);
+      return 2;
+    }
+    if (parsedDoctor.args.help) {
+      io.stdout.write(`${USAGE}\n`);
+      return 0;
+    }
+    try {
+      const report = await diagnose({ cwd: io.cwd, env: io.env, args: parsedDoctor.args, store: io.credentialStore, signal: io.signal });
+      io.stdout.write(parsedDoctor.args.json ? `${JSON.stringify(report)}\n` : formatDoctor(report));
+      return doctorExitCode(report);
+    } catch {
+      io.stderr.write("Doctor could not complete. Retry after restoring local filesystem access or removing cancellation.\n");
+      return 2;
+    }
+  }
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
     io.stderr.write(`${parsed.error}\n${USAGE}\n`);
@@ -398,17 +419,6 @@ function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
     );
   }
   return value;
-}
-
-/** True when the user passed compatible connection flags on the CLI. */
-function hasCliConnectionOptions(args: CliArgs): boolean {
-  return (
-    args.baseUrl !== undefined ||
-    args.headers !== undefined ||
-    args.extraBody !== undefined ||
-    args.auth !== undefined ||
-    args.profile !== undefined
-  );
 }
 
 /** Resolve credentials and construct the selected provider model. */

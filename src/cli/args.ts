@@ -3,7 +3,7 @@ import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|low|medium|high>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "anthropic" | "openai" | "openai-compatible";
@@ -449,6 +449,12 @@ function validateConnectionOptions(
     return { error: "OpenAI auth preference requires --provider openai" };
   }
   return { args };
+}
+
+/** True when explicit CLI flags require the OpenAI-compatible provider after config resolution. */
+export function hasCliConnectionOptions(args: CliArgs): boolean {
+  return args.baseUrl !== undefined || args.headers !== undefined || args.extraBody !== undefined ||
+    args.auth !== undefined || args.profile !== undefined;
 }
 
 /** Map explicitly provided CLI flags onto a config overlay. Omitted flags stay unset. */
