@@ -34,6 +34,32 @@ test("records are correlated, bounded and strip secrets from nested errors, head
   expect(Number.isNaN(Date.parse(record.timestamp))).toBe(false);
 }));
 
+test("errors never read attacker-defined names or credential getters", async () => temporary(async home => {
+  const sink = createDiagnosticSink({ home, enabled: true });
+  const named = new Error("private-message");
+  named.name = "unknown-prompt-and-credential";
+  const getter = new Error("private-message");
+  Object.defineProperty(getter, "name", { get() { throw new Error("private-getter"); } });
+  Object.defineProperty(getter, "status", { get() { throw new Error("private-status-getter"); } });
+  sink.record("model", "failure", { named, getter });
+  await sink.close();
+  const text = await readFile(diagnosticPath(home), "utf8");
+  expect(text).not.toMatch(/unknown-prompt-and-credential|private-message|private-getter|private-status-getter/);
+  expect(text).toContain('"category":"exception"');
+}));
+
+test("credential-bearing auth and signature keys are excluded before string serialization", async () => temporary(async home => {
+  const sink = createDiagnosticSink({ home, enabled: true });
+  sink.record("network", "configuration", {
+    auth: "credential-one", signature: "credential-two", "X-Amz-Signature": "credential-three",
+    nested: { authentication: "credential-four", authHeader: "credential-five" }, count: 2,
+  });
+  await sink.close();
+  const text = await readFile(diagnosticPath(home), "utf8");
+  expect(text).not.toMatch(/credential-one|credential-two|credential-three|credential-four|credential-five/);
+  expect(text).toContain('"count":2');
+}));
+
 test("rotation retains finite files and pending writes are bounded, with nonfatal failure", async () => temporary(async home => {
   const path = join(home, "diag.jsonl");
   const sink = createDiagnosticSink({ home, enabled: true, destination: path, limits: { maxBytes: 400, archives: 2, pending: 3 } });
@@ -120,11 +146,43 @@ test("oversized metadata and unsafe identifiers never enumerate deep getters or 
   expect(text.length).toBeLessThan(4096);
 }));
 
+test("oversized pre-existing file is refused untouched; oversized single record is dropped without rotation", async () => temporary(async home => {
+  const destination = join(home, "oversized.jsonl");
+  const original = "x".repeat(401);
+  await writeFile(destination, original, { mode: 0o600 });
+  await chmod(destination, 0o600);
+  const refused = createDiagnosticSink({ home, enabled: true, destination, limits: { maxBytes: 400, archives: 2 } });
+  refused.record("test", "event", { count: 1 });
+  await refused.close();
+  expect(refused.dropped).toBeGreaterThan(0);
+  expect(await readFile(destination, "utf8")).toBe(original);
+  expect(await readdir(home)).toEqual(["oversized.jsonl"]);
+  const archived = `${destination}.1`;
+  await writeFile(destination, "b".repeat(400));
+  await writeFile(archived, original);
+  const archivedRefusal = createDiagnosticSink({ home, enabled: true, destination, limits: { maxBytes: 400, archives: 2 } });
+  archivedRefusal.record("test", "event", { count: 2 });
+  await archivedRefusal.close();
+  expect(archivedRefusal.dropped).toBeGreaterThan(0);
+  expect(await readFile(destination, "utf8")).toBe("b".repeat(400));
+  expect(await readFile(archived, "utf8")).toBe(original);
+
+  const fresh = join(home, "fresh.jsonl");
+  const sink = createDiagnosticSink({ home, enabled: true, destination: fresh, limits: { maxBytes: 256, archives: 2 } });
+  sink.record("test", "too_large", { value: "v".repeat(240) });
+  await sink.flush();
+  sink.record("t", "ok", { count: 1 });
+  await sink.close();
+  expect(sink.dropped).toBe(1);
+  expect((await readFile(fresh)).length).toBeLessThanOrEqual(256);
+  expect((await readdir(home)).sort()).toEqual(["fresh.jsonl", "oversized.jsonl", "oversized.jsonl.1"]);
+}));
+
 test("userinfo with embedded @ and signed credential query are masked", async () => temporary(async home => {
   const sink = createDiagnosticSink({ home, enabled: true });
-  sink.record("network", "url", { url: "https://alice:p@ss@host.test/v1?X-Amz-Signature=signature-secret&ok=1" });
+  sink.record("network", "url", { url: "https://alice:p@ss@host.test/v1?X-Amz-Signature=signature-secret&ok=1", websocket: "wss://alice:socket-secret@host.test/v1?signature=unknown-secret", ftp: "ftp://alice:ftp-secret@host.test/path?auth=ftp-token" });
   await sink.close();
   const text = await readFile(diagnosticPath(home), "utf8");
-  expect(text).not.toMatch(/alice|p@ss|signature-secret/);
+  expect(text).not.toMatch(/alice|p@ss|signature-secret|socket-secret|unknown-secret|ftp-secret|ftp-token/);
   expect(text).toContain("host.test");
 }));

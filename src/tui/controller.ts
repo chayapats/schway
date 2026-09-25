@@ -119,8 +119,8 @@ export interface TuiControllerOptions {
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
-  /** Observe current-turn normalized events before display folding without blocking or failing the coding loop. */
-  onRuntimeEvent?: (event: RuntimeEvent) => void | Promise<void>;
+  /** Observe current-turn events and their active session ID before display folding without blocking the loop. */
+  onRuntimeEvent?: (event: RuntimeEvent, sessionId: string) => void | Promise<void>;
   /** Explicit change-tracking fallback when no config editor supplies effective settings. */
   changeTracking?: GitChangeTrackingMode;
 }
@@ -1767,7 +1767,7 @@ export class TuiController {
   private observeRuntimeEvent(event: RuntimeEvent): void {
     if (!this.onRuntimeEvent) return;
     try {
-      const pending = this.onRuntimeEvent(event);
+      const pending = this.onRuntimeEvent(event, this.sessionId);
       if (pending) void Promise.resolve(pending).catch(() => {});
     } catch { /* Diagnostic failures never change the conversation. */ }
   }

@@ -3,7 +3,7 @@ import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
 import type { ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { resolve } from "node:path";
-import { createDiagnosticSink } from "../diagnostics/sink.ts";
+import { createDiagnosticSink, type DiagnosticSink } from "../diagnostics/sink.ts";
 import {
   redactSecrets,
 } from "../auth/secrets.ts";
@@ -104,10 +104,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   const secrets: string[] = collectSecrets(io.args.apiKey, io.env);
   let diagnosticSessionId: string | undefined;
-  let activeController: TuiController | undefined;
   const diagnostics = createDiagnosticSink({ home, enabled: io.args.debug ?? false,
     destination: io.args.debugFile ? resolve(io.cwd, io.args.debugFile) : undefined,
-    runId: crypto.randomUUID(), sessionId: () => activeController?.snapshot().sessionId ?? diagnosticSessionId, secrets });
+    runId: crypto.randomUUID(), sessionId: () => diagnosticSessionId, secrets });
   try {
   diagnostics.record("cli", "startup", { mode: "interactive", resumed: !!io.args.resume });
   let env = io.env;
@@ -272,7 +271,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           loadWorkspaceExtensions,
           home,
           configEditor, stageSettings, onSettingsCommitted, credentials,
-          onRuntimeEvent: io.args.debug ? (event) => diagnostics.runtime(event) : undefined,
+          onRuntimeEvent: io.args.debug ? (event, sessionId) => { diagnosticSessionId = sessionId; diagnostics.runtime(event); } : undefined,
           workspace: resumedWorkspace,
           provider: settings.provider,
           modelId: settings.model,
@@ -312,7 +311,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           loadWorkspaceExtensions,
           home,
           configEditor, stageSettings, onSettingsCommitted, credentials,
-          onRuntimeEvent: io.args.debug ? (event) => diagnostics.runtime(event) : undefined,
+          onRuntimeEvent: io.args.debug ? (event, sessionId) => { diagnosticSessionId = sessionId; diagnostics.runtime(event); } : undefined,
           workspace,
           provider: settings.provider,
           modelId: settings.model,
@@ -342,7 +341,6 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       return 1;
     }
 
-    activeController = controller;
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
     for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
@@ -360,12 +358,16 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         secrets,
         signal: io.signal,
         stderr: io.stderr,
+        diagnostics,
       });
     } catch (error) {
       diagnostics.record("tui", "renderer_failed", { category: "terminal_setup" }, "error");
       io.stderr.write(`${messageOf(error)}\n`);
       return 1;
     } finally {
+      // Renderer setup may fail before its own cleanup runs; still record the
+      // cancellation request before disposal suppresses stale turn events.
+      if (controller.running) diagnostics.record("tui", "shutdown", { state: "cancellation_requested", reason: io.signal?.aborted ? "signal" : "renderer_cleanup" }, "warn");
       controller.dispose();
     }
     return 0;
@@ -413,6 +415,7 @@ async function runTuiRenderer(options: {
   secrets: string[];
   signal?: AbortSignal;
   stderr: TuiWriter;
+  diagnostics: DiagnosticSink;
 }): Promise<void> {
   const { createCliRenderer, BoxRenderable, TextRenderable, InputRenderable, ScrollBoxRenderable } =
     await loadCredentialSafeTui();
@@ -654,6 +657,9 @@ async function runTuiRenderer(options: {
   } finally {
     unbindCredentialInput?.();
     options.signal?.removeEventListener("abort", onAbort);
+    if (options.controller.running) options.diagnostics.record("tui", "shutdown", {
+      state: "cancellation_requested", reason: options.signal?.aborted ? "signal" : quit || quitting ? "quit" : "renderer_cleanup",
+    }, "warn");
     options.controller.dispose();
     try {
       renderer.stop();

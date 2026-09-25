@@ -58,6 +58,18 @@ test("configuration and model-load failures log only safe categories", async () 
   expect(records).toContain('"event":"load_failed"');
 }));
 
+test("CLI model identifier with websocket userinfo cannot expose URL credentials in diagnostic file", async () => withHome(async home => {
+  const identifier = "wss://alice:websocket-secret@host.test/v1?X-Amz-Signature=signature-secret";
+  const code = await runCli(["-p", "hello", "--debug", "--model", identifier], {
+    cwd: home, env: { HOME: home }, stdout: { write() {} }, stderr: { write() {} },
+    model: createScriptedModel({ text: "done" }),
+  });
+  expect(code).toBe(0);
+  const text = await readFile(diagnosticPath(home), "utf8");
+  expect(text).not.toMatch(/alice|websocket-secret|signature-secret/);
+  expect(text).toContain("host.test");
+}));
+
 test("cancellation drains pending diagnostics without changing session semantics", async () => withHome(async home => {
   const controller = new AbortController();
   let started!: () => void;

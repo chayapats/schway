@@ -155,6 +155,94 @@ test("interactive /compact reports completed, noop, cancellation and rejected tr
   }
 }));
 
+test("actual interactive quit while a turn is active logs truthful cancellation request and exits without hanging", async () => inHome(async home => {
+  // Isolated process keeps the mocked renderer from affecting other OpenTUI tests.
+  const script = String.raw`
+    import { mock } from "bun:test";
+    import { EventEmitter } from "node:events";
+    import { join } from "node:path";
+    import { pathToFileURL } from "node:url";
+    const root = process.cwd();
+    let keyInput;
+    class Box {
+      constructor() { this.children = []; this.content = { add: child => this.add(child) }; }
+      add(child) { this.children.push(child); }
+      getChildren() { return this.children; }
+      remove(child) { this.children = this.children.filter(item => item !== child); }
+    }
+    class Text extends Box {}
+    class Scroll extends Box {}
+    class Input extends Box {
+      on(event, callback) {
+        if (event === "enter") setTimeout(() => { this.value = "work"; callback(); }, 0);
+      }
+      focus() {} blur() {}
+    }
+    const renderer = { root: new Box(), keyInput: new EventEmitter(), start() {}, stop() {}, destroy() {} };
+    keyInput = renderer.keyInput;
+    const fixture = join(root, "src/tui/credential-input.ts");
+    mock.module(fixture, () => ({
+      loadCredentialSafeTui: async () => ({ createCliRenderer: async () => renderer,
+        BoxRenderable: Box, TextRenderable: Text, ScrollBoxRenderable: Scroll, InputRenderable: Input }),
+      bindCredentialInput: () => () => {},
+    }));
+    const { runInteractiveTui } = await import(pathToFileURL(join(root, "src/tui/app.ts")).href);
+    const model = { provider: "scripted", id: "scripted", async *stream(request) {
+      yield { type: "text_delta", text: "partial" };
+      setTimeout(() => keyInput.emit("keypress", { name: "d", ctrl: true }), 0);
+      await new Promise(resolve => request.signal.addEventListener("abort", resolve, { once: true }));
+      const failure = new Error("aborted"); failure.name = "AbortError"; throw failure;
+    } };
+    const code = await runInteractiveTui({ args: { json: false, help: false, debug: true },
+      env: { HOME: process.env.HOME }, cwd: process.env.HOME, model,
+      stdout: { write() {} }, stderr: { write(text) { console.error(text); } } });
+    console.log("EXIT:" + code);
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    cwd: process.cwd(), env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe",
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const code = await Promise.race([child.exited, new Promise<number>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("TUI quit fixture hung")), 4000);
+    })]);
+    expect(code).toBe(0);
+    expect(await new Response(child.stdout).text()).toContain("EXIT:0");
+    const stderr = await new Response(child.stderr).text();
+    expect(stderr).toBe("");
+    const records = (await readFile(diagnosticPath(home), "utf8")).trim().split("\n").map(line => JSON.parse(line) as { component: string; event: string; fields: { state?: string; reason?: string } });
+    expect(records.some(record => record.component === "tui" && record.event === "shutdown" && record.fields.state === "cancellation_requested" && record.fields.reason === "quit")).toBe(true);
+    expect(records.some(record => record.event === "agent.finished")).toBe(false);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (child.exitCode === null) child.kill();
+    await child.exited;
+  }
+}));
+
+test("TUI event callback uses constant-time current session ID after a switch without inspecting transcript", async () => inHome(async home => {
+  const workspace = { root: home, launchCwd: home, extraRoots: [] as string[] };
+  const first = createSession();
+  let diagnosticSessionId: string | undefined = "first";
+  const sink = createDiagnosticSink({ home, enabled: true, sessionId: () => diagnosticSessionId });
+  const seenIds: string[] = [];
+  const controller = new TuiController({ session: first,
+    model: createScriptedModel({ responses: [{ text: "one" }, { text: "two" }] }),
+    contextManager: createContextManager(workspace), workspace,
+    provider: "scripted", modelId: "scripted", sessionId: "first",
+    onRuntimeEvent(event, sessionId) { diagnosticSessionId = sessionId; seenIds.push(sessionId); sink.runtime(event); },
+  });
+  controller.snapshot = () => { throw new Error("expensive transcript snapshot accessed"); };
+  await controller.submit("first prompt");
+  expect(await controller.switchSession(createSession(), "second", { workspace, contextManager: createContextManager(workspace) })).toBe(true);
+  await controller.submit("second prompt");
+  await sink.close();
+  expect(seenIds).toContain("first");
+  expect(seenIds).toContain("second");
+  const records = (await readFile(diagnosticPath(home), "utf8")).trim().split("\n").map(line => JSON.parse(line) as { sessionId: string; event: string });
+  expect(records.filter(record => record.event === "agent.finished").map(record => record.sessionId)).toEqual(["first", "second"]);
+}));
+
 test("interactive cancellation flushes the final correlated lifecycle event", async () => inHome(async home => {
   const sink = createDiagnosticSink({ home, enabled: true, sessionId: () => "tui-session" });
   let started!: () => void;

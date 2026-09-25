@@ -68,10 +68,17 @@ export function createDiagnosticSink(options: {
         if (isDefault) await requirePrivate(dirname(destination), true);
         await requirePrivate(destination, false);
         size ??= await stat(destination).then(file => file.size, missingSize);
+        // Never rotate an oversized or unrelated pre-existing file into retention.
+        if (size > maxBytes) throw new Error("Pre-existing diagnostic file exceeds size limit");
         while (queue.length) {
           const line = queue.shift()!;
           const bytes = Buffer.byteLength(line);
+          if (bytes > maxBytes) { dropped++; continue; }
           if (size + bytes > maxBytes) {
+            for (let i = 1; i <= archives; i++) {
+              const archivedSize = await stat(`${destination}.${i}`).then(file => file.size, missingSize);
+              if (archivedSize > maxBytes) throw new Error("Pre-existing diagnostic archive exceeds size limit");
+            }
             for (let i = archives; i >= 1; i--) {
               const from = i === 1 ? destination : `${destination}.${i - 1}`;
               if (i === archives) await unlink(`${destination}.${i}`).catch(missingOnly);
@@ -175,12 +182,12 @@ function safeText(value: string, secrets: readonly string[], max: number): strin
 function bounded(value: number | undefined, fallback: number, min: number, max: number): number {
   return value !== undefined && Number.isSafeInteger(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
-const secretField = /(?:secret|password|passwd|token|credential|api.?key|authorization|cookie|private.?key|client.?secret|session.?key)/i;
+const secretField = /(?:secret|password|passwd|token|credential|api.?key|auth|signature|cookie|private.?key|session.?key)/i;
 const rawField = /(?:prompt|payload|content|arguments|body|transcript|stack|source|output|headers)/i;
 const urlCredential = /([?&](?:[^=&]*(?:key|token|secret|password|auth|credential|code|signature|sig)[^=&]*)=)[^&#\s]*/gi;
 function cleanText(value: string, secrets: readonly string[]): string {
   return redactSecrets(value, secrets)
-    .replace(/https?:\/\/[^\s"'<>]+/gi, url => {
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi, url => {
       const start = url.indexOf("://") + 3;
       const authorityEnd = ["/", "?", "#"].reduce((end, marker) => {
         const index = url.indexOf(marker, start);
@@ -205,7 +212,10 @@ export function sanitize(value: unknown, secrets: readonly string[] = []): unkno
     if (seen.has(item)) return "[circular]";
     seen.add(item);
     // Error messages and stacks can echo an entire prompt; never inspect either by default.
-    if (item instanceof Error) return { name: visit(item.name, depth + 1), ...(typeof (item as Error & { status?: unknown }).status === "number" ? { status: (item as Error & { status: number }).status } : {}) };
+    if (item instanceof Error) {
+      const status = Object.getOwnPropertyDescriptor(item, "status");
+      return { category: "exception", ...(status && "value" in status && typeof status.value === "number" && Number.isFinite(status.value) ? { status: status.value } : {}) };
+    }
     if (Array.isArray(item)) {
       const result: unknown[] = [];
       for (let i = 0; i < Math.min(item.length, 8); i++) {
