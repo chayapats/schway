@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { dirname, relative } from "node:path";
+import { resolveToolPath } from "../tools/path.ts";
+import { DAILY_CASES, type EvalCase } from "./cases.ts";
 import { constants } from "node:fs";
 import { mkdtemp, mkdir, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -72,8 +75,10 @@ export interface CodingEvalResult {
   settings: EvalSettings;
   outcome: "success" | "grader_failure" | "model_failure" | "harness_error" | "timeout" | "skipped_prerequisites";
   durationMs: number;
-  grader: { passed: boolean; exitCode: number | null } | null;
+  grader: { passed: boolean; exitCode: number | null; evidence?: string } | null;
   metrics: EvalMetrics;
+  /** Tool-call overlap is diagnostic evidence, not a real-model timing grade. */
+  readOverlap?: boolean;
 }
 
 /** Execute the real loop and tools in a temporary Git repository, grade files, and clean up on every exit. */
@@ -83,10 +88,14 @@ export async function runCodingEval(options: {
   settings?: Partial<EvalSettings>;
   signal?: AbortSignal;
   clock?: AgentClock;
+  /** Defaults to the original clamp-bounds case. */
+  caseId?: string;
   /** Override the grader executable for embedded runs or deterministic missing-prerequisite checks. */
   graderExecutable?: string;
 }): Promise<CodingEvalResult> {
   const settings = resolveEvalSettings(options.settings);
+  const selected = options.caseId === undefined || options.caseId === CODING_CASE.id ? undefined : DAILY_CASES.find(item => item.id === options.caseId);
+  if (options.caseId !== undefined && options.caseId !== CODING_CASE.id && !selected) throw new Error(`Unknown eval case: ${options.caseId}`);
   const start = performance.now();
   const runId = crypto.randomUUID();
   const controller = new AbortController();
@@ -96,6 +105,12 @@ export async function runCodingEval(options: {
   let outcome: CodingEvalResult["outcome"] = "harness_error";
   let grader: CodingEvalResult["grader"] = null;
   let metrics = createEvalMetricsPlaceholder();
+  let readOverlap = false;
+  const activeReads = new Set<string>();
+  const readPaths = new Map<string, string>();
+  const completedReads = new Set<string>();
+  const failedReads = new Set<string>();
+  let recoveredRead = false;
   try {
     directory = await mkdtemp(join(tmpdir(), "schway-eval-"));
     const project = join(directory, "project");
@@ -105,22 +120,51 @@ export async function runCodingEval(options: {
     await mkdir(home);
     const subprocessEnv: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, TMPDIR: directory };
     await writeFile(join(project, "package.json"), '{"private":true,"type":"module"}\n');
-    await writeFile(join(project, "src/math.ts"), INITIAL_SOURCE);
-    await writeFile(join(project, "test/math.test.ts"), TEST_SOURCE);
+    for (const [path, content] of Object.entries(selected?.seed ?? { "src/math.ts": INITIAL_SOURCE, "test/math.test.ts": TEST_SOURCE })) {
+      await mkdir(dirname(join(project, path)), { recursive: true });
+      await writeFile(join(project, path), content);
+    }
     await exec("git", ["init", "-q", project], { timeout: 3000, env: subprocessEnv });
     signal.throwIfAborted();
     const workspace = await resolveWorkspace(project);
     const session = await createJsonlSession({ directory: join(directory, "sessions"), workspace });
-    session.append({ type: "user", id: crypto.randomUUID(), content: [{ type: "text", text: CODING_CASE.task }] });
+    for (const fact of selected?.history ?? []) {
+      session.append({ type: "user", id: crypto.randomUUID(), content: [{ type: "text", text: fact }] });
+      session.append({ type: "assistant", id: crypto.randomUUID(), content: [{ type: "text", text: "Acknowledged; retain this for the final task." }] });
+    }
+    session.append({ type: "user", id: crypto.randomUUID(), content: [{ type: "text", text: selected?.task ?? CODING_CASE.task }] });
     const tracker = createEvalMetrics(session);
-    const tools = createEvalTools(project);
+    const tools = createEvalTools(project, selected);
     let reason: string | undefined;
     let errorOrigin: "model" | "harness" | undefined;
     for await (const event of runAgentLoop({
-      session, model: options.model, contextManager: createContextManager(workspace, { home }),
+      session, model: options.model, contextManager: createContextManager(workspace, { home, ...(selected?.contextWindow ? { contextWindow: selected.contextWindow } : {}) }),
       workspace, tools, maxTurns: settings.maxTurns, signal, clock: options.clock, toolEnv: subprocessEnv,
     })) {
       tracker.record(event);
+      if (event.type === "model.finished" && (selected?.id === "parallel-read" || selected?.id === "tool-error-recovery")) {
+        const message = session.items.at(-1);
+        if (message?.type === "assistant") for (const block of message.content) {
+          if (block.type === "tool_call" && block.name === "read" && block.arguments && typeof block.arguments === "object" && !Array.isArray(block.arguments)) {
+            const path = (block.arguments as { path?: unknown }).path;
+            if (typeof path === "string") readPaths.set(block.id, relative(workspace.root, resolveToolPath(workspace.root, path)));
+          }
+        }
+      }
+      if (event.type === "tool.started" && event.name === "read" && readPaths.has(event.toolCallId)) {
+        if (activeReads.size > 0) readOverlap = true;
+        activeReads.add(event.toolCallId);
+      }
+      if (event.type === "tool.finished") {
+        activeReads.delete(event.toolCallId);
+        const path = readPaths.get(event.toolCallId);
+        if (path && event.name === "read") {
+          if (event.status === "success") {
+            completedReads.add(path);
+            if (path === "src/config.ts" && failedReads.has("src/missing-config.ts")) recoveredRead = true;
+          } else failedReads.add(path);
+        }
+      }
       if (event.type === "agent.finished") reason = event.reason;
       if (event.type === "error") errorOrigin = event.origin;
     }
@@ -128,7 +172,9 @@ export async function runCodingEval(options: {
     if (signal.aborted) outcome = controller.signal.aborted ? "timeout" : "model_failure";
     else if (reason !== "completed") outcome = errorOrigin === "harness" ? "harness_error" : "model_failure";
     else {
-      grader = await grade(project, join(directory, "grading"), signal, subprocessEnv, options.graderExecutable ?? "bun");
+      grader = selected
+        ? await gradeDaily(selected, project, signal, subprocessEnv, options.graderExecutable ?? "bun", completedReads, recoveredRead)
+        : await grade(project, join(directory, "grading"), signal, subprocessEnv, options.graderExecutable ?? "bun");
       outcome = signal.aborted ? controller.signal.aborted ? "timeout" : "model_failure" : grader.passed ? "success" : "grader_failure";
     }
   } catch (error) {
@@ -138,9 +184,10 @@ export async function runCodingEval(options: {
     if (directory) await rm(directory, { recursive: true, force: true });
   }
   return {
-    runId, case: { id: CODING_CASE.id, version: CODING_CASE.version },
+    runId, case: { id: selected?.id ?? CODING_CASE.id, version: selected?.version ?? CODING_CASE.version },
     sourceRevision: options.sourceRevision, provider: options.model.provider, model: options.model.id,
     settings, outcome, durationMs: Math.round(performance.now() - start), grader, metrics,
+    ...(selected?.id === "parallel-read" ? { readOverlap } : {}),
   };
 }
 
@@ -175,6 +222,33 @@ async function grade(project: string, gradingCopy: string, signal: AbortSignal, 
   return { passed: source !== INITIAL_SOURCE && exitCode === 0, exitCode };
 }
 
+/** Grade bounded case files and immutable fixtures independently of the model's reported success. */
+async function gradeDaily(selected: EvalCase, project: string, signal: AbortSignal, env: NodeJS.ProcessEnv, executable: string, reads: ReadonlySet<string>, recoveredRead: boolean): Promise<{ passed: boolean; exitCode: number | null; evidence: string }> {
+  // The same prerequisite as the clamp grader; unavailable Bun is an explicit skip.
+  try { await exec(executable, ["--version"], { timeout: 3000, signal, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } }); }
+  catch (error) {
+    if (["ENOENT", "EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw new GraderUnavailable();
+    throw error;
+  }
+  const files: Record<string, string> = {};
+  for (const [path, initial] of Object.entries(selected.seed)) {
+    const value = await readBoundedFile(join(project, path), 16_000, signal);
+    if (value === null) return { passed: false, exitCode: null, evidence: `missing_or_oversized:${path}` };
+    if (!selected.writable.includes(path) && value !== initial) return { passed: false, exitCode: null, evidence: `fixture_changed:${path}` };
+    files[path] = value;
+  }
+  const requiredReads = selected.id === "parallel-read" ? ["input/customer.txt", "input/item.txt", "input/count.txt"] : [];
+  const missingReads = requiredReads.filter(path => !reads.has(path));
+  const behaviorPassed = await selected.check(files, env, signal);
+  signal.throwIfAborted();
+  const passed = behaviorPassed && missingReads.length === 0 && (selected.id !== "tool-error-recovery" || recoveredRead);
+  const evidence = missingReads.length ? `missing_reads:${missingReads.join(",")}` :
+    selected.id === "tool-error-recovery" && !recoveredRead ? "missing_recovery" : passed ? "checked" :
+      `behavior_mismatch:${await selected.diagnose(files, env, signal)}`;
+  signal.throwIfAborted();
+  return { passed, exitCode: passed ? 0 : 1, evidence };
+}
+
 /** Read only a regular, non-symlink candidate with a strict byte cap and abort checks. */
 async function readBoundedFile(path: string, maxBytes: number, signal: AbortSignal): Promise<string | null> {
   signal.throwIfAborted();
@@ -206,18 +280,19 @@ class GraderTimeout extends Error {}
 class GraderUnavailable extends Error {}
 
 /** Record a prerequisite skip without constructing or calling a paid model. */
-export function skippedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings): CodingEvalResult {
-  return unstartedEval(provider, model, sourceRevision, settings, "skipped_prerequisites");
+export function skippedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, caseId?: string): CodingEvalResult {
+  return unstartedEval(provider, model, sourceRevision, settings, "skipped_prerequisites", caseId);
 }
 
 /** Record a failed provider setup without leaking construction errors or losing the artifact. */
-export function failedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings): CodingEvalResult {
-  return unstartedEval(provider, model, sourceRevision, settings, "harness_error");
+export function failedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, caseId?: string): CodingEvalResult {
+  return unstartedEval(provider, model, sourceRevision, settings, "harness_error", caseId);
 }
 
 /** Produce safe metadata for a run that never reached the coding workspace. */
-function unstartedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, outcome: "harness_error" | "skipped_prerequisites"): CodingEvalResult {
-  return { runId: crypto.randomUUID(), case: { id: CODING_CASE.id, version: CODING_CASE.version },
+function unstartedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, outcome: "harness_error" | "skipped_prerequisites", caseId?: string): CodingEvalResult {
+  const selected = DAILY_CASES.find(item => item.id === caseId);
+  return { runId: crypto.randomUUID(), case: { id: selected?.id ?? CODING_CASE.id, version: selected?.version ?? CODING_CASE.version },
     sourceRevision, provider, model, settings, outcome,
     durationMs: 0, grader: null, metrics: createEvalMetricsPlaceholder() };
 }
