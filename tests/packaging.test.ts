@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
@@ -94,7 +94,7 @@ test("only shipped extension surfaces are present in the base harness", async ()
   const cli = await source("src/cli/main.ts");
   const tui = await source("src/tui/app.ts");
   // ChatGPT subscription login shipped with the Codex OAuth integration; the rest remain deferred.
-  for (const surface of ["mcp", "subagent", "doctor", "keychain"]) {
+  for (const surface of ["mcp", "subagent", "keychain"]) {
     expect(cli.toLowerCase().includes(surface)).toBe(false);
     expect(tui.toLowerCase().includes(surface)).toBe(false);
   }
@@ -213,6 +213,15 @@ test("npm pack installs the public extension API and completes a headless tool r
     }
     const marker = join(installDir, "disabled-ran");
     await Bun.write(join(installDir, "disabled.ts"), `await Bun.write(${JSON.stringify(marker)}, 'bad'); throw new Error('disabled extension ran');`);
+    const doctor = await runCommand([
+      join(installDir, "node_modules/.bin/schway"), "doctor", "--json", "--provider", "openai-compatible",
+      "--base-url", "http://127.0.0.1:11434/v1", "--auth", "none", "--extension", "disabled.ts",
+    ], { cwd: installDir, env: buildIsolatedCliEnv(join(dir, "home")) });
+    expect(doctor.exitCode).toBe(0);
+    expect(doctor.stderr).toBe("");
+    expect(JSON.parse(doctor.stdout).checks.find((item: { id: string }) => item.id === "extensions")).toBeUndefined();
+    expect(JSON.parse(doctor.stdout).checks.some((item: { id: string; status: string }) => item.id === "extension.0" && item.status === "ok")).toBe(true);
+    expect(await Bun.file(marker).exists()).toBe(false);
     const requests: Array<{ tools?: Array<{ function: { name: string } }>; messages?: Array<{ role: string; tool_call_id?: string; content?: string }> }> = [];
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
       requests.push(await request.json() as typeof requests[number]);
@@ -225,7 +234,6 @@ test("npm pack installs the public extension API and completes a headless tool r
       });
     } });
     const isolatedHome = join(dir, "home");
-    await mkdir(isolatedHome);
     try {
       const conversation = await runCommand([
         join(installDir, "node_modules/.bin/schway"), "-p", "/greeting Ada", "--json",
