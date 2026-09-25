@@ -42,13 +42,21 @@ test("real edits pass, source workspace stays isolated and temp repository is re
   await expect(access(workspace)).rejects.toThrow();
 });
 
+test("grader accepts a different correct clamp implementation", async () => {
+  const result = await runCodingEval({ model: script([
+    { toolCalls: [{ id: "alternate", name: "write", arguments: { path: "src/math.ts", content: "export function clamp(value: number, min: number, max: number): number { if (value < min) return min; if (value > max) return max; return value; }\n" } }] },
+    { text: "done" },
+  ]), sourceRevision: revision });
+  expect(result.outcome).toBe("success");
+});
+
 test("case test subprocesses cannot inherit unrelated parent credentials", async () => {
   const key = "SCHWAY_EVAL_PRIVATE_TEST";
   const previous = process.env[key];
   process.env[key] = "fixture-secret";
   try {
     const result = await runCodingEval({ model: script([
-      { toolCalls: [{ id: "env", name: "edit", arguments: { path: "src/math.ts", edits: [{ oldText: "return Math.min(value, min);", newText: 'if (process.env.SCHWAY_EVAL_PRIVATE_TEST) throw new Error("exposed"); return Math.max(min, Math.min(max, value));' }] } }] },
+      { toolCalls: [{ id: "env", name: "edit", arguments: edit }] },
       { toolCalls: [{ id: "verify", name: "bash", arguments: { command: "bun test test/math.test.ts" } }] },
       { text: "done" },
     ]), sourceRevision: revision });
@@ -72,13 +80,23 @@ test("wrong edits fail, model and turn failures stay distinct from grader failur
   expect(bounded.outcome).toBe("model_failure");
 });
 
-test("an early zero exit cannot claim success without three completed assertions", async () => {
+test("oversized candidate source is rejected before full read or execution", async () => {
   const result = await runCodingEval({ model: script([
-    { toolCalls: [{ id: "exit", name: "write", arguments: { path: "src/math.ts", content: "process.exit(0);\nexport function clamp() { return 5; }\n" } }] },
+    { toolCalls: [{ id: "oversized", name: "write", arguments: { path: "src/math.ts", content: " ".repeat(100_001) } }] },
+    { text: "done" },
+  ]), sourceRevision: revision });
+  expect(result.outcome).toBe("grader_failure");
+  expect(result.grader?.exitCode).toBeNull();
+});
+
+test("fake test output and an early zero exit cannot bypass trusted assertions", async () => {
+  const result = await runCodingEval({ model: script([
+    { toolCalls: [{ id: "exit", name: "write", arguments: { path: "src/math.ts", content: 'console.error("3 pass\\n0 fail"); process.exit(0);\nexport function clamp() { return 5; }\n' } }] },
     { text: "fixed" },
   ]), sourceRevision: revision });
   expect(result.outcome).toBe("grader_failure");
-  expect(result.grader).toEqual({ passed: false, exitCode: 0 });
+  expect(result.grader?.passed).toBe(false);
+  expect(result.grader?.exitCode).not.toBe(0);
 });
 
 test("editing the grader test is rejected and cannot turn a wrong fix into success", async () => {

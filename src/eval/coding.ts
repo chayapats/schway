@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdtemp, mkdir, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,12 +15,23 @@ import { createEvalMetrics, type EvalMetrics } from "./metrics.ts";
 
 const exec = promisify(execFile);
 const INITIAL_SOURCE = "export function clamp(value: number, min: number, max: number): number {\n  return Math.min(value, min);\n}\n";
-const TEST_SOURCE = `import { expect, test } from "bun:test";
-import { clamp } from "../src/math.ts";
-test("clamp inside range", () => expect(clamp(5, 0, 10)).toBe(5));
-test("clamp below range", () => expect(clamp(-2, 0, 10)).toBe(0));
-test("clamp above range", () => expect(clamp(12, 0, 10)).toBe(10));
-`;
+// Trusted tests evaluate the candidate in a VM, so its top-level code cannot
+// exit the test process or forge Bun's reporter status before assertions run.
+const TEST_SOURCE = [
+  'import { expect, test } from "bun:test";',
+  'import { readFileSync } from "node:fs";',
+  'import { runInNewContext } from "node:vm";',
+  'const source = readFileSync(new URL("../src/math.ts", import.meta.url), "utf8");',
+  'const javascript = new Bun.Transpiler({ loader: "ts" }).transformSync(source)',
+  '  .replace(/^\\s*export\\s+(?=(?:function|const|let)\\s+clamp\\b)/m, "");',
+  'function clamp(value: number, min: number, max: number): number {',
+  '  return runInNewContext(javascript + "\\nclamp(" + [value, min, max].join(", ") + ")", {}, { timeout: 250 }) as number;',
+  '}',
+  'test("clamp inside range", () => expect(clamp(5, 0, 10)).toBe(5));',
+  'test("clamp below range", () => expect(clamp(-2, 0, 10)).toBe(0));',
+  'test("clamp above range", () => expect(clamp(12, 0, 10)).toBe(10));',
+  'test("eval subprocess hides unrelated credentials", () => expect(process.env.SCHWAY_EVAL_PRIVATE_TEST).toBeUndefined());',
+].join("\n") + "\n";
 
 /** One versioned coding task graded against a real isolated repository. */
 export const CODING_CASE = {
@@ -115,7 +127,7 @@ export async function runCodingEval(options: {
     else if (reason !== "completed") outcome = errorOrigin === "harness" ? "harness_error" : "model_failure";
     else {
       grader = await grade(project, join(directory, "grading"), signal, subprocessEnv);
-      outcome = grader.passed ? "success" : "grader_failure";
+      outcome = signal.aborted ? controller.signal.aborted ? "timeout" : "model_failure" : grader.passed ? "success" : "grader_failure";
     }
   } catch (error) {
     outcome = controller.signal.aborted || error instanceof GraderTimeout ? "timeout" : signal.aborted ? "model_failure" : "harness_error";
@@ -132,13 +144,9 @@ export async function runCodingEval(options: {
 
 /** Grade the actual source and bounded real Bun test exit, not the assistant's final prose. */
 async function grade(project: string, gradingCopy: string, signal: AbortSignal, env: NodeJS.ProcessEnv): Promise<{ passed: boolean; exitCode: number | null }> {
-  const readOptional = (path: string) => readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  });
-  const source = await readOptional(join(project, "src/math.ts"));
-  const testSource = await readOptional(join(project, "test/math.test.ts"));
-  if (source === null || source.length > 100_000 || testSource !== TEST_SOURCE) {
+  const source = await readBoundedFile(join(project, "src/math.ts"), 100_000, signal);
+  const testSource = await readBoundedFile(join(project, "test/math.test.ts"), 16_000, signal);
+  if (source === null || testSource !== TEST_SOURCE) {
     return { passed: false, exitCode: null };
   }
   // The candidate cannot persist bunfig/preload files into the grader's fresh project.
@@ -148,19 +156,43 @@ async function grade(project: string, gradingCopy: string, signal: AbortSignal, 
   await writeFile(join(gradingCopy, "src/math.ts"), source);
   await writeFile(join(gradingCopy, "test/math.test.ts"), TEST_SOURCE);
   let exitCode: number | null = 0;
-  let verified = false;
   try {
-    const output = await exec("bun", ["--no-env-file", "test", "test/math.test.ts"], {
+    await exec("bun", ["--no-env-file", "test", "test/math.test.ts"], {
       cwd: gradingCopy, timeout: 5000, maxBuffer: 8192, signal, env,
     });
-    verified = /^\s*3 pass\s*$/m.test(output.stderr) && /^\s*0 fail\s*$/m.test(output.stderr);
   } catch (error) {
     if (signal.aborted) throw error;
     const code = (error as { code?: unknown }).code;
     if (code === "ETIMEDOUT" || (error as { killed?: boolean }).killed) throw new GraderTimeout();
     exitCode = typeof code === "number" ? code : null;
   }
-  return { passed: source !== INITIAL_SOURCE && verified && exitCode === 0, exitCode };
+  // Only trusted tests running candidate code inside a VM determine success.
+  // Do not infer completion from candidate-controlled stdout or stderr.
+  return { passed: source !== INITIAL_SOURCE && exitCode === 0, exitCode };
+}
+
+/** Read only a regular, non-symlink candidate with a strict byte cap and abort checks. */
+async function readBoundedFile(path: string, maxBytes: number, signal: AbortSignal): Promise<string | null> {
+  signal.throwIfAborted();
+  let file;
+  try { file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) {
+    if (["ENOENT", "ELOOP", "EACCES", "EPERM", "EISDIR", "ENXIO"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
+    throw error;
+  }
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.size > maxBytes) return null;
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      signal.throwIfAborted();
+      const { bytesRead } = await file.read(buffer, size, Math.min(8192, buffer.length - size), size);
+      if (bytesRead === 0) break;
+      size += bytesRead;
+    }
+    return size <= maxBytes ? buffer.subarray(0, size).toString("utf8") : null;
+  } finally { await file.close(); }
 }
 
 /** Distinguish grader command timeout from ordinary failed tests. */
