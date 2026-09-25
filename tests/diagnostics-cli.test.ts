@@ -105,7 +105,8 @@ test("unwritable diagnostic destination cannot suppress tool settlement", async 
 
 test("rotation rejection cannot suppress tool or session settlement", async () => withHome(async home => {
   const destination = join(home, "rotating.jsonl");
-  await writeFile(destination, "#".repeat(1_048_575));
+  const original = "#".repeat(1_048_575);
+  await writeFile(destination, original);
   await mkdir(`${destination}.3`);
   await writeFile(join(`${destination}.3`, "keep"), "unchanged");
   let stdout = "";
@@ -116,6 +117,7 @@ test("rotation rejection cannot suppress tool or session settlement", async () =
   expect(code).toBe(0);
   expect(stdout).toContain('"type":"tool.finished"');
   expect(await readFile(join(home, "note.txt"), "utf8")).toBe("settled");
+  expect(await readFile(destination, "utf8")).toBe(original);
   expect(await readFile(join(`${destination}.3`, "keep"), "utf8")).toBe("unchanged");
   const session = (await readdir(join(home, ".schway", "sessions")))[0]!;
   expect(await readFile(join(home, ".schway", "sessions", session), "utf8")).toContain('"tool_result"');

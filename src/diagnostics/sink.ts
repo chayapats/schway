@@ -87,10 +87,17 @@ export function createDiagnosticSink(options: {
             if (archives === 0) await unlink(destination).catch(missingOnly);
             size = 0;
           }
-          // O_NOFOLLOW prevents a late replacement of the final file with a symlink.
+          // O_NOFOLLOW rejects final symlinks; validate the opened inode too, since
+          // the destination may change after the pre-open path check.
           await requirePrivate(destination, false);
           const file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW, 0o600);
-          try { await file.appendFile(line); } finally { await file.close(); }
+          try {
+            const info = await file.stat();
+            if (!info.isFile() || info.mode & 0o077 || info.nlink !== 1) {
+              throw new Error("Diagnostic destination is not a private regular file");
+            }
+            await file.appendFile(line);
+          } finally { await file.close(); }
           size += bytes;
         }
       } catch {

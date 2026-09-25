@@ -133,6 +133,82 @@ test("insecure preexisting default directory and file are refused without permis
   expect(await readFile(diagnosticPath(home), "utf8")).toBe("original");
 }));
 
+test("opened handle is checked after preflight against swapped hardlinks, insecure files and nonregular targets", async () => {
+  // A separate Bun process keeps mock.module of node:fs/promises isolated from the suite.
+  const script = String.raw`
+    import { mock } from "bun:test";
+    import * as fs from "node:fs/promises";
+    import { tmpdir } from "node:os";
+    import { join } from "node:path";
+    import { pathToFileURL } from "node:url";
+    const realOpen = fs.open;
+    const home = await fs.mkdtemp(join(tmpdir(), "schway-fd-swap-"));
+    let current;
+    let appendCount = 0;
+    let closeCount = 0;
+    mock.module("node:fs/promises", () => ({ ...fs, open: async (path, flags, mode) => {
+      if (path !== current?.destination) return realOpen(path, flags, mode);
+      if (current.kind === "nonregular") return {
+        stat: async () => ({ isFile: () => false, mode: 0o600, nlink: 1 }),
+        appendFile: async () => { appendCount++; },
+        close: async () => { closeCount++; },
+      };
+      await fs.unlink(path);
+      if (current.kind === "hardlink") await fs.link(current.protectedFile, path);
+      else { await fs.writeFile(path, "insecure\n", { mode: 0o644 }); await fs.chmod(path, 0o644); }
+      const handle = await realOpen(path, flags, mode);
+      return {
+        stat: () => handle.stat(),
+        appendFile: async data => { appendCount++; await handle.appendFile(data); },
+        close: async () => { closeCount++; await handle.close(); },
+      };
+    } }));
+    const { createDiagnosticSink } = await import(pathToFileURL(join(process.cwd(), "src/diagnostics/sink.ts")).href);
+    const results = [];
+    try {
+      for (const kind of ["hardlink", "insecure", "nonregular"]) {
+        const destination = join(home, kind + ".jsonl");
+        const protectedFile = join(home, "protected.jsonl");
+        await fs.writeFile(protectedFile, "protected\n", { mode: 0o600 });
+        await fs.writeFile(destination, "original\n", { mode: 0o600 });
+        current = { kind, destination, protectedFile };
+        appendCount = 0; closeCount = 0;
+        const sink = createDiagnosticSink({ home, destination, enabled: true });
+        sink.record("test", "write");
+        await sink.close();
+        results.push({ kind, appendCount, closeCount, dropped: sink.dropped,
+          protected: await fs.readFile(protectedFile, "utf8"),
+          destinationText: kind === "nonregular" ? await fs.readFile(destination, "utf8") : undefined });
+      }
+      console.log(JSON.stringify(results));
+    } finally { await fs.rm(home, { recursive: true, force: true }); }
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const code = await Promise.race([child.exited, new Promise<number>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("diagnostic FD swap fixture hung")), 5000);
+    })]);
+    const output = await new Response(child.stdout).text();
+    const stderr = await new Response(child.stderr).text();
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    const results = JSON.parse(output) as { kind: string; appendCount: number; closeCount: number; dropped: number; protected: string; destinationText?: string }[];
+    expect(results.map(result => result.kind)).toEqual(["hardlink", "insecure", "nonregular"]);
+    for (const result of results) {
+      expect(result.appendCount).toBe(0);
+      expect(result.closeCount).toBe(1);
+      expect(result.dropped).toBeGreaterThan(0);
+      expect(result.protected).toBe("protected\n");
+    }
+    expect(results[2]?.destinationText).toBe("original\n");
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (child.exitCode === null) child.kill();
+    await child.exited;
+  }
+});
+
 test("oversized metadata and unsafe identifiers never enumerate deep getters or expose partial secrets", async () => temporary(async home => {
   const secret = "secret-long-" + "x".repeat(300);
   const sink = createDiagnosticSink({ home, enabled: true, runId: secret, sessionId: () => secret, secrets: [secret] });
