@@ -1,4 +1,5 @@
 import type { CompactionReason } from "../context/compaction.ts";
+import type { ModelUsage } from "../model/model.ts";
 import type { ToolCallStatus } from "../tools/types.ts";
 
 /**
@@ -17,6 +18,7 @@ export type RuntimeEvent =
       content: { type: "text"; text: string } | { type: "thinking"; text: string };
     }
   | { type: "model.finished" }
+  | { type: "model.usage"; phase: "turn" | "compaction"; usage: ModelUsage; complete: boolean }
   | {
       type: "model.retry";
       attempt: number;
@@ -54,4 +56,4 @@ export type RuntimeEvent =
       status: "failed" | "noop";
       message?: string;
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; origin?: "model" | "harness" };

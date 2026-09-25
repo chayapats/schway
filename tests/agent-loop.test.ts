@@ -48,6 +48,7 @@ test("scripted model streams text through the real agent loop", async () => {
     "model.started",
     "model.delta",
     "model.delta",
+    "model.usage",
     "model.finished",
     "agent.finished",
   ]);
@@ -81,7 +82,7 @@ test("stream failure emits an error and does not complete successfully", async (
     }),
   );
 
-  expect(events).toContainEqual({ type: "error", message: "invalid request" });
+  expect(events).toContainEqual({ type: "error", message: "invalid request", origin: "model" });
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "error" });
   expect(session.items).toHaveLength(1);
 });
@@ -150,11 +151,13 @@ test("agent reads a workspace file and continues from the tool result", async ()
     expect(events.map((event) => event.type)).toEqual([
       "agent.started",
       "model.started",
+      "model.usage",
       "model.finished",
       "tool.started",
       "tool.finished",
       "model.started",
       "model.delta",
+      "model.usage",
       "model.finished",
       "agent.finished",
     ]);

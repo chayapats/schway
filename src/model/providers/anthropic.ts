@@ -17,6 +17,7 @@ import { ANTHROPIC_THINKING_BUDGETS, DEFAULT_MODEL_IDS, describeThinkingSupport,
 
 /** Numeric Anthropic thinking budgets shared with resolve-time config validation; re-exported to preserve the provider import path. */
 export { ANTHROPIC_THINKING_BUDGETS };
+import { reportedTokens } from "../model.ts";
 import type {
   Model,
   ModelRequest,
@@ -107,12 +108,23 @@ export function createAnthropicModel(options: {
         { signal: request.signal },
       );
       const builder = createStreamBuilder();
+      let inputTokens: number | null = null;
+      let outputTokens: number | null = null;
       for await (const event of stream) {
+        if (event.type === "message_start") {
+          inputTokens = reportedTokens(event.message.usage.input_tokens);
+          outputTokens = reportedTokens(event.message.usage.output_tokens);
+          yield { type: "usage", usage: { inputTokens, outputTokens: null } };
+        }
+        if (event.type === "message_delta") {
+          outputTokens = reportedTokens(event.usage.output_tokens);
+        }
         const deltas = builder.accept(event);
         for (const delta of deltas) {
           yield delta;
         }
       }
+      yield { type: "usage", usage: { inputTokens, outputTokens } };
       yield { type: "message_complete", message: builder.complete() };
     },
   };

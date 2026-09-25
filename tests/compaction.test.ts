@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { createContextManager } from "../src/context/manager.ts";
+import { SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
+import { createEvalMetrics } from "../src/eval/metrics.ts";
 import type {
   AssistantMessage,
   UserMessage,
@@ -59,6 +61,25 @@ const CODING_SUMMARY = [
   "src/b.ts",
 ].join("\n");
 
+test("pressure summarization and the completed turn both contribute usage once", async () => {
+  const session = createSession([...turns(3), { type: "user", id: "last", content: [{ type: "text", text: "continue" }] }]);
+  const tracker = createEvalMetrics(session);
+  const model: Model = { provider: "scripted", id: "usage-fixture", async *stream(request) {
+    const summary = request.systemPrompt === SUMMARY_SYSTEM_PROMPT;
+    yield { type: "usage", usage: { inputTokens: summary ? 9 : 13, outputTokens: summary ? 4 : 6 } };
+    yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "text", text: summary ? CODING_SUMMARY : "ok" }] } };
+  } };
+  const events = await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace, { contextWindow: 1, keepTurns: 1 }) }));
+  events.forEach(tracker.record);
+  expect(events.filter(event => event.type === "model.usage")).toEqual([
+    { type: "model.usage", phase: "compaction", usage: { inputTokens: 9, outputTokens: 4 }, complete: true },
+    { type: "model.usage", phase: "turn", usage: { inputTokens: 13, outputTokens: 6 }, complete: true },
+  ]);
+  expect(tracker.result().inputTokens).toBe(22);
+  expect(tracker.result().outputTokens).toBe(10);
+  expect(tracker.result().compactions).toBe(1);
+});
+
 test("manual compaction preserves raw history and uses summary plus retained records", async () => {
   const session = createSession(turns(12));
   const before = session.items.length;
@@ -85,6 +106,18 @@ test("manual compaction preserves raw history and uses summary plus retained rec
   // Retained recent records only, never the full raw history.
   expect(prepared.items.length).toBeLessThan(before);
   expect(prepared.items.length).toBeGreaterThan(0);
+});
+
+test("summary stream throwing after message_complete still reports an incomplete attempt", async () => {
+  const session = createSession(turns(12));
+  const manager = createContextManager(workspace);
+  const model: Model = { provider: "scripted", id: "interrupted-summary", async *stream() {
+    yield { type: "usage", usage: { inputTokens: 3, outputTokens: 2 } };
+    yield { type: "message_complete", message: { type: "assistant", id: "summary", content: [{ type: "text", text: CODING_SUMMARY }] } };
+    throw new Error("transport dropped after completion event");
+  } };
+  expect(await manager.compact(session, model, { reason: "manual" })).toBeNull();
+  expect(manager.takeUsage()).toEqual([{ usage: { inputTokens: 3, outputTokens: 2 }, complete: false }]);
 });
 
 test("failed summarization leaves history intact without a misleading record", async () => {

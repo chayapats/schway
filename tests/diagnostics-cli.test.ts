@@ -23,7 +23,7 @@ test("debug opt-in keeps runtime JSONL and durable semantic JSONL separate", asy
   stdout = "";
   expect(await invoke(["--debug"])).toBe(0);
   const events = stdout.trim().split("\n").map(line => JSON.parse(line) as { type: string });
-  expect(events.map(event => event.type)).toEqual(["agent.started", "model.started", "model.delta", "model.finished", "agent.finished"]);
+  expect(events.map(event => event.type)).toEqual(["agent.started", "model.started", "model.delta", "model.usage", "model.finished", "agent.finished"]);
   const lines = (await readFile(diagnosticPath(home), "utf8")).trim().split("\n").map(line => JSON.parse(line) as { runId: string; sessionId: string; event: string });
   expect(lines.map(line => line.event)).toContain("agent.finished");
   expect(lines[0]?.runId).toBeTruthy();

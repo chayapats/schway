@@ -26,6 +26,7 @@ export async function executeToolCall(options: {
   call: ToolCallContent;
   workspace?: Workspace;
   signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
   onOutput?: (chunk: ToolOutputChunk) => void;
   toolHooks?: ExtensionToolHooks;
 }): Promise<ExecutedToolCall> {
@@ -74,6 +75,7 @@ export async function executeToolCall(options: {
     const output = await registered.definition.execute(args, {
       workspace: options.workspace,
       signal,
+      env: options.env,
       onOutput: options.onOutput,
     });
     executed = {

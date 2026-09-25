@@ -30,10 +30,22 @@ export interface ModelRequest {
   thinking?: ThinkingLevel;
 }
 
+/** Reported token counts for one provider attempt; null means that dimension was not reported. */
+export interface ModelUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+/** Normalize nonnegative integer provider counters without inventing consumption. */
+export function reportedTokens(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 /** Incremental stream events plus the assembled assistant message. */
 export type ModelStreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
+  | { type: "usage"; usage: ModelUsage }
   | { type: "message_complete"; message: AssistantMessage };
 
 /** Provider adapter contract using Schway conversation records while leaving retries and tool execution to the harness. */

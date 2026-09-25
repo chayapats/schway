@@ -25,6 +25,7 @@ export async function* scheduleToolCalls(options: {
   workspace?: Workspace;
   signal?: AbortSignal;
   maxConcurrentTools?: number;
+  env?: NodeJS.ProcessEnv;
   toolHooks?: ExtensionToolHooks;
 }): AsyncGenerator<RuntimeEvent, ExecutedToolCall[]> {
   const { calls, registry, workspace, toolHooks } = options;
@@ -83,6 +84,7 @@ export async function* scheduleToolCalls(options: {
       call,
       workspace,
       signal,
+      env: options.env,
       toolHooks,
       onOutput(chunk) {
         if (chunk.text.length === 0) {

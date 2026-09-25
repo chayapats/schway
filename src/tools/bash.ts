@@ -179,7 +179,7 @@ async function runShell(
 
     child = spawn("bash", ["-c", command], {
       cwd,
-      env: process.env,
+      env: ctx.env ?? process.env,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });

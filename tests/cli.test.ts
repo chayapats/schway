@@ -120,6 +120,7 @@ test("--json streams normalized runtime events as JSONL on stdout", async () => 
     "agent.started",
     "model.started",
     "model.delta",
+    "model.usage",
     "model.finished",
     "agent.finished",
   ]);

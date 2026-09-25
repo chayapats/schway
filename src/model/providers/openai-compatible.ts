@@ -4,6 +4,7 @@ import type {
   AssistantMessage,
 } from "../../conversation/types.ts";
 import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../catalog.ts";
+import { reportedTokens } from "../model.ts";
 import type {
   Model,
   ModelRequest,
@@ -103,6 +104,7 @@ export function createOpenAICompatibleModel(options: {
           ...(options.extraBody ?? {}),
           model: modelId,
           stream: true,
+          stream_options: { include_usage: true },
           ...(options.maxTokens !== undefined
             ? { max_tokens: options.maxTokens }
             : {}),
@@ -115,6 +117,13 @@ export function createOpenAICompatibleModel(options: {
       });
       const builder = createStreamBuilder();
       for await (const chunk of readSseJson(response, secrets, request.signal)) {
+        if (chunk.usage && typeof chunk.usage === "object" && !Array.isArray(chunk.usage)) {
+          const usage = chunk.usage as Record<string, unknown>;
+          yield { type: "usage", usage: {
+            inputTokens: reportedTokens(usage.prompt_tokens),
+            outputTokens: reportedTokens(usage.completion_tokens),
+          } };
+        }
         const deltas = builder.accept(chunk);
         for (const delta of deltas) {
           yield delta;

@@ -1490,6 +1490,9 @@ export class TuiController {
       if (this.activeAbort === abort) this.observeRuntimeEvent({ type: "compaction.finished", reason: "manual", status: "failed" });
       throw error;
     } finally {
+      for (const entry of this.contextManager.takeUsage()) {
+        this.observeRuntimeEvent({ type: "model.usage", phase: "compaction", ...entry });
+      }
       if (this.activeAbort === abort) {
         this.activeAbort = undefined;
       }

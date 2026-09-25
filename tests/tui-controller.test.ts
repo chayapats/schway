@@ -155,7 +155,7 @@ test("optional event callback runs before display folding and cannot suppress se
       },
     });
     await controller.submit("read note");
-    expect(seen).toEqual(["agent.started", "model.started", "model.finished", "tool.started", "tool.finished", "model.started", "model.delta", "model.delta", "model.finished", "agent.finished"]);
+    expect(seen).toEqual(["agent.started", "model.started", "model.usage", "model.finished", "tool.started", "tool.finished", "model.started", "model.delta", "model.delta", "model.usage", "model.finished", "agent.finished"]);
     expect(sawFilteredThinking).toBe(true);
     expect(JSON.stringify(controller.snapshot()).includes("hidden-thought")).toBe(false);
     expect(toolStatusBefore).toBe("running");

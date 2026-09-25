@@ -36,7 +36,7 @@ import type {
   SessionRecord,
 } from "../conversation/types.ts";
 import { lookupModel } from "../model/catalog.ts";
-import type { Model } from "../model/model.ts";
+import type { Model, ModelUsage } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import { resolveToolPath } from "../tools/path.ts";
 import type { Workspace } from "../workspace/workspace.ts";
@@ -93,6 +93,8 @@ export interface ContextManager {
   activateSkill(name: string, options?: { signal?: AbortSignal }): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Drop any active skill without touching durable history. */
   clearActiveSkill(): void;
+  /** Drain per-attempt summarization usage, including failed or unreported attempts. */
+  takeUsage(): Array<{ usage: ModelUsage; complete: boolean }>;
 }
 
 /** Create a context manager bound to one workspace and optional user home. */
@@ -103,6 +105,7 @@ export function createContextManager(
   const keepTurns = options.keepTurns ?? COMPACTION_KEEP_TURNS;
   let activeSkill: ActiveSkill | undefined;
   let activationScope = {};
+  const summaryUsage: Array<{ usage: ModelUsage; complete: boolean }> = [];
 
   /** Resolve the model-aware context window with explicit overrides first. */
   const resolveWindow = (model: Model): number => {
@@ -256,6 +259,10 @@ export function createContextManager(
       activationScope = {};
       activeSkill = undefined;
     },
+
+    takeUsage() {
+      return summaryUsage.splice(0);
+    },
   };
 
   /** Shared compaction worker used by pressure, manual, and overflow paths. */
@@ -295,7 +302,9 @@ export function createContextManager(
         compacted: pruned,
       });
       const tokensBefore = estimateSessionTokens(session.items);
-      const summary = await summarizeWithModel(model, inputText, compactOptions.signal);
+      const summary = await summarizeWithModel(model, inputText, compactOptions.signal, (usage, complete) => {
+        summaryUsage.push({ usage, complete });
+      });
       if (!summary || compactOptions.signal?.aborted) {
         return null;
       }
@@ -356,10 +365,13 @@ async function summarizeWithModel(
   model: Model,
   inputText: string,
   signal?: AbortSignal,
+  onUsage?: (usage: ModelUsage, complete: boolean) => void,
 ): Promise<string | null> {
   if (signal?.aborted) {
     return null;
   }
+  let usage: ModelUsage = { inputTokens: null, outputTokens: null };
+  let complete = false;
   try {
     let text = "";
     for await (const event of model.stream({
@@ -376,7 +388,10 @@ async function summarizeWithModel(
     })) {
       if (event.type === "text_delta") {
         text += event.text;
+      } else if (event.type === "usage") {
+        usage = event.usage;
       } else if (event.type === "message_complete") {
+        complete = true;
         const completed: string[] = [];
         for (const block of event.message.content) {
           if (block.type === "text") {
@@ -391,6 +406,9 @@ async function summarizeWithModel(
     const trimmed = text.trim();
     return trimmed.length > 0 ? trimmed : null;
   } catch {
+    complete = false;
     return null;
+  } finally {
+    onUsage?.(usage, complete && !signal?.aborted);
   }
 }

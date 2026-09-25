@@ -19,6 +19,11 @@ bun run dev -- -p "hello"
 bun run dev
 ```
 
+## Graded coding eval
+
+Run `bun run eval --provider scripted` for the isolated offline coding case.
+Paid runs require an explicit provider, model, and `--allow-paid`; see [eval commands and artifact contract](docs/evals.md).
+
 ## Diagnose local readiness
 
 ```bash

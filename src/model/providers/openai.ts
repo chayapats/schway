@@ -13,6 +13,7 @@ import type {
   ProviderMetadata,
 } from "../../conversation/types.ts";
 import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
+import { reportedTokens } from "../model.ts";
 import type {
   Model,
   ModelRequest,
@@ -107,6 +108,16 @@ export function createOpenAIModel(options: {
       );
       const builder = createStreamBuilder();
       for await (const event of stream) {
+        if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
+          const usage = event.response.usage;
+          if (usage) yield { type: "usage", usage: {
+            inputTokens: reportedTokens(usage.input_tokens),
+            outputTokens: reportedTokens(usage.output_tokens),
+          } };
+        }
+        if (event.type === "response.incomplete") {
+          throw new Error("OpenAI response incomplete");
+        }
         if (event.type === "response.failed") {
           throw new Error(failedMessage(event));
         }
