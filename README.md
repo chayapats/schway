@@ -64,8 +64,10 @@ Esc cancels the running turn through the shared AbortSignal path and returns to
 the input editor. Ctrl+C cancels when running and quits when idle. Quitting
 restores the terminal and releases resources. Resume rebuilds history from the
 saved JSONL without replaying old tool effects. Missing credentials and runtime failures appear as actionable errors. Interactive
-`/login` and `/logout` manage API keys and ChatGPT subscription credentials; see
-[credentials](docs/credentials.md) and [subscription login](docs/configuration.md#chatgpt-subscription-codex-oauth).
+`/login` and `/logout` manage API keys and ChatGPT subscription credentials. With
+`openaiAuth codex`, `/model` fetches that subscription's available model list rather
+than showing static OpenAI guesses; see [credentials](docs/credentials.md) and
+[subscription login](docs/configuration.md#chatgpt-subscription-codex-oauth).
 
 ## Headless usage
 

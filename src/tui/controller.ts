@@ -114,6 +114,8 @@ export interface TuiControllerOptions {
     reload: (settings?: ResolvedSettings) => Promise<{ model: Model; notice?: string } | { error: string }>;
     /** Explicit subscription login runner; production wires the verified OAuth flow. */
     codexLogin?: CodexLoginRunner;
+    /** Resolve account-scoped model IDs using only the ChatGPT subscription transport. */
+    listSubscriptionModels?: (signal: AbortSignal) => Promise<readonly string[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
@@ -368,6 +370,8 @@ export class TuiController {
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
   private readonly onRuntimeEvent?: TuiControllerOptions["onRuntimeEvent"];
   private modelPicker?: ModelPickerSnapshot;
+  private subscriptionModels?: readonly string[];
+  private modelCatalogAbort?: AbortController;
   private branchTreeOpen = false;
   private branchTreeSelectedId?: string;
   private branchTreeCache?: BranchTreeSnapshot;
@@ -1216,15 +1220,41 @@ export class TuiController {
   /** Open model search while idle, selecting the currently active entry. */
   openModelPicker(): boolean {
     if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
-    this.modelPicker = { query: "", selectedIndex: 0, entries: [] };
+    this.closeModelPicker();
+    this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() ? { loading: true } : {}) };
     this.searchModels("");
+    if (this.subscriptionSelected()) {
+      const picker = this.modelPicker;
+      const abort = new AbortController();
+      this.modelCatalogAbort = abort;
+      const load = this.credentials?.listSubscriptionModels;
+      if (!load) { picker.loading = false; picker.error = "ChatGPT model discovery is unavailable. Restart Schway."; }
+      else void load(abort.signal).then(models => {
+        if (this.disposed || abort.signal.aborted || this.modelCatalogAbort !== abort || this.modelPicker !== picker) return;
+        this.subscriptionModels = models;
+        picker.loading = false;
+        this.searchModels(picker.query);
+      }).catch(error => {
+        if (this.disposed || abort.signal.aborted || this.modelPicker !== picker) return;
+        picker.loading = false;
+        picker.error = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500);
+      });
+    }
     return true;
+  }
+
+  /** True when the active OpenAI adapter uses the subscription or explicitly requires it. */
+  private subscriptionSelected(): boolean {
+    return (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
   }
 
   /** Filter catalog and profile choices with fallback budgets for typed ids. */
   searchModels(query: string): void {
     if (!this.modelPicker || this.running) return;
-    this.modelPicker = { query, selectedIndex: 0, entries: modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile }) };
+    const picker = this.modelPicker;
+    picker.query = query;
+    picker.selectedIndex = 0;
+    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile, subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels });
   }
 
   /** Move the highlighted model with wraparound over the filtered choices. */
@@ -1235,7 +1265,12 @@ export class TuiController {
   }
 
   /** Close the picker without changing the active model or settings. */
-  closeModelPicker(): void { this.modelPicker = undefined; }
+  closeModelPicker(): void {
+    this.modelCatalogAbort?.abort();
+    this.modelCatalogAbort = undefined;
+    this.subscriptionModels = undefined;
+    this.modelPicker = undefined;
+  }
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
@@ -1265,6 +1300,18 @@ export class TuiController {
     if ("error" in selection) { this.fail(selection.error); return false; }
     if (selection.profile !== undefined) {
       return this.selectProfile(selection.profile);
+    }
+    if (this.subscriptionSelected() && selection.provider === "openai") {
+      try {
+        const available = this.subscriptionModels ?? await this.credentials?.listSubscriptionModels?.(AbortSignal.timeout(5_000));
+        if (!available?.includes(selection.modelId)) {
+          this.fail(`Model "${selection.modelId}" is not in the ChatGPT subscription model catalog. Open /model to see available choices.`);
+          return false;
+        }
+      } catch (error) {
+        this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500));
+        return false;
+      }
     }
     return this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId), () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}). Applies to this session only.`);
   }
@@ -1340,7 +1387,7 @@ export class TuiController {
         await transaction.commit(abort.signal);
         // Once the transaction commits, publish the matching runtime even if cancellation arrives at that boundary.
         this.publishSettings(transaction.settings, staged);
-        this.modelPicker = undefined;
+        this.closeModelPicker();
         this.status = "idle";
         this.notice(redactSecrets(message(), this.secrets));
         return true;
@@ -1590,6 +1637,7 @@ export class TuiController {
     sessionId: string,
     options: { workspace?: Workspace; contextManager?: ContextManager } = {},
   ): void {
+    this.closeModelPicker();
     this.abortActiveTurn();
     this.extensions?.replaceSession();
     this.contextManager.clearActiveSkill();
@@ -1655,6 +1703,7 @@ export class TuiController {
    */
   dispose(): void {
     this.disposed = true;
+    this.closeModelPicker();
     if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; }
     this.abortActiveTurn();
     this.contextManager.clearActiveSkill();

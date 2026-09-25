@@ -249,6 +249,10 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         });
       },
       codexLogin,
+      listSubscriptionModels: async (signal: AbortSignal) => {
+        const { fetchSubscriptionModels } = await import("../model/providers/codex-subscription.ts");
+        return fetchSubscriptionModels({ store: credentialStore, fetch: io.fetch, signal });
+      },
     };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
       settings = next;
@@ -530,7 +534,9 @@ async function runTuiRenderer(options: {
         const picker = snapshot.modelPicker;
         lines += `\n\nSelect model or profile — search or type provider/model or profile:<name> (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}\n`;
         lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output)${entry.custom ? " [typed ID]" : ""}`).join("\n");
-        if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID or profile:<name>.";
+        if (picker.loading) lines += "\nLoading ChatGPT subscription models...";
+        else if (picker.error) lines += `\n${picker.error}`;
+        else if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID or profile:<name>.";
       }
       lines = redactSecrets(lines, options.secrets);
       const roots = options.controller.workspaceIdentity();
