@@ -41,7 +41,7 @@ const model: Model = {
       const summary = request.context.find((entry: any) => entry.name === "summary")?.content ?? "";
       if (calls === 3) assert(!content.includes("main-only"));
       if (calls === 4) { assert(!content.includes("alt-only")); assert(!summary.includes("ALT_SUMMARY")); }
-      if (calls === 5) { assert(content.includes("alt-only")); assert(!content.includes("main-only")); }
+      if (calls === 5) { assert(summary.includes("ALT_SUMMARY")); assert(content.includes("alt-only")); assert(!content.includes("main-only")); }
       yield { type: "message_complete", message: { type: "assistant", id: `reply-${calls}`, content: [{ type: "text", text: calls === 3 ? "alt-only" : calls === 4 ? "main-only" : "alt-resumed" }] } };
     }
   },
