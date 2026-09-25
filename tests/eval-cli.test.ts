@@ -32,10 +32,20 @@ test("malformed compatible endpoint is a skipped prerequisite even with a key", 
   });
 });
 
+test("existing output is rejected before any paid attempt and stays unchanged", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "existing.json");
+    await Bun.write(output, "leave me alone");
+    expect(await runEvalCli(["--provider", "openai", "--model", "fixture", "--allow-paid", "--output", output], { OPENAI_API_KEY: "fixture-secret" })).toBe(2);
+    expect(await readFile(output, "utf8")).toBe("leave me alone");
+  });
+});
+
 test("offline command writes a bounded artifact with the observed grader result", async () => {
   await withTempDir(async dir => {
     const output = join(dir, "run.json");
     expect(await runEvalCli(["--provider", "scripted", "--output", output], {})).toBe(0);
+    expect(await runEvalCli(["--provider", "scripted", "--output", output], {})).toBe(2);
     const result = JSON.parse(await readFile(output, "utf8")) as { outcome: string; grader: { passed: boolean }; metrics: { toolCalls: number } };
     expect(result.outcome).toBe("success");
     expect(result.grader.passed).toBe(true);

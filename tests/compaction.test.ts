@@ -108,6 +108,18 @@ test("manual compaction preserves raw history and uses summary plus retained rec
   expect(prepared.items.length).toBeGreaterThan(0);
 });
 
+test("summary stream throwing after message_complete still reports an incomplete attempt", async () => {
+  const session = createSession(turns(12));
+  const manager = createContextManager(workspace);
+  const model: Model = { provider: "scripted", id: "interrupted-summary", async *stream() {
+    yield { type: "usage", usage: { inputTokens: 3, outputTokens: 2 } };
+    yield { type: "message_complete", message: { type: "assistant", id: "summary", content: [{ type: "text", text: CODING_SUMMARY }] } };
+    throw new Error("transport dropped after completion event");
+  } };
+  expect(await manager.compact(session, model, { reason: "manual" })).toBeNull();
+  expect(manager.takeUsage()).toEqual([{ usage: { inputTokens: 3, outputTokens: 2 }, complete: false }]);
+});
+
 test("failed summarization leaves history intact without a misleading record", async () => {
   const session = createSession(turns(12));
   const before = session.items.length;

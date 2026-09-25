@@ -30,6 +30,8 @@ export interface AgentLoopOptions {
   signal?: AbortSignal;
   maxTurns?: number;
   maxConcurrentTools?: number;
+  /** Override the environment inherited by shell tools without changing the parent process. */
+  toolEnv?: NodeJS.ProcessEnv;
   clock?: AgentClock;
   extensions?: ExtensionRuntime;
 }
@@ -248,6 +250,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         workspace: options.workspace,
         signal,
         maxConcurrentTools: options.maxConcurrentTools,
+        env: options.toolEnv,
         toolHooks,
       });
       for (const item of executed) {

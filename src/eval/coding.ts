@@ -87,10 +87,13 @@ export async function runCodingEval(options: {
     const project = join(directory, "project");
     await mkdir(join(project, "src"), { recursive: true });
     await mkdir(join(project, "test"), { recursive: true });
+    const home = join(directory, "home");
+    await mkdir(home);
+    const subprocessEnv: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, TMPDIR: directory };
     await writeFile(join(project, "package.json"), '{"private":true,"type":"module"}\n');
     await writeFile(join(project, "src/math.ts"), INITIAL_SOURCE);
     await writeFile(join(project, "test/math.test.ts"), TEST_SOURCE);
-    await exec("git", ["init", "-q", project], { timeout: 3000 });
+    await exec("git", ["init", "-q", project], { timeout: 3000, env: subprocessEnv });
     signal.throwIfAborted();
     const workspace = await resolveWorkspace(project);
     const session = await createJsonlSession({ directory: join(directory, "sessions"), workspace });
@@ -100,8 +103,8 @@ export async function runCodingEval(options: {
     let reason: string | undefined;
     let errorOrigin: "model" | "harness" | undefined;
     for await (const event of runAgentLoop({
-      session, model: options.model, contextManager: createContextManager(workspace, { home: join(directory, "home") }),
-      workspace, tools, maxTurns: settings.maxTurns, signal, clock: options.clock,
+      session, model: options.model, contextManager: createContextManager(workspace, { home }),
+      workspace, tools, maxTurns: settings.maxTurns, signal, clock: options.clock, toolEnv: subprocessEnv,
     })) {
       tracker.record(event);
       if (event.type === "agent.finished") reason = event.reason;
@@ -111,7 +114,7 @@ export async function runCodingEval(options: {
     if (signal.aborted) outcome = controller.signal.aborted ? "timeout" : "model_failure";
     else if (reason !== "completed") outcome = errorOrigin === "harness" ? "harness_error" : "model_failure";
     else {
-      grader = await grade(project, signal);
+      grader = await grade(project, join(directory, "grading"), signal, subprocessEnv);
       outcome = grader.passed ? "success" : "grader_failure";
     }
   } catch (error) {
@@ -128,25 +131,36 @@ export async function runCodingEval(options: {
 }
 
 /** Grade the actual source and bounded real Bun test exit, not the assistant's final prose. */
-async function grade(project: string, signal: AbortSignal): Promise<{ passed: boolean; exitCode: number | null }> {
+async function grade(project: string, gradingCopy: string, signal: AbortSignal, env: NodeJS.ProcessEnv): Promise<{ passed: boolean; exitCode: number | null }> {
   const readOptional = (path: string) => readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw error;
   });
   const source = await readOptional(join(project, "src/math.ts"));
   const testSource = await readOptional(join(project, "test/math.test.ts"));
+  if (source === null || source.length > 100_000 || testSource !== TEST_SOURCE) {
+    return { passed: false, exitCode: null };
+  }
+  // The candidate cannot persist bunfig/preload files into the grader's fresh project.
+  await mkdir(join(gradingCopy, "src"), { recursive: true });
+  await mkdir(join(gradingCopy, "test"), { recursive: true });
+  await writeFile(join(gradingCopy, "package.json"), '{"private":true,"type":"module"}\n');
+  await writeFile(join(gradingCopy, "src/math.ts"), source);
+  await writeFile(join(gradingCopy, "test/math.test.ts"), TEST_SOURCE);
   let exitCode: number | null = 0;
+  let verified = false;
   try {
-    await exec("bun", ["test", "test/math.test.ts"], {
-      cwd: project, timeout: 5000, maxBuffer: 8192, signal,
+    const output = await exec("bun", ["--no-env-file", "test", "test/math.test.ts"], {
+      cwd: gradingCopy, timeout: 5000, maxBuffer: 8192, signal, env,
     });
+    verified = /^\s*3 pass\s*$/m.test(output.stderr) && /^\s*0 fail\s*$/m.test(output.stderr);
   } catch (error) {
     if (signal.aborted) throw error;
     const code = (error as { code?: unknown }).code;
     if (code === "ETIMEDOUT" || (error as { killed?: boolean }).killed) throw new GraderTimeout();
     exitCode = typeof code === "number" ? code : null;
   }
-  return { passed: source !== null && source !== INITIAL_SOURCE && testSource === TEST_SOURCE && exitCode === 0, exitCode };
+  return { passed: source !== INITIAL_SOURCE && verified && exitCode === 0, exitCode };
 }
 
 /** Distinguish grader command timeout from ordinary failed tests. */

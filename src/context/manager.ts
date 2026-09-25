@@ -406,6 +406,7 @@ async function summarizeWithModel(
     const trimmed = text.trim();
     return trimmed.length > 0 ? trimmed : null;
   } catch {
+    complete = false;
     return null;
   } finally {
     onUsage?.(usage, complete && !signal?.aborted);

@@ -42,6 +42,24 @@ test("real edits pass, source workspace stays isolated and temp repository is re
   await expect(access(workspace)).rejects.toThrow();
 });
 
+test("case test subprocesses cannot inherit unrelated parent credentials", async () => {
+  const key = "SCHWAY_EVAL_PRIVATE_TEST";
+  const previous = process.env[key];
+  process.env[key] = "fixture-secret";
+  try {
+    const result = await runCodingEval({ model: script([
+      { toolCalls: [{ id: "env", name: "edit", arguments: { path: "src/math.ts", edits: [{ oldText: "return Math.min(value, min);", newText: 'if (process.env.SCHWAY_EVAL_PRIVATE_TEST) throw new Error("exposed"); return Math.max(min, Math.min(max, value));' }] } }] },
+      { toolCalls: [{ id: "verify", name: "bash", arguments: { command: "bun test test/math.test.ts" } }] },
+      { text: "done" },
+    ]), sourceRevision: revision });
+    expect(result.outcome).toBe("success");
+    expect(JSON.stringify(result)).not.toContain("fixture-secret");
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
+});
+
 test("wrong edits fail, model and turn failures stay distinct from grader failures", async () => {
   const wrong = await runCodingEval({ model: script([
     { toolCalls: [{ id: "edit1", name: "edit", arguments: { ...edit, edits: [{ oldText: "return Math.min(value, min);", newText: "return Math.min(value, max);" }] } }] },
@@ -54,12 +72,21 @@ test("wrong edits fail, model and turn failures stay distinct from grader failur
   expect(bounded.outcome).toBe("model_failure");
 });
 
+test("an early zero exit cannot claim success without three completed assertions", async () => {
+  const result = await runCodingEval({ model: script([
+    { toolCalls: [{ id: "exit", name: "write", arguments: { path: "src/math.ts", content: "process.exit(0);\nexport function clamp() { return 5; }\n" } }] },
+    { text: "fixed" },
+  ]), sourceRevision: revision });
+  expect(result.outcome).toBe("grader_failure");
+  expect(result.grader).toEqual({ passed: false, exitCode: 0 });
+});
+
 test("editing the grader test is rejected and cannot turn a wrong fix into success", async () => {
   const result = await runCodingEval({ model: script([
     { toolCalls: [{ id: "write1", name: "write", arguments: { path: "test/math.test.ts", content: 'import { test } from "bun:test"; test("fake", () => {});' } }] },
     { text: "done" },
   ]), sourceRevision: revision });
-  expect(result.grader?.exitCode).toBe(1);
+  expect(result.grader?.passed).toBe(false);
   expect(result.metrics.toolFailures).toBe(1);
   expect(result.outcome).toBe("grader_failure");
 });
@@ -81,9 +108,11 @@ test("eval tool paths and shell commands cannot mutate files outside the case", 
 
 test("timeout and caller cancellation clean up without grading incomplete work", async () => {
   let workspace = "";
-  const stalled = (): Model => ({ provider: "scripted", id: "waiting", async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
+  const stalled = (onStart?: () => void): Model => ({ provider: "scripted", id: "waiting", async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
     workspace = request.context.find(section => section.name === "environment")?.content.match(/Workspace root: ([^\n]+)/)?.[1] ?? "";
-    await new Promise<void>(resolve => request.signal!.addEventListener("abort", () => resolve(), { once: true }));
+    const aborted = new Promise<void>(resolve => request.signal!.addEventListener("abort", () => resolve(), { once: true }));
+    onStart?.();
+    await aborted;
     throw new DOMException("aborted", "AbortError");
   } });
   const timeout = await runCodingEval({ model: stalled(), sourceRevision: revision, settings: { timeoutMs: 80 } });
@@ -91,8 +120,7 @@ test("timeout and caller cancellation clean up without grading incomplete work",
   expect(timeout.grader).toBeNull();
   await expect(access(workspace)).rejects.toThrow();
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), 60);
-  const cancelled = await runCodingEval({ model: stalled(), signal: controller.signal, sourceRevision: revision });
+  const cancelled = await runCodingEval({ model: stalled(() => controller.abort()), signal: controller.signal, sourceRevision: revision });
   expect(cancelled.outcome).toBe("model_failure");
   expect(cancelled.metrics.incompleteAttempts).toBe(1);
   await expect(access(workspace)).rejects.toThrow();

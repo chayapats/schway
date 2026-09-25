@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -44,31 +44,35 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   let sourceRevision = "unknown";
   try { sourceRevision = (await exec("git", ["rev-parse", "HEAD"], { cwd: join(import.meta.dir, "../.."), timeout: 3000 })).stdout.trim(); }
   catch { /* Packaged sources need not have a Git checkout. */ }
-  const keyName = provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : "OPENAI_COMPATIBLE_API_KEY";
-  const apiKey = env[keyName]?.trim();
-  const baseUrl = values.get("--base-url");
-  let result;
-  if (provider !== "scripted" && (!apiKey || (provider === "openai-compatible" && !validEndpoint(baseUrl)))) {
-    result = skippedCodingEval(provider, modelId, sourceRevision, settings);
-  } else {
-    try {
-      const model: Model = provider === "scripted" ? offlineModel()
-        : await loadProviderModel({ provider: provider as "anthropic" | "openai" | "openai-compatible", model: modelId,
-          apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
-      // Remove the selected credential from tool subprocesses; the adapter retains its own copy.
-      const previous = process.env[keyName];
-      if (provider !== "scripted") delete process.env[keyName];
-      try { result = await runCodingEval({ model, sourceRevision, settings }); }
-      finally { if (provider !== "scripted" && previous !== undefined) process.env[keyName] = previous; }
-    } catch {
-      result = failedCodingEval(provider, modelId, sourceRevision, settings);
+  const path = values.get("--output") ?? join(tmpdir(), `schway-eval-${crypto.randomUUID()}.json`);
+  // Reserve before any paid call; never overwrite an existing artifact or symlink.
+  let artifact;
+  try { artifact = await open(path, "wx", 0o600); }
+  catch { console.error("Cannot reserve eval artifact path (it must be a new file in an existing directory)."); return 2; }
+  try {
+    const keyName = provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : "OPENAI_COMPATIBLE_API_KEY";
+    const apiKey = env[keyName]?.trim();
+    const baseUrl = values.get("--base-url");
+    let result;
+    if (provider !== "scripted" && (!apiKey || (provider === "openai-compatible" && !validEndpoint(baseUrl)))) {
+      result = skippedCodingEval(provider, modelId, sourceRevision, settings);
+    } else {
+      try {
+        const model: Model = provider === "scripted" ? offlineModel()
+          : await loadProviderModel({ provider: provider as "anthropic" | "openai" | "openai-compatible", model: modelId,
+            apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
+        result = await runCodingEval({ model, sourceRevision, settings });
+      } catch {
+        result = failedCodingEval(provider, modelId, sourceRevision, settings);
+      }
     }
+    await artifact.writeFile(`${JSON.stringify(result, null, 2)}\n`);
+    console.log(`${result.case.id}@${result.case.version}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}`);
+    console.log(`Artifact: ${path}`);
+    return result.outcome === "success" ? 0 : 1;
+  } finally {
+    await artifact.close();
   }
-  const path = values.get("--output") ?? join(tmpdir(), `schway-eval-${result.runId}.json`);
-  await writeFile(path, `${JSON.stringify(result, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-  console.log(`${result.case.id}@${result.case.version}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}`);
-  console.log(`Artifact: ${path}`);
-  return result.outcome === "success" ? 0 : 1;
 }
 
 /** Require a parseable credential-free HTTP(S) compatible endpoint before model construction. */
@@ -76,7 +80,8 @@ function validEndpoint(value: string | undefined): boolean {
   if (!value) return false;
   try {
     const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && !!url.hostname && !url.username && !url.password;
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    return (url.protocol === "https:" || (url.protocol === "http:" && loopback)) && !!url.hostname && !url.username && !url.password;
   } catch { return false; }
 }
 
