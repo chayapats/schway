@@ -106,6 +106,10 @@ export async function runCodingEval(options: {
   let metrics = createEvalMetricsPlaceholder();
   let readOverlap = false;
   const activeReads = new Set<string>();
+  const readPaths = new Map<string, string>();
+  const completedReads = new Set<string>();
+  const failedReads = new Set<string>();
+  let recoveredRead = false;
   try {
     directory = await mkdtemp(join(tmpdir(), "schway-eval-"));
     const project = join(directory, "project");
@@ -137,11 +141,29 @@ export async function runCodingEval(options: {
       workspace, tools, maxTurns: settings.maxTurns, signal, clock: options.clock, toolEnv: subprocessEnv,
     })) {
       tracker.record(event);
-      if (selected?.id === "parallel-read" && event.type === "tool.started" && event.name === "read") {
+      if (event.type === "model.finished" && (selected?.id === "parallel-read" || selected?.id === "tool-error-recovery")) {
+        const message = session.items.at(-1);
+        if (message?.type === "assistant") for (const block of message.content) {
+          if (block.type === "tool_call" && block.name === "read" && block.arguments && typeof block.arguments === "object" && !Array.isArray(block.arguments)) {
+            const path = (block.arguments as { path?: unknown }).path;
+            if (typeof path === "string") readPaths.set(block.id, path);
+          }
+        }
+      }
+      if (event.type === "tool.started" && event.name === "read" && readPaths.has(event.toolCallId)) {
         if (activeReads.size > 0) readOverlap = true;
         activeReads.add(event.toolCallId);
       }
-      if (event.type === "tool.finished") activeReads.delete(event.toolCallId);
+      if (event.type === "tool.finished") {
+        activeReads.delete(event.toolCallId);
+        const path = readPaths.get(event.toolCallId);
+        if (path && event.name === "read") {
+          if (event.status === "success") {
+            completedReads.add(path);
+            if (path === "src/config.ts" && failedReads.has("src/missing-config.ts")) recoveredRead = true;
+          } else failedReads.add(path);
+        }
+      }
       if (event.type === "agent.finished") reason = event.reason;
       if (event.type === "error") errorOrigin = event.origin;
     }
@@ -150,7 +172,7 @@ export async function runCodingEval(options: {
     else if (reason !== "completed") outcome = errorOrigin === "harness" ? "harness_error" : "model_failure";
     else {
       grader = selected
-        ? await gradeDaily(selected, project, signal, options.graderExecutable ?? "bun")
+        ? await gradeDaily(selected, project, signal, options.graderExecutable ?? "bun", completedReads, recoveredRead)
         : await grade(project, join(directory, "grading"), signal, subprocessEnv, options.graderExecutable ?? "bun");
       outcome = signal.aborted ? controller.signal.aborted ? "timeout" : "model_failure" : grader.passed ? "success" : "grader_failure";
     }
@@ -200,7 +222,7 @@ async function grade(project: string, gradingCopy: string, signal: AbortSignal, 
 }
 
 /** Grade bounded case files and immutable fixtures independently of the model's reported success. */
-async function gradeDaily(selected: EvalCase, project: string, signal: AbortSignal, executable: string): Promise<{ passed: boolean; exitCode: number | null; evidence: string }> {
+async function gradeDaily(selected: EvalCase, project: string, signal: AbortSignal, executable: string, reads: ReadonlySet<string>, recoveredRead: boolean): Promise<{ passed: boolean; exitCode: number | null; evidence: string }> {
   // The same prerequisite as the clamp grader; unavailable Bun is an explicit skip.
   try { await exec(executable, ["--version"], { timeout: 3000, signal, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } }); }
   catch (error) {
@@ -214,8 +236,14 @@ async function gradeDaily(selected: EvalCase, project: string, signal: AbortSign
     if (!selected.writable.includes(path) && value !== initial) return { passed: false, exitCode: null, evidence: `fixture_changed:${path}` };
     files[path] = value;
   }
-  const passed = selected.check(files);
-  return { passed, exitCode: passed ? 0 : 1, evidence: passed ? "checked" : "behavior_mismatch" };
+  const requiredReads = selected.id === "parallel-read" ? ["input/customer.txt", "input/item.txt", "input/count.txt"] : [];
+  const missingReads = requiredReads.filter(path => !reads.has(path));
+  const behaviorPassed = selected.check(files);
+  const passed = behaviorPassed && missingReads.length === 0 && (selected.id !== "tool-error-recovery" || recoveredRead);
+  const evidence = missingReads.length ? `missing_reads:${missingReads.join(",")}` :
+    selected.id === "tool-error-recovery" && !recoveredRead ? "missing_recovery" : passed ? "checked" :
+      `behavior_mismatch:${selected.diagnose(files)}`;
+  return { passed, exitCode: passed ? 0 : 1, evidence };
 }
 
 /** Read only a regular, non-symlink candidate with a strict byte cap and abort checks. */

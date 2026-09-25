@@ -8,8 +8,11 @@ export interface EvalCase {
   seed: Readonly<Record<string, string>>;
   writable: readonly string[];
   verifyCommand?: string;
+  verifyFile?: string;
   /** Check only bounded candidate files copied out of the isolated workspace. */
   check(files: Readonly<Record<string, string>>): boolean;
+  /** Bounded expected-versus-observed diagnostics with unknown candidate values redacted. */
+  diagnose(files: Readonly<Record<string, string>>): string;
   /** Older complete turns supplied to the real context manager for the compaction case. */
   history?: readonly string[];
   contextWindow?: number;
@@ -22,6 +25,24 @@ function answer(files: Readonly<Record<string, string>>, expected: Record<string
       Object.keys(parsed).length === Object.keys(expected).length &&
       Object.entries(expected).every(([key, value]) => (parsed as Record<string, unknown>)[key] === value);
   } catch { return false; }
+}
+
+function diagnose(expected: Record<string, unknown> | readonly unknown[], observed: unknown): string {
+  const known = new Set([...Object.values(expected), "src/preview.ts", "src/logger.ts", "preview", "fallback", "health", "MARY", "ADA LOVELACE", "LIN CHEN"]);
+  const safe = (value: unknown): unknown => known.has(value) || typeof value === "number" && Number.isSafeInteger(value) && value >= -100 && value <= 100 ? value : "[redacted]";
+  const actual = Array.isArray(observed) ? observed.slice(0, 8).map(safe) : observed && typeof observed === "object" && !Array.isArray(observed) ?
+    Object.fromEntries(Object.keys(expected).map(key => [key, safe((observed as Record<string, unknown>)[key])])) : "[redacted]";
+  return JSON.stringify({ expected, actual }).slice(0, 1024);
+}
+
+function answerEvidence(files: Readonly<Record<string, string>>, expected: Record<string, unknown>): string {
+  try { return diagnose(expected, JSON.parse(files["answer.json"] ?? "")); }
+  catch { return diagnose(expected, null); }
+}
+
+function codeEvidence(files: Readonly<Record<string, string>>, paths: string[], expression: string, expected: readonly unknown[]): string {
+  try { return diagnose(expected, JSON.parse(String(evaluate(files, paths, expression)))); }
+  catch { return diagnose(expected, null); }
 }
 
 function evaluate(files: Readonly<Record<string, string>>, paths: string[], expression: string): unknown {
@@ -39,6 +60,10 @@ const cartSeed = {
   "src/cart.ts": "export function cartTotal(items: { price: number; quantity: number }[]): number { return items.reduce((sum, item) => sum + item.price, 0); }\n",
   "test/cart.test.ts": 'import { test, expect } from "bun:test";\nimport { cartTotal } from "../src/cart.ts";\ntest("quantities", () => expect(cartTotal([{ price: 7, quantity: 2 }, { price: 3, quantity: 1 }])).toBe(17));\ntest("empty", () => expect(cartTotal([])).toBe(0));\n',
 };
+const REFACTOR_PROBE = 'JSON.stringify([normalizeName("  Ada   Lovelace "), normalizeName("Lin  Chen"), displayName("  Ada   Lovelace "), displayName("Lin  Chen"), displayName("  MARY  ")])';
+const REFACTOR_EXPECTED = ["Ada Lovelace", "Lin Chen", "Ada Lovelace", "Lin Chen", "MARY"];
+const CART_PROBE = "JSON.stringify([cartTotal([{price:7,quantity:2},{price:3,quantity:1}]),cartTotal([]),cartTotal([{price:4,quantity:0}]),cartTotal([{price:2,quantity:3}])])";
+const CART_EXPECTED = [17, 0, 0, 6];
 const history = [
   "This repository's release codename is amber. Keep that fact for the final manifest.",
   "The release channel must be stable, not preview. This constraint is permanent.",
@@ -50,13 +75,14 @@ export const DAILY_CASES: readonly EvalCase[] = [
   {
     id: "multi-file-refactor", version: 1,
     task: "Refactor normalizeName and its displayName caller to collapse internal whitespace while preserving name casing. Keep the provided test and run bun test test/display.test.ts.",
-    seed: refactorSeed, writable: ["src/normalize.ts", "src/display.ts"], verifyCommand: "bun test test/display.test.ts",
+    seed: refactorSeed, writable: ["src/normalize.ts", "src/display.ts"], verifyCommand: "bun test test/display.test.ts", verifyFile: "test/display.test.ts",
     check: files => {
       try {
         return ["src/normalize.ts", "src/display.ts"].every(path => files[path] !== refactorSeed[path as keyof typeof refactorSeed]) &&
-          evaluate(files, ["src/normalize.ts", "src/display.ts"], 'JSON.stringify([displayName("  Ada   Lovelace "), displayName("Lin  Chen"), displayName("  MARY  ")])') === '["Ada Lovelace","Lin Chen","MARY"]';
+          evaluate(files, ["src/normalize.ts", "src/display.ts"], REFACTOR_PROBE) === JSON.stringify(REFACTOR_EXPECTED);
       } catch { return false; }
     },
+    diagnose: files => codeEvidence(files, ["src/normalize.ts", "src/display.ts"], REFACTOR_PROBE, REFACTOR_EXPECTED),
   },
   {
     id: "locate-implementation", version: 1,
@@ -69,17 +95,19 @@ export const DAILY_CASES: readonly EvalCase[] = [
       "answer.json": "{}\n",
     }, writable: ["answer.json"],
     check: files => answer(files, { path: "src/router.ts", symbol: "resolveRoute" }),
+    diagnose: files => answerEvidence(files, { path: "src/router.ts", symbol: "resolveRoute" }),
   },
   {
     id: "failing-tests", version: 1,
     task: "Diagnose the failing cart tests, fix the real quantity behavior without editing or disabling the tests, then run bun test test/cart.test.ts.",
-    seed: cartSeed, writable: ["src/cart.ts"], verifyCommand: "bun test test/cart.test.ts",
+    seed: cartSeed, writable: ["src/cart.ts"], verifyCommand: "bun test test/cart.test.ts", verifyFile: "test/cart.test.ts",
     check: files => {
       try {
         return files["src/cart.ts"] !== cartSeed["src/cart.ts"] &&
-          evaluate(files, ["src/cart.ts"], "JSON.stringify([cartTotal([{price:7,quantity:2},{price:3,quantity:1}]),cartTotal([]),cartTotal([{price:4,quantity:0}]),cartTotal([{price:2,quantity:3}])])") === "[17,0,0,6]";
+          evaluate(files, ["src/cart.ts"], CART_PROBE) === JSON.stringify(CART_EXPECTED);
       } catch { return false; }
     },
+    diagnose: files => codeEvidence(files, ["src/cart.ts"], CART_PROBE, CART_EXPECTED),
   },
   {
     id: "long-context", version: 1,
@@ -87,18 +115,21 @@ export const DAILY_CASES: readonly EvalCase[] = [
     seed: { "answer.json": "{}\n", "README.md": "Release manifest must reflect prior discussion.\n" }, writable: ["answer.json"],
     history, contextWindow: 2500,
     check: files => answer(files, { codename: "amber", channel: "stable" }),
+    diagnose: files => answerEvidence(files, { codename: "amber", channel: "stable" }),
   },
   {
     id: "tool-error-recovery", version: 1,
     task: 'The old target src/missing-config.ts is gone. If reading it fails, locate the valid config at src/config.ts and write answer.json with its region and revision.',
     seed: { "src/config.ts": 'export const config = { region: "ap-south", revision: 7 };\n', "README.md": "Configuration moved to src/config.ts.\n", "answer.json": "{}\n" },
     writable: ["answer.json"], check: files => answer(files, { region: "ap-south", revision: 7 }),
+    diagnose: files => answerEvidence(files, { region: "ap-south", revision: 7 }),
   },
   {
     id: "parallel-read", version: 1,
     task: 'Read all three independent input files (they can be read in parallel). Write answer.json with the customer, sku, and quantity from their contents. Timing alone is never a grade.',
     seed: { "input/customer.txt": "customer=mina\n", "input/item.txt": "sku=Q42\n", "input/count.txt": "quantity=3\n", "answer.json": "{}\n" },
     writable: ["answer.json"], check: files => answer(files, { customer: "mina", sku: "Q42", quantity: 3 }),
+    diagnose: files => answerEvidence(files, { customer: "mina", sku: "Q42", quantity: 3 }),
   },
 ];
 

@@ -227,7 +227,9 @@ for (const scenario of DAILY_CASES) {
     expect(passed.case).toEqual({ id: scenario.id, version: 1 });
     const wrong = await runCodingEval({ caseId: scenario.id, model: caseScript(scenario.id, [done]), sourceRevision: revision });
     expect(wrong.outcome).toBe("grader_failure");
-    expect(wrong.grader?.evidence).toBe("behavior_mismatch");
+    if (scenario.id === "parallel-read") expect(wrong.grader?.evidence).toBe("missing_reads:input/customer.txt,input/item.txt,input/count.txt");
+    else if (scenario.id === "tool-error-recovery") expect(wrong.grader?.evidence).toBe("missing_recovery");
+    else expect(wrong.grader?.evidence).toContain("behavior_mismatch:");
   });
 }
 
@@ -239,11 +241,20 @@ test("coupled refactor rejects changing only the caller or only the definition",
   }
 });
 
+test("a cosmetic normalize edit and caller-only workaround fail the trusted refactor behavior", async () => {
+  const result = await runCodingEval({ caseId: "multi-file-refactor", sourceRevision: revision, model: script([
+    { toolCalls: [put("src/normalize.ts", 'export function normalizeName(value: string): string { return value.trim(); } // changed\n'),
+      put("src/display.ts", 'import { normalizeName } from "./normalize.ts";\nexport function displayName(value: string): string { return normalizeName(value).replace(/\\s+/g, " "); }\n')] }, done,
+  ]) });
+  expect(result.outcome).toBe("grader_failure");
+});
+
 test("locate grader rejects a plausible distractor and test deletion is denied", async () => {
   const wrong = await runCodingEval({ caseId: "locate-implementation", model: script([
     { toolCalls: [put("answer.json", JSON.stringify({ path: "src/preview.ts", symbol: "resolveRoute" }))] }, done,
   ]), sourceRevision: revision });
   expect(wrong.outcome).toBe("grader_failure");
+  expect(wrong.grader?.evidence).toContain('"actual":{"path":"src/preview.ts"');
   const tampered = await runCodingEval({ caseId: "failing-tests", model: script([
     { toolCalls: [put("test/cart.test.ts", 'import { test } from "bun:test"; test("fake", () => {});')] }, done,
   ]), sourceRevision: revision });
@@ -267,6 +278,9 @@ test("failing tests and recoverable missing path record real errors but still gr
   expect(recovered.metrics.toolFailures).toBe(1);
   const wrong = await runCodingEval({ caseId: "tool-error-recovery", model: script([{ toolCalls: [put("answer.json", JSON.stringify({ region: "wrong", revision: 7 }))] }, done]), sourceRevision: revision });
   expect(wrong.outcome).toBe("grader_failure");
+  const guessed = await runCodingEval({ caseId: "tool-error-recovery", model: script([{ toolCalls: [put("answer.json", JSON.stringify({ region: "ap-south", revision: 7 }))] }, done]), sourceRevision: revision });
+  expect(guessed.outcome).toBe("grader_failure");
+  expect(guessed.grader?.evidence).toBe("missing_recovery");
 });
 
 test("long context compacts older complete turns; retained summary facts determine the graded result", async () => {
@@ -313,6 +327,21 @@ test("parallel reads overlap in the controlled fixture but timing is not the gra
   ]), sourceRevision: revision });
   expect(serial.outcome).toBe("success");
   expect(serial.readOverlap).toBe(false);
+  const guessed = await runCodingEval({ caseId: "parallel-read", model: script([
+    { toolCalls: [put("answer.json", JSON.stringify({ customer: "mina", sku: "Q42", quantity: 3 }))] }, done,
+  ]), sourceRevision: revision });
+  expect(guessed.outcome).toBe("grader_failure");
+  expect(guessed.grader?.evidence).toContain("missing_reads");
+});
+
+test("grader evidence bounds candidate observations and redacts arbitrary secrets", async () => {
+  const secret = "sk-fixture-sensitive-value";
+  const result = await runCodingEval({ caseId: "locate-implementation", model: script([
+    { toolCalls: [put("answer.json", JSON.stringify({ path: secret, symbol: secret }))] }, done,
+  ]), sourceRevision: revision });
+  expect(result.outcome).toBe("grader_failure");
+  expect(result.grader?.evidence).toContain('"actual":{"path":"[redacted]","symbol":"[redacted]"}');
+  expect(JSON.stringify(result)).not.toContain(secret);
 });
 
 test("daily-case timeout and cancellation do not report success", async () => {

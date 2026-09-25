@@ -37,7 +37,7 @@ export function createEvalTools(project: string, selected?: EvalCase): ToolRegis
     if (!command || input.command !== command || input.cwd !== undefined || (input.timeout !== undefined && input.timeout > 5000)) {
       throw new Error("Eval bash permits only the case verification command");
     }
-    await verifyPath(selected ? selected.verifyCommand!.slice("bun test ".length) : "test/math.test.ts", false);
+    await verifyPath(selected?.verifyFile ?? "test/math.test.ts", false);
     return bashTool.execute({ command: input.command, timeout: input.timeout ?? 5000 }, ctx);
   } };
   return createToolRegistry([restrictedRead, restrictedEdit, restrictedWrite, restrictedBash]);
