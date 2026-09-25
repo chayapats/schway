@@ -223,6 +223,39 @@ test("missing manifest paths are distinct from missing installs and safely ident
   expect(JSON.stringify(report)).not.toContain(secret);
 });
 
+test("doctor help lists diagnostic flags without implying model runs", async () => {
+  const { workspace, home } = await fixture();
+  let text = "";
+  const exit = await runCli(["doctor", "--help"], {
+    cwd: workspace, env: { HOME: home }, stdout: { write(chunk) { text += chunk; } }, stderr: { write() {} },
+  });
+  expect(exit).toBe(0);
+  const [doctor, normal] = text.split(" | schway ");
+  for (const flag of ["--api-key", "--openai-auth", "--base-url", "--auth", "--header", "--body", "--env-file", "--add-dir", "--extension"]) {
+    expect(doctor).toContain(flag);
+  }
+  expect(doctor).not.toContain("--model");
+  expect(normal).toContain("--model");
+});
+
+test("doctor redacts credential sources but keeps ordinary env-number identifiers", async () => {
+  const { workspace, home } = await fixture();
+  await mkdir(join(workspace, ".schway"));
+  await writeFile(join(workspace, ".schway", "config.json"), JSON.stringify({ profiles: { local: { baseUrl: "http://localhost:11434/v1", auth: "none", credentialEnv: "LOCAL_KEY" } } }));
+  const report = await diagnose({
+    cwd: workspace,
+    env: { HOME: home, C: "1", LOCAL_KEY: "profile-secret", ANTHROPIC_API_KEY: "anthropic-secret" },
+    args: { ...args, profile: "local", apiKey: "runtime-secret", headers: { AUTHORIZATION: "Bearer header-secret", "X-API-KEY": "other-header-secret", "X-Other": "ordinary-identifier" },
+      extensions: ["plugin-v1.ts", "plugin-profile-secret.ts", "plugin-runtime-secret.ts", "plugin-header-secret.ts", "plugin-other-header-secret.ts", "plugin-anthropic-secret.ts", "plugin-ordinary-identifier.ts"] },
+    store: store(null),
+  });
+  expect(check(report, "extension.0")?.summary).toContain("plugin-v1.ts");
+  expect(check(report, "extension.6")?.summary).toContain("plugin-ordinary-identifier.ts");
+  const printed = JSON.stringify(report);
+  for (const secret of ["profile-secret", "runtime-secret", "header-secret", "other-header-secret", "anthropic-secret"]) expect(printed).not.toContain(secret);
+  expect(check(report, "extension.3")?.summary).toContain("plugin-***.ts");
+});
+
 test("missing extensions and malformed skills expose bounded, redacted source identifiers", async () => {
   const { workspace, home } = await fixture();
   const secret = "private-secret-credential";

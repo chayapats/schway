@@ -1,10 +1,10 @@
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
-import { redactSecrets } from "../auth/secrets.ts";
+import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../auth/secrets.ts";
 import { platform } from "node:os";
 import { version } from "../../package.json";
-import { credentialEnvironmentVariable } from "../auth/credentials.ts";
+import { COMPATIBLE_API_KEY_ENV, credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { codexSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, type CredentialStore } from "../auth/store.ts";
 import { readConfigFile, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
 import { inspectPackages } from "../packages/packages.ts";
@@ -223,8 +223,17 @@ export async function diagnose(input: {
     try {
       const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal });
       add("packages", "ok", `${inspected.packages.length} enabled package manifest(s) valid.`);
-      // Only bounded identifiers reach output; never include arbitrary manifest or OS error text.
-      const secrets = [input.args.apiKey, ...Object.values(input.args.headers ?? {}), ...Object.values(env)]
+      // Bound identifiers and redact only known credential sources: ordinary env/header values are not keys.
+      const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", COMPATIBLE_API_KEY_ENV,
+        ...(!("error" in settings) && settings.credentialEnv ? [settings.credentialEnv] : [])];
+      const credentialHeaders = Object.entries(input.args.headers ?? {})
+        .filter(([name]) => CREDENTIAL_HEADER_NAMES.has(name.trim().toLowerCase()))
+        .flatMap(([, value]) => {
+          // Authorization schemes prefix the actual credential; redact both forms.
+          const token = /^(?:Bearer|Basic|Token)\s+(\S+)$/i.exec(value.trim())?.[1];
+          return token ? [value, token] : [value];
+        });
+      const secrets = [input.args.apiKey, ...credentialEnvNames.map(name => env[name]), ...credentialHeaders]
         .filter((value): value is string => !!value).sort((a, b) => b.length - a.length);
       const safeName = (value: string) => redactSecrets(value, secrets).replace(/[^a-zA-Z0-9._*/-]/g, "?").slice(0, 64);
       const safeEntry = (value: string) => {
