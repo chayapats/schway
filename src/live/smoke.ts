@@ -41,6 +41,8 @@ export interface SmokeDependencies {
   createStore?: () => CredentialStore;
   createModel?: (input: ProviderLoaderInput) => Promise<Model>;
   onWorkspace?: (workspace: Workspace) => void;
+  /** Script a bounded sentinel read in offline tests without changing the only allowed path. */
+  readSentinel?: ToolDefinition<ReadInput>["execute"];
 }
 /** Bounded, secret-free scenario classification; no arbitrary provider messages are serialized. */
 export interface SmokeScenario {
@@ -51,6 +53,8 @@ export interface SmokeScenario {
   reason: string;
   durationMs: number;
   toolRoundTrip: boolean;
+  /** Deferred means an uncooperative stream still owns its temporary workspace. */
+  cleanup?: "deferred";
 }
 /** Dated evidence tied to revision and model selections; incomplete never masquerades as pass. */
 export interface SmokeReport {
@@ -61,13 +65,16 @@ export interface SmokeReport {
 }
 
 const SENTINEL_FILE = "smoke-sentinel.txt";
-const sentinelReadTool: ToolDefinition<ReadInput> = {
-  ...readTool,
-  execute: async (input, context) => input.path === SENTINEL_FILE
-    ? await readTool.execute(input, context)
-    : { content: "Only the smoke sentinel may be read.", isError: true },
-};
+function sentinelReadTool(execute: ToolDefinition<ReadInput>["execute"]): ToolDefinition<ReadInput> {
+  return {
+    ...readTool,
+    execute: async (input, context) => input.path === SENTINEL_FILE
+      ? await execute(input, context)
+      : { content: "Only the smoke sentinel may be read.", isError: true },
+  };
+}
 const MAX_OUTPUT_CHARS = 4096;
+const SETTLEMENT_GRACE_MS = 40;
 const MAX_TURNS = 2;
 const MAX_TOKENS = 256;
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
@@ -81,6 +88,7 @@ const DEFAULT_MODELS: Record<SmokeProvider, string> = {
 /** Execute only explicitly enabled lanes through Schway's real streaming loop and isolated read tool. */
 export async function runLiveSmoke(selection: SmokeSelection, deps: SmokeDependencies = {}): Promise<SmokeReport> {
   const scenarios: SmokeScenario[] = [];
+  let priorUnsettled = false;
   for (const provider of [...new Set(selection.providers)]) {
     const start = performance.now();
     const requestedModel = selection.models?.[provider] ?? DEFAULT_MODELS[provider];
@@ -88,11 +96,11 @@ export async function runLiveSmoke(selection: SmokeSelection, deps: SmokeDepende
       provider, model: SAFE_ID.test(requestedModel) ? requestedModel : "invalid-model-id",
       authSource: "unavailable", status: "skipped", reason: "live_disabled", durationMs: 0, toolRoundTrip: false,
     };
-    if (selection.enabled) {
-      await runScenario(selection, provider, scenario, deps);
-    }
+    if (priorUnsettled) { scenario.status = "pending"; scenario.reason = "prior_run_unsettled"; }
+    else if (selection.enabled) await runScenario(selection, provider, scenario, deps);
     scenario.durationMs = Math.round(performance.now() - start);
     scenarios.push(scenario);
+    if (scenario.cleanup === "deferred") priorUnsettled = true;
   }
   const aggregate = scenarios.some(s => s.status === "failed_provider" || s.status === "failed_runner") ? "failed"
     : scenarios.length > 0 && scenarios.every(s => s.status === "passed") ? "passed" : "incomplete";
@@ -110,14 +118,27 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
   const signal = selection.signal ? AbortSignal.any([controller.signal, selection.signal]) : controller.signal;
   let directory: string | undefined;
   let startedModel = false;
+  let stream: Promise<void> | undefined;
+  let unsettled = false;
+  let outputLimit = false;
   try {
-    const input = await awaitSetup(resolveInput(selection, provider, result, deps), signal);
+    // OS keychain reads are not cancellable; do not allow a late resolution
+    // to mutate an already-published timeout report.
+    const resolved: SmokeScenario = { ...result };
+    const input = await awaitSetup(resolveInput(selection, provider, resolved, deps), signal);
+    if (!signal.aborted) Object.assign(result, resolved);
     if (!input || signal.aborted) {
       if (signal.aborted) { result.status = selection.signal?.aborted ? "pending" : "failed_runner"; result.reason = selection.signal?.aborted ? "cancelled" : "timeout"; }
       return;
     }
     const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input)))(input), signal);
     result.model = SAFE_ID.test(model.id) ? model.id : "invalid-model-id";
+    // The loop registers activate_skill whenever it has a workspace. Do not
+    // advertise that unrelated tool to the selected smoke transport.
+    const smokeModel: Model = {
+      provider: model.provider, id: model.id,
+      stream: request => model.stream({ ...request, tools: request.tools?.filter(tool => tool.name === "read") }),
+    };
     directory = await mkdtemp(join(tmpdir(), "schway-live-"));
     // Never promote an ancestor Git root if TMPDIR happens to live inside a repository.
     const root = await realpath(directory);
@@ -133,21 +154,31 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     let needsLogin = false;
     let finished: string | undefined;
     let chars = 0;
-    for await (const event of runAgentLoop({ session, model, workspace, contextManager: createContextManager(workspace),
-      tools: createToolRegistry([sentinelReadTool]), signal, maxTurns: MAX_TURNS })) {
-      if (event.type === "model.started") startedModel = true;
-      if (event.type === "model.delta") {
-        chars += event.content.text.length;
-        if (chars > MAX_OUTPUT_CHARS) { controller.abort(); result.reason = "output_limit"; break; }
+    stream = (async () => {
+      for await (const event of runAgentLoop({ session, model: smokeModel, workspace, contextManager: createContextManager(workspace),
+        tools: createToolRegistry([sentinelReadTool(deps.readSentinel ?? readTool.execute)]), signal, maxTurns: MAX_TURNS })) {
+        if (event.type === "model.started") startedModel = true;
+        if (event.type === "model.delta") chars += event.content.text.length;
+        // A completed model message is yielded before the loop schedules its tool calls.
+        // This caps assembled arguments at the runner seam, not provider wire bytes.
+        if (event.type === "model.finished") {
+          const last = session.items.at(-1);
+          if (last?.type === "assistant") chars += JSON.stringify(last).length;
+        }
+        if (event.type === "tool.finished") chars += event.content.length;
+        if (chars > MAX_OUTPUT_CHARS) { outputLimit = true; controller.abort(); break; }
+        if (event.type === "error") {
+          error = true;
+          needsLogin = provider === "codex" && /Sign in again in interactive mode|subscription session (expired|was revoked)/i.test(event.message);
+        }
+        if (event.type === "agent.finished") finished = event.reason;
       }
-      if (event.type === "error") {
-        error = true;
-        needsLogin = provider === "codex" && /Sign in again in interactive mode|subscription session (expired|was revoked)/i.test(event.message);
-      }
-      if (event.type === "agent.finished") finished = event.reason;
-    }
+    })();
+    // Abort bounds the report even if an adapter ignores it. Never remove the workspace
+    // before the still-running stream and any accepted tool I/O have actually settled.
+    await awaitSetup(stream, signal);
     if (selection.signal?.aborted) { result.status = "pending"; result.reason = "cancelled"; return; }
-    if (result.reason === "output_limit") { result.status = "failed_provider"; return; }
+    if (outputLimit) { result.status = "failed_provider"; result.reason = "output_limit"; return; }
     if (controller.signal.aborted) { result.status = startedModel ? "failed_provider" : "failed_runner"; result.reason = "timeout"; return; }
     if (error || finished === "error") {
       result.status = needsLogin ? "pending" : startedModel ? "failed_provider" : "failed_runner";
@@ -163,17 +194,35 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
       && (calls[0].arguments as { path?: unknown }).path === SENTINEL_FILE
       && results.length === 1 && results[0]?.type === "tool_result" && results[0].toolCallId === calls[0].id
       && !results[0].isError && results[0].content.includes(marker);
-    const answer = final?.type === "assistant" ? final.content.filter(block => block.type === "text").map(block => block.text).join("").trim() : "";
+    const answer = final?.type === "assistant" ? final.content.filter(block => block.type === "text").map(block => block.text).join("") : "";
     result.status = result.toolRoundTrip && answer === marker ? "passed" : "failed_provider";
     result.reason = result.status === "passed" ? "verified" : "missing_tool_evidence";
   } catch {
+    if (stream && signal.aborted) {
+      // Cooperative adapters get a short, bounded chance to finish cancellation.
+      // A non-cooperative adapter cannot block the report or authorize deleting its workspace.
+      const settled = await Promise.race([
+        stream.then(() => true, () => true),
+        Bun.sleep(SETTLEMENT_GRACE_MS).then(() => false),
+      ]);
+      unsettled = !settled;
+    }
     result.status = selection.signal?.aborted ? "pending" : controller.signal.aborted && startedModel ? "failed_provider" : "failed_runner";
-    result.reason = selection.signal?.aborted ? "cancelled" : controller.signal.aborted ? "timeout" : "runner_error";
+    result.reason = outputLimit ? "output_limit" : selection.signal?.aborted ? "cancelled"
+      : controller.signal.aborted ? (unsettled ? "timeout_unsettled" : "timeout") : "runner_error";
   } finally {
     clearTimeout(timer);
     if (directory) {
-      try { await rm(directory, { recursive: true, force: true }); }
-      catch { result.status = "failed_runner"; result.reason = "cleanup_failed"; }
+      if (unsettled && stream) {
+        result.cleanup = "deferred";
+        const retained = directory;
+        // Keep the workspace if the stream never settles; a settled stream releases it.
+        void stream.then(() => rm(retained, { recursive: true, force: true }),
+          () => rm(retained, { recursive: true, force: true })).catch(() => {});
+      } else {
+        try { await rm(directory, { recursive: true, force: true }); }
+        catch { result.status = "failed_runner"; result.reason = "cleanup_failed"; }
+      }
     }
   }
 }
@@ -224,7 +273,7 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
 
 /** Stop waiting for non-cancellable setup (such as an OS keychain read) before any model stream begins. */
 async function awaitSetup<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw new Error("setup aborted");
+  if (signal.aborted) { void operation.catch(() => {}); throw new Error("setup aborted"); }
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(new Error("setup aborted"));
     signal.addEventListener("abort", abort, { once: true });
@@ -235,7 +284,8 @@ async function awaitSetup<T>(operation: Promise<T>, signal: AbortSignal): Promis
   });
 }
 
-function isSafeEndpoint(value: string): boolean {
+/** Accept only HTTP(S) compatible endpoints without URL-embedded secrets or fragments. */
+export function isSafeEndpoint(value: string): boolean {
   try {
     const url = new URL(value);
     return /^https?:$/.test(url.protocol) && !url.username && !url.password && !url.search && !url.hash;

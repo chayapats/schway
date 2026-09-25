@@ -1,4 +1,4 @@
-import { runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
+import { isSafeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 
 const PROVIDERS: readonly SmokeProvider[] = ["anthropic", "openai-api-key", "compatible", "codex"];
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
@@ -28,12 +28,8 @@ export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeS
       if (separator < 1 || !PROVIDERS.includes(provider) || !SAFE_ID.test(id)) return { error: "Use --model provider=model-id with a valid provider and model ID." };
       selection.models![provider] = id;
     } else if (flag === "--base-url") {
-      try {
-        const parsed = new URL(value);
-        if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw Error();
-        url = parsed.href;
-      }
-      catch { return { error: "Compatible endpoint must be an HTTP(S) URL." }; }
+      if (!isSafeEndpoint(value)) return { error: "Compatible endpoint must be an HTTP(S) URL without userinfo, query, or fragment." };
+      url = new URL(value).href;
     } else if (flag === "--auth" && (value === "required" || value === "none")) auth = value;
     else if (flag === "--timeout-ms" && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 120_000) selection.timeoutMs = Number(value);
     else if (flag === "--profile") profile = value;

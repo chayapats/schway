@@ -46,6 +46,7 @@ test("each provider exercises a real read tool and final answer without leaking 
   expect(report.scenarios.map(item => item.status)).toEqual(["passed", "passed", "passed", "passed"]);
   expect(report.scenarios.map(item => item.authSource)).toEqual(["env", "env", "env", "stored-subscription"]);
   expect(requests).toHaveLength(4);
+  expect(requests.every(request => request.tools?.map(tool => tool.name).join(",") === "read")).toBe(true);
   expect(requests.every(request => request.items.some(item => item.type === "tool_result" && !item.isError && /1\|[a-f0-9]{40}/.test(item.content)))).toBe(true);
   expect(JSON.stringify(report)).not.toMatch(/PRIVATE_VALUE|stored-subscription-private|smoke-sentinel.txt|\/tmp\//);
 });
@@ -109,6 +110,73 @@ test("tool-free final statement and incorrect read never pass", async () => {
   expect(absolute.scenarios[0]?.status).toBe("failed_provider");
 });
 
+test("a padded answer is not the verbatim sentinel", async () => {
+  const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } }, {
+    createStore: () => missingStore,
+    createModel: async () => createScriptedModel({ responses: [
+      { toolCalls: [{ id: "read", name: "read", arguments: { path: "smoke-sentinel.txt" } }] },
+      request => {
+        const result = request.items.find(item => item.type === "tool_result");
+        const marker = result?.type === "tool_result" ? result.content.match(/1\|([a-f0-9]{40})/)?.[1] : undefined;
+        return { text: ` ${marker} ` };
+      },
+    ] }),
+  });
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "missing_tool_evidence", toolRoundTrip: true });
+});
+
+test("non-cooperative stream reports a bounded unsettled timeout, retains workspace until settlement, and skips later lanes", async () => {
+  let release!: () => void;
+  let dir = "";
+  let models = 0;
+  const blocking: Model = { provider: "anthropic", id: "fake", async *stream() {
+    await new Promise<void>(resolve => { release = resolve; });
+    yield { type: "message_complete", message: { type: "assistant", id: "late", content: [{ type: "text", text: "late" }] } };
+  } };
+  const started = performance.now();
+  const report = await runLiveSmoke({ ...selection(["anthropic", "openai-api-key"]), timeoutMs: 35,
+    env: { ANTHROPIC_API_KEY: "fake", OPENAI_API_KEY: "fake" } }, {
+    createStore: () => missingStore,
+    createModel: async () => { models++; return blocking; },
+    onWorkspace: workspace => { dir = workspace.root; },
+  });
+  expect(performance.now() - started).toBeLessThan(350);
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout_unsettled", cleanup: "deferred" });
+  expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_unsettled" });
+  expect(models).toBe(1);
+  await access(dir);
+  release();
+  for (let i = 0; i < 30; i++) { try { await access(dir); await Bun.sleep(10); } catch { break; } }
+  await expect(access(dir)).rejects.toThrow();
+});
+
+test("oversized assembled tool-call arguments and tool result cannot reach another provider round", async () => {
+  let rounds = 0;
+  const configured = { ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } };
+  const args = await runLiveSmoke(configured, {
+    createStore: () => missingStore,
+    createModel: async () => ({ provider: "anthropic", id: "fixture", async *stream() {
+      rounds++;
+      yield { type: "message_complete", message: { type: "assistant", id: "arg", content: [
+        { type: "tool_call", id: "a", name: "read", arguments: { path: "smoke-sentinel.txt", padding: "X".repeat(8192) } },
+      ] } };
+    } }),
+  });
+  expect(args.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
+  expect(rounds).toBe(1);
+  let toolRounds = 0;
+  const tool = await runLiveSmoke(configured, {
+    createStore: () => missingStore,
+    readSentinel: async () => ({ content: "X".repeat(8192) }),
+    createModel: async () => createScriptedModel({ responses: [
+      () => { toolRounds++; return { toolCalls: [{ id: "read", name: "read", arguments: { path: "smoke-sentinel.txt" } }] }; },
+      () => { toolRounds++; return { text: "must not happen" }; },
+    ] }),
+  });
+  expect(tool.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
+  expect(toolRounds).toBe(1);
+});
+
 test("transport error, timeout, and cancellation are distinguished and temp directory removed", async () => {
   let tempPath = "";
   const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "SECRET_IN_ERROR" } }, {
@@ -142,6 +210,21 @@ test("credential-store wait is time-bounded before any provider can instantiate"
   expect(models).toBe(0);
   expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "timeout" });
   expect(report.scenarios[0]!.durationMs).toBeLessThan(150);
+});
+
+test("a late keychain resolution cannot change a published timeout report or start a model", async () => {
+  let release!: (value: string | null) => void;
+  let models = 0;
+  const report = await runLiveSmoke({ ...selection(["anthropic"]), timeoutMs: 20 }, {
+    createStore: () => ({ ...missingStore, get: () => new Promise<string | null>(resolve => { release = resolve; }) }),
+    createModel: async () => { models++; return validModel([]); },
+  });
+  const published = JSON.stringify(report);
+  release("late-secret");
+  await Bun.sleep(10);
+  expect(models).toBe(0);
+  expect(JSON.stringify(report)).toBe(published);
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "timeout" });
 });
 
 test("local fake HTTP transport uses the selected compatible adapter and sends tool output back", async () => {

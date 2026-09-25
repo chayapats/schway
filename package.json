@@ -18,6 +18,8 @@
     "src",
     "examples/extensions",
     "examples/packages",
+    "docs/live-providers.md",
+    "docs/doctor.md",
     "README.md",
     "LICENSE"
   ],
