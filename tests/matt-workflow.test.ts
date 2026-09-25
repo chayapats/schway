@@ -26,7 +26,10 @@ async function command(argv: string[], cwd: string, home: string) {
 /** Pack the actual example and install only its local tarball without scripts or registry access. */
 async function install(work: string, home: string) {
   const output = await command(["npm", "pack", packageSource, "--offline", "--ignore-scripts", "--json"], work, home);
-  const [packed] = JSON.parse(output) as Array<{ filename: string; files: Array<{ path: string }> }>;
+  type Packed = { filename: string; files: Array<{ path: string }> };
+  const parsed = JSON.parse(output) as Packed[] | Record<string, Packed>;
+  // npm versions emit either an array or an object keyed by package name for --json.
+  const packed = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
   expect(packed!.files.map(file => file.path).sort()).toEqual([
     "README.md", "package.json", ...roles.map(role => `skills/${role}/SKILL.md`),
   ].sort());

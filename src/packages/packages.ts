@@ -14,13 +14,25 @@ export interface EnabledPackage {
   skills: string[];
 }
 
-/** Resolve only explicitly enabled installed packages, validating every declaration without executing code. */
+/** Resolve enabled packages, retaining the first error as the runtime loader always has. */
 export async function discoverPackages(options: {
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
 }): Promise<EnabledPackage[]> {
+  const inspected = await inspectPackages(options);
+  if (inspected.diagnostics.length) throw new Error(inspected.diagnostics[0]);
+  return inspected.packages;
+}
+
+/** Inspect each configured package independently without evaluating extension entrypoints. */
+export async function inspectPackages(options: {
+  workspaceRoot: string;
+  home?: string;
+  signal?: AbortSignal;
+}): Promise<{ packages: EnabledPackage[]; diagnostics: string[] }> {
   const packages: EnabledPackage[] = [];
+  const diagnostics: string[] = [];
   const scopes = [
     ...(options.home ? [{ scope: "global" as const, root: join(options.home, ".schway"), config: userConfigPath(options.home) }] : []),
     { scope: "project" as const, root: options.workspaceRoot, config: projectConfigPath(options.workspaceRoot) },
@@ -28,17 +40,20 @@ export async function discoverPackages(options: {
   for (const { scope, root, config } of scopes) {
     options.signal?.throwIfAborted();
     const layer = await readConfigFile(config);
-    if (layer && "error" in layer) throw new Error(layer.error);
+    if (layer && "error" in layer) {
+      diagnostics.push(layer.error);
+      continue;
+    }
     for (const name of layer?.packages ?? []) {
       options.signal?.throwIfAborted();
       const source = `${scope} package "${name}" (${config})`;
-      let packageRoot: string;
       try {
-        packageRoot = await realpath(join(root, "node_modules", name));
-      } catch {
-        throw new Error(`Missing ${source}. Install it with npm install --prefix ${JSON.stringify(root)} ${name}; Schway never installs packages automatically.`);
-      }
-      try {
+        let packageRoot: string;
+        try {
+          packageRoot = await realpath(join(root, "node_modules", name));
+        } catch {
+          throw new Error(`Missing ${source}. Install it with npm install --prefix ${JSON.stringify(root)} ${name}; Schway never installs packages automatically.`);
+        }
         const manifest: unknown = JSON.parse(await readFile(join(packageRoot, "package.json"), { encoding: "utf8", signal: options.signal }));
         if (!isObject(manifest)) throw new Error("package.json must be an object");
         const schway = manifest.schway;
@@ -72,12 +87,14 @@ export async function discoverPackages(options: {
         packages.push({ name, scope, root: packageRoot, source, extensions, skills });
       } catch (error) {
         options.signal?.throwIfAborted();
-        throw new Error(`${source}: ${error instanceof Error ? error.message : String(error)}`);
+        // Native filesystem errors can include untrusted path or OS detail; keep diagnostics bounded.
+        const message = error instanceof Error ? error.message : "Unable to inspect package";
+        diagnostics.push(message.startsWith(`Missing ${source}.`) ? message : `${source}: ${message.slice(0, 500)}`);
       }
     }
   }
   options.signal?.throwIfAborted();
-  return packages;
+  return { packages, diagnostics };
 }
 
 /** Resolve manifest entrypoints only when their canonical paths and required file types stay inside the package. */

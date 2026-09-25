@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
@@ -90,6 +91,25 @@ export interface CliIo {
  * Returns 0 on success and 1 on handled usage, auth, or run failure; unhandled setup/I/O failures can reject.
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+  if (argv[0] === "doctor") {
+    const parsedDoctor = parseArgs(argv.slice(1));
+    if ("error" in parsedDoctor || parsedDoctor.args.prompt || parsedDoctor.args.resume || parsedDoctor.args.branch) {
+      io.stderr.write(`Invalid doctor options. ${"error" in parsedDoctor ? "Check doctor flags." : "Doctor does not accept prompts or session resume."}\n${USAGE}\n`);
+      return 2;
+    }
+    if (parsedDoctor.args.help) {
+      io.stdout.write(`${USAGE}\n`);
+      return 0;
+    }
+    try {
+      const report = await diagnose({ cwd: io.cwd, env: io.env, args: parsedDoctor.args, store: io.credentialStore, signal: io.signal });
+      io.stdout.write(parsedDoctor.args.json ? `${JSON.stringify(report)}\n` : formatDoctor(report));
+      return doctorExitCode(report);
+    } catch {
+      io.stderr.write("Doctor could not complete. Retry after restoring local filesystem access or removing cancellation.\n");
+      return 2;
+    }
+  }
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
     io.stderr.write(`${parsed.error}\n${USAGE}\n`);

@@ -19,6 +19,17 @@ bun run dev -- -p "hello"
 bun run dev
 ```
 
+## Diagnose local readiness
+
+```bash
+schway doctor
+schway doctor --json
+```
+
+Doctor reports runtime, workspace, shell/search, session storage, configuration,
+selected authentication and enabled skill/extension metadata without starting a
+model or executing extensions. See [doctor usage and JSON/exit status](https://github.com/chayapats/schway/blob/main/docs/doctor.md).
+
 ## Interactive usage
 
 ```bash
