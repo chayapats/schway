@@ -1,5 +1,7 @@
-import { appendFile, mkdir, rename, stat, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, realpath, rename, stat, unlink } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { sessionsDirectory } from "../session/jsonl.ts";
 import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../auth/secrets.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 
@@ -38,7 +40,8 @@ export function createDiagnosticSink(options: {
   limits?: { maxBytes?: number; archives?: number; pending?: number };
 }): DiagnosticSink {
   if (!options.enabled) return { record() {}, runtime() {}, async flush() {}, async close() {}, get dropped() { return 0; } };
-  const destination = options.destination ?? diagnosticPath(options.home);
+  const destination = resolve(options.destination ?? diagnosticPath(options.home));
+  const isDefault = options.destination === undefined;
   const maxBytes = bounded(options.limits?.maxBytes, DIAGNOSTIC_MAX_BYTES, 256, DIAGNOSTIC_MAX_BYTES);
   const archives = bounded(options.limits?.archives, DIAGNOSTIC_ARCHIVES, 0, 20);
   const pending = bounded(options.limits?.pending, DIAGNOSTIC_PENDING, 1, 1024);
@@ -53,8 +56,18 @@ export function createDiagnosticSink(options: {
     if (writing || failed || queue.length === 0) return;
     writing = (async () => {
       try {
+        // Canonicalize existing paths and their nearest existing parent before any append/rotation.
+        // A caller-chosen log must never become a durable session record (or rotate one).
+        const sessionRoot = await canonicalTarget(sessionsDirectory(options.home));
+        const target = await canonicalTarget(destination);
+        const inSessions = relative(sessionRoot, target);
+        if (inSessions === "" || (inSessions !== ".." && !inSessions.startsWith(`..${sep}`) && !isAbsolute(inSessions))) {
+          throw new Error("Diagnostic destination overlaps sessions");
+        }
         await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-        size ??= await stat(destination).then(file => file.size, () => 0);
+        if (isDefault) await requirePrivate(dirname(destination), true);
+        await requirePrivate(destination, false);
+        size ??= await stat(destination).then(file => file.size, missingSize);
         while (queue.length) {
           const line = queue.shift()!;
           const bytes = Buffer.byteLength(line);
@@ -67,7 +80,10 @@ export function createDiagnosticSink(options: {
             if (archives === 0) await unlink(destination).catch(missingOnly);
             size = 0;
           }
-          await appendFile(destination, line, { mode: 0o600 });
+          // O_NOFOLLOW prevents a late replacement of the final file with a symlink.
+          await requirePrivate(destination, false);
+          const file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW, 0o600);
+          try { await file.appendFile(line); } finally { await file.close(); }
           size += bytes;
         }
       } catch {
@@ -86,11 +102,13 @@ export function createDiagnosticSink(options: {
       if (stopped || failed) { dropped++; return; }
       if (queue.length >= pending) { dropped++; return; }
       try {
+      const sessionId = options.sessionId?.();
       const record = {
         timestamp: new Date().toISOString(), level,
-        runId: options.runId ?? "unknown", sessionId: options.sessionId?.() ?? null,
-        component: cleanText(component, secrets).slice(0, 64),
-        event: cleanText(event, secrets).slice(0, 64),
+        runId: safeText(options.runId ?? "unknown", secrets, 128),
+        sessionId: sessionId === undefined ? null : safeText(sessionId, secrets, 128),
+        component: safeText(component, secrets, 64),
+        event: safeText(event, secrets, 64),
         fields: sanitize(fields, secrets),
       };
       let line = JSON.stringify(record);
@@ -105,12 +123,12 @@ export function createDiagnosticSink(options: {
         case "agent.started": case "model.finished": sink.record(event.type.split(".")[0]!, event.type); break;
         case "agent.finished": sink.record("agent", event.type, { reason: event.reason }, event.reason === "error" ? "error" : "info"); break;
         case "model.started": sink.record("model", event.type, { provider: event.provider, model: event.model }); break;
-        case "model.retry": sink.record("model", event.type, { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: event.message }, "warn"); break;
+        case "model.retry": sink.record("model", event.type, { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, category: "transient_provider_failure" }, "warn"); break;
         case "tool.started": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId }); break;
         case "tool.finished": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId, status: event.status }, event.status === "success" ? "info" : "warn"); break;
         case "compaction.started": sink.record("compaction", event.type, { reason: event.reason }); break;
-        case "compaction.finished": sink.record("compaction", event.type, { reason: event.reason, status: event.status, ...(event.status === "completed" ? { recordId: event.recordId, firstKeptId: event.firstKeptId } : { message: event.message }) }, event.status === "failed" ? "warn" : "info"); break;
-        case "error": sink.record("agent", event.type, { message: event.message }, "error"); break;
+        case "compaction.finished": sink.record("compaction", event.type, { reason: event.reason, status: event.status, ...(event.status === "completed" ? { recordId: event.recordId, firstKeptId: event.firstKeptId } : { category: event.status === "failed" ? "compaction_failure" : "no_compaction" }) }, event.status === "failed" ? "warn" : "info"); break;
+        case "error": sink.record("agent", event.type, { category: "runtime_failure" }, "error"); break;
         case "model.delta": case "tool.delta": break;
       }
     },
@@ -128,15 +146,50 @@ export function createDiagnosticSink(options: {
 function missingOnly(error: unknown): void {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 }
+function missingSize(error: unknown): number {
+  missingOnly(error);
+  return 0;
+}
+async function canonicalTarget(path: string): Promise<string> {
+  const absolute = resolve(path);
+  try { return await realpath(absolute); }
+  catch (error) {
+    missingOnly(error);
+    return join(await canonicalTarget(dirname(absolute)), basename(absolute));
+  }
+}
+async function requirePrivate(path: string, directory: boolean): Promise<void> {
+  let info;
+  try { info = await lstat(path); }
+  catch (error) { missingOnly(error); return; }
+  if ((directory ? !info.isDirectory() : !info.isFile()) || info.mode & 0o077 || (!directory && info.nlink !== 1)) {
+    throw new Error("Diagnostic destination is not a private regular file or directory");
+  }
+}
+function safeText(value: string, secrets: readonly string[], max: number): string {
+  // Reject, rather than truncate, before sanitizing: a cut credential could reveal a prefix.
+  if (value.length > max) return "[oversized]";
+  const safe = cleanText(value, secrets);
+  return safe.length > max ? "[oversized]" : safe;
+}
 function bounded(value: number | undefined, fallback: number, min: number, max: number): number {
   return value !== undefined && Number.isSafeInteger(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
 const secretField = /(?:secret|password|passwd|token|credential|api.?key|authorization|cookie|private.?key|client.?secret|session.?key)/i;
 const rawField = /(?:prompt|payload|content|arguments|body|transcript|stack|source|output|headers)/i;
-const urlCredential = /([?&](?:[^=&]*(?:key|token|secret|password|auth|credential|code)[^=&]*)=)[^&#\s]*/gi;
+const urlCredential = /([?&](?:[^=&]*(?:key|token|secret|password|auth|credential|code|signature|sig)[^=&]*)=)[^&#\s]*/gi;
 function cleanText(value: string, secrets: readonly string[]): string {
   return redactSecrets(value, secrets)
-    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1***@")
+    .replace(/https?:\/\/[^\s"'<>]+/gi, url => {
+      const start = url.indexOf("://") + 3;
+      const authorityEnd = ["/", "?", "#"].reduce((end, marker) => {
+        const index = url.indexOf(marker, start);
+        return index < 0 ? end : Math.min(end, index);
+      }, url.length);
+      const authority = url.slice(start, authorityEnd);
+      const at = authority.lastIndexOf("@");
+      return at < 0 ? url : `${url.slice(0, start)}***@${authority.slice(at + 1)}${url.slice(authorityEnd)}`;
+    })
     .replace(urlCredential, "$1***")
     .replace(/\b(Bearer|Basic)\s+[^\s,"'}]+/gi, "$1 ***")
     .replace(/\b((?:x-api-key|api[_-]?key|authorization|proxy-authorization|x-auth-token|password|access_token)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi, "$1***");
@@ -145,19 +198,33 @@ function cleanText(value: string, secrets: readonly string[]): string {
 export function sanitize(value: unknown, secrets: readonly string[] = []): unknown {
   const seen = new WeakSet<object>();
   const visit = (item: unknown, depth: number): unknown => {
-    if (typeof item === "string") return cleanText(item, secrets).slice(0, 256);
+    if (typeof item === "string") return safeText(item, secrets, 256);
     if (typeof item === "number") return Number.isFinite(item) ? item : null;
     if (typeof item === "boolean" || item === null) return item;
     if (depth >= 3 || typeof item !== "object") return undefined;
     if (seen.has(item)) return "[circular]";
     seen.add(item);
-    if (item instanceof Error) return { name: visit(item.name, depth + 1), message: visit(item.message, depth + 1), ...(typeof (item as Error & { status?: unknown }).status === "number" ? { status: (item as Error & { status: number }).status } : {}) };
-    if (Array.isArray(item)) return item.slice(0, 8).map(entry => visit(entry, depth + 1));
-    const result: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(item).slice(0, 24)) {
-      if (secretField.test(key) || rawField.test(key) || CREDENTIAL_HEADER_NAMES.has(key.toLowerCase())) continue;
-      const safe = visit(entry, depth + 1);
-      if (safe !== undefined) result[cleanText(key, secrets).slice(0, 64)] = safe;
+    // Error messages and stacks can echo an entire prompt; never inspect either by default.
+    if (item instanceof Error) return { name: visit(item.name, depth + 1), ...(typeof (item as Error & { status?: unknown }).status === "number" ? { status: (item as Error & { status: number }).status } : {}) };
+    if (Array.isArray(item)) {
+      const result: unknown[] = [];
+      for (let i = 0; i < Math.min(item.length, 8); i++) {
+        const descriptor = Object.getOwnPropertyDescriptor(item, String(i));
+        result.push(descriptor && "value" in descriptor ? visit(descriptor.value, depth + 1) : null);
+      }
+      return result;
+    }
+    const result: Record<string, unknown> = Object.create(null);
+    let examined = 0;
+    // for...in is lazy, unlike Object.entries, which evaluates *every* getter before slicing.
+    for (const key in item) {
+      if (!Object.hasOwn(item, key)) continue;
+      if (++examined > 24) break;
+      if (key.length > 64 || secretField.test(key) || rawField.test(key) || CREDENTIAL_HEADER_NAMES.has(key.toLowerCase())) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(item, key);
+      if (!descriptor || !("value" in descriptor)) continue;
+      const safe = visit(descriptor.value, depth + 1);
+      if (safe !== undefined) result[safeText(key, secrets, 64)] = safe;
     }
     return result;
   };

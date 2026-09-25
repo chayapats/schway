@@ -154,6 +154,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       env,
     );
     if ("error" in loadedEnv) {
+      diagnostics.record("config", "env_file_failed", { category: "configuration_input" }, "error");
       io.stderr.write(`${loadedEnv.error}\n`);
       return 1;
     }
@@ -171,6 +172,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         branchId: parsed.args.branch,
       });
     } catch (error) {
+      diagnostics.record("session", "resume_failed", { category: "session_load" }, "error");
       io.stderr.write(`${errorMessage(error)}\n`);
       return 1;
     }
@@ -186,6 +188,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     workspace = await addWorkspaceRoots(workspace, parsed.args.addDirs ?? [], io.signal);
     if (session && parsed.args.addDirs?.length) session.setExtraRoots([...new Set([...session.metadata.extraRoots, ...workspace.extraRoots])]);
   } catch (error) {
+    diagnostics.record("workspace", "attach_failed", { category: "workspace_setup" }, "error");
     io.stderr.write(`${errorMessage(error)}\n`);
     return 1;
   }
@@ -196,6 +199,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     cli: cliOverridesFromArgs(parsed.args),
   });
   if ("error" in settings) {
+    diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");
     io.stderr.write(`${settings.error}\n`);
     return 1;
   }
@@ -203,12 +207,14 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     hasCliConnectionOptions(parsed.args) &&
     settings.provider !== "openai-compatible"
   ) {
+    diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write(
       `OpenAI-compatible connection options require --provider openai-compatible\n${USAGE}\n`,
     );
     return 1;
   }
   if (parsed.args.openaiAuth !== undefined && settings.provider !== "openai") {
+    diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write(
       `OpenAI auth preference requires --provider openai\n${USAGE}\n`,
     );
@@ -228,6 +234,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     tools = loaded.tools;
     extensions = loaded.runtime;
   } catch (error) {
+    diagnostics.record("extension", "load_failed", { category: "extension_setup" }, "error");
     io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
     return 1;
   }
@@ -258,6 +265,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (!model) {
       const loaded = await loadCliModel(settings, parsed.args.apiKey, { ...io, env }, secrets);
       if ("error" in loaded) {
+        diagnostics.record("model", "load_failed", { provider: settings.provider, category: "model_unavailable" }, "error");
         io.stderr.write(`${loaded.error}\n`);
         return 1;
       }
@@ -351,6 +359,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   } finally {
     extensions.dispose();
   }
+  } catch (error) {
+    diagnostics.record("cli", "setup_failed", { category: "unexpected_setup_failure" }, "error");
+    throw error;
   } finally {
     await diagnostics.close();
   }

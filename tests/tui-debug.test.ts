@@ -19,5 +19,11 @@ test("interactive startup diagnostics are opt-in and never require OpenTUI for p
     }
     const records = (await readFile(diagnosticPath(home), "utf8")).trim().split("\n").map(line => JSON.parse(line) as { event: string; component: string });
     expect(records).toContainEqual(expect.objectContaining({ component: "cli", event: "startup" }));
+
+    const configArgs = parseArgs(["--debug", "--provider", "openai-compatible"]);
+    if ("error" in configArgs) throw new Error(configArgs.error);
+    expect(await runInteractiveTui({ args: configArgs.args, env: { HOME: home }, cwd: home,
+      stdout: { write() {} }, stderr: { write() {} } })).toBe(1);
+    expect(await readFile(diagnosticPath(home), "utf8")).toContain('"event":"invalid_configuration"');
   } finally { await rm(home, { recursive: true, force: true }); }
 });

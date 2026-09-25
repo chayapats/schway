@@ -117,6 +117,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       env,
     );
     if ("error" in loadedEnv) {
+      diagnostics.record("config", "env_file_failed", { category: "configuration_input" }, "error");
       io.stderr.write(`${loadedEnv.error}\n`);
       return 1;
     }
@@ -140,6 +141,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     workspace = await addWorkspaceRoots(workspace, io.args.addDirs ?? [], io.signal);
     if (startupResumed && io.args.addDirs?.length) startupResumed.setExtraRoots([...new Set([...startupResumed.metadata.extraRoots, ...workspace.extraRoots])]);
   } catch (error) {
+    diagnostics.record("workspace", "load_failed", { category: "workspace_setup" }, "error");
     io.stderr.write(`${messageOf(error)}\n`);
     return 1;
   }
@@ -148,6 +150,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   try {
     configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args) });
   } catch (error) {
+    diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");
     io.stderr.write(`${messageOf(error)}\n`);
     return 1;
   }
@@ -156,12 +159,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     hasCliConnectionOptions(io.args) &&
     settings.provider !== "openai-compatible"
   ) {
+    diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write(
       "OpenAI-compatible connection options require --provider openai-compatible\n",
     );
     return 1;
   }
   if (io.args.openaiAuth !== undefined && settings.provider !== "openai") {
+    diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write("OpenAI auth preference requires --provider openai\n");
     return 1;
   }
@@ -184,6 +189,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     tools = loaded.tools;
     extensions = loaded.runtime;
   } catch (error) {
+    diagnostics.record("extension", "load_failed", { category: "extension_setup" }, "error");
     io.stderr.write(`${redactSecrets(messageOf(error), secrets)}\n`);
     return 1;
   }
@@ -211,6 +217,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         secrets, credentialStore,
       });
       if ("error" in loaded) {
+        diagnostics.record("model", "load_failed", { provider: settings.provider, category: "model_unavailable" }, "error");
         startupError = loaded.error;
       } else {
         model = loaded.model;
@@ -328,6 +335,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         }
       }
     } catch (error) {
+      diagnostics.record("session", "start_failed", { category: "session_setup" }, "error");
       io.stderr.write(`${messageOf(error)}\n`);
       return 1;
     }
@@ -352,6 +360,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         stderr: io.stderr,
       });
     } catch (error) {
+      diagnostics.record("tui", "renderer_failed", { category: "terminal_setup" }, "error");
       io.stderr.write(`${messageOf(error)}\n`);
       return 1;
     } finally {

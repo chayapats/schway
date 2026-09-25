@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "../src/cli/main.ts";
@@ -47,6 +47,17 @@ test("retries and errors log sanitized metadata without streamed prompt or tool 
   expect(text).toContain('"event":"error"');
 }));
 
+test("configuration and model-load failures log only safe categories", async () => withHome(async home => {
+  const io = { cwd: home, env: { HOME: home, ANTHROPIC_API_KEY: "key" }, stdout: { write() {} }, stderr: { write() {} } };
+  expect(await runCli(["-p", "hello", "--debug", "--provider", "openai-compatible"], io)).toBe(1);
+  const sensitiveError = "unknown-provider-error-echoed-private-prompt";
+  expect(await runCli(["-p", "hello", "--debug"], { ...io, createModel: async () => { throw new Error(sensitiveError); } })).toBe(1);
+  const records = await readFile(diagnosticPath(home), "utf8");
+  expect(records).not.toContain(sensitiveError);
+  expect(records).toContain('"event":"invalid_configuration"');
+  expect(records).toContain('"event":"load_failed"');
+}));
+
 test("cancellation drains pending diagnostics without changing session semantics", async () => withHome(async home => {
   const controller = new AbortController();
   let started!: () => void;
@@ -76,4 +87,43 @@ test("unwritable diagnostic destination cannot suppress tool settlement", async 
   expect(code).toBe(0);
   expect(stdout).toContain('"type":"tool.finished"');
   expect(await readFile(join(home, "note.txt"), "utf8")).toBe("settled");
+  const session = (await readdir(join(home, ".schway", "sessions")))[0]!;
+  expect(await readFile(join(home, ".schway", "sessions", session), "utf8")).toContain('"tool_result"');
+}));
+
+test("rotation rejection cannot suppress tool or session settlement", async () => withHome(async home => {
+  const destination = join(home, "rotating.jsonl");
+  await writeFile(destination, "#".repeat(1_048_575));
+  await mkdir(`${destination}.3`);
+  await writeFile(join(`${destination}.3`, "keep"), "unchanged");
+  let stdout = "";
+  const code = await runCli(["-p", "write", "--json", "--debug-file", destination], {
+    cwd: home, env: { HOME: home }, stdout: { write(chunk) { stdout += chunk; } }, stderr: { write() {} },
+    model: createScriptedModel({ responses: [{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "note.txt", content: "settled" } }] }, { text: "done" }] }),
+  });
+  expect(code).toBe(0);
+  expect(stdout).toContain('"type":"tool.finished"');
+  expect(await readFile(join(home, "note.txt"), "utf8")).toBe("settled");
+  expect(await readFile(join(`${destination}.3`, "keep"), "utf8")).toBe("unchanged");
+  const session = (await readdir(join(home, ".schway", "sessions")))[0]!;
+  expect(await readFile(join(home, ".schway", "sessions", session), "utf8")).toContain('"tool_result"');
+}));
+
+test("debug path targeting a resumed session, including symlink alias, cannot corrupt history", async () => withHome(async home => {
+  const io = { cwd: home, env: { HOME: home }, stdout: { write() {} }, stderr: { write() {} }, model: createScriptedModel({ text: "ok" }) };
+  expect(await runCli(["-p", "hello"], io)).toBe(0);
+  const sessionName = (await readdir(join(home, ".schway", "sessions")))[0]!;
+  const id = sessionName.slice(0, -".jsonl".length);
+  const session = join(home, ".schway", "sessions", sessionName);
+  const alias = join(home, "alias.jsonl");
+  await symlink(session, alias);
+  for (const path of [session, alias]) {
+    const before = await readFile(session, "utf8");
+    expect(await runCli(["-p", "continue", "--resume", id, "--debug-file", path], { ...io, model: createScriptedModel({ text: "ok" }) })).toBe(0);
+    const after = await readFile(session, "utf8");
+    expect(after.startsWith(before)).toBe(true);
+    expect(after).not.toContain('"component":"cli"');
+    expect(after).not.toContain('"event":"agent.finished"');
+  }
+  expect((await readdir(join(home, ".schway", "sessions")))).toEqual([sessionName]);
 }));
