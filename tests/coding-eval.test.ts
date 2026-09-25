@@ -68,6 +68,13 @@ test("case test subprocesses cannot inherit unrelated parent credentials", async
   }
 });
 
+test("missing grader executable is a skipped prerequisite, not a failing candidate", async () => {
+  const result = await runCodingEval({ model: script([{ text: "done" }]), sourceRevision: revision,
+    graderExecutable: "/nonexistent/schway-eval-bun-fixture" });
+  expect(result.outcome).toBe("skipped_prerequisites");
+  expect(result.grader).toBeNull();
+});
+
 test("wrong edits fail, model and turn failures stay distinct from grader failures", async () => {
   const wrong = await runCodingEval({ model: script([
     { toolCalls: [{ id: "edit1", name: "edit", arguments: { ...edit, edits: [{ oldText: "return Math.min(value, min);", newText: "return Math.min(value, max);" }] } }] },

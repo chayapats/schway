@@ -83,6 +83,8 @@ export async function runCodingEval(options: {
   settings?: Partial<EvalSettings>;
   signal?: AbortSignal;
   clock?: AgentClock;
+  /** Override the grader executable for embedded runs or deterministic missing-prerequisite checks. */
+  graderExecutable?: string;
 }): Promise<CodingEvalResult> {
   const settings = resolveEvalSettings(options.settings);
   const start = performance.now();
@@ -126,11 +128,11 @@ export async function runCodingEval(options: {
     if (signal.aborted) outcome = controller.signal.aborted ? "timeout" : "model_failure";
     else if (reason !== "completed") outcome = errorOrigin === "harness" ? "harness_error" : "model_failure";
     else {
-      grader = await grade(project, join(directory, "grading"), signal, subprocessEnv);
+      grader = await grade(project, join(directory, "grading"), signal, subprocessEnv, options.graderExecutable ?? "bun");
       outcome = signal.aborted ? controller.signal.aborted ? "timeout" : "model_failure" : grader.passed ? "success" : "grader_failure";
     }
   } catch (error) {
-    outcome = controller.signal.aborted || error instanceof GraderTimeout ? "timeout" : signal.aborted ? "model_failure" : "harness_error";
+    outcome = controller.signal.aborted || error instanceof GraderTimeout ? "timeout" : signal.aborted ? "model_failure" : error instanceof GraderUnavailable ? "skipped_prerequisites" : "harness_error";
   } finally {
     clearTimeout(timer);
     if (directory) await rm(directory, { recursive: true, force: true });
@@ -143,7 +145,7 @@ export async function runCodingEval(options: {
 }
 
 /** Grade the actual source and bounded real Bun test exit, not the assistant's final prose. */
-async function grade(project: string, gradingCopy: string, signal: AbortSignal, env: NodeJS.ProcessEnv): Promise<{ passed: boolean; exitCode: number | null }> {
+async function grade(project: string, gradingCopy: string, signal: AbortSignal, env: NodeJS.ProcessEnv, executable: string): Promise<{ passed: boolean; exitCode: number | null }> {
   const source = await readBoundedFile(join(project, "src/math.ts"), 100_000, signal);
   const testSource = await readBoundedFile(join(project, "test/math.test.ts"), 16_000, signal);
   if (source === null || testSource !== TEST_SOURCE) {
@@ -157,13 +159,15 @@ async function grade(project: string, gradingCopy: string, signal: AbortSignal, 
   await writeFile(join(gradingCopy, "test/math.test.ts"), TEST_SOURCE);
   let exitCode: number | null = 0;
   try {
-    await exec("bun", ["--no-env-file", "test", "test/math.test.ts"], {
+    await exec(executable, ["--no-env-file", "test", "test/math.test.ts"], {
       cwd: gradingCopy, timeout: 5000, maxBuffer: 8192, signal, env,
     });
   } catch (error) {
     if (signal.aborted) throw error;
     const code = (error as { code?: unknown }).code;
     if (code === "ETIMEDOUT" || (error as { killed?: boolean }).killed) throw new GraderTimeout();
+    if (code === "ENOENT" || code === "EACCES" || code === "EPERM") throw new GraderUnavailable();
+    if (typeof code === "string" && code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw error;
     exitCode = typeof code === "number" ? code : null;
   }
   // Only trusted tests running candidate code inside a VM determine success.
@@ -197,6 +201,9 @@ async function readBoundedFile(path: string, maxBytes: number, signal: AbortSign
 
 /** Distinguish grader command timeout from ordinary failed tests. */
 class GraderTimeout extends Error {}
+
+/** Missing or unusable grader executable is a skipped prerequisite, not a candidate failure. */
+class GraderUnavailable extends Error {}
 
 /** Record a prerequisite skip without constructing or calling a paid model. */
 export function skippedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings): CodingEvalResult {
