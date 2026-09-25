@@ -11,7 +11,7 @@ const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const reasons = new Set(["verified", "missing_credentials", "credential_store_unavailable", "missing_subscription",
   "subscription_requires_login", "integration_unavailable", "compatible_endpoint_required", "timeout", "timeout_unsettled",
   "output_limit", "provider_error", "runner_error", "turn_limit", "no_final_response", "missing_tool_evidence",
-  "invalid_settings", "cancelled", "cleanup_failed"]);
+  "invalid_settings", "cancelled", "cleanup_failed", "disallowed_tool"]);
 const statuses = new Set(["passed", "skipped", "pending", "failed_provider", "failed_runner"]);
 const authSources = new Set(["runtime", "env", "stored", "stored-subscription", "none", "unavailable"]);
 
@@ -51,6 +51,13 @@ async function boundedOutput(stdout: ReadableStream<Uint8Array>): Promise<string
       if (done) break;
       length += value.byteLength;
       if (length > MAX_REPLY_BYTES) throw Error("oversized worker output");
+      const endOfReply = value.indexOf(10);
+      if (endOfReply >= 0) {
+        if (endOfReply !== value.byteLength - 1) throw Error("invalid worker output frame");
+        chunks.push(value.subarray(0, endOfReply));
+        length--;
+        break;
+      }
       chunks.push(value);
     }
     const bytes = new Uint8Array(length);
@@ -112,12 +119,20 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
     let abort: (() => void) | undefined;
     let reason: "timeout" | "cancelled" | undefined;
     let hardDeadline = false;
+    const guardSetup = () => {
+      const stop = selection.signal?.aborted ? "cancelled" : performance.now() - start >= selection.timeoutMs ? "timeout" : undefined;
+      if (stop) { reason = stop; if (stop === "timeout") timedOut = true; throw Error("setup stopped"); }
+    };
     try {
       if (!safeId.test(model) || !Number.isInteger(selection.timeoutMs) || selection.timeoutMs < 1 || selection.timeoutMs > 120_000) {
         result.reason = "invalid_settings";
       } else {
         workspace = await mkdtemp(join(tmpdir(), "schway-live-"));
+        guardSetup();
         options.onWorkspace?.(workspace);
+        // There is no await between this guard and spawn: cancellation during mkdir
+        // or an onWorkspace callback must never start a selected paid worker.
+        guardSetup();
         // No secrets enter argv or stdin: provider credentials are resolved inside this worker.
         child = Bun.spawn([process.execPath, "--no-env-file", options.workerFile ?? fileURLToPath(new URL("./worker.ts", import.meta.url))], {
           cwd: workspace, env: selection.env, stdin: "pipe", stdout: "pipe", stderr: "ignore", detached: true,
@@ -128,29 +143,38 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         child.stdin.write(input);
         child.stdin.end();
         const output = boundedOutput(child.stdout);
-        const finished = Promise.all([child.exited, output]);
-        const deadline = new Promise<"timeout" | "cancelled">(resolve => {
+        const deadline = new Promise<{ reason: "timeout" | "cancelled" }>(resolve => {
           const remaining = Math.max(0, selection.timeoutMs - (performance.now() - start));
-          timer = setTimeout(() => resolve("timeout"), remaining);
-          abort = () => resolve("cancelled");
+          timer = setTimeout(() => resolve({ reason: "timeout" }), remaining);
+          abort = () => resolve({ reason: "cancelled" });
           selection.signal?.addEventListener("abort", abort, { once: true });
-          if (selection.signal?.aborted) resolve("cancelled");
+          if (selection.signal?.aborted) resolve({ reason: "cancelled" });
         });
-        const response = await Promise.race([finished, deadline]);
-        if (typeof response === "string") {
-          reason = response;
-          if (response === "timeout") { timedOut = true; hardDeadline = true; }
-          result = scenario(provider, model, response === "cancelled" ? "pending" : "failed_runner", response);
+        const first = await Promise.race([output, deadline]);
+        if (typeof first !== "string") {
+          reason = first.reason;
+          if (reason === "timeout") { timedOut = true; hardDeadline = true; }
+          result = scenario(provider, model, reason === "cancelled" ? "pending" : "failed_runner", reason);
         } else {
-          const [exit, text] = response;
-          if (performance.now() - start >= selection.timeoutMs) {
+          const reply = validReply(first, provider, model, selection.timeoutMs);
+          // A deferred reply is already a real provider outcome. Hard-stop its
+          // uncooperative worker now, rather than waiting for exit/deadline and erasing it.
+          const exit = reply?.cleanup === "deferred" ? 0 : await Promise.race([child.exited, deadline]);
+          if (typeof exit !== "number") {
+            reason = exit.reason;
+            if (reason === "timeout") { timedOut = true; hardDeadline = true; }
+            result = scenario(provider, model, reason === "cancelled" ? "pending" : "failed_runner", reason);
+          } else if (performance.now() - start >= selection.timeoutMs) {
             timedOut = true;
             hardDeadline = true;
             result = scenario(provider, model, "failed_runner", "timeout");
-          } else result = exit === 0 ? validReply(text, provider, model, selection.timeoutMs) ?? result : result;
+          } else result = exit === 0 ? reply ?? result : result;
         }
       }
-    } catch { result = scenario(provider, model, "failed_runner", "runner_error"); }
+    } catch {
+      result = reason && !child ? scenario(provider, model, reason === "cancelled" ? "pending" : "failed_runner", reason)
+        : scenario(provider, model, "failed_runner", "runner_error");
+    }
     finally {
       if (timer) clearTimeout(timer);
       if (result.reason === "timeout" || result.reason === "timeout_unsettled") timedOut = true;
@@ -164,8 +188,8 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
           result.cleanup = "deferred";
         } else if (unexpectedGroup) {
           result = scenario(provider, model, "failed_runner", "process_group_leak");
-        } else if (result.cleanup === "deferred") {
-          result = scenario(provider, model, "failed_runner", "timeout");
+        } else if (result.reason === "timeout_unsettled") {
+          result.reason = "timeout";
         }
       }
       if (workspace && stopped && hardDeadline) {
@@ -173,8 +197,8 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         catch { /* No stream-start evidence: a setup deadline is a runner failure. */ }
       }
       if (workspace && stopped) {
-        try { await rm(workspace, { recursive: true, force: true }); }
-        catch { result = scenario(provider, model, "failed_runner", "cleanup_failed"); }
+        try { await rm(workspace, { recursive: true, force: true }); delete result.cleanup; }
+        catch { result = scenario(provider, model, "failed_runner", "cleanup_failed"); result.cleanup = "deferred"; }
       }
       result.durationMs = Math.round(performance.now() - start);
       scenarios.push(result);

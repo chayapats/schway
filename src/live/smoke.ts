@@ -126,6 +126,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
   let stream: Promise<void> | undefined;
   let unsettled = false;
   let outputLimit = false;
+  let disallowedTool = false;
   try {
     // OS keychain reads are not cancellable; do not allow a late resolution
     // to mutate an already-published timeout report.
@@ -171,10 +172,16 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
         // This caps assembled arguments at the runner seam, not provider wire bytes.
         if (event.type === "model.finished") {
           const last = session.items.at(-1);
-          if (last?.type === "assistant") chars += JSON.stringify(last).length;
+          if (last?.type === "assistant") {
+            chars += JSON.stringify(last).length;
+            // The loop yields before scheduling tools: reject an unadvertised call here,
+            // before its automatic activate_skill registration can execute anything.
+            if (last.content.some(block => block.type === "tool_call" && block.name !== "read")) disallowedTool = true;
+          }
         }
         if (event.type === "tool.finished") chars += event.content.length;
         if (chars > MAX_OUTPUT_CHARS) { outputLimit = true; controller.abort(); break; }
+        if (disallowedTool) { controller.abort(); break; }
         if (event.type === "error") {
           error = true;
           needsLogin = provider === "codex" && /Sign in again in interactive mode|subscription session (expired|was revoked)/i.test(event.message);
@@ -215,8 +222,8 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
       ]);
       unsettled = !settled;
     }
-    result.status = selection.signal?.aborted ? "pending" : controller.signal.aborted && startedModel ? "failed_provider" : "failed_runner";
-    result.reason = outputLimit ? "output_limit" : selection.signal?.aborted ? "cancelled"
+    result.status = selection.signal?.aborted ? "pending" : (outputLimit || disallowedTool || controller.signal.aborted && startedModel) ? "failed_provider" : "failed_runner";
+    result.reason = selection.signal?.aborted ? "cancelled" : outputLimit ? "output_limit" : disallowedTool ? "disallowed_tool"
       : controller.signal.aborted ? (unsettled ? "timeout_unsettled" : "timeout") : "runner_error";
   } finally {
     clearTimeout(timer);

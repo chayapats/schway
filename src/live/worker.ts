@@ -61,7 +61,8 @@ export async function runWorker(input: ReadableStream<Uint8Array>, env: Record<s
 if (import.meta.main) {
   try {
     const output = await runWorker(Bun.stdin.stream(), process.env);
-    process.stdout.write(output);
+    // One bounded line lets the supervisor kill an unsettled stream without waiting for process exit.
+    process.stdout.write(`${output}\n`);
   } catch {
     // Neither raw provider exceptions nor potentially secret-bearing instructions are printed.
     process.exitCode = 1;

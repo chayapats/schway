@@ -114,6 +114,28 @@ test("tool-free final statement and incorrect read never pass", async () => {
   expect(absolute.scenarios[0]?.status).toBe("failed_provider");
 });
 
+test("unadvertised activate_skill call blocks every tool before execution, even alongside read", async () => {
+  let readCalls = 0;
+  let modelRounds = 0;
+  let workspace = "";
+  const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } }, {
+    createStore: () => missingStore,
+    onWorkspace: value => { workspace = value.root; },
+    readSentinel: async () => { readCalls++; return { content: "must not execute" }; },
+    createModel: async () => createScriptedModel({ responses: [
+      () => { modelRounds++; return { toolCalls: [
+        { id: "bad", name: "activate_skill", arguments: { name: "unadvertised" } },
+        { id: "read", name: "read", arguments: { path: "smoke-sentinel.txt" } },
+      ] }; },
+      () => { modelRounds++; return { text: "must not run" }; },
+    ] }),
+  });
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "disallowed_tool", toolRoundTrip: false });
+  expect(readCalls).toBe(0);
+  expect(modelRounds).toBe(1);
+  await expect(access(workspace)).rejects.toThrow();
+});
+
 test("a padded answer is not the verbatim sentinel", async () => {
   const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } }, {
     createStore: () => missingStore,

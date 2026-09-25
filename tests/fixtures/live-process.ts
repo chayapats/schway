@@ -18,6 +18,14 @@ if (process.argv.includes("grandchild")) {
   } else if (mode === "hang" || mode === "hang-stream") {
     if (mode === "hang-stream") await writeFile(`${instruction.workspaceRoot}/.model-started`, "");
     setInterval(() => {}, 10_000);
+  } else if (mode === "deferred-output") {
+    Bun.spawn([process.execPath, import.meta.path, "grandchild"], { stdout: "ignore", stderr: "ignore" });
+    for (let i = 0; i < 100; i++) {
+      try { await access(`${path}.descendant`); break; } catch { await Bun.sleep(5); }
+    }
+    writeSync(1, `${JSON.stringify({ provider: instruction.provider, model: instruction.model, authSource: "env",
+      status: "failed_provider", reason: "output_limit", durationMs: 1, toolRoundTrip: false, cleanup: "deferred" })}\n`);
+    setInterval(() => {}, 10_000);
   } else if (mode === "oversized") {
     process.stdout.write("PRIVATE_SECRET".repeat(1000));
   } else if (mode === "orphan") {
@@ -28,6 +36,8 @@ if (process.argv.includes("grandchild")) {
     writeSync(1, JSON.stringify({ provider: instruction.provider, model: instruction.model,
       authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoundTrip: true }));
     process.exit(0);
+  } else if (mode === "fake-timeout") {
+    process.stdout.write("timeout\n");
   } else if (mode === "forged") {
     process.stdout.write(JSON.stringify({ provider: instruction.provider, model: "PRIVATE_SECRET",
       authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoundTrip: true }));

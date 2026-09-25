@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -39,6 +39,36 @@ test("disabled supervision does not spawn or discover credentials", async () => 
   expect(result.scenarios[0]).toMatchObject({ status: "skipped", reason: "live_disabled" });
   expect(JSON.stringify(result)).not.toContain("PRIVATE_SECRET");
 });
+
+test("cancelled or expired workspace setup never spawns a paid worker", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    for (const mode of ["cancelled", "expired"] as const) {
+      const launches = spyOn(Bun, "spawn");
+      const pidPath = join(temp, `${mode}.pid`);
+      const controller = new AbortController();
+      let root = "";
+      let report;
+      let spawned = 0;
+      try {
+        report = await runLiveProcesses({ ...settings(["anthropic"], mode === "cancelled" ? 600 : 30), signal: controller.signal,
+          env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath, ANTHROPIC_API_KEY: "PRIVATE_SECRET" } },
+        { workerFile: fixture, onWorkspace: path => {
+          root = path;
+          if (mode === "cancelled") controller.abort();
+          else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 55);
+        } });
+        spawned = launches.mock.calls.length;
+      } finally { launches.mockRestore(); }
+      expect(spawned).toBe(0);
+      expect(report.scenarios[0]).toMatchObject({ status: mode === "cancelled" ? "pending" : "failed_runner",
+        reason: mode === "cancelled" ? "cancelled" : "timeout" });
+      expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
+      await expect(access(pidPath)).rejects.toThrow();
+      await expect(access(root)).rejects.toThrow();
+    }
+  });
+}, 10_000);
 
 test("real non-cooperative process and same-group descendant die, workspace removed, no later provider starts", async () => {
   if (process.platform === "win32") return;
@@ -92,6 +122,23 @@ test("a worker cannot report pass while its descendant remains alive", async () 
   });
 }, 10_000);
 
+test("non-cooperative output-limit worker is hard stopped without changing provider failure to timeout", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    const pidPath = join(temp, "worker.pid");
+    const roots: string[] = [];
+    const report = await runLiveProcesses({ ...settings(["anthropic"], 1200), env: {
+      SCHWAY_FIXTURE_MODE: "deferred-output", SCHWAY_FIXTURE_PID_FILE: pidPath,
+    } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
+    expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
+    expect(report.scenarios[0]).not.toHaveProperty("cleanup");
+    expect(roots).toHaveLength(1);
+    expect(gone(await waitForPid(pidPath))).toBe(true);
+    expect(gone(await waitForPid(`${pidPath}.descendant`))).toBe(true);
+    await expect(access(roots[0]!)).rejects.toThrow();
+  });
+}, 10_000);
+
 test("oversized stdout and malformed worker response are rejected without echo, cleaned up and reaped", async () => {
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
@@ -108,6 +155,10 @@ test("oversized stdout and malformed worker response are rejected without echo, 
     } }, { workerFile: fixture });
     expect(forged.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
     expect(JSON.stringify(forged)).not.toContain("PRIVATE_SECRET");
+    const fakeTimeout = await runLiveProcesses({ ...settings(["anthropic"]), env: {
+      SCHWAY_FIXTURE_MODE: "fake-timeout",
+    } }, { workerFile: fixture });
+    expect(fakeTimeout.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
   });
 });
 
