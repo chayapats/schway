@@ -1,0 +1,21 @@
+# Local diagnostics
+
+Schway does not write diagnostic logs unless you opt in. To investigate a run:
+
+```bash
+schway -p "explain this project" --json --debug
+# Or choose a local file (relative to launch cwd):
+schway -p "explain this project" --debug-file ./schway-debug.jsonl
+# For an interactive session:
+schway --debug
+```
+
+`--debug` writes newline-delimited JSON records to `~/.schway/logs/diagnostics.jsonl` (`HOME` determines `~`). `--debug-file <path>` enables logging and overrides that destination. Keep explicit destinations private; the default directory and file are created with owner-only permissions (0700/0600). There is no upload, collection endpoint or verbose/raw-payload mode.
+
+Each record has `timestamp` (ISO 8601), `level`, `runId` (unique invocation identifier), `sessionId` (null until a session is ready), `component`, `event`, and bounded `fields`. Diagnostics include startup/provider configuration identifiers and limits, retry reasons and delays, errors, tool names/IDs/status, and compaction transitions. Prompt contents, streamed text, tool arguments, tool output/details, provider payloads and full conversation history are **not** logged. Sensitive structured keys (including authentication headers, tokens, passwords and credentials) are excluded; known runtime secrets, bearer/basic credentials and URL userinfo/query credentials are masked in remaining strings. Avoid placing arbitrary secrets inside non-credential identifiers. Logs are locally sensitive metadata and should not be shared without inspection.
+
+The active file is limited to 1 MiB with three retained archives (`diagnostics.jsonl.1` through `.3`, oldest discarded). Each line is bounded to under 4 KiB and the in-memory pending queue is limited to 128 records. Excess entries are dropped, not allowed to delay the agent. Filesystem errors disable that invocation's logging; they never fail a model/tool run. During orderly exit or cancellation, Schway waits up to 1.5 seconds for pending writes, then proceeds. Avoid writing to remote or slow filesystems if you need reliable final diagnostics.
+
+Headless `--json` continues to print normalized runtime events on stdout and the existing `~/.schway/sessions/*.jsonl` files continue to hold only durable semantic conversation records. The diagnostic file is neither an archive of prompts nor a replacement for session state.
+
+Internal consumers can use `createDiagnosticSink({ home, enabled, runId, sessionId, secrets })` from `src/diagnostics/sink.ts`: call `record(component, event, fields, level)` with metadata only or `runtime(event)` with a normalized runtime event, then `close()` at shutdown. All fields pass through the common sanitizer before JSON serialization; do not pre-stringify potentially sensitive objects or log raw payloads.

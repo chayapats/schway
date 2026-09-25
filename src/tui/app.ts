@@ -3,6 +3,7 @@ import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
 import type { ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { resolve } from "node:path";
+import { createDiagnosticSink } from "../diagnostics/sink.ts";
 import {
   redactSecrets,
 } from "../auth/secrets.ts";
@@ -101,6 +102,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
 
+  const secrets: string[] = collectSecrets(io.args.apiKey, io.env);
+  let diagnosticSessionId: string | undefined;
+  let activeController: TuiController | undefined;
+  const diagnostics = createDiagnosticSink({ home, enabled: io.args.debug ?? false,
+    destination: io.args.debugFile ? resolve(io.cwd, io.args.debugFile) : undefined,
+    runId: crypto.randomUUID(), sessionId: () => activeController?.snapshot().sessionId ?? diagnosticSessionId, secrets });
+  try {
+  diagnostics.record("cli", "startup", { mode: "interactive", resumed: !!io.args.resume });
   let env = io.env;
   if (io.args.envFiles && io.args.envFiles.length > 0) {
     const loadedEnv = await applyEnvFiles(
@@ -123,6 +132,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       startupResumed = await loadJsonlSession({ directory, id: io.args.resume, branchId: io.args.branch });
       const restored = await restoreWorkspace({ root: startupResumed.header.workspaceRoot, launchCwd: startupResumed.header.launchCwd, extraRoots: [...startupResumed.metadata.extraRoots] });
       workspace = restored.workspace;
+      diagnosticSessionId = startupResumed.header.id;
       workspaceDiagnostics.push(...restored.diagnostics);
     } else {
       workspace = await resolveWorkspace(io.cwd);
@@ -156,7 +166,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
 
-  const secrets = collectSecrets(io.args.apiKey, env, settings.credentialEnv);
+  secrets.push(...collectSecrets(undefined, env, settings.credentialEnv));
+  diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools });
   const credentialStore = io.credentialStore ?? createNativeCredentialStore();
   const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
     modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal,
@@ -280,6 +291,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         }
       } else {
         const session = await createJsonlSession({ directory, workspace });
+        diagnosticSessionId = session.header.id;
         const freshManager = createContextManager(workspace, managerOptions);
         skillScope.manager = freshManager;
         skillScope.workspaceRoot = workspace.root;
@@ -320,6 +332,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       return 1;
     }
 
+    activeController = controller;
+    diagnostics.record("session", "ready", { resumed: !!io.args.resume });
     for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
       await runTuiRenderer({
@@ -346,6 +360,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 0;
   } finally {
     extensions.dispose();
+  }
+  } finally {
+    await diagnostics.close();
   }
 }
 

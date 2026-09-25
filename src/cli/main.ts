@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { createDiagnosticSink } from "../diagnostics/sink.ts";
 import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
@@ -137,6 +138,15 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
+  const secrets: string[] = collectSecrets(parsed.args.apiKey, io.env);
+  let diagnosticSessionId: string | undefined;
+  const diagnostics = createDiagnosticSink({
+    enabled: parsed.args.debug ?? false, home,
+    destination: parsed.args.debugFile ? resolve(io.cwd, parsed.args.debugFile) : undefined,
+    runId: crypto.randomUUID(), sessionId: () => diagnosticSessionId, secrets,
+  });
+  try {
+  diagnostics.record("cli", "startup", { mode: "headless", resumed: !!parsed.args.resume });
   let env = io.env;
   if (parsed.args.envFiles && parsed.args.envFiles.length > 0) {
     const loadedEnv = await applyEnvFiles(
@@ -166,6 +176,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     const restored = await restoreWorkspace({ root: session.header.workspaceRoot, launchCwd: session.header.launchCwd, extraRoots: [...session.metadata.extraRoots] });
     workspace = restored.workspace;
+    diagnosticSessionId = session.header.id;
     for (const diagnostic of restored.diagnostics) io.stderr.write(`${diagnostic}\n`);
   } else {
     workspace = await resolveWorkspace(io.cwd);
@@ -204,7 +215,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
-  const secrets = collectSecrets(parsed.args.apiKey, env, settings.credentialEnv);
+  secrets.push(...collectSecrets(undefined, env, settings.credentialEnv));
+  diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools, resumed: !!session });
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   try {
@@ -257,7 +269,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
     if (!session) {
       session = await createJsonlSession({ directory, workspace });
+      diagnosticSessionId = session.header.id;
     }
+    diagnostics.record("session", "ready", { resumed: !!parsed.args.resume });
     session.append({
       type: "user",
       id: crypto.randomUUID(),
@@ -291,6 +305,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
       })) {
+        diagnostics.runtime(event);
         const safeEvent = redactEvent(event, secrets);
         if (parsed.args.json) {
           io.stdout.write(`${JSON.stringify(safeEvent)}\n`);
@@ -335,6 +350,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return failed ? 1 : 0;
   } finally {
     extensions.dispose();
+  }
+  } finally {
+    await diagnostics.close();
   }
 }
 
