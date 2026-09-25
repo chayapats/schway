@@ -14,6 +14,13 @@ export interface EnabledPackage {
   skills: string[];
 }
 
+/** Safe identity and failure category for a configured package, separate from its runtime error text. */
+export interface PackageIssue {
+  scope: "project" | "global";
+  name?: string;
+  kind: "configuration" | "missing" | "manifest" | "peer";
+}
+
 /** Resolve enabled packages, retaining the first error as the runtime loader always has. */
 export async function discoverPackages(options: {
   workspaceRoot: string;
@@ -30,9 +37,10 @@ export async function inspectPackages(options: {
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
-}): Promise<{ packages: EnabledPackage[]; diagnostics: string[] }> {
+}): Promise<{ packages: EnabledPackage[]; diagnostics: string[]; issues: PackageIssue[] }> {
   const packages: EnabledPackage[] = [];
   const diagnostics: string[] = [];
+  const issues: PackageIssue[] = [];
   const scopes = [
     ...(options.home ? [{ scope: "global" as const, root: join(options.home, ".schway"), config: userConfigPath(options.home) }] : []),
     { scope: "project" as const, root: options.workspaceRoot, config: projectConfigPath(options.workspaceRoot) },
@@ -42,16 +50,19 @@ export async function inspectPackages(options: {
     const layer = await readConfigFile(config);
     if (layer && "error" in layer) {
       diagnostics.push(layer.error);
+      issues.push({ scope, kind: "configuration" });
       continue;
     }
     for (const name of layer?.packages ?? []) {
       options.signal?.throwIfAborted();
       const source = `${scope} package "${name}" (${config})`;
+      let kind: PackageIssue["kind"] = "manifest";
       try {
         let packageRoot: string;
         try {
           packageRoot = await realpath(join(root, "node_modules", name));
         } catch {
+          kind = "missing";
           throw new Error(`Missing ${source}. Install it with npm install --prefix ${JSON.stringify(root)} ${name}; Schway never installs packages automatically.`);
         }
         const manifest: unknown = JSON.parse(await readFile(join(packageRoot, "package.json"), { encoding: "utf8", signal: options.signal }));
@@ -65,9 +76,11 @@ export async function inspectPackages(options: {
         const peer = isObject(manifest.peerDependencies) ? manifest.peerDependencies.schway : undefined;
         if (peer !== undefined) {
           if (typeof peer !== "string" || !peer.trim() || validRange(peer) === null) {
+            kind = "peer";
             throw new Error(`Invalid Schway peer range ${JSON.stringify(peer)}; peerDependencies.schway must be a nonempty npm semver range.`);
           }
           if (!satisfies(version, peer)) {
+            kind = "peer";
             throw new Error(`Incompatible Schway peer ${JSON.stringify(peer)}; installed Schway is ${version}. Install a compatible package version.`);
           }
         }
@@ -82,19 +95,27 @@ export async function inspectPackages(options: {
         if (dependencyField) {
           throw new Error(`Declare schway in peerDependencies instead of ${dependencyField}; packages must use the installed harness's public schway/extensions API without bundling a second harness.`);
         }
-        const extensions = await declaredPaths(packageRoot, schway.extensions, "extensions", options.signal);
-        const skills = await declaredPaths(packageRoot, schway.skills, "skills", options.signal);
+        let extensions: string[];
+        let skills: string[];
+        try {
+          extensions = await declaredPaths(packageRoot, schway.extensions, "extensions", options.signal);
+          skills = await declaredPaths(packageRoot, schway.skills, "skills", options.signal);
+        } catch (error) {
+          if (error instanceof Error && /(?: is missing|missing SKILL\.md)/.test(error.message)) kind = "missing";
+          throw error;
+        }
         packages.push({ name, scope, root: packageRoot, source, extensions, skills });
       } catch (error) {
         options.signal?.throwIfAborted();
         // Native filesystem errors can include untrusted path or OS detail; keep diagnostics bounded.
         const message = error instanceof Error ? error.message : "Unable to inspect package";
         diagnostics.push(message.startsWith(`Missing ${source}.`) ? message : `${source}: ${message.slice(0, 500)}`);
+        issues.push({ scope, name, kind });
       }
     }
   }
   options.signal?.throwIfAborted();
-  return { packages, diagnostics };
+  return { packages, diagnostics, issues };
 }
 
 /** Resolve manifest entrypoints only when their canonical paths and required file types stay inside the package. */

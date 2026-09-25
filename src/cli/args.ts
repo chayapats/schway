@@ -451,6 +451,12 @@ function validateConnectionOptions(
   return { args };
 }
 
+/** True when explicit CLI flags require the OpenAI-compatible provider after config resolution. */
+export function hasCliConnectionOptions(args: CliArgs): boolean {
+  return args.baseUrl !== undefined || args.headers !== undefined || args.extraBody !== undefined ||
+    args.auth !== undefined || args.profile !== undefined;
+}
+
 /** Map explicitly provided CLI flags onto a config overlay. Omitted flags stay unset. */
 export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
   const layer: ConfigLayer = {};

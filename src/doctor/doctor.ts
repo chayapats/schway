@@ -1,6 +1,7 @@
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { redactSecrets } from "../auth/secrets.ts";
 import { platform } from "node:os";
 import { version } from "../../package.json";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
@@ -13,7 +14,7 @@ import { resolveWorkspace, addWorkspaceRoots } from "../workspace/workspace.ts";
 import { findGitRoot } from "../workspace/git.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import type { CliArgs } from "../cli/args.ts";
-import { cliOverridesFromArgs } from "../cli/args.ts";
+import { cliOverridesFromArgs, hasCliConnectionOptions } from "../cli/args.ts";
 
 /** One locally evaluated readiness check, with a stable identifier and recovery action. */
 export interface DoctorCheck {
@@ -135,6 +136,10 @@ export async function diagnose(input: {
   if (invalidConfig) add("provider", "warning", "Provider selection may change after invalid configuration is fixed.", "Fix configuration, then rerun doctor.");
   else if ("error" in settings) {
     add("provider", "error", "Provider or profile settings cannot be resolved (unknown profile, incompatible mode, or missing endpoint).", "Check --profile, --provider and --base-url against configured profiles.");
+  } else if (hasCliConnectionOptions(input.args) && settings.provider !== "openai-compatible") {
+    add("provider", "error", "OpenAI-compatible connection flags conflict with the selected provider.", "Select --provider openai-compatible or remove --base-url, --header, --body, --auth and --profile.");
+  } else if (input.args.openaiAuth !== undefined && settings.provider !== "openai") {
+    add("provider", "error", "OpenAI auth preference conflicts with the selected provider.", "Select --provider openai or remove --openai-auth.");
   } else {
     report.provider = settings.provider;
     if (settings.profile) report.profile = settings.profile;
@@ -154,22 +159,37 @@ export async function diagnose(input: {
         try { parsed = JSON.parse(raw); } catch { return "invalid"; }
         if (typeof parsed !== "object" || !parsed || !("accessToken" in parsed) || typeof parsed.accessToken !== "string" || !parsed.accessToken.trim()) return "invalid";
         const token = parsed as { expiresAt?: unknown; refreshToken?: unknown };
-        if (typeof token.expiresAt === "number" && token.expiresAt <= Date.now() + 60_000)
+        // Match the provider's finite expiry/skew rule without importing its executable adapter.
+        if (typeof token.expiresAt === "number" && Number.isFinite(token.expiresAt) && token.expiresAt <= Date.now() + 60_000)
           return typeof token.refreshToken === "string" && token.refreshToken.trim() ? "refresh" : "expired";
         return "present";
       } catch { return "unavailable"; }
     };
     let sub: Awaited<ReturnType<typeof subscription>> | undefined;
-    if (settings.provider === "openai" && preferred !== "api-key" && (preferred === "codex" || (!runtime?.trim() && !environment?.trim()))) sub = await subscription();
+    let storedOpenAI: string | null | undefined;
+    let storeUnavailable = false;
+    const emptyOverride = runtime !== undefined && !runtime.trim();
+    if (!emptyOverride && settings.provider === "openai" && preferred === "codex") sub = await subscription();
+    if (!emptyOverride && settings.provider === "openai" && preferred === "auto" && !runtime?.trim() && !environment?.trim()) {
+      // Auto selection checks BOTH identities, even if the subscription is present.
+      // A failure of either read prevents healthy fallback to the other billing mode.
+      sub = await subscription();
+      if (sub === "unavailable") storeUnavailable = true;
+      else try { storedOpenAI = await store.get(credentialIdentity({ provider: "openai" })); }
+      catch { storeUnavailable = true; }
+    }
     const useSubscription = preferred === "codex" || (preferred === "auto" && !runtime?.trim() && !environment?.trim() && (sub === "present" || sub === "refresh" || sub === "expired" || sub === "invalid"));
-    if (useSubscription) {
+    if (emptyOverride) {
+      report.authSource = "runtime";
+      add("auth", "error", "Explicit API key is empty.", "Supply a nonempty --api-key or remove it.");
+    } else if (storeUnavailable) {
+      report.authSource = "unknown";
+      add("auth", "error", "OS secure store unavailable or locked; OpenAI auto selection cannot inspect both identities.", "Unlock/allow access to the OS secure store or explicitly select --openai-auth api-key with a supplied --api-key / OPENAI_API_KEY.");
+    } else if (useSubscription) {
       report.authSource = "subscription";
       if (sub === "present") add("auth", "ok", "ChatGPT subscription login present; access-token status checked locally.");
       else if (sub === "refresh") add("auth", "warning", "ChatGPT access token needs refresh; refresh token present (not tested).", "Refresh occurs during a future model request; sign in again if it fails.");
       else add("auth", "error", sub === "expired" ? "ChatGPT access token expired without a refresh token." : sub === "unavailable" ? "OS secure store unavailable or locked." : sub === "invalid" ? "Stored subscription login is invalid." : "No ChatGPT subscription login found.", "Unlock the OS secure store or sign in interactively with /login codex; choose --openai-auth api-key to use an API key.");
-    } else if (runtime !== undefined && !runtime.trim()) {
-      report.authSource = "runtime";
-      add("auth", "error", "Explicit API key is empty.", "Supply a nonempty --api-key or remove it.");
     } else if (runtime?.trim()) {
       report.authSource = "runtime";
       add("auth", "ok", "Runtime API key present.");
@@ -182,7 +202,7 @@ export async function diagnose(input: {
     } else {
       try {
         const identity = credentialIdentity(settings);
-        const stored = await store.get(identity);
+        const stored = storedOpenAI !== undefined ? storedOpenAI : await store.get(identity);
         if (stored?.trim()) {
           report.authSource = "secure-store";
           add("auth", "ok", "Selected API key present in OS secure store.");
@@ -202,18 +222,25 @@ export async function diagnose(input: {
     try {
       const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal });
       add("packages", "ok", `${inspected.packages.length} enabled package manifest(s) valid.`);
-      for (let i = 0; i < inspected.diagnostics.length; i++) {
-        const diagnostic = inspected.diagnostics[i]!;
-        const name = diagnostic.match(/(?:global|project) package "([@a-z0-9._\/-]+)"/)?.[1];
-        const subject = name ? `Package ${name}` : "Package configuration";
-        const category = diagnostic.includes("Missing ") || diagnostic.includes(" is missing") ? "has a missing installation or declared entry" : diagnostic.includes("peer") ? "has an invalid or incompatible peer declaration" : "has an invalid manifest";
-        add(`package.${i}`, "error", `${subject} ${category}.`, name ? `Inspect the schway manifest and declared paths for ${name}; install the package in its configured scope or remove its enablement.` : "Correct the invalid package configuration or restore access to it.");
+      // Only bounded identifiers reach output; never include arbitrary manifest or OS error text.
+      const secrets = [input.args.apiKey, ...Object.values(input.args.headers ?? {}), ...Object.values(env)]
+        .filter((value): value is string => !!value).sort((a, b) => b.length - a.length);
+      const safeName = (value: string) => redactSecrets(value, secrets).replace(/[^a-zA-Z0-9._*/-]/g, "?").slice(0, 64);
+      for (let i = 0; i < inspected.issues.length; i++) {
+        const issue = inspected.issues[i]!;
+        const subject = issue.name ? `${issue.scope} package ${safeName(issue.name)}` : `${issue.scope} package configuration`;
+        const category = issue.kind === "configuration" ? "is invalid or unreadable" : issue.kind === "missing" ? "has a missing installation or declared entry" : issue.kind === "peer" ? "has an invalid or incompatible peer declaration" : "has an invalid manifest";
+        add(`package.${i}`, "error", `${subject} ${category}.`, issue.name ? `Inspect the schway manifest and declared paths for ${safeName(issue.name)}; install it in its configured scope or remove its enablement.` : "Correct the invalid package configuration or restore access to it.");
       }
       // Discovery accepts already validated packages and never imports extension registration code.
       try {
         const skills = await discoverSkills({ workspaceRoot: workspace, extraRoots, home, packages: inspected.packages, signal: input.signal });
         add("skills", "ok", `${skills.skills.length} skill(s) available.`);
-        for (let i = 0; i < skills.diagnostics.length; i++) add(`skill.invalid.${i}`, "error", "Skill metadata invalid or unreadable.", "Repair the reported skill's SKILL.md frontmatter and permissions; check .agents/skills or ~/.schway/skills.");
+        for (let i = 0; i < skills.diagnostics.length; i++) {
+          const source = skills.diagnostics[i]!.source;
+          const identifier = safeName(basename(source.endsWith("SKILL.md") ? dirname(source) : source));
+          add(`skill.invalid.${i}`, "error", `Skill metadata invalid or unreadable in ${identifier}.`, `Repair SKILL.md for ${identifier} (frontmatter, body or permissions) under .agents/skills, ~/.schway/skills or its configured package.`);
+        }
         for (const duplicate of skills.ambiguous) add(`skill.duplicate.${duplicate.name}`, "error", `Duplicate skill name: ${duplicate.name}.`, "Rename or remove a duplicate skill in the same precedence tier.");
         for (const collision of skills.collisions) add(`skill.collision.${collision.name}`, "error", `Skill ${collision.name} collides with a built-in command.`, "Rename the skill.");
       } catch {
@@ -227,9 +254,9 @@ export async function diagnose(input: {
         try {
           const canonical = await realpath(entries[i]!);
           if (!(await stat(canonical)).isFile()) throw new Error("not a file");
-          if (identities.has(canonical)) add(`extension.${i}`, "error", "Duplicate enabled extension module.", "Remove one duplicate --extension or package entry.");
-          else { identities.add(canonical); add(`extension.${i}`, "ok", "Enabled extension module exists; registration not executed."); }
-        } catch { add(`extension.${i}`, "error", "Enabled extension module missing or inaccessible.", "Restore the module path or remove its enablement."); }
+          if (identities.has(canonical)) add(`extension.${i}`, "error", `Duplicate enabled extension module ${safeName(basename(entries[i]!))}.`, "Remove one duplicate --extension or package entry.");
+          else { identities.add(canonical); add(`extension.${i}`, "ok", `Enabled extension ${safeName(basename(entries[i]!))} exists; registration not executed.`); }
+        } catch { add(`extension.${i}`, "error", `Enabled extension ${safeName(basename(entries[i]!))} missing or inaccessible.`, `Restore module ${safeName(basename(entries[i]!))} in its configured package or --extension path, or remove its enablement.`); }
       }
     } catch {
       input.signal?.throwIfAborted();

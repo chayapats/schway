@@ -38,6 +38,7 @@ import { loadProviderModel } from "../model/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
   cliOverridesFromArgs,
+  hasCliConnectionOptions,
   parseArgs,
   USAGE,
   type CliArgs,
@@ -87,8 +88,8 @@ export interface CliIo {
 
 /**
  * Dispatch CLI arguments to a persisted headless run or a lazily loaded interactive terminal.
- * Without `-p` this opens the interactive terminal; with `-p` it runs headless.
- * Returns 0 on success and 1 on handled usage, auth, or run failure; unhandled setup/I/O failures can reject.
+ * `doctor` runs diagnostics; otherwise `-p` runs headless and no prompt opens the interactive terminal.
+ * Returns 0 on success, 1 on diagnosed/handled failures, or 2 if doctor cannot complete; unhandled non-doctor setup/I/O failures can reject.
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv[0] === "doctor") {
@@ -418,17 +419,6 @@ function redactJsonValue(value: unknown, secrets: readonly string[]): unknown {
     );
   }
   return value;
-}
-
-/** True when the user passed compatible connection flags on the CLI. */
-function hasCliConnectionOptions(args: CliArgs): boolean {
-  return (
-    args.baseUrl !== undefined ||
-    args.headers !== undefined ||
-    args.extraBody !== undefined ||
-    args.auth !== undefined ||
-    args.profile !== undefined
-  );
 }
 
 /** Resolve credentials and construct the selected provider model. */
