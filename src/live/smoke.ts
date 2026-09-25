@@ -36,12 +36,16 @@ export interface SmokeSelection {
   models?: Partial<Record<SmokeProvider, string>>;
   /** Optional programmatic runtime key overrides, scoped to one selected provider. */
   runtimeKeys?: Partial<Record<SmokeProvider, string>>;
+  /** Parent-owned workspace for an isolated subprocess; the worker must never remove it. */
+  workspaceRoot?: string;
 }
 /** Private test seams; production defaults load only selected adapters and the native secure store. */
 export interface SmokeDependencies {
   createStore?: () => CredentialStore;
   createModel?: (input: ProviderLoaderInput) => Promise<Model>;
   onWorkspace?: (workspace: Workspace) => void;
+  /** Record that the selected model stream has started, without exposing model content. */
+  onModelStarted?: () => void;
   /** Script a bounded sentinel read in offline tests without changing the only allowed path. */
   readSentinel?: ToolDefinition<ReadInput>["execute"];
 }
@@ -143,7 +147,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
       provider: model.provider, id: model.id,
       stream: request => model.stream({ ...request, tools: request.tools?.filter(tool => tool.name === "read") }),
     };
-    directory = await mkdtemp(join(tmpdir(), "schway-live-"));
+    directory = selection.workspaceRoot ?? await mkdtemp(join(tmpdir(), "schway-live-"));
     // Never promote an ancestor Git root if TMPDIR happens to live inside a repository.
     const root = await realpath(directory);
     const workspace: Workspace = { root, launchCwd: root, extraRoots: [] };
@@ -161,7 +165,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     stream = (async () => {
       for await (const event of runAgentLoop({ session, model: smokeModel, workspace, contextManager: createContextManager(workspace),
         tools: createToolRegistry([sentinelReadTool(deps.readSentinel ?? readTool.execute)]), signal, maxTurns: MAX_TURNS })) {
-        if (event.type === "model.started") startedModel = true;
+        if (event.type === "model.started") { startedModel = true; deps.onModelStarted?.(); }
         if (event.type === "model.delta") chars += event.content.text.length;
         // A completed model message is yielded before the loop schedules its tool calls.
         // This caps assembled arguments at the runner seam, not provider wire bytes.
@@ -216,7 +220,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
       : controller.signal.aborted ? (unsettled ? "timeout_unsettled" : "timeout") : "runner_error";
   } finally {
     clearTimeout(timer);
-    if (directory) {
+    if (directory && !selection.workspaceRoot) {
       if (unsettled && stream) {
         result.cleanup = "deferred";
         const retained = directory;

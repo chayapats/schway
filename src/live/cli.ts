@@ -1,4 +1,5 @@
 import { isSafeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
+import { runLiveProcesses } from "./process.ts";
 
 const PROVIDERS: readonly SmokeProvider[] = ["anthropic", "openai-api-key", "compatible", "codex"];
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
@@ -52,7 +53,8 @@ export async function runLiveCli(argv: readonly string[], io: {
 }): Promise<number> {
   const parsed = parseLiveArgs(argv);
   if ("error" in parsed) { io.err(`${parsed.error}\nSee docs/live-providers.md.\n`); return 1; }
-  const report = await runLiveSmoke({ ...parsed.selection, env: parsed.selection.enabled ? io.env : {}, revision: io.revision, signal: io.signal });
+  const selection = { ...parsed.selection, env: parsed.selection.enabled ? io.env : {}, revision: io.revision, signal: io.signal };
+  const report = await (selection.enabled ? runLiveProcesses(selection) : runLiveSmoke(selection));
   io.out(`${JSON.stringify(report, null, 2)}\n`);
   return report.aggregate === "passed" ? 0 : report.aggregate === "incomplete" ? 2 : 1;
 }
