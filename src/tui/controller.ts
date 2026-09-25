@@ -119,6 +119,8 @@ export interface TuiControllerOptions {
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
+  /** Observe current-turn events and their active session ID before display folding without blocking the loop. */
+  onRuntimeEvent?: (event: RuntimeEvent, sessionId: string) => void | Promise<void>;
   /** Explicit change-tracking fallback when no config editor supplies effective settings. */
   changeTracking?: GitChangeTrackingMode;
 }
@@ -364,6 +366,7 @@ export class TuiController {
   private configEditor?: ConfigEditor;
   private readonly stageSettings?: TuiControllerOptions["stageSettings"];
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
+  private readonly onRuntimeEvent?: TuiControllerOptions["onRuntimeEvent"];
   private modelPicker?: ModelPickerSnapshot;
   private branchTreeOpen = false;
   private branchTreeSelectedId?: string;
@@ -419,6 +422,7 @@ export class TuiController {
     this.explicitChangeTracking = options.changeTracking;
     this.stageSettings = options.stageSettings;
     this.onSettingsCommitted = options.onSettingsCommitted;
+    this.onRuntimeEvent = options.onRuntimeEvent;
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
@@ -1464,6 +1468,7 @@ export class TuiController {
     this.status = "running";
     const abort = new AbortController();
     this.activeAbort = abort;
+    this.observeRuntimeEvent({ type: "compaction.started", reason: "manual" });
     const task = this.contextManager.compact(this.session, this.model, {
       reason: "manual",
       signal: abort.signal,
@@ -1476,6 +1481,14 @@ export class TuiController {
     let record: Awaited<typeof task>;
     try {
       record = await task;
+      if (this.activeAbort === abort) {
+        this.observeRuntimeEvent(record && !abort.signal.aborted
+          ? { type: "compaction.finished", reason: "manual", status: "completed", recordId: record.id, firstKeptId: record.firstKeptId }
+          : { type: "compaction.finished", reason: "manual", status: "noop" });
+      }
+    } catch (error) {
+      if (this.activeAbort === abort) this.observeRuntimeEvent({ type: "compaction.finished", reason: "manual", status: "failed" });
+      throw error;
     } finally {
       if (this.activeAbort === abort) {
         this.activeAbort = undefined;
@@ -1723,6 +1736,7 @@ export class TuiController {
       })) {
         // Drain accepted calls on cancellation; replaced sessions ignore stale display events.
         if (this.activeAbort?.signal === signal) {
+          this.observeRuntimeEvent(event);
           this.applyEvent(event);
         }
       }
@@ -1747,6 +1761,15 @@ export class TuiController {
       this.fail(actionableError(message));
       await this.captureTurnResult();
     }
+  }
+
+  /** Deliver native or manual-compaction events without letting observers affect the conversation. */
+  private observeRuntimeEvent(event: RuntimeEvent): void {
+    if (!this.onRuntimeEvent) return;
+    try {
+      const pending = this.onRuntimeEvent(event, this.sessionId);
+      if (pending) void Promise.resolve(pending).catch(() => {});
+    } catch { /* Diagnostic failures never change the conversation. */ }
   }
 
   /** Fold one runtime event into transcript rows and status. */

@@ -80,7 +80,7 @@ schway -p "explain this repository" --provider openai-compatible \
   --base-url http://127.0.0.1:8080/v1 --auth required --api-key sk-local
 ```
 
-`--json` streams normalized runtime events as JSONL on stdout. Diagnostics stay on stderr.
+`--json` streams normalized runtime events as JSONL on stdout. Errors/retries still appear on stderr. Opt in to local structured diagnostics with `--debug` or `--debug-file ./schway-debug.jsonl` (implies `--debug`); log writes never enter stdout or durable sessions. See [local diagnostics](docs/diagnostics.md) for redaction and retention defaults.
 
 `--provider` selects `anthropic` (default), `openai`, or `openai-compatible`. `--model` is passed through even if it is not in a catalog. Unknown IDs use conservative defaults of a 32768-token context window and 16384 maximum output tokens; known catalog models supply richer context-window metadata. Override either limit with `--context-window`, `--max-output`, or the same keys in config.
 

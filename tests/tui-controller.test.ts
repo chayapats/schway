@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
+import type { RuntimeEvent } from "../src/agent/events.ts";
 import type { Session } from "../src/session/session.ts";
 import {
   createJsonlSession,
@@ -124,6 +125,42 @@ test("tool errors surface as error state without crashing the turn", async () =>
     expect(tool?.toolStatus).toBe("error");
     expect(snapshot.transcript.some((entry) => entry.kind === "assistant" && entry.text === "recovered")).toBe(true);
     expect(snapshot.status).toBe("idle");
+  });
+});
+
+test("optional event callback runs before display folding and cannot suppress settled tool results", async () => {
+  await withTempDir(async dir => {
+    const workspace = workspaceFor(dir);
+    await writeFile(join(dir, "note.txt"), "settled result");
+    const session = createSession();
+    const seen: string[] = [];
+    let toolStatusBefore: string | undefined;
+    let sawFilteredThinking = false;
+    let controller!: TuiController;
+    controller = new TuiController({
+      session, model: createScriptedModel({ responses: [
+        { toolCalls: [{ id: "read-1", name: "read", arguments: { path: "note.txt" } }] },
+        { thinkingChunks: ["hidden-thought"], text: "completed" },
+      ] }),
+      contextManager: createContextManager(workspace), tools: createToolRegistry([readTool]),
+      workspace, provider: "scripted", modelId: "scripted", sessionId: "sess-events",
+      onRuntimeEvent(event: RuntimeEvent) {
+        seen.push(event.type);
+        if (event.type === "model.delta" && event.content.type === "thinking") sawFilteredThinking = true;
+        if (event.type === "model.started") throw new Error("observer threw");
+        if (event.type === "tool.finished") {
+          toolStatusBefore = controller.snapshot().transcript.find(entry => entry.toolCallId === event.toolCallId)?.toolStatus;
+          return Promise.reject(new Error("observer rejected"));
+        }
+      },
+    });
+    await controller.submit("read note");
+    expect(seen).toEqual(["agent.started", "model.started", "model.finished", "tool.started", "tool.finished", "model.started", "model.delta", "model.delta", "model.finished", "agent.finished"]);
+    expect(sawFilteredThinking).toBe(true);
+    expect(JSON.stringify(controller.snapshot()).includes("hidden-thought")).toBe(false);
+    expect(toolStatusBefore).toBe("running");
+    expect(controller.snapshot().transcript.find(entry => entry.toolCallId === "read-1")?.toolStatus).toBe("success");
+    expect(session.items.some(item => item.type === "tool_result" && item.content.includes("settled result"))).toBe(true);
   });
 });
 
