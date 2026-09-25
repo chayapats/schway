@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Model } from "../model/model.ts";
 import { loadProviderModel } from "../model/loader.ts";
-import { runCodingEval, skippedCodingEval, type EvalSettings } from "./coding.ts";
+import { failedCodingEval, resolveEvalSettings, runCodingEval, skippedCodingEval, type EvalSettings } from "./coding.ts";
 
 const exec = promisify(execFile);
 const USAGE = "Usage: bun run eval --provider scripted | --provider anthropic|openai|openai-compatible --model ID --allow-paid [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N]";
@@ -26,19 +26,17 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   const provider = values.get("--provider");
   if (!provider || !["scripted", "anthropic", "openai", "openai-compatible"].includes(provider) ||
       (provider !== "scripted" && (!allowPaid || !values.get("--model"))) ||
-      (provider === "scripted" && allowPaid) ||
+      (provider === "scripted" && (allowPaid || (values.has("--model") && values.get("--model") !== "offline-v1"))) ||
       (provider !== "openai-compatible" && values.has("--base-url")) ||
       (provider === "openai-compatible" && !values.has("--base-url"))) {
     console.error(USAGE); return 2;
   }
   const integer = (key: string, fallback: number) => values.has(key) ? Number(values.get(key)) : fallback;
-  const settings: EvalSettings = {
-    maxTurns: integer("--max-turns", 8), timeoutMs: integer("--timeout-ms", 30_000),
-    maxOutputTokens: integer("--max-output-tokens", 4096),
-  };
-  if (!Number.isSafeInteger(settings.maxTurns) || settings.maxTurns < 1 || settings.maxTurns > 20 ||
-      !Number.isSafeInteger(settings.timeoutMs) || settings.timeoutMs < 1 || settings.timeoutMs > 120_000 ||
-      !Number.isSafeInteger(settings.maxOutputTokens) || settings.maxOutputTokens < 1 || settings.maxOutputTokens > 8192) {
+  let settings: EvalSettings;
+  try {
+    settings = resolveEvalSettings({ maxTurns: integer("--max-turns", 8),
+      timeoutMs: integer("--timeout-ms", 30_000), maxOutputTokens: integer("--max-output-tokens", 4096) });
+  } catch {
     console.error("Invalid eval bounds"); return 2;
   }
   const modelId = values.get("--model") ?? "offline-v1";
@@ -50,24 +48,36 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   const apiKey = env[keyName]?.trim();
   const baseUrl = values.get("--base-url");
   let result;
-  if (provider !== "scripted" && (!apiKey || (provider === "openai-compatible" && !/^https?:\/\//.test(baseUrl ?? "")))) {
+  if (provider !== "scripted" && (!apiKey || (provider === "openai-compatible" && !validEndpoint(baseUrl)))) {
     result = skippedCodingEval(provider, modelId, sourceRevision, settings);
   } else {
-    let model: Model;
-    if (provider === "scripted") model = offlineModel();
-    else model = await loadProviderModel({ provider: provider as "anthropic" | "openai" | "openai-compatible", model: modelId,
-      apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
-    // Remove the selected credential from tool subprocesses; the adapter retains its own copy.
-    const previous = process.env[keyName];
-    if (provider !== "scripted") delete process.env[keyName];
-    try { result = await runCodingEval({ model, sourceRevision, settings }); }
-    finally { if (provider !== "scripted" && previous !== undefined) process.env[keyName] = previous; }
+    try {
+      const model: Model = provider === "scripted" ? offlineModel()
+        : await loadProviderModel({ provider: provider as "anthropic" | "openai" | "openai-compatible", model: modelId,
+          apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
+      // Remove the selected credential from tool subprocesses; the adapter retains its own copy.
+      const previous = process.env[keyName];
+      if (provider !== "scripted") delete process.env[keyName];
+      try { result = await runCodingEval({ model, sourceRevision, settings }); }
+      finally { if (provider !== "scripted" && previous !== undefined) process.env[keyName] = previous; }
+    } catch {
+      result = failedCodingEval(provider, modelId, sourceRevision, settings);
+    }
   }
   const path = values.get("--output") ?? join(tmpdir(), `schway-eval-${result.runId}.json`);
   await writeFile(path, `${JSON.stringify(result, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   console.log(`${result.case.id}@${result.case.version}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}`);
   console.log(`Artifact: ${path}`);
   return result.outcome === "success" ? 0 : 1;
+}
+
+/** Require a parseable credential-free HTTP(S) compatible endpoint before model construction. */
+function validEndpoint(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && !!url.hostname && !url.username && !url.password;
+  } catch { return false; }
 }
 
 /** Offline script drives the real loop through read, edit, and bash verification. */

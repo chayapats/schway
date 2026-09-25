@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { access } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { withTempDir } from "./helpers.ts";
 import type { AgentClock } from "../src/agent/retry.ts";
 import { runCodingEval } from "../src/eval/coding.ts";
 import type { Model, ModelRequest, ModelStreamEvent } from "../src/model/model.ts";
@@ -52,13 +54,29 @@ test("wrong edits fail, model and turn failures stay distinct from grader failur
   expect(bounded.outcome).toBe("model_failure");
 });
 
-test("editing the grader test cannot turn a wrong fix into success", async () => {
+test("editing the grader test is rejected and cannot turn a wrong fix into success", async () => {
   const result = await runCodingEval({ model: script([
     { toolCalls: [{ id: "write1", name: "write", arguments: { path: "test/math.test.ts", content: 'import { test } from "bun:test"; test("fake", () => {});' } }] },
     { text: "done" },
   ]), sourceRevision: revision });
-  expect(result.grader?.exitCode).toBe(0);
+  expect(result.grader?.exitCode).toBe(1);
+  expect(result.metrics.toolFailures).toBe(1);
   expect(result.outcome).toBe("grader_failure");
+});
+
+test("eval tool paths and shell commands cannot mutate files outside the case", async () => {
+  await withTempDir(async dir => {
+    const outside = join(dir, "outside.txt");
+    await writeFile(outside, "untouched");
+    const result = await runCodingEval({ model: script([
+      { toolCalls: [{ id: "external", name: "write", arguments: { path: outside, content: "changed" } }] },
+      { toolCalls: [{ id: "shell", name: "bash", arguments: { command: `printf changed > ${outside}` } }] },
+      { text: "done" },
+    ]), sourceRevision: revision });
+    expect(result.outcome).toBe("grader_failure");
+    expect(result.metrics.toolFailures).toBe(2);
+    expect(await readFile(outside, "utf8")).toBe("untouched");
+  });
 });
 
 test("timeout and caller cancellation clean up without grading incomplete work", async () => {

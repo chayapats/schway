@@ -8,11 +8,7 @@ import type { AgentClock } from "../agent/retry.ts";
 import { createContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
 import { createJsonlSession } from "../session/jsonl.ts";
-import { bashTool } from "../tools/bash.ts";
-import { editTool } from "../tools/edit.ts";
-import { readTool } from "../tools/read.ts";
-import { createToolRegistry } from "../tools/registry.ts";
-import { writeTool } from "../tools/write.ts";
+import { createEvalTools } from "./tools.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 import { createEvalMetrics, type EvalMetrics } from "./metrics.ts";
 
@@ -39,6 +35,21 @@ export interface EvalSettings {
   maxOutputTokens: number;
 }
 
+/** Apply and validate bounded settings consistently for the API and CLI. */
+export function resolveEvalSettings(overrides: Partial<EvalSettings> = {}): EvalSettings {
+  const settings: EvalSettings = {
+    maxTurns: overrides.maxTurns ?? 8,
+    timeoutMs: overrides.timeoutMs ?? 30_000,
+    maxOutputTokens: overrides.maxOutputTokens ?? 4096,
+  };
+  if (!Number.isSafeInteger(settings.maxTurns) || settings.maxTurns < 1 || settings.maxTurns > 20 ||
+      !Number.isSafeInteger(settings.timeoutMs) || settings.timeoutMs < 1 || settings.timeoutMs > 120_000 ||
+      !Number.isSafeInteger(settings.maxOutputTokens) || settings.maxOutputTokens < 1 || settings.maxOutputTokens > 8192) {
+    throw new Error("Eval bounds exceeded (maxTurns 1-20, timeoutMs 1-120000, maxOutputTokens 1-8192)");
+  }
+  return settings;
+}
+
 /** Safe artifact for one eval, without prompts, tool arguments, outputs, or credentials. */
 export interface CodingEvalResult {
   runId: string;
@@ -61,16 +72,7 @@ export async function runCodingEval(options: {
   signal?: AbortSignal;
   clock?: AgentClock;
 }): Promise<CodingEvalResult> {
-  const settings: EvalSettings = {
-    maxTurns: options.settings?.maxTurns ?? 8,
-    timeoutMs: options.settings?.timeoutMs ?? 30_000,
-    maxOutputTokens: options.settings?.maxOutputTokens ?? 4096,
-  };
-  if (!Number.isSafeInteger(settings.maxTurns) || settings.maxTurns < 1 || settings.maxTurns > 20 ||
-      !Number.isSafeInteger(settings.timeoutMs) || settings.timeoutMs < 1 || settings.timeoutMs > 120_000 ||
-      !Number.isSafeInteger(settings.maxOutputTokens) || settings.maxOutputTokens < 1 || settings.maxOutputTokens > 8192) {
-    throw new Error("Eval bounds exceeded (maxTurns 1-20, timeoutMs 1-120000, maxOutputTokens 1-8192)");
-  }
+  const settings = resolveEvalSettings(options.settings);
   const start = performance.now();
   const runId = crypto.randomUUID();
   const controller = new AbortController();
@@ -94,7 +96,7 @@ export async function runCodingEval(options: {
     const session = await createJsonlSession({ directory: join(directory, "sessions"), workspace });
     session.append({ type: "user", id: crypto.randomUUID(), content: [{ type: "text", text: CODING_CASE.task }] });
     const tracker = createEvalMetrics(session);
-    const tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);
+    const tools = createEvalTools(project);
     let reason: string | undefined;
     let errorOrigin: "model" | "harness" | undefined;
     for await (const event of runAgentLoop({
@@ -152,8 +154,18 @@ class GraderTimeout extends Error {}
 
 /** Record a prerequisite skip without constructing or calling a paid model. */
 export function skippedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings): CodingEvalResult {
+  return unstartedEval(provider, model, sourceRevision, settings, "skipped_prerequisites");
+}
+
+/** Record a failed provider setup without leaking construction errors or losing the artifact. */
+export function failedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings): CodingEvalResult {
+  return unstartedEval(provider, model, sourceRevision, settings, "harness_error");
+}
+
+/** Produce safe metadata for a run that never reached the coding workspace. */
+function unstartedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, outcome: "harness_error" | "skipped_prerequisites"): CodingEvalResult {
   return { runId: crypto.randomUUID(), case: { id: CODING_CASE.id, version: CODING_CASE.version },
-    sourceRevision, provider, model, settings, outcome: "skipped_prerequisites",
+    sourceRevision, provider, model, settings, outcome,
     durationMs: 0, grader: null, metrics: createEvalMetricsPlaceholder() };
 }
 

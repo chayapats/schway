@@ -7,6 +7,7 @@ import { withTempDir } from "./helpers.ts";
 test("paid selection requires both model and explicit opt-in, without calling a provider", async () => {
   expect(await runEvalCli(["--provider", "openai", "--model", "gpt-fixture"], {})).toBe(2);
   expect(await runEvalCli(["--provider", "openai", "--allow-paid"], {})).toBe(2);
+  expect(await runEvalCli(["--provider", "scripted", "--model", "unknown"], {})).toBe(2);
 });
 
 test("missing paid prerequisite emits a structured skip and no model call", async () => {
@@ -18,6 +19,16 @@ test("missing paid prerequisite emits a structured skip and no model call", asyn
     expect(result.outcome).toBe("skipped_prerequisites");
     expect(result.grader).toBeNull();
     expect(JSON.stringify(result)).not.toContain("apiKey");
+  });
+});
+
+test("malformed compatible endpoint is a skipped prerequisite even with a key", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "skip.json");
+    const code = await runEvalCli(["--provider", "openai-compatible", "--model", "fixture", "--base-url", "https://", "--allow-paid", "--output", output], { OPENAI_COMPATIBLE_API_KEY: "fixture-secret" });
+    expect(code).toBe(1);
+    expect((JSON.parse(await readFile(output, "utf8")) as { outcome: string }).outcome).toBe("skipped_prerequisites");
+    expect(await readFile(output, "utf8")).not.toContain("fixture-secret");
   });
 });
 

@@ -6,7 +6,7 @@ Run the single versioned `clamp-bounds@1` task from the Schway source checkout:
 bun run eval --provider scripted
 ```
 
-This offline scripted fixture exercises the real Schway loop, read/edit/bash tools, and an independent environment grader. It needs no API key and is the only eval mode run by deterministic tests. A passing fixture is not live-provider evidence.
+This offline scripted fixture (`--model offline-v1` if specified) exercises the real Schway loop, read/edit/bash tools, and an independent environment grader. Its token counts are deterministic fixture values, not paid-model usage. It needs no API key and is the only eval mode run by deterministic tests. A passing fixture is not live-provider evidence.
 
 To explicitly opt into a paid call, select both provider and model:
 
@@ -16,9 +16,9 @@ ANTHROPIC_API_KEY=... bun run eval --provider anthropic --model claude-sonnet-4-
 # Or: OPENAI_COMPATIBLE_API_KEY=... bun run eval --provider openai-compatible --model local-model --base-url https://example.test/v1 --allow-paid
 ```
 
-The compatible endpoint must be HTTP(S); the selected provider key is read from its environment variable, not a command-line flag. Do not put keys in the command or artifact. Only the selected provider adapter is loaded. A missing key or invalid endpoint is recorded as `skipped_prerequisites` without calling a provider. There is no automatic provider fallback or subscription mode.
+The compatible endpoint must be a valid HTTP(S) URL without embedded user credentials; the selected provider key is read from its environment variable, not a command-line flag. Do not put keys in the command or artifact. Only the selected provider adapter is loaded. A missing key or invalid endpoint is recorded as `skipped_prerequisites` without calling a provider. There is no automatic provider fallback or subscription mode.
 
-The command prints a summary and writes a private JSON artifact to the OS temporary directory. Use `--output /safe/path/result.json` to choose a new file (existing files are not overwritten). The coding repository and session live in a separate temporary directory and are removed on completion/cancellation; the grader checks the unchanged case test and real `bun test` exit as well as the edited source. The shell tool is not a security sandbox; do not use an untrusted model endpoint on a sensitive machine.
+The command prints a summary and writes a private JSON artifact to the OS temporary directory. Use `--output /safe/path/result.json` to choose a new file (existing files are not overwritten). The coding repository and session live in a separate temporary directory and are removed on completion/cancellation; the grader checks the unchanged case test and real `bun test` exit as well as the edited source. Eval tool adapters accept reads of `src/math.ts` and the case test, edits/writes only to `src/math.ts`, and only the `bun test test/math.test.ts` shell command. Arbitrary external paths and commands are rejected. Bun tests still execute model-edited code, so this is not an OS sandbox: do not use an untrusted model endpoint on a sensitive machine.
 
 Options: `--max-turns` (1-20, default 8), `--timeout-ms` (1-120000, default 30000), `--max-output-tokens` (1-8192, default 4096, sent as the provider's output cap). The grader additionally has a 5-second command limit and an 8 KiB output limit. Run `bun run eval --help` for the full invocation.
 
