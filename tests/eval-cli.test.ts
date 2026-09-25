@@ -1,0 +1,33 @@
+import { expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { runEvalCli } from "../src/eval/cli.ts";
+import { withTempDir } from "./helpers.ts";
+
+test("paid selection requires both model and explicit opt-in, without calling a provider", async () => {
+  expect(await runEvalCli(["--provider", "openai", "--model", "gpt-fixture"], {})).toBe(2);
+  expect(await runEvalCli(["--provider", "openai", "--allow-paid"], {})).toBe(2);
+});
+
+test("missing paid prerequisite emits a structured skip and no model call", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "skip.json");
+    const code = await runEvalCli(["--provider", "openai", "--model", "gpt-fixture", "--allow-paid", "--output", output], {});
+    expect(code).toBe(1);
+    const result = JSON.parse(await readFile(output, "utf8")) as Record<string, unknown>;
+    expect(result.outcome).toBe("skipped_prerequisites");
+    expect(result.grader).toBeNull();
+    expect(JSON.stringify(result)).not.toContain("apiKey");
+  });
+});
+
+test("offline command writes a bounded artifact with the observed grader result", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "run.json");
+    expect(await runEvalCli(["--provider", "scripted", "--output", output], {})).toBe(0);
+    const result = JSON.parse(await readFile(output, "utf8")) as { outcome: string; grader: { passed: boolean }; metrics: { toolCalls: number } };
+    expect(result.outcome).toBe("success");
+    expect(result.grader.passed).toBe(true);
+    expect(result.metrics.toolCalls).toBe(3);
+  });
+});

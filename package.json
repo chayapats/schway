@@ -27,6 +27,7 @@
     "dev": "bun --no-env-file src/cli/main.ts",
     "start": "bun --no-env-file src/cli/main.ts",
     "live-smoke": "bun --no-env-file src/live/cli.ts",
+    "eval": "bun --no-env-file src/eval/cli.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

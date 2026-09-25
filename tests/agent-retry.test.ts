@@ -108,10 +108,13 @@ test("transient provider failures retry then persist only the successful assista
     "agent.started",
     "model.started",
     "model.retry",
+    "model.usage",
     "model.started",
     "model.retry",
+    "model.usage",
     "model.started",
     "model.delta",
+    "model.usage",
     "model.finished",
     "agent.finished",
   ]);
@@ -165,6 +168,7 @@ test("transient attempts stop at three and do not start a fourth stream", async 
     type: "error",
     message:
       "Provider request failed after 3 transient attempts: network reset",
+    origin: "model",
   });
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "error" });
   expect(JSON.stringify(events).includes("should not run")).toBe(false);
@@ -275,7 +279,7 @@ test("authentication and malformed requests are not retried", async () => {
     1,
   );
   expect(authEvents.some((event) => event.type === "model.retry")).toBe(false);
-  expect(authEvents).toContainEqual({ type: "error", message: "unauthorized" });
+  expect(authEvents).toContainEqual({ type: "error", message: "unauthorized", origin: "model" });
   expect(authSession.items).toHaveLength(1);
   expect(clock.delays).toEqual([]);
 
@@ -292,7 +296,7 @@ test("authentication and malformed requests are not retried", async () => {
     1,
   );
   expect(badEvents.some((event) => event.type === "model.retry")).toBe(false);
-  expect(badEvents).toContainEqual({ type: "error", message: "bad request" });
+  expect(badEvents).toContainEqual({ type: "error", message: "bad request", origin: "model" });
 });
 
 test("invalid tool arguments, failed shell commands, and edit mismatches are not retried", async () => {
@@ -665,6 +669,7 @@ test("openai-compatible 5xx responses retry with Retry-After and then exhaust cl
     message: expect.stringMatching(
       /Provider request failed after 3 transient attempts:.*busy/,
     ),
+    origin: "model",
   });
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "error" });
   expect(session.items).toHaveLength(1);

@@ -70,7 +70,7 @@ test("converts chunked text stream events into Schway deltas and metadata", asyn
   });
 
   const events = await collect(model.stream(sampleRequest()));
-  expect(events.filter((event) => event.type !== "message_complete")).toEqual([
+  expect(events.filter((event) => event.type !== "message_complete" && event.type !== "usage")).toEqual([
     { type: "text_delta", text: "Hello" },
     { type: "text_delta", text: " world" },
   ]);
@@ -216,7 +216,7 @@ test("assembles streamed tool_use JSON before exposing a complete tool call", as
     fetch: sseFetch(TOOL_USE_STREAM_EVENTS, captured),
   });
   const events = await collect(model.stream(sampleRequest()));
-  expect(events.filter((event) => event.type !== "message_complete")).toEqual([
+  expect(events.filter((event) => event.type !== "message_complete" && event.type !== "usage")).toEqual([
     { type: "text_delta", text: "Let me read that." },
   ]);
   const complete = events.at(-1);

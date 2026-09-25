@@ -64,6 +64,11 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     : options.signal;
   let turnContext: ContextSection[] = [];
   const finishTurn = options.contextManager.beginTurn();
+  function* compactionUsage(): Generator<RuntimeEvent> {
+    for (const entry of options.contextManager.takeUsage()) {
+      yield { type: "model.usage", phase: "compaction", ...entry };
+    }
+  }
 
   /** Intercept ordinary requests after native context assembly, sharing the path used after overflow. */
   async function prepareRequest(prepared: PreparedContext): Promise<ModelRequest> {
@@ -96,6 +101,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       reason: "overflow",
       signal,
     });
+    yield* compactionUsage();
     if (signal?.aborted) {
       if (record) {
         yield {
@@ -122,6 +128,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         type: "error",
         message:
           "Context overflow: compaction did not free context. The session is unchanged; compact manually or shorten the history and retry.",
+        origin: "model",
       };
       yield { type: "agent.finished", reason: "error" };
       return null;
@@ -138,6 +145,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       options.model,
       { signal },
     );
+    yield* compactionUsage();
     if (prepared.compaction) {
       yield { type: "compaction.started", reason: "pressure" };
       yield {
@@ -159,6 +167,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         type: "error",
         message:
           "Repeated context overflow after compaction. The compaction record was kept; shorten the history or start a new session and retry.",
+        origin: "model",
       };
       yield { type: "agent.finished", reason: "error" };
       return null;
@@ -189,6 +198,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         options.model,
         { signal },
       );
+      yield* compactionUsage();
       if (prepared.compaction) {
         yield { type: "compaction.started", reason: "pressure" };
         yield {
@@ -218,7 +228,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         return;
       }
       if (outcome.kind === "error") {
-        yield { type: "error", message: outcome.message };
+        yield { type: "error", message: outcome.message, origin: "model" };
         yield { type: "agent.finished", reason: "error" };
         return;
       }
@@ -252,10 +262,11 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
 
     yield { type: "agent.finished", reason: "max_turns" };
   } catch (error) {
+    yield* compactionUsage();
     if (signal?.aborted) {
       yield { type: "agent.finished", reason: "cancelled" };
     } else {
-      yield { type: "error", message: errorMessage(error) };
+      yield { type: "error", message: errorMessage(error), origin: "harness" };
       yield { type: "agent.finished", reason: "error" };
     }
   } finally {

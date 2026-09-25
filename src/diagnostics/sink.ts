@@ -137,6 +137,7 @@ export function createDiagnosticSink(options: {
         case "agent.started": case "model.finished": sink.record(event.type.split(".")[0]!, event.type); break;
         case "agent.finished": sink.record("agent", event.type, { reason: event.reason }, event.reason === "error" ? "error" : "info"); break;
         case "model.started": sink.record("model", event.type, { provider: event.provider, model: event.model }); break;
+        case "model.usage": sink.record("model", event.type, { phase: event.phase, complete: event.complete, inputCount: event.usage.inputTokens, outputCount: event.usage.outputTokens }); break;
         case "model.retry": sink.record("model", event.type, { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, category: "transient_provider_failure" }, "warn"); break;
         case "tool.started": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId }); break;
         case "tool.finished": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId, status: event.status }, event.status === "success" ? "info" : "warn"); break;

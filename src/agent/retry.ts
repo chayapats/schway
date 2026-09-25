@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "../conversation/types.ts";
-import type { Model, ModelRequest } from "../model/model.ts";
+import type { Model, ModelRequest, ModelUsage } from "../model/model.ts";
 import type { RuntimeEvent } from "./events.ts";
 
 /** Total provider stream attempts allowed for one model turn, including the first. */
@@ -111,6 +111,8 @@ export async function* streamModelTurn(options: {
     };
 
     let complete: AssistantMessage | undefined;
+    let usage: ModelUsage = { inputTokens: null, outputTokens: null };
+    let failed = false;
     try {
       for await (const event of model.stream(request)) {
         if (event.type === "text_delta") {
@@ -123,11 +125,15 @@ export async function* streamModelTurn(options: {
             type: "model.delta",
             content: { type: "thinking", text: event.text },
           };
+        } else if (event.type === "usage") {
+          // Terminal totals supersede earlier partial reports from the same attempt.
+          usage = event.usage;
         } else {
           complete = event.message;
         }
       }
     } catch (error) {
+      failed = true;
       if (signal?.aborted || isAbortError(error)) {
         return { kind: "cancelled" };
       }
@@ -162,6 +168,8 @@ export async function* streamModelTurn(options: {
         };
       }
       return { kind: "error", message };
+    } finally {
+      yield { type: "model.usage", phase: "turn", usage, complete: !!complete && !failed && !signal?.aborted };
     }
 
     if (!complete) {
