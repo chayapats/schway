@@ -53,10 +53,28 @@ test("verified Codex levels remain visible when an incompatible saved effort awa
   await withTempDir(async root => {
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
       cli: { provider: "openai", model: "real-codex", openaiAuth: "codex", thinking: "ultra" } });
-    editor.setModelCapabilities([{ id: "real-codex", defaultThinking: "low", supportedThinking: ["low", "max"] }]);
-    expect(editor.settings).toMatchObject({ thinking: "ultra", defaultThinking: "low", supportedThinking: ["low", "max"] });
+    editor.setModelCapabilities([{ id: "real-codex", contextWindow: 64000, maxOutput: 6000, defaultThinking: "low", supportedThinking: ["low", "max"] }]);
+    expect(editor.settings).toMatchObject({ thinking: "ultra", defaultThinking: "low", supportedThinking: ["low", "max"],
+      contextWindow: 64000, maxOutput: 6000, catalog: { contextWindow: 64000, maxOutput: 6000 } });
     await (await editor.prepare({ scope: "session", key: "thinking", value: "max" })).commit();
     expect(editor.settings.thinking).toBe("max");
+  });
+});
+
+test("missing Codex adapter still allows thinking reset after a saved unverified effort", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "real-codex", openaiAuth: "codex", thinking: "high" } });
+    const controller = new TuiController({ session: createSession(), sessionId: "no-codex-adapter", workspace,
+      configEditor: editor, provider: "openai", modelId: "real-codex", contextManager: createContextManager(workspace),
+      stageSettings: async () => ({ model: undefined, contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(controller.describeThinking()).toContain("subscription capability not yet verified");
+      expect(await controller.thinkingCommand("reset")).toBe(true);
+      expect(editor.settings.thinking).toBeUndefined();
+    } finally { controller.dispose(); }
   });
 });
 

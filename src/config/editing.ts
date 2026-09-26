@@ -122,13 +122,18 @@ export class ConfigEditor {
   /** Install verified account capabilities for future session edits without persisting them. */
   setModelCapabilities(capabilities: readonly ModelCapability[]): void {
     const next = structuredClone(capabilities);
-    // An unavailable old selection must not prevent the picker from loading replacement choices.
+    // An incompatible saved effort must not prevent recovery or leave stale model limits.
     let settings: ResolvedSettings | undefined;
-    try { settings = resolved(this.layers, next); } catch { /* The next staged model edit validates against the new catalog. */ }
+    try { settings = resolved(this.layers, next); } catch {
+      try {
+        const recovered = resolved({ ...this.layers, session: { ...this.layers.session, thinking: null } }, next);
+        if (recovered.provider === this.current.provider && recovered.model === this.current.model && recovered.openaiAuth === this.current.openaiAuth) {
+          settings = { ...recovered, thinking: this.current.thinking };
+        }
+      } catch { /* The next staged model edit validates against the new catalog. */ }
+    }
     this.modelCapabilities = next;
-    const selected = this.current.provider === "openai" && this.current.openaiAuth === "codex"
-      ? next.find(capability => capability.id === this.current.model) : undefined;
-    this.current = settings ?? { ...this.current, defaultThinking: selected?.defaultThinking, supportedThinking: selected?.supportedThinking };
+    this.current = settings ?? { ...this.current, defaultThinking: undefined, supportedThinking: undefined };
     this.revision++;
   }
 
