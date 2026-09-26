@@ -126,7 +126,9 @@ export class ConfigEditor {
     let settings: ResolvedSettings | undefined;
     try { settings = resolved(this.layers, next); } catch { /* The next staged model edit validates against the new catalog. */ }
     this.modelCapabilities = next;
-    this.current = settings ?? { ...this.current, defaultThinking: undefined, supportedThinking: undefined };
+    const selected = this.current.provider === "openai" && this.current.openaiAuth === "codex"
+      ? next.find(capability => capability.id === this.current.model) : undefined;
+    this.current = settings ?? { ...this.current, defaultThinking: selected?.defaultThinking, supportedThinking: selected?.supportedThinking };
     this.revision++;
   }
 

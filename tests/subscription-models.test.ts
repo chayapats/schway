@@ -49,6 +49,17 @@ test("subscription catalog retains verified reasoning capabilities and context w
   expect(JSON.stringify(models)).not.toContain("subscription-secret");
 });
 
+test("verified Codex levels remain visible when an incompatible saved effort awaits recovery", async () => {
+  await withTempDir(async root => {
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "real-codex", openaiAuth: "codex", thinking: "ultra" } });
+    editor.setModelCapabilities([{ id: "real-codex", defaultThinking: "low", supportedThinking: ["low", "max"] }]);
+    expect(editor.settings).toMatchObject({ thinking: "ultra", defaultThinking: "low", supportedThinking: ["low", "max"] });
+    await (await editor.prepare({ scope: "session", key: "thinking", value: "max" })).commit();
+    expect(editor.settings.thinking).toBe("max");
+  });
+});
+
 test("Codex config rejects unverified explicit effort but loads saved settings provisionally for recovery", async () => {
   const cli = { provider: "openai" as const, model: "gpt-5.4", openaiAuth: "codex" as const, thinking: "high" as const };
   expect(resolveSettings({ cli })).toMatchObject({ error: expect.stringContaining("subscription catalog") });
@@ -195,6 +206,32 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
       expect(attempts).toBe(2);
+    } finally { controller.dispose(); }
+  });
+});
+
+test("failed Codex activation does not turn the active API-key model into a subscription for /thinking", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "gpt-5.4", openaiAuth: "api-key" } });
+    let discoveries = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "pending-key", workspace,
+      configEditor: editor, provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "openai", id: "gpt-5.4" }),
+      contextManager: createContextManager(workspace),
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) }),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: async () => ({ ok: true as const, status: "Signed in" }),
+        listSubscriptionCatalog: async () => { discoveries++; throw Error("Catalog unavailable"); } },
+    });
+    try {
+      expect(await controller.login("codex")).toBe(false);
+      expect(discoveries).toBe(1);
+      expect(await controller.thinkingCommand("")).toBe(true);
+      expect(await controller.thinkingCommand("high")).toBe(true);
+      expect(discoveries).toBe(1);
+      expect(controller.describeThinking()).not.toContain("subscription capability not yet verified");
+      expect(controller.describeThinking()).toContain("high");
     } finally { controller.dispose(); }
   });
 });
