@@ -104,13 +104,13 @@ function workspaceFor(dir: string) {
 
 // Config validation
 
-test("thinking config accepts off/low/medium/high and rejects invalid values", () => {
-  for (const level of ["off", "low", "medium", "high"] as const) {
+test("thinking config parses provider-independent levels but validates provider support separately", () => {
+  for (const level of ["off", "low", "medium", "high", "xhigh", "max", "ultra"] as const) {
     const parsed = parseConfigObject({ thinking: level }, "test");
     expect("error" in parsed).toBe(false);
     if (!("error" in parsed)) expect(parsed.thinking).toBe(level);
   }
-  const invalid = parseConfigObject({ thinking: "ultra" }, "test");
+  const invalid = parseConfigObject({ thinking: "extreme" }, "test");
   expect("error" in invalid).toBe(true);
   if ("error" in invalid) expect(invalid.error).toContain("thinking");
   const wrongType = parseConfigObject({ thinking: 42 }, "test");
@@ -248,15 +248,15 @@ test("anthropic thinking budgets pass when the output limit fits and rejected ed
 
 // CLI
 
-test("--thinking parses off/low/medium/high and rejects unknown levels", () => {
-  for (const level of ["off", "low", "medium", "high"] as const) {
+test("--thinking parses all supported syntax and rejects unknown levels", () => {
+  for (const level of ["off", "low", "medium", "high", "xhigh", "max", "ultra"] as const) {
     const parsed = parseArgs(["-p", "hi", "--thinking", level]);
     expect("error" in parsed).toBe(false);
     if (!("error" in parsed)) expect(parsed.args.thinking).toBe(level);
     const equals = parseArgs(["-p", "hi", `--thinking=${level}`]);
     expect("error" in equals).toBe(false);
   }
-  const bad = parseArgs(["-p", "hi", "--thinking", "ultra"]);
+  const bad = parseArgs(["-p", "hi", "--thinking", "extreme"]);
   expect("error" in bad).toBe(true);
   if (!("error" in bad)) throw new Error("expected error");
   expect(bad.error).toContain("thinking");
@@ -272,7 +272,8 @@ test("cliOverridesFromArgs maps thinking onto a config layer and USAGE documents
 
 test("isThinkingLevel guards provider-independent levels", () => {
   expect(isThinkingLevel("low")).toBe(true);
-  expect(isThinkingLevel("ultra")).toBe(false);
+  expect(isThinkingLevel("ultra")).toBe(true);
+  expect(isThinkingLevel("extreme")).toBe(false);
   expect(isThinkingLevel(undefined)).toBe(false);
 });
 
@@ -538,7 +539,8 @@ test("/thinking parses show, levels, reset, and invalid values", () => {
   expect(parseThinkingArgs("")).toBe("show");
   expect(parseThinkingArgs("medium")).toBe("medium");
   expect(parseThinkingArgs("RESET")).toBe("reset");
-  const invalid = parseThinkingArgs("ultra");
+  expect(parseThinkingArgs("ultra")).toBe("ultra");
+  const invalid = parseThinkingArgs("extreme");
   expect(typeof invalid === "object" && "error" in invalid).toBe(true);
   expect(helpText()).toContain("/thinking");
 });

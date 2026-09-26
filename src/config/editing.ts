@@ -1,5 +1,6 @@
 import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
+import type { ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
@@ -106,11 +107,24 @@ export class ConfigEditor {
   private revision = 0;
   private committing = false;
   private current: ResolvedSettings;
+  private modelCapabilities?: readonly ModelCapability[];
 
   /** Initialize from validated layers without reading or writing configuration files. */
-  constructor(layers: Layers, private readonly paths: { user: string; project: string }) {
+  constructor(layers: Layers, private readonly paths: { user: string; project: string }, capabilities?: readonly ModelCapability[]) {
     this.layers = structuredClone(layers);
-    this.current = resolved(this.layers);
+    this.modelCapabilities = capabilities === undefined ? undefined : structuredClone(capabilities);
+    this.current = resolved(this.layers, this.modelCapabilities);
+  }
+
+  /** Install verified account capabilities for future session edits without persisting them. */
+  setModelCapabilities(capabilities: readonly ModelCapability[]): void {
+    const next = structuredClone(capabilities);
+    // An unavailable old selection must not prevent the picker from loading replacement choices.
+    let settings: ResolvedSettings | undefined;
+    try { settings = resolved(this.layers, next); } catch { /* The next staged model edit validates against the new catalog. */ }
+    this.modelCapabilities = next;
+    this.current = settings ?? { ...this.current, defaultThinking: undefined, supportedThinking: undefined };
+    this.revision++;
   }
 
   /** Return a copy of effective settings so callers cannot alter committed layers. */
@@ -132,7 +146,7 @@ export class ConfigEditor {
     const path = projectConfigPath(workspaceRoot);
     const project = await readConfigFile(path);
     if (project && "error" in project) throw new Error(project.error);
-    return new ConfigEditor({ ...this.layers, project }, { ...this.paths, project: path });
+    return new ConfigEditor({ ...this.layers, project }, { ...this.paths, project: path }, this.modelCapabilities);
   }
 
   /** Stage one validated setting edit, retaining the previous settings until commit. */
@@ -142,11 +156,23 @@ export class ConfigEditor {
 
   /** Stage provider and model together as one session override, clearing any profile selection. */
   async prepareModel(provider: string, model: string): Promise<ConfigTransaction> {
+    const capability = provider === "openai" && this.current.openaiAuth === "codex" ? this.modelCapabilities?.find(entry => entry.id === model) : undefined;
     return this.prepareChanges("session", [
       { key: "provider", value: provider },
       { key: "model", value: model },
       // Session-only null clears profile selections from user, project, and CLI layers.
       { key: "profile", value: null },
+      ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
+    ]);
+  }
+
+  /** Stage the verified subscription choice and its transport as one session-only edit. */
+  async prepareSubscriptionModel(model: string): Promise<ConfigTransaction> {
+    const capability = this.modelCapabilities?.find(entry => entry.id === model);
+    return this.prepareChanges("session", [
+      { key: "provider", value: "openai" }, { key: "openaiAuth", value: "codex" },
+      { key: "model", value: model }, { key: "profile", value: null },
+      ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }
 
@@ -190,7 +216,7 @@ export class ConfigEditor {
     for (const edit of expanded) if ((edit.key === "model" || edit.key === "baseUrl" || edit.key === "profile") && typeof edit.value === "string" && !parsed[edit.key]?.trim()) throw new Error(`${edit.key} must be a nonempty string.`);
     if (scope !== "session" && expanded.some(edit => edit.key === "baseUrl" && edit.value !== undefined)) validatePersistedBaseUrl(parsed.baseUrl!);
     const layers = { ...this.layers, [scope]: parsed };
-    const settings = resolved(layers);
+    const settings = resolved(layers, this.modelCapabilities);
     return { settings, origins: configOrigins(layers), commit: async (signal) => {
       signal?.throwIfAborted();
       if (revision !== this.revision || this.committing) throw new Error("Configuration changed while this edit was staged. Retry the edit.");
@@ -279,8 +305,8 @@ export async function loadConfigEditor(input: { home: string; workspaceRoot: str
 }
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */
-function resolved(layers: Layers): ResolvedSettings {
-  const settings = resolveSettings(layers);
+function resolved(layers: Layers, modelCapabilities?: readonly ModelCapability[]): ResolvedSettings {
+  const settings = resolveSettings({ ...layers, modelCapabilities });
   if ("error" in settings) throw new Error(settings.error);
   return settings;
 }

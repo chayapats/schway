@@ -249,9 +249,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         });
       },
       codexLogin,
-      listSubscriptionModels: async (signal: AbortSignal) => {
-        const { fetchSubscriptionModels } = await import("../model/providers/codex-subscription.ts");
-        return fetchSubscriptionModels({ store: credentialStore, fetch: io.fetch, signal });
+      listSubscriptionCatalog: async (signal: AbortSignal) => {
+        const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
+        return fetchSubscriptionCatalog({ store: credentialStore, fetch: io.fetch, signal });
       },
     };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
@@ -389,11 +389,12 @@ export async function stageInteractiveSettings(
   previous: ResolvedSettings,
   options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
 ): Promise<{ model?: Model; contextManager: ContextManager }> {
-  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
+  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
   if (adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
+      ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
     options.signal.throwIfAborted();
@@ -533,7 +534,7 @@ async function runTuiRenderer(options: {
       if (snapshot.modelPicker) {
         const picker = snapshot.modelPicker;
         lines += `\n\nSelect model or profile — search or type provider/model or profile:<name> (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}\n`;
-        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output)${entry.custom ? " [typed ID]" : ""}`).join("\n");
+        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output${entry.supportedThinking !== undefined ? `, thinking ${entry.supportedThinking.join("/") || "not advertised"}${entry.defaultThinking ? ` [default ${entry.defaultThinking}]` : ""}` : ""})${entry.custom ? " [typed ID]" : ""}`).join("\n");
         if (picker.loading) lines += "\nLoading ChatGPT subscription models...";
         else if (picker.error) lines += `\n${picker.error}`;
         else if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID or profile:<name>.";
@@ -1084,6 +1085,7 @@ export async function loadInteractiveModel(
     auth?: CliAuthMode;
     openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
+    modelCapability?: import("../model/catalog.ts").ModelCapability;
     profile?: string;
     credentialEnv?: string;
     credentialIdentity?: string;
@@ -1108,6 +1110,7 @@ export async function loadInteractiveModel(
       const input = {
         provider, model: modelId, maxTokens: options.maxTokens,
         ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
+        ...(options.modelCapability !== undefined ? { modelCapability: options.modelCapability } : {}),
         openaiAuth: "codex" as const,
       };
       try {

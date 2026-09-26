@@ -2,8 +2,9 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { createContextManager } from "../src/context/manager.ts";
+import { runCli } from "../src/cli/main.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
-import { fetchSubscriptionModels, CODEX_MODELS_URL, CODEX_RESPONSES_URL, createCodexSubscriptionModel } from "../src/model/providers/codex-subscription.ts";
+import { fetchSubscriptionCatalog, fetchSubscriptionModels, CODEX_MODELS_URL, CODEX_RESPONSES_URL, createCodexSubscriptionModel, resolveCodexReasoning } from "../src/model/providers/codex-subscription.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { withTempDir } from "./helpers.ts";
@@ -12,7 +13,7 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 
 const catalog = { models: [
-  { slug: "real-codex", visibility: "list", context_window: 111000 },
+  { slug: "real-codex", visibility: "list", context_window: 111000, default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "max" }] },
   { slug: "hidden-codex", visibility: "hide" },
   { slug: "real-codex", visibility: "list" },
   { slug: "bad/slash", visibility: "list" },
@@ -35,6 +36,154 @@ test("subscription discovery uses Codex account auth and the official catalog, n
   expect(JSON.stringify(models)).not.toContain("subscription-secret");
 });
 
+test("subscription catalog retains verified reasoning capabilities and context without exposing hidden models", async () => {
+  const store = fakeCredentialStore();
+  await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", expiresAt: Date.now() + 600_000 }));
+  const models = await fetchSubscriptionCatalog({ store, fetch: async () => Response.json({ models: [
+    { slug: "real-codex", visibility: "list", context_window: 111000, default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }, { effort: "xhigh" }, { effort: "max" }, { effort: "ultra" }] },
+    { slug: "hidden-codex", visibility: "hide", default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }] },
+  ] }) });
+  expect(models).toEqual([{ id: "real-codex", contextWindow: 111000, defaultThinking: "medium", supportedThinking: ["low", "medium", "high", "xhigh", "max", "ultra"] }]);
+  expect(JSON.stringify(models)).not.toContain("subscription-secret");
+});
+
+test("verified subscription metadata validates thinking and budgets only for the selected account model", async () => {
+  await withTempDir(async root => {
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", openaiAuth: "codex" } });
+    editor.setModelCapabilities([{ id: "real-codex", contextWindow: 111000, defaultThinking: "medium", supportedThinking: ["low", "medium", "high", "max"] }]);
+    const choice = await editor.prepareModel("openai", "real-codex");
+    await choice.commit();
+    expect(editor.settings.contextWindow).toBe(111000);
+    expect(editor.settings.defaultThinking).toBe("medium");
+    expect(editor.settings.thinking).toBeUndefined();
+    await (await editor.prepare({ scope: "session", key: "thinking", value: "max" })).commit();
+    expect(editor.settings.thinking).toBe("max");
+    await expect(editor.prepare({ scope: "session", key: "thinking", value: "ultra" })).rejects.toThrow("subscription catalog");
+    expect(editor.settings.thinking).toBe("max");
+  });
+});
+
+test("subscription activation preserves compatible thinking and shadows unsupported saved thinking only in session", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    await mkdir(join(home, ".schway"), { recursive: true });
+    await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" }));
+    const editor = await loadConfigEditor({ home, workspaceRoot: root });
+    editor.setModelCapabilities([{ id: "real-codex", defaultThinking: "low", supportedThinking: ["low"] }]);
+    await (await editor.prepareSubscriptionModel("real-codex")).commit();
+    expect(editor.settings).toMatchObject({ provider: "openai", model: "real-codex", openaiAuth: "codex", defaultThinking: "low" });
+    expect(editor.settings.thinking).toBeUndefined();
+    expect((await Bun.file(join(home, ".schway/config.json")).json()).thinking).toBe("high");
+    expect((await editor.prepare({ scope: "session", key: "thinking", value: "low" })).settings.thinking).toBe("low");
+  });
+});
+
+test("explicit Codex login activates the account model and reasoning only in this session", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    await mkdir(join(home, ".schway"), { recursive: true });
+    await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai-compatible", model: "local-model", baseUrl: "http://localhost:11434/v1" }));
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home, workspaceRoot: root });
+    const capability = { id: "real-codex", contextWindow: 111000, defaultThinking: "medium" as const, supportedThinking: ["low", "medium", "high", "max"] as const };
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "test-store-value");
+    const controller = new TuiController({ session: createSession(), sessionId: "auto-login", workspace,
+      configEditor: editor, provider: editor.settings.provider, modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "openai-compatible" }), contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel({ provider: "codex-subscription" }) }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }), listSubscriptionCatalog: async () => [capability] },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(await controller.login("codex")).toBe(true);
+      expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
+      expect(editor.settings).toMatchObject({ provider: "openai", model: "real-codex", openaiAuth: "codex", contextWindow: 111000, defaultThinking: "medium" });
+      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect(await controller.thinkingCommand("max")).toBe(true);
+      expect(controller.snapshot().thinking).toBe("max");
+      expect(await controller.thinkingCommand("ultra")).toBe(false);
+      expect(await controller.thinkingCommand("reset")).toBe(true);
+      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect((await Bun.file(join(home, ".schway/config.json")).json()).provider).toBe("openai-compatible");
+      expect(resolveCodexReasoning("max", "real-codex", capability)).toEqual({ effort: "max", summary: "auto" });
+      expect(() => resolveCodexReasoning("ultra", "real-codex", capability)).toThrow("subscription catalog");
+      expect(await controller.logout("codex")).toBe(true);
+      expect(controller.describeThinking()).not.toContain("Supported:");
+    } finally { controller.dispose(); }
+  });
+});
+
+test("denied login never switches provider or fetches subscription models", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    let discovered = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "denied-login", workspace,
+      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: false as const, message: "Denied" }), listSubscriptionCatalog: async () => { discovered++; return []; } },
+      stageSettings: async () => { throw Error("unexpected adapter change"); },
+    });
+    try {
+      expect(await controller.login("codex")).toBe(false);
+      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(discovered).toBe(0);
+    } finally { controller.dispose(); }
+  });
+});
+
+test("cancelling post-login discovery leaves the previous provider active and retains sign-in", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    let begin!: () => void;
+    const requested = new Promise<void>(resolve => { begin = resolve; });
+    const controller = new TuiController({ session: createSession(), sessionId: "cancel-discovery", workspace,
+      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }),
+        listSubscriptionCatalog: signal => { begin(); return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })); } },
+      stageSettings: async () => { throw Error("unexpected adapter change"); },
+    });
+    try {
+      const pending = controller.login("codex");
+      await requested;
+      expect(controller.running).toBe(true);
+      controller.cancel();
+      expect(await pending).toBe(false);
+      expect(controller.snapshot().provider).toBe("anthropic");
+    } finally { controller.dispose(); }
+  });
+});
+
+test("a signed-in account can retry discovery in /model without repeating OAuth", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    let attempts = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "retry-catalog", workspace,
+      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }),
+        listSubscriptionCatalog: async () => {
+          if (++attempts === 1) throw new Error("Temporary catalog failure");
+          return [{ id: "real-codex", defaultThinking: "low", supportedThinking: ["low"] }];
+        } },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(await controller.login("codex")).toBe(false);
+      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.openModelPicker()).toBe(true);
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      expect(controller.snapshot().modelPicker?.entries.map(entry => entry.modelId)).toEqual(["real-codex"]);
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
+      expect(attempts).toBe(2);
+    } finally { controller.dispose(); }
+  });
+});
+
 test("Codex catalog uses a compatible client version rather than Schway's package version", async () => {
   const store = fakeCredentialStore();
   await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", expiresAt: Date.now() + 600_000 }));
@@ -47,6 +196,58 @@ test("Codex catalog uses a compatible client version rather than Schway's packag
   } });
   expect(seen).toEqual(["0.156.1"]);
   expect(models).toEqual(["real-codex"]);
+});
+
+test("headless Codex discovers an available model and advertised thinking without API-key billing", async () => {
+  await withTempDir(async root => {
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", accountId: "account-fixture", expiresAt: Date.now() + 600_000 }));
+    const requests: Array<{ url: string; model?: string; effort?: string }> = [];
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const code = await runCli(["--provider", "openai", "--openai-auth", "codex", "--thinking", "max", "-p", "hi"], {
+      cwd: root, env: { HOME: join(root, "home"), OPENAI_API_KEY: "unused-api-key" }, credentialStore: store,
+      stdout: { write: text => { stdout.push(text); } }, stderr: { write: text => { stderr.push(text); } },
+      fetch: async (url, init) => {
+        if (String(url).startsWith(CODEX_MODELS_URL)) { requests.push({ url: String(url) }); return Response.json(catalog); }
+        expect(String(url)).toBe(CODEX_RESPONSES_URL);
+        const body = JSON.parse(String(init?.body));
+        requests.push({ url: String(url), model: body.model, effort: body.reasoning?.effort });
+        expect(init?.headers).toMatchObject({ Authorization: "Bearer subscription-secret" });
+        return new Response([
+          { type: "response.created", response: { id: "r", status: "in_progress" } },
+          { type: "response.output_item.added", output_index: 0, item: { type: "message" } },
+          { type: "response.output_text.delta", output_index: 0, delta: "subscription replied" },
+          { type: "response.output_item.done", output_index: 0, item: { type: "message" } },
+          { type: "response.completed", response: { id: "r", status: "completed" } },
+        ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    expect(code).toBe(0);
+    expect(requests.map(request => request.model).filter(Boolean)).toEqual(["real-codex"]);
+    expect(requests.find(request => request.model)?.effort).toBe("max");
+    expect(stdout.join("")).toContain("subscription replied");
+    expect(stderr.join("")).not.toContain("subscription-secret");
+    expect(requests.some(request => request.url.includes("api.openai.com"))).toBe(false);
+  });
+});
+
+test("automatic API-key selection never borrows subscription catalog capabilities", async () => {
+  await withTempDir(async root => {
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", expiresAt: Date.now() + 600_000 }));
+    const stderr: string[] = [];
+    let requests = 0;
+    const code = await runCli(["--provider", "openai", "--model", "gpt-5.4", "--thinking", "max", "-p", "hi"], {
+      cwd: root, env: { HOME: join(root, "home"), OPENAI_API_KEY: "api-key-secret" }, credentialStore: store,
+      stdout: { write: () => {} }, stderr: { write: text => { stderr.push(text); } },
+      fetch: async () => { requests++; return Response.json(catalog); },
+    });
+    expect(code).toBe(1);
+    expect(stderr.join("")).toContain('Thinking level "max" is not supported');
+    expect(stderr.join("")).not.toContain("api-key-secret");
+    expect(requests).toBe(0);
+  });
 });
 
 test("catalog rejects absent auth, malformed/oversized responses and status errors without leaking secrets", async () => {
@@ -147,7 +348,7 @@ test("account catalog selection reaches the real Schway loop and Codex request b
   await withTempDir(async root => {
     const store = fakeCredentialStore();
     await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", accountId: "account-fixture", expiresAt: Date.now() + 600_000 }));
-    const requests: Array<{ url: string; model?: string }> = [];
+    const requests: Array<{ url: string; model?: string; effort?: string }> = [];
     const transport = async (url: string | URL | Request, init?: RequestInit) => {
       if (String(url).startsWith(CODEX_MODELS_URL)) {
         requests.push({ url: String(url) });
@@ -155,7 +356,7 @@ test("account catalog selection reaches the real Schway loop and Codex request b
       }
       expect(String(url)).toBe(CODEX_RESPONSES_URL);
       const body = JSON.parse(String(init?.body));
-      requests.push({ url: String(url), model: body.model });
+      requests.push({ url: String(url), model: body.model, effort: body.reasoning?.effort });
       return new Response([
         { type: "response.created", response: { id: "r", status: "in_progress" } },
         { type: "response.output_item.added", output_index: 0, item: { type: "message" } },
@@ -170,16 +371,19 @@ test("account catalog selection reaches the real Schway loop and Codex request b
       session: createSession(), sessionId: "real-loop", workspace, configEditor,
       provider: "openai", modelId: "gpt-5.4", model: createCodexSubscriptionModel({ store, fetch: transport }),
       contextManager: createContextManager(workspace),
-      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: signal => fetchSubscriptionModels({ store, fetch: transport, signal }) },
-      stageSettings: async settings => ({ model: createCodexSubscriptionModel({ model: settings.model, store, fetch: transport }), contextManager: createContextManager(workspace) }),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: signal => fetchSubscriptionCatalog({ store, fetch: transport, signal }) },
+      stageSettings: async settings => ({ model: createCodexSubscriptionModel({ model: settings.model, thinking: settings.thinking, modelCapability: settings.supportedThinking ? { id: settings.model, supportedThinking: settings.supportedThinking } : undefined, store, fetch: transport }), contextManager: createContextManager(workspace) }),
     });
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       controller.searchModels("real-codex");
       expect(await controller.selectPickerModel()).toBe(true);
+      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect(await controller.thinkingCommand("max")).toBe(true);
       await controller.submit("hello");
       expect(requests.map(request => request.model).filter(Boolean)).toEqual(["real-codex"]);
+      expect(requests.find(request => request.model)?.effort).toBe("max");
       expect(controller.snapshot().transcript.some(entry => entry.text.includes("real model replied"))).toBe(true);
     } finally { controller.dispose(); }
   });
