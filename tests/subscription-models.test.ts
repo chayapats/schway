@@ -421,6 +421,32 @@ test("cancelling model discovery does not reveal provider error text", async () 
   await expect(pending).rejects.toThrow("Model discovery cancelled.");
 });
 
+test("/thinking activates verified capabilities when auto selected the Codex adapter", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "real-codex", openaiAuth: "auto" } });
+    let discoveries = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "auto-codex-thinking", workspace,
+      configEditor: editor, provider: "openai", modelId: "real-codex", model: createScriptedModel({ provider: "codex-subscription", id: "real-codex" }),
+      contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => {
+        discoveries++;
+        return [{ id: "real-codex", defaultThinking: "max", supportedThinking: ["max"] }];
+      } },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(await controller.thinkingCommand("")).toBe(true);
+      expect(controller.describeThinking()).toContain("Supported: max");
+      expect(editor.settings).toMatchObject({ openaiAuth: "codex", supportedThinking: ["max"] });
+      expect(await controller.thinkingCommand("max")).toBe(true);
+      expect(editor.settings.thinking).toBe("max");
+      expect(discoveries).toBe(1);
+    } finally { controller.dispose(); }
+  });
+});
+
 test("/thinking discovers account support before allowing explicit Codex effort", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };

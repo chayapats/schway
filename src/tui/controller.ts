@@ -1396,13 +1396,18 @@ export class TuiController {
   async thinkingCommand(args: string): Promise<boolean> {
     const selection = parseThinkingArgs(args);
     if (typeof selection === "object") { this.fail(selection.error); return false; }
-    if (selection !== "reset" && this.codexThinkingSelected() && this.configEditor?.settings.supportedThinking === undefined) {
+    if (selection !== "reset" && this.codexThinkingSelected() &&
+      (this.configEditor?.settings.supportedThinking === undefined || this.model?.provider === "codex-subscription" && this.configEditor?.settings.openaiAuth !== "codex")) {
       try {
-        const models = await this.loadAccountCatalog(AbortSignal.timeout(5_000));
+        const models = this.subscriptionCapabilities ?? await this.loadAccountCatalog(AbortSignal.timeout(5_000));
         if (!models.some(model => model.id === this.modelId)) {
           this.fail(`Model "${this.modelId}" is not available for this ChatGPT subscription. Open /model to choose an account-visible model.`);
           return false;
         }
+        // Auto-selected Codex is an active subscription, but saved auth remains "auto".
+        // Bind the verified choice to this session so config validation and the adapter agree.
+        if (this.model?.provider === "codex-subscription" && this.configEditor?.settings.openaiAuth !== "codex" &&
+          !(await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(this.modelId), () => `Verified subscription model ${this.modelId} for this session.`))) return false;
       } catch (error) {
         this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500));
         return false;
