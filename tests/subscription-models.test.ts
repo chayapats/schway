@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { createContextManager } from "../src/context/manager.ts";
 import { runCli } from "../src/cli/main.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
+import { resolveSettings } from "../src/config/config.ts";
 import { fetchSubscriptionCatalog, fetchSubscriptionModels, CODEX_MODELS_URL, CODEX_RESPONSES_URL, createCodexSubscriptionModel, resolveCodexReasoning } from "../src/model/providers/codex-subscription.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
@@ -46,6 +47,17 @@ test("subscription catalog retains verified reasoning capabilities and context w
   ] }) });
   expect(models).toEqual([{ id: "real-codex", contextWindow: 111000, defaultThinking: "medium", supportedThinking: ["low", "medium", "high", "xhigh", "max", "ultra"] }]);
   expect(JSON.stringify(models)).not.toContain("subscription-secret");
+});
+
+test("Codex config rejects unverified explicit effort but loads saved settings provisionally for recovery", async () => {
+  const cli = { provider: "openai" as const, model: "gpt-5.4", openaiAuth: "codex" as const, thinking: "high" as const };
+  expect(resolveSettings({ cli })).toMatchObject({ error: expect.stringContaining("subscription catalog") });
+  await withTempDir(async root => {
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli });
+    expect(editor.settings.thinking).toBe("high");
+    await (await editor.prepare({ scope: "session", key: "thinking", value: null })).commit();
+    expect(editor.settings.thinking).toBeUndefined();
+  });
 });
 
 test("verified subscription metadata validates thinking and budgets only for the selected account model", async () => {
@@ -352,6 +364,30 @@ test("cancelling model discovery does not reveal provider error text", async () 
     throw new Error("provider echoed subscription-secret");
   } });
   await expect(pending).rejects.toThrow("Model discovery cancelled.");
+});
+
+test("/thinking discovers account support before allowing explicit Codex effort", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", model: "gpt-5.4", openaiAuth: "codex" } });
+    let discoveries = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "thinking-discovery", workspace,
+      configEditor: editor, provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "codex-subscription", id: "gpt-5.4" }),
+      contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => {
+        discoveries++;
+        return [{ id: "gpt-5.4", defaultThinking: "low", supportedThinking: ["low"] }];
+      } },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(await controller.thinkingCommand("high")).toBe(false);
+      expect(discoveries).toBe(1);
+      expect(await controller.thinkingCommand("low")).toBe(true);
+      expect(discoveries).toBe(1);
+      expect(controller.describeThinking()).toContain("supported: low");
+    } finally { controller.dispose(); }
+  });
 });
 
 test("subscription picker distinguishes other provider choices from account models", () => {

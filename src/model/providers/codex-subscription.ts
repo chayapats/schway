@@ -4,13 +4,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import {
-  DEFAULT_MODEL_IDS,
-  describeThinkingSupport,
-  getThinkingSupport,
-  isThinkingSupported,
-  type ModelCapability,
-} from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, type ModelCapability } from "../catalog.ts";
 import { THINKING_LEVELS, reportedTokens } from "../model.ts";
 import type {
   Model,
@@ -900,18 +894,12 @@ export function resolveCodexReasoning(
   if (level === undefined) {
     return undefined;
   }
-  if (capability && capability.id !== modelId) throw new Error("Subscription capability does not match the selected model.");
-  if (capability ? !capability.supportedThinking.includes(level) : !isThinkingSupported("openai", modelId, level)) {
-    throw new Error(capability
-      ? `Thinking level "${level}" is not listed for openai/${modelId} in this account's subscription catalog.`
-      : `Thinking level "${level}" is not supported for openai/${modelId}. ${describeThinkingSupport("openai", modelId)}`);
+  if (!capability) throw new Error(`Thinking level "${level}" requires verified subscription catalog capabilities for openai/${modelId}. Open /model or reset thinking.`);
+  if (capability.id !== modelId) throw new Error("Subscription capability does not match the selected model.");
+  if (!capability.supportedThinking.includes(level)) {
+    throw new Error(`Thinking level "${level}" is not listed for openai/${modelId} in this account's subscription catalog.`);
   }
-  if (level === "off") {
-    if (!capability && !getThinkingSupport("openai", modelId).supportsDisabling) {
-      return undefined;
-    }
-    return { effort: "none" };
-  }
+  if (level === "off") return { effort: "none" };
   return { effort: level, summary: "auto" };
 }
 

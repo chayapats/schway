@@ -1390,9 +1390,21 @@ export class TuiController {
   async thinkingCommand(args: string): Promise<boolean> {
     const selection = parseThinkingArgs(args);
     if (typeof selection === "object") { this.fail(selection.error); return false; }
+    if (selection !== "reset" && this.provider === "openai" && this.subscriptionSelected() && this.configEditor?.settings.supportedThinking === undefined) {
+      try {
+        const models = await this.loadAccountCatalog(AbortSignal.timeout(5_000));
+        if (!models.some(model => model.id === this.modelId)) {
+          this.fail(`Model "${this.modelId}" is not available for this ChatGPT subscription. Open /model to choose an account-visible model.`);
+          return false;
+        }
+      } catch (error) {
+        this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500));
+        return false;
+      }
+    }
     if (selection === "show") { this.notice(this.describeThinking()); return true; }
     if (selection === "reset") {
-      return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.subscriptionSelected() && this.configEditor?.settings.supportedThinking !== undefined ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}. Applies to this session only.`);
+      return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.provider === "openai" && this.subscriptionSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}. Applies to this session only.`);
     }
     return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}. Applies to this session only.`);
   }
@@ -1409,6 +1421,9 @@ export class TuiController {
       return requested === undefined
         ? `Thinking: provider default (${defaultLevel}; no explicit control sent). Supported: ${supported} with ${this.provider}/${this.modelId}`
         : `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (supported: ${supported}; provider default: ${defaultLevel}) with ${this.provider}/${this.modelId}`;
+    }
+    if (this.provider === "openai" && this.subscriptionSelected()) {
+      return `Thinking: ${requested ?? "unset"} (subscription capability not yet verified; open /model) with ${this.provider}/${this.modelId}`;
     }
     const effectiveDesc = describeEffectiveThinking(this.provider, (effective ?? requested) as never, this.modelId);
     if (requested === undefined) {
@@ -1531,7 +1546,7 @@ export class TuiController {
       lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => {
         if (key === "thinking") {
           const requested = (settings as unknown as Record<string, unknown>)[key];
-          const effective = settings.supportedThinking !== undefined ? this.describeThinking() : describeEffectiveThinking(this.provider, requested as never, settings.model);
+          const effective = this.provider === "openai" && this.subscriptionSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, requested as never, settings.model);
           return `${key}: ${displaySetting(key, requested)} [${origins[key as keyof ConfigLayer]}] (effective: ${effective})`;
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
@@ -1542,7 +1557,7 @@ export class TuiController {
         lines.push(`git: {"changeTracking":"${gitMode}"}${gitOrigin}`);
       }
       if (settings.thinking === undefined) {
-        lines.push(`thinking: unset (effective: ${settings.supportedThinking !== undefined ? this.describeThinking() : describeEffectiveThinking(this.provider, undefined)})`);
+        lines.push(`thinking: unset (effective: ${this.provider === "openai" && this.subscriptionSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, undefined)})`);
       }
       if (settings.headers) lines.push(`headers: configured (values hidden) [${origins.headers}]`);
       if (settings.extraBody) lines.push(`extraBody: configured (values hidden) [${origins.extraBody}]`);

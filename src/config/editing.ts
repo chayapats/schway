@@ -113,7 +113,10 @@ export class ConfigEditor {
   constructor(layers: Layers, private readonly paths: { user: string; project: string }, capabilities?: readonly ModelCapability[]) {
     this.layers = structuredClone(layers);
     this.modelCapabilities = capabilities === undefined ? undefined : structuredClone(capabilities);
-    this.current = resolved(this.layers, this.modelCapabilities);
+    // A saved Codex effort can be resolved after login, without blocking interactive recovery.
+    const pendingCodexCatalog = this.modelCapabilities === undefined &&
+      mergeConfigLayers(BUILTIN_DEFAULTS, this.layers.user, this.layers.project, this.layers.cli, this.layers.session).openaiAuth === "codex";
+    this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog);
   }
 
   /** Install verified account capabilities for future session edits without persisting them. */
@@ -305,8 +308,8 @@ export async function loadConfigEditor(input: { home: string; workspaceRoot: str
 }
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */
-function resolved(layers: Layers, modelCapabilities?: readonly ModelCapability[]): ResolvedSettings {
-  const settings = resolveSettings({ ...layers, modelCapabilities });
+function resolved(layers: Layers, modelCapabilities?: readonly ModelCapability[], deferOpenAIThinking = false): ResolvedSettings {
+  const settings = resolveSettings({ ...layers, modelCapabilities, deferOpenAIThinking });
   if ("error" in settings) throw new Error(settings.error);
   return settings;
 }

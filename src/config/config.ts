@@ -525,7 +525,8 @@ export function resolveSettings(input: {
       error: `Profile "${selectedName}" requires provider openai-compatible. Remove the conflicting provider override.`,
     };
   }
-  const subscriptionCatalog = provider === "openai" && merged.openaiAuth === "codex" ? input.modelCapabilities : undefined;
+  const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
+  const subscriptionCatalog = subscriptionSelected ? input.modelCapabilities : undefined;
   const capability = subscriptionCatalog?.find(entry => entry.id === model);
   const metadata = lookupModel(provider, model, {
     contextWindow: merged.contextWindow ?? capability?.contextWindow,
@@ -534,7 +535,7 @@ export function resolveSettings(input: {
   const catalog = capability ? { ...metadata, supportsThinking: capability.supportedThinking.length > 0 } : metadata;
   const thinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
   const thinkingError = input.deferOpenAIThinking && provider === "openai" ? undefined
-    : validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput, subscriptionCatalog ? capability ?? null : undefined);
+    : validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput, subscriptionSelected ? capability ?? null : undefined);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
