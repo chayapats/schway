@@ -391,7 +391,7 @@ export async function stageInteractiveSettings(
 ): Promise<{ model?: Model; contextManager: ContextManager }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
-  if (adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
+  if ((next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
       ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking } } : {}),
@@ -534,7 +534,7 @@ async function runTuiRenderer(options: {
       if (snapshot.modelPicker) {
         const picker = snapshot.modelPicker;
         lines += `\n\nSelect model or profile — search or type provider/model or profile:<name> (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}\n`;
-        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output${entry.supportedThinking !== undefined ? `, thinking ${entry.supportedThinking.join("/") || "not advertised"}${entry.defaultThinking ? ` [default ${entry.defaultThinking}]` : ""}` : ""})${entry.custom ? " [typed ID]" : ""}`).join("\n");
+        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output${entry.supportedThinking !== undefined ? `, thinking ${entry.supportedThinking.join("/") || "not advertised"}${entry.defaultThinking ? ` [default ${entry.defaultThinking}]` : ""}` : ""})${entry.custom ? " [typed ID]" : ""}${entry.otherProvider ? " [other provider]" : ""}`).join("\n");
         if (picker.loading) lines += "\nLoading ChatGPT subscription models...";
         else if (picker.error) lines += `\n${picker.error}`;
         else if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID or profile:<name>.";

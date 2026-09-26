@@ -67,7 +67,7 @@ saved JSONL without replaying old tool effects. Missing credentials and runtime 
 `/login` and `/logout` manage API keys and ChatGPT subscription credentials. Successful
 `/login codex` selects the subscription and an available model for this session without
 editing saved preferences. `/model` fetches that account's model and thinking capabilities
-instead of showing static guesses, and `/thinking` shows the model's default and supported levels;
+instead of showing static OpenAI guesses, and `/thinking` shows the model's default and supported levels;
 see [credentials](docs/credentials.md) and
 [subscription login](docs/configuration.md#chatgpt-subscription-codex-oauth).
 

@@ -7,6 +7,7 @@ import { loadConfigEditor } from "../src/config/editing.ts";
 import { fetchSubscriptionCatalog, fetchSubscriptionModels, CODEX_MODELS_URL, CODEX_RESPONSES_URL, createCodexSubscriptionModel, resolveCodexReasoning } from "../src/model/providers/codex-subscription.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
+import { modelPickerEntries } from "../src/tui/model-picker.ts";
 import { withTempDir } from "./helpers.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -176,10 +177,48 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
       expect(controller.snapshot().provider).toBe("anthropic");
       expect(controller.openModelPicker()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(controller.snapshot().modelPicker?.entries.map(entry => entry.modelId)).toEqual(["real-codex"]);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.provider === "openai").map(entry => entry.modelId)).toEqual(["real-codex"]);
+      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.provider === "anthropic" && entry.otherProvider)).toBe(true);
+      controller.searchModels("real-codex");
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
       expect(attempts).toBe(2);
+    } finally { controller.dispose(); }
+  });
+});
+
+test("re-login cannot send a turn through the previous account adapter when discovery fails", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", model: "old-codex", openaiAuth: "codex" } });
+    editor.setModelCapabilities([{ id: "old-codex", supportedThinking: ["low"] }]);
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "old-account-token");
+    let oldRequests = 0;
+    const oldModel = createScriptedModel({ provider: "codex-subscription", id: "old-codex", responses: [() => { oldRequests++; return { text: "old account replied" }; }] });
+    let discoveries = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "account-change", workspace,
+      configEditor: editor, provider: "openai", modelId: "old-codex", model: oldModel, contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => {
+        await store.set(codexSubscriptionIdentity(), "new-account-token");
+        return { ok: true as const, status: "Signed in" };
+      }, listSubscriptionCatalog: async () => {
+        if (++discoveries === 1) throw Error("Catalog unavailable");
+        return [{ id: "new-codex", supportedThinking: ["medium"] }];
+      } },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(await controller.login("codex")).toBe(false);
+      await controller.submit("hello");
+      expect(oldRequests).toBe(0);
+      expect(JSON.stringify(controller.snapshot())).not.toContain("old account replied");
+      expect(await controller.selectModel("openai/old-codex")).toBe(false);
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.searchModels("new-codex");
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "new-codex" });
     } finally { controller.dispose(); }
   });
 });
@@ -196,6 +235,23 @@ test("Codex catalog uses a compatible client version rather than Schway's packag
   } });
   expect(seen).toEqual(["0.156.1"]);
   expect(models).toEqual(["real-codex"]);
+});
+
+test("local /skills works without subscription credentials or catalog access", async () => {
+  await withTempDir(async root => {
+    let contacted = 0;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const code = await runCli(["--provider", "openai", "--openai-auth", "codex", "-p", "/skills"], {
+      cwd: root, env: { HOME: join(root, "home") }, credentialStore: fakeCredentialStore(),
+      stdout: { write: text => { stdout.push(text); } }, stderr: { write: text => { stderr.push(text); } },
+      fetch: async () => { contacted++; throw Error("local command must not call provider"); },
+    });
+    expect(code).toBe(0);
+    expect(stderr.join("")).not.toContain("/login codex");
+    expect(stdout.join("")).toContain("skill");
+    expect(contacted).toBe(0);
+  });
 });
 
 test("headless Codex discovers an available model and advertised thinking without API-key billing", async () => {
@@ -296,6 +352,15 @@ test("cancelling model discovery does not reveal provider error text", async () 
     throw new Error("provider echoed subscription-secret");
   } });
   await expect(pending).rejects.toThrow("Model discovery cancelled.");
+});
+
+test("subscription picker distinguishes other provider choices from account models", () => {
+  const entries = modelPickerEntries("", "openai", "real-codex", {}, { subscriptionMode: true,
+    subscriptionModels: ["real-codex"], profiles: { local: { baseUrl: "http://127.0.0.1:11434/v1", model: "local-model" } } });
+  expect(entries.some(entry => entry.provider === "openai" && entry.modelId === "gpt-5.4")).toBe(false);
+  expect(entries.find(entry => entry.provider === "openai" && entry.modelId === "real-codex")?.otherProvider).toBeFalsy();
+  expect(entries.find(entry => entry.provider === "anthropic")?.otherProvider).toBe(true);
+  expect(entries.find(entry => entry.profile === "local")?.otherProvider).toBe(true);
 });
 
 test("catalog failure never falls back to static OpenAI choices", async () => {

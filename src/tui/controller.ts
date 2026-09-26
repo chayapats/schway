@@ -375,6 +375,7 @@ export class TuiController {
   private subscriptionModels?: readonly string[];
   private subscriptionCapabilities?: readonly ModelCapability[];
   private subscriptionPending = false;
+  private subscriptionReactivationRequired = false;
   private modelCatalogAbort?: AbortController;
   private branchTreeOpen = false;
   private branchTreeSelectedId?: string;
@@ -665,6 +666,15 @@ export class TuiController {
           return false;
         }
         this.notice(redactSecrets(result.status, this.secrets));
+        // A store-backed Codex adapter would read the newly saved account on its next turn.
+        // Never reuse the previous account's adapter or its catalog after credential replacement.
+        if (this.model?.provider === "codex-subscription") {
+          this.model = undefined;
+          this.subscriptionReactivationRequired = true;
+        }
+        this.subscriptionModels = undefined;
+        this.subscriptionCapabilities = undefined;
+        this.configEditor?.setModelCapabilities([]);
         if (this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog) {
           this.subscriptionPending = true;
           this.status = "idle";
@@ -718,8 +728,8 @@ export class TuiController {
         if (!preferred) throw new Error("No selectable models were returned for this ChatGPT subscription.");
         discovery.signal.throwIfAborted();
       } catch (error) {
-        if (discovery.signal.aborted) this.notice("Subscription activation cancelled; sign-in remains saved and the previous provider is still active.");
-        else this.fail(`Signed in, but could not activate the subscription: ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500)}`);
+        if (discovery.signal.aborted) this.notice(`Subscription activation cancelled; sign-in remains saved. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model."}`);
+        else this.fail(`Signed in, but could not activate the subscription: ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500)} ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model."}`);
         return false;
       } finally {
         if (this.activeAbort === discovery) this.activeAbort = undefined;
@@ -728,7 +738,7 @@ export class TuiController {
       const applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(preferred),
         () => `ChatGPT subscription active for this session: openai/${this.modelId}. ${this.describeThinking()}`);
       if (applied) this.subscriptionPending = false;
-      else this.notice("Signed in, but subscription activation failed. Previous provider remains active; retry /model after checking the error.");
+      else this.notice(`Signed in, but subscription activation failed. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
       return applied;
     }
     return signedIn;
@@ -748,6 +758,7 @@ export class TuiController {
         return false;
       }
       this.subscriptionPending = false;
+      this.subscriptionReactivationRequired = false;
       if (deleted) {
         this.subscriptionCapabilities = undefined;
         this.subscriptionModels = undefined;
@@ -1481,6 +1492,7 @@ export class TuiController {
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
     this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
+    this.subscriptionReactivationRequired = false;
     if (next.provider !== "openai" && next.openaiAuth !== "codex") this.subscriptionPending = false;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
@@ -1799,9 +1811,9 @@ export class TuiController {
       return;
     }
     if (!this.model) {
-      this.fail(
-        "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.",
-      );
+      this.fail(this.subscriptionReactivationRequired
+        ? "ChatGPT subscription account changed. Open /model to select an available model for the new account; no request was sent."
+        : "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.");
       return;
     }
     const userEntry: TuiTranscriptEntry = {

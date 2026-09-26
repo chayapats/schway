@@ -223,38 +223,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
-  if (settings.provider === "openai" && !io.model && !io.createModel) {
-    const store = io.credentialStore ?? createNativeCredentialStore();
-    const transport = await selectOpenAITransport({ openaiAuth: settings.openaiAuth, runtimeApiKey: parsed.args.apiKey, env, store });
-    if ("error" in transport) { io.stderr.write(`${transport.error}\n`); return 1; }
-    if (transport.transport === "codex") {
-      try {
-        const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
-        const capabilities = await fetchSubscriptionCatalog({ store, fetch: io.fetch, signal: io.signal });
-        const configuredModel = settings.model;
-        const selected = capabilities.find(entry => entry.id === configuredModel)?.id ?? capabilities[0]?.id;
-        if (!selected) throw new Error("No selectable models were returned for this ChatGPT subscription.");
-        if (parsed.args.model && parsed.args.model !== selected) {
-          throw new Error(`Model "${parsed.args.model}" is not available for this ChatGPT subscription. Select one with /model in interactive mode.`);
-        }
-        const chosen = await loadResolvedSettings({ home, workspaceRoot: workspace.root,
-          cli: { ...cliLayer, openaiAuth: "codex", model: selected }, modelCapabilities: capabilities });
-        if ("error" in chosen) throw new Error(chosen.error);
-        if (settings.model !== selected) io.stderr.write(`Selected account-available ChatGPT subscription model ${selected} for this run; saved configuration is unchanged.\n`);
-        settings = chosen;
-      } catch (error) {
-        io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
-        return 1;
-      }
-    } else {
-      const validated = await loadResolvedSettings({ home, workspaceRoot: workspace.root, cli: cliLayer });
-      if ("error" in validated) { io.stderr.write(`${validated.error}\n`); return 1; }
-      settings = validated;
-    }
-  }
-
   secrets.push(...collectSecrets(undefined, env, settings.credentialEnv));
-  diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools, resumed: !!session });
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   try {
@@ -292,6 +261,37 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }
       skillTurn = { skill: prepared.skill, body: prepared.body };
     }
+
+    if (settings.provider === "openai" && !io.model && !io.createModel) {
+      const store = io.credentialStore ?? createNativeCredentialStore();
+      const transport = await selectOpenAITransport({ openaiAuth: settings.openaiAuth, runtimeApiKey: parsed.args.apiKey, env, store });
+      if ("error" in transport) { io.stderr.write(`${transport.error}\n`); return 1; }
+      if (transport.transport === "codex") {
+        try {
+          const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
+          const capabilities = await fetchSubscriptionCatalog({ store, fetch: io.fetch, signal: io.signal });
+          const configuredModel = settings.model;
+          const selected = capabilities.find(entry => entry.id === configuredModel)?.id ?? capabilities[0]?.id;
+          if (!selected) throw new Error("No selectable models were returned for this ChatGPT subscription.");
+          if (parsed.args.model && parsed.args.model !== selected) {
+            throw new Error(`Model "${parsed.args.model}" is not available for this ChatGPT subscription. Select one with /model in interactive mode.`);
+          }
+          const chosen = await loadResolvedSettings({ home, workspaceRoot: workspace.root,
+            cli: { ...cliLayer, openaiAuth: "codex", model: selected }, modelCapabilities: capabilities });
+          if ("error" in chosen) throw new Error(chosen.error);
+          if (settings.model !== selected) io.stderr.write(`Selected account-available ChatGPT subscription model ${selected} for this run; saved configuration is unchanged.\n`);
+          settings = chosen;
+        } catch (error) {
+          io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
+          return 1;
+        }
+      } else {
+        const validated = await loadResolvedSettings({ home, workspaceRoot: workspace.root, cli: cliLayer });
+        if ("error" in validated) { io.stderr.write(`${validated.error}\n`); return 1; }
+        settings = validated;
+      }
+    }
+    diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools, resumed: !!session });
 
     let model = io.model;
     if (!model) {
