@@ -91,8 +91,9 @@ compatible auth, plus saves and deletions, return recovery guidance without
 printing the native error or key. Optional compatible auth runs without a key
 when a read fails. Restore OS access and retry to use a saved key, or supply the
 provider environment variable or `--api-key`. Saving and deleting still require
-working secure storage. No OAuth, subscription login or migration from another
-CLI is performed.
+working secure storage. ChatGPT subscription OAuth uses a separate stored
+identity; see [subscription login](configuration.md#chatgpt-subscription-codex-oauth).
+Credentials are never migrated from another CLI.
 
 ## Deterministic checks and opt-in native smoke
 

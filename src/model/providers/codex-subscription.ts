@@ -45,6 +45,10 @@ export const CODEX_DEVICE_TOKEN_URL =
 /** Model-only Responses endpoint owned by the Schway loop; never a delegated agent run. */
 export const CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
+/** Codex backend catalog used for account-scoped subscription model choices. */
+export const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
+/** Codex CLI protocol version verified against the subscription catalog; not Schway's package version. */
+export const CODEX_CATALOG_CLIENT_VERSION = "0.156.1";
 /** Account header carrying the verified JWT chatgpt_account_id alongside the Bearer token. */
 export const CODEX_ACCOUNT_HEADER = "ChatGPT-Account-Id";
 /** JWT claim namespace whose chatgpt_account_id identifies the billed ChatGPT account. */
@@ -460,6 +464,77 @@ export function createSubscriptionTokenRefresher(input: {
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },
   };
+}
+
+/** Fetch bounded, visible model slugs using only the selected ChatGPT subscription identity. */
+export async function fetchSubscriptionModels(input: {
+  store: CredentialStore;
+  fetch?: CodexFetchLike;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const credential = await createSubscriptionTokenRefresher({ store: input.store, fetch: input.fetch })
+    .getValidAccessToken(input.signal);
+  const deadline = AbortSignal.timeout(5_000);
+  const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
+  let response: Response;
+  try {
+    response = await (input.fetch ?? fetch)(`${CODEX_MODELS_URL}?client_version=${encodeURIComponent(CODEX_CATALOG_CLIENT_VERSION)}`, {
+      method: "GET",
+      headers: codexRequestHeaders(credential.accessToken, credential.accountId),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    if (input.signal?.aborted) throw new Error("Model discovery cancelled.");
+    if (signal.aborted) throw new Error("ChatGPT model catalog timed out. Retry /model.");
+    throw new Error("Could not reach the ChatGPT subscription model catalog. Retry /model.");
+  }
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("ChatGPT model catalog rejected this subscription. Retry /login codex; no API key fallback was used.");
+    }
+    throw new Error(`ChatGPT model catalog returned HTTP ${response.status}. Retry /model.`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("ChatGPT model catalog returned no data.");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 1_048_576) throw new Error("ChatGPT model catalog exceeds the 1 MiB limit.");
+      chunks.push(value);
+    }
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    if (input.signal?.aborted) throw new Error("Model discovery cancelled.");
+    if (signal.aborted) throw new Error("ChatGPT model catalog timed out. Retry /model.");
+    if (error instanceof Error && error.message === "ChatGPT model catalog exceeds the 1 MiB limit.") throw error;
+    throw new Error("Could not read the ChatGPT model catalog. Retry /model.");
+  }
+  let payload: unknown;
+  try {
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    payload = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error("ChatGPT model catalog returned invalid JSON.");
+  }
+  if (!payload || typeof payload !== "object" || !("models" in payload) || !Array.isArray(payload.models) || payload.models.length > 256) {
+    throw new Error("ChatGPT model catalog returned an invalid model list.");
+  }
+  const models = new Set<string>();
+  for (const item of payload.models) {
+    if (!item || typeof item !== "object" || !("slug" in item) || !("visibility" in item)) continue;
+    if (item.visibility !== "list" || typeof item.slug !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.slug)) continue;
+    models.add(item.slug);
+  }
+  if (!models.size) throw new Error("No selectable models were returned for this ChatGPT subscription.");
+  return [...models];
 }
 
 /** Run the explicit browser PKCE login, persisting tokens at the subscription identity. */

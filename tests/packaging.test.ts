@@ -93,8 +93,8 @@ test("only shipped extension surfaces are present in the base harness", async ()
   }
   const cli = await source("src/cli/main.ts");
   const tui = await source("src/tui/app.ts");
-  // ChatGPT subscription login shipped with the Codex OAuth integration; the rest remain deferred.
-  for (const surface of ["mcp", "subagent", "keychain"]) {
+  // Server orchestration remains deferred; OS credential storage is supported.
+  for (const surface of ["mcp", "subagent"]) {
     expect(cli.toLowerCase().includes(surface)).toBe(false);
     expect(tui.toLowerCase().includes(surface)).toBe(false);
   }
@@ -161,6 +161,8 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/package.json",
       "package/README.md",
       "package/LICENSE",
+      ...["configuration", "credentials", "diagnostics", "doctor", "evals", "extensions", "live-providers", "sessions", "workspaces"]
+        .map((name) => `package/docs/${name}.md`),
     ]) {
       expect(entries.includes(required)).toBe(true);
     }
@@ -222,8 +224,10 @@ test("npm pack installs the public extension API and completes a headless tool r
     expect(JSON.parse(doctor.stdout).checks.find((item: { id: string }) => item.id === "extensions")).toBeUndefined();
     expect(JSON.parse(doctor.stdout).checks.some((item: { id: string; status: string }) => item.id === "extension.0" && item.status === "ok")).toBe(true);
     expect(await Bun.file(marker).exists()).toBe(false);
-    const requests: Array<{ tools?: Array<{ function: { name: string } }>; messages?: Array<{ role: string; tool_call_id?: string; content?: string }> }> = [];
+    const requests: Array<{ model?: string; reasoning_effort?: string; tools?: Array<{ function: { name: string } }>; messages?: Array<{ role: string; tool_call_id?: string; content?: string }> }> = [];
+    const authorizations: string[] = [];
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+      authorizations.push(request.headers.get("authorization") ?? "");
       requests.push(await request.json() as typeof requests[number]);
       const first = requests.length === 1;
       const delta = first
@@ -234,15 +238,18 @@ test("npm pack installs the public extension API and completes a headless tool r
       });
     } });
     const isolatedHome = join(dir, "home");
+    await Bun.write(join(installDir, "failing-observer.ts"),
+      "export default ctx => ctx.onRuntimeEvent(() => { throw Error('observer fixture failure'); });");
     try {
       const conversation = await runCommand([
         join(installDir, "node_modules/.bin/schway"), "-p", "/greeting Ada", "--json",
         "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${server.port}/v1`,
-        "--model", "fixture", "--auth", "none",
+        "--model", "fixture", "--auth", "none", "--debug-file", join(dir, "diagnostics.jsonl"),
         "--extension", "commands-and-events.ts", "--extension", "context.ts",
-        "--extension", "tool-policy.ts",
+        "--extension", "tool-policy.ts", "--extension", "failing-observer.ts",
       ], { cwd: installDir, env: buildIsolatedCliEnv(isolatedHome) });
-      expect(conversation.stderr).toBe("");
+      expect(conversation.stderr).toContain("failing-observer.ts");
+      expect(conversation.stderr).toContain("observer failed");
       expect(conversation.exitCode).toBe(0);
       expect(requests).toHaveLength(2);
       for (const request of requests) {
@@ -260,6 +267,10 @@ test("npm pack installs the public extension API and completes a headless tool r
       ]);
       expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
       expect(await Bun.file(marker).exists()).toBe(false);
+      const diagnostics = await Bun.file(join(dir, "diagnostics.jsonl")).text();
+      expect(diagnostics.trim().split("\n").every((line) => JSON.parse(line).runId)).toBe(true);
+      expect(diagnostics).not.toContain("Hello, Ada!");
+      expect(diagnostics).not.toContain("observer fixture failure");
       // The installed interactive controller uses the same package initializer and skill path.
       await Bun.write(join(installDir, "interactive-fixture.ts"), `
         import { loadExtensions } from './node_modules/schway/src/extensions/loader.ts';
@@ -297,6 +308,60 @@ test("npm pack installs the public extension API and completes a headless tool r
       expect(interactive.stderr).toBe("");
       expect(interactive.exitCode).toBe(0);
       expect(interactive.stdout).toContain("installed interactive package round trip passed");
+
+      // Run the combined workspace/branch gate inside the consumer, not via checkout imports.
+      const fixture = await Bun.file(join(import.meta.dir, "fixtures/installed-workflow.ts")).text();
+      await Bun.write(join(installDir, "installed-workflow.ts"),
+        fixture.replaceAll("../../src/", "./node_modules/schway/src/"));
+      const workflow = await runCommand([process.execPath, "--no-env-file", "installed-workflow.ts"], {
+        cwd: installDir, env: buildIsolatedCliEnv(isolatedHome),
+      });
+      expect(workflow.stderr).toBe("");
+      expect(workflow.exitCode).toBe(0);
+      expect(JSON.parse(workflow.stdout).scenarios).toEqual([
+        "attached-skill", "primary-tool-root", "branch-tree", "compaction-resume",
+      ]);
+
+      // Each profile must affect the actual outgoing request, never merely the display.
+      const configPath = join(installDir, ".schway/config.json");
+      await Bun.write(configPath, JSON.stringify({
+        packages: ["schway-example-greeting"],
+        profiles: {
+          alpha: { baseUrl: `http://127.0.0.1:${server.port}/v1`, model: "fixture-alpha", auth: "required", credentialEnv: "GATE_ALPHA_KEY", extraBody: { reasoning_effort: "low" } },
+          beta: { baseUrl: `http://127.0.0.1:${server.port}/v1`, model: "fixture-beta", auth: "required", credentialEnv: "GATE_BETA_KEY", extraBody: { reasoning_effort: "high" } },
+        },
+      }));
+      const profileEnv = { ...buildIsolatedCliEnv(isolatedHome), GATE_ALPHA_KEY: "fixture-alpha-key", GATE_BETA_KEY: "fixture-beta-key" };
+      for (const [name, model, effort, key] of [
+        ["alpha", "fixture-alpha", "low", "fixture-alpha-key"],
+        ["beta", "fixture-beta", "high", "fixture-beta-key"],
+      ]) {
+        const doctorProfile = await runCommand([join(installDir, "node_modules/.bin/schway"), "doctor", "--json", "--provider", "openai-compatible", "--profile", name!], { cwd: installDir, env: profileEnv });
+        expect(doctorProfile.exitCode).toBe(0);
+        expect(JSON.parse(doctorProfile.stdout)).toMatchObject({ profile: name, authSource: "environment" });
+        const text = await runCommand([join(installDir, "node_modules/.bin/schway"), "-p", "hello", "--provider", "openai-compatible", "--profile", name!], { cwd: installDir, env: profileEnv });
+        expect(text.exitCode).toBe(0);
+        expect(text.stdout).toContain("Greeting complete");
+        expect(requests.at(-1)).toMatchObject({ model, reasoning_effort: effort });
+        expect(authorizations.at(-1)).toBe(`Bearer ${key}`);
+        expect(text.stdout + text.stderr + doctorProfile.stdout + doctorProfile.stderr).not.toContain(key!);
+      }
+      const brokenHome = join(dir, "broken-home");
+      await Bun.write(join(brokenHome, ".schway", "sessions"), "not a directory");
+      const broken = await runCommand([join(installDir, "node_modules/.bin/schway"), "doctor", "--json", "--provider", "openai-compatible", "--profile", "alpha"], { cwd: installDir, env: { ...profileEnv, HOME: brokenHome } });
+      expect(broken.exitCode).toBe(1);
+      expect(JSON.parse(broken.stdout).checks).toContainEqual(expect.objectContaining({ id: "sessions", status: "error" }));
+
+      const gitDir = join(installDir, "git-fixture");
+      const gitFixture = await Bun.file(join(import.meta.dir, "fixtures/installed-git.ts")).text();
+      await Bun.write(join(gitDir, "installed-git.ts"),
+        gitFixture.replaceAll("../../src/", "../node_modules/schway/src/"));
+      const gitResult = await runCommand([process.execPath, "--no-env-file", "installed-git.ts"], {
+        cwd: gitDir, env: buildIsolatedCliEnv(isolatedHome),
+      });
+      expect(gitResult.stderr).toBe("");
+      expect(gitResult.exitCode).toBe(0);
+      expect(JSON.parse(gitResult.stdout)).toMatchObject({ preExisting: ["tracked.txt"], newChanges: ["new.txt"] });
 
     } finally {
       await server.stop(true);

@@ -23,6 +23,7 @@ bun run dev
 
 Run `bun run eval --provider scripted` for the isolated offline coding case.
 Paid runs require an explicit provider, model, and `--allow-paid`; see [eval commands and artifact contract](docs/evals.md).
+The [installed release gate](https://github.com/chayapats/schway/blob/main/docs/release-verification.md) records offline evidence and outstanding live/human checks.
 
 ## Diagnose local readiness
 
@@ -62,9 +63,11 @@ headless runs never initialize it.
 Esc cancels the running turn through the shared AbortSignal path and returns to
 the input editor. Ctrl+C cancels when running and quits when idle. Quitting
 restores the terminal and releases resources. Resume rebuilds history from the
-saved JSONL without replaying old tool effects. Missing credentials and runtime
-failures appear as actionable errors; there is no interactive subscription login
-flow in v0.1.
+saved JSONL without replaying old tool effects. Missing credentials and runtime failures appear as actionable errors. Interactive
+`/login` and `/logout` manage API keys and ChatGPT subscription credentials. With
+`openaiAuth codex`, `/model` fetches that subscription's available model list rather
+than showing static OpenAI guesses; see [credentials](docs/credentials.md) and
+[subscription login](docs/configuration.md#chatgpt-subscription-codex-oauth).
 
 ## Headless usage
 
@@ -89,9 +92,10 @@ schway -p "explain this repository" --provider openai-compatible \
 
 `--provider` selects `anthropic` (default), `openai`, or `openai-compatible`. `--model` is passed through even if it is not in a catalog. Unknown IDs use conservative defaults of a 32768-token context window and 16384 maximum output tokens; known catalog models supply richer context-window metadata. Override either limit with `--context-window`, `--max-output`, or the same keys in config.
 
-OpenAI-compatible endpoints use Schway's own Chat Completions fetch/SSE adapter. `--base-url` is required. `--header Name:Value` may be repeated, `--body` is a JSON object of extra request fields, and `--auth` is `required`, `optional` (default), or `none`. Compatible mode does not read `OPENAI_API_KEY`. Named provider profiles are not supported in v0.1.
+OpenAI-compatible endpoints use Schway's own Chat Completions fetch/SSE adapter. `--base-url` is required. `--header Name:Value` may be repeated, `--body` is a JSON object of extra request fields, and `--auth` is `required`, `optional` (default), or `none`. Compatible mode does not read `OPENAI_API_KEY`. Select named endpoint profiles with `--profile <name>` or `/config set profile <name>`;
+see [profiles](docs/configuration.md#named-openai-compatible-profiles).
 
-Runtime credentials (`--api-key`) take precedence over environment variables, including keys loaded with `--env-file`. Project `.env` files are not loaded automatically. Missing credentials fail with a non-zero exit and do not open an interactive login. Codex/ChatGPT subscription authentication and OS keychain storage are not supported in v0.1. API keys must not be stored in `config.json`.
+Runtime credentials (`--api-key`) take precedence over environment variables, including keys loaded with `--env-file`, followed by the OS secure store. Project `.env` files are not loaded automatically. Headless mode never opens a login prompt. Interactive `/login <provider>` and `/logout <provider>` manage credentials; `--openai-auth codex` selects a stored ChatGPT subscription without silent API-key fallback. API keys must not be stored in `config.json`. See [credentials](docs/credentials.md) and [subscription setup](docs/configuration.md#chatgpt-subscription-codex-oauth).
 
 `--max-turns` bounds agent rounds (default 32). `--max-concurrent-tools` caps overlapping parallel-safe tools (default 10).
 
@@ -468,7 +472,7 @@ Long sessions compact context instead of failing when pressure builds.
 - Oversized tool output is pruned only for summarization input; raw history keeps the full records.
 - The summary plus retained records reconstruct identically after `--resume`.
 
-There is no interactive `/compact` command in v0.1 beyond the automatic path and the same recovery inside headless runs.
+Interactive `/compact` runs the same context manager's manual compaction path. Automatic pressure and overflow recovery also apply in headless and interactive runs.
 
 ## Cancellation
 
