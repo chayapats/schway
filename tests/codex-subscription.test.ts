@@ -861,11 +861,27 @@ test("CLI exposes --openai-auth separately from compatible --auth", () => {
   });
 });
 
-test("subscription reasoning maps provider levels without touching provider defaults when unset", () => {
+test("a saved but unverified Codex effort never sends an inference request", async () => {
+  let requests = 0;
+  const model = createCodexSubscriptionModel({
+    model: "gpt-5.4", thinking: "high",
+    tokens: { accessToken: "fixture-token", expiresAt: Date.now() + 3_600_000 },
+    fetch: async () => { requests++; return sseResponse(TEXT_EVENTS); },
+  });
+  await expect(async () => {
+    for await (const _event of model.stream(sampleRequest())) { /* no request permitted */ }
+  }).toThrow(/subscription catalog/);
+  expect(requests).toBe(0);
+});
+
+test("subscription reasoning requires account-verified levels while leaving defaults untouched when unset", () => {
+  const capability = { id: "gpt-5.4", supportedThinking: ["off", "medium"] as const };
   expect(resolveCodexReasoning(undefined, "gpt-5.4")).toBeUndefined();
-  expect(resolveCodexReasoning("medium", "gpt-5.4")).toEqual({ effort: "medium", summary: "auto" });
-  expect(resolveCodexReasoning("off", "gpt-5.4")).toEqual({ effort: "none" });
-  expect(() => resolveCodexReasoning("medium", "gpt-4o")).toThrow(/not supported/);
+  expect(() => resolveCodexReasoning("medium", "gpt-5.4")).toThrow(/subscription catalog/);
+  expect(() => resolveCodexReasoning("off", "gpt-5.4")).toThrow(/subscription catalog/);
+  expect(resolveCodexReasoning("medium", "gpt-5.4", capability)).toEqual({ effort: "medium", summary: "auto" });
+  expect(resolveCodexReasoning("off", "gpt-5.4", capability)).toEqual({ effort: "none" });
+  expect(() => resolveCodexReasoning("high", "gpt-5.4", capability)).toThrow(/subscription catalog/);
   const body = toCodexResponsesBody(sampleRequest(), "gpt-5.4", 128);
   expect(body["model"]).toBe("gpt-5.4");
   expect(body["max_output_tokens"]).toBe(128);

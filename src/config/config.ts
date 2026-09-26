@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
   ANTHROPIC_THINKING_BUDGETS,
+  type ModelCapability,
   DEFAULT_MODEL_IDS,
   describeThinkingSupport,
   findCompatibleReasoningBodyKey,
@@ -76,6 +77,9 @@ export const ThinkingSchema = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),
+  Type.Literal("xhigh"),
+  Type.Literal("max"),
+  Type.Literal("ultra"),
 ]);
 
 /** Validated Git change-tracking modes for observational inspection. */
@@ -126,7 +130,7 @@ export const ConfigSchema = Type.Object(
   {
     provider: Type.Optional(ProviderSchema),
     model: Type.Optional(Type.String({ minLength: 1 })),
-    thinking: Type.Optional(ThinkingSchema),
+    thinking: Type.Optional(Type.Union([ThinkingSchema, Type.Null()])),
     maxTurns: Type.Optional(PositiveInt),
     maxConcurrentTools: Type.Optional(PositiveInt),
     contextWindow: Type.Optional(PositiveInt),
@@ -179,6 +183,10 @@ export interface ResolvedSettings {
   thinking?: ThinkingLevel;
   /** Effective reasoning level after capability checks; undefined means provider defaults. */
   effectiveThinking?: ThinkingLevel;
+  /** Account-advertised default when thinking is unset. */
+  defaultThinking?: ThinkingLevel;
+  /** Account-advertised reasoning levels for a selected subscription model. */
+  supportedThinking?: readonly ThinkingLevel[];
   maxTurns: number;
   maxConcurrentTools: number;
   contextWindow: number;
@@ -285,6 +293,9 @@ export function parseConfigObject(
   const profilesError = validateProfiles(layer.profiles, source);
   if (profilesError !== undefined) {
     return { error: profilesError };
+  }
+  if (layer.thinking === null && source !== "session") {
+    return { error: `Invalid config at ${source}: thinking must be a supported level. Null is a session-only provider-default marker.` };
   }
   if (layer.profile === null && source !== "session") {
     return {
@@ -451,6 +462,10 @@ export function resolveSettings(input: {
   project?: ConfigLayer;
   cli?: ConfigLayer;
   session?: ConfigLayer;
+  /** Verified account capabilities are applied only to the explicit Codex subscription. */
+  modelCapabilities?: readonly ModelCapability[];
+  /** Preliminary headless resolution only; never use it for an outgoing request. */
+  deferOpenAIThinking?: boolean;
 }): ResolvedSettings | { error: string } {
   const mergedProfiles = mergeProfileMaps(input.user?.profiles, input.project?.profiles, input.cli?.profiles, input.session?.profiles);
   const selection = mergeConfigLayers(
@@ -510,12 +525,17 @@ export function resolveSettings(input: {
       error: `Profile "${selectedName}" requires provider openai-compatible. Remove the conflicting provider override.`,
     };
   }
-  const catalog = lookupModel(provider, model, {
-    contextWindow: merged.contextWindow,
-    maxOutput: merged.maxOutput,
+  const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
+  const subscriptionCatalog = subscriptionSelected ? input.modelCapabilities : undefined;
+  const capability = subscriptionCatalog?.find(entry => entry.id === model);
+  const metadata = lookupModel(provider, model, {
+    contextWindow: merged.contextWindow ?? capability?.contextWindow,
+    maxOutput: merged.maxOutput ?? capability?.maxOutput,
   });
-  const thinking = merged.thinking as ThinkingLevel | undefined;
-  const thinkingError = validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput);
+  const catalog = capability ? { ...metadata, supportsThinking: capability.supportedThinking.length > 0 } : metadata;
+  const thinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
+  const thinkingError = input.deferOpenAIThinking && provider === "openai" ? undefined
+    : validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput, subscriptionSelected ? capability ?? null : undefined);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
@@ -524,6 +544,8 @@ export function resolveSettings(input: {
     provider,
     model,
     ...(thinking !== undefined ? { thinking, effectiveThinking: thinking } : {}),
+    ...(capability?.defaultThinking !== undefined ? { defaultThinking: capability.defaultThinking } : {}),
+    ...(capability !== undefined ? { supportedThinking: capability.supportedThinking } : {}),
     maxTurns: merged.maxTurns ?? DEFAULT_MAX_TURNS,
     maxConcurrentTools:
       merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
@@ -574,6 +596,7 @@ export function validateThinking(
   thinking: ThinkingLevel | undefined,
   extraBody: Record<string, unknown> | undefined,
   maxOutput?: number,
+  accountCapability?: ModelCapability | null,
 ): string | undefined {
   if (thinking === undefined) {
     return undefined;
@@ -584,12 +607,15 @@ export function validateThinking(
       return `thinking "${thinking}" conflicts with extraBody.${bodyKey}; remove one to define a single source of truth for reasoning.`;
     }
   }
-  const support = getThinkingSupport(provider, model);
-  if (!support.supported.includes(thinking)) {
+  const support = accountCapability === undefined ? getThinkingSupport(provider, model) : undefined;
+  if (accountCapability !== undefined && !accountCapability?.supportedThinking.includes(thinking)) {
+    return `Thinking level "${thinking}" is not listed for ${provider}/${model} in this account's subscription catalog. Leave thinking unset or select an advertised level.`;
+  }
+  if (support && !support.supported.includes(thinking)) {
     return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
   }
   if (provider === "anthropic" && thinking !== "off" && maxOutput !== undefined) {
-    const budget = ANTHROPIC_THINKING_BUDGETS[thinking];
+    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as "low" | "medium" | "high"];
     if (budget >= maxOutput) {
       return `Thinking level "${thinking}" needs budget ${budget} < max output ${maxOutput} for anthropic/${model}. Increase maxOutput or choose a lower level.`;
     }
@@ -621,7 +647,7 @@ export function describeEffectiveThinking(provider: string, thinking: ThinkingLe
     return "off (provider default, no reasoning controls sent)";
   }
   if (provider === "anthropic") {
-    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as Exclude<ThinkingLevel, "off">];
+    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as "low" | "medium" | "high"];
     return `${thinking} (budget ${budget} tokens via thinking)`;
   }
   if (provider === "openai") {
@@ -658,6 +684,8 @@ export async function loadResolvedSettings(input: {
   home: string;
   workspaceRoot: string;
   cli?: ConfigLayer;
+  modelCapabilities?: readonly ModelCapability[];
+  deferOpenAIThinking?: boolean;
 }): Promise<ResolvedSettings | { error: string }> {
   const user = await readConfigFile(userConfigPath(input.home));
   if (user && "error" in user) {
@@ -671,6 +699,8 @@ export async function loadResolvedSettings(input: {
     user,
     project,
     cli: input.cli,
+    modelCapabilities: input.modelCapabilities,
+    deferOpenAIThinking: input.deferOpenAIThinking,
   });
 }
 

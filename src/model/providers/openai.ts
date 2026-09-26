@@ -28,7 +28,7 @@ export const DEFAULT_OPENAI_MODEL = DEFAULT_MODEL_IDS.openai;
 export const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 16_384;
 
 /** Named effort per level per reasoning guide (none disables; minimal/xhigh/max stay unmapped). */
-export const OPENAI_THINKING_EFFORTS: Record<ThinkingLevel, "none" | "low" | "medium" | "high"> = {
+export const OPENAI_THINKING_EFFORTS: Record<"off" | "low" | "medium" | "high", "none" | "low" | "medium" | "high"> = {
   off: "none",
   low: "low",
   medium: "medium",
@@ -54,7 +54,7 @@ export function resolveOpenAIReasoning(
     }
     return { effort: "none" };
   }
-  return { effort: OPENAI_THINKING_EFFORTS[level], summary: "auto" };
+  return { effort: OPENAI_THINKING_EFFORTS[level as "low" | "medium" | "high"], summary: "auto" };
 }
 
 /** Optional fetch override used by protocol tests. */

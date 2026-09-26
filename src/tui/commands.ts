@@ -70,7 +70,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/sessions - list saved sessions",
     "/resume <id> [branch-id] - resume a saved session on its active branch or one stable branch ID",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
-    "/thinking [off|low|medium|high|reset] - show or switch reasoning level for future requests",
+    "/thinking [off|low|medium|high|xhigh|max|ultra|reset] - show or switch reasoning level for future requests",
     "/compact - summarize older turns to free context",
     "/branch list | tree | fork <entry-id> [name] | switch <branch-id> - browse the session tree or continue a saved conversation path",
     "/changes [status|diff [-- <path>]] - show Git branch, HEAD, and bounded working-tree changes",
@@ -241,7 +241,7 @@ export function formatModelPicker(
 }
 
 /** Provider-independent reasoning level accepted by /thinking and --thinking. */
-export type ThinkingSelection = "off" | "low" | "medium" | "high";
+export type ThinkingSelection = "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 /** Parse `/thinking` arguments into a reasoning level or a reset/show request. */
 export function parseThinkingArgs(args: string): ThinkingSelection | "show" | "reset" | { error: string } {
@@ -252,10 +252,10 @@ export function parseThinkingArgs(args: string): ThinkingSelection | "show" | "r
   if (trimmed === "reset" || trimmed === "clear" || trimmed === "unset" || trimmed === "default") {
     return "reset";
   }
-  if (trimmed === "off" || trimmed === "low" || trimmed === "medium" || trimmed === "high") {
+  if (trimmed === "off" || trimmed === "low" || trimmed === "medium" || trimmed === "high" || trimmed === "xhigh" || trimmed === "max" || trimmed === "ultra") {
     return trimmed;
   }
-  return { error: "Usage: /thinking [off|low|medium|high|reset]. Shows requested and effective levels with provider/model." };
+  return { error: "Usage: /thinking [off|low|medium|high|xhigh|max|ultra|reset]. Shows requested and effective levels with provider/model." };
 }
 
 /** True when the value names a selectable model provider. */

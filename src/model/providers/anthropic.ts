@@ -51,7 +51,7 @@ export function resolveAnthropicThinking(
     }
     return { type: "disabled" };
   }
-  const budget = ANTHROPIC_THINKING_BUDGETS[level];
+  const budget = ANTHROPIC_THINKING_BUDGETS[level as "low" | "medium" | "high"];
   if (budget >= maxTokens) {
     throw new Error(
       `Thinking level "${level}" needs budget ${budget} < max output ${maxTokens} for anthropic/${modelId}. Increase --max-output or choose a lower level.`,

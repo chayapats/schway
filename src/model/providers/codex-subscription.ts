@@ -4,13 +4,8 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import {
-  DEFAULT_MODEL_IDS,
-  describeThinkingSupport,
-  getThinkingSupport,
-  isThinkingSupported,
-} from "../catalog.ts";
-import { reportedTokens } from "../model.ts";
+import { DEFAULT_MODEL_IDS, type ModelCapability } from "../catalog.ts";
+import { THINKING_LEVELS, reportedTokens } from "../model.ts";
 import type {
   Model,
   ModelRequest,
@@ -466,12 +461,12 @@ export function createSubscriptionTokenRefresher(input: {
   };
 }
 
-/** Fetch bounded, visible model slugs using only the selected ChatGPT subscription identity. */
-export async function fetchSubscriptionModels(input: {
+/** Fetch bounded, visible account-scoped model capabilities using only the subscription identity. */
+export async function fetchSubscriptionCatalog(input: {
   store: CredentialStore;
   fetch?: CodexFetchLike;
   signal?: AbortSignal;
-}): Promise<string[]> {
+}): Promise<ModelCapability[]> {
   const credential = await createSubscriptionTokenRefresher({ store: input.store, fetch: input.fetch })
     .getValidAccessToken(input.signal);
   const deadline = AbortSignal.timeout(5_000);
@@ -527,14 +522,33 @@ export async function fetchSubscriptionModels(input: {
   if (!payload || typeof payload !== "object" || !("models" in payload) || !Array.isArray(payload.models) || payload.models.length > 256) {
     throw new Error("ChatGPT model catalog returned an invalid model list.");
   }
-  const models = new Set<string>();
+  const models = new Map<string, ModelCapability>();
   for (const item of payload.models) {
     if (!item || typeof item !== "object" || !("slug" in item) || !("visibility" in item)) continue;
     if (item.visibility !== "list" || typeof item.slug !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.slug)) continue;
-    models.add(item.slug);
+    if (models.has(item.slug)) continue;
+    const levels: unknown[] = Array.isArray(item.supported_reasoning_levels) ? item.supported_reasoning_levels : [];
+    const supportedThinking = [...new Set<ThinkingLevel>(levels.map((entry: unknown) => {
+      if (!entry || typeof entry !== "object" || !("effort" in entry)) return undefined;
+      const effort = entry.effort === "none" ? "off" : entry.effort;
+      return THINKING_LEVELS.includes(effort as ThinkingLevel) ? effort as ThinkingLevel : undefined;
+    }).filter((level): level is ThinkingLevel => level !== undefined))];
+    const defaultThinking = item.default_reasoning_level === "none" ? "off" : item.default_reasoning_level;
+    models.set(item.slug, {
+      id: item.slug,
+      ...(typeof item.context_window === "number" && Number.isSafeInteger(item.context_window) && item.context_window > 0 && item.context_window <= 10_000_000 ? { contextWindow: item.context_window } : {}),
+      ...(typeof item.max_output_tokens === "number" && Number.isSafeInteger(item.max_output_tokens) && item.max_output_tokens > 0 && item.max_output_tokens <= 1_000_000 ? { maxOutput: item.max_output_tokens } : {}),
+      ...(supportedThinking.includes(defaultThinking as ThinkingLevel) ? { defaultThinking: defaultThinking as ThinkingLevel } : {}),
+      supportedThinking,
+    });
   }
   if (!models.size) throw new Error("No selectable models were returned for this ChatGPT subscription.");
-  return [...models];
+  return [...models.values()];
+}
+
+/** Fetch visible model slugs without exposing account-specific metadata to older callers. */
+export async function fetchSubscriptionModels(input: { store: CredentialStore; fetch?: CodexFetchLike; signal?: AbortSignal }): Promise<string[]> {
+  return (await fetchSubscriptionCatalog(input)).map(model => model.id);
 }
 
 /** Run the explicit browser PKCE login, persisting tokens at the subscription identity. */
@@ -844,8 +858,9 @@ export function toCodexResponsesBody(
   request: ModelRequest,
   modelId: string,
   maxTokens: number,
+  capability?: ModelCapability,
 ): Record<string, unknown> {
-  const reasoning = resolveCodexReasoning(request.thinking, modelId);
+  const reasoning = resolveCodexReasoning(request.thinking, modelId, capability);
   return {
     model: modelId,
     store: false,
@@ -871,24 +886,20 @@ export function codexRequestHeaders(accessToken: string, accountId?: string): Re
 export function resolveCodexReasoning(
   level: ThinkingLevel | undefined,
   modelId: string,
+  capability?: ModelCapability,
 ):
   | { effort: "none" }
-  | { effort: "low" | "medium" | "high"; summary: "auto" }
+  | { effort: Exclude<ThinkingLevel, "off">; summary: "auto" }
   | undefined {
   if (level === undefined) {
     return undefined;
   }
-  if (!isThinkingSupported("openai", modelId, level)) {
-    throw new Error(
-      `Thinking level "${level}" is not supported for openai/${modelId}. ${describeThinkingSupport("openai", modelId)}`,
-    );
+  if (!capability) throw new Error(`Thinking level "${level}" requires verified subscription catalog capabilities for openai/${modelId}. Open /model or reset thinking.`);
+  if (capability.id !== modelId) throw new Error("Subscription capability does not match the selected model.");
+  if (!capability.supportedThinking.includes(level)) {
+    throw new Error(`Thinking level "${level}" is not listed for openai/${modelId} in this account's subscription catalog.`);
   }
-  if (level === "off") {
-    if (!getThinkingSupport("openai", modelId).supportsDisabling) {
-      return undefined;
-    }
-    return { effort: "none" };
-  }
+  if (level === "off") return { effort: "none" };
   return { effort: level, summary: "auto" };
 }
 
@@ -920,6 +931,8 @@ export function createCodexSubscriptionModel(options: {
   model?: string;
   maxTokens?: number;
   thinking?: ThinkingLevel;
+  /** Verified capabilities for this exact account and model. */
+  modelCapability?: ModelCapability;
   tokens?: CodexTokens;
   refresher?: { getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }> };
   store?: CredentialStore;
@@ -956,6 +969,7 @@ export function createCodexSubscriptionModel(options: {
         { ...request, thinking: request.thinking ?? options.thinking },
         modelId,
         maxTokens,
+        options.modelCapability,
       );
       options.onRequest?.({
         model: modelId,

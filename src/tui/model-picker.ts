@@ -1,4 +1,4 @@
-import { listCatalog, lookupModel } from "../model/catalog.ts";
+import { listCatalog, lookupModel, type ModelCapability } from "../model/catalog.ts";
 import type { CompatibleProfile } from "../config/config.ts";
 import { parseModelArgs } from "./commands.ts";
 
@@ -10,6 +10,12 @@ export interface ModelPickerEntry {
   maxOutput: number;
   active: boolean;
   custom: boolean;
+  /** Mark non-subscription choices explicitly when a subscription is selected. */
+  otherProvider?: boolean;
+  /** Verified subscription default, not a locally guessed effort. */
+  defaultThinking?: string;
+  /** Advertised account-specific thinking levels. */
+  supportedThinking?: readonly string[];
   /** Named compatible profile backing this row, when the entry selects a profile. */
   profile?: string;
 }
@@ -24,14 +30,19 @@ export interface ModelPickerSnapshot {
 }
 
 /** Build matching catalog and profile choices plus an explicit typed choice with fallback budgets. */
-export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionMode?: boolean }): ModelPickerEntry[] {
+export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean }): ModelPickerEntry[] {
   const normalized = query.toLowerCase();
   const entries: ModelPickerEntry[] = listCatalog().filter(entry => (!options?.subscriptionMode || entry.provider !== "openai") && `${entry.provider}/${entry.id}`.toLowerCase().includes(normalized)).map(entry => ({
     provider: entry.provider, modelId: entry.id, ...budgets(entry.provider, entry.id, limits), active: entry.provider === provider && entry.id === modelId && (options?.activeProfile === undefined), custom: false,
+    ...(options?.subscriptionMode ? { otherProvider: true } : {}),
   }));
   for (const id of options?.subscriptionModels ?? []) {
     if (!`openai/${id}`.toLowerCase().includes(normalized)) continue;
-    entries.push({ provider: "openai", modelId: id, ...budgets("openai", id, limits), active: provider === "openai" && modelId === id, custom: false });
+    const capability = options?.subscriptionCapabilities?.find(entry => entry.id === id);
+    entries.push({ provider: "openai", modelId: id, ...budgets("openai", id, { contextWindow: limits.contextWindow ?? capability?.contextWindow, maxOutput: limits.maxOutput ?? capability?.maxOutput }), active: provider === "openai" && modelId === id, custom: false,
+      ...(capability?.defaultThinking !== undefined ? { defaultThinking: capability.defaultThinking } : {}),
+      ...(capability !== undefined ? { supportedThinking: capability.supportedThinking } : {}),
+    });
   }
   const profiles = options?.profiles ?? {};
   for (const [name, profile] of Object.entries(profiles)) {
@@ -50,11 +61,14 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       active: options?.activeProfile === name,
       custom: false,
       profile: name,
+      ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
   const selection = parseModelArgs(query || `${provider}/${modelId}`, provider);
-  if (!("error" in selection) && selection.profile === undefined && !(options?.subscriptionMode && selection.provider === "openai") && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined)) {
-    entries.push({ ...selection, ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined, custom: true });
+  if (!("error" in selection) && selection.profile === undefined && !(options?.subscriptionMode && (!query || selection.provider === "openai")) && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined)) {
+    entries.push({ ...selection, ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined, custom: true,
+      ...(options?.subscriptionMode ? { otherProvider: true } : {}),
+    });
   }
   if (!query) entries.sort((a, b) => Number(b.active) - Number(a.active));
   return entries;

@@ -6,7 +6,7 @@ import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { SessionRecord } from "../conversation/types.ts";
-import { lookupModel } from "../model/catalog.ts";
+import { lookupModel, type ModelCapability } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { SessionEntry } from "../session/branches.ts";
@@ -116,6 +116,8 @@ export interface TuiControllerOptions {
     codexLogin?: CodexLoginRunner;
     /** Resolve account-scoped model IDs using only the ChatGPT subscription transport. */
     listSubscriptionModels?: (signal: AbortSignal) => Promise<readonly string[]>;
+    /** Discover verified model budgets and reasoning levels for this subscription identity. */
+    listSubscriptionCatalog?: (signal: AbortSignal) => Promise<readonly ModelCapability[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
@@ -371,6 +373,9 @@ export class TuiController {
   private readonly onRuntimeEvent?: TuiControllerOptions["onRuntimeEvent"];
   private modelPicker?: ModelPickerSnapshot;
   private subscriptionModels?: readonly string[];
+  private subscriptionCapabilities?: readonly ModelCapability[];
+  private subscriptionPending = false;
+  private subscriptionReactivationRequired = false;
   private modelCatalogAbort?: AbortController;
   private branchTreeOpen = false;
   private branchTreeSelectedId?: string;
@@ -661,6 +666,20 @@ export class TuiController {
           return false;
         }
         this.notice(redactSecrets(result.status, this.secrets));
+        // A store-backed Codex adapter would read the newly saved account on its next turn.
+        // Never reuse the previous account's adapter or its catalog after credential replacement.
+        if (this.model?.provider === "codex-subscription") {
+          this.model = undefined;
+          this.subscriptionReactivationRequired = true;
+        }
+        this.subscriptionModels = undefined;
+        this.subscriptionCapabilities = undefined;
+        this.configEditor?.setModelCapabilities([]);
+        if (this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog) {
+          this.subscriptionPending = true;
+          this.status = "idle";
+          return true;
+        }
         if (this.provider !== "openai") {
           this.status = "idle";
           this.notice("Signed in. Set provider openai with openaiAuth codex (or auto) to run the subscription transport.");
@@ -691,12 +710,38 @@ export class TuiController {
     })();
     const tracked = task.then(() => {});
     this.activeTurn = tracked;
-    try { return await task; } finally {
+    let signedIn: boolean;
+    try { signedIn = await task; } finally {
       this.credentialMutation = false;
       if (this.codexLoginAbort === abort) this.codexLoginAbort = undefined;
       if (this.activeAbort === abort) this.activeAbort = undefined;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
+    if (signedIn && this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog && !this.disposed) {
+      const discovery = new AbortController();
+      this.activeAbort = discovery;
+      this.status = "running";
+      let preferred: string;
+      try {
+        const models = await this.loadAccountCatalog(AbortSignal.any([discovery.signal, AbortSignal.timeout(5_000)]));
+        preferred = models.find(model => model.id === this.modelId)?.id ?? models[0]?.id ?? "";
+        if (!preferred) throw new Error("No selectable models were returned for this ChatGPT subscription.");
+        discovery.signal.throwIfAborted();
+      } catch (error) {
+        if (discovery.signal.aborted) this.notice(`Subscription activation cancelled; sign-in remains saved. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model."}`);
+        else this.fail(`Signed in, but could not activate the subscription: ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500)} ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model."}`);
+        return false;
+      } finally {
+        if (this.activeAbort === discovery) this.activeAbort = undefined;
+        if (this.status === "running") this.status = "idle";
+      }
+      const applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(preferred),
+        () => `ChatGPT subscription active for this session: openai/${this.modelId}. ${this.describeThinking()}`);
+      if (applied) this.subscriptionPending = false;
+      else this.notice(`Signed in, but subscription activation failed. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
+      return applied;
+    }
+    return signedIn;
   }
 
   /** Remove only the selected subscription identity, refreshing the adapter when it served OpenAI. */
@@ -711,6 +756,13 @@ export class TuiController {
       } catch {
         this.fail(credentialStoreError("delete"));
         return false;
+      }
+      this.subscriptionPending = false;
+      this.subscriptionReactivationRequired = false;
+      if (deleted) {
+        this.subscriptionCapabilities = undefined;
+        this.subscriptionModels = undefined;
+        this.configEditor?.setModelCapabilities([]);
       }
       this.notice(
         deleted
@@ -1227,11 +1279,10 @@ export class TuiController {
       const picker = this.modelPicker;
       const abort = new AbortController();
       this.modelCatalogAbort = abort;
-      const load = this.credentials?.listSubscriptionModels;
-      if (!load) { picker.loading = false; picker.error = "ChatGPT model discovery is unavailable. Restart Schway."; }
-      else void load(abort.signal).then(models => {
+      if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) { picker.loading = false; picker.error = "ChatGPT model discovery is unavailable. Restart Schway."; }
+      else void this.loadAccountCatalog(abort.signal).then(models => {
         if (this.disposed || abort.signal.aborted || this.modelCatalogAbort !== abort || this.modelPicker !== picker) return;
-        this.subscriptionModels = models;
+        this.subscriptionModels = models.map(model => model.id);
         picker.loading = false;
         this.searchModels(picker.query);
       }).catch(error => {
@@ -1243,9 +1294,31 @@ export class TuiController {
     return true;
   }
 
+  /** Read account metadata once and retain it only in this controller and its session config. */
+  private async loadAccountCatalog(signal: AbortSignal): Promise<readonly ModelCapability[]> {
+    const load = this.credentials?.listSubscriptionCatalog;
+    if (load) {
+      const models = await load(signal);
+      signal.throwIfAborted();
+      this.configEditor?.setModelCapabilities(models);
+      this.subscriptionCapabilities = models;
+      this.subscriptionModels = models.map(model => model.id);
+      return models;
+    }
+    const slugs = await this.credentials?.listSubscriptionModels?.(signal);
+    if (!slugs) throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
+    return slugs.map(id => ({ id, supportedThinking: [] }));
+  }
+
   /** True when the active OpenAI adapter uses the subscription or explicitly requires it. */
   private subscriptionSelected(): boolean {
-    return (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
+    return this.subscriptionPending || (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
+  }
+
+  /** Use Codex thinking only for its adapter or a Codex session awaiting an adapter. */
+  private codexThinkingSelected(): boolean {
+    return this.model?.provider === "codex-subscription" || (!this.model && this.provider === "openai" &&
+      (this.subscriptionReactivationRequired || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex"));
   }
 
   /** Filter catalog and profile choices with fallback budgets for typed ids. */
@@ -1254,7 +1327,7 @@ export class TuiController {
     const picker = this.modelPicker;
     picker.query = query;
     picker.selectedIndex = 0;
-    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile, subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels });
+    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile, subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities });
   }
 
   /** Move the highlighted model with wraparound over the filtered choices. */
@@ -1303,7 +1376,7 @@ export class TuiController {
     }
     if (this.subscriptionSelected() && selection.provider === "openai") {
       try {
-        const available = this.subscriptionModels ?? await this.credentials?.listSubscriptionModels?.(AbortSignal.timeout(5_000));
+        const available = this.subscriptionModels ?? (await this.loadAccountCatalog(AbortSignal.timeout(5_000))).map(model => model.id);
         if (!available?.includes(selection.modelId)) {
           this.fail(`Model "${selection.modelId}" is not in the ChatGPT subscription model catalog. Open /model to see available choices.`);
           return false;
@@ -1313,16 +1386,36 @@ export class TuiController {
         return false;
       }
     }
-    return this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId), () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}). Applies to this session only.`);
+    return this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
+      ? this.configEditor!.prepareSubscriptionModel(selection.modelId)
+      : this.configEditor!.prepareModel(selection.provider, selection.modelId),
+      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}). Applies to this session only.`);
   }
 
   /** Show or switch the reasoning level for future requests without rewriting history. */
   async thinkingCommand(args: string): Promise<boolean> {
     const selection = parseThinkingArgs(args);
     if (typeof selection === "object") { this.fail(selection.error); return false; }
+    if (selection !== "reset" && this.codexThinkingSelected() &&
+      (this.configEditor?.settings.supportedThinking === undefined || this.model?.provider === "codex-subscription" && this.configEditor?.settings.openaiAuth !== "codex")) {
+      try {
+        const models = this.subscriptionCapabilities ?? await this.loadAccountCatalog(AbortSignal.timeout(5_000));
+        if (!models.some(model => model.id === this.modelId)) {
+          this.fail(`Model "${this.modelId}" is not available for this ChatGPT subscription. Open /model to choose an account-visible model.`);
+          return false;
+        }
+        // Auto-selected Codex is an active subscription, but saved auth remains "auto".
+        // Bind the verified choice to this session so config validation and the adapter agree.
+        if (this.model?.provider === "codex-subscription" && this.configEditor?.settings.openaiAuth !== "codex" &&
+          !(await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(this.modelId), () => `Verified subscription model ${this.modelId} for this session.`))) return false;
+      } catch (error) {
+        this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500));
+        return false;
+      }
+    }
     if (selection === "show") { this.notice(this.describeThinking()); return true; }
     if (selection === "reset") {
-      return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: undefined }), () => `Thinking reset. ${this.describeThinking()}. Applies to this session only.`);
+      return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}. Applies to this session only.`);
     }
     return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}. Applies to this session only.`);
   }
@@ -1332,6 +1425,17 @@ export class TuiController {
     const requested = this.configEditor?.settings.thinking ?? this.thinking;
     const effective = this.configEditor?.settings.effectiveThinking ?? (requested as never);
     const origin = this.configEditor?.origins.thinking;
+    const capability = this.codexThinkingSelected() ? this.configEditor?.settings : undefined;
+    if (capability?.supportedThinking !== undefined) {
+      const supported = capability.supportedThinking.join("/") || "none advertised";
+      const defaultLevel = capability.defaultThinking ?? "unspecified";
+      return requested === undefined
+        ? `Thinking: provider default (${defaultLevel}; no explicit control sent). Supported: ${supported} with ${this.provider}/${this.modelId}`
+        : `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (supported: ${supported}; provider default: ${defaultLevel}) with ${this.provider}/${this.modelId}`;
+    }
+    if (this.codexThinkingSelected()) {
+      return `Thinking: ${requested ?? "unset"} (subscription capability not yet verified; open /model) with ${this.provider}/${this.modelId}`;
+    }
     const effectiveDesc = describeEffectiveThinking(this.provider, (effective ?? requested) as never, this.modelId);
     if (requested === undefined) {
       return `Thinking: unset (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
@@ -1414,11 +1518,17 @@ export class TuiController {
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
     this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
+    this.subscriptionReactivationRequired = false;
+    if (next.provider !== "openai" && next.openaiAuth !== "codex") this.subscriptionPending = false;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
 
   /** Effective context and output budgets for the current model with overrides. */
   effectiveBudgets(): { contextWindow: number; maxOutput: number } {
+    const resolved = this.configEditor?.settings;
+    if (resolved?.provider === this.provider && resolved.model === this.modelId && resolved.supportedThinking !== undefined) {
+      return { contextWindow: resolved.contextWindow, maxOutput: resolved.maxOutput };
+    }
     const info = lookupModel(this.provider, this.modelId, {
       ...(this.explicitContextWindow !== undefined
         ? { contextWindow: this.explicitContextWindow }
@@ -1447,7 +1557,7 @@ export class TuiController {
       lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => {
         if (key === "thinking") {
           const requested = (settings as unknown as Record<string, unknown>)[key];
-          const effective = describeEffectiveThinking(this.provider, requested as never, (settings as unknown as Record<string, unknown>).model as string | undefined ?? this.modelId);
+          const effective = this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, requested as never, settings.model);
           return `${key}: ${displaySetting(key, requested)} [${origins[key as keyof ConfigLayer]}] (effective: ${effective})`;
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
@@ -1458,7 +1568,7 @@ export class TuiController {
         lines.push(`git: {"changeTracking":"${gitMode}"}${gitOrigin}`);
       }
       if (settings.thinking === undefined) {
-        lines.push(`thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
+        lines.push(`thinking: unset (effective: ${this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, undefined)})`);
       }
       if (settings.headers) lines.push(`headers: configured (values hidden) [${origins.headers}]`);
       if (settings.extraBody) lines.push(`extraBody: configured (values hidden) [${origins.extraBody}]`);
@@ -1727,9 +1837,9 @@ export class TuiController {
       return;
     }
     if (!this.model) {
-      this.fail(
-        "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.",
-      );
+      this.fail(this.subscriptionReactivationRequired
+        ? "ChatGPT subscription account changed. Open /model to select an available model for the new account; no request was sent."
+        : "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.");
       return;
     }
     const userEntry: TuiTranscriptEntry = {

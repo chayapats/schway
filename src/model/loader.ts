@@ -2,6 +2,7 @@ import type { Model, ThinkingLevel } from "./model.ts";
 import type { CliAuthMode, CliOpenAIAuth, CliProvider } from "../cli/args.ts";
 import type { CredentialStore } from "../auth/store.ts";
 import type { CodexTokens } from "./providers/codex-subscription.ts";
+import type { ModelCapability } from "./catalog.ts";
 
 /** Optional fetch override used by protocol fixture tests. */
 export type FetchLike = (
@@ -27,6 +28,8 @@ export interface ProviderLoaderInput {
   codexTokens?: CodexTokens;
   /** Secure-store renewal channel for the codex transport; enables serialized pre-expiry refresh. */
   codexStore?: CredentialStore;
+  /** Verified subscription model capabilities used only by the Codex transport. */
+  modelCapability?: ModelCapability;
 }
 
 /**
@@ -60,6 +63,7 @@ export async function loadProviderModel(
         thinking: input.thinking,
         tokens: input.codexTokens,
         store: input.codexStore,
+        modelCapability: input.modelCapability,
         fetch: fetchFn,
       });
     }

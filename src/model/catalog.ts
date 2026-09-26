@@ -25,6 +25,15 @@ export interface ModelInfo {
   supportsThinking: boolean;
 }
 
+/** Verified account-scoped model capabilities, independent of provider response fields. */
+export interface ModelCapability {
+  id: string;
+  contextWindow?: number;
+  maxOutput?: number;
+  defaultThinking?: ThinkingLevel;
+  supportedThinking: readonly ThinkingLevel[];
+}
+
 /** Optional user-supplied limits that outrank catalog and unknown defaults. */
 export interface ModelLimitOverrides {
   contextWindow?: number;
@@ -134,7 +143,7 @@ const ANTHROPIC_THINKING_MODELS = new Set([
 ]);
 
 /** Numeric Anthropic thinking budgets per level per extended-thinking docs (must stay below max_tokens, minimum 1024). */
-export const ANTHROPIC_THINKING_BUDGETS: Record<Exclude<ThinkingLevel, "off">, number> = {
+export const ANTHROPIC_THINKING_BUDGETS: Record<"low" | "medium" | "high", number> = {
   low: 1024,
   medium: 4096,
   high: 8192,
