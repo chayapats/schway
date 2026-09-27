@@ -159,37 +159,28 @@ test("actual interactive quit while a turn is active logs truthful cancellation 
   // Isolated process keeps the mocked renderer from affecting other OpenTUI tests.
   const script = String.raw`
     import { mock } from "bun:test";
-    import { EventEmitter } from "node:events";
     import { join } from "node:path";
     import { pathToFileURL } from "node:url";
+    import { createTestRenderer } from "@opentui/core/testing";
     const root = process.cwd();
-    let keyInput;
-    class Box {
-      constructor() { this.children = []; this.content = { add: child => this.add(child) }; }
-      add(child) { this.children.push(child); }
-      getChildren() { return this.children; }
-      remove(child) { this.children = this.children.filter(item => item !== child); }
-    }
-    class Text extends Box {}
-    class Scroll extends Box {}
-    class Input extends Box {
-      on(event, callback) {
-        if (event === "enter") setTimeout(() => { this.value = "work"; callback(); }, 0);
-      }
-      focus() {} blur() {}
-    }
-    const renderer = { root: new Box(), keyInput: new EventEmitter(), start() {}, stop() {}, destroy() {} };
-    keyInput = renderer.keyInput;
+    const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
     const fixture = join(root, "src/tui/credential-input.ts");
+    const credentialInput = await import(pathToFileURL(fixture).href);
+    const core = await credentialInput.loadCredentialSafeTui();
     mock.module(fixture, () => ({
-      loadCredentialSafeTui: async () => ({ createCliRenderer: async () => renderer,
-        BoxRenderable: Box, TextRenderable: Text, ScrollBoxRenderable: Scroll, InputRenderable: Input }),
-      bindCredentialInput: () => () => {},
+      ...credentialInput,
+      loadCredentialSafeTui: async () => ({ ...core, createCliRenderer: async () => {
+        setTimeout(async () => {
+          await terminal.mockInput.pasteBracketedText("work");
+          terminal.mockInput.pressEnter();
+        }, 0);
+        return terminal.renderer;
+      } }),
     }));
     const { runInteractiveTui } = await import(pathToFileURL(join(root, "src/tui/app.ts")).href);
     const model = { provider: "scripted", id: "scripted", async *stream(request) {
       yield { type: "text_delta", text: "partial" };
-      setTimeout(() => keyInput.emit("keypress", { name: "d", ctrl: true }), 0);
+      setTimeout(() => terminal.mockInput.pressKey("d", { ctrl: true }), 0);
       await new Promise(resolve => request.signal.addEventListener("abort", resolve, { once: true }));
       const failure = new Error("aborted"); failure.name = "AbortError"; throw failure;
     } };

@@ -1,8 +1,9 @@
 import { runAgentLoop } from "../agent/loop.ts";
+import { toolTarget } from "./presentation.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
-import { credentialEnvironmentVariable } from "../auth/credentials.ts";
+import { credentialEnvironmentVariable, isOpenAIAuthPreference } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { SessionRecord } from "../conversation/types.ts";
@@ -30,6 +31,7 @@ import {
   type GitTurnComparison,
 } from "../workspace/git.ts";
 import { modelPickerEntries, type ModelPickerSnapshot } from "./model-picker.ts";
+import { loadModelPickerAccess, type ModelPickerAccess } from "./model-access.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -45,6 +47,8 @@ export interface TuiTranscriptEntry {
   toolName?: string;
   toolCallId?: string;
   toolStatus?: TuiToolStatus;
+  /** Short path, search pattern, or command identifying this call. */
+  toolSummary?: string;
 }
 
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
@@ -373,6 +377,8 @@ export class TuiController {
   private readonly onRuntimeEvent?: TuiControllerOptions["onRuntimeEvent"];
   private modelPicker?: ModelPickerSnapshot;
   private subscriptionModels?: readonly string[];
+  private modelPickerAccess?: ModelPickerAccess;
+  private pickerSubscriptionMode = false;
   private subscriptionCapabilities?: readonly ModelCapability[];
   private subscriptionPending = false;
   private subscriptionReactivationRequired = false;
@@ -436,7 +442,7 @@ export class TuiController {
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
     if (options.startupError) {
-      this.transcript.push(this.systemEntry(options.startupError));
+      this.transcript.push({ ...this.systemEntry(options.startupError), kind: "error" });
       this.status = "error";
     }
   }
@@ -451,7 +457,7 @@ export class TuiController {
       transcript: this.transcript.map((entry) =>
         this.secrets.length === 0
           ? entry
-          : { ...entry, text: redactSecrets(entry.text, this.secrets) },
+          : { ...entry, text: redactSecrets(entry.text, this.secrets), toolSummary: entry.toolSummary ? redactSecrets(entry.toolSummary, this.secrets) : undefined },
       ),
       sessionId: this.sessionId,
       branchId: this.session.activeBranchId,
@@ -924,7 +930,7 @@ export class TuiController {
     const records = branchTreeAncestryRecords(this.session, target);
     const transcript = buildTranscriptFromSession(records);
     if (!this.secrets.length) return transcript;
-    return transcript.map(entry => ({ ...entry, text: redactSecrets(entry.text, this.secrets) }));
+    return transcript.map(entry => ({ ...entry, text: redactSecrets(entry.text, this.secrets), toolSummary: entry.toolSummary ? redactSecrets(entry.toolSummary, this.secrets) : undefined }));
   }
 
   /** Switch to one stable branch ID while idle and rebuild the transcript without replaying tools. */
@@ -1273,25 +1279,61 @@ export class TuiController {
   openModelPicker(): boolean {
     if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
     this.closeModelPicker();
-    this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() ? { loading: true } : {}) };
+    this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() || this.credentials ? { loading: true } : {}) };
     this.searchModels("");
-    if (this.subscriptionSelected()) {
+    if (this.subscriptionSelected() || this.credentials) {
       const picker = this.modelPicker;
       const abort = new AbortController();
       this.modelCatalogAbort = abort;
-      if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) { picker.loading = false; picker.error = "ChatGPT model discovery is unavailable. Restart Schway."; }
-      else void this.loadAccountCatalog(abort.signal).then(models => {
-        if (this.disposed || abort.signal.aborted || this.modelCatalogAbort !== abort || this.modelPicker !== picker) return;
-        this.subscriptionModels = models.map(model => model.id);
-        picker.loading = false;
-        this.searchModels(picker.query);
-      }).catch(error => {
-        if (this.disposed || abort.signal.aborted || this.modelPicker !== picker) return;
-        picker.loading = false;
-        picker.error = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500);
-      });
+      void this.refreshModelPicker(picker, abort);
     }
     return true;
+  }
+
+  private async refreshModelPicker(picker: ModelPickerSnapshot, abort: AbortController): Promise<void> {
+    const current = () => !this.disposed && !abort.signal.aborted && this.modelPicker === picker;
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)]);
+    const catalog = this.subscriptionSelected()
+      ? this.loadAccountCatalog(signal).then(models => ({ models }), error => ({ error }))
+      : undefined;
+    try {
+      if (this.credentials) {
+        const settings = this.configEditor?.settings;
+        const preference = settings?.openaiAuth ?? this.openaiAuth;
+        const auth = settings?.auth ?? this.auth;
+        const access = await loadModelPickerAccess({ ...this.credentials,
+          openaiAuth: isOpenAIAuthPreference(preference) ? preference : undefined,
+          baseUrl: settings?.baseUrl ?? this.baseUrl, auth: auth === "none" || auth === "optional" || auth === "required" ? auth : undefined,
+          credentialEnv: settings?.credentialEnv, credentialIdentity: settings?.credentialIdentity,
+          activeProfile: settings?.profile ?? this.profile, profiles: this.configEditor?.profiles,
+        });
+        if (!current()) return;
+        this.modelPickerAccess = access;
+        this.pickerSubscriptionMode = access.openaiTransport === "codex";
+      }
+      if (this.subscriptionSelected()) {
+        if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) {
+          throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
+        }
+        const result = catalog ? await catalog : { models: await this.loadAccountCatalog(signal) };
+        if ("error" in result) throw result.error;
+        if (!current()) return;
+        this.subscriptionModels = result.models.map(model => model.id);
+      }
+    } catch (error) {
+      if (current()) picker.error = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500);
+    } finally {
+      if (current()) {
+        // Keep the row under the cursor if the user has already started navigating.
+        const selected = picker.selectedIndex > 0 ? picker.entries[picker.selectedIndex] : undefined;
+        picker.loading = false;
+        this.searchModels(picker.query);
+        if (selected) {
+          const index = picker.entries.findIndex(entry => entry.provider === selected.provider && entry.modelId === selected.modelId && entry.profile === selected.profile);
+          if (index >= 0) picker.selectedIndex = index;
+        }
+      }
+    }
   }
 
   /** Read account metadata once and retain it only in this controller and its session config. */
@@ -1306,13 +1348,14 @@ export class TuiController {
       return models;
     }
     const slugs = await this.credentials?.listSubscriptionModels?.(signal);
+    signal.throwIfAborted();
     if (!slugs) throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
     return slugs.map(id => ({ id, supportedThinking: [] }));
   }
 
-  /** True when the active OpenAI adapter uses the subscription or explicitly requires it. */
+  /** Use account models when Codex is selected or the open picker discovered its saved login. */
   private subscriptionSelected(): boolean {
-    return this.subscriptionPending || (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
+    return this.pickerSubscriptionMode || this.subscriptionPending || (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
   }
 
   /** Use Codex thinking only for its adapter or a Codex session awaiting an adapter. */
@@ -1327,7 +1370,7 @@ export class TuiController {
     const picker = this.modelPicker;
     picker.query = query;
     picker.selectedIndex = 0;
-    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile, subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities });
+    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile, subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess });
   }
 
   /** Move the highlighted model with wraparound over the filtered choices. */
@@ -1341,12 +1384,15 @@ export class TuiController {
   closeModelPicker(): void {
     this.modelCatalogAbort?.abort();
     this.modelCatalogAbort = undefined;
+    this.modelPickerAccess = undefined;
+    this.pickerSubscriptionMode = false;
     this.subscriptionModels = undefined;
     this.modelPicker = undefined;
   }
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
+    if (this.modelPicker?.loading) { this.notice("Loading available models. Try again when the list is ready."); return false; }
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
     if (!selection) return false;
     if (selection.profile !== undefined) {
@@ -1960,6 +2006,8 @@ export class TuiController {
         return;
       }
       case "tool.started": {
+        const assistant = this.session.items.findLast(item => item.type === "assistant");
+        const call = assistant?.type === "assistant" ? assistant.content.find(block => block.type === "tool_call" && block.id === event.toolCallId) : undefined;
         const entry: TuiTranscriptEntry = {
           id: this.nextId("tool"),
           kind: "tool",
@@ -1967,6 +2015,7 @@ export class TuiController {
           toolName: event.name,
           toolCallId: event.toolCallId,
           toolStatus: "running",
+          toolSummary: call?.type === "tool_call" ? toolTarget(event.name, call.arguments) : undefined,
         };
         this.toolEntryByCallId.set(event.toolCallId, entry);
         this.transcript.push(entry);
@@ -2116,6 +2165,7 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
             toolName: block.name,
             toolCallId: block.id,
             toolStatus: "cancelled",
+            toolSummary: toolTarget(block.name, block.arguments),
           };
           pending.set(block.id, entry);
           transcript.push(entry);

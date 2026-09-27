@@ -58,8 +58,6 @@ export const CODEX_LOGIN_TIMEOUT_MS = 10 * 60_000;
 export const CODEX_DEVICE_TIMEOUT_MS = 900_000;
 /** Default model reported when the caller does not select one. */
 export const CODEX_SUBSCRIPTION_MODEL = DEFAULT_MODEL_IDS.openai;
-/** Default max_output_tokens for Codex subscription Responses requests. */
-export const CODEX_DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 
 /** Short-lived subscription credential with its offline_access renewal secret. */
 export interface CodexTokens {
@@ -598,25 +596,35 @@ export async function loginWithBrowserFlow(input: {
   const authorizeUrl = buildCodexAuthorizeUrl({ challenge, state });
   pendingBrowserAttempt = { verifier, state, expiresAt: Date.now() + timeoutMs };
   deps.onProgress?.(`Open this URL to sign in with ChatGPT: ${authorizeUrl}`);
-  if (deps.openBrowser) {
-    try {
-      await deps.openBrowser(authorizeUrl);
-    } catch {
-      deps.onProgress?.("The browser could not be opened automatically; use the printed URL instead.");
-    }
-  }
   if (!deps.waitForCallbackCode) {
+    if (deps.openBrowser) {
+      try { await deps.openBrowser(authorizeUrl); }
+      catch { deps.onProgress?.("The browser could not be opened automatically; use the printed URL instead."); }
+    }
     throw new Error(
       "The localhost callback is unavailable in this environment. Retry with /login codex --device, or paste the redirect with /login codex --code <callback-url>.",
     );
   }
-  const abort = AbortSignal.any(signal ? [signal] : []);
-  const code = await waitWithTimeout(
-    deps.waitForCallbackCode({ expectedState: state, signal: abort, timeoutMs }),
-    timeoutMs,
-    "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.",
-    abort,
-  );
+  const listenerAbort = new AbortController();
+  const abort = AbortSignal.any(signal ? [signal, listenerAbort.signal] : [listenerAbort.signal]);
+  let code: string;
+  try {
+    // Bind before opening the browser: an existing browser session may redirect immediately.
+    const callback = deps.waitForCallbackCode({ expectedState: state, signal: abort, timeoutMs });
+    const waiting = waitWithTimeout(
+      callback,
+      timeoutMs,
+      "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.",
+      abort,
+    );
+    // Some platform launchers stay alive until the browser closes.
+    void Promise.resolve().then(() => deps.openBrowser?.(authorizeUrl)).catch(() => {
+      if (!abort.aborted) deps.onProgress?.("The browser could not be opened automatically; use the printed URL instead.");
+    });
+    code = await waiting;
+  } finally {
+    listenerAbort.abort();
+  }
   throwIfAborted(signal);
   if (pendingBrowserAttempt?.state === state) {
     pendingBrowserAttempt = undefined;
@@ -666,26 +674,21 @@ export function waitForLocalhostCallback(input: {
         if (url.pathname !== "/auth/callback") {
           return new Response("Not found", { status: 404 });
         }
+        if (url.searchParams.get("state") !== input.expectedState) {
+          return new Response("This callback belongs to another sign-in attempt. Use the newest browser tab; Schway is still waiting.", { status: 400 });
+        }
         const error = url.searchParams.get("error");
-        settle(() => {
-          if (error) {
-            reject(new Error(codexDeniedError(url.searchParams.get("error_description") ?? error)));
-            return;
-          }
-          const state = url.searchParams.get("state");
-          if (state !== input.expectedState) {
-            reject(new Error("The callback state does not match this login attempt. Restart /login codex and approve the newest browser tab."));
-            return;
-          }
-          const code = url.searchParams.get("code")?.trim();
-          if (!code) {
-            reject(new Error("The browser callback has no authorization code. Approve Schway, then retry /login codex."));
-            return;
-          }
-          resolve(code);
-        });
+        if (error) {
+          settle(() => reject(new Error(codexDeniedError(url.searchParams.get("error_description") ?? error))));
+          return new Response("ChatGPT sign-in was denied. Return to Schway to retry.", { status: 403 });
+        }
+        const code = url.searchParams.get("code")?.trim();
+        if (!code) {
+          return new Response("This callback has no authorization code. Complete sign-in in the newest browser tab; Schway is still waiting.", { status: 400 });
+        }
+        settle(() => resolve(code));
         return new Response(
-          "<!doctype html><title>Schway signed in</title><p>Schway received the ChatGPT sign-in. Return to the terminal.</p>",
+          "<!doctype html><title>Schway sign-in received</title><p>Schway received the ChatGPT sign-in callback. Return to the terminal to check that sign-in was saved.</p>",
           { headers: { "Content-Type": "text/html" } },
         );
       },
@@ -709,7 +712,8 @@ export function waitForLocalhostCallback(input: {
       clearTimeout(timer);
       input.signal.removeEventListener("abort", onAbort);
       try {
-        server.stop(true);
+        // Let the callback response finish before closing its socket.
+        void server.stop();
       } catch {
         // Listener cleanup is best-effort once the attempt has settled.
       }
@@ -853,21 +857,21 @@ export async function loginWithDeviceFlow(input: {
   return enriched;
 }
 
-/** Build the Responses request body from native conversation items with opaque metadata preserved. */
+/** Serialize supported subscription request fields with opaque conversation metadata preserved. */
 export function toCodexResponsesBody(
   request: ModelRequest,
   modelId: string,
-  maxTokens: number,
   capability?: ModelCapability,
 ): Record<string, unknown> {
   const reasoning = resolveCodexReasoning(request.thinking, modelId, capability);
+  // This endpoint rejects output-token caps, unlike the public Responses API.
   return {
     model: modelId,
     store: false,
+    stream: true,
     ...(reasoning !== undefined ? { reasoning } : {}),
     instructions: toCodexInstructions(request),
     input: toCodexInput(request.items),
-    max_output_tokens: maxTokens,
     include: ["reasoning.encrypted_content"],
     ...(request.tools && request.tools.length > 0 ? { tools: toCodexTools(request.tools) } : {}),
   };
@@ -929,6 +933,7 @@ export type CodexOutputItem = {
  */
 export function createCodexSubscriptionModel(options: {
   model?: string;
+  /** Accepted from shared model settings; the subscription endpoint does not support an output cap. */
   maxTokens?: number;
   thinking?: ThinkingLevel;
   /** Verified capabilities for this exact account and model. */
@@ -946,7 +951,6 @@ export function createCodexSubscriptionModel(options: {
   }) => void;
 }): Model {
   const modelId = options.model?.trim() || CODEX_SUBSCRIPTION_MODEL;
-  const maxTokens = options.maxTokens ?? CODEX_DEFAULT_MAX_OUTPUT_TOKENS;
   const secrets = [...(options.secrets ?? [])];
   const refresher = options.refresher ??
     (options.store ? createSubscriptionTokenRefresher({ store: options.store, fetch: options.fetch }) : undefined);
@@ -968,7 +972,6 @@ export function createCodexSubscriptionModel(options: {
       const body = toCodexResponsesBody(
         { ...request, thinking: request.thinking ?? options.thinking },
         modelId,
-        maxTokens,
         options.modelCapability,
       );
       options.onRequest?.({

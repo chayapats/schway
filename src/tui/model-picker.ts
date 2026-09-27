@@ -1,6 +1,7 @@
 import { listCatalog, lookupModel, type ModelCapability } from "../model/catalog.ts";
 import type { CompatibleProfile } from "../config/config.ts";
 import { parseModelArgs } from "./commands.ts";
+import type { ModelAccess, ModelPickerAccess } from "./model-access.ts";
 
 /** One selectable known or typed model with effective budgets and active state. */
 export interface ModelPickerEntry {
@@ -12,6 +13,8 @@ export interface ModelPickerEntry {
   custom: boolean;
   /** Mark non-subscription choices explicitly when a subscription is selected. */
   otherProvider?: boolean;
+  /** Describe configured access without exposing credentials or promising server acceptance. */
+  access?: ModelAccess;
   /** Verified subscription default, not a locally guessed effort. */
   defaultThinking?: string;
   /** Advertised account-specific thinking levels. */
@@ -30,7 +33,7 @@ export interface ModelPickerSnapshot {
 }
 
 /** Build matching catalog and profile choices plus an explicit typed choice with fallback budgets. */
-export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean }): ModelPickerEntry[] {
+export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; access?: ModelPickerAccess }): ModelPickerEntry[] {
   const normalized = query.toLowerCase();
   const entries: ModelPickerEntry[] = listCatalog().filter(entry => (!options?.subscriptionMode || entry.provider !== "openai") && `${entry.provider}/${entry.id}`.toLowerCase().includes(normalized)).map(entry => ({
     provider: entry.provider, modelId: entry.id, ...budgets(entry.provider, entry.id, limits), active: entry.provider === provider && entry.id === modelId && (options?.activeProfile === undefined), custom: false,
@@ -70,7 +73,19 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
-  if (!query) entries.sort((a, b) => Number(b.active) - Number(a.active));
+  for (const entry of entries) {
+    entry.access = entry.profile !== undefined ? options?.access?.profiles[entry.profile]
+      : options?.subscriptionMode && entry.provider === "openai" ? "ChatGPT" : options?.access?.providers[entry.provider];
+  }
+  const rank = (entry: ModelPickerEntry): number => {
+    if (entry.custom && !entry.active) return 5;
+    if (entry.access === "Login required") return 4;
+    if (entry.active) return 0;
+    if (options?.subscriptionMode && !entry.otherProvider) return 1;
+    if (!options?.subscriptionMode && entry.provider === provider && entry.profile === options?.activeProfile) return 1;
+    return entry.access !== undefined ? 2 : 3;
+  };
+  entries.sort((a, b) => rank(a) - rank(b));
   return entries;
 }
 

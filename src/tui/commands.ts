@@ -10,6 +10,8 @@ export type SlashCommandName =
   | "resume"
   | "model"
   | "thinking"
+  | "theme"
+  | "session"
   | "branch"
   | "changes"
   | "compact"
@@ -46,6 +48,8 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "resume":
     case "model":
     case "thinking":
+    case "theme":
+    case "session":
     case "branch":
     case "changes":
     case "compact":
@@ -71,6 +75,8 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/resume <id> [branch-id] - resume a saved session on its active branch or one stable branch ID",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
     "/thinking [off|low|medium|high|xhigh|max|ultra|reset] - show or switch reasoning level for future requests",
+    "/theme [auto|dark|light] - choose appearance for this session (default: auto)",
+    "/session - show session ID, conversation branch, model, and workspace roots",
     "/compact - summarize older turns to free context",
     "/branch list | tree | fork <entry-id> [name] | switch <branch-id> - browse the session tree or continue a saved conversation path",
     "/changes [status|diff [-- <path>]] - show Git branch, HEAD, and bounded working-tree changes",
@@ -86,7 +92,13 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/help - show this help",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
-    "Esc cancels the running turn. Ctrl+C quits when idle.",
+    "Esc cancels the running turn. With no selection, Ctrl+C cancels a turn or quits when idle.",
+    "Drag conversation text to copy it. Ctrl+C copies a selection. Click a web link to open your browser.",
+    "Enter sends. Shift+Enter or Ctrl+J inserts a newline. Up/Down recalls prompts at editor boundaries.",
+    "Ctrl+O expands/collapses tool output; click a tool heading to toggle one result.",
+    "PageUp/PageDown scroll. Ctrl+End returns to the latest message. Alt+M opens models without losing your draft.",
+    "Ctrl+L resets terminal output if stale text remains; your draft and conversation are preserved.",
+    "Type / for commands, Up/Down to select, Tab to complete, Esc to dismiss.",
     "In the branch tree: Up/Down browses, Enter switches or forks the highlight, Esc closes.",
   ].join("\n");
 }

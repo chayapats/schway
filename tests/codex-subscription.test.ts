@@ -631,6 +631,55 @@ test("locked subscription storage fails actionably instead of starting a browser
   expect(resolved).toMatchObject({ error: expect.stringContaining("secure store") });
 });
 
+test("subscription transport explicitly enables streaming to avoid the endpoint's HTTP 400", async () => {
+  let requests = 0;
+  const model = createCodexSubscriptionModel({
+    tokens: { accessToken: jwtWithAccount("acct-stream-required"), expiresAt: Date.now() + 3_600_000 },
+    fetch: async (_input, init) => {
+      requests++;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.stream !== true) {
+        return Response.json({ detail: "Stream must be set to true" }, { status: 400 });
+      }
+      return sseResponse(TEXT_EVENTS);
+    },
+  });
+  const events = await collect(model.stream(sampleRequest()));
+  expect(requests).toBe(1);
+  expect(events.filter(event => event.type === "text_delta")).toEqual([
+    { type: "text_delta", text: "Hello" },
+    { type: "text_delta", text: " world" },
+  ]);
+  expect(events.at(-1)?.type).toBe("message_complete");
+});
+
+test.each([undefined, 128, 16_384])("subscription requests omit unsupported output limits (configured: %s)", async maxTokens => {
+  let requests = 0;
+  const model = createCodexSubscriptionModel({
+    maxTokens,
+    tokens: { accessToken: jwtWithAccount("acct-output-limit"), expiresAt: Date.now() + 3_600_000 },
+    fetch: async (_input, init) => {
+      requests++;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (Object.hasOwn(body, "max_output_tokens")) {
+        return Response.json({ detail: "Unsupported parameter: max_output_tokens" }, { status: 400 });
+      }
+      expect(body.stream).toBe(true);
+      expect(body.store).toBe(false);
+      expect(body).not.toHaveProperty("max_tokens");
+      expect(body).not.toHaveProperty("max_completion_tokens");
+      return sseResponse(TEXT_EVENTS);
+    },
+  });
+  const events = await collect(model.stream(sampleRequest()));
+  expect(requests).toBe(1);
+  expect(events.filter(event => event.type === "text_delta")).toEqual([
+    { type: "text_delta", text: "Hello" },
+    { type: "text_delta", text: " world" },
+  ]);
+  expect(events.at(-1)?.type).toBe("message_complete");
+});
+
 test("subscription transport normalizes text, thinking, tool calls, usage, and opaque metadata", async () => {
   const seen: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
   const fetchStub: CodexFetchLike = async (input, init) => {
@@ -882,9 +931,9 @@ test("subscription reasoning requires account-verified levels while leaving defa
   expect(resolveCodexReasoning("medium", "gpt-5.4", capability)).toEqual({ effort: "medium", summary: "auto" });
   expect(resolveCodexReasoning("off", "gpt-5.4", capability)).toEqual({ effort: "none" });
   expect(() => resolveCodexReasoning("high", "gpt-5.4", capability)).toThrow(/subscription catalog/);
-  const body = toCodexResponsesBody(sampleRequest(), "gpt-5.4", 128);
+  const body = toCodexResponsesBody(sampleRequest(), "gpt-5.4");
   expect(body["model"]).toBe("gpt-5.4");
-  expect(body["max_output_tokens"]).toBe(128);
+  expect(body).not.toHaveProperty("max_output_tokens");
   expect(body["store"]).toBe(false);
   expect(codexRequestHeaders("token-1", "acct-9")).toEqual({
     Authorization: "Bearer token-1",

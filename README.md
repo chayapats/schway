@@ -55,10 +55,26 @@ headless runs never initialize it.
 /branch fork <entry-id> [name] - create and select a conversation branch
 /branch switch <branch-id> - continue an existing conversation branch
 /add-dir <directory> - attach project context while idle
-/model - show the current provider and model
-/help - show help
+/model - open the model/profile picker
+/theme [auto|dark|light] - change appearance for this session
+/session - show session, branch, and workspace details
+/help - show commands and keyboard shortcuts
 /quit - quit schway
 ```
+
+The conversation renders Markdown with readable code blocks and tables. Successful
+tool results collapse to a summary; **Ctrl+O** expands all results, and clicking a
+tool heading toggles that result. Errors keep a preview visible. **Enter** sends;
+**Shift+Enter** or **Ctrl+J** adds a newline. Pasted multiline text stays in the
+editor until submitted. **Up/Down** recalls prompts at the editor's first/last
+visual row. Type **/** for command suggestions and **Tab** to complete a selection.
+**Alt+M** opens model selection while keeping your draft. **PageUp/PageDown** scroll
+the conversation; **Ctrl+End** returns to the latest message.
+
+Appearance follows the terminal's light/dark mode when available. `/theme` overrides
+it for the current session; set `SCHWAY_THEME=dark` or `SCHWAY_THEME=light` for a
+launch preference. A nonempty `NO_COLOR` disables semantic colors. See the
+[TUI guide](docs/tui.md) for the palette and offline preview.
 
 Esc cancels the running turn through the shared AbortSignal path and returns to
 the input editor. Ctrl+C cancels when running and quits when idle. Quitting

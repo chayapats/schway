@@ -8,7 +8,7 @@ import {
   redactSecrets,
 } from "../auth/secrets.ts";
 import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
-import { bindCredentialInput, loadCredentialSafeTui } from "./credential-input.ts";
+import { loadCredentialSafeTui } from "./credential-input.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
 import {
@@ -37,7 +37,7 @@ import {
   type CliProvider,
   type CliThinking,
 } from "../cli/args.ts";
-import { TuiController, MAX_BRANCH_TREE_PREVIEW_ENTRIES } from "./controller.ts";
+import { TuiController } from "./controller.ts";
 import type { CodexLoginRunner } from "./controller.ts";
 import type { BranchTreeSnapshot } from "./controller.ts";
 import {
@@ -297,7 +297,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
             controller.notice(startupNotice);
           }
           controller.notice(
-            `Resumed session ${resumed.header.id} with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
+            `Resumed ${resumed.items.length} saved records. /session for details.`,
           );
         }
       } else {
@@ -336,7 +336,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           if (startupNotice) {
             controller.notice(startupNotice);
           }
-          controller.notice(`New session ${session.header.id}. Type /help for commands.`);
+          controller.notice("Session ready. Type / for commands or /session for details.");
         }
       }
     } catch (error) {
@@ -422,8 +422,8 @@ async function runTuiRenderer(options: {
   stderr: TuiWriter;
   diagnostics: DiagnosticSink;
 }): Promise<void> {
-  const { createCliRenderer, BoxRenderable, TextRenderable, InputRenderable, ScrollBoxRenderable } =
-    await loadCredentialSafeTui();
+  const { createCliRenderer } = await loadCredentialSafeTui();
+  const { createConversationView } = await import("./view.ts");
 
   const renderer = await createCliRenderer({
     // The app owns Ctrl+C (cancel turn when running, quit when idle) and
@@ -434,7 +434,7 @@ async function runTuiRenderer(options: {
   });
   let quit = false;
   let quitting = false;
-  let unbindCredentialInput: (() => void) | undefined;
+  let view: ReturnType<typeof createConversationView> | undefined;
   const onAbort = () => {
     quit = true;
   };
@@ -450,120 +450,11 @@ async function runTuiRenderer(options: {
 
   try {
     renderer.start();
-    const root = new BoxRenderable(renderer, {
-      flexDirection: "column",
-      flexGrow: 1,
-      width: "100%",
-      height: "100%",
-    });
-    renderer.root.add(root);
-
-    const header = new TextRenderable(renderer, { content: "" });
-    root.add(header);
-
-    const transcriptBox = new ScrollBoxRenderable(renderer, {
-      flexGrow: 1,
-      stickyScroll: true,
-      stickyStart: "bottom",
-    });
-    root.add(transcriptBox);
-    const transcriptContent = new BoxRenderable(renderer, {
-      flexDirection: "column",
-      flexGrow: 1,
-    });
-    transcriptBox.content.add(transcriptContent);
-
-    const statusLine = new TextRenderable(renderer, { content: "" });
-    root.add(statusLine);
-
-    const input = new InputRenderable(renderer, {
-      placeholder: "Type a prompt or /help (Esc cancels, Ctrl+C quits)",
-      flexGrow: 0,
-    });
-    root.add(input);
-    input.focus();
-    const credentialLine = new TextRenderable(renderer, { content: "" });
-    root.add(credentialLine);
-
-    let lastRendered = "";
-    let lastTreePreviewKey = "";
-    let lastTreePreviewText = "";
-    const render = () => {
-      const snapshot = options.controller.snapshot();
-      if (snapshot.credentialEntry) {
-        input.blur();
-        input.visible = false;
-        credentialLine.visible = true;
-        credentialLine.content = `API key for ${snapshot.credentialEntry.label}: ${snapshot.credentialEntry.masked} (Enter saves, Esc cancels)`;
-      } else {
-        credentialLine.visible = false;
-        input.visible = true;
-        input.focus();
-      }
-      const headerText = redactSecrets(`schway - ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}${snapshot.thinking ? ` (thinking ${snapshot.thinking})` : ""} - session ${snapshot.sessionId} [branch ${snapshot.branchId}] - ${snapshot.status}`, options.secrets);
-      try {
-        header.content = headerText;
-      } catch {
-        // Header updates are best-effort; transcript below is authoritative.
-      }
-      let lines = formatTranscript(snapshot.transcript.map((entry) => ({
-        kind: entry.kind,
-        text: entry.text,
-        toolName: entry.toolName,
-        toolStatus: entry.toolStatus,
-      })));
-      if (snapshot.branchTree) {
-        const tree = snapshot.branchTree;
-        const previewKey = `${tree.activeBranchId}|${tree.selectedId}|${tree.nodes.length}|${tree.totalNodeCount}`;
-        if (previewKey !== lastTreePreviewKey) {
-          lastTreePreviewKey = previewKey;
-          try {
-            const preview = options.controller.previewBranchTreeNode(tree.selectedId);
-            const tail = preview.slice(-MAX_BRANCH_TREE_PREVIEW_ENTRIES);
-            lastTreePreviewText = tail.length
-              ? tail.map(entry => formatTranscript([{ kind: entry.kind, text: entry.text, toolName: entry.toolName, toolStatus: entry.toolStatus }])).join("\n")
-              : "(empty preview - no durable records on this path yet)";
-          } catch (error) {
-            lastTreePreviewText = `Preview unavailable: ${messageOf(error)}`;
-          }
-        }
-        lines = `${formatBranchTree(tree)}\n\nPreview of ${tree.selectedId} (Enter switches or forks, Esc closes):\n${lastTreePreviewText}`;
-      } else if (snapshot.branchTreeError) {
-        lines += `\n\nBranch tree unavailable: ${snapshot.branchTreeError}`;
-      }
-      if (snapshot.modelPicker) {
-        const picker = snapshot.modelPicker;
-        lines += `\n\nSelect model or profile — search or type provider/model or profile:<name> (↑/↓, Enter, Esc)\nCurrent: ${snapshot.provider}/${snapshot.modelId}${snapshot.profile ? ` [profile ${snapshot.profile}]` : ""}\n`;
-        lines += picker.entries.map((entry, index) => `${index === picker.selectedIndex ? ">" : " "} ${entry.active ? "*" : " "} ${entry.profile !== undefined ? `profile:${entry.profile} (${entry.provider}/${entry.modelId})` : `${entry.provider}/${entry.modelId}`} (${entry.contextWindow} ctx, ${entry.maxOutput} output${entry.supportedThinking !== undefined ? `, thinking ${entry.supportedThinking.join("/") || "not advertised"}${entry.defaultThinking ? ` [default ${entry.defaultThinking}]` : ""}` : ""})${entry.custom ? " [typed ID]" : ""}${entry.otherProvider ? " [other provider]" : ""}`).join("\n");
-        if (picker.loading) lines += "\nLoading ChatGPT subscription models...";
-        else if (picker.error) lines += `\n${picker.error}`;
-        else if (!picker.entries.length) lines += "No matching models. Type provider/model-id for a custom ID or profile:<name>.";
-      }
-      lines = redactSecrets(lines, options.secrets);
-      const roots = options.controller.workspaceIdentity();
-      const rootStatus = roots ? ` | Primary: ${roots.root} | Attached: ${roots.extraRoots.join(", ") || "none"}` : "";
-      const branchStatus = ` | Branch: ${snapshot.branchId}`;
-      const statusText = redactSecrets(formatStatus(snapshot.status) + branchStatus + rootStatus, options.secrets);
-      const fingerprint = `${headerText}\n${lines}\n${statusText}\n${snapshot.credentialEntry?.masked ?? ""}\n${snapshot.branchTree?.selectedId ?? ""}\n${snapshot.branchTreeError ?? ""}`;
-      if (fingerprint === lastRendered) {
-        return;
-      }
-      lastRendered = fingerprint;
-      clearContainer(transcriptContent);
-      // Rebuild visible rows from the controller snapshot; sessions stay durable.
-      for (const line of lines.split("\n")) {
-        const row = new TextRenderable(renderer, { content: line });
-        transcriptContent.add(row);
-      }
-      try {
-        statusLine.content = statusText;
-      } catch {
-        // Ignore sticky render errors; next tick retries.
-      }
-    };
-
-    const submitPrompt = (value: string) => {
-      void dispatchEditorInput(value, options.controller, async (command) => {
+    view = createConversationView(renderer, {
+      controller: options.controller, home: options.home, workspaceRoot: options.workspaceRoot,
+      env: options.env, secrets: options.secrets, quit: finishQuit,
+      openUrl: openBrowserUrl,
+      submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command) => {
         await handleSlashCommand(command.name, command.args, {
           controller: options.controller,
           home: options.home,
@@ -579,90 +470,16 @@ async function runTuiRenderer(options: {
           finishQuit,
           stderr: options.stderr,
         }, command.raw);
-      }, () => { input.value = ""; }).then(render, (error: unknown) => {
-        options.controller.fail(messageOf(error));
-        render();
-      });
-    };
-
-    input.on("enter", () => {
-      const current = options.controller.snapshot();
-      if (current.branchTree) {
-        if (isBranchTreeCommandInput(input.value)) {
-          submitPrompt(input.value);
-          render();
-          return;
-        }
-        const name = input.value.trim() || undefined;
-        options.controller.confirmBranchTreeSelection(name);
-        if (name) input.value = "";
-        render();
-        return;
-      }
-      if (current.modelPicker) {
-        void options.controller.selectPickerModel().then(selected => { if (selected) input.value = ""; render(); });
-        return;
-      }
-      const value = input.value;
-      submitPrompt(value);
-      render();
+      }, accepted),
     });
-    input.on("input", () => {
-      if (options.controller.snapshot().branchTree) { render(); return; }
-      options.controller.searchModels(input.value); render();
-    });
-    unbindCredentialInput = bindCredentialInput(renderer.keyInput, options.controller, render);
-
-    renderer.keyInput.on("keypress", (key) => {
-      const name = key.name.toLowerCase();
-      const treeOpen = options.controller.snapshot().branchTree !== undefined;
-      if (treeOpen && (name === "up" || name === "down")) {
-        options.controller.moveBranchTreeSelection(name === "up" ? -1 : 1);
-        render();
-        return;
-      }
-      if (options.controller.snapshot().modelPicker && (name === "up" || name === "down")) {
-        options.controller.moveModelPicker(name === "up" ? -1 : 1);
-        render();
-        return;
-      }
-      if (key.ctrl && name === "c") {
-        if (options.controller.running) {
-          options.controller.cancel();
-        } else {
-          finishQuit();
-        }
-        return;
-      }
-      if (key.ctrl && name === "d") {
-        finishQuit();
-        return;
-      }
-      if (name === "escape") {
-        if (options.controller.running) {
-          options.controller.cancel();
-        } else if (options.controller.snapshot().branchTree) {
-          options.controller.closeBranchTree();
-          input.value = "";
-          render();
-        } else if (options.controller.snapshot().modelPicker) {
-          options.controller.closeModelPicker();
-          input.value = "";
-          render();
-        }
-      }
-    });
-
-    render();
     while (!quit && !quitting) {
-      render();
-      if (options.signal?.aborted) {
-        break;
-      }
+      view.refresh();
+      if (options.signal?.aborted) break;
       await Bun.sleep(50);
     }
   } finally {
-    unbindCredentialInput?.();
+    try { view?.destroy(); }
+    catch { options.stderr.write("Could not release a TUI widget; restoring the terminal.\n"); }
     options.signal?.removeEventListener("abort", onAbort);
     if (options.controller.running) options.diagnostics.record("tui", "shutdown", {
       state: "cancellation_requested", reason: options.signal?.aborted ? "signal" : quit || quitting ? "quit" : "renderer_cleanup",
@@ -718,7 +535,7 @@ async function handleSlashCommand(
       if (!await ctx.controller.switchSession(session, session.header.id, { workspace, contextManager: manager })) return;
       ctx.skillScope.manager = ctx.controller.activeContextManager();
       ctx.skillScope.workspaceRoot = workspace.root;
-      ctx.controller.notice(`New session ${session.header.id}. Type /help for commands.`);
+      ctx.controller.notice("New session. Type / for commands or /session for details.");
       return;
     }
     case "sessions": {
@@ -749,7 +566,7 @@ async function handleSlashCommand(
         ctx.skillScope.workspaceRoot = workspace.root;
         for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
         ctx.controller.notice(
-          `Resumed session ${resumed.header.id} [branch ${resumed.activeBranchId}] with ${resumed.items.length} saved records. Old tool effects were not replayed.`,
+          `Resumed ${resumed.items.length} saved records. /session for details.`,
         );
       } catch (error) {
         ctx.controller.fail(messageOf(error));
@@ -886,16 +703,6 @@ function contextManagerOptions(home: string, explicitContextWindow?: number): { 
   return explicitContextWindow !== undefined ? { home, contextWindow: explicitContextWindow } : { home };
 }
 
-/** Remove all children from a container renderable. */
-function clearContainer(container: {
-  getChildren(): readonly unknown[];
-  remove(child: never): void;
-}): void {
-  for (const child of [...container.getChildren()]) {
-    container.remove(child as never);
-  }
-}
-
 /** Report whether branch-tree input must take the slash-command path instead of becoming a fork name. */
 export function isBranchTreeCommandInput(value: string): boolean {
   return value.trim().startsWith("/");
@@ -919,58 +726,6 @@ export function formatBranchTree(tree: BranchTreeSnapshot): string {
   ];
   if (tree.truncated) lines.push(`… truncated to ${tree.nodes.length} of ${tree.totalNodeCount} nodes. Use /branch list for IDs.`);
   return lines.join("\n");
-}
-
-/** Format transcript rows with tool state and bounded text for terminal display. */
-function formatTranscript(
-  entries: ReadonlyArray<{
-    kind: string;
-    text: string;
-    toolName?: string;
-    toolStatus?: string;
-  }>,
-): string {
-  const lines: string[] = [];
-  for (const entry of entries) {
-    if (entry.kind === "user") {
-      lines.push(`› ${entry.text}`);
-    } else if (entry.kind === "assistant") {
-      lines.push(entry.text);
-    } else if (entry.kind === "tool") {
-      const state =
-        entry.toolStatus === "running"
-          ? "running"
-          : entry.toolStatus === "success"
-            ? "done"
-            : entry.toolStatus === "cancelled"
-              ? "cancelled"
-              : "error";
-      // Completed entry text is already bounded; only live output gets a preview
-      // so a finished edit diff never loses its added lines to truncation.
-      const visibleText =
-        entry.toolStatus === "running"
-          ? entry.text.split("\n").slice(0, 12).join("\n")
-          : entry.text;
-      lines.push(`⚙ ${entry.toolName ?? "tool"} [${state}]\n${visibleText}`);
-    } else if (entry.kind === "error") {
-      lines.push(`! ${entry.text}`);
-    } else {
-      lines.push(`* ${entry.text}`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n").trimEnd();
-}
-
-/** Format the running/idle/error status line. */
-function formatStatus(status: string): string {
-  if (status === "running") {
-    return "running… Esc cancels the turn.";
-  }
-  if (status === "error") {
-    return "error. Fix the issue and keep prompting, or /quit.";
-  }
-  return "idle. /help for commands.";
 }
 
 /** True when the user passed compatible connection flags on the CLI. */
@@ -1033,7 +788,7 @@ export function createCodexLoginRunner(options: {
           signal,
           deps: {
             fetch: options.fetch,
-            openBrowser: options.openBrowser ?? openSubscriptionAuthorizeUrl,
+            openBrowser: options.openBrowser ?? openBrowserUrl,
             waitForCallbackCode: (attempt) => codex.waitForLocalhostCallback(attempt),
             onProgress,
           },
@@ -1063,8 +818,8 @@ export function subscriptionAuthorizeLauncher(platform: string, url: string): { 
   return { command: "xdg-open", args: [url] };
 }
 
-/** Open the provider authorization URL with the platform launcher without blocking the login attempt. */
-async function openSubscriptionAuthorizeUrl(url: string): Promise<void> {
+/** Open a browser URL with the platform launcher and report launch failures. */
+async function openBrowserUrl(url: string): Promise<void> {
   const { command, args } = subscriptionAuthorizeLauncher(process.platform, url);
   const child = Bun.spawn([command, ...args], { stdout: "ignore", stderr: "ignore" });
   await child.exited;

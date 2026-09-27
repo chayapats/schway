@@ -539,6 +539,8 @@ test("account catalog selection reaches the real Schway loop and Codex request b
       expect(String(url)).toBe(CODEX_RESPONSES_URL);
       const body = JSON.parse(String(init?.body));
       requests.push({ url: String(url), model: body.model, effort: body.reasoning?.effort });
+      if (body.stream !== true) return Response.json({ detail: "Stream must be set to true" }, { status: 400 });
+      if (Object.hasOwn(body, "max_output_tokens")) return Response.json({ detail: "Unsupported parameter: max_output_tokens" }, { status: 400 });
       return new Response([
         { type: "response.created", response: { id: "r", status: "in_progress" } },
         { type: "response.output_item.added", output_index: 0, item: { type: "message" } },

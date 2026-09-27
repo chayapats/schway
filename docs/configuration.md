@@ -75,6 +75,11 @@ See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `s
 
 ## ChatGPT subscription (Codex OAuth)
 
+The subscription transport does not send an output-token cap: its endpoint rejects
+`max_output_tokens`. The `maxOutput` setting remains visible in configuration but
+does not limit subscription responses. API-key transport still sends its output
+limit.
+
 Sign in with a ChatGPT Plus/Pro subscription and run the same Schway-owned coding loop: Schway keeps its tools, context, sessions, retries, and compaction, while the isolated Codex adapter only translates the model transport (`POST https://chatgpt.com/backend-api/codex/responses` with a Bearer subscription token). There is no delegated Codex agent run, no sandbox delegation, and transport retries are disabled. Account prerequisites follow the provider docs: ChatGPT Plus/Pro with workspace membership/provisioning plus seat/role entitlements; MFA rules for Codex cloud; device-code beta enabled for headless login; Enterprise token permission for automation. Schway never reads another CLI's credential cache (`~/.codex/auth.json` or OS-store copies owned by other tools); you sign in directly to Schway.
 
 Choose the credential explicitly so billing never changes silently:
@@ -105,11 +110,24 @@ After a successful explicit `/login codex`, Schway discovers this account's visi
 
 `/login codex` opens the provider browser flow with a localhost callback and per-attempt PKCE/state; denial, expiry, timeout, and Esc cancellation settle without leaked listeners. On machines where the browser cannot reach the loopback callback, `/login codex --device` prints a user code to approve at `https://auth.openai.com/codex/device` (beta, 900 s timeout), and `--code` exchanges a manually pasted redirect URL or code. Tokens (short-lived access plus `offline_access` refresh) live only at the subscription secure-store identity with serialized pre-expiry refresh; `/logout codex` removes exactly that identity. Resume rebuilds the native conversation under the currently selected auth identity without replaying tools, and prior provider metadata round-trips across auth switches.
 
+The login survives restarts, but the provider selected by `/login codex` applies only to the current session. To use the saved subscription by default on future launches, save both settings once:
+
+```text
+/config set provider openai --scope user
+/config set openaiAuth codex --scope user
+```
+
+Without a saved provider preference, Schway starts with its built-in Anthropic provider even when a Codex login exists. You can also use `schway --provider openai --openai-auth codex` without repeating login. Project settings and CLI flags still override user settings.
+
+`/model` checks configured credentials whenever it opens. It groups the current model and active-auth choices first, followed by other configured providers/profiles, then choices that need login. Search keeps the same ordering. Rows show `ChatGPT`, `API key`, `No key required`, or `Login required`; these describe credential configuration, not a guarantee that a remote service will accept a key. In automatic auth mode, a saved Codex login exposes that account's models even when the session started with another provider. Selecting one activates Codex for the session. Explicit API-key preferences and runtime/environment key precedence remain in effect.
+
+The browser returning to `http://localhost:1455/auth/callback` is expected. Schway starts that listener before launching the browser and finishes sending the callback page before closing the connection. The page confirms receipt; the terminal reports whether the tokens were saved. A callback from an older browser tab returns an error without cancelling the current attempt.
+
 Runnable examples (deterministic; no paid APIs or live subscription calls):
 
 ```sh
 # Scripted login/refresh/selection/resume/redaction coverage plus a real tool round trip
-bun test tests/codex-subscription.test.ts
+bun test tests/codex-subscription.test.ts tests/codex-callback.test.ts
 # Deterministic headless behavior without credentials: fails actionably, starts no browser
 schway --provider openai --openai-auth codex -p 'hello'
 # Live-equivalent API-key path (needs a key; shows validation, not fixtures)
