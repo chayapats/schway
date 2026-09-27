@@ -274,7 +274,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       completionIndex = Math.min(completionIndex, Math.max(0, available.length - 1));
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || available.length > 0;
       const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
-      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? 3 : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
+      const deviceApproval = snapshot.loginApproval ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
+      const approvalRows = deviceApproval
+        ? (renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval[2]!)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval[1]!)/(width - 2))
+        : 2;
+      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
       const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
@@ -292,12 +296,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             textRow(picker, fitLine(`${index === snapshot.loginChooser!.selectedIndex ? "›" : " "} ${choice}`, width - 2), index === snapshot.loginChooser!.selectedIndex ? theme.accent : theme.text);
           });
         } else if (snapshot.loginApproval) {
-          textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
-          const device = /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval);
-          if (device) {
-            textRow(picker, fitLine(safe(device[2]!), width - 2), theme.accent);
-            textRow(picker, fitLine(safe(device[1]!), width - 2), theme.text);
-          } else textRow(picker, fitLine(safe(snapshot.loginApproval), width - 2), theme.text);
+          if (renderer.height >= 12) textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
+          if (deviceApproval) {
+            textRow(picker, deviceApproval[2]!, theme.accent).wrapMode = "char";
+            textRow(picker, deviceApproval[1]!, theme.text).wrapMode = "char";
+          } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
           textRow(picker, fitLine("Choose model · ↑/↓ select · Enter apply · Esc back", width - 2), theme.accent);

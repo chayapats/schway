@@ -278,7 +278,7 @@ function isPickerProvider(value: string): value is ModelPickerProvider {
 
 /** Usage guidance for credential commands, keeping API keys out of slash arguments. */
 export const LOGIN_USAGE =
-  "Usage: /login <anthropic|openai|openai-compatible> or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
+  "Usage: /login to choose a method, /login <anthropic|openai|openai-compatible>, or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
 
 /** Requested credential action from /login or /logout arguments. */
 export type LoginTarget =

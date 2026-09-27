@@ -156,6 +156,8 @@ const LOGIN_CHOICES = [
   { label: "Anthropic API key", action: { kind: "api-key", provider: "anthropic" } },
   { label: "OpenAI-compatible API key", action: { kind: "api-key", provider: "openai-compatible" } },
 ] as const;
+const BROWSER_LOGIN_INDEX = LOGIN_CHOICES.findIndex(choice => choice.action.kind === "codex" && !choice.action.device);
+const DEVICE_LOGIN_INDEX = LOGIN_CHOICES.findIndex(choice => choice.action.kind === "codex" && choice.action.device);
 
 /** Bound on displayed tool-result characters; session data stays complete. */
 export const MAX_TOOL_DISPLAY_CHARS = 2000;
@@ -765,7 +767,7 @@ export class TuiController {
             if (message.startsWith("Enter this code at ")) this.loginApproval = message;
             else {
               this.notice(redactSecrets(message, this.secrets));
-              if (message.startsWith("The browser could not be opened automatically")) this.loginChooserIndex = 1;
+              if (message.startsWith("The browser could not be opened automatically")) this.loginChooserIndex = DEVICE_LOGIN_INDEX;
             }
           },
         });
@@ -773,7 +775,9 @@ export class TuiController {
         if (this.disposed || this.activeAbort !== abort) return false;
         if (!result.ok) {
           this.fail(result.message);
-          this.loginChooserIndex = 1;
+          if (!result.message.startsWith("Cannot save credential")) {
+            this.loginChooserIndex = /callback|localhost|browser/i.test(result.message) ? DEVICE_LOGIN_INDEX : BROWSER_LOGIN_INDEX;
+          }
           return false;
         }
         this.notice(redactSecrets(result.status, this.secrets));
@@ -811,7 +815,7 @@ export class TuiController {
           this.status = "idle";
         } else {
           this.fail("ChatGPT sign-in could not complete. Retry from the sign-in chooser or check secure-store access.");
-          this.loginChooserIndex = 1;
+          this.loginChooserIndex = BROWSER_LOGIN_INDEX;
         }
         return false;
       }

@@ -346,6 +346,11 @@ test("device approval code remains visible on a narrow terminal without entering
   const pending = ui.controller.login("codex --device");
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("ABCD-1234");
+  expect(ui.captureCharFrame().replace(/\s+/g, "")).toContain("https://auth.openai.com/codex/device");
+  ui.resize(24, 8);
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("ABCD-1234");
+  expect(ui.captureCharFrame().replace(/\s+/g, "")).toContain("https://auth.openai.com/codex/device");
   expect(JSON.stringify(ui.controller.snapshot().transcript)).not.toContain("ABCD-1234");
   ui.mockInput.pressEscape();
   expect(await pending).toBe(false);

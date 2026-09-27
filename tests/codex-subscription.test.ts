@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { TextareaRenderable } from "@opentui/core";
+import { createTestRenderer } from "@opentui/core/testing";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { STABLE_SYSTEM_PROMPT } from "../src/context/prompt.ts";
@@ -10,6 +12,7 @@ import {
 import {
   codexSubscriptionIdentity,
   credentialIdentity,
+  type CredentialStore,
 } from "../src/auth/store.ts";
 import {
   CODEX_ACCOUNT_CLAIM,
@@ -47,6 +50,7 @@ import {
 } from "../src/model/providers/codex-subscription.ts";
 import { createCodexLoginRunner, loadInteractiveModel, subscriptionAuthorizeLauncher } from "../src/tui/app.ts";
 import { TuiController } from "../src/tui/controller.ts";
+import { createConversationView } from "../src/tui/view.ts";
 import { parseLoginTarget } from "../src/tui/commands.ts";
 import { createSession } from "../src/session/session.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -1121,7 +1125,13 @@ test("controller browser callback saves a credential, discovers account models a
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
-    const store = fakeCredentialStore();
+    const values = new Map<string, string>();
+    const openStore = (): CredentialStore => ({
+      async get(identity) { return values.get(identity.account) ?? null; },
+      async set(identity, value) { values.set(identity.account, value); },
+      async delete(identity) { return values.delete(identity.account); },
+    });
+    const store = openStore();
     const secrets: string[] = [];
     let callbackStatus = 0;
     const browserDone = Promise.withResolvers<void>();
@@ -1147,12 +1157,28 @@ test("controller browser callback saves a credential, discovers account models a
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model,
         responses: [() => { inferences++; return { text: "unused" }; }] }), contextManager: createContextManager(workspace) }),
     });
+    const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
+    const view = createConversationView(terminal.renderer, {
+      controller, home: join(root, "home"), workspaceRoot: root, env: {}, secrets,
+      submit: async () => {}, quit: () => {},
+    });
     try {
-      expect(await controller.login("codex")).toBe(true);
+      const composer = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
+      await terminal.mockInput.pasteBracketedText("finish the prepared task\nsecond line");
+      composer.cursorOffset = 7;
+      expect(controller.openLoginChooser()).toBe(true);
+      view.refresh();
+      await terminal.flush();
+      expect(await controller.selectLoginChoice()).toBe(true);
       await browserDone.promise;
+      view.refresh();
+      await terminal.flush();
       expect(callbackStatus).toBe(200);
-      expect((await loadSubscriptionTokens(store))?.accountId).toBe("acct-browser-journey");
+      expect((await loadSubscriptionTokens(openStore()))?.accountId).toBe("acct-browser-journey");
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "account-model" });
+      expect(composer.plainText).toBe("finish the prepared task\nsecond line");
+      expect(composer.cursorOffset).toBe(7);
+      expect(controller.snapshot().transcript.filter(entry => entry.kind === "user")).toHaveLength(0);
       const text = JSON.stringify(controller.snapshot());
       expect(text).toContain("Approval received");
       expect(text).toContain("credential saved");
@@ -1161,7 +1187,7 @@ test("controller browser callback saves a credential, discovers account models a
       expect(text).not.toContain("browser-journey-secret");
       expect(text).not.toContain("refresh-journey-secret");
       expect(inferences).toBe(0);
-    } finally { controller.dispose(); clearPendingBrowserAttempt(); }
+    } finally { view.destroy(); terminal.renderer.destroy(); controller.dispose(); clearPendingBrowserAttempt(); }
   });
 });
 
