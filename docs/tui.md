@@ -89,6 +89,19 @@ not restore the prompt as a new draft. Prompt recall records accepted ordinary
 prompts only. Long commands release the editor when their preparation succeeds
 and execution starts; their later completion leaves any newer draft intact.
 
+When a provider step fails, the error row gives the available recovery keys for
+that operation. Alt+L opens sign-in after an authentication failure, Alt+M opens
+model selection after an unavailable-model failure, Ctrl+I shows optional
+redacted diagnostics, and Esc dismisses the controls while keeping the editor.
+For an accepted turn, Ctrl+R continues from saved conversation progress when
+offered. It does not submit the original user message again or rerun saved tool
+calls. Authentication and model failures offer continuation only after their
+repair activates a usable route. A session-write failure disables continuation:
+visible output remains available, but a tool result may not have been saved.
+Recovery controls expire when the active session, branch, or model identity
+changes. Provider retries are limited to a single model step; Schway never
+automatically retries the whole user task.
+
 Selection is copied through the terminal's OSC 52 clipboard protocol. This works
 with Kitty's clipboard support, including text selected from scrolled output.
 Selecting in the editor does not automatically overwrite the clipboard. Ctrl+C

@@ -177,7 +177,9 @@ test("provider failures appear as actionable errors with error status", async ()
     await controller.submit("hi");
     const snapshot = controller.snapshot();
     expect(snapshot.status).toBe("error");
-    expect(snapshot.transcript.some((entry) => entry.kind === "error" && entry.text.includes("boom"))).toBe(true);
+    expect(snapshot.transcript.some((entry) => entry.kind === "error" && entry.text.includes("provider could not finish"))).toBe(true);
+    expect(controller.inspectRecovery()).toBe(true);
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("boom");
   });
 });
 
@@ -204,7 +206,7 @@ test("missing credentials explain the interactive login path", async () => {
     snapshot = controller.snapshot();
     const lastError = [...snapshot.transcript].reverse().find((entry) => entry.kind === "error");
     expect(lastError?.text).toContain("Missing credentials");
-    expect(lastError?.text).toContain("/login <provider>");
+    expect(lastError?.text).toContain("Alt+L connect");
     expect(snapshot.status).toBe("error");
   });
 });

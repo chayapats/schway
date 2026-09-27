@@ -62,6 +62,38 @@ async function settle(ui: TestRendererSetup & { view: ReturnType<typeof createCo
   await ui.flush();
 }
 
+test("rejected draft survives connect cancellation and recovery keys run only the saved turn", async () => {
+  const missing = await setup(80, 24, {}, undefined, { model: undefined });
+  await missing.mockInput.pasteBracketedText("unsent task");
+  missing.mockInput.pressEnter();
+  await settle(missing);
+  expect(missing.editor.plainText).toBe("unsent task");
+  expect(missing.session.items).toHaveLength(0);
+  expect(missing.controller.snapshot().recovery?.actions).toContain("connect");
+  missing.mockInput.pressKey("l", { meta: true });
+  await settle(missing);
+  expect(missing.controller.snapshot().loginChooser).toBeDefined();
+  missing.mockInput.pressEscape();
+  await settle(missing);
+  expect(missing.controller.snapshot().loginChooser).toBeUndefined();
+  expect(missing.editor.plainText).toBe("unsent task");
+
+  const accepted = await setup(80, 24, {}, undefined, { model: createScriptedModel({ responses: [
+    { error: "offline", code: "ENETUNREACH" }, { error: "offline", code: "ENETUNREACH" },
+    { error: "offline", code: "ENETUNREACH" }, { text: "continued once" },
+  ] }), agentClock: { now: () => 0, sleep: async () => {} } });
+  await accepted.mockInput.pasteBracketedText("accepted task");
+  accepted.mockInput.pressEnter();
+  await accepted.waitFor(() => !accepted.controller.running);
+  await settle(accepted);
+  expect(accepted.controller.snapshot().recovery?.actions).toContain("continue");
+  accepted.mockInput.pressKey("r", { ctrl: true });
+  await accepted.waitFor(() => !accepted.controller.running);
+  await settle(accepted);
+  expect(accepted.session.items.filter(item => item.type === "user")).toHaveLength(1);
+  expect(accepted.captureCharFrame()).toContain("continued once");
+});
+
 test("multiline paste and Ctrl+J submit one prompt; Markdown renders with stable message objects", async () => {
   const ui = await setup();
   await ui.mockInput.pasteBracketedText("ช่วยแก้ไข\nบรรทัดที่สอง");

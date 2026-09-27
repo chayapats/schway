@@ -227,12 +227,13 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         return;
       }
       if (outcome.kind === "error") {
-        yield { type: "error", message: outcome.message, origin: "model" };
+        yield classifiedError(outcome.message, "model", outcome.category);
         yield { type: "agent.finished", reason: "error" };
         return;
       }
 
-      options.session.append(outcome.message);
+      try { options.session.append(outcome.message); }
+      catch (error) { yield classifiedError(errorMessage(error), "harness", "session-write"); yield { type: "agent.finished", reason: "error" }; return; }
       yield { type: "model.finished" };
 
       const calls = toolCallsOf(outcome.message);
@@ -251,7 +252,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         toolHooks,
       });
       for (const item of executed) {
-        options.session.append(item.result);
+        try { options.session.append(item.result); }
+        catch (error) { yield classifiedError(errorMessage(error), "harness", "session-write"); yield { type: "agent.finished", reason: "error" }; return; }
       }
 
       if (signal?.aborted || toolHooks?.signal.aborted) {
@@ -296,4 +298,11 @@ function toModelTools(registry: ToolRegistry | undefined): ModelTool[] | undefin
 /** Normalize thrown values into a printable error string. */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Attach local recovery metadata without changing the serialized runtime event contract. */
+function classifiedError(message: string, origin: "model" | "harness", category?: Extract<RuntimeEvent, { type: "error" }>["category"]): RuntimeEvent {
+  const event: RuntimeEvent = { type: "error", message, origin };
+  if (category) Object.defineProperty(event, "category", { value: category, enumerable: false });
+  return event;
 }

@@ -416,6 +416,23 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
+    if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser) {
+      if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("continue")) {
+        void controller.continueRecovery().then(refresh, fail); handled(); return;
+      }
+      if (key.ctrl && name === "i" && snapshot.recovery.actions.includes("details")) {
+        controller.inspectRecovery(); handled(); return;
+      }
+      if ((key.meta || key.option) && name === "l" && snapshot.recovery.actions.includes("connect")) {
+        controller.openRecoveryRepair("connect"); handled(); return;
+      }
+      if ((key.meta || key.option) && name === "m" && snapshot.recovery.actions.includes("choose-model")) {
+        controller.openRecoveryRepair("choose-model"); handled(); return;
+      }
+      if (name === "escape" && snapshot.recovery.actions.includes("keep-editing")) {
+        controller.keepEditingRecovery(); handled(); return;
+      }
+    }
     if (key.ctrl && name === "c" && copySelection()) {
       renderer.clearSelection();
       handled(); return;

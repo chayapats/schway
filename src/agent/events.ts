@@ -56,4 +56,4 @@ export type RuntimeEvent =
       status: "failed" | "noop";
       message?: string;
     }
-  | { type: "error"; message: string; origin?: "model" | "harness" };
+  | { type: "error"; message: string; origin?: "model" | "harness"; category?: "auth" | "model" | "offline" | "rate-limit" | "provider" | "session-write" };
