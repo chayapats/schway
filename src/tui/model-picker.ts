@@ -64,7 +64,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       return row;
     });
   for (const id of options?.subscriptionModels ?? []) {
-    if (!matches("openai", id, "ChatGPT subscription")) continue;
+    if (!matches("openai", id, "ChatGPT subscription connect")) continue;
     const capability = options?.subscriptionCapabilities?.find(entry => entry.id === id);
     entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "codex", modelId: id }), provider: "openai", modelId: id, authRoute: "codex", verifiedCatalog: true,
       ...budgets("openai", id, { contextWindow: limits.contextWindow ?? capability?.contextWindow, maxOutput: limits.maxOutput ?? capability?.maxOutput }), active: provider === "openai" && modelId === id && activeRoute === "codex", custom: false,

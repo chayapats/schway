@@ -222,12 +222,12 @@ test("ChatGPT connection returns to account discovery without silently activatin
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("ChatGPT");
+      controller.searchModels("connect");
       expect(controller.snapshot().modelPicker?.entries[0]).toMatchObject({ connect: true, authRoute: "codex" });
       expect(await controller.selectPickerModel()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       expect(controller.snapshot().provider).toBe("anthropic");
-      expect(controller.snapshot().modelPicker?.query).toBe("ChatGPT");
+      expect(controller.snapshot().modelPicker?.query).toBe("connect");
       expect(controller.snapshot().modelPicker?.entries.some(entry => entry.modelId === "account-model" && entry.verifiedCatalog)).toBe(true);
       expect(outcomes).toEqual([]);
       expect(await controller.selectPickerModel()).toBe(true);
