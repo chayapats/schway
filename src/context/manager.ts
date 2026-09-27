@@ -77,7 +77,7 @@ export interface ContextManager {
   prepare(
     session: Session,
     model?: Model,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; onCompactionStart?: () => void },
   ): Promise<PreparedContext>;
   /** Summarize older turns and append a record, returning null for no boundary or an empty, rejected, or pre-aborted summary. */
   compact(
@@ -177,6 +177,7 @@ export function createContextManager(
           items,
         });
         if (estimated >= window * COMPACTION_PRESSURE_THRESHOLD) {
+          prepareOptions.onCompactionStart?.();
           const record = await compactInternal(session, model, {
             reason: "pressure",
             signal: prepareOptions.signal,

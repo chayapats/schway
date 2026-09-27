@@ -5,6 +5,14 @@ context sits at the top; model, reasoning preference, and execution state sit be
 the editor. `/session` reveals session IDs, the conversation branch, and attached
 workspace paths. A conversation branch is distinct from a Git branch.
 
+The status line follows the active operation's runtime events: preparing context,
+waiting for the provider, streaming a response, running tools, waiting to retry,
+compacting, and stopping. It shows elapsed time; provider retry countdowns use the
+reported delay and attempt. Quiet providers and tools remain in their current phase
+with elapsed time, without an estimated percentage or a hang warning. Parallel tools
+share a compact count and name summary. At narrow widths the phase and `Esc stops`
+take priority in the footer.
+
 ## Color roles
 
 | Role | Dark | Light | Use |
@@ -56,6 +64,13 @@ your reading position; Ctrl+End resumes following. Wheel input over non-scrollab
 chrome, including the footer, also scrolls the conversation. The multiline editor
 retains its own scrolling. The transcript has a fixed-width viewport so starting
 to overflow does not introduce a scrollbar and rewrap earlier messages.
+
+After an accepted prompt clears, you can type or paste a future draft during the
+current turn. Enter does not queue it while work is active; the draft stays in the
+editor until you send it after settlement. Pressing Esc or Ctrl+C acknowledges
+cancellation immediately as “Stopping.” Running tools and other owned work may
+still need to settle. Completed output and tool results remain visible; “Ready”
+returns only after settlement, and cancellation does not undo completed effects.
 
 Enter releases a prompt only after its user record is saved. Missing credentials,
 busy operations, rejected commands, and session write failures keep the text and
@@ -124,6 +139,7 @@ and home directory, removed on exit. No model API or stored credentials are used
 
 ```sh
 bun test tests/tui-view.test.ts
+bun test tests/tui-activity.test.ts
 bun run typecheck
 ```
 
