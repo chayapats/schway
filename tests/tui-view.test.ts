@@ -189,7 +189,17 @@ test("failed session append retains the editor and never starts the model", asyn
   expect(ui.editor.focused).toBe(true);
   expect(ui.session.items).toHaveLength(0);
   expect(requests).toBe(0);
-  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Could not save your prompt");
+  const guidance = ui.controller.snapshot().transcript.at(-1)?.text ?? "";
+  expect(guidance).toContain("Could not save your prompt");
+  expect(guidance).toContain("draft is still in the editor");
+  expect(guidance).toContain("Open a new or repaired session");
+  expect(guidance).not.toContain("send the draft again");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("  เก็บข้อความ\nและบรรทัดนี้  ");
+  expect(ui.session.items).toHaveLength(0);
+  expect(requests).toBe(0);
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("cannot safely save another turn");
 });
 
 test("invalid local command remains editable after Enter", async () => {

@@ -2264,7 +2264,7 @@ export class TuiController {
         content: [{ type: "text", text }],
       });
     } catch {
-      this.offerRecovery("session-write", false, "Could not save your prompt. Check session storage, then send the draft again. Nothing was sent.");
+      this.offerRecovery("session-write", false, "Could not save your prompt. Your draft is still in the editor and nothing was sent. Open a new or repaired session before sending it.");
       return false;
     }
     this.recovery = undefined;
