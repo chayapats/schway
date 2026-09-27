@@ -1,6 +1,6 @@
 import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
-import type { ModelCapability } from "../model/catalog.ts";
+import { getThinkingSupport, type ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
@@ -191,6 +191,7 @@ export class ConfigEditor {
     return this.prepareChanges("session", [
       { key: "provider", value: "openai" }, { key: "openaiAuth", value: "api-key" },
       { key: "model", value: model }, { key: "profile", value: null },
+      ...(this.current.thinking && !getThinkingSupport("openai", model).supported.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }
 

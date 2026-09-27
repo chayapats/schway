@@ -52,6 +52,39 @@ test("resuming another workspace uses its configured route after an API-key choi
   });
 });
 
+test("an API-key row clears subscription-only thinking without blocking activation", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", openaiAuth: "codex", model: "gpt-5.4", thinking: "xhigh" } });
+    editor.setModelCapabilities([{ id: "gpt-5.4", supportedThinking: ["xhigh"] }]);
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "account-token");
+    await store.set(credentialIdentity({ provider: "openai" }), "api-secret");
+    const staged: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "thinking-route", workspace,
+      provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "codex-subscription", id: "gpt-5.4" }),
+      contextManager: createContextManager(workspace), configEditor: editor,
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => [{ id: "gpt-5.4", supportedThinking: ["xhigh"] }] },
+      stageSettings: async settings => {
+        staged.push(`${settings.openaiAuth}:${settings.thinking ?? "unset"}`);
+        return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+    });
+    try {
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      const picker = controller.snapshot().modelPicker!;
+      const index = picker.entries.findIndex(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-5.4");
+      expect(index).toBeGreaterThanOrEqual(0);
+      controller.moveModelPicker(index - picker.selectedIndex);
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(controller.snapshot().activeRoute).toBe("OpenAI API key");
+      expect(staged).toEqual(["api-key:unset"]);
+    } finally { controller.dispose(); }
+  });
+});
+
 test("the same model activates the chosen subscription or API-key route atomically", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
