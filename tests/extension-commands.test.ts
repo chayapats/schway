@@ -161,7 +161,11 @@ test("newly discovered skill collisions fail commands after session replacement 
     await mkdir(join(dir, ".agents/skills/same"), { recursive: true });
     await Bun.write(join(dir, ".agents/skills/same/SKILL.md"), "---\nname: same\ndescription: Newly installed\n---\nTask.");
     fixture.controller.replaceSession(createSession(), "resumed");
-    await fixture.controller.runExtensionCommand("same", "");
+    let editor = "/same keep this";
+    let accepted = 0;
+    expect(await dispatchEditorInput(editor, fixture.controller, noBuiltin, () => { accepted++; editor = ""; })).toBe(false);
+    expect(editor).toBe("/same keep this");
+    expect(accepted).toBe(0);
     expect(fixture.module.ran).toBe(false);
     expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("conflicts with skill");
     expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain(fixture.path);

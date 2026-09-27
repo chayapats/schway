@@ -454,8 +454,8 @@ async function runTuiRenderer(options: {
       controller: options.controller, home: options.home, workspaceRoot: options.workspaceRoot,
       env: options.env, secrets: options.secrets, quit: finishQuit,
       openUrl: openBrowserUrl,
-      submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command) => {
-        await handleSlashCommand(command.name, command.args, {
+      submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command, onAccepted) => {
+        return handleSlashCommand(command.name, command.args, {
           controller: options.controller,
           home: options.home,
           workspaceRoot: options.workspaceRoot,
@@ -469,7 +469,7 @@ async function runTuiRenderer(options: {
           secrets: options.secrets,
           finishQuit,
           stderr: options.stderr,
-        }, command.raw);
+        }, command.raw, onAccepted);
       }, accepted),
     });
     while (!quit && !quitting) {
@@ -498,8 +498,8 @@ async function runTuiRenderer(options: {
   }
 }
 
-/** Handle one slash command without leaving the interactive session. */
-async function handleSlashCommand(
+/** Execute one interactive slash command and report whether the editor may release it. */
+export async function handleSlashCommand(
   name: string,
   args: string,
   ctx: {
@@ -518,10 +518,11 @@ async function handleSlashCommand(
     stderr: TuiWriter;
   },
   raw?: string,
-): Promise<void> {
+  accepted: () => void = () => {},
+): Promise<boolean> {
   if ((name === "new" || name === "resume") && ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
-    return;
+    return false;
   }
   const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow);
   switch (name) {
@@ -532,74 +533,68 @@ async function handleSlashCommand(
         workspace,
       });
       const manager = createContextManager(workspace, managerOptions);
-      if (!await ctx.controller.switchSession(session, session.header.id, { workspace, contextManager: manager })) return;
+      if (!await ctx.controller.switchSession(session, session.header.id, { workspace, contextManager: manager })) return false;
       ctx.skillScope.manager = ctx.controller.activeContextManager();
       ctx.skillScope.workspaceRoot = workspace.root;
       ctx.controller.notice("New session. Type / for commands or /session for details.");
-      return;
+      return true;
     }
     case "sessions": {
       const listed = await listSessions(ctx.sessionsDir);
       if (listed.length === 0) {
         ctx.controller.notice("No saved sessions yet.");
-        return;
+        return true;
       }
       const lines = listed
         .slice(0, 20)
         .map((entry) => `- ${entry.id} (${entry.createdAt}, ${entry.workspaceRoot})`);
       ctx.controller.notice(`Saved sessions:\n${lines.join("\n")}`);
-      return;
+      return true;
     }
     case "resume": {
       const [sessionId, branchId, ...extra] = args.trim().split(/\s+/);
       if (!sessionId || extra.length || !sessionId.trim()) {
         ctx.controller.fail("Usage: /resume <session-id> [branch-id]. See /sessions for ids.");
-        return;
+        return false;
       }
       try {
         const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: sessionId, ...(branchId ? { branchId } : {}) });
         const restored = await restoreWorkspace({ root: resumed.header.workspaceRoot, launchCwd: resumed.header.launchCwd, extraRoots: [...resumed.metadata.extraRoots] });
         const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
-        if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return;
+        if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return false;
         ctx.skillScope.manager = ctx.controller.activeContextManager();
         ctx.skillScope.workspaceRoot = workspace.root;
         for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
         ctx.controller.notice(
           `Resumed ${resumed.items.length} saved records. /session for details.`,
         );
+        return true;
       } catch (error) {
         ctx.controller.fail(messageOf(error));
+        return false;
       }
-      return;
     }
     case "model": {
       if (!args) {
-        ctx.controller.openModelPicker();
-        return;
+        return ctx.controller.openModelPicker();
       }
-      await ctx.controller.selectModel(args);
-      return;
+      return ctx.controller.selectModel(args);
     }
     case "thinking": {
-      await ctx.controller.thinkingCommand(args);
-      return;
+      return ctx.controller.thinkingCommand(args);
     }
     case "branch": {
-      ctx.controller.branchCommand(args);
-      return;
+      return ctx.controller.branchCommand(args);
     }
     case "changes": {
-      await ctx.controller.changesCommand(args);
-      return;
+      return ctx.controller.changesCommand(args);
     }
     case "compact": {
-      await ctx.controller.compact();
-      return;
+      return ctx.controller.compact(accepted);
     }
     case "add-dir": {
-      await ctx.controller.addDirectories(args ? [args] : []);
-      return;
+      return ctx.controller.addDirectories(args ? [args] : []);
     }
     case "skills": {
       const discovery = await discoverSkills({
@@ -608,45 +603,41 @@ async function handleSlashCommand(
         home: ctx.home,
       });
       ctx.controller.notice(formatSkillsListing(discovery));
-      return;
+      return true;
     }
     case "config": {
-      await ctx.controller.configCommand(args);
-      return;
+      return ctx.controller.configCommand(args);
     }
     case "login": {
-      await ctx.controller.login(args);
-      return;
+      return ctx.controller.login(args, accepted);
     }
     case "logout": {
-      await ctx.controller.logout(args);
-      return;
+      return ctx.controller.logout(args);
     }
     case "help": {
       ctx.controller.notice(helpText(ctx.controller.extensionCommands()));
-      return;
+      return true;
     }
     case "quit": {
       ctx.finishQuit();
-      return;
+      return true;
     }
     case "unknown": {
       const invocation = raw ? parseSkillInvocation(raw) : null;
       if (invocation) {
-        await invokeSkillTurn(invocation, ctx);
-        return;
+        return invokeSkillTurn(invocation, ctx, accepted);
       }
       ctx.controller.fail("Unknown command. Type /help for commands.");
-      return;
+      return false;
     }
     default: {
       ctx.controller.fail("Unknown command. Type /help for commands.");
-      return;
+      return false;
     }
   }
 }
 
-/** Run one explicit skill invocation as a single active-skill turn, clearing state on settle. */
+/** Run one skill turn, notifying acceptance after its user record is saved. */
 export async function invokeSkillTurn(
   invocation: { name: string; args: string; raw: string },
   ctx: {
@@ -654,15 +645,16 @@ export async function invokeSkillTurn(
     home: string;
     skillScope: { manager?: ContextManager; workspaceRoot: string };
   },
-): Promise<void> {
+  accepted: () => void = () => {},
+): Promise<boolean> {
   if (ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
-    return;
+    return false;
   }
   const manager = ctx.skillScope.manager;
   if (!manager) {
     ctx.controller.fail("Skills are not ready yet; try again.");
-    return;
+    return false;
   }
   const branchId = ctx.controller.snapshot().branchId;
   const workspaceIdentity = ctx.controller.workspaceIdentity();
@@ -674,15 +666,15 @@ export async function invokeSkillTurn(
   });
   if (!prepared.ok) {
     ctx.controller.fail(prepared.error);
-    return;
+    return false;
   }
   if (ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
-    return;
+    return false;
   }
   if (ctx.skillScope.manager !== manager || ctx.controller.snapshot().branchId !== branchId || JSON.stringify(workspaceIdentity) !== JSON.stringify(ctx.controller.workspaceIdentity())) {
     ctx.controller.notice("The active session changed. Retry the skill when ready.");
-    return;
+    return false;
   }
   manager.setActiveSkill({
     name: prepared.skill.name,
@@ -692,7 +684,7 @@ export async function invokeSkillTurn(
     dir: prepared.skill.dir,
   });
   try {
-    await ctx.controller.submit(invocation.raw);
+    return await ctx.controller.submit(invocation.raw, accepted);
   } finally {
     manager.clearActiveSkill();
   }

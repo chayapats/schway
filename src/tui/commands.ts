@@ -104,35 +104,38 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
   ].join("\n");
 }
 
-/** Dispatch the shared editor input, returning whether the editor may clear it; busy extension commands retain input. */
+/** Dispatch editor input and report whether a prompt was durably appended or a command accepted. */
 export async function dispatchEditorInput(
   input: string,
   controller: TuiController,
-  builtin: (command: SlashCommand) => Promise<void>,
+  builtin: (command: SlashCommand, accepted: () => void) => Promise<boolean>,
   accepted: () => void = () => {},
 ): Promise<boolean> {
   const text = input.trim();
-  if (!text) return true;
+  if (!text) return false;
+  let notified = false;
+  const accept = () => { if (!notified) { notified = true; accepted(); } };
   const slash = parseSlashCommand(text);
   const invocation = splitSlashCommand(text);
   if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
-    const wasBusy = controller.running;
-    if (!wasBusy) accepted();
-    await controller.runExtensionCommand(invocation.name, invocation.args);
-    return !wasBusy;
+    const executed = await controller.runExtensionCommand(invocation.name, invocation.args, accept);
+    if (executed) accept();
+    return notified || executed;
   }
   if (slash) {
-    accepted();
-    await builtin(slash);
-    return true;
+    if (controller.running) {
+      controller.notice("Already running. Press Esc to cancel first.");
+      return false;
+    }
+    const executed = await builtin(slash, accept);
+    if (executed) accept();
+    return notified || executed;
   }
   if (controller.running) {
     controller.notice("Already running. Press Esc to cancel first.");
     return false;
   }
-  accepted();
-  await controller.submit(text);
-  return true;
+  return controller.submit(input, accepted);
 }
 
 /** Built-in slash names; a skill using one collides and is never invoked silently. */

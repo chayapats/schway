@@ -207,7 +207,7 @@ test("controller attachments persist outside conversation history, activate atta
     const session = await createJsonlSession({ directory, workspace });
     const captured: ModelRequest[] = [];
     const { controller, manager } = controllerFor(workspace, [request => { captured.push(request); return { toolCalls: [{ id: "activate", name: "activate_skill", arguments: { name: "helper" } }] }; }, request => { captured.push(request); return { text: "done" }; }, request => { captured.push(request); return { text: "invoked" }; }], session);
-    await dispatchEditorInput("/add-dir alias", controller, async command => { await controller.addDirectories([command.args]); });
+    await dispatchEditorInput("/add-dir alias", controller, async command => controller.addDirectories([command.args]));
     expect(controller.describeConfig()).toContain(extra);
     expect(session.items).toHaveLength(0);
     await controller.submit("use helper");

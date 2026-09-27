@@ -563,7 +563,7 @@ test("branch-tree slash input routes to commands instead of becoming a fork name
       let commanded: string | undefined;
       const input = "/help";
       if (isBranchTreeCommandInput(input)) {
-        await dispatchEditorInput(input, controller, async (command) => { commanded = command.name; });
+        await dispatchEditorInput(input, controller, async (command) => { commanded = command.name; return true; });
       } else {
         controller.confirmBranchTreeSelection(input);
       }
