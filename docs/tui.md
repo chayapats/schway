@@ -13,6 +13,14 @@ with elapsed time, without an estimated percentage or a hang warning. Parallel t
 share a compact count and name summary. At narrow widths the phase and `Esc stops`
 take priority in the footer.
 
+Streamed assistant text is a preview until the provider finishes the attempt. A
+retry keeps an abandoned preview visibly marked as incomplete, then replaces it
+when the next attempt starts. Once an answer is accepted, the visible text comes
+from the saved assistant record, so reopening the session shows the same answer.
+Retry progress uses one changing status row and the footer countdown. If retries
+run out or you cancel, any remaining preview is marked “Incomplete response · not
+saved”; completed tool results remain in the session.
+
 ## Color roles
 
 | Role | Dark | Light | Use |

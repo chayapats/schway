@@ -62,6 +62,8 @@ export interface TuiTranscriptEntry {
   toolName?: string;
   toolCallId?: string;
   toolStatus?: TuiToolStatus;
+  /** A streamed assistant preview whose attempt never became a session record. */
+  incomplete?: boolean;
   /** Short path, search pattern, or command identifying this call. */
   toolSummary?: string;
 }
@@ -442,6 +444,9 @@ export class TuiController {
   private activeTurn?: Promise<void>;
   private counter = 0;
   private currentAssistantId?: string;
+  private modelAttemptBaseAssistantId?: string;
+  private modelAttemptStarted = false;
+  private retryNoticeId?: string;
   private toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
   private extensions?: ExtensionRuntime;
   private readonly home?: string;
@@ -2120,6 +2125,9 @@ export class TuiController {
     this.transcript = buildTranscriptFromSession(session.items);
     this.status = "idle";
     this.currentAssistantId = undefined;
+    this.modelAttemptBaseAssistantId = undefined;
+    this.modelAttemptStarted = false;
+    this.retryNoticeId = undefined;
     this.toolEntryByCallId.clear();
     this.invalidateBranchTreeCache();
     if (this.branchTreeOpen) {
@@ -2233,6 +2241,8 @@ export class TuiController {
     const abort = new AbortController();
     this.activeAbort = abort;
     this.currentAssistantId = undefined;
+    this.modelAttemptStarted = false;
+    this.retryNoticeId = undefined;
     try { accepted(); } catch { /* A presentation callback cannot undo an accepted record. */ }
     // The baseline capture runs inside the tracked turn so a spawn failure still clears ownership below.
     const turn = (async () => {
@@ -2286,6 +2296,8 @@ export class TuiController {
         return;
       }
       if (signal.aborted) {
+        this.markProvisionalIncomplete();
+        this.clearRetryNotice();
         this.transcript.push(this.systemEntry("Cancelled."));
         await this.captureTurnResult();
         this.status = "idle";
@@ -2300,6 +2312,8 @@ export class TuiController {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
+      this.markProvisionalIncomplete();
+      this.clearRetryNotice();
       this.fail(actionableError(message));
       await this.captureTurnResult();
     }
@@ -2336,6 +2350,12 @@ export class TuiController {
     switch (event.type) {
       case "agent.started":
         return;
+      case "model.started": {
+        this.discardProvisionalAssistant();
+        this.modelAttemptBaseAssistantId = this.session.items.findLast(item => item.type === "assistant")?.id;
+        this.modelAttemptStarted = true;
+        return;
+      }
       case "model.delta": {
         if (event.content.type !== "text") {
           return;
@@ -2345,15 +2365,25 @@ export class TuiController {
         return;
       }
       case "model.finished": {
+        const accepted = this.session.items.findLast(item => item.type === "assistant");
+        if (this.modelAttemptStarted && accepted?.type === "assistant" && accepted.id !== this.modelAttemptBaseAssistantId) {
+          const text = accepted.content.filter(block => block.type === "text").map(block => block.text).join("");
+          if (text) {
+            const current = this.currentAssistant();
+            current.text = text;
+            current.incomplete = false;
+          } else {
+            this.discardProvisionalAssistant();
+          }
+        }
         this.currentAssistantId = undefined;
+        this.modelAttemptStarted = false;
+        this.clearRetryNotice();
         return;
       }
       case "model.retry": {
-        this.transcript.push(
-          this.systemEntry(
-            `Retrying provider request (attempt ${event.attempt + 1}/${event.maxAttempts}): ${event.message}`,
-          ),
-        );
+        this.markProvisionalIncomplete();
+        this.showRetryNotice(`Retrying provider request (attempt ${event.attempt + 1}/${event.maxAttempts}): ${event.message}`);
         return;
       }
       case "tool.started": {
@@ -2404,6 +2434,10 @@ export class TuiController {
         return;
       }
       case "compaction.started": {
+        if (event.reason === "overflow") {
+          this.markProvisionalIncomplete();
+          this.clearRetryNotice();
+        }
         this.transcript.push(
           this.systemEntry(
             event.reason === "overflow"
@@ -2426,10 +2460,16 @@ export class TuiController {
         return;
       }
       case "error": {
+        this.markProvisionalIncomplete();
+        this.clearRetryNotice();
         this.fail(actionableError(event.message));
         return;
       }
       case "agent.finished": {
+        if (event.reason === "cancelled" || event.reason === "error") {
+          this.markProvisionalIncomplete();
+          this.clearRetryNotice();
+        }
         if (event.reason === "error") {
           if (this.status === "running") {
             this.status = "error";
@@ -2466,6 +2506,37 @@ export class TuiController {
     this.currentAssistantId = entry.id;
     this.transcript.push(entry);
     return entry;
+  }
+
+  /** Mark the current stream preview as abandoned without changing session history. */
+  private markProvisionalIncomplete(): void {
+    const entry = this.transcript.find(item => item.id === this.currentAssistantId);
+    if (entry?.text) entry.incomplete = true;
+  }
+
+  /** Remove an abandoned stream preview before the next model attempt begins. */
+  private discardProvisionalAssistant(): void {
+    if (!this.currentAssistantId) return;
+    const index = this.transcript.findIndex(item => item.id === this.currentAssistantId);
+    if (index >= 0) this.transcript.splice(index, 1);
+    this.currentAssistantId = undefined;
+  }
+
+  /** Reuse one transient retry row for all attempts in a model turn. */
+  private showRetryNotice(text: string): void {
+    const entry = this.transcript.find(item => item.id === this.retryNoticeId);
+    if (entry) { entry.text = text; return; }
+    const next = this.systemEntry(text);
+    this.retryNoticeId = next.id;
+    this.transcript.push(next);
+  }
+
+  /** Clear transient retry status once the turn settles. */
+  private clearRetryNotice(): void {
+    if (!this.retryNoticeId) return;
+    const index = this.transcript.findIndex(item => item.id === this.retryNoticeId);
+    if (index >= 0) this.transcript.splice(index, 1);
+    this.retryNoticeId = undefined;
   }
 
   private systemEntry(text: string): TuiTranscriptEntry {
@@ -2659,6 +2730,9 @@ function asEditDetails(details: unknown): EditDetailsDisplay | undefined {
 /** Explain API-key recovery for interactive provider failures. */
 function actionableError(message: string): string {
   const lowered = message.toLowerCase();
+  if (lowered.includes("provider request failed after") && lowered.includes("transient attempts")) {
+    return `${message} Check the provider connection or rate limit, then continue this session. Completed tool calls remain saved; any incomplete preview was not saved.`;
+  }
   if (
     lowered.includes("missing anthropic api key") ||
     lowered.includes("missing openai api key") ||
