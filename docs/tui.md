@@ -43,6 +43,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Complete command | Type `/`, Up/Down to select, Tab to insert |
 | Dismiss suggestions | Esc |
 | Model picker | `/model` or Alt+M; Up/Down, Enter, Esc |
+| Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
@@ -71,10 +72,12 @@ and primary-scroll conventions follow the alternate-screen approach described in
 using [OpenTUI's native ScrollBox](https://github.com/anomalyco/opentui/blob/main/packages/core/src/renderables/ScrollBox.ts)
 for clipping, wheel handling and sticky scroll state.
 
-Esc first closes an open model/branch picker or command suggestion list. The
-underlying prompt is restored after a picker closes. Prompt recall excludes slash
-commands so pasted authentication callbacks cannot enter history. Credentials
-use a separate masked entry that intercepts keyboard and paste events.
+Esc first closes an open sign-in, model or branch picker or command suggestion
+list. The underlying prompt and cursor are restored after a picker closes.
+Prompt recall excludes slash commands. API keys and pasted browser callbacks
+use separate masked entries that intercept keyboard and paste events; neither
+enters the ordinary draft, prompt recall or conversation. Device approval codes
+appear only while the approval panel is open.
 
 Successful tools show a compact target/status summary. Running tools show a short
 tail; errors and cancellations retain a bounded preview even when collapsed.

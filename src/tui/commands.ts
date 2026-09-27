@@ -86,6 +86,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/config - show effective settings and their origins with secrets redacted",
     "/config set <key> <value> [--scope user|project] - edit settings (session only by default)",
     "/config reset <key> [--scope user|project] - remove an override and inherit its fallback",
+    "/login - choose a provider and sign-in method",
     "/login <anthropic|openai|openai-compatible> - enter an API key in a masked prompt",
     "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
     "/logout <anthropic|openai|openai-compatible|codex> - remove the selected stored credential",
@@ -277,7 +278,7 @@ function isPickerProvider(value: string): value is ModelPickerProvider {
 
 /** Usage guidance for credential commands, keeping API keys out of slash arguments. */
 export const LOGIN_USAGE =
-  "Usage: /login <anthropic|openai|openai-compatible> or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
+  "Usage: /login to choose a method, /login <anthropic|openai|openai-compatible>, or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
 
 /** Requested credential action from /login or /logout arguments. */
 export type LoginTarget =

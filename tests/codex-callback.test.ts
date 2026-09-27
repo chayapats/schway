@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { clearPendingBrowserAttempt, CODEX_REDIRECT_URI, loadSubscriptionTokens, loginWithBrowserFlow, waitForLocalhostCallback } from "../src/model/providers/codex-subscription.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { createCodexLoginRunner } from "../src/tui/app.ts";
+import { TuiController } from "../src/tui/controller.ts";
+import { createSession } from "../src/session/session.ts";
+import { createContextManager } from "../src/context/manager.ts";
 
 test("browser redirect reaches a ready listener and saves a reusable subscription", async () => {
   const store = fakeCredentialStore();
@@ -105,6 +109,29 @@ test("a browser launcher that stays open does not block login or cancellation", 
     expect(listenerSignal.aborted).toBe(true);
   } finally {
     launcher.resolve();
+    clearPendingBrowserAttempt();
+  }
+});
+
+test("occupied callback port leaves a device fallback reachable through the controller chooser", async () => {
+  const occupied = Bun.serve({ hostname: "127.0.0.1", port: 1455, fetch: () => new Response("occupied") });
+  const store = fakeCredentialStore();
+  const workspace = { root: "/fixture", launchCwd: "/fixture", extraRoots: [] };
+  const controller = new TuiController({
+    session: createSession(), sessionId: "occupied-callback", workspace,
+    provider: "openai", modelId: "test", contextManager: createContextManager(workspace),
+    credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+      codexLogin: createCodexLoginRunner({ store, secrets: [], openBrowser: () => {} }) },
+  });
+  try {
+    expect(await controller.login("codex")).toBe(false);
+    const snapshot = controller.snapshot();
+    expect(JSON.stringify(snapshot)).toContain("callback port is unavailable");
+    expect(snapshot.loginChooser?.choices[snapshot.loginChooser.selectedIndex]).toContain("Device");
+    expect(JSON.stringify(snapshot)).not.toContain("EADDRINUSE");
+  } finally {
+    controller.dispose();
+    occupied.stop();
     clearPendingBrowserAttempt();
   }
 });

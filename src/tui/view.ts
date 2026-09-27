@@ -41,6 +41,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let sessionKey = "";
   let panelMode = "";
   let savedDraft = "";
+  let savedDraftCursor = 0;
   let panelFingerprint = "";
   let treePreviewKey = "";
   let treePreview: readonly TuiTranscriptEntry[] = [];
@@ -212,18 +213,23 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         resetRows(); sessionKey = key; expandedTools.clear(); unseen = false; lastTail = "";
         latest();
       }
-      const nextPanel = snapshot.credentialEntry ? "credential" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
+      const nextPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
       if (nextPanel !== panelMode) {
-        if (!panelMode && nextPanel) savedDraft = editor.plainText;
+        if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; }
         panelMode = nextPanel;
         setDraft(panelMode ? "" : savedDraft);
+        if (!panelMode) editor.cursorOffset = savedDraftCursor;
         panelFingerprint = "";
       }
-      editor.visible = !snapshot.credentialEntry;
-      credential.visible = !!snapshot.credentialEntry;
-      if (snapshot.credentialEntry) {
+      editor.visible = !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
+      credential.visible = !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
+      if (snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
         editor.blur();
-        credential.content = safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter saves · Esc cancels`);
+        credential.content = snapshot.credentialEntry
+          ? safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter saves · Esc cancels`)
+          : snapshot.loginCallbackEntry
+            ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
+            : "Approval pending · Esc cancels";
       } else if (!editor.focused) editor.focus();
       editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
@@ -266,18 +272,36 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const available = completions();
       if (editor.plainText !== lastQuery) { completionIndex = 0; lastQuery = editor.plainText; }
       completionIndex = Math.min(completionIndex, Math.max(0, available.length - 1));
-      picker.visible = !!snapshot.modelPicker || available.length > 0;
+      picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || available.length > 0;
       const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
-      const pickerRows = snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
+      const deviceApproval = snapshot.loginApproval ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
+      const approvalRows = deviceApproval
+        ? (renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval[2]!)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval[1]!)/(width - 2))
+        : 2;
+      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
       const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.loginChooser, snapshot.loginApproval, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
-        if (snapshot.modelPicker) {
+        if (snapshot.loginChooser) {
+          textRow(picker, fitLine("Sign in · ↑/↓ select · Enter continue · Esc back", width - 2), theme.accent);
+          const choices = snapshot.loginChooser.choices;
+          const start = Math.max(0, Math.min(snapshot.loginChooser.selectedIndex - Math.floor(maxRows / 2), choices.length - maxRows));
+          choices.slice(start, start + maxRows).forEach((choice, offset) => {
+            const index = start + offset;
+            textRow(picker, fitLine(`${index === snapshot.loginChooser!.selectedIndex ? "›" : " "} ${choice}`, width - 2), index === snapshot.loginChooser!.selectedIndex ? theme.accent : theme.text);
+          });
+        } else if (snapshot.loginApproval) {
+          if (renderer.height >= 12) textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
+          if (deviceApproval) {
+            textRow(picker, deviceApproval[2]!, theme.accent).wrapMode = "char";
+            textRow(picker, deviceApproval[1]!, theme.text).wrapMode = "char";
+          } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
+        } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
           textRow(picker, fitLine("Choose model · ↑/↓ select · Enter apply · Esc back", width - 2), theme.accent);
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
@@ -321,7 +345,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
 
   function submit() {
     const snapshot = controller.snapshot();
-    if (snapshot.credentialEntry) return;
+    if (snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
+    if (snapshot.loginChooser) {
+      void controller.selectLoginChoice().then(refresh, fail);
+      return;
+    }
     if (snapshot.modelPicker) {
       void controller.selectPickerModel().then(refresh, fail);
       return;
@@ -363,7 +391,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function onKey(key: KeyEvent) {
-    if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().credentialEntry) return;
+    if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().credentialEntry || controller.snapshot().loginCallbackEntry) return;
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
@@ -387,7 +415,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if (name === "escape") {
-      if (snapshot.modelPicker) controller.closeModelPicker();
+      if (snapshot.loginChooser) controller.cancel();
+      else if (snapshot.modelPicker) controller.closeModelPicker();
       else if (snapshot.branchTree) controller.closeBranchTree();
       else if (completions().length) dismissedQuery = editor.plainText;
       else if (controller.running) controller.cancel();
@@ -397,6 +426,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (key.ctrl && name === "d" && !editor.plainText) { options.quit(); handled(); return; }
     if (name === "up" || name === "down") {
       const delta = name === "up" ? -1 : 1;
+      if (snapshot.loginChooser) { controller.moveLoginChooser(delta); handled(); return; }
       if (snapshot.modelPicker) { controller.moveModelPicker(delta); handled(); return; }
       if (snapshot.branchTree) { controller.moveBranchTreeSelection(delta); handled(); return; }
       const choices = completions();

@@ -773,14 +773,14 @@ export function createCodexLoginRunner(options: {
   secrets: string[];
   openBrowser?: (url: string) => Promise<void> | void;
 }): CodexLoginRunner {
-  return async ({ device, code, signal, onProgress }) => {
+  return async ({ device, code, signal, onProgress, onSaved }) => {
     const codex = await import("../model/providers/codex-subscription.ts");
     try {
       const tokens = device
         ? await codex.loginWithDeviceFlow({
           store: options.store,
           signal,
-          deps: { fetch: options.fetch, onProgress },
+          deps: { fetch: options.fetch, onProgress, onSaved },
         })
         : await codex.loginWithBrowserFlow({
           store: options.store,
@@ -790,19 +790,23 @@ export function createCodexLoginRunner(options: {
             fetch: options.fetch,
             openBrowser: options.openBrowser ?? openBrowserUrl,
             waitForCallbackCode: (attempt) => codex.waitForLocalhostCallback(attempt),
-            onProgress,
+            onProgress, onSaved,
           },
         });
-      signal.throwIfAborted();
       if (!options.secrets.includes(tokens.accessToken)) {
         options.secrets.push(tokens.accessToken);
       }
+      signal.throwIfAborted();
       return { ok: true as const, status: codex.formatSubscriptionStatus(tokens) };
     } catch (error) {
       if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
         throw error instanceof Error ? error : new DOMException("Aborted", "AbortError");
       }
-      return { ok: false as const, message: redactSecrets(messageOf(error), options.secrets) };
+      const message = messageOf(error);
+      const actionable = /^(ChatGPT sign-in was denied|The sign-in code expired|The sign-in response has no access token|No active browser sign-in attempt|The callback state does not match|The pasted callback URL|The pasted code is empty|The callback URL has no authorization code|The localhost|ChatGPT sign-in timed out|The sign-in endpoint|Exchanging the sign-in code failed|Device sign-in|Cannot save credential)/.test(message);
+      return { ok: false as const, message: actionable
+        ? redactSecrets(message, options.secrets)
+        : "ChatGPT sign-in could not complete. Check the connection and OS secure store, then retry from the sign-in chooser." };
     }
   };
 }

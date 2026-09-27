@@ -81,6 +81,7 @@ export class MaskedCredentialEntry {
 export async function removeStoredCredential(input: CredentialTarget & {
   store: CredentialStore;
   runtimeApiKey?: string;
+  credentialEnv?: string;
   env: Record<string, string | undefined>;
 }): Promise<CredentialMutationResult> {
   let identity: CredentialIdentity;
@@ -89,12 +90,12 @@ export async function removeStoredCredential(input: CredentialTarget & {
   let deleted: boolean;
   try { deleted = await input.store.delete(identity); }
   catch { return { ok: false, message: credentialStoreError("delete") }; }
-  const variable = credentialEnvironmentVariable(input.provider);
-  const overrides = input.runtimeApiKey !== undefined
-    ? " The runtime --api-key override is unchanged; restart without it to stop using it."
-    : input.env[variable]?.trim()
-      ? ` ${variable} is still set; unset it to stop using the environment credential.`
-      : "";
+  const variable = input.provider === "openai-compatible" && input.credentialEnv
+    ? input.credentialEnv : credentialEnvironmentVariable(input.provider);
+  const remaining: string[] = [];
+  if (input.runtimeApiKey !== undefined) remaining.push("The runtime --api-key override is unchanged");
+  if (input.env[variable]?.trim()) remaining.push(`${variable} is still set`);
+  const overrides = remaining.length ? ` ${remaining.join("; ")}; restart without these overrides to stop using them.` : "";
   return {
     ok: true,
     message: `${deleted ? "Removed stored API key" : "No stored API key found"} for ${identity.label}.${overrides}`,

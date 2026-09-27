@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
-import { TuiController, buildTranscriptFromSession } from "../src/tui/controller.ts";
+import { TuiController, buildTranscriptFromSession, type CodexLoginRunner } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -14,7 +14,7 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}) {
+async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
   const session = createSession();
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
@@ -22,7 +22,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     session, workspace, provider: "scripted", modelId: "test-model", sessionId: "private-session-id",
     model: createScriptedModel({ responses: [{ text: "## Result\n\nHello **world**.\n\n```ts\nconst answer = 42;\n```" }] }),
     contextManager: createContextManager(workspace), secrets: ["secret-sentinel"],
-    credentials: { store: fakeCredentialStore(), env: credentialEnv, reload: async () => ({ model: createScriptedModel() }) },
+    credentials: { store: fakeCredentialStore(), env: credentialEnv, reload: async () => ({ model: createScriptedModel() }), codexLogin },
   });
   let quit = false;
   const copied: string[] = [];
@@ -34,6 +34,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     openUrl: async url => { opened.push(url); },
     submit: (value, accepted) => dispatchEditorInput(value, controller, async command => {
       if (command.name === "model") controller.openModelPicker();
+      else if (command.name === "login") await controller.login(command.args);
       else if (command.name === "help") controller.notice("Help text");
     }, accepted),
   });
@@ -296,6 +297,63 @@ test("masked credential entry intercepts paste and restores a multiline draft wi
   await settle(ui);
   expect(ui.editor.plainText).toBe("keep my\ndraft");
   expect(ui.session.items).toHaveLength(0);
+});
+
+test("login chooser and masked callback use real keyboard and paste input while preserving a draft", async () => {
+  const ui = await setup(48, 18);
+  await ui.mockInput.pasteBracketedText("continue this task\nsecond line");
+  ui.editor.cursorOffset = 8;
+  expect(await ui.controller.login("")).toBe(true);
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Sign in");
+  expect(ui.editor.plainText).toBe("");
+  ui.mockInput.pressArrow("down");
+  ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  await ui.mockInput.pasteBracketedText("callback-secret-sentinel");
+  await settle(ui);
+  expect(ui.captureCharFrame()).not.toContain("callback-secret-sentinel");
+  expect(JSON.stringify(ui.controller.snapshot())).not.toContain("callback-secret-sentinel");
+  ui.resize(36, 16);
+  await settle(ui);
+  ui.mockInput.pressEscape();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("continue this task\nsecond line");
+  expect(ui.editor.cursorOffset).toBe(8);
+  expect(ui.session.items).toHaveLength(0);
+});
+
+test("/login without arguments reaches the chooser through editor dispatch", async () => {
+  const ui = await setup();
+  await ui.mockInput.typeText("/login");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.controller.snapshot().loginChooser).toBeDefined();
+  expect(ui.captureCharFrame()).toContain("ChatGPT");
+  ui.mockInput.pressEscape();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("");
+  expect(ui.session.items).toHaveLength(0);
+});
+
+test("device approval code remains visible on a narrow terminal without entering notices", async () => {
+  const ui = await setup(36, 16, {}, async ({ signal, onProgress }) => {
+    onProgress("Enter this code at https://auth.openai.com/codex/device: ABCD-1234");
+    await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+    throw new Error("unreachable");
+  });
+  const pending = ui.controller.login("codex --device");
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("ABCD-1234");
+  expect(ui.captureCharFrame().replace(/\s+/g, "")).toContain("https://auth.openai.com/codex/device");
+  ui.resize(24, 8);
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("ABCD-1234");
+  expect(ui.captureCharFrame().replace(/\s+/g, "")).toContain("https://auth.openai.com/codex/device");
+  expect(JSON.stringify(ui.controller.snapshot().transcript)).not.toContain("ABCD-1234");
+  ui.mockInput.pressEscape();
+  expect(await pending).toBe(false);
 });
 
 test("streaming Markdown renders lists, links, and tables offline before and after finalization", async () => {
