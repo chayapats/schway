@@ -701,8 +701,12 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   expect(ui.captureCharFrame()).toContain("Esc stops");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
   ui.mockInput.pressEscape();
+  const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+  expect((footer.content as { chunks: Array<{ text: string }> }).chunks.map(chunk => chunk.text).join(""))
+    .toContain("Cancel requested");
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("Stopping");
+  expect(ui.captureCharFrame()).not.toContain("Cancel requested");
   releaseSettlement();
   await ui.controller.waitForIdle();
   await settle(ui);

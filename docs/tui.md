@@ -67,8 +67,9 @@ to overflow does not introduce a scrollbar and rewrap earlier messages.
 
 After an accepted prompt clears, you can type or paste a future draft during the
 current turn. Enter does not queue it while work is active; the draft stays in the
-editor until you send it after settlement. Pressing Esc or Ctrl+C acknowledges
-cancellation immediately as “Stopping.” Running tools and other owned work may
+editor until you send it after settlement. Pressing Esc or Ctrl+C shows
+“Cancel requested” immediately, then “Stopping” while active work settles.
+Running tools and other owned work may
 still need to settle. Completed output and tool results remain visible; “Ready”
 returns only after settlement, and cancellation does not undo completed effects.
 

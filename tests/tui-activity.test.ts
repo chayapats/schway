@@ -71,6 +71,41 @@ test("preparation, quiet provider wait, streaming and cancellation keep one oper
   });
 });
 
+test("cancel during a quiet first-token wait keeps the turn owned until provider settlement", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const first = new Gate();
+    const model: Model = {
+      provider: "scripted", id: "quiet",
+      async *stream(request) {
+        await first.promise;
+        if (request.signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+        yield { type: "text_delta", text: "too late" };
+      },
+    };
+    const controller = new TuiController({
+      session: createSession(), model, contextManager: createContextManager(workspace), workspace,
+      provider: "scripted", modelId: "quiet", sessionId: "quiet",
+    });
+    const task = controller.submit("wait for first token");
+    await until(() => controller.snapshot().activity?.phase === "waiting");
+    expect(controller.snapshot().transcript.some(entry => entry.kind === "assistant")).toBe(false);
+    controller.cancel();
+    expect(activityStatus(controller.snapshot().activity!)).toContain("Cancel requested");
+    expect(controller.snapshot().activity?.cancellation).toBe("requested");
+    await Promise.resolve();
+    expect(activityStatus(controller.snapshot().activity!)).toContain("Stopping");
+    expect(controller.snapshot().activity?.cancellation).toBe("settling");
+    expect(controller.snapshot().status).toBe("running");
+    first.open();
+    await task;
+    expect(controller.snapshot().activity).toBeUndefined();
+    expect(controller.snapshot().status).toBe("idle");
+    expect(controller.snapshot().transcript.some(entry => entry.kind === "assistant")).toBe(false);
+    expect(controller.snapshot().transcript.some(entry => entry.text === "Cancelled.")).toBe(true);
+  });
+});
+
 test("retry countdown uses the emitted delay and injected clock, then clears on next attempt", async () => {
   await withTempDir(async dir => {
     const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
