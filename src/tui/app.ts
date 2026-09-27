@@ -454,7 +454,7 @@ async function runTuiRenderer(options: {
       controller: options.controller, home: options.home, workspaceRoot: options.workspaceRoot,
       env: options.env, secrets: options.secrets, quit: finishQuit,
       openUrl: openBrowserUrl,
-      submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command) => {
+      submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command, onAccepted) => {
         return handleSlashCommand(command.name, command.args, {
           controller: options.controller,
           home: options.home,
@@ -469,7 +469,7 @@ async function runTuiRenderer(options: {
           secrets: options.secrets,
           finishQuit,
           stderr: options.stderr,
-        }, command.raw);
+        }, command.raw, onAccepted);
       }, accepted),
     });
     while (!quit && !quitting) {
@@ -518,6 +518,7 @@ export async function handleSlashCommand(
     stderr: TuiWriter;
   },
   raw?: string,
+  accepted: () => void = () => {},
 ): Promise<boolean> {
   if ((name === "new" || name === "resume") && ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
@@ -590,7 +591,7 @@ export async function handleSlashCommand(
       return ctx.controller.changesCommand(args);
     }
     case "compact": {
-      return ctx.controller.compact();
+      return ctx.controller.compact(accepted);
     }
     case "add-dir": {
       return ctx.controller.addDirectories(args ? [args] : []);
@@ -608,7 +609,7 @@ export async function handleSlashCommand(
       return ctx.controller.configCommand(args);
     }
     case "login": {
-      return ctx.controller.login(args);
+      return ctx.controller.login(args, accepted);
     }
     case "logout": {
       return ctx.controller.logout(args);
@@ -624,7 +625,7 @@ export async function handleSlashCommand(
     case "unknown": {
       const invocation = raw ? parseSkillInvocation(raw) : null;
       if (invocation) {
-        return invokeSkillTurn(invocation, ctx);
+        return invokeSkillTurn(invocation, ctx, accepted);
       }
       ctx.controller.fail("Unknown command. Type /help for commands.");
       return false;
@@ -636,7 +637,7 @@ export async function handleSlashCommand(
   }
 }
 
-/** Run one explicit skill invocation as a single active-skill turn, clearing state on settle. */
+/** Run one skill turn, notifying acceptance after its user record is saved. */
 export async function invokeSkillTurn(
   invocation: { name: string; args: string; raw: string },
   ctx: {
@@ -644,6 +645,7 @@ export async function invokeSkillTurn(
     home: string;
     skillScope: { manager?: ContextManager; workspaceRoot: string };
   },
+  accepted: () => void = () => {},
 ): Promise<boolean> {
   if (ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
@@ -682,7 +684,7 @@ export async function invokeSkillTurn(
     dir: prepared.skill.dir,
   });
   try {
-    return await ctx.controller.submit(invocation.raw);
+    return await ctx.controller.submit(invocation.raw, accepted);
   } finally {
     manager.clearActiveSkill();
   }

@@ -108,26 +108,28 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
 export async function dispatchEditorInput(
   input: string,
   controller: TuiController,
-  builtin: (command: SlashCommand) => Promise<boolean>,
+  builtin: (command: SlashCommand, accepted: () => void) => Promise<boolean>,
   accepted: () => void = () => {},
 ): Promise<boolean> {
   const text = input.trim();
   if (!text) return false;
+  let notified = false;
+  const accept = () => { if (!notified) { notified = true; accepted(); } };
   const slash = parseSlashCommand(text);
   const invocation = splitSlashCommand(text);
   if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
-    const executed = await controller.runExtensionCommand(invocation.name, invocation.args);
-    if (executed) accepted();
-    return executed;
+    const executed = await controller.runExtensionCommand(invocation.name, invocation.args, accept);
+    if (executed) accept();
+    return notified || executed;
   }
   if (slash) {
     if (controller.running) {
       controller.notice("Already running. Press Esc to cancel first.");
       return false;
     }
-    const executed = await builtin(slash);
-    if (executed) accepted();
-    return executed;
+    const executed = await builtin(slash, accept);
+    if (executed) accept();
+    return notified || executed;
   }
   if (controller.running) {
     controller.notice("Already running. Press Esc to cancel first.");

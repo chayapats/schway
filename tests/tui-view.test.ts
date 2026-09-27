@@ -14,6 +14,11 @@ import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
 import { join } from "node:path";
+import { realpath } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { loadExtensions } from "../src/extensions/loader.ts";
+import { createToolRegistry } from "../src/tools/registry.ts";
+import { resolveWorkspace } from "../src/workspace/workspace.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
@@ -175,6 +180,31 @@ test("late command acceptance leaves a newer draft through picker restoration", 
   await settle(ui);
   expect(ui.editor.plainText).toBe("newer draft");
   expect(ui.editor.cursorOffset).toBe(5);
+});
+
+test("a real extension command releases input at handoff and cannot clear a newer draft on finish", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "commands.ts");
+    await Bun.write(path, `export let finish; export default ctx => ctx.registerCommand({ name: 'delay', description: 'Wait', execute(args, command) { command.submitPrompt('generated prompt'); return new Promise(resolve => { finish = resolve; }); } });`);
+    const module = await import(pathToFileURL(await realpath(path)).href);
+    const workspace = await resolveWorkspace(root);
+    const loaded = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry(), home: join(root, "home") });
+    const ui = await setup(44, 18, {}, undefined, { workspace, extensions: loaded.runtime, home: join(root, "home") });
+    await ui.mockInput.typeText("/delay");
+    ui.mockInput.pressEnter();
+    await ui.waitFor(() => typeof module.finish === "function");
+    await settle(ui);
+    expect(ui.controller.running).toBe(true);
+    expect(ui.editor.plainText).toBe("");
+    await ui.mockInput.typeText("new work while waiting");
+    ui.editor.cursorOffset = 4;
+    module.finish("Done");
+    await ui.controller.waitForIdle();
+    await settle(ui);
+    expect(ui.editor.plainText).toBe("new work while waiting");
+    expect(ui.editor.cursorOffset).toBe(4);
+    expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
+  });
 });
 
 test("model failure after acceptance remains one failed turn, not a restored draft", async () => {

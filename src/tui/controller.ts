@@ -514,8 +514,8 @@ export class TuiController {
     return this.activeAbort !== undefined || this.credentialEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
   }
 
-  /** Route /login arguments to masked API-key entry or the explicit ChatGPT subscription action. */
-  async login(args: string): Promise<boolean> {
+  /** Route login input and notify when an explicit subscription sign-in starts. */
+  async login(args: string, accepted: () => void = () => {}): Promise<boolean> {
     if (!args.trim()) return this.openLoginChooser();
     const routed = parseLoginTarget(args);
     if ("error" in routed) {
@@ -523,7 +523,7 @@ export class TuiController {
       return false;
     }
     if (routed.kind === "codex") {
-      return this.runCodexLogin(routed);
+      return this.runCodexLogin(routed, accepted);
     }
     return this.beginLogin(routed.provider);
   }
@@ -760,7 +760,7 @@ export class TuiController {
   }
 
   /** Run the explicit ChatGPT subscription sign-in, persisting only the subscription identity on success. */
-  private async runCodexLogin(target: { device: boolean; code?: string }): Promise<boolean> {
+  private async runCodexLogin(target: { device: boolean; code?: string }, accepted: () => void = () => {}): Promise<boolean> {
     if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
     if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
     const runner = this.credentials.codexLogin;
@@ -774,6 +774,7 @@ export class TuiController {
     this.credentialMutation = true;
     this.status = "running";
     this.notice(target.device ? "Starting ChatGPT subscription device sign-in. Press Esc to cancel." : "Starting ChatGPT subscription browser sign-in. Press Esc to cancel.");
+    try { accepted(); } catch { /* Presentation cannot cancel an accepted sign-in. */ }
     const task = (async (): Promise<boolean> => {
       try {
         const result = await runner({
@@ -1353,8 +1354,8 @@ export class TuiController {
   /** Return active extension command metadata for help and editor dispatch. */
   extensionCommands() { return this.extensions?.commandList() ?? []; }
 
-  /** Run an extension command only while idle, preserving normal loop ownership for any requested prompt. */
-  async runExtensionCommand(name: string, args: string): Promise<boolean> {
+  /** Start an idle extension command after preparation and notify when its input is accepted. */
+  async runExtensionCommand(name: string, args: string, accepted: () => void = () => {}): Promise<boolean> {
     const command = this.extensions?.command(name);
     if (!command || this.disposed) return false;
     if (this.running) {
@@ -1364,7 +1365,7 @@ export class TuiController {
     const abort = new AbortController();
     this.activeAbort = abort;
     this.status = "running";
-    const task = this.executeExtensionCommand(command, args, abort);
+    const task = this.executeExtensionCommand(command, args, abort, accepted);
     const tracked = task.then(() => {});
     this.activeTurn = tracked;
     try { return await task; } finally {
@@ -1373,7 +1374,7 @@ export class TuiController {
   }
 
   private async executeExtensionCommand(
-    command: { name: string; source: string; description: string }, args: string, abort: AbortController,
+    command: { name: string; source: string; description: string }, args: string, abort: AbortController, accepted: () => void,
   ): Promise<boolean> {
     let prompt: string | undefined;
     let accepting = true;
@@ -1385,7 +1386,10 @@ export class TuiController {
         const skills = await discoverSkills({ workspaceRoot: this.workspace.root, extraRoots: this.workspace.extraRoots, home: this.home, signal: abort.signal });
         this.extensions!.assertNoSkillCollision(command, skills);
       }
+      abort.signal.throwIfAborted();
+      if (!current()) return false;
       executed = true;
+      try { accepted(); } catch { /* Presentation cannot cancel an accepted command. */ }
       const result = await this.extensions!.executeCommand(command.name, args, {
         signal: abort.signal,
         submitPrompt: (text) => {
@@ -1906,11 +1910,8 @@ export class TuiController {
     return redactSecrets(lines.join("\n"), this.secrets);
   }
 
-  /**
-   * Return whether manual compaction created a record, or false when busy, unavailable, cancelled, or unchanged.
-   * @throws Propagates rejection of the compaction promise after clearing its active operation tracking.
-   */
-  async compact(): Promise<boolean> {
+  /** Start manual compaction after model checks and notify acceptance before it settles. */
+  async compact(accepted: () => void = () => {}): Promise<boolean> {
     if (this.running) {
       this.notice("Already running. Press Esc to cancel first.");
       return false;
@@ -1925,6 +1926,7 @@ export class TuiController {
     this.status = "running";
     const abort = new AbortController();
     this.activeAbort = abort;
+    try { accepted(); } catch { /* Presentation cannot cancel an accepted compaction. */ }
     this.observeRuntimeEvent({ type: "compaction.started", reason: "manual" });
     const task = this.contextManager.compact(this.session, this.model, {
       reason: "manual",
@@ -2129,11 +2131,7 @@ export class TuiController {
     await this.activeTurn;
   }
 
-  /**
-   * Append a nonempty prompt and run the shared agent loop when a model is available, ignoring submissions while busy.
-   * Without a model, displays an error and returns without appending a user record or starting the loop.
-   * Appends the user record first so a cancelled turn still leaves resumable history.
-   */
+  /** Accept a prompt only after durable append, then run its turn and report acceptance. */
   async submit(prompt: string, accepted: () => void = () => {}): Promise<boolean> {
     const text = prompt;
     if (text.trim().length === 0 || this.running || this.disposed) {

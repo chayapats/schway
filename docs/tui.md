@@ -62,7 +62,8 @@ busy operations, rejected commands, and session write failures keep the text and
 cursor in the editor so you can repair the cause and press Enter again. A model
 failure after the saved user record is a failed turn in the conversation; it does
 not restore the prompt as a new draft. Prompt recall records accepted ordinary
-prompts only.
+prompts only. Long commands release the editor when their preparation succeeds
+and execution starts; their later completion leaves any newer draft intact.
 
 Selection is copied through the terminal's OSC 52 clipboard protocol. This works
 with Kitty's clipboard support, including text selected from scrolled output.
