@@ -2,11 +2,15 @@ import { listCatalog, lookupModel, type ModelCapability } from "../model/catalog
 import type { CompatibleProfile } from "../config/config.ts";
 import { parseModelArgs } from "./commands.ts";
 import type { ModelAccess, ModelPickerAccess } from "./model-access.ts";
+import { createHash } from "node:crypto";
 
 /** One selectable known or typed model with effective budgets and active state. */
 export interface ModelPickerEntry {
+  /** Stable route, endpoint/profile and model identity across sorting and refreshes. */
+  identity: string;
   provider: string;
   modelId: string;
+  authRoute: "codex" | "api-key" | "provider";
   contextWindow: number;
   maxOutput: number;
   active: boolean;
@@ -21,6 +25,10 @@ export interface ModelPickerEntry {
   supportedThinking?: readonly string[];
   /** Named compatible profile backing this row, when the entry selects a profile. */
   profile?: string;
+  /** Account catalog confirms access to this subscription model, unlike configured API keys. */
+  verifiedCatalog?: boolean;
+  /** Connection action shown when subscription catalog rows cannot yet be known. */
+  connect?: boolean;
 }
 
 /** Renderable keyboard picker state; selectedIndex selects from the filtered entries. */
@@ -29,20 +37,37 @@ export interface ModelPickerSnapshot {
   selectedIndex: number;
   entries: ModelPickerEntry[];
   loading?: boolean;
+  accessLoading?: boolean;
   error?: string;
+  catalogState?: "loading" | "ready" | "empty" | "offline" | "failed";
+}
+
+/** Identify the complete selectable route without relying on a model ID or row index. */
+export function modelPickerIdentity(entry: Pick<ModelPickerEntry, "provider" | "authRoute" | "profile" | "modelId">, endpoint?: string, credential?: string): string {
+  return createHash("sha256").update(JSON.stringify([entry.provider, entry.authRoute, entry.profile ?? "", endpoint ?? "", credential ?? "", entry.modelId])).digest("hex");
 }
 
 /** Build matching catalog and profile choices plus an explicit typed choice with fallback budgets. */
-export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; access?: ModelPickerAccess }): ModelPickerEntry[] {
+export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess }): ModelPickerEntry[] {
   const normalized = query.toLowerCase();
-  const entries: ModelPickerEntry[] = listCatalog().filter(entry => (!options?.subscriptionMode || entry.provider !== "openai") && `${entry.provider}/${entry.id}`.toLowerCase().includes(normalized)).map(entry => ({
-    provider: entry.provider, modelId: entry.id, ...budgets(entry.provider, entry.id, limits), active: entry.provider === provider && entry.id === modelId && (options?.activeProfile === undefined), custom: false,
-    ...(options?.subscriptionMode ? { otherProvider: true } : {}),
-  }));
+  const activeRoute = options?.activeRoute ?? (options?.subscriptionMode ? "codex" : "api-key");
+  const matches = (family: string, id: string, route: string) => `${family}/${id} ${route}`.toLowerCase().includes(normalized);
+  const entries: ModelPickerEntry[] = listCatalog().filter(entry => matches(entry.provider, entry.id, entry.provider === "openai" ? "API key" : ""))
+    .map(entry => {
+      const authRoute = entry.provider === "openai" ? "api-key" as const : "provider" as const;
+      const row: ModelPickerEntry = {
+        identity: modelPickerIdentity({ provider: entry.provider, authRoute, modelId: entry.id }, entry.provider === "openai-compatible" ? options?.baseUrl : undefined, entry.provider === "openai-compatible" ? options?.credentialIdentity : undefined),
+        provider: entry.provider, modelId: entry.id, authRoute, ...budgets(entry.provider, entry.id, limits),
+        active: entry.provider === provider && entry.id === modelId && options?.activeProfile === undefined && (entry.provider !== "openai" || activeRoute === "api-key"), custom: false,
+        ...(options?.subscriptionMode ? { otherProvider: true } : {}),
+      };
+      return row;
+    });
   for (const id of options?.subscriptionModels ?? []) {
-    if (!`openai/${id}`.toLowerCase().includes(normalized)) continue;
+    if (!matches("openai", id, "ChatGPT subscription")) continue;
     const capability = options?.subscriptionCapabilities?.find(entry => entry.id === id);
-    entries.push({ provider: "openai", modelId: id, ...budgets("openai", id, { contextWindow: limits.contextWindow ?? capability?.contextWindow, maxOutput: limits.maxOutput ?? capability?.maxOutput }), active: provider === "openai" && modelId === id, custom: false,
+    entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "codex", modelId: id }), provider: "openai", modelId: id, authRoute: "codex", verifiedCatalog: true,
+      ...budgets("openai", id, { contextWindow: limits.contextWindow ?? capability?.contextWindow, maxOutput: limits.maxOutput ?? capability?.maxOutput }), active: provider === "openai" && modelId === id && activeRoute === "codex", custom: false,
       ...(capability?.defaultThinking !== undefined ? { defaultThinking: capability.defaultThinking } : {}),
       ...(capability !== undefined ? { supportedThinking: capability.supportedThinking } : {}),
     });
@@ -55,8 +80,10 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       continue;
     }
     entries.push({
+      identity: modelPickerIdentity({ provider: "openai-compatible", authRoute: "provider", profile: name, modelId: model }, profile.baseUrl, profile.credentialIdentity),
       provider: "openai-compatible",
       modelId: model,
+      authRoute: "provider",
       ...budgets("openai-compatible", model, {
         contextWindow: profile.contextWindow ?? limits.contextWindow,
         maxOutput: profile.maxOutput ?? limits.maxOutput,
@@ -68,20 +95,24 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
     });
   }
   const selection = parseModelArgs(query || `${provider}/${modelId}`, provider);
-  if (!("error" in selection) && selection.profile === undefined && !(options?.subscriptionMode && (!query || selection.provider === "openai")) && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined)) {
-    entries.push({ ...selection, ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined, custom: true,
+  if ((!query || query.includes("/")) && !("error" in selection) && selection.profile === undefined && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined && entry.authRoute !== "codex")) {
+    const authRoute = selection.provider === "openai" ? "api-key" as const : "provider" as const;
+    entries.push({ ...selection, identity: modelPickerIdentity({ ...selection, authRoute }, selection.provider === "openai-compatible" ? options?.baseUrl : undefined, selection.provider === "openai-compatible" ? options?.credentialIdentity : undefined), authRoute,
+      ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined && (selection.provider !== "openai" || activeRoute === "api-key"), custom: true,
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
   for (const entry of entries) {
     entry.access = entry.profile !== undefined ? options?.access?.profiles[entry.profile]
-      : options?.subscriptionMode && entry.provider === "openai" ? "ChatGPT" : options?.access?.providers[entry.provider];
+      : entry.authRoute === "codex" ? options?.access?.subscription ?? "ChatGPT"
+        : entry.authRoute === "api-key" ? options?.access?.openaiApiKey ?? options?.access?.providers.openai
+          : options?.access?.providers[entry.provider];
   }
   const rank = (entry: ModelPickerEntry): number => {
-    if (entry.custom && !entry.active) return 5;
-    if (entry.access === "Login required") return 4;
+    if (entry.access === "Login required") return 5;
     if (entry.active) return 0;
-    if (options?.subscriptionMode && !entry.otherProvider) return 1;
+    if (entry.authRoute === "codex") return 1;
+    if (entry.custom) return 4;
     if (!options?.subscriptionMode && entry.provider === provider && entry.profile === options?.activeProfile) return 1;
     return entry.access !== undefined ? 2 : 3;
   };

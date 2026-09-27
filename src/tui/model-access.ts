@@ -10,6 +10,10 @@ export interface ModelPickerAccess {
   providers: Record<string, ModelAccess>;
   profiles: Record<string, ModelAccess>;
   openaiTransport?: "codex" | "api-key";
+  /** Independently configured subscription route, regardless of the current preference. */
+  subscription: ModelAccess;
+  /** Independently configured API route, regardless of the current preference. */
+  openaiApiKey: ModelAccess;
 }
 
 /** Resolve picker access using the same credential precedence as model creation without contacting providers. */
@@ -25,7 +29,7 @@ export async function loadModelPickerAccess(input: {
   activeProfile?: string;
   profiles?: Record<string, CompatibleProfile>;
 }): Promise<ModelPickerAccess> {
-  const access: ModelPickerAccess = { providers: {}, profiles: {} };
+  const access: ModelPickerAccess = { providers: {}, profiles: {}, subscription: "Login required", openaiApiKey: "Login required" };
   const resolve = async (target: CredentialTarget & { auth?: "required" | "optional" | "none"; credentialEnv?: string }): Promise<ModelAccess> => {
     const result = await resolveProviderCredential({ ...target, store: input.store, env: input.env, runtimeApiKey: input.runtimeApiKey });
     return "error" in result ? "Login required" : result.source === "none" ? "No key required" : "API key";
@@ -33,10 +37,16 @@ export async function loadModelPickerAccess(input: {
   await Promise.all([
     resolve({ provider: "anthropic" }).then(value => { access.providers.anthropic = value; }),
     (async () => {
-      const transport = await selectOpenAITransport(input);
+      const [transport, subscription, apiKey] = await Promise.all([
+        selectOpenAITransport(input),
+        selectOpenAITransport({ ...input, openaiAuth: "codex" }),
+        resolve({ provider: "openai" }),
+      ]);
+      access.subscription = "error" in subscription ? "Login required" : "ChatGPT";
+      access.openaiApiKey = apiKey;
       if ("error" in transport) { access.providers.openai = "Login required"; return; }
       access.openaiTransport = transport.transport;
-      access.providers.openai = transport.transport === "codex" ? "ChatGPT" : await resolve({ provider: "openai" });
+      access.providers.openai = transport.transport === "codex" ? access.subscription : apiKey;
     })(),
     (async () => {
       access.providers["openai-compatible"] = input.baseUrl && !input.activeProfile

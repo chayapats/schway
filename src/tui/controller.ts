@@ -30,7 +30,7 @@ import {
   type GitSnapshot,
   type GitTurnComparison,
 } from "../workspace/git.ts";
-import { modelPickerEntries, type ModelPickerSnapshot } from "./model-picker.ts";
+import { modelPickerEntries, modelPickerIdentity, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
 import { loadModelPickerAccess, type ModelPickerAccess } from "./model-access.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
@@ -63,6 +63,8 @@ export interface TuiSnapshot {
   profile?: string;
   /** OpenAI credential preference shown with provider/model; auto prefers explicit keys over stored subscription. */
   openaiAuth?: string;
+  /** Route bound to the active adapter, regardless of the saved automatic preference. */
+  activeRoute?: string;
   /** Requested thinking level shown with provider/model; undefined leaves provider defaults untouched. */
   thinking?: string;
   /** Effective reasoning description shown alongside the requested value. */
@@ -133,6 +135,8 @@ export interface TuiControllerOptions {
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
+  /** Receive a choice only after its model and route are active. */
+  onModelActivated?: (choice: { provider: string; modelId: string; authRoute: string; profile?: string }) => void;
   /** Observe current-turn events and their active session ID before display folding without blocking the loop. */
   onRuntimeEvent?: (event: RuntimeEvent, sessionId: string) => void | Promise<void>;
   /** Explicit change-tracking fallback when no config editor supplies effective settings. */
@@ -392,11 +396,14 @@ export class TuiController {
   private configEditor?: ConfigEditor;
   private readonly stageSettings?: TuiControllerOptions["stageSettings"];
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
+  private readonly onModelActivated?: TuiControllerOptions["onModelActivated"];
   private readonly onRuntimeEvent?: TuiControllerOptions["onRuntimeEvent"];
   private modelPicker?: ModelPickerSnapshot;
   private subscriptionModels?: readonly string[];
   private modelPickerAccess?: ModelPickerAccess;
-  private pickerSubscriptionMode = false;
+  private pickerReturn?: { query: string; identity: string };
+  private pickerPreferredIdentity?: string;
+  private pickerSelectionTouched = false;
   private subscriptionCapabilities?: readonly ModelCapability[];
   private subscriptionPending = false;
   private subscriptionReactivationRequired = false;
@@ -458,6 +465,7 @@ export class TuiController {
     this.explicitChangeTracking = options.changeTracking;
     this.stageSettings = options.stageSettings;
     this.onSettingsCommitted = options.onSettingsCommitted;
+    this.onModelActivated = options.onModelActivated;
     this.onRuntimeEvent = options.onRuntimeEvent;
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
@@ -473,6 +481,9 @@ export class TuiController {
     const thinking = this.configEditor?.settings.thinking ?? this.thinking;
     const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId);
     const branchTree = this.branchTreeForSnapshot();
+    const activeRoute = this.model
+      ? this.model.provider === "codex-subscription" ? "ChatGPT subscription" : this.model.provider === "openai" ? "OpenAI API key" : "OpenAI route"
+      : this.openaiAuth === "codex" ? "ChatGPT subscription" : this.openaiAuth === "api-key" ? "OpenAI API key" : "OpenAI route";
     return {
       status: this.status,
       transcript: this.transcript.map((entry) =>
@@ -486,6 +497,7 @@ export class TuiController {
       modelId: this.modelId,
       ...(this.profile !== undefined ? { profile: this.profile } : {}),
       ...(this.openaiAuth !== undefined ? { openaiAuth: this.openaiAuth } : {}),
+      ...(this.provider === "openai" ? { activeRoute: `${activeRoute}${this.model ? "" : " (unavailable)"}` } : {}),
       ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
@@ -577,6 +589,11 @@ export class TuiController {
     if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
     const target = this.parseCredentialTarget(args);
     if (!target || !this.credentials) return false;
+    return this.beginCredentialTarget(target);
+  }
+
+  private beginCredentialTarget(target: CredentialTarget): boolean {
+    if (!this.credentials) return false;
     let identity: CredentialIdentity;
     try { identity = credentialIdentity(target); }
     catch { this.fail("Select a valid compatible base URL before /login openai-compatible."); return false; }
@@ -607,7 +624,7 @@ export class TuiController {
     const task = (async () => {
       const result = await entry.submit();
       this.notice(result.message);
-      if (!result.ok) { this.status = "error"; return false; }
+      if (!result.ok) { this.pickerReturn = undefined; this.status = "error"; return false; }
       const source = this.credentialOverrideNotice(target);
       if (source) this.notice(source);
       await this.refreshCredentialModel(credentialIdentity(target));
@@ -615,12 +632,15 @@ export class TuiController {
     })();
     const tracked = task.then(() => {});
     this.activeTurn = tracked;
-    try { return await task; } finally {
+    let saved: boolean;
+    try { saved = await task; } finally {
       this.credentialEntry = undefined;
       this.credentialTarget = undefined;
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
+    if (saved) this.restorePickerAfterConnection();
+    return saved;
   }
 
   /** Remove exactly one provider's saved credential without altering runtime or environment overrides. */
@@ -830,6 +850,11 @@ export class TuiController {
       if (this.activeTurn === tracked) this.activeTurn = undefined;
       this.loginApproval = undefined;
     }
+    if (signedIn && this.pickerReturn) {
+      this.restorePickerAfterConnection();
+      return true;
+    }
+    if (!signedIn) this.pickerReturn = undefined;
     if (signedIn && this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog && !this.disposed) {
       const discovery = new AbortController();
       this.activeAbort = discovery;
@@ -1400,7 +1425,9 @@ export class TuiController {
   openModelPicker(): boolean {
     if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
     this.closeModelPicker();
-    this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() || this.credentials ? { loading: true } : {}) };
+    this.pickerSelectionTouched = false;
+    this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() || this.credentials ? { loading: true, catalogState: "loading" } : {}),
+      ...(this.credentials ? { accessLoading: true } : {}) };
     this.searchModels("");
     if (this.subscriptionSelected() || this.credentials) {
       const picker = this.modelPicker;
@@ -1414,47 +1441,72 @@ export class TuiController {
   private async refreshModelPicker(picker: ModelPickerSnapshot, abort: AbortController): Promise<void> {
     const current = () => !this.disposed && !abort.signal.aborted && this.modelPicker === picker;
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)]);
-    const catalog = this.subscriptionSelected()
-      ? this.loadAccountCatalog(signal).then(models => ({ models }), error => ({ error }))
-      : undefined;
     try {
       if (this.credentials) {
         const settings = this.configEditor?.settings;
         const preference = settings?.openaiAuth ?? this.openaiAuth;
         const auth = settings?.auth ?? this.auth;
-        const access = await loadModelPickerAccess({ ...this.credentials,
+        const access = await this.boundedPickerTask(signal, loadModelPickerAccess({ ...this.credentials,
           openaiAuth: isOpenAIAuthPreference(preference) ? preference : undefined,
           baseUrl: settings?.baseUrl ?? this.baseUrl, auth: auth === "none" || auth === "optional" || auth === "required" ? auth : undefined,
           credentialEnv: settings?.credentialEnv, credentialIdentity: settings?.credentialIdentity,
           activeProfile: settings?.profile ?? this.profile, profiles: this.configEditor?.profiles,
-        });
+        }));
         if (!current()) return;
         this.modelPickerAccess = access;
-        this.pickerSubscriptionMode = access.openaiTransport === "codex";
+        picker.accessLoading = false;
+        this.searchModels(picker.query, true);
       }
-      if (this.subscriptionSelected()) {
+      if (this.subscriptionSelected() || this.modelPickerAccess?.subscription === "ChatGPT") {
         if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) {
           throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
         }
-        const result = catalog ? await catalog : { models: await this.loadAccountCatalog(signal) };
-        if ("error" in result) throw result.error;
+        const models = await this.boundedPickerTask(signal, this.loadAccountCatalog(signal));
         if (!current()) return;
-        this.subscriptionModels = result.models.map(model => model.id);
+        this.subscriptionModels = models.map(model => model.id);
+        picker.catalogState = models.length ? "ready" : "empty";
+        if (!models.length) picker.error = "No ChatGPT models were returned for this account. Press R to retry or Esc to cancel.";
+      } else {
+        picker.catalogState = "empty";
       }
     } catch (error) {
-      if (current()) picker.error = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500);
+      if (current()) {
+        picker.accessLoading = false;
+        const message = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350);
+        picker.catalogState = /offline|network|fetch|timeout|aborted/i.test(message) ? "offline" : "failed";
+        picker.error = `ChatGPT catalog ${picker.catalogState}: ${message}. Press R to retry or Esc to cancel.`;
+      }
     } finally {
       if (current()) {
-        // Keep the row under the cursor if the user has already started navigating.
-        const selected = picker.selectedIndex > 0 ? picker.entries[picker.selectedIndex] : undefined;
         picker.loading = false;
-        this.searchModels(picker.query);
-        if (selected) {
-          const index = picker.entries.findIndex(entry => entry.provider === selected.provider && entry.modelId === selected.modelId && entry.profile === selected.profile);
-          if (index >= 0) picker.selectedIndex = index;
-        }
+        this.searchModels(picker.query, true);
       }
     }
+  }
+
+  private async boundedPickerTask<T>(signal: AbortSignal, task: Promise<T>): Promise<T> {
+    let onAbort: (() => void) | undefined;
+    const cancelled = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason ?? new Error("Model discovery timed out"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+    try { return await Promise.race([task, cancelled]); }
+    finally { if (onAbort) signal.removeEventListener("abort", onAbort); }
+  }
+
+  /** Retry account discovery without losing the search or highlighted route. */
+  retryModelPickerCatalog(): boolean {
+    const picker = this.modelPicker;
+    if (!picker || picker.loading || !this.credentials) return false;
+    this.modelCatalogAbort?.abort();
+    const abort = new AbortController();
+    this.modelCatalogAbort = abort;
+    picker.loading = true;
+    picker.error = undefined;
+    picker.catalogState = "loading";
+    void this.refreshModelPicker(picker, abort);
+    return true;
   }
 
   /** Read account metadata once and retain it only in this controller and its session config. */
@@ -1474,9 +1526,9 @@ export class TuiController {
     return slugs.map(id => ({ id, supportedThinking: [] }));
   }
 
-  /** Use account models when Codex is selected or the open picker discovered its saved login. */
+  /** Use account models when the active route or explicit preference selects a subscription. */
   private subscriptionSelected(): boolean {
-    return this.pickerSubscriptionMode || this.subscriptionPending || (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
+    return this.subscriptionPending || (this.provider === "openai" && this.model?.provider === "codex-subscription") || (this.configEditor?.settings.openaiAuth ?? this.openaiAuth) === "codex";
   }
 
   /** Use Codex thinking only for its adapter or a Codex session awaiting an adapter. */
@@ -1486,19 +1538,63 @@ export class TuiController {
   }
 
   /** Filter catalog and profile choices with fallback budgets for typed ids. */
-  searchModels(query: string): void {
+  searchModels(query: string, refresh = false): void {
     if (!this.modelPicker || this.running) return;
     const picker = this.modelPicker;
+    const selectedIdentity = this.pickerPreferredIdentity ?? (this.pickerSelectionTouched ? picker.entries[picker.selectedIndex]?.identity : undefined);
+    if (!refresh && picker.query !== query) this.pickerSelectionTouched = true;
     picker.query = query;
-    picker.selectedIndex = 0;
-    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, { profiles: this.configEditor?.profiles, activeProfile: this.configEditor?.settings.profile ?? this.profile, subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess });
+    const settings = this.configEditor?.settings;
+    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, {
+      profiles: this.configEditor?.profiles, activeProfile: settings?.profile ?? this.profile,
+      activeRoute: this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
+      baseUrl: settings?.baseUrl ?? this.baseUrl, credentialIdentity: settings?.credentialIdentity,
+      subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess,
+    });
+    if (this.modelPickerAccess?.subscription === "Login required" && !this.subscriptionModels?.length &&
+      "openai ChatGPT subscription connect".toLowerCase().includes(query.toLowerCase())) {
+      picker.entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "codex", modelId: "" }), provider: "openai", modelId: "", authRoute: "codex",
+        contextWindow: 0, maxOutput: 0, active: false, custom: false, access: "Login required", connect: true });
+    }
+    picker.selectedIndex = selectedIdentity ? Math.max(0, picker.entries.findIndex(entry => entry.identity === selectedIdentity)) : 0;
+    if (this.pickerPreferredIdentity && picker.entries.some(entry => entry.identity === this.pickerPreferredIdentity)) this.pickerPreferredIdentity = undefined;
   }
 
   /** Move the highlighted model with wraparound over the filtered choices. */
   moveModelPicker(delta: number): void {
     if (!this.modelPicker || this.running || !this.modelPicker.entries.length) return;
+    this.pickerPreferredIdentity = undefined;
+    this.pickerSelectionTouched = true;
     const count = this.modelPicker.entries.length;
     this.modelPicker.selectedIndex = ((this.modelPicker.selectedIndex + delta) % count + count) % count;
+  }
+
+  private async connectPickerRoute(selection: ModelPickerEntry): Promise<boolean> {
+    const picker = this.modelPicker;
+    if (!picker || !this.credentials) { this.fail("Sign-in is unavailable in this session."); return false; }
+    this.pickerReturn = { query: picker.query, identity: selection.identity };
+    let started: boolean;
+    if (selection.authRoute === "codex") {
+      started = await this.login("codex");
+      if (!started) this.pickerReturn = undefined;
+      return started;
+    }
+    if (selection.profile) {
+      const profile = this.configEditor?.profiles[selection.profile];
+      started = !!profile && this.beginCredentialTarget({ provider: "openai-compatible", profile: selection.profile,
+        baseUrl: profile.baseUrl, credentialIdentity: profile.credentialIdentity });
+    } else started = this.beginLogin(selection.provider);
+    if (!started) this.pickerReturn = undefined;
+    return started;
+  }
+
+  private restorePickerAfterConnection(): void {
+    const returning = this.pickerReturn;
+    this.pickerReturn = undefined;
+    if (!returning || this.disposed) return;
+    this.openModelPicker();
+    this.pickerPreferredIdentity = returning.identity;
+    this.searchModels(returning.query);
   }
 
   /** Close the picker without changing the active model or settings. */
@@ -1506,20 +1602,41 @@ export class TuiController {
     this.modelCatalogAbort?.abort();
     this.modelCatalogAbort = undefined;
     this.modelPickerAccess = undefined;
-    this.pickerSubscriptionMode = false;
     this.subscriptionModels = undefined;
     this.modelPicker = undefined;
+    this.pickerPreferredIdentity = undefined;
+    this.pickerSelectionTouched = false;
   }
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
-    if (this.modelPicker?.loading) { this.notice("Loading available models. Try again when the list is ready."); return false; }
+    if (this.modelPicker?.accessLoading) { this.notice("Checking configured credentials. Try again shortly."); return false; }
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
     if (!selection) return false;
-    if (selection.profile !== undefined) {
-      return this.selectProfile(selection.profile);
+    if (selection.access === "Login required" || selection.connect) {
+      return this.connectPickerRoute(selection);
     }
-    return this.selectModel(`${selection.provider}/${selection.modelId}`);
+    let applied: boolean;
+    if (selection.profile !== undefined) applied = await this.selectProfile(selection.profile);
+    else if (selection.authRoute === "codex") {
+      if (!this.subscriptionModels?.includes(selection.modelId)) {
+        this.fail("This ChatGPT model is not in the current account catalog. Press R to retry discovery.");
+        return false;
+      }
+      applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
+        () => `Switched to openai/${this.modelId} via ChatGPT subscription. Applies to this session only.`);
+    } else if (selection.authRoute === "api-key") {
+      applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
+        () => `Switched to openai/${this.modelId} via OpenAI API key. Applies to this session only.`);
+    } else applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
+    if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) this.emitModelActivated(selection);
+    return applied;
+  }
+
+  private emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): void {
+    try { this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
+      ...(choice.profile ? { profile: choice.profile } : {}) }); }
+    catch { this.notice("Model activated, but its preference could not be remembered."); }
   }
 
   /** Switch the named compatible profile as one staged change, retaining previous on failure. */
@@ -1527,10 +1644,12 @@ export class TuiController {
     if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
     const trimmed = name.trim();
     if (!trimmed) { this.fail("Usage: /model profile:<name>."); return false; }
-    return this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
+    const applied = await this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
       const active = this.configEditor!.settings.profile ?? trimmed;
       return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}). Applies to this session only.`;
     });
+    if (applied) this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: "provider", profile: trimmed });
+    return applied;
   }
 
   /** Apply the textual model or profile form through the same atomic session settings path as the picker. */
@@ -1553,10 +1672,13 @@ export class TuiController {
         return false;
       }
     }
-    return this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
+    const applied = await this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
       ? this.configEditor!.prepareSubscriptionModel(selection.modelId)
       : this.configEditor!.prepareModel(selection.provider, selection.modelId),
       () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}). Applies to this session only.`);
+    if (applied) this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
+      authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
+    return applied;
   }
 
   /** Show or switch the reasoning level for future requests without rewriting history. */
@@ -1686,7 +1808,7 @@ export class TuiController {
     this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
     this.subscriptionReactivationRequired = false;
-    if (next.provider !== "openai" && next.openaiAuth !== "codex") this.subscriptionPending = false;
+    if (next.openaiAuth !== "codex" || staged.model?.provider === "codex-subscription") this.subscriptionPending = false;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
 
@@ -1962,14 +2084,15 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction.
    */
   cancel(): void {
-    if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.notice("Callback entry cancelled; no credential was changed."); return; }
-    if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.codexLoginAbort.abort(); return; }
+    if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.notice("Callback entry cancelled; no credential was changed."); return; }
+    if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.codexLoginAbort.abort(); return; }
     if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; return; }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.credentialEntry) {
       this.credentialEntry.cancel();
       this.credentialEntry = undefined;
       this.credentialTarget = undefined;
+      this.pickerReturn = undefined;
       this.notice("Credential entry cancelled; nothing saved.");
       return;
     }

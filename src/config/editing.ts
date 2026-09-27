@@ -186,6 +186,14 @@ export class ConfigEditor {
     ]);
   }
 
+  /** Stage an explicit API-key model and billing route together for this session. */
+  async prepareOpenAIApiModel(model: string): Promise<ConfigTransaction> {
+    return this.prepareChanges("session", [
+      { key: "provider", value: "openai" }, { key: "openaiAuth", value: "api-key" },
+      { key: "model", value: model }, { key: "profile", value: null },
+    ]);
+  }
+
   /** Stage a named compatible profile switch as one session override, clearing shadowed direct keys. */
   async prepareProfile(profile: string, scope: ConfigScope = "session"): Promise<ConfigTransaction> {
     const connectionKeys = ["provider", "model", "baseUrl", "auth", "contextWindow", "maxOutput"];

@@ -76,7 +76,8 @@ test("opening the picker discovers a saved Codex login from another provider and
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const entries = controller.snapshot().modelPicker!.entries;
       expect(entries.slice(0, 2).map(entry => [entry.modelId, entry.access])).toEqual([["account-first", "ChatGPT"], ["account-second", "ChatGPT"]]);
-      expect(entries.filter(entry => entry.provider === "openai")).toHaveLength(2);
+      expect(entries.filter(entry => entry.authRoute === "codex")).toHaveLength(2);
+      expect(entries.some(entry => entry.provider === "openai" && entry.authRoute === "api-key")).toBe(true);
       expect(await controller.selectPickerModel()).toBe(true);
       expect(configEditor.settings).toMatchObject({ provider: "openai", openaiAuth: "codex", model: "account-first" });
     } finally { controller.dispose(); }
