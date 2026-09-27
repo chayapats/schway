@@ -110,6 +110,38 @@ test("recovery controls become stale after session replacement", async () => {
   });
 });
 
+test("changing the active model outside repair disables an earlier operation's controls", async () => {
+  await withTempDir(async dir => {
+    const tui = controller(dir, [{ error: "temporary failure", status: 500 },
+      { error: "temporary failure", status: 500 }, { error: "temporary failure", status: 500 }]);
+    await tui.submit("task");
+    expect(tui.snapshot().recovery?.actions).toContain("continue");
+    tui.setModel(createScriptedModel({ text: "new identity" }), "scripted", "new-model");
+    expect(tui.snapshot().recovery).toBeUndefined();
+    expect(await tui.continueRecovery()).toBe(false);
+  });
+});
+
+test("a stale continuation cannot publish into a replacement session", async () => {
+  await withTempDir(async dir => {
+    const original = createSession();
+    const tui = controller(dir, [
+      { error: "temporary failure", status: 500 }, { error: "temporary failure", status: 500 },
+      { error: "temporary failure", status: 500 }, { waitForAbort: true },
+    ], original);
+    await tui.submit("task");
+    const pending = tui.continueRecovery();
+    await new Promise(resolve => setTimeout(resolve, 1));
+    const replacement = createSession();
+    tui.replaceSession(replacement, "replacement-session");
+    await pending;
+    expect(replacement.items).toHaveLength(0);
+    expect(tui.snapshot().sessionId).toBe("replacement-session");
+    expect(tui.snapshot().recovery).toBeUndefined();
+    expect(original.items.filter(item => item.type === "user")).toHaveLength(1);
+  });
+});
+
 test("failed model repair keeps the turn and a successful repair enables continuation", async () => {
   await withTempDir(async dir => {
     const session = createSession();
