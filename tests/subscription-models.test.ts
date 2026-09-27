@@ -198,6 +198,42 @@ test("cancelling post-login discovery leaves the previous provider active and re
   });
 });
 
+test("cancelling after secure-store commit reports saved credentials and blocks the previous account adapter", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "old-codex", openaiAuth: "codex" } });
+    let oldCalls = 0;
+    let committed!: () => void;
+    const saved = new Promise<void>(resolve => { committed = resolve; });
+    const controller = new TuiController({ session: createSession(), sessionId: "cancel-after-save", workspace,
+      configEditor: editor, provider: "openai", modelId: "old-codex",
+      model: createScriptedModel({ provider: "codex-subscription", responses: [() => { oldCalls++; return { text: "old account" }; }] }),
+      contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: async ({ onSaved, signal }) => {
+          await store.set(codexSubscriptionIdentity(), "replacement-credential");
+          onSaved?.(); committed();
+          await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+          throw new Error("unreachable");
+        } },
+    });
+    try {
+      const pending = controller.login("codex");
+      await saved;
+      controller.cancel();
+      expect(await pending).toBe(false);
+      expect(await store.get(codexSubscriptionIdentity())).toBe("replacement-credential");
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("credential was saved");
+      expect(text).not.toContain("Nothing was saved");
+      await controller.submit("continue task");
+      expect(oldCalls).toBe(0);
+    } finally { controller.dispose(); }
+  });
+});
+
 test("a signed-in account can retry discovery in /model without repeating OAuth", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -224,6 +260,33 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
       expect(attempts).toBe(2);
+    } finally { controller.dispose(); }
+  });
+});
+
+test("activation failure keeps saved credentials and gives a redacted model retry", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const controller = new TuiController({ session: createSession(), sessionId: "activation-failure", workspace,
+      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: async ({ onSaved }) => {
+          await store.set(codexSubscriptionIdentity(), "saved-credential-secret");
+          onSaved?.();
+          return { ok: true as const, status: "Credential saved" };
+        }, listSubscriptionCatalog: async () => [{ id: "account-model", supportedThinking: [] }] },
+      stageSettings: async () => { throw new Error("native-activation-secret-sentinel"); },
+    });
+    try {
+      expect(await controller.login("codex")).toBe(false);
+      expect(await store.get(codexSubscriptionIdentity())).toBe("saved-credential-secret");
+      expect(controller.snapshot().provider).toBe("anthropic");
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("Retry /model");
+      expect(text).not.toContain("native-activation-secret-sentinel");
     } finally { controller.dispose(); }
   });
 });

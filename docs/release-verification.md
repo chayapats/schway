@@ -1,5 +1,24 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## Issue #87 sign-in journey evidence (2026-09-27)
+
+Status: **automated fixture checks implemented; human installed browser check pending**.
+The controller test sends a real loopback callback through the injected token
+endpoint, reads the saved credential with a separate store reader, discovers an
+account model and activates it without inference. Other controller and renderer
+checks cover denied approval, secure-store save denial, occupied callback port,
+device approval, stale callback, cancellation before and after the store commit,
+catalog retry, activation failure, masked callback paste, draft/cursor recovery,
+resize, and logout with an API-key override. These use isolated user state and
+protocol fixtures; they do not establish real OAuth, live provider availability
+or native secure-store behavior.
+
+The operator-assisted installed check is **pending**. Record the installed
+revision, terminal and runtime, browser approval result, terminal stage messages,
+draft recovery, account model activation, and logout result after it is actually
+observed. Keep credential payloads and approval codes out of that record. An
+unrun check does not make this release gate pass.
+
 Status: **pending**, not release-approved. Checked on 2026-09-25 from the #58 issue worktree based on `15d6bf5` (which includes #57); package identity `schway@0.1.0`, Bun `1.4.2` on macOS arm64. The original gate was a local packed-artifact and offline-fixture check; the later subscription catalog follow-up added one bounded live model-list check. No registry publication, live inference, or human dogfood was performed. Record the final candidate SHA and rerun checks if the PR changes.
 
 ## Reproduce the installed path

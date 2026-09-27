@@ -16,6 +16,7 @@ import type {
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
+  credentialStoreError,
   type CredentialStore,
 } from "../../auth/store.ts";
 
@@ -92,6 +93,8 @@ export interface CodexLoginDeps {
     timeoutMs: number;
   }) => Promise<string>;
   onProgress?: CodexProgress;
+  /** Called only after the secure-store write resolves successfully. */
+  onSaved?: () => void;
   /** Deterministic random bytes for PKCE/state in tests; defaults to crypto. */
   randomBytes?: (bytes: number) => Uint8Array;
 }
@@ -100,6 +103,8 @@ export interface CodexLoginDeps {
 export interface CodexDeviceDeps {
   fetch?: CodexFetchLike;
   onProgress?: CodexProgress;
+  /** Called only after the secure-store write resolves successfully. */
+  onSaved?: () => void;
 }
 
 /** Device authorization started by the headless beta request. */
@@ -198,9 +203,8 @@ export function extractCodeFromCallbackUrl(
 }
 
 /** Actionable error when the user denies Schway at the provider consent screen. */
-export function codexDeniedError(detail?: string): string {
-  const suffix = detail?.trim() ? ` (${detail.trim()})` : "";
-  return `ChatGPT sign-in was denied at the provider consent screen${suffix}. Retry /login codex and approve Schway, or stay on API-key billing with openaiAuth api-key.`;
+export function codexDeniedError(_detail?: string): string {
+  return "ChatGPT sign-in was denied at the provider consent screen. Retry sign-in and approve Schway, or stay on API-key billing.";
 }
 
 /** Actionable error when an authorization code or device code has expired. */
@@ -246,6 +250,15 @@ export async function saveSubscriptionTokens(
   tokens: CodexTokens,
 ): Promise<void> {
   await store.set(codexSubscriptionIdentity(), JSON.stringify(serializeSubscriptionTokens(tokens)));
+}
+
+/** Commit a completed interactive sign-in and report the secure-store commit point. */
+async function commitInteractiveLogin(store: CredentialStore, tokens: CodexTokens, deps: { onSaved?: () => void; onProgress?: CodexProgress }): Promise<void> {
+  deps.onProgress?.("Approval received. Saving ChatGPT credential in the OS secure store…");
+  try { await saveSubscriptionTokens(store, tokens); }
+  catch { throw new Error(credentialStoreError("save")); }
+  deps.onSaved?.();
+  deps.onProgress?.(formatSubscriptionStatus(tokens));
 }
 
 /** Remove only the selected subscription identity, reporting whether one existed. */
@@ -333,7 +346,7 @@ export function formatSubscriptionStatus(tokens: CodexTokens): string {
   const expiry = tokens.expiresAt !== undefined
     ? `expires ${new Date(tokens.expiresAt).toISOString()}`
     : "no reported expiry";
-  return `${CODEX_SUBSCRIPTION_LABEL}: signed in (account ${account}, ${expiry}).`;
+  return `${CODEX_SUBSCRIPTION_LABEL}: credential saved (account ${account}, ${expiry}); model discovery and activation are still pending.`;
 }
 
 /** Exchange one authorization code for subscription tokens with a single transport attempt. */
@@ -588,8 +601,7 @@ export async function loginWithBrowserFlow(input: {
       accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
       obtainedAt: Date.now(),
     };
-    await saveSubscriptionTokens(input.store, enriched);
-    deps.onProgress?.(formatSubscriptionStatus(enriched));
+    await commitInteractiveLogin(input.store, enriched, deps);
     return enriched;
   }
   const { verifier, challenge, state } = createPkceChallenge(deps.randomBytes);
@@ -636,8 +648,7 @@ export async function loginWithBrowserFlow(input: {
     accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
     obtainedAt: Date.now(),
   };
-  await saveSubscriptionTokens(input.store, enriched);
-  deps.onProgress?.(formatSubscriptionStatus(enriched));
+  await commitInteractiveLogin(input.store, enriched, deps);
   return enriched;
 }
 
@@ -666,7 +677,8 @@ export function waitForLocalhostCallback(input: {
       return;
     }
     let settled = false;
-    const server = Bun.serve({
+    let server: ReturnType<typeof Bun.serve>;
+    try { server = Bun.serve({
       port: 1455,
       hostname: "127.0.0.1",
       fetch: (request) => {
@@ -692,11 +704,14 @@ export function waitForLocalhostCallback(input: {
           { headers: { "Content-Type": "text/html" } },
         );
       },
-      error: (cause) => {
-        settle(() => reject(new Error(`The localhost sign-in callback failed (${messageOf(cause)}). Retry /login codex, or use /login codex --device on headless machines.`)));
+      error: () => {
+        settle(() => reject(new Error("The localhost sign-in callback failed. Choose device approval or paste the browser callback to retry.")));
         return new Response("Callback unavailable", { status: 503 });
       },
-    });
+    }); } catch {
+      reject(new Error("The localhost callback port is unavailable. Choose device approval or paste the browser callback to retry."));
+      return;
+    }
     const timer = setTimeout(() => {
       settle(() => reject(new Error("ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.")));
     }, input.timeoutMs);
@@ -852,8 +867,7 @@ export async function loginWithDeviceFlow(input: {
     accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
     obtainedAt: Date.now(),
   };
-  await saveSubscriptionTokens(input.store, enriched);
-  deps.onProgress?.(formatSubscriptionStatus(enriched));
+  await commitInteractiveLogin(input.store, enriched, deps);
   return enriched;
 }
 
@@ -1388,9 +1402,8 @@ async function readErrorDetail(response: Response): Promise<string> {
 /** Map a failed token endpoint payload to the distinct missing/expired/revoked login errors. */
 function mapTokenEndpointError(status: number, payload: Record<string, unknown>): string {
   const error = typeof payload.error === "string" ? payload.error : "";
-  const description = typeof payload.error_description === "string" ? payload.error_description.trim() : "";
   if (error === "access_denied") {
-    return codexDeniedError(description);
+    return codexDeniedError();
   }
   if (error === "invalid_grant" || error === "expired_token") {
     return codexExpiredCodeError();
@@ -1398,7 +1411,7 @@ function mapTokenEndpointError(status: number, payload: Record<string, unknown>)
   if (status === 401) {
     return codexRevokedSessionError();
   }
-  return `Exchanging the sign-in code failed (${error || `HTTP ${status}`}${description ? `: ${description}` : ""}). Restart /login codex for a fresh code.`;
+  return `Exchanging the sign-in code failed (HTTP ${status}). Start a fresh sign-in attempt.`;
 }
 
 /** Normalize a token endpoint payload into stored subscription tokens. */
@@ -1430,9 +1443,9 @@ async function readTokenPayload(response: Response, signal?: AbortSignal): Promi
       throw new Error("unreadable");
     }
     return payload as Record<string, unknown>;
-  } catch (error) {
+  } catch {
     throwIfAborted(signal);
-    throw new Error(`The sign-in endpoint returned an unreadable response (${messageOf(error)}). Retry /login codex.`);
+    throw new Error("The sign-in endpoint returned an unreadable response. Retry sign-in.");
   }
 }
 

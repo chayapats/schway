@@ -22,7 +22,13 @@ OpenAI still has a separate identity from native OpenAI.
 
 ## Explicit interactive management
 
-Start an interactive session and choose the provider explicitly:
+Start an interactive session and type `/login` to choose ChatGPT browser approval,
+device approval, a pasted browser callback, or a provider API key. Use Up/Down,
+Enter and Esc; no credential syntax is needed in the chooser. The callback entry
+is masked and stays outside prompt recall and session history. A draft and its
+cursor return after the chooser or masked entry closes.
+
+You can also name the provider explicitly:
 
 ```sh
 schway
@@ -45,6 +51,15 @@ submits an OS write, wait for its outcome: the native operation cannot be cancel
 without error. Runtime and environment overrides remain unchanged, and the notice
 identifies any override that still applies. Saving or removing the active provider's
 key refreshes its adapter so future requests use the newly resolved source.
+
+ChatGPT sign-in reports browser/device approval, OS secure-store saving, account
+model discovery and activation as separate steps. A callback response alone does
+not mean the connection is ready. If model discovery fails after saving, open
+`/model` to retry without repeating OAuth. Cancelling after a successful store
+write keeps the credential and reports that it remains saved. Device approval
+codes appear only in the temporary approval panel. Logging out of an active
+ChatGPT account blocks that account's adapter and reports any explicit API-key
+overrides; it does not switch billing automatically.
 
 For a compatible endpoint, configure its base URL before saving a key:
 

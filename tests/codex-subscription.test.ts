@@ -50,6 +50,7 @@ import { TuiController } from "../src/tui/controller.ts";
 import { parseLoginTarget } from "../src/tui/commands.ts";
 import { createSession } from "../src/session/session.ts";
 import { createContextManager } from "../src/context/manager.ts";
+import { loadConfigEditor } from "../src/config/editing.ts";
 import { executeToolCall } from "../src/tools/executor.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { readTool } from "../src/tools/read.ts";
@@ -1061,6 +1062,167 @@ test("interactive subscription login succeeds, denies, and cancels through the c
   });
 });
 
+test("interactive sign-in chooser offers browser, device, callback and API-key actions", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const methods: string[] = [];
+    const controller = new TuiController({
+      session: createSession(), sessionId: "login-chooser", workspace,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
+      credentials: {
+        store, env: {}, reload: async () => ({ model: createScriptedModel() }),
+        codexLogin: async ({ device }) => {
+          methods.push(device ? "device" : "browser");
+          return { ok: false, message: "Authorization was denied. Try another method." };
+        },
+      },
+    });
+    expect(await controller.login("")).toBe(true);
+    expect(controller.snapshot().loginChooser?.choices).toEqual(expect.arrayContaining([
+      expect.stringContaining("Browser"), expect.stringContaining("Device"),
+      expect.stringContaining("callback"), expect.stringContaining("OpenAI API key"),
+    ]));
+    controller.moveLoginChooser(1);
+    expect(await controller.selectLoginChoice()).toBe(false);
+    expect(methods).toEqual(["device"]);
+    controller.dispose();
+  });
+});
+
+test("controller browser callback saves a credential, discovers account models and activates without inference", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const store = fakeCredentialStore();
+    const secrets: string[] = [];
+    let callbackStatus = 0;
+    const browserDone = Promise.withResolvers<void>();
+    let inferences = 0;
+    const runner = createCodexLoginRunner({
+      store, secrets,
+      fetch: tokenEndpoint({ access_token: jwtWithAccount("acct-browser-journey"), refresh_token: "refresh-journey-secret", expires_in: 3600 }),
+      openBrowser: async authorizeUrl => {
+        try {
+          const state = new URL(authorizeUrl).searchParams.get("state");
+          const response = await fetch(`${CODEX_REDIRECT_URI}?code=browser-journey-secret&state=${state}`);
+          callbackStatus = response.status;
+          await response.text();
+        } finally { browserDone.resolve(); }
+      },
+    });
+    const controller = new TuiController({
+      session: createSession(), sessionId: "browser-journey", workspace, configEditor: editor,
+      provider: "anthropic", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace), secrets,
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: runner,
+        listSubscriptionCatalog: async () => [{ id: "account-model", contextWindow: 100000, supportedThinking: ["low"] }] },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model,
+        responses: [() => { inferences++; return { text: "unused" }; }] }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(await controller.login("codex")).toBe(true);
+      await browserDone.promise;
+      expect(callbackStatus).toBe(200);
+      expect((await loadSubscriptionTokens(store))?.accountId).toBe("acct-browser-journey");
+      expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "account-model" });
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("Approval received");
+      expect(text).toContain("credential saved");
+      expect(text).toContain("discovery succeeded");
+      expect(text).toContain("active for this session");
+      expect(text).not.toContain("browser-journey-secret");
+      expect(text).not.toContain("refresh-journey-secret");
+      expect(inferences).toBe(0);
+    } finally { controller.dispose(); clearPendingBrowserAttempt(); }
+  });
+});
+
+test("controller reports locked secure-store save after approval without claiming activation or leaking native errors", async () => {
+  await withTempDir(async root => {
+    clearPendingBrowserAttempt();
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const denied = { ...store, async set() { throw new Error("native-save-secret-sentinel"); } };
+    await expect(loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } })).rejects.toThrow(/callback is unavailable/);
+    const state = getPendingBrowserAttempt()?.state;
+    const controller = new TuiController({
+      session: createSession(), sessionId: "locked-save", workspace, provider: "openai", modelId: "gpt-5.4",
+      contextManager: createContextManager(workspace), secrets: [],
+      credentials: { store: denied, env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: createCodexLoginRunner({ store: denied, secrets: [],
+          fetch: tokenEndpoint({ access_token: "access-secret-sentinel", refresh_token: "refresh-secret-sentinel" }) }) },
+    });
+    try {
+      expect(await controller.login(`codex --code ${CODEX_REDIRECT_URI}?code=approval-secret-sentinel&state=${state}`)).toBe(false);
+      expect(await loadSubscriptionTokens(store)).toBeNull();
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("Cannot save credential");
+      expect(text).not.toContain("active for this session");
+      expect(text).not.toContain("secret-sentinel");
+    } finally { controller.dispose(); clearPendingBrowserAttempt(); }
+  });
+});
+
+test("controller device approval keeps the user code ephemeral and saves only after polling succeeds", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const presented = Promise.withResolvers<void>();
+    const grant = Promise.withResolvers<void>();
+    const controller = new TuiController({
+      session: createSession(), sessionId: "device-journey", workspace,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace), secrets: [],
+      credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }),
+        codexLogin: createCodexLoginRunner({ store, secrets: [],
+          fetch: async input => {
+            if (String(input).includes("usercode")) {
+              presented.resolve();
+              return Response.json({ user_code: "DEVICE-SECRET-CODE", verification_uri: "https://auth.openai.com/codex/device", device_code: "device-private", interval: 0 });
+            }
+            await grant.promise;
+            return Response.json({ access_token: jwtWithAccount("acct-device-controller"), refresh_token: "refresh-device-private", expires_in: 3600 });
+          } }) },
+    });
+    try {
+      const pending = controller.login("codex --device");
+      await presented.promise;
+      await Bun.sleep(0);
+      expect(controller.snapshot().loginApproval).toContain("DEVICE-SECRET-CODE");
+      expect(JSON.stringify(controller.snapshot().transcript)).not.toContain("DEVICE-SECRET-CODE");
+      expect(await loadSubscriptionTokens(store)).toBeNull();
+      grant.resolve();
+      expect(await pending).toBe(true);
+      expect((await loadSubscriptionTokens(store))?.accountId).toBe("acct-device-controller");
+      expect(JSON.stringify(controller.snapshot())).not.toContain("DEVICE-SECRET-CODE");
+    } finally { grant.resolve(); controller.dispose(); }
+  });
+});
+
+test("controller replaces native token-exchange exceptions with a redacted recovery action", async () => {
+  await withTempDir(async root => {
+    clearPendingBrowserAttempt();
+    const store = fakeCredentialStore();
+    await expect(loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } })).rejects.toThrow(/callback is unavailable/);
+    const state = getPendingBrowserAttempt()?.state;
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const controller = new TuiController({
+      session: createSession(), sessionId: "native-exception", workspace,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: createCodexLoginRunner({ store, secrets: [],
+          fetch: async () => { throw new Error("native-network-secret-sentinel"); } }) },
+    });
+    try {
+      expect(await controller.login(`codex --code ${CODEX_REDIRECT_URI}?code=callback-secret-sentinel&state=${state}`)).toBe(false);
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("Check the connection");
+      expect(text).not.toContain("secret-sentinel");
+      expect(await loadSubscriptionTokens(store)).toBeNull();
+    } finally { controller.dispose(); clearPendingBrowserAttempt(); }
+  });
+});
+
 test("interactive subscription logout removes only the subscription identity", async () => {
   await withTempDir(async (root) => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -1085,6 +1247,38 @@ test("interactive subscription logout removes only the subscription identity", a
     expect(await loadSubscriptionTokens(store)).toBeNull();
     expect(await store.get(credentialIdentity({ provider: "openai" }))).toBe("api-key-sentinel");
     controller.dispose();
+  });
+});
+
+test("logout blocks an active ChatGPT account while reporting untouched API-key overrides", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    await saveSubscriptionTokens(store, { accessToken: "old-account-secret", expiresAt: Date.now() + 3600000 });
+    await store.set(credentialIdentity({ provider: "openai" }), "stored-api-key-secret");
+    let oldCalls = 0;
+    let reloads = 0;
+    const controller = new TuiController({
+      session: createSession(), sessionId: "logout-active", workspace,
+      provider: "openai", modelId: "old-model", openaiAuth: "auto",
+      model: createScriptedModel({ provider: "codex-subscription",
+        responses: [() => { oldCalls++; return { text: "old response" }; }] }),
+      contextManager: createContextManager(workspace),
+      credentials: { store, env: { OPENAI_API_KEY: "env-api-key-secret" },
+        reload: async () => { reloads++; return { model: createScriptedModel({ provider: "openai" }) }; } },
+    });
+    try {
+      expect(await controller.logout("codex")).toBe(true);
+      expect(await loadSubscriptionTokens(store)).toBeNull();
+      expect(await store.get(credentialIdentity({ provider: "openai" }))).toBe("stored-api-key-secret");
+      await controller.submit("do not switch billing");
+      expect(oldCalls).toBe(0);
+      expect(reloads).toBe(0);
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("OPENAI_API_KEY");
+      expect(text).toContain("will not switch");
+      expect(text).not.toContain("env-api-key-secret");
+    } finally { controller.dispose(); }
   });
 });
 

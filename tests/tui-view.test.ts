@@ -34,6 +34,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     openUrl: async url => { opened.push(url); },
     submit: (value, accepted) => dispatchEditorInput(value, controller, async command => {
       if (command.name === "model") controller.openModelPicker();
+      else if (command.name === "login") await controller.login(command.args);
       else if (command.name === "help") controller.notice("Help text");
     }, accepted),
   });
@@ -295,6 +296,44 @@ test("masked credential entry intercepts paste and restores a multiline draft wi
   ui.mockInput.pressEscape();
   await settle(ui);
   expect(ui.editor.plainText).toBe("keep my\ndraft");
+  expect(ui.session.items).toHaveLength(0);
+});
+
+test("login chooser and masked callback use real keyboard and paste input while preserving a draft", async () => {
+  const ui = await setup(48, 18);
+  await ui.mockInput.pasteBracketedText("continue this task\nsecond line");
+  ui.editor.cursorOffset = 8;
+  expect(await ui.controller.login("")).toBe(true);
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Sign in");
+  expect(ui.editor.plainText).toBe("");
+  ui.mockInput.pressArrow("down");
+  ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  await ui.mockInput.pasteBracketedText("callback-secret-sentinel");
+  await settle(ui);
+  expect(ui.captureCharFrame()).not.toContain("callback-secret-sentinel");
+  expect(JSON.stringify(ui.controller.snapshot())).not.toContain("callback-secret-sentinel");
+  ui.resize(36, 16);
+  await settle(ui);
+  ui.mockInput.pressEscape();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("continue this task\nsecond line");
+  expect(ui.editor.cursorOffset).toBe(8);
+  expect(ui.session.items).toHaveLength(0);
+});
+
+test("/login without arguments reaches the chooser through editor dispatch", async () => {
+  const ui = await setup();
+  await ui.mockInput.typeText("/login");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.controller.snapshot().loginChooser).toBeDefined();
+  expect(ui.captureCharFrame()).toContain("ChatGPT");
+  ui.mockInput.pressEscape();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("");
   expect(ui.session.items).toHaveLength(0);
 });
 
