@@ -715,6 +715,47 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   expect(ui.captureCharFrame()).toContain("Ready");
 });
 
+test("real renderer replaces failed stream and preserves an earlier reading position", async () => {
+  let releaseRetry!: () => void;
+  const retry = new Promise<void>(resolve => { releaseRetry = resolve; });
+  const ui = await setup(80, 24, {}, undefined, {
+    model: createScriptedModel({ responses: [
+      { chunks: ["Hel"], error: "busy", status: 503, throwAfter: "chunks" },
+      { chunks: ["Hello world"] },
+    ] }),
+    agentClock: { now: () => 0, sleep: async () => { await retry; } },
+  });
+  for (let i = 0; i < 65; i++) ui.controller.notice(`Earlier message ${i}`);
+  await ui.mockInput.pasteBracketedText("hello");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "retry");
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Hel");
+  expect(ui.controller.snapshot().transcript.filter(entry => entry.kind === "assistant")).toMatchObject([{ text: "Hel", incomplete: true }]);
+  for (let i = 0; i < 3; i++) await ui.mockInput.pressKeys(["\u001b[5~"]);
+  await settle(ui);
+  const visible = () => ui.captureCharFrame().split("\n").slice(ui.transcript.y, ui.transcript.y + ui.transcript.height).map(line => line.slice(ui.transcript.x, ui.transcript.x + ui.transcript.viewport.width)).join("\n");
+  const before = visible();
+  const top = ui.transcript.scrollTop;
+  expect(before).toContain("Earlier message");
+  ui.resize(44, 18);
+  await settle(ui);
+  releaseRetry();
+  await ui.controller.waitForIdle();
+  await settle(ui);
+  expect(ui.controller.snapshot().transcript.filter(entry => entry.kind === "assistant").map(entry => entry.text)).toEqual(["Hello world"]);
+  expect(ui.captureCharFrame()).not.toContain("HelHello world");
+  expect(ui.transcript.scrollTop).toBeLessThan(ui.transcript.scrollHeight - ui.transcript.viewport.height);
+  ui.resize(80, 24);
+  await settle(ui);
+  expect(ui.transcript.scrollTop).toBe(top);
+  expect(visible()).toBe(before);
+  ui.mockInput.pressKey("END", { ctrl: true });
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Hello world");
+  expect(ui.captureCharFrame()).not.toContain("HelHello world");
+});
+
 test("overflow does not change the conversation width or rewrap earlier messages", async () => {
   const ui = await setup(70, 20);
   ui.controller.notice("A short first message");

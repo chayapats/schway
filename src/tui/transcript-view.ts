@@ -101,6 +101,9 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
     root.paddingX = 1;
     label.content = new StyledText([bold(fg(theme.accent)("› You"))]);
     root.add(label);
+  } else if (initial.kind === "assistant") {
+    label.visible = false;
+    root.add(label);
   } else if (initial.kind === "tool") {
     let press: { x: number; y: number } | undefined;
     label.onMouseDown = event => { press = event.button === 0 ? { x: event.x, y: event.y } : undefined; };
@@ -120,7 +123,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   return {
     root,
     update(entry, expanded, streaming, width) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, expanded, streaming, width]);
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width]);
       if (next === fingerprint) return;
       fingerprint = next;
       if (entry.kind === "tool") {
@@ -143,6 +146,10 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         body.content = linkify(tool.detail.split("\n").map((line, index) =>
           fg(isDiff && line.startsWith("+") ? theme.success : isDiff && line.startsWith("-") ? theme.error : theme.muted)(`${index ? "\n" : ""}${line}`)));
       } else {
+        if (entry.kind === "assistant") {
+          label.visible = !!entry.incomplete;
+          label.content = entry.incomplete ? new StyledText([fg(theme.warning)("Incomplete response · not saved")]) : "";
+        }
         const color = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
         body.content = body instanceof MarkdownRenderable ? displayText(entry.text) : linkify([fg(color)(displayText(entry.text))]);
         if (body instanceof MarkdownRenderable) body.streaming = streaming;
