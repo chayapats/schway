@@ -2,12 +2,14 @@ import { expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
+import { credentialStoreError } from "../src/auth/store.ts";
 import { createSession } from "../src/session/session.ts";
 import { readTool } from "../src/tools/read.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { withTempDir } from "./helpers.ts";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel, type ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 
 function controller(dir: string, responses: ScriptedTurnFactory[], session = createSession(), secrets: string[] = [], startupError?: string) {
@@ -57,7 +59,68 @@ test("pre-acceptance unavailable model preserves the draft without a user record
     expect(accepted).toBe(false);
     expect(session.items).toHaveLength(0);
     expect(tui.snapshot().recovery).toMatchObject({ category: "model", accepted: false,
-      actions: ["choose-model", "keep-editing"] });
+      actions: ["choose-model", "details", "keep-editing"] });
+  });
+});
+
+test("startup diagnostics stay out of the primary row and optional details mask unknown payload fields", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const tui = new TuiController({ session: createSession(), model: undefined,
+      contextManager: createContextManager(workspace), workspace, provider: "scripted", modelId: "broken",
+      sessionId: "sensitive-startup", startupError: "Provider failed: Bearer opaque-startup-token payload=private-payload token=unknown-token" });
+    const primary = tui.snapshot().transcript.at(-1)?.text ?? "";
+    expect(primary).toContain("provider could not be loaded");
+    expect(primary).not.toContain("opaque-startup-token");
+    expect(primary).not.toContain("private-payload");
+    expect(tui.inspectRecovery()).toBe(true);
+    const details = tui.snapshot().transcript.at(-1)?.text ?? "";
+    expect(details).toContain("Bearer ***");
+    expect(details).not.toContain("opaque-startup-token");
+    expect(details).not.toContain("private-payload");
+    expect(details).not.toContain("unknown-token");
+  });
+});
+
+test("locked credential storage offers retry without accepting the draft", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const session = createSession();
+    let locked = true;
+    const tui = new TuiController({ session, model: undefined, contextManager: createContextManager(workspace),
+      workspace, provider: "scripted", modelId: "scripted", sessionId: "locked-credential-store",
+      startupError: credentialStoreError("read"),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => locked
+        ? { error: credentialStoreError("read") } : { model: createScriptedModel({ text: "ready" }) } } });
+    expect(tui.snapshot().recovery).toMatchObject({ category: "credential-store",
+      actions: ["retry-credentials", "details", "keep-editing"] });
+    expect(await tui.submit("unsent task")).toBe(false);
+    expect(session.items).toHaveLength(0);
+    expect(await tui.retryCredentialRecovery()).toBe(false);
+    expect(tui.snapshot().recovery?.category).toBe("credential-store");
+    locked = false;
+    expect(await tui.retryCredentialRecovery()).toBe(true);
+    expect(session.items).toHaveLength(0);
+    expect(await tui.submit("unsent task")).toBe(true);
+    expect(session.items.filter(item => item.type === "user")).toHaveLength(1);
+  });
+});
+
+test("credential-store failure after acceptance repairs and continues the saved turn", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const session = createSession();
+    const tui = new TuiController({ session, model: createScriptedModel({ error: credentialStoreError("read") }),
+      contextManager: createContextManager(workspace), workspace, provider: "scripted", modelId: "scripted",
+      sessionId: "accepted-locked-store",
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel({ text: "after unlock" }) }) } });
+    await tui.submit("saved task");
+    expect(tui.snapshot().recovery).toMatchObject({ category: "credential-store", accepted: true,
+      actions: ["retry-credentials", "details", "keep-editing"] });
+    expect(await tui.retryCredentialRecovery()).toBe(true);
+    expect(tui.snapshot().recovery?.actions).toContain("continue");
+    expect(await tui.continueRecovery()).toBe(true);
+    expect(session.items.filter(item => item.type === "user")).toHaveLength(1);
   });
 });
 
@@ -96,6 +159,16 @@ test("failed session write stops continuation and does not claim tool result was
     expect(await tui.continueRecovery()).toBe(false);
     expect(tui.snapshot().transcript.some(entry => entry.text.includes("read result"))).toBe(true);
     expect(tui.snapshot().transcript.find(entry => entry.toolCallId === "call")?.text).toContain("result was not saved");
+    let accepted = false;
+    expect(await tui.submit("new draft", () => { accepted = true; })).toBe(false);
+    expect(accepted).toBe(false);
+    expect(writes).toBe(3);
+    expect(session.items.filter(item => item.type === "user")).toHaveLength(1);
+    const fresh = createSession();
+    tui.replaceSession(fresh, "fresh-session");
+    tui.setModel(createScriptedModel({ text: "fresh answer" }), "scripted", "scripted");
+    expect(await tui.submit("new draft")).toBe(true);
+    expect(fresh.items.filter(item => item.type === "user")).toHaveLength(1);
   });
 });
 
@@ -119,6 +192,26 @@ test("changing the active model outside repair disables an earlier operation's c
     tui.setModel(createScriptedModel({ text: "new identity" }), "scripted", "new-model");
     expect(tui.snapshot().recovery).toBeUndefined();
     expect(await tui.continueRecovery()).toBe(false);
+  });
+});
+
+test("same adapter with changed provider, model ID, or profile stales recovery", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    for (const change of [
+      { provider: "another", modelId: "scripted" },
+      { provider: "scripted", modelId: "another" },
+      { provider: "scripted", modelId: "scripted", profile: "another" },
+    ]) {
+      const model = createScriptedModel({ error: "bad request", status: 400 });
+      const tui = new TuiController({ session: createSession(), model, contextManager: createContextManager(workspace),
+        workspace, provider: "scripted", modelId: "scripted", sessionId: "same-adapter" });
+      await tui.submit("task");
+      expect(tui.snapshot().recovery).toBeDefined();
+      tui.setModel(model, change.provider, change.modelId, change.profile);
+      expect(tui.snapshot().recovery).toBeUndefined();
+      expect(await tui.continueRecovery()).toBe(false);
+    }
   });
 });
 

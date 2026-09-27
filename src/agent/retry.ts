@@ -24,7 +24,7 @@ export type ModelTurnOutcome =
   | { kind: "complete"; message: AssistantMessage }
   | { kind: "cancelled" }
   | { kind: "overflow"; message: string }
-  | { kind: "error"; message: string; category?: "auth" | "model" | "offline" | "rate-limit" | "provider" };
+  | { kind: "error"; message: string; category?: "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" };
 
 const NETWORK_CODES = new Set([
   "ECONNRESET",
@@ -189,13 +189,14 @@ export async function* streamModelTurn(options: {
 }
 
 /** Classify a provider failure from structured status before its diagnostic text is displayed. */
-function providerFailureCategory(error: unknown): "auth" | "model" | "offline" | "rate-limit" | "provider" {
+function providerFailureCategory(error: unknown): "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" {
   for (const item of errorChain(error)) {
     const status = httpStatus(item);
+    const message = item instanceof Error ? item.message : String(item ?? "");
+    if (/Cannot (read|save|delete) credential in the OS secure store|secure store|Secret Service|libsecret/i.test(message)) return "credential-store";
     if (status === 401 || status === 403) return "auth";
     if (status === 429) return "rate-limit";
     const code = overflowField(item, ["code", "type"]);
-    const message = item instanceof Error ? item.message : String(item ?? "");
     if ((status === 400 || status === 404 || status === 422) &&
       (/(unknown|unavailable|not found|does not exist|invalid)\s+model|model\s+(not found|unavailable|does not exist|invalid)/i.test(message) ||
         code && /model_(not_found|unavailable|invalid)/i.test(code))) return "model";

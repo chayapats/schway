@@ -82,8 +82,8 @@ still need to settle. Completed output and tool results remain visible; “Ready
 returns only after settlement, and cancellation does not undo completed effects.
 
 Enter releases a prompt only after its user record is saved. Missing credentials,
-busy operations, rejected commands, and session write failures keep the text and
-cursor in the editor so you can repair the cause and press Enter again. A model
+busy operations, and rejected commands keep the text and cursor in the editor
+so you can repair the cause and press Enter again. A model
 failure after the saved user record is a failed turn in the conversation; it does
 not restore the prompt as a new draft. Prompt recall records accepted ordinary
 prompts only. Long commands release the editor when their preparation succeeds
@@ -101,6 +101,14 @@ visible output remains available, but a tool result may not have been saved.
 Recovery controls expire when the active session, branch, or model identity
 changes. Provider retries are limited to a single model step; Schway never
 automatically retries the whole user task.
+
+If the OS credential store is locked, the recovery row offers Ctrl+R to retry
+credential access after you unlock it. The draft stays in the editor and is sent
+only when you press Enter. A credential-store failure during an accepted turn
+requires the same repair before Ctrl+R can continue its saved progress.
+A session-write failure fences that session from accepting more turns because
+the file may contain a partial write. Keep the visible evidence and open a new
+or repaired session before sending another draft.
 
 Selection is copied through the terminal's OSC 52 clipboard protocol. This works
 with Kitty's clipboard support, including text selected from scrolled output.

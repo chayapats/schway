@@ -199,7 +199,7 @@ test("missing credentials explain the interactive login path", async () => {
     });
     let snapshot = controller.snapshot();
     expect(snapshot.status).toBe("error");
-    expect(snapshot.transcript.some((entry) => entry.text.includes("Missing Anthropic API key"))).toBe(true);
+    expect(snapshot.transcript.some((entry) => entry.text.includes("Missing credentials"))).toBe(true);
     expect(JSON.stringify(snapshot).toLowerCase().includes("subscription login")).toBe(false);
 
     await controller.submit("hello");

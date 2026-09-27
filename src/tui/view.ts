@@ -417,6 +417,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
     if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser) {
+      if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("retry-credentials")) {
+        void controller.retryCredentialRecovery().then(refresh, fail); handled(); return;
+      }
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("continue")) {
         void controller.continueRecovery().then(refresh, fail); handled(); return;
       }

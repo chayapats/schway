@@ -10,6 +10,7 @@ import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { fitLine } from "../src/tui/presentation.ts";
 import { resolveTheme, TUI_THEMES } from "../src/tui/theme.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { credentialStoreError } from "../src/auth/store.ts";
 import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
@@ -92,6 +93,33 @@ test("rejected draft survives connect cancellation and recovery keys run only th
   await settle(accepted);
   expect(accepted.session.items.filter(item => item.type === "user")).toHaveLength(1);
   expect(accepted.captureCharFrame()).toContain("continued once");
+});
+
+test("credential-store retry uses real keyboard input and leaves the draft unsent", async () => {
+  let locked = true;
+  const ui = await setup(80, 24, {}, undefined, {
+    model: undefined, startupError: credentialStoreError("read"),
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => locked
+      ? { error: credentialStoreError("read") } : { model: createScriptedModel({ text: "ready" }) } },
+  });
+  await ui.mockInput.pasteBracketedText("draft after unlock");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.editor.plainText).toBe("draft after unlock");
+  expect(ui.controller.snapshot().recovery?.category).toBe("credential-store");
+  ui.mockInput.pressKey("r", { ctrl: true });
+  await settle(ui);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.controller.snapshot().recovery?.category).toBe("credential-store");
+  locked = false;
+  ui.mockInput.pressKey("r", { ctrl: true });
+  await settle(ui);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.editor.plainText).toBe("draft after unlock");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !ui.controller.running);
+  expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
 });
 
 test("multiline paste and Ctrl+J submit one prompt; Markdown renders with stable message objects", async () => {
