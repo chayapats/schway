@@ -1779,6 +1779,31 @@ Initial TUI should support:
 
 TUI consumes runtime events from the agent.
 
+## Conversation design and usability gate
+
+The default layout is a single conversation column, a stable multiline composer,
+and a compact model/status footer. Keep session IDs and full workspace metadata
+behind `/session`. Model selection is a transient, bounded panel, and opening or
+closing it must preserve the prompt draft.
+
+Use semantic dark/light palettes: neutral body text, readable muted metadata,
+blue interaction/running state, green success/additions, amber warning/cancelled
+state, and red errors/removals. Always pair status colors with text or symbols.
+Follow terminal appearance when available, provide `/theme auto|dark|light`, and
+honor `NO_COLOR`. Document the tokens in `docs/tui.md`.
+
+Render Markdown structure, code blocks, and tables. Collapse successful tool
+output by default, allow expansion, and keep failure previews visible. Keep
+message widgets stable during streaming; new output must not pull a reader out
+of scrollback. Support multiline paste, prompt history, command completion, and
+keyboard-only scrolling and cancellation.
+
+Before calling the TUI daily-driver ready, verify both palettes, narrow and wide
+terminals, Thai/Unicode input, long output, draft preservation, credential masking,
+and terminal cleanup with an offline scripted model. Controller tests alone do
+not establish visual quality. This usability gate applies before v1.0 alongside
+the release gates in section 92.
+
 ---
 
 # 71. CLI modes
@@ -2188,6 +2213,13 @@ Target:
 - debug logs;
 - live provider tests;
 - coding eval suite.
+
+The approved [experience-polish implementation plan](docs/plans/experience-polish.md)
+turns this milestone into 20 complete user journeys, covering startup, auth/model
+continuity, input preservation, progress, recovery, inspection, and returning to
+saved work. Each ticket has observable acceptance criteria and concrete test
+scenarios. Its installed-journey gate remains open until required real-use
+evidence passes; implementation completion alone is not daily-driver readiness.
 
 ---
 
