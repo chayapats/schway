@@ -3,6 +3,10 @@
 ## Issue #87 sign-in journey evidence (2026-09-27)
 
 Status: **automated fixture checks implemented; human installed browser check pending**.
+Verified implementation candidate `89978dae0ba8b57dbd27e710a0a51ba6a842408d`
+on Linux x86-64 with Bun 1.4.2: `bun test` passed 1,014 tests across 74
+files and `bun run typecheck` passed. Renderer input used OpenTUI's test
+renderer; it is not a human terminal observation.
 The controller test sends a real loopback callback through the injected token
 endpoint, reads the saved credential with a separate store reader, discovers an
 account model and activates it without inference. Other controller and renderer
@@ -12,6 +16,11 @@ catalog retry, activation failure, masked callback paste, draft/cursor recovery,
 resize, and logout with an API-key override. These use isolated user state and
 protocol fixtures; they do not establish real OAuth, live provider availability
 or native secure-store behavior.
+`tests/codex-callback.test.ts` checks that a stale state cannot settle the
+current attempt. `tests/codex-subscription.test.ts` checks that explicit Codex
+selection never falls back to API-key billing and that headless selection does
+not start a browser. Remembered interactive choices belong to later issue #89;
+this slice does not consume or persist that memory.
 
 The operator-assisted installed check is **pending**. Record the installed
 revision, terminal and runtime, browser approval result, terminal stage messages,
