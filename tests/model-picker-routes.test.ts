@@ -293,3 +293,22 @@ test("status reports the loaded adapter when a saved auth preference disagrees",
   try { expect(controller.snapshot().activeRoute).toBe("OpenAI API key"); }
   finally { controller.dispose(); }
 });
+
+test("a credential-read timeout is labelled as access discovery, not catalog failure", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = { ...fakeCredentialStore(), get: async () => new Promise<null>(() => {}) };
+    const controller = new TuiController({ session: createSession(), sessionId: "slow-access", workspace,
+      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }) },
+    });
+    try {
+      controller.openModelPicker();
+      const started = Date.now();
+      while (controller.snapshot().modelPicker?.loading && Date.now() - started < 7_000) await Bun.sleep(20);
+      expect(controller.snapshot().modelPicker?.loading).toBe(false);
+      expect(controller.snapshot().modelPicker?.error).toContain("Model access discovery");
+      expect(controller.snapshot().modelPicker?.error).not.toContain("ChatGPT catalog");
+    } finally { controller.dispose(); }
+  });
+}, 8_000);

@@ -314,6 +314,30 @@ test("explicit API preference changes only through keyboard route selection at b
   });
 });
 
+test("retry shortcut leaves ordinary r available in a failed-catalog search", async () => {
+  const store = fakeCredentialStore();
+  await store.set(codexSubscriptionIdentity(), "account-fixture");
+  let calls = 0;
+  const ui = await setup(44, 18, {}, undefined, {
+    credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => {
+      calls++;
+      if (calls === 1) throw new Error("network offline");
+      return [];
+    } },
+  });
+  ui.mockInput.pressKey("m", { meta: true });
+  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+  expect(ui.controller.snapshot().modelPicker?.error).toContain("Ctrl+R");
+  await ui.mockInput.typeText("openroute");
+  ui.mockInput.pressKey("r");
+  await settle(ui);
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("openrouter");
+  expect(calls).toBe(1);
+  ui.mockInput.pressKey("r", { ctrl: true });
+  await ui.waitFor(() => calls === 2 && !ui.controller.snapshot().modelPicker?.loading);
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("openrouter");
+});
+
 test("slash completion uses Tab without sending a prompt; light theme updates a narrow terminal", async () => {
   const ui = await setup(44, 18);
   await ui.mockInput.typeText("/the");

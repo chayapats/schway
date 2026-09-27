@@ -303,7 +303,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
-          textRow(picker, fitLine("Choose model + route · ↑/↓ select · Enter apply/connect · R retry · Esc back", width - 2), theme.accent);
+          textRow(picker, fitLine("Choose model + route · ↑/↓ select · Enter apply/connect · Ctrl+R retry · Esc back", width - 2), theme.accent);
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
           models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
             const index = start + offset;
@@ -413,7 +413,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if ((key.meta || key.option) && name === "m") { controller.openModelPicker(); handled(); return; }
-    if (snapshot.modelPicker?.error && name === "r" && !key.ctrl && !key.meta && !key.option &&
+    if (snapshot.modelPicker?.error && name === "r" && key.ctrl && !key.meta && !key.option &&
       ["empty", "offline", "failed"].includes(snapshot.modelPicker.catalogState ?? "")) {
       controller.retryModelPickerCatalog(); handled(); return;
     }

@@ -592,6 +592,7 @@ export class TuiController {
     return this.beginCredentialTarget(target);
   }
 
+  /** Open masked entry for the route identity chosen by the picker. */
   private beginCredentialTarget(target: CredentialTarget): boolean {
     if (!this.credentials) return false;
     let identity: CredentialIdentity;
@@ -1438,9 +1439,11 @@ export class TuiController {
     return true;
   }
 
+  /** Resolve configured access and account models for only the current picker instance. */
   private async refreshModelPicker(picker: ModelPickerSnapshot, abort: AbortController): Promise<void> {
     const current = () => !this.disposed && !abort.signal.aborted && this.modelPicker === picker;
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)]);
+    let discoveryStage: "access" | "catalog" = "access";
     try {
       if (this.credentials) {
         const settings = this.configEditor?.settings;
@@ -1457,6 +1460,7 @@ export class TuiController {
         picker.accessLoading = false;
         this.searchModels(picker.query, true);
       }
+      discoveryStage = "catalog";
       if (this.subscriptionSelected() || this.modelPickerAccess?.subscription === "ChatGPT") {
         if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) {
           throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
@@ -1465,7 +1469,7 @@ export class TuiController {
         if (!current()) return;
         this.subscriptionModels = models.map(model => model.id);
         picker.catalogState = models.length ? "ready" : "empty";
-        if (!models.length) picker.error = "No ChatGPT models were returned for this account. Press R to retry or Esc to cancel.";
+        if (!models.length) picker.error = "No ChatGPT models were returned for this account. Press Ctrl+R to retry or Esc to cancel.";
       } else {
         picker.catalogState = "empty";
       }
@@ -1474,7 +1478,7 @@ export class TuiController {
         picker.accessLoading = false;
         const message = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350);
         picker.catalogState = /offline|network|fetch|timeout|aborted/i.test(message) ? "offline" : "failed";
-        picker.error = `ChatGPT catalog ${picker.catalogState}: ${message}. Press R to retry or Esc to cancel.`;
+        picker.error = `${discoveryStage === "access" ? "Model access discovery" : "ChatGPT catalog"} ${picker.catalogState}: ${message}. Press Ctrl+R to retry or Esc to cancel.`;
       }
     } finally {
       if (current()) {
@@ -1484,6 +1488,7 @@ export class TuiController {
     }
   }
 
+  /** Enforce the picker deadline even when a credential store or catalog ignores cancellation. */
   private async boundedPickerTask<T>(signal: AbortSignal, task: Promise<T>): Promise<T> {
     let onAbort: (() => void) | undefined;
     const cancelled = new Promise<never>((_, reject) => {
@@ -1569,6 +1574,7 @@ export class TuiController {
     this.modelPicker.selectedIndex = ((this.modelPicker.selectedIndex + delta) % count + count) % count;
   }
 
+  /** Start the selected route's sign-in while retaining its query and identity. */
   private async connectPickerRoute(selection: ModelPickerEntry): Promise<boolean> {
     const picker = this.modelPicker;
     if (!picker || !this.credentials) { this.fail("Sign-in is unavailable in this session."); return false; }
@@ -1588,6 +1594,7 @@ export class TuiController {
     return started;
   }
 
+  /** Reopen search after a saved credential without activating a model. */
   private restorePickerAfterConnection(): void {
     const returning = this.pickerReturn;
     this.pickerReturn = undefined;
@@ -1620,7 +1627,7 @@ export class TuiController {
     if (selection.profile !== undefined) applied = await this.selectProfile(selection.profile);
     else if (selection.authRoute === "codex") {
       if (!this.subscriptionModels?.includes(selection.modelId)) {
-        this.fail("This ChatGPT model is not in the current account catalog. Press R to retry discovery.");
+        this.fail("This ChatGPT model is not in the current account catalog. Press Ctrl+R to retry discovery.");
         return false;
       }
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
@@ -1633,6 +1640,7 @@ export class TuiController {
     return applied;
   }
 
+  /** Notify persistence consumers only after the selected route has activated. */
   private emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): void {
     try { this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
       ...(choice.profile ? { profile: choice.profile } : {}) }); }

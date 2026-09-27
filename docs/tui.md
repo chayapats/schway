@@ -42,7 +42,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Recall prompt | Up/Down at first/last visual row; up to 100 prompts in memory |
 | Complete command | Type `/`, Up/Down to select, Tab to insert |
 | Dismiss suggestions | Esc |
-| Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, R to retry a failed account catalog, Esc to cancel |
+| Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, Ctrl+R to retry a failed account catalog, Esc to cancel |
 | Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
 | Scroll | PageUp/PageDown or mouse wheel |
