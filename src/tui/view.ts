@@ -274,7 +274,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       completionIndex = Math.min(completionIndex, Math.max(0, available.length - 1));
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || available.length > 0;
       const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
-      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? 2 : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
+      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? 3 : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
       const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
@@ -293,7 +293,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           });
         } else if (snapshot.loginApproval) {
           textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
-          textRow(picker, fitLine(safe(snapshot.loginApproval), width - 2), theme.text);
+          const device = /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval);
+          if (device) {
+            textRow(picker, fitLine(safe(device[2]!), width - 2), theme.accent);
+            textRow(picker, fitLine(safe(device[1]!), width - 2), theme.text);
+          } else textRow(picker, fitLine(safe(snapshot.loginApproval), width - 2), theme.text);
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
           textRow(picker, fitLine("Choose model · ↑/↓ select · Enter apply · Esc back", width - 2), theme.accent);

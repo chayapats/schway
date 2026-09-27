@@ -149,12 +149,12 @@ export type CodexLoginRunner = (input: {
 }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
 
 const LOGIN_CHOICES = [
-  "ChatGPT · Browser approval",
-  "ChatGPT · Device approval",
-  "ChatGPT · Paste browser callback",
-  "OpenAI API key",
-  "Anthropic API key",
-  "OpenAI-compatible API key",
+  { label: "ChatGPT · Browser approval", action: { kind: "codex", device: false } },
+  { label: "ChatGPT · Device approval", action: { kind: "codex", device: true } },
+  { label: "ChatGPT · Paste browser callback", action: { kind: "callback" } },
+  { label: "OpenAI API key", action: { kind: "api-key", provider: "openai" } },
+  { label: "Anthropic API key", action: { kind: "api-key", provider: "anthropic" } },
+  { label: "OpenAI-compatible API key", action: { kind: "api-key", provider: "openai-compatible" } },
 ] as const;
 
 /** Bound on displayed tool-result characters; session data stays complete. */
@@ -487,7 +487,7 @@ export class TuiController {
       ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
-      ...(this.loginChooserIndex !== undefined ? { loginChooser: { selectedIndex: this.loginChooserIndex, choices: LOGIN_CHOICES } } : {}),
+      ...(this.loginChooserIndex !== undefined ? { loginChooser: { selectedIndex: this.loginChooserIndex, choices: LOGIN_CHOICES.map(choice => choice.label) } } : {}),
       ...(this.loginCallbackValue !== undefined ? { loginCallbackEntry: { masked: "•".repeat(Math.min(this.loginCallbackValue.length, 64)) } } : {}),
       ...(this.loginApproval !== undefined ? { loginApproval: this.loginApproval } : {}),
       ...(branchTree.tree !== undefined ? { branchTree: branchTree.tree } : {}),
@@ -532,10 +532,16 @@ export class TuiController {
   async selectLoginChoice(): Promise<boolean> {
     const index = this.loginChooserIndex;
     if (index === undefined) return false;
+    const choice = LOGIN_CHOICES[index];
+    if (!choice) return false;
     this.loginChooserIndex = undefined;
-    if (index === 2) { this.loginCallbackValue = ""; return true; }
-    if (index === 0 || index === 1) return this.runCodexLogin({ device: index === 1 });
-    return this.beginLogin(index === 3 ? "openai" : index === 4 ? "anthropic" : "openai-compatible");
+    if (this.codexLoginAbort) {
+      this.codexLoginAbort.abort();
+      await this.activeTurn;
+    }
+    if (choice.action.kind === "callback") { this.loginCallbackValue = ""; return true; }
+    if (choice.action.kind === "codex") return this.runCodexLogin({ device: choice.action.device });
+    return this.beginLogin(choice.action.provider);
   }
 
   /** Append a pasted callback to masked input without entering history or a notice. */
@@ -718,6 +724,18 @@ export class TuiController {
     }
   }
 
+  /** Block an old subscription adapter and discard catalog data after a credential replacement. */
+  private invalidateSubscriptionAdapter(): void {
+    if (this.model?.provider === "codex-subscription") {
+      this.model = undefined;
+      this.subscriptionReactivationRequired = true;
+    }
+    this.subscriptionModels = undefined;
+    this.subscriptionCapabilities = undefined;
+    this.configEditor?.setModelCapabilities([]);
+    this.subscriptionPending = true;
+  }
+
   /** Run the explicit ChatGPT subscription sign-in, persisting only the subscription identity on success. */
   private async runCodexLogin(target: { device: boolean; code?: string }): Promise<boolean> {
     if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
@@ -741,19 +759,14 @@ export class TuiController {
           signal: abort.signal,
           onSaved: () => {
             credentialSaved = true;
-            // The old adapter must stop using its previous account at the store commit point.
-            if (this.model?.provider === "codex-subscription") {
-              this.model = undefined;
-              this.subscriptionReactivationRequired = true;
-            }
-            this.subscriptionModels = undefined;
-            this.subscriptionCapabilities = undefined;
-            this.configEditor?.setModelCapabilities([]);
-            this.subscriptionPending = true;
+            this.invalidateSubscriptionAdapter();
           },
           onProgress: (message) => {
             if (message.startsWith("Enter this code at ")) this.loginApproval = message;
-            else this.notice(redactSecrets(message, this.secrets));
+            else {
+              this.notice(redactSecrets(message, this.secrets));
+              if (message.startsWith("The browser could not be opened automatically")) this.loginChooserIndex = 1;
+            }
           },
         });
         abort.signal.throwIfAborted();
@@ -764,15 +777,8 @@ export class TuiController {
           return false;
         }
         this.notice(redactSecrets(result.status, this.secrets));
-        // A store-backed Codex adapter would read the newly saved account on its next turn.
-        // Never reuse the previous account's adapter or its catalog after credential replacement.
-        if (this.model?.provider === "codex-subscription") {
-          this.model = undefined;
-          this.subscriptionReactivationRequired = true;
-        }
-        this.subscriptionModels = undefined;
-        this.subscriptionCapabilities = undefined;
-        this.configEditor?.setModelCapabilities([]);
+        // Test runners may omit onSaved; production also invalidates at the store commit point.
+        this.invalidateSubscriptionAdapter();
         if (this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog) {
           this.subscriptionPending = true;
           this.status = "idle";
@@ -1953,8 +1959,8 @@ export class TuiController {
    */
   cancel(): void {
     if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.notice("Callback entry cancelled; no credential was changed."); return; }
+    if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.codexLoginAbort.abort(); return; }
     if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; return; }
-    if (this.codexLoginAbort) { this.codexLoginAbort.abort(); return; }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.credentialEntry) {
       this.credentialEntry.cancel();

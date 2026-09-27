@@ -239,10 +239,17 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
     let attempts = 0;
+    let oauthAttempts = 0;
+    const store = fakeCredentialStore();
     const controller = new TuiController({ session: createSession(), sessionId: "retry-catalog", workspace,
       configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
       model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
-      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: async ({ onSaved }) => {
+        oauthAttempts++;
+        await store.set(codexSubscriptionIdentity(), "saved-account-credential");
+        onSaved?.();
+        return { ok: true as const, status: "Credential saved" };
+      },
         listSubscriptionCatalog: async () => {
           if (++attempts === 1) throw new Error("Temporary catalog failure");
           return [{ id: "real-codex", defaultThinking: "low", supportedThinking: ["low"] }];
@@ -251,6 +258,7 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
     });
     try {
       expect(await controller.login("codex")).toBe(false);
+      expect(await store.get(codexSubscriptionIdentity())).toBe("saved-account-credential");
       expect(controller.snapshot().provider).toBe("anthropic");
       expect(controller.openModelPicker()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
@@ -260,6 +268,7 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
       expect(attempts).toBe(2);
+      expect(oauthAttempts).toBe(1);
     } finally { controller.dispose(); }
   });
 });

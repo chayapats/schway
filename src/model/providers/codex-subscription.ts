@@ -807,9 +807,9 @@ export async function pollDeviceAuthorization(input: {
         body: JSON.stringify({ client_id: CODEX_CLIENT_ID, device_code: input.deviceCode, grant_type: "device_code" }),
         signal: input.signal,
       });
-    } catch (error) {
+    } catch {
       throwIfAborted(input.signal);
-      throw new Error(`Device sign-in polling failed (${messageOf(error)}). Retry /login codex --device.`);
+      throw new Error("Device sign-in polling failed. Check the connection and retry device approval.");
     }
     throwIfAborted(input.signal);
     let payload: Record<string, unknown>;

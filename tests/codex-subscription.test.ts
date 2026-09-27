@@ -1090,6 +1090,33 @@ test("interactive sign-in chooser offers browser, device, callback and API-key a
   });
 });
 
+test("browser opener failure can switch directly to device approval without command syntax", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const calls: string[] = [];
+    const controller = new TuiController({
+      session: createSession(), sessionId: "opener-fallback", workspace,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: async ({ device, signal, onProgress }) => {
+          calls.push(device ? "device" : "browser");
+          if (device) return { ok: false as const, message: "Device approval denied." };
+          onProgress("The browser could not be opened automatically; use the printed URL instead.");
+          await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+          throw new Error("unreachable");
+        } },
+    });
+    try {
+      const browser = controller.login("codex");
+      await Bun.sleep(0);
+      expect(controller.snapshot().loginChooser?.choices[controller.snapshot().loginChooser!.selectedIndex]).toContain("Device");
+      expect(await controller.selectLoginChoice()).toBe(false);
+      expect(await browser).toBe(false);
+      expect(calls).toEqual(["browser", "device"]);
+    } finally { controller.dispose(); }
+  });
+});
+
 test("controller browser callback saves a credential, discovers account models and activates without inference", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -1199,6 +1226,38 @@ test("controller device approval keeps the user code ephemeral and saves only af
   });
 });
 
+test("controller cancels a live device poll before saving and clears the approval code", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const polling = Promise.withResolvers<void>();
+    const controller = new TuiController({
+      session: createSession(), sessionId: "cancel-device-poll", workspace,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+        codexLogin: createCodexLoginRunner({ store, secrets: [],
+          fetch: async (input, init) => {
+            if (String(input).includes("usercode")) {
+              return Response.json({ user_code: "CANCEL-CODE", verification_uri: "https://auth.openai.com/codex/device", device_code: "device-private" });
+            }
+            polling.resolve();
+            return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+          } }) },
+    });
+    try {
+      const pending = controller.login("codex --device");
+      await polling.promise;
+      expect(controller.snapshot().loginApproval).toContain("CANCEL-CODE");
+      controller.cancel();
+      expect(await pending).toBe(false);
+      expect(await loadSubscriptionTokens(store)).toBeNull();
+      const text = JSON.stringify(controller.snapshot());
+      expect(text).toContain("nothing was saved");
+      expect(text).not.toContain("CANCEL-CODE");
+    } finally { controller.dispose(); }
+  });
+});
+
 test("controller replaces native token-exchange exceptions with a redacted recovery action", async () => {
   await withTempDir(async root => {
     clearPendingBrowserAttempt();
@@ -1279,6 +1338,61 @@ test("logout blocks an active ChatGPT account while reporting untouched API-key 
       expect(text).toContain("will not switch");
       expect(text).not.toContain("env-api-key-secret");
     } finally { controller.dispose(); }
+  });
+});
+
+test("revoked account is repaired through controller login then logout without API-key fallback", async () => {
+  await withTempDir(async root => {
+    clearPendingBrowserAttempt();
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    const repairedAccess = jwtWithAccount("acct-repaired");
+    await saveSubscriptionTokens(store, { accessToken: "revoked-access", refreshToken: "revoked-refresh", expiresAt: Date.now() - 1000 });
+    let refreshCalls = 0;
+    let inferenceCalls = 0;
+    const responseFetch: CodexFetchLike = async (input, init) => {
+      if (String(input).includes("/oauth/token")) {
+        refreshCalls++;
+        return Response.json({ error: "invalid_grant" }, { status: 401 });
+      }
+      inferenceCalls++;
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${repairedAccess}`);
+      return sseResponse(TEXT_EVENTS);
+    };
+    const secrets: string[] = [];
+    let reloads = 0;
+    const controller = new TuiController({
+      session: createSession(), sessionId: "repair-revoked", workspace,
+      provider: "openai", modelId: "gpt-5.4", openaiAuth: "codex",
+      model: createCodexSubscriptionModel({ store, fetch: responseFetch }),
+      contextManager: createContextManager(workspace), secrets,
+      credentials: { store, env: { OPENAI_API_KEY: "explicit-env-secret" },
+        reload: async () => {
+          reloads++;
+          return { model: createCodexSubscriptionModel({ store, fetch: responseFetch }) };
+        },
+        codexLogin: createCodexLoginRunner({ store, secrets,
+          fetch: tokenEndpoint({ access_token: repairedAccess, refresh_token: "new-refresh-secret", expires_in: 3600 }) }) },
+    });
+    try {
+      await controller.submit("before repair");
+      expect(refreshCalls).toBe(1);
+      expect(inferenceCalls).toBe(0);
+      expect(JSON.stringify(controller.snapshot())).toContain("revoked");
+      await expect(loginWithBrowserFlow({ store, deps: { openBrowser: () => {} } })).rejects.toThrow(/callback is unavailable/);
+      const state = getPendingBrowserAttempt()?.state;
+      expect(await controller.login(`codex --code ${CODEX_REDIRECT_URI}?code=repair-secret&state=${state}`)).toBe(true);
+      expect((await loadSubscriptionTokens(store))?.accountId).toBe("acct-repaired");
+      await controller.submit("after repair");
+      expect(inferenceCalls).toBe(1);
+      expect(reloads).toBe(1);
+      expect(await controller.logout("codex")).toBe(true);
+      await controller.submit("after logout");
+      expect(inferenceCalls).toBe(1);
+      expect(reloads).toBe(1);
+      expect(JSON.stringify(controller.snapshot())).toContain("OPENAI_API_KEY");
+      expect(JSON.stringify(controller.snapshot())).not.toContain("explicit-env-secret");
+    } finally { controller.dispose(); clearPendingBrowserAttempt(); }
   });
 });
 

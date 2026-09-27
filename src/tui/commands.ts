@@ -86,6 +86,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/config - show effective settings and their origins with secrets redacted",
     "/config set <key> <value> [--scope user|project] - edit settings (session only by default)",
     "/config reset <key> [--scope user|project] - remove an override and inherit its fallback",
+    "/login - choose a provider and sign-in method",
     "/login <anthropic|openai|openai-compatible> - enter an API key in a masked prompt",
     "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
     "/logout <anthropic|openai|openai-compatible|codex> - remove the selected stored credential",
