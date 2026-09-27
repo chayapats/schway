@@ -72,6 +72,31 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     }
   }
 
+  /** Yield pressure start while prepare is still compacting, then report its actual result. */
+  async function* prepareContext(): AsyncGenerator<RuntimeEvent, PreparedContext> {
+    let announce!: () => void;
+    const started = new Promise<"started">(resolve => { announce = () => resolve("started"); });
+    const pending = options.contextManager.prepare(options.session, options.model, {
+      signal,
+      onCompactionStart: announce,
+    });
+    const first = await Promise.race([started, pending.then(() => "prepared" as const, () => "prepared" as const)]);
+    const pressure = first === "started";
+    if (pressure) yield { type: "compaction.started", reason: "pressure" };
+    try {
+      const prepared = await pending;
+      if (pressure) {
+        yield prepared.compaction
+          ? { type: "compaction.finished", reason: "pressure", status: "completed", recordId: prepared.compaction.id, firstKeptId: prepared.compaction.firstKeptId }
+          : { type: "compaction.finished", reason: "pressure", status: "noop" };
+      }
+      return prepared;
+    } catch (error) {
+      if (pressure) yield { type: "compaction.finished", reason: "pressure", status: "failed" };
+      throw error;
+    }
+  }
+
   /** Intercept ordinary requests after native context assembly, sharing the path used after overflow. */
   async function prepareRequest(prepared: PreparedContext): Promise<ModelRequest> {
     const request: ModelRequest = {
@@ -142,22 +167,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       recordId: record.id,
       firstKeptId: record.firstKeptId,
     };
-    const prepared = await options.contextManager.prepare(
-      options.session,
-      options.model,
-      { signal },
-    );
+    const prepared = yield* prepareContext();
     yield* compactionUsage();
-    if (prepared.compaction) {
-      yield { type: "compaction.started", reason: "pressure" };
-      yield {
-        type: "compaction.finished",
-        reason: "pressure",
-        status: "completed",
-        recordId: prepared.compaction.id,
-        firstKeptId: prepared.compaction.firstKeptId,
-      };
-    }
     const outcome = yield* streamModelTurn({
       model: options.model,
       request: await prepareRequest(prepared),
@@ -195,22 +206,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         return;
       }
 
-      let prepared = await options.contextManager.prepare(
-        options.session,
-        options.model,
-        { signal },
-      );
+      let prepared = yield* prepareContext();
       yield* compactionUsage();
-      if (prepared.compaction) {
-        yield { type: "compaction.started", reason: "pressure" };
-        yield {
-          type: "compaction.finished",
-          reason: "pressure",
-          status: "completed",
-          recordId: prepared.compaction.id,
-          firstKeptId: prepared.compaction.firstKeptId,
-        };
-      }
       let outcome = yield* streamModelTurn({
         model: options.model,
         request: await prepareRequest(prepared),

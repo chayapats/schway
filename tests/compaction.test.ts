@@ -412,6 +412,33 @@ test("pressure compaction runs inside the real loop before the first turn", asyn
   expect(session.items.some((item) => item.type === "compaction")).toBe(true);
 });
 
+test("pressure compaction starts before the summary wait and finishes after it", async () => {
+  const session = createSession(turns(12));
+  const manager = createContextManager(workspace, { contextWindow: 100 });
+  const scripted = createScriptedModel({ responses: [{ text: CODING_SUMMARY }, { text: "done" }] });
+  let releaseSummary!: () => void;
+  const summaryGate = new Promise<void>(resolve => { releaseSummary = resolve; });
+  let summaryStarted!: () => void;
+  const started = new Promise<void>(resolve => { summaryStarted = resolve; });
+  let calls = 0;
+  const model = { ...scripted, async *stream(request: Parameters<typeof scripted.stream>[0]) {
+    if (++calls === 1) { summaryStarted(); await summaryGate; }
+    yield* scripted.stream(request);
+  } };
+  const events = runAgentLoop({ session, model, contextManager: manager });
+  expect((await events.next()).value).toEqual({ type: "agent.started" });
+  expect((await events.next()).value).toEqual({ type: "compaction.started", reason: "pressure" });
+  const next = events.next();
+  await started;
+  let finished = false;
+  void next.then(() => { finished = true; });
+  await Promise.resolve();
+  expect(finished).toBe(false);
+  releaseSummary();
+  expect((await next).value).toMatchObject({ type: "compaction.finished", reason: "pressure", status: "completed" });
+  for await (const _event of events) { /* Drain the ordinary final answer. */ }
+});
+
 test("context overflow forces one compaction and retries once", async () => {
   const session = createSession(turns(12));
   const manager = createContextManager(workspace, { keepTurns: 10 });

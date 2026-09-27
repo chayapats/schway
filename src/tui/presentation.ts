@@ -1,4 +1,37 @@
-import type { TuiTranscriptEntry } from "./controller.ts";
+import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
+
+/** Render an operation's event-backed phase with elapsed time and cancellation control. */
+export function activityStatus(activity: TuiActivity, compact = false, tiny = false): string {
+  const elapsed = Math.floor(activity.elapsedMs / 1000);
+  const duration = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
+  if (tiny) {
+    if (activity.phase === "stopping") return activity.cancellation === "requested" ? "◌ Cancel sent" : "◌ Stopping";
+    if (activity.phase === "retry" && activity.retry) return `◌ Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} · Esc`;
+    return `● ${{ preparing: "Prep", waiting: "Wait", streaming: "Stream", tools: `Tools ${activity.activeTools}`, retry: "Retry", compacting: "Compact" }[activity.phase]} · Esc`;
+  }
+  if (activity.phase === "stopping") return activity.cancellation === "requested" ? "◌ Cancel requested" : `◌ Stopping ${duration}`;
+  if (activity.phase === "retry" && activity.retry) {
+    if (compact) return `◌ Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} ${Math.ceil(activity.retry.remainingMs / 1000)}s · Esc stops`;
+    return `◌ Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} in ${Math.ceil(activity.retry.remainingMs / 1000)}s · ${duration} · Esc stops`;
+  }
+  if (activity.phase === "retry") return `◌ Retrying ${duration} · Esc stops`;
+  const phase = activity.phase === "tools" ? `Tools ${activity.activeTools}` : {
+    preparing: "Preparing", waiting: "Waiting for model", streaming: "Streaming", compacting: "Compacting",
+  }[activity.phase];
+  return `● ${compact && activity.phase === "waiting" ? "Waiting" : phase} ${duration} · Esc stops`;
+}
+
+/** Summarize current work without implying that a quiet provider or tool has stalled. */
+export function activityDetail(activity: TuiActivity): string {
+  if (activity.phase === "stopping") return activity.cancellation === "requested" ? "Cancellation requested · stop signal sent" : "Stopping · waiting for active work to settle";
+  if (activity.phase === "tools") {
+    const names = [...new Set(activity.toolNames)];
+    return names.length ? `Running ${activity.activeTools} tool${activity.activeTools === 1 ? "" : "s"}: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}` : `Running ${activity.activeTools} tools`;
+  }
+  if (activity.phase === "retry" && activity.retry) return `Provider retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} after the requested delay`;
+  if (activity.phase === "retry") return "Retrying provider request…";
+  return { preparing: "Preparing request…", waiting: "Waiting for provider response…", streaming: "Receiving response…", compacting: "Compacting context…" }[activity.phase];
+}
 
 /** Remove terminal control sequences while retaining ordinary Unicode, tabs, and newlines. */
 export function displayText(text: string): string {

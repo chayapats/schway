@@ -1,4 +1,5 @@
 import { runAgentLoop } from "../agent/loop.ts";
+import type { AgentClock } from "../agent/retry.ts";
 import { toolTarget } from "./presentation.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
@@ -36,6 +37,20 @@ import { loadModelPickerAccess, type ModelPickerAccess } from "./model-access.ts
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
 
+/** Current operation phase derived from runtime events, never inferred from silence. */
+export type TuiActivityPhase = "preparing" | "waiting" | "streaming" | "tools" | "retry" | "compacting" | "stopping";
+
+/** Volatile progress for the operation that currently owns the controller. */
+export interface TuiActivity {
+  operationId: number;
+  phase: TuiActivityPhase;
+  elapsedMs: number;
+  activeTools: number;
+  toolNames: readonly string[];
+  retry?: { failedAttempt: number; maxAttempts: number; remainingMs: number };
+  cancellation: "none" | "requested" | "settling";
+}
+
 /** Tool execution state shown in the transcript. */
 export type TuiToolStatus = "running" | "success" | "error" | "cancelled";
 
@@ -54,6 +69,8 @@ export interface TuiTranscriptEntry {
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
 export interface TuiSnapshot {
   status: TuiStatus;
+  /** Live phase and elapsed time while an operation is owned; absent once settled. */
+  activity?: TuiActivity;
   transcript: readonly TuiTranscriptEntry[];
   sessionId: string;
   branchId: string;
@@ -139,6 +156,10 @@ export interface TuiControllerOptions {
   onModelActivated?: (choice: { provider: string; modelId: string; authRoute: string; profile?: string }) => void;
   /** Observe current-turn events and their active session ID before display folding without blocking the loop. */
   onRuntimeEvent?: (event: RuntimeEvent, sessionId: string) => void | Promise<void>;
+  /** Injectable monotonic time source for deterministic activity snapshots. */
+  activityClock?: () => number;
+  /** Injectable loop clock for deterministic provider retry waits. */
+  agentClock?: AgentClock;
   /** Explicit change-tracking fallback when no config editor supplies effective settings. */
   changeTracking?: GitChangeTrackingMode;
 }
@@ -413,6 +434,10 @@ export class TuiController {
   private branchTreeCache?: BranchTreeSnapshot;
   private transcript: TuiTranscriptEntry[] = [];
   private status: TuiStatus = "idle";
+  private readonly activityClock: () => number;
+  private readonly agentClock?: AgentClock;
+  private activity?: { id: number; phase: TuiActivityPhase; startedAt: number; elapsedMs: number; activeTools: Map<string, string>; retry?: { failedAttempt: number; maxAttempts: number; until: number }; cancellation: "none" | "requested" | "settling" };
+  private operationSequence = 0;
   private activeAbort?: AbortController;
   private activeTurn?: Promise<void>;
   private counter = 0;
@@ -467,6 +492,8 @@ export class TuiController {
     this.onSettingsCommitted = options.onSettingsCommitted;
     this.onModelActivated = options.onModelActivated;
     this.onRuntimeEvent = options.onRuntimeEvent;
+    this.activityClock = options.activityClock ?? (() => performance.now());
+    this.agentClock = options.agentClock;
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
@@ -486,6 +513,7 @@ export class TuiController {
       : this.openaiAuth === "codex" ? "ChatGPT subscription" : this.openaiAuth === "api-key" ? "OpenAI API key" : "OpenAI route";
     return {
       status: this.status,
+      ...(this.activity ? { activity: this.activitySnapshot() } : {}),
       transcript: this.transcript.map((entry) =>
         this.secrets.length === 0
           ? entry
@@ -512,6 +540,31 @@ export class TuiController {
   /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
   get running(): boolean {
     return this.activeAbort !== undefined || this.credentialEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
+  }
+
+  private beginActivity(phase: TuiActivityPhase): number {
+    const id = ++this.operationSequence;
+    this.activity = { id, phase, startedAt: this.activityClock(), elapsedMs: 0, activeTools: new Map(), cancellation: "none" };
+    return id;
+  }
+
+  private activitySnapshot(): TuiActivity {
+    const activity = this.activity!;
+    const now = this.activityClock();
+    activity.elapsedMs = Math.max(activity.elapsedMs, now - activity.startedAt, 0);
+    return {
+      operationId: activity.id,
+      phase: activity.phase,
+      elapsedMs: activity.elapsedMs,
+      activeTools: activity.activeTools.size,
+      toolNames: [...activity.activeTools.values()].map(name => redactSecrets(name, this.secrets)),
+      ...(activity.retry ? { retry: { failedAttempt: activity.retry.failedAttempt, maxAttempts: activity.retry.maxAttempts, remainingMs: Math.max(0, activity.retry.until - now) } } : {}),
+      cancellation: activity.cancellation,
+    };
+  }
+
+  private settleActivity(id: number): void {
+    if (this.activity?.id === id) this.activity = undefined;
   }
 
   /** Route login input and notify when an explicit subscription sign-in starts. */
@@ -1924,6 +1977,7 @@ export class TuiController {
     }
     this.transcript.push(this.systemEntry("Compacting…"));
     this.status = "running";
+    const operationId = this.beginActivity("compacting");
     const abort = new AbortController();
     this.activeAbort = abort;
     try { accepted(); } catch { /* Presentation cannot cancel an accepted compaction. */ }
@@ -1958,6 +2012,7 @@ export class TuiController {
       if (this.activeTurn === tracked) {
         this.activeTurn = undefined;
       }
+      this.settleActivity(operationId);
     }
     this.invalidateBranchTreeCache();
     if (abort.signal.aborted) {
@@ -2109,7 +2164,21 @@ export class TuiController {
       this.notice("Credential entry cancelled; nothing saved.");
       return;
     }
-    this.activeAbort?.abort();
+    if (this.activeAbort && !this.activeAbort.signal.aborted) {
+      if (this.activity) {
+        this.activity.phase = "stopping";
+        this.activity.cancellation = "requested";
+        this.activity.retry = undefined;
+      }
+      this.activeAbort.abort();
+    }
+  }
+
+  /** Mark a cancellation as settling only after its requested state was painted for this operation. */
+  acknowledgeCancellationFrame(operationId: number): void {
+    if (this.activity?.id === operationId && this.activity.cancellation === "requested") {
+      this.activity.cancellation = "settling";
+    }
   }
 
   /**
@@ -2160,6 +2229,7 @@ export class TuiController {
     }
     this.transcript.push(userEntry);
     this.status = "running";
+    const operationId = this.beginActivity("preparing");
     const abort = new AbortController();
     this.activeAbort = abort;
     this.currentAssistantId = undefined;
@@ -2173,7 +2243,7 @@ export class TuiController {
           this.gitSnapshotError = error instanceof Error ? error.message : String(error);
         }
       }
-      await this.runTurn(abort.signal);
+      await this.runTurn(abort.signal, operationId);
     })();
     this.activeTurn = turn;
     try {
@@ -2185,12 +2255,13 @@ export class TuiController {
       if (this.activeTurn === turn) {
         this.activeTurn = undefined;
       }
+      this.settleActivity(operationId);
       this.invalidateBranchTreeCache();
     }
     return true;
   }
 
-  private async runTurn(signal: AbortSignal): Promise<void> {
+  private async runTurn(signal: AbortSignal, operationId: number): Promise<void> {
     try {
       for await (const event of runAgentLoop({
         session: this.session,
@@ -2203,11 +2274,12 @@ export class TuiController {
         maxTurns: this.maxTurns,
         maxConcurrentTools: this.maxConcurrentTools,
         extensions: this.extensions,
+        clock: this.agentClock,
       })) {
         // Drain accepted calls on cancellation; replaced sessions ignore stale display events.
         if (this.activeAbort?.signal === signal) {
           this.observeRuntimeEvent(event);
-          this.applyEvent(event);
+          this.applyEvent(event, operationId);
         }
       }
       if (this.activeAbort?.signal !== signal) {
@@ -2215,14 +2287,14 @@ export class TuiController {
       }
       if (signal.aborted) {
         this.transcript.push(this.systemEntry("Cancelled."));
-        this.status = "idle";
         await this.captureTurnResult();
+        this.status = "idle";
         return;
       }
+      await this.captureTurnResult();
       if (this.status === "running") {
         this.status = "idle";
       }
-      await this.captureTurnResult();
     } catch (error) {
       if (this.activeAbort?.signal !== signal) {
         return;
@@ -2243,7 +2315,24 @@ export class TuiController {
   }
 
   /** Fold one runtime event into transcript rows and status. */
-  applyEvent(event: RuntimeEvent): void {
+  applyEvent(event: RuntimeEvent, operationId?: number): void {
+    if (operationId !== undefined && this.activity?.id !== operationId) return;
+    const activity = this.activity;
+    if (activity && activity.cancellation === "none") {
+      switch (event.type) {
+        case "agent.started": activity.phase = "preparing"; break;
+        case "model.started": activity.phase = "waiting"; activity.retry = undefined; break;
+        case "model.delta": activity.phase = "streaming"; break;
+        case "model.finished": activity.phase = "preparing"; break;
+        case "model.retry": activity.phase = "retry"; activity.retry = { failedAttempt: event.attempt, maxAttempts: event.maxAttempts, until: this.activityClock() + event.delayMs }; break;
+        case "tool.started": activity.activeTools.set(event.toolCallId, event.name); activity.phase = "tools"; break;
+        case "tool.finished": activity.activeTools.delete(event.toolCallId); activity.phase = activity.activeTools.size ? "tools" : "preparing"; break;
+        case "compaction.started": activity.phase = "compacting"; break;
+        case "compaction.finished": activity.phase = "preparing"; break;
+      }
+    } else if (activity && event.type === "tool.finished") {
+      activity.activeTools.delete(event.toolCallId);
+    }
     switch (event.type) {
       case "agent.started":
         return;
@@ -2262,7 +2351,7 @@ export class TuiController {
       case "model.retry": {
         this.transcript.push(
           this.systemEntry(
-            `Retrying provider request (${event.attempt}/${event.maxAttempts}): ${event.message}`,
+            `Retrying provider request (attempt ${event.attempt + 1}/${event.maxAttempts}): ${event.message}`,
           ),
         );
         return;

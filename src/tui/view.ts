@@ -2,7 +2,7 @@ import { BoxRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable,
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
-import { displayText, fitLine } from "./presentation.ts";
+import { activityDetail, activityStatus, displayText, fitLine } from "./presentation.ts";
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
@@ -58,6 +58,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let lastTail = "";
   let interactionNotice = "";
   let interactionNoticeUntil = 0;
+  let paintedCancellationId: number | undefined;
 
   const root = new BoxRenderable(renderer, { id: "conversation", width: "100%", height: "100%", flexDirection: "column", paddingX: 2, backgroundColor: theme.background });
   renderer.root.add(root);
@@ -206,6 +207,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     refreshing = true;
     try {
       const snapshot = controller.snapshot();
+      paintedCancellationId = snapshot.activity?.cancellation === "requested" ? snapshot.activity.operationId : undefined;
       const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
       root.paddingX = renderer.width < 60 ? 1 : 2;
       header.visible = activity.visible = renderer.height >= 10;
@@ -239,19 +241,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
       header.content = new StyledText([bold(fg(theme.accent)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), width - 8)}`)]);
-      const status = snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
+      const status = snapshot.activity ? activityStatus(snapshot.activity, width < 60, width < 32) : snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
       const model = safe(`${snapshot.activeRoute ? `${snapshot.activeRoute} · ` : ""}${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
       const statusWidth = Bun.stringWidth(status);
       footer.content = new StyledText([
-        fg(theme.muted)(`${fitLine(model, Math.max(1, width - statusWidth - 3))}   `),
-        fg(snapshot.status === "error" ? theme.error : snapshot.status === "running" ? theme.accent : theme.muted)(status),
+        fg(theme.muted)(`${fitLine(model, Math.max(0, width - statusWidth - 3))}${width > statusWidth + 3 ? "   " : ""}`),
+        fg(snapshot.activity?.phase === "stopping" ? theme.warning : snapshot.status === "error" ? theme.error : snapshot.status === "running" ? theme.accent : theme.muted)(fitLine(status, width)),
       ]);
       const tail = snapshot.transcript.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      activity.content = fitLine(Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.status === "running" ? "Working on your request…" : "", width);
+      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : "", width);
       activity.fg = unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
       activity.onMouseUp = () => { latest(); refresh(); };
       transcript.visible = !snapshot.branchTree;
@@ -482,19 +484,28 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const onTheme = () => { if (mode === "auto") applyTheme(); };
   renderer.on("theme_mode", onTheme);
   renderer.on("resize", refresh);
+  const onFrame = () => {
+    if (paintedCancellationId === undefined) return;
+    controller.acknowledgeCancellationFrame(paintedCancellationId);
+    paintedCancellationId = undefined;
+  };
+  renderer.on("frame", onFrame);
   renderer.setBackgroundColor(theme.background);
   editor.focus();
+  const activityTimer = setInterval(() => { if (!destroyed && controller.snapshot().activity) refresh(); }, 250);
   refresh();
   return {
     refresh,
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearInterval(activityTimer);
       unbindCredential();
       renderer.keyInput.off("keypress", onKey);
       renderer.off("selection", onSelection);
       renderer.off("theme_mode", onTheme);
       renderer.off("resize", refresh);
+      renderer.off("frame", onFrame);
       root.destroyRecursively();
       syntax.destroy();
     },

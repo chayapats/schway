@@ -676,6 +676,45 @@ test("resize keeps the editor and status inside the viewport with a populated tr
   expect(ui.editor.plainText).toBe("draft line\n".repeat(8));
 });
 
+test("retry and cancellation stay visible at 44×18 while a future draft survives paste, scroll and resize", async () => {
+  let releaseSettlement!: () => void;
+  const settlement = new Promise<void>(resolve => { releaseSettlement = resolve; });
+  const ui = await setup(80, 24, {}, undefined, {
+    model: createScriptedModel({ error: "temporary outage", status: 503, headers: { "Retry-After": "30" } }),
+    agentClock: {
+      now: () => 0,
+      sleep: (_ms, signal) => new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          void settlement.then(() => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+        }, { once: true });
+      }),
+    },
+  });
+  await ui.mockInput.typeText("start work");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "retry");
+  await ui.mockInput.pasteBracketedText("future draft\nsecond line");
+  await ui.mockInput.pressKeys(["\u001b[5~"]);
+  ui.resize(44, 18);
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Retry 2/3");
+  expect(ui.captureCharFrame()).toContain("Esc stops");
+  expect(ui.editor.plainText).toBe("future draft\nsecond line");
+  ui.mockInput.pressEscape();
+  await ui.flush();
+  expect(ui.captureCharFrame()).toContain("Cancel requested");
+  expect(ui.controller.snapshot().activity?.cancellation).toBe("settling");
+  ui.view.refresh();
+  await ui.flush();
+  expect(ui.captureCharFrame()).toContain("Stopping");
+  expect(ui.captureCharFrame()).not.toContain("Cancel requested");
+  releaseSettlement();
+  await ui.controller.waitForIdle();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("future draft\nsecond line");
+  expect(ui.captureCharFrame()).toContain("Ready");
+});
+
 test("overflow does not change the conversation width or rewrap earlier messages", async () => {
   const ui = await setup(70, 20);
   ui.controller.notice("A short first message");
