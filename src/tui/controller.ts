@@ -1359,24 +1359,25 @@ export class TuiController {
     if (!command || this.disposed) return false;
     if (this.running) {
       this.notice(`Busy: /${name} was not run. Press Esc to cancel the active operation, then retry.`);
-      return true;
+      return false;
     }
     const abort = new AbortController();
     this.activeAbort = abort;
     this.status = "running";
     const task = this.executeExtensionCommand(command, args, abort);
-    this.activeTurn = task;
-    try { await task; } finally {
-      if (this.activeTurn === task) this.activeTurn = undefined;
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
-    return true;
   }
 
   private async executeExtensionCommand(
     command: { name: string; source: string; description: string }, args: string, abort: AbortController,
-  ): Promise<void> {
+  ): Promise<boolean> {
     let prompt: string | undefined;
     let accepting = true;
+    let executed = false;
     let succeeded = false;
     const current = () => this.activeAbort === abort && !this.disposed;
     try {
@@ -1384,6 +1385,7 @@ export class TuiController {
         const skills = await discoverSkills({ workspaceRoot: this.workspace.root, extraRoots: this.workspace.extraRoots, home: this.home, signal: abort.signal });
         this.extensions!.assertNoSkillCollision(command, skills);
       }
+      executed = true;
       const result = await this.extensions!.executeCommand(command.name, args, {
         signal: abort.signal,
         submitPrompt: (text) => {
@@ -1410,6 +1412,7 @@ export class TuiController {
       if (this.activeAbort === abort) this.activeAbort = undefined;
     }
     if (succeeded && prompt !== undefined && !this.disposed && !abort.signal.aborted) await this.submit(prompt);
+    return executed;
   }
 
   /** Replace the adapter and displayed provider/model ids without changing session history. */
@@ -2131,32 +2134,38 @@ export class TuiController {
    * Without a model, displays an error and returns without appending a user record or starting the loop.
    * Appends the user record first so a cancelled turn still leaves resumable history.
    */
-  async submit(prompt: string): Promise<void> {
-    const text = prompt.trim();
-    if (text.length === 0 || this.running || this.disposed) {
-      return;
+  async submit(prompt: string, accepted: () => void = () => {}): Promise<boolean> {
+    const text = prompt;
+    if (text.trim().length === 0 || this.running || this.disposed) {
+      return false;
     }
     if (!this.model) {
       this.fail(this.subscriptionReactivationRequired
         ? "ChatGPT subscription account changed. Open /model to select an available model for the new account; no request was sent."
         : "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.");
-      return;
+      return false;
     }
     const userEntry: TuiTranscriptEntry = {
       id: this.nextId("user"),
       kind: "user",
       text,
     };
+    try {
+      this.session.append({
+        type: "user",
+        id: crypto.randomUUID(),
+        content: [{ type: "text", text }],
+      });
+    } catch {
+      this.fail("Could not save your prompt. Check session storage and retry; nothing was sent.");
+      return false;
+    }
     this.transcript.push(userEntry);
-    this.session.append({
-      type: "user",
-      id: crypto.randomUUID(),
-      content: [{ type: "text", text }],
-    });
     this.status = "running";
     const abort = new AbortController();
     this.activeAbort = abort;
     this.currentAssistantId = undefined;
+    try { accepted(); } catch { /* A presentation callback cannot undo an accepted record. */ }
     // The baseline capture runs inside the tracked turn so a spawn failure still clears ownership below.
     const turn = (async () => {
       try {
@@ -2180,6 +2189,7 @@ export class TuiController {
       }
       this.invalidateBranchTreeCache();
     }
+    return true;
   }
 
   private async runTurn(signal: AbortSignal): Promise<void> {

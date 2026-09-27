@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
-import { createConversationView } from "../src/tui/view.ts";
+import { createConversationView, type ConversationViewOptions } from "../src/tui/view.ts";
 import { TuiController, buildTranscriptFromSession, type CodexLoginRunner, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
@@ -18,9 +18,9 @@ import { join } from "node:path";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}) {
+async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}, submitOverride?: ConversationViewOptions["submit"]) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
-  const session = createSession();
+  const session = overrides.session ?? createSession();
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({
     session, workspace, provider: "scripted", modelId: "test-model", sessionId: "private-session-id",
@@ -37,11 +37,12 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: ["secret-sentinel"],
     quit: () => { quit = true; },
     openUrl: async url => { opened.push(url); },
-    submit: (value, accepted) => dispatchEditorInput(value, controller, async command => {
-      if (command.name === "model") controller.openModelPicker();
-      else if (command.name === "login") await controller.login(command.args);
-      else if (command.name === "help") controller.notice("Help text");
-    }, accepted),
+    submit: submitOverride ?? ((value, accepted) => dispatchEditorInput(value, controller, async command => {
+      if (command.name === "model") return controller.openModelPicker();
+      if (command.name === "login") return controller.login(command.args);
+      if (command.name === "help") { controller.notice("Help text"); return true; }
+      return false;
+    }, accepted)),
   });
   cleanups.push(() => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); });
   await terminal.flush();
@@ -82,6 +83,109 @@ test("multiline paste and Ctrl+J submit one prompt; Markdown renders with stable
   expect(ui.transcript.getChildren()).toContain(userRow!);
   ui.mockInput.pressArrow("up");
   expect(ui.editor.plainText).toContain("บรรทัดที่สอง");
+});
+
+test("missing credentials retain a Thai multiline prompt and cursor through real Enter", async () => {
+  const ui = await setup(44, 18, {}, undefined, { model: undefined });
+  await ui.mockInput.pasteBracketedText("ช่วยแก้ไข\nบรรทัดที่สอง");
+  ui.editor.cursorOffset = 3;
+  const before = ui.editor.cursorOffset;
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("ช่วยแก้ไข\nบรรทัดที่สอง");
+  expect(ui.editor.cursorOffset).toBe(before);
+  expect(ui.editor.focused).toBe(true);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.controller.snapshot().status).toBe("error");
+  ui.controller.setModel(createScriptedModel({ text: "ready" }), "scripted", "ready");
+  ui.mockInput.pressEnter();
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !ui.controller.running);
+  await settle(ui);
+  expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
+  expect(ui.session.items[0]).toMatchObject({ content: [{ type: "text", text: "ช่วยแก้ไข\nบรรทัดที่สอง" }] });
+  expect(ui.editor.plainText).toBe("");
+});
+
+test("failed session append retains the editor and never starts the model", async () => {
+  let requests = 0;
+  const session = createSession([], [], { writeOperation: () => { throw new Error("disk full"); } });
+  const ui = await setup(44, 18, {}, undefined, {
+    session,
+    model: createScriptedModel({ responses: [() => { requests++; return { text: "unexpected" }; }] }),
+  });
+  await ui.mockInput.pasteBracketedText("  เก็บข้อความ\nและบรรทัดนี้  ");
+  ui.editor.cursorOffset = 4;
+  const before = ui.editor.cursorOffset;
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("  เก็บข้อความ\nและบรรทัดนี้  ");
+  expect(ui.editor.cursorOffset).toBe(before);
+  expect(ui.editor.focused).toBe(true);
+  expect(ui.session.items).toHaveLength(0);
+  expect(requests).toBe(0);
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Could not save your prompt");
+});
+
+test("invalid local command remains editable after Enter", async () => {
+  const ui = await setup();
+  await ui.mockInput.typeText("/theme wrong");
+  ui.editor.cursorOffset = 5;
+  const before = ui.editor.cursorOffset;
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("/theme wrong");
+  expect(ui.editor.cursorOffset).toBe(before);
+  expect(ui.controller.snapshot().status).toBe("error");
+});
+
+test("busy built-in command keeps text and cursor through renderer dispatch", async () => {
+  const ui = await setup();
+  ui.controller.setModel(createScriptedModel({ waitForAbort: true }), "scripted", "waiting");
+  const running = ui.controller.submit("running");
+  await ui.mockInput.typeText("/model unavailable");
+  ui.editor.cursorOffset = 7;
+  const before = ui.editor.cursorOffset;
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("/model unavailable");
+  expect(ui.editor.cursorOffset).toBe(before);
+  expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("Already running"))).toBe(true);
+  ui.controller.cancel();
+  await running;
+});
+
+test("late command acceptance leaves a newer draft through picker restoration", async () => {
+  let complete!: (value: boolean) => void;
+  let controller!: TuiController;
+  const ui = await setup(44, 18, {}, undefined, {}, (value, accepted) => dispatchEditorInput(value, controller, async () => {
+    return new Promise<boolean>(resolve => { complete = resolve; });
+  }, accepted));
+  controller = ui.controller;
+  await ui.mockInput.typeText("/help");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  ui.editor.setText("newer draft");
+  ui.editor.cursorOffset = 5;
+  ui.controller.openModelPicker();
+  await settle(ui);
+  complete(true);
+  await settle(ui);
+  ui.controller.closeModelPicker();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("newer draft");
+  expect(ui.editor.cursorOffset).toBe(5);
+});
+
+test("model failure after acceptance remains one failed turn, not a restored draft", async () => {
+  const ui = await setup(80, 24, {}, undefined, { model: createScriptedModel({ error: "offline" }) });
+  await ui.mockInput.typeText("one saved turn");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !ui.controller.running);
+  await settle(ui);
+  expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
+  expect(ui.editor.plainText).toBe("");
+  expect(ui.controller.snapshot().status).toBe("error");
 });
 
 test("dragging transcript text copies it; Ctrl+C copies selection instead of quitting", async () => {
@@ -433,6 +537,12 @@ test("login chooser and masked callback use real keyboard and paste input while 
   expect(ui.editor.plainText).toBe("continue this task\nsecond line");
   expect(ui.editor.cursorOffset).toBe(8);
   expect(ui.session.items).toHaveLength(0);
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !ui.controller.running);
+  await settle(ui);
+  ui.mockInput.pressArrow("up");
+  expect(ui.editor.plainText).toBe("continue this task\nsecond line");
+  expect(ui.editor.plainText).not.toContain("callback-secret-sentinel");
 });
 
 test("/login without arguments reaches the chooser through editor dispatch", async () => {

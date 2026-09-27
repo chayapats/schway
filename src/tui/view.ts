@@ -42,12 +42,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let panelMode = "";
   let savedDraft = "";
   let savedDraftCursor = 0;
+  let savedDraftRevision = 0;
   let panelFingerprint = "";
   let treePreviewKey = "";
   let treePreview: readonly TuiTranscriptEntry[] = [];
   let historyIndex = -1;
   let historyDraft = "";
   const history: string[] = [];
+  let editorRevision = 0;
+  let pendingAcceptance = false;
   let completionIndex = 0;
   let lastQuery = "";
   let dismissedQuery: string | undefined;
@@ -215,7 +218,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       const nextPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
       if (nextPanel !== panelMode) {
-        if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; }
+        if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
         panelMode = nextPanel;
         setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
         if (!panelMode) editor.cursorOffset = savedDraftCursor;
@@ -366,28 +369,38 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     const value = editor.plainText;
     if (!value.trim()) return;
-    const themeCommand = /^\/theme(?:\s+(.*))?$/.exec(value.trim());
-    if (themeCommand) {
-      const requested = themeCommand[1]?.trim() || "auto";
-      if (!["auto", "dark", "light"].includes(requested)) controller.fail("Usage: /theme [auto|dark|light]");
-      else { mode = requested as ThemeMode; applyTheme(); }
-      setDraft(""); refresh(); return;
-    }
-    if (value.trim() === "/session") {
-      const workspace = controller.workspaceIdentity();
-      controller.notice(`Session: ${snapshot.sessionId}\nConversation branch: ${snapshot.branchId}\nModel: ${snapshot.provider}/${snapshot.modelId}\nPrimary: ${workspace?.root ?? options.workspaceRoot}\nAttached: ${workspace?.extraRoots.join(", ") || "none"}`);
-      setDraft(""); refresh(); return;
-    }
-    void options.submit(value, () => {
+    if (pendingAcceptance) return;
+    const revision = editorRevision;
+    const accept = () => {
+      pendingAcceptance = false;
       // Credential callback commands must never enter prompt recall.
       if (!value.trimStart().startsWith("/") && history.at(-1) !== value) {
         history.push(value); if (history.length > 100) history.shift();
       }
       historyIndex = -1;
-      setDraft("");
+      if (panelMode) {
+        if (savedDraftRevision === revision && savedDraft === value) { savedDraft = ""; savedDraftCursor = 0; }
+      } else if (editorRevision === revision && editor.plainText === value) {
+        setDraft("");
+      }
       dismissedQuery = undefined;
       latest();
-    }).then(refresh, fail);
+      refresh();
+    };
+    const themeCommand = /^\/theme(?:\s+(.*))?$/.exec(value.trim());
+    if (themeCommand) {
+      const requested = themeCommand[1]?.trim() || "auto";
+      if (!["auto", "dark", "light"].includes(requested)) controller.fail("Usage: /theme [auto|dark|light]");
+      else { mode = requested as ThemeMode; applyTheme(); accept(); }
+      refresh(); return;
+    }
+    if (value.trim() === "/session") {
+      const workspace = controller.workspaceIdentity();
+      controller.notice(`Session: ${snapshot.sessionId}\nConversation branch: ${snapshot.branchId}\nModel: ${snapshot.provider}/${snapshot.modelId}\nPrimary: ${workspace?.root ?? options.workspaceRoot}\nAttached: ${workspace?.extraRoots.join(", ") || "none"}`);
+      accept(); refresh(); return;
+    }
+    pendingAcceptance = true;
+    void options.submit(value, accept).then(() => { pendingAcceptance = false; refresh(); }, error => { pendingAcceptance = false; fail(error); });
     refresh();
   }
 
@@ -459,6 +472,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   editor.onSubmit = submit;
   editor.onContentChange = () => {
     if (refreshing || destroyed) return;
+    editorRevision++;
     if (controller.snapshot().modelPicker) controller.searchModels(editor.plainText);
     refresh();
   };

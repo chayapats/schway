@@ -412,7 +412,7 @@ test("CLI branch selection and interactive commands use exact saved identities w
     session.append(user("u"), assistant("a"));
     const manager = createContextManager(ws, { home });
     const controller = new TuiController({ session, sessionId: session.header.id, contextManager: manager, workspace: ws, provider: "scripted", modelId: "scripted" });
-    await dispatchEditorInput("/branch fork a alternate", controller, async command => { controller.branchCommand(command.args); });
+    await dispatchEditorInput("/branch fork a alternate", controller, async command => controller.branchCommand(command.args));
     const branch = session.activeBranchId;
     session.append(user("only-on-alternate"), assistant("alternate-done"));
     expect(controller.branchCommand("switch main")).toBe(true);
