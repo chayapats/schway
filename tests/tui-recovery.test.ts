@@ -68,17 +68,34 @@ test("startup diagnostics stay out of the primary row and optional details mask 
     const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
     const tui = new TuiController({ session: createSession(), model: undefined,
       contextManager: createContextManager(workspace), workspace, provider: "scripted", modelId: "broken",
-      sessionId: "sensitive-startup", startupError: "Provider failed: Bearer opaque-startup-token payload=private-payload token=unknown-token" });
+      sessionId: "sensitive-startup", startupError: "Provider failed: Bearer opaque-startup-token\npayload: private customer text and address\nbody: private invoice records\ndata: private account notes\ntoken=unknown-token" });
     const primary = tui.snapshot().transcript.at(-1)?.text ?? "";
     expect(primary).toContain("provider could not be loaded");
     expect(primary).not.toContain("opaque-startup-token");
-    expect(primary).not.toContain("private-payload");
+    expect(primary).not.toContain("private customer text");
     expect(tui.inspectRecovery()).toBe(true);
     const details = tui.snapshot().transcript.at(-1)?.text ?? "";
     expect(details).toContain("Bearer ***");
+    expect(details).toContain("[provider payload redacted]");
     expect(details).not.toContain("opaque-startup-token");
-    expect(details).not.toContain("private-payload");
+    expect(details).not.toContain("private customer text");
+    expect(details).not.toContain("private invoice records");
+    expect(details).not.toContain("private account notes");
     expect(details).not.toContain("unknown-token");
+  });
+});
+
+test("accepted provider diagnostics omit multiword payloads from both recovery views", async () => {
+  await withTempDir(async dir => {
+    const tui = controller(dir, [{ error: "request rejected\npayload: private customer text and address", status: 400 }]);
+    await tui.submit("task");
+    const primary = tui.snapshot().transcript.at(-1)?.text ?? "";
+    expect(primary).not.toContain("private customer text");
+    expect(tui.inspectRecovery()).toBe(true);
+    const details = tui.snapshot().transcript.at(-1)?.text ?? "";
+    expect(details).toContain("[provider payload redacted]");
+    expect(details).not.toContain("private customer text");
+    expect(details).not.toContain("address");
   });
 });
 

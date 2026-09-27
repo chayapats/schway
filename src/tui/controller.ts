@@ -2959,9 +2959,12 @@ function startupRecoveryMessage(category: "auth" | "credential-store" | "model" 
 /** Bound and mask provider diagnostics before optional display. */
 function redactRecoveryDetails(message: string, secrets: readonly string[]): string {
   return redactSecrets(message, secrets)
+    .split(/\r?\n/)
+    .map(line => /\b(?:payload|body|data)\b["']?\s*[:=]/i.test(line) ? "[provider payload redacted]" : line)
+    .join("\n")
     .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, "$1 ***")
     .replace(/\b(sk-[A-Za-z0-9_-]{8,}|gh[opusr]_[A-Za-z0-9_]{8,})\b/g, "***")
-    .replace(/\b(authorization|x-api-key|api-key|api_key|access_token|refresh_token|client_secret|password|session_token|secret|token|payload|body|data)\s*[:=]\s*[^\s,;]+/gi, "$1: ***")
+    .replace(/\b(authorization|x-api-key|api-key|api_key|access_token|refresh_token|client_secret|password|session_token|secret|token)\s*[:=]\s*[^\s,;]+/gi, "$1: ***")
     .slice(0, 2000);
 }
 
