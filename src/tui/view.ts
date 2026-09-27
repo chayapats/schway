@@ -217,7 +217,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; }
         panelMode = nextPanel;
-        setDraft(panelMode ? "" : savedDraft);
+        setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
         if (!panelMode) editor.cursorOffset = savedDraftCursor;
         panelFingerprint = "";
       }
@@ -237,7 +237,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
       header.content = new StyledText([bold(fg(theme.accent)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), width - 8)}`)]);
       const status = snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
-      const model = safe(`${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
+      const model = safe(`${snapshot.activeRoute ? `${snapshot.activeRoute} · ` : ""}${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
       const statusWidth = Bun.stringWidth(status);
       footer.content = new StyledText([
         fg(theme.muted)(`${fitLine(model, Math.max(1, width - statusWidth - 3))}   `),
@@ -303,14 +303,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
-          textRow(picker, fitLine("Choose model · ↑/↓ select · Enter apply · Esc back", width - 2), theme.accent);
+          textRow(picker, fitLine("Choose model + route · ↑/↓ select · Enter apply/connect · Ctrl+R retry · Esc back", width - 2), theme.accent);
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
           models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
             const index = start + offset;
-            textRow(picker, fitLine(`${index === models.selectedIndex ? "›" : " "} ${entry.profile ? `profile:${entry.profile}` : `${entry.provider}/${entry.modelId}`}${entry.active ? " ✓ current" : ""}${entry.access ? ` · ${entry.access}` : entry.otherProvider ? " (other provider)" : ""}${entry.custom ? " (custom)" : ""}`, width - 2), index === models.selectedIndex ? theme.accent : theme.text);
+            const route = entry.authRoute === "codex" ? "ChatGPT" : entry.authRoute === "api-key" ? "API key" : entry.access ?? "Provider";
+            const name = entry.connect ? "Connect ChatGPT" : entry.profile ? `profile:${entry.profile}` : `${entry.provider}/${entry.modelId}`;
+            textRow(picker, fitLine(`${index === models.selectedIndex ? "›" : " "} ${route} · ${name}${entry.active ? " ✓ current" : ""}${entry.access === "Login required" ? " · Connect" : ""}${entry.custom ? " (typed)" : ""}`, width - 2), index === models.selectedIndex ? theme.accent : theme.text);
           });
           const selected = models.entries[models.selectedIndex];
-          textRow(picker, fitLine(models.error ?? (models.loading ? "Loading available models…" : selected ? `${selected.access ? `${selected.access} · ` : ""}${models.selectedIndex + 1}/${models.entries.length} · ${selected.contextWindow.toLocaleString()} context · ${selected.maxOutput.toLocaleString()} output${selected.supportedThinking ? ` · thinking: ${selected.supportedThinking.join("/") || "not advertised"}` : ""}` : "No matches. Try provider/model-id."), width - 2), models.error ? theme.error : theme.muted);
+          const routeDetail = selected?.connect ? "ChatGPT subscription · connect to discover models"
+            : selected?.authRoute === "codex" ? `ChatGPT subscription · ${selected.verifiedCatalog ? "account catalog" : "catalog pending"}`
+              : `${selected?.authRoute === "api-key" ? "OpenAI API key" : selected?.access ?? "Provider"} · ${selected?.access === "Login required" ? "connect needed" : selected?.access === "No key required" ? "no key required" : "configured, unverified"}`;
+          const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString()} context · ${selected.maxOutput.toLocaleString()} output`}` : "No matches. Try provider/model-id.";
+          textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
         } else if (available.length) {
           const start = Math.max(0, completionIndex - maxRows + 1);
           available.slice(start, start + maxRows).forEach(([name, description], offset) => {
@@ -407,6 +413,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if ((key.meta || key.option) && name === "m") { controller.openModelPicker(); handled(); return; }
+    if (snapshot.modelPicker?.error && name === "r" && key.ctrl && !key.meta && !key.option &&
+      ["empty", "offline", "failed"].includes(snapshot.modelPicker.catalogState ?? "")) {
+      controller.retryModelPickerCatalog(); handled(); return;
+    }
     if (key.ctrl && name === "o") { allExpanded = !allExpanded; expandedTools.clear(); handled(); return; }
     if (key.ctrl && name === "end") { latest(); handled(); return; }
     if (name === "pageup" || name === "pagedown") {

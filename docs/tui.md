@@ -42,7 +42,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Recall prompt | Up/Down at first/last visual row; up to 100 prompts in memory |
 | Complete command | Type `/`, Up/Down to select, Tab to insert |
 | Dismiss suggestions | Esc |
-| Model picker | `/model` or Alt+M; Up/Down, Enter, Esc |
+| Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, Ctrl+R to retry a failed account catalog, Esc to cancel |
 | Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
 | Scroll | PageUp/PageDown or mouse wheel |
@@ -74,6 +74,20 @@ for clipping, wheel handling and sticky scroll state.
 
 Esc first closes an open sign-in, model or branch picker or command suggestion
 list. The underlying prompt and cursor are restored after a picker closes.
+The model picker lists usable routes first. ChatGPT subscription and OpenAI API
+key are separate choices even when they advertise the same model ID. The footer
+shows the active route. API-key and endpoint labels mean credentials are
+configured; they do not mean the remote service accepted them. Subscription
+model rows appear only after account catalog discovery. An unknown OpenAI API
+model ID can be typed with fallback budgets, while an unknown subscription ID
+cannot be sent. A missing credential row opens its connection action, then
+returns to the same search and highlight after a successful save. Connection
+cancellation leaves the model unchanged. An empty, offline, or failed ChatGPT
+catalog shows a retry action; it never substitutes API-key billing for a
+subscription choice. Explicit CLI and configuration preferences remain visible
+until the user selects a different route. Picker choices apply to the current
+session; cross-launch workspace preference persistence is a separate slice.
+
 Prompt recall excludes slash commands. API keys and pasted browser callbacks
 use separate masked entries that intercept keyboard and paste events; neither
 enters the ordinary draft, prompt recall or conversation. Device approval codes
@@ -104,6 +118,12 @@ and home directory, removed on exit. No model API or stored credentials are used
 bun test tests/tui-view.test.ts
 bun run typecheck
 ```
+
+The route, connection, catalog, profile, keyboard, paste, and resize checks in
+this repository use isolated credentials and scripted or protocol fixtures.
+They verify the local interaction and request path. They do not establish live
+OAuth approval, remote account entitlement, or success in a human terminal;
+those checks remain for the installed-journey gate.
 
 Renderer tests exercise real keyboard/paste events, Markdown, output disclosure,
 draft preservation, scroll anchoring, theme changes, Unicode, and resizing. Tests

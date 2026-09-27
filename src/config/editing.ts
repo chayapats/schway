@@ -1,6 +1,6 @@
 import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
-import type { ModelCapability } from "../model/catalog.ts";
+import { getThinkingSupport, type ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
@@ -151,12 +151,12 @@ export class ConfigEditor {
   /** Identify the provider override that discarded an inherited model and selected a built-in model default. */
   get modelFallbackSource(): string | undefined { return traceOrigins(this.layers).modelFallbackSource; }
 
-  /** Stage a different primary workspace's project layer while retaining user, CLI and session settings. */
+  /** Stage a workspace's project layer, retaining session overrides only within the same primary workspace. */
   async forWorkspace(workspaceRoot: string): Promise<ConfigEditor> {
     const path = projectConfigPath(workspaceRoot);
     const project = await readConfigFile(path);
     if (project && "error" in project) throw new Error(project.error);
-    return new ConfigEditor({ ...this.layers, project }, { ...this.paths, project: path }, this.modelCapabilities);
+    return new ConfigEditor({ ...this.layers, project, session: path === this.paths.project ? this.layers.session : undefined }, { ...this.paths, project: path }, this.modelCapabilities);
   }
 
   /** Stage one validated setting edit, retaining the previous settings until commit. */
@@ -183,6 +183,15 @@ export class ConfigEditor {
       { key: "provider", value: "openai" }, { key: "openaiAuth", value: "codex" },
       { key: "model", value: model }, { key: "profile", value: null },
       ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
+    ]);
+  }
+
+  /** Stage an explicit API-key model and billing route together for this session. */
+  async prepareOpenAIApiModel(model: string): Promise<ConfigTransaction> {
+    return this.prepareChanges("session", [
+      { key: "provider", value: "openai" }, { key: "openaiAuth", value: "api-key" },
+      { key: "model", value: model }, { key: "profile", value: null },
+      ...(this.current.thinking && !getThinkingSupport("openai", model).supported.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }
 

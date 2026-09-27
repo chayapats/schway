@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
-import { TuiController, buildTranscriptFromSession, type CodexLoginRunner } from "../src/tui/controller.ts";
+import { TuiController, buildTranscriptFromSession, type CodexLoginRunner, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -10,11 +10,15 @@ import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { fitLine } from "../src/tui/presentation.ts";
 import { resolveTheme, TUI_THEMES } from "../src/tui/theme.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { codexSubscriptionIdentity } from "../src/auth/store.ts";
+import { loadConfigEditor } from "../src/config/editing.ts";
+import { withTempDir } from "./helpers.ts";
+import { join } from "node:path";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner) {
+async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
   const session = createSession();
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
@@ -23,6 +27,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     model: createScriptedModel({ responses: [{ text: "## Result\n\nHello **world**.\n\n```ts\nconst answer = 42;\n```" }] }),
     contextManager: createContextManager(workspace), secrets: ["secret-sentinel"],
     credentials: { store: fakeCredentialStore(), env: credentialEnv, reload: async () => ({ model: createScriptedModel() }), codexLogin },
+    ...overrides,
   });
   let quit = false;
   const copied: string[] = [];
@@ -225,6 +230,112 @@ test("model picker renders credential labels and puts configured providers first
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("Login required");
   }
+});
+
+test("keyboard connection at 44×18 restores the picker search and ordinary draft", async () => {
+  const ui = await setup(44, 18);
+  await ui.mockInput.pasteBracketedText("ordinary draft");
+  ui.mockInput.pressKey("m", { meta: true });
+  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.accessLoading);
+  await ui.mockInput.typeText("anthropic/claude-sonnet-4-6");
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("connect needed");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !!ui.controller.snapshot().credentialEntry);
+  await ui.mockInput.pasteBracketedText("masked-route-secret");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !!ui.controller.snapshot().modelPicker && !ui.controller.snapshot().modelPicker?.loading);
+  await settle(ui);
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("anthropic/claude-sonnet-4-6");
+  expect(ui.captureCharFrame()).toContain("API key");
+  expect(ui.captureCharFrame()).not.toContain("masked-route-secret");
+  ui.mockInput.pressEscape();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("ordinary draft");
+});
+
+test("active OpenAI billing route stays visible at 80×24 and 44×18 after keyboard resize", async () => {
+  const ui = await setup(80, 24, { OPENAI_API_KEY: "route-secret" });
+  ui.controller.setModel(createScriptedModel({ provider: "openai", id: "gpt-5.4" }), "openai", "gpt-5.4");
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("OpenAI API key");
+  ui.mockInput.pressKey("m", { meta: true });
+  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.accessLoading);
+  await ui.mockInput.typeText("gpt-5.4");
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("configured, unverified");
+  ui.resize(44, 18);
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("OpenAI API key");
+  expect(ui.captureCharFrame()).toContain("API key");
+  expect(ui.captureCharFrame()).not.toContain("route-secret");
+});
+
+test("explicit API preference changes only through keyboard route selection at both terminal sizes", async () => {
+  await withTempDir(async root => {
+    const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "gpt-5.4", openaiAuth: "api-key" } });
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "account-fixture");
+    const env = { OPENAI_API_KEY: "environment-override-secret" };
+    const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
+    const ui = await setup(80, 24, env, undefined, {
+      provider: "openai", modelId: "gpt-5.4", openaiAuth: "api-key", configEditor,
+      model: createScriptedModel({ provider: "openai", id: "gpt-5.4" }),
+      credentials: { store, env, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => [{ id: "gpt-5.4", supportedThinking: [] }] },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.openaiAuth === "codex" ? "codex-subscription" : "openai", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    expect(ui.controller.snapshot().activeRoute).toBe("OpenAI API key");
+    ui.mockInput.pressKey("m", { meta: true });
+    await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+    await ui.mockInput.typeText("gpt-5.4");
+    await settle(ui);
+    expect(configEditor.settings.openaiAuth).toBe("api-key");
+    expect(ui.captureCharFrame()).toContain("API key");
+    expect(ui.captureCharFrame()).toContain("ChatGPT");
+    ui.mockInput.pressArrow("down");
+    ui.mockInput.pressEnter();
+    await ui.waitFor(() => !ui.controller.snapshot().modelPicker);
+    expect(ui.controller.snapshot().activeRoute).toBe("ChatGPT subscription");
+    expect(configEditor.settings.openaiAuth).toBe("codex");
+    ui.resize(44, 18);
+    ui.mockInput.pressKey("m", { meta: true });
+    await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+    await ui.mockInput.typeText("gpt-5.4");
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("ChatGPT");
+    ui.mockInput.pressArrow("down");
+    ui.mockInput.pressEnter();
+    await ui.waitFor(() => !ui.controller.snapshot().modelPicker);
+    await settle(ui);
+    expect(ui.controller.snapshot().activeRoute).toBe("OpenAI API key");
+    expect(configEditor.settings.openaiAuth).toBe("api-key");
+    expect(ui.captureCharFrame()).not.toContain("environment-override-secret");
+  });
+});
+
+test("retry shortcut leaves ordinary r available in a failed-catalog search", async () => {
+  const store = fakeCredentialStore();
+  await store.set(codexSubscriptionIdentity(), "account-fixture");
+  let calls = 0;
+  const ui = await setup(44, 18, {}, undefined, {
+    credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => {
+      calls++;
+      if (calls === 1) throw new Error("network offline");
+      return [];
+    } },
+  });
+  ui.mockInput.pressKey("m", { meta: true });
+  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+  expect(ui.controller.snapshot().modelPicker?.error).toContain("Ctrl+R");
+  await ui.mockInput.typeText("openroute");
+  ui.mockInput.pressKey("r");
+  await settle(ui);
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("openrouter");
+  expect(calls).toBe(1);
+  ui.mockInput.pressKey("r", { ctrl: true });
+  await ui.waitFor(() => calls === 2 && !ui.controller.snapshot().modelPicker?.loading);
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("openrouter");
 });
 
 test("slash completion uses Tab without sending a prompt; light theme updates a narrow terminal", async () => {
