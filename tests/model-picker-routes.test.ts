@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { codexSubscriptionIdentity, credentialIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -9,6 +10,47 @@ import { TuiController } from "../src/tui/controller.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
+
+test("resuming another workspace uses its configured route after an API-key choice", async () => {
+  await withTempDir(async root => {
+    const firstRoot = join(root, "first");
+    const secondRoot = join(root, "second");
+    await mkdir(join(secondRoot, ".schway"), { recursive: true });
+    await writeFile(join(secondRoot, ".schway", "config.json"), JSON.stringify({ provider: "openai", openaiAuth: "codex", model: "gpt-5.4" }));
+    const first = { root: firstRoot, launchCwd: firstRoot, extraRoots: [] };
+    const second = { root: secondRoot, launchCwd: secondRoot, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: firstRoot });
+    const store = fakeCredentialStore();
+    await store.set(credentialIdentity({ provider: "openai" }), "api-secret");
+    const activated: string[] = [];
+    const staged: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "first", workspace: first,
+      provider: editor.settings.provider, modelId: editor.settings.model, contextManager: createContextManager(first), configEditor: editor,
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }) },
+      stageSettings: async (settings, _signal, workspace) => {
+        staged.push(`${settings.openaiAuth}:${settings.model}`);
+        return { model: createScriptedModel({ provider: settings.openaiAuth === "codex" ? "codex-subscription" : settings.provider, id: settings.model }), contextManager: createContextManager(workspace!) };
+      },
+      onModelActivated: choice => activated.push(choice.authRoute),
+    });
+    try {
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      const picker = controller.snapshot().modelPicker!;
+      const index = picker.entries.findIndex(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-5.4");
+      expect(index).toBeGreaterThanOrEqual(0);
+      controller.moveModelPicker(index - picker.selectedIndex);
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(controller.snapshot().activeRoute).toBe("OpenAI API key");
+      expect(await controller.switchSession(createSession(), "first-again", { workspace: first, contextManager: createContextManager(first) })).toBe(true);
+      expect(controller.snapshot().activeRoute).toBe("OpenAI API key");
+      expect(await controller.switchSession(createSession(), "second", { workspace: second, contextManager: createContextManager(second) })).toBe(true);
+      expect(controller.snapshot().activeRoute).toBe("ChatGPT subscription");
+      expect(staged).toEqual(["api-key:gpt-5.4", "api-key:gpt-5.4", "codex:gpt-5.4"]);
+      expect(activated).toEqual(["api-key"]);
+    } finally { controller.dispose(); }
+  });
+});
 
 test("the same model activates the chosen subscription or API-key route atomically", async () => {
   await withTempDir(async root => {

@@ -151,12 +151,12 @@ export class ConfigEditor {
   /** Identify the provider override that discarded an inherited model and selected a built-in model default. */
   get modelFallbackSource(): string | undefined { return traceOrigins(this.layers).modelFallbackSource; }
 
-  /** Stage a different primary workspace's project layer while retaining user, CLI and session settings. */
+  /** Stage a workspace's project layer, retaining session overrides only within the same primary workspace. */
   async forWorkspace(workspaceRoot: string): Promise<ConfigEditor> {
     const path = projectConfigPath(workspaceRoot);
     const project = await readConfigFile(path);
     if (project && "error" in project) throw new Error(project.error);
-    return new ConfigEditor({ ...this.layers, project }, { ...this.paths, project: path }, this.modelCapabilities);
+    return new ConfigEditor({ ...this.layers, project, session: path === this.paths.project ? this.layers.session : undefined }, { ...this.paths, project: path }, this.modelCapabilities);
   }
 
   /** Stage one validated setting edit, retaining the previous settings until commit. */
