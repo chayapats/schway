@@ -58,6 +58,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let lastTail = "";
   let interactionNotice = "";
   let interactionNoticeUntil = 0;
+  let paintedCancellationId: number | undefined;
 
   const root = new BoxRenderable(renderer, { id: "conversation", width: "100%", height: "100%", flexDirection: "column", paddingX: 2, backgroundColor: theme.background });
   renderer.root.add(root);
@@ -206,6 +207,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     refreshing = true;
     try {
       const snapshot = controller.snapshot();
+      paintedCancellationId = snapshot.activity?.cancellation === "requested" ? snapshot.activity.operationId : undefined;
       const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
       root.paddingX = renderer.width < 60 ? 1 : 2;
       header.visible = activity.visible = renderer.height >= 10;
@@ -482,6 +484,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const onTheme = () => { if (mode === "auto") applyTheme(); };
   renderer.on("theme_mode", onTheme);
   renderer.on("resize", refresh);
+  const onFrame = () => {
+    if (paintedCancellationId === undefined) return;
+    controller.acknowledgeCancellationFrame(paintedCancellationId);
+    paintedCancellationId = undefined;
+  };
+  renderer.on("frame", onFrame);
   renderer.setBackgroundColor(theme.background);
   editor.focus();
   const activityTimer = setInterval(() => { if (!destroyed && controller.snapshot().activity) refresh(); }, 250);
@@ -497,6 +505,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       renderer.off("selection", onSelection);
       renderer.off("theme_mode", onTheme);
       renderer.off("resize", refresh);
+      renderer.off("frame", onFrame);
       root.destroyRecursively();
       syntax.destroy();
     },

@@ -2165,17 +2165,19 @@ export class TuiController {
       return;
     }
     if (this.activeAbort && !this.activeAbort.signal.aborted) {
-      const operationId = this.activity?.id;
       if (this.activity) {
         this.activity.phase = "stopping";
         this.activity.cancellation = "requested";
         this.activity.retry = undefined;
       }
       this.activeAbort.abort();
-      queueMicrotask(() => {
-        const activity = this.activity;
-        if (activity && activity.id === operationId && activity.cancellation === "requested") activity.cancellation = "settling";
-      });
+    }
+  }
+
+  /** Mark a cancellation as settling only after its requested state was painted for this operation. */
+  acknowledgeCancellationFrame(operationId: number): void {
+    if (this.activity?.id === operationId && this.activity.cancellation === "requested") {
+      this.activity.cancellation = "settling";
     }
   }
 

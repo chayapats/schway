@@ -60,7 +60,7 @@ test("preparation, quiet provider wait, streaming and cancellation keep one oper
     controller.cancel();
     controller.cancel();
     expect(controller.snapshot().activity).toMatchObject({ phase: "stopping", cancellation: "requested" });
-    await Promise.resolve();
+    controller.acknowledgeCancellationFrame(controller.snapshot().activity!.operationId);
     expect(controller.snapshot().activity?.cancellation).toBe("settling");
     expect(controller.snapshot().status).toBe("running");
     finish.open();
@@ -93,7 +93,7 @@ test("cancel during a quiet first-token wait keeps the turn owned until provider
     controller.cancel();
     expect(activityStatus(controller.snapshot().activity!)).toContain("Cancel requested");
     expect(controller.snapshot().activity?.cancellation).toBe("requested");
-    await Promise.resolve();
+    controller.acknowledgeCancellationFrame(controller.snapshot().activity!.operationId);
     expect(activityStatus(controller.snapshot().activity!)).toContain("Stopping");
     expect(controller.snapshot().activity?.cancellation).toBe("settling");
     expect(controller.snapshot().status).toBe("running");
@@ -154,7 +154,7 @@ test("cancel during retry backoff replaces countdown with stopping and prevents 
     expect(attempts).toBe(1);
     controller.cancel();
     expect(controller.snapshot().activity).toMatchObject({ phase: "stopping", cancellation: "requested" });
-    await Promise.resolve();
+    controller.acknowledgeCancellationFrame(controller.snapshot().activity!.operationId);
     expect(controller.snapshot().activity?.cancellation).toBe("settling");
     expect(controller.snapshot().activity?.retry).toBeUndefined();
     settlement.open();
@@ -179,7 +179,7 @@ test("manual compaction reports stopping until the owned operation settles", asy
     controller.cancel();
     controller.cancel();
     expect(controller.snapshot().activity).toMatchObject({ phase: "stopping", cancellation: "requested" });
-    await Promise.resolve();
+    controller.acknowledgeCancellationFrame(controller.snapshot().activity!.operationId);
     expect(controller.snapshot().activity?.cancellation).toBe("settling");
     expect(controller.snapshot().status).toBe("running");
     gate.open();
@@ -214,7 +214,7 @@ test("cancel during parallel tools retains settled results and stale completion 
     expect(controller.snapshot().status).toBe("running");
     controller.cancel();
     expect(controller.snapshot().activity).toMatchObject({ phase: "stopping", activeTools: 1, cancellation: "requested" });
-    await Promise.resolve();
+    controller.acknowledgeCancellationFrame(controller.snapshot().activity!.operationId);
     expect(controller.snapshot().activity?.cancellation).toBe("settling");
     b.open();
     await first;
