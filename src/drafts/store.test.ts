@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { isOrdinaryDraft, openDraftStore } from "./store.ts";
@@ -25,12 +25,15 @@ describe("durable draft checkpoint", () => {
   });
   test("fences old asynchronous revisions and accepted/discard cleanup", () => {
     const { options, store } = fixture();
+    const staleEmptyWriter = openDraftStore(options);
     store.save("latest", 3);
     expect(store.save("stale", 2)).toBe(false);
     expect(store.clear(4)).toBe(true);
     expect(store.save("resurrect", 3)).toBe(false);
     expect(openDraftStore(options).checkpoint).toBeUndefined();
-    expect(readdirSync(dirname(store.path))).toEqual([]);
+    expect(() => staleEmptyWriter.save("resurrect from another process", 1)).toThrow("another process");
+    expect(readFileSync(store.path, "utf8")).not.toContain("latest");
+    expect(readdirSync(dirname(store.path))).toHaveLength(1);
   });
   test("isolates sessions and canonical workspace identities", () => {
     const { options, store } = fixture();
@@ -72,5 +75,46 @@ describe("durable draft checkpoint", () => {
     expect(isOrdinaryDraft("ordinary text while credential entry is open", true)).toBe(false);
     expect(isOrdinaryDraft("ordinary leaked-value", false, ["leaked-value"])).toBe(false);
     expect(isOrdinaryDraft("ordinary multiline\ninput")).toBe(true);
+  });
+  test("rejects oversized UTF-8 checkpoints before writing any artifacts", () => {
+    const { options, store } = fixture(); store.save("previous", 1);
+    expect(() => store.save("🙂".repeat(1024 * 1024), 2)).toThrow("recovery limit");
+    expect(openDraftStore(options).checkpoint?.text).toBe("previous");
+    expect(readdirSync(dirname(store.path))).toHaveLength(1);
+  });
+  test("ancestor replacement never redirects checkpoints to an unrelated target", () => {
+    const { options, store } = fixture(); store.save("previous", 1);
+    const original = join(options.home, "original-state"); renameSync(join(options.home, ".schway"), original);
+    const unrelated = join(options.home, "unrelated-state"); mkdirSync(unrelated);
+    symlinkSync(unrelated, join(options.home, ".schway"));
+    expect(() => store.save("redirected", 2)).toThrow();
+    expect(readdirSync(unrelated)).toEqual([]);
+    expect(JSON.parse(readFileSync(join(original, "drafts", store.path.split("/").at(-1)!), "utf8")).text).toBe("previous");
+  });
+  test("recovers previous checkpoint and removes a killed writer's incomplete replacement", async () => {
+    const { options, store } = fixture(); store.save("previous completed", 1);
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "interrupted-writer.fixture.ts"), JSON.stringify(options)], { stdout: "pipe", stderr: "pipe" });
+    try {
+      const reader = child.stdout.getReader();
+      const { value } = await reader.read();
+      expect(new TextDecoder().decode(value)).toContain("replacement-ready");
+      child.kill("SIGKILL"); await child.exited;
+      const recovered = openDraftStore(options);
+      expect(recovered.checkpoint?.text).toBe("previous completed");
+      expect(readdirSync(dirname(store.path))).toHaveLength(1);
+      recovered.save("next", 1);
+      expect(openDraftStore(options).checkpoint?.text).toBe("next");
+      reader.releaseLock();
+    } finally { child.kill(); await child.exited; }
+  });
+  test("permission and full-disk write failures retain the completed checkpoint and remove temporary files", async () => {
+    const { options, store } = fixture(); store.save("previous completed", 1);
+    for (const failure of ["EACCES", "ENOSPC"]) {
+      const child = Bun.spawn([process.execPath, join(import.meta.dir, "interrupted-writer.fixture.ts"), JSON.stringify(options), failure], { stdout: "pipe", stderr: "pipe" });
+      expect(await new Response(child.stdout).text()).toContain(`save-failed:${failure}`);
+      expect(await child.exited).toBe(0);
+      expect(openDraftStore(options).checkpoint?.text).toBe("previous completed");
+      expect(readdirSync(dirname(store.path))).toHaveLength(1);
+    }
   });
 });
