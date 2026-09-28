@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type {
@@ -10,7 +10,7 @@ import type {
 } from "../conversation/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import { createSession, type Session } from "./session.ts";
-import { applyBranchOperation, emptyBranchState, type BranchOperation, type BranchState, type SessionEntry } from "./branches.ts";
+import { applyBranchOperation, emptyBranchState, branchAncestry, pendingCalls, type BranchOperation, type BranchState, type SessionEntry } from "./branches.ts";
 
 /** Current session format, storing atomic branch operations separately from session-wide metadata. */
 export const SESSION_FORMAT_VERSION = 3;
@@ -175,6 +175,19 @@ function sessionFilePath(directory: string, id: string): string {
 /** Bind atomic branch operations and separate workspace metadata to append-only version upgrades. */
 function openPersisted(path: string, header: SessionHeader, state: BranchState, extraRoots: readonly string[], version: number): JsonlSession {
   let failed = false;
+  let discovery: { activityAt?: string; title?: string } = {};
+  try {
+    const fd = openSync(`${path}.meta`, "r");
+    try {
+      const buffer = Buffer.alloc(2048);
+      const count = readSync(fd, buffer, 0, buffer.length, 0);
+      const cached = JSON.parse(buffer.subarray(0, count).toString("utf8"));
+      if (isPlainObject(cached)) discovery = {
+        ...(typeof cached.activityAt === "string" ? { activityAt: cached.activityAt } : {}),
+        ...(typeof cached.title === "string" ? { title: safeTaskText(cached.title) } : {}),
+      };
+    } finally { closeSync(fd); }
+  } catch { /* Optional bounded discovery cache. */ }
   /** Fence this handle after uncertain I/O so retries cannot append behind a partial durable write. */
   const write = (text: string): void => {
     if (failed) throw new Error("Session storage previously failed; reload the session before writing again");
@@ -184,9 +197,27 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
     state,
     writeOperation(operation) {
       const prefix = version < 3 ? JSON.stringify({ type: "session_format", version: 3 }) + "\n" : "";
-      const line = JSON.stringify(operation);
+      const committedAt = operation.type === "branch_append" && operation.entries.some(entry => entry.item.type !== "compaction") ? new Date().toISOString() : undefined;
+      const line = JSON.stringify({ ...operation, ...(committedAt ? { committedAt } : {}) });
       write(prefix + line + "\n");
       version = 3;
+      if (committedAt && operation.type === "branch_append") {
+        // All advisory work is fenced after the authoritative append succeeded.
+        let temp: string | undefined;
+        try {
+          discovery.activityAt = committedAt;
+          for (const entry of operation.entries) {
+            const title = taskTitle(entry.item);
+            if (title) discovery.title = title;
+          }
+          temp = `${path}.meta.${crypto.randomUUID()}.tmp`;
+          writeFileSync(temp, JSON.stringify(discovery), { mode: 0o600 });
+          renameSync(temp, `${path}.meta`);
+        } catch {
+          if (temp) { try { unlinkSync(temp); } catch {} }
+          try { unlinkSync(`${path}.meta`); } catch {}
+        }
+      }
     },
     writeRoots(roots) {
       if (JSON.stringify(roots) === JSON.stringify(session.metadata.extraRoots)) return;
@@ -416,4 +447,65 @@ async function replaceFile(path: string, text: string): Promise<void> {
     await unlink(tempPath).catch(() => undefined);
     throw error;
   }
+}
+
+/** Bounded, read-only discovery row; unknown activity is never inferred from filesystem modification time. */
+export interface SessionDiscovery extends SessionSummary {
+  title: string;
+  activityAt?: string;
+  state: string;
+}
+
+/** Read one batch of at most 100 histories with 64 KiB transcript windows, retaining every file for explicit recovery. */
+export async function discoverSessions(directory: string, offset = 0): Promise<SessionDiscovery[]> {
+  let names: string[];
+  try { names = await readdir(directory); } catch (error) { if (isNotFound(error)) return []; throw error; }
+  const rows: SessionDiscovery[] = [];
+  for (const name of names.filter(name => name.endsWith(".jsonl")).sort().slice(offset, offset + 100)) {
+    const row: SessionDiscovery = { id: name.slice(0, -6), createdAt: "", workspaceRoot: "", title: "No task preview", state: "Corrupt/unreadable header · recover file manually" };
+    rows.push(row);
+    try {
+      const text = await readWindow(join(directory, name), 65536);
+      const header = JSON.parse(text.split("\n", 1)[0]!);
+      if (!isSessionHeader(header) || header.id !== row.id) continue;
+      row.createdAt = header.createdAt;
+      row.workspaceRoot = header.workspaceRoot;
+      if (![1, 2, 3].includes(header.version)) { row.state = "Unsupported history · use a compatible Schway build"; continue; }
+      try {
+        const metadata: unknown = JSON.parse(await readWindow(join(directory, `${name}.meta`), 2048));
+        if (!isPlainObject(metadata)) throw new Error("Invalid discovery metadata");
+        if (typeof metadata.activityAt === "string" && Number.isFinite(Date.parse(metadata.activityAt))) row.activityAt = metadata.activityAt;
+        if (typeof metadata.title === "string") row.title = safeTaskText(metadata.title) || row.title;
+      } catch { /* Older histories do not have a discovery cache. */ }
+      if (Buffer.byteLength(text) >= 65536) row.state = "Partial preview · large history validated only on resume";
+      else {
+        const loaded = loadRecords(text);
+        const items = branchAncestry(loaded.state, loaded.state.branches.get(loaded.state.activeBranchId)!.headId).map(entry => entry.item);
+        row.title = items.map(taskTitle).filter(Boolean).at(-1) || row.title;
+        const times = text.split("\n").flatMap(line => {
+          try { const value = JSON.parse(line); return value.type === "branch_append" && typeof value.committedAt === "string" && Number.isFinite(Date.parse(value.committedAt)) ? [value.committedAt as string] : []; } catch { return []; }
+        });
+        row.activityAt = times.at(-1) ?? row.activityAt;
+        row.state = loaded.text !== (text.endsWith("\n") ? text : text + "\n") || pendingCalls(items).length ? "Interrupted · Enter recovers without replaying tools" : !items.length ? "Empty history" : header.version < 3 ? "Legacy history · supported" : "Ready";
+      }
+    } catch { row.state = "Corrupt/unreadable history · recover file manually"; }
+  }
+  return rows.sort((a, b) => (b.activityAt ?? b.createdAt).localeCompare(a.activityAt ?? a.createdAt) || a.id.localeCompare(b.id));
+}
+
+async function readWindow(path: string, limit: number): Promise<string> {
+  const file = await open(path, "r");
+  try { const buffer = Buffer.alloc(limit); const { bytesRead } = await file.read(buffer, 0, limit, 0); return buffer.subarray(0, bytesRead).toString("utf8"); }
+  finally { await file.close(); }
+}
+
+function taskTitle(item: SessionRecord): string {
+  if (item.type !== "user") return "";
+  // Credential entry never becomes a user record; additionally exclude saved command/callback payloads.
+  return safeTaskText(item.content.map(block => block.text).join(" "));
+}
+
+function safeTaskText(text: string): string {
+  if (/(^|\s)\/(?:login|auth|logout|connect|config|model|callback)\b|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization|oauth|https?:\/\/[^\s]*[?&](?:code|token)=)/i.test(text) || text.trimStart().startsWith("/")) return "";
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
 }

@@ -13,7 +13,6 @@ import { createNativeCredentialStore, type CredentialStore } from "../auth/store
 import type { Model } from "../model/model.ts";
 import {
   createJsonlSession,
-  listSessions,
   loadJsonlSession,
   sessionsDirectory,
   type JsonlSession,
@@ -518,8 +517,9 @@ export async function handleSlashCommand(
   },
   raw?: string,
   accepted: () => void = () => {},
+  resumeSignal?: AbortSignal,
 ): Promise<boolean> {
-  if ((name === "new" || name === "resume") && ctx.controller.running) {
+  if ((name === "new" || name === "resume" || name === "sessions") && ctx.controller.running) {
     ctx.controller.notice("Already running. Press Esc to cancel first.");
     return false;
   }
@@ -539,16 +539,7 @@ export async function handleSlashCommand(
       return true;
     }
     case "sessions": {
-      const listed = await listSessions(ctx.sessionsDir);
-      if (listed.length === 0) {
-        ctx.controller.notice("No saved sessions yet.");
-        return true;
-      }
-      const lines = listed
-        .slice(0, 20)
-        .map((entry) => `- ${entry.id} (${entry.createdAt}, ${entry.workspaceRoot})`);
-      ctx.controller.notice(`Saved sessions:\n${lines.join("\n")}`);
-      return true;
+      return ctx.controller.openSessionPicker(ctx.sessionsDir, (id, signal) => handleSlashCommand("resume", id, ctx, undefined, undefined, signal));
     }
     case "resume": {
       const [sessionId, branchId, ...extra] = args.trim().split(/\s+/);
@@ -561,6 +552,7 @@ export async function handleSlashCommand(
         const restored = await restoreWorkspace({ root: resumed.header.workspaceRoot, launchCwd: resumed.header.launchCwd, extraRoots: [...resumed.metadata.extraRoots] });
         const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
+        if (resumeSignal?.aborted) return false;
         if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return false;
         ctx.skillScope.manager = ctx.controller.activeContextManager();
         ctx.skillScope.workspaceRoot = workspace.root;

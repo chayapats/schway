@@ -73,7 +73,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
   return [
     "Commands:",
     "/new - start a new session",
-    "/sessions - list saved sessions",
+    "/sessions - browse recent sessions",
     "/resume <id> [branch-id] - resume a saved session on its active branch or one stable branch ID",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
     "/thinking [off|low|medium|high|xhigh|max|ultra|reset] - show or switch reasoning level for future requests",

@@ -28,8 +28,8 @@ test("debug opt-in keeps runtime JSONL and durable semantic JSONL separate", asy
   expect(lines.map(line => line.event)).toContain("agent.finished");
   expect(lines[0]?.runId).toBeTruthy();
   expect(lines.find(line => line.event === "agent.finished")?.sessionId).toBeTruthy();
-  expect((await readdir(join(home, ".schway", "sessions"))).length).toBe(2);
-  for (const file of await readdir(join(home, ".schway", "sessions"))) {
+  expect(((await readdir(join(home, ".schway", "sessions"))).filter(file => file.endsWith(".jsonl"))).length).toBe(2);
+  for (const file of (await readdir(join(home, ".schway", "sessions"))).filter(file => file.endsWith(".jsonl"))) {
     expect(await readFile(join(home, ".schway", "sessions", file), "utf8")).not.toContain('"agent.started"');
   }
 }));
@@ -99,7 +99,7 @@ test("unwritable diagnostic destination cannot suppress tool settlement", async 
   expect(code).toBe(0);
   expect(stdout).toContain('"type":"tool.finished"');
   expect(await readFile(join(home, "note.txt"), "utf8")).toBe("settled");
-  const session = (await readdir(join(home, ".schway", "sessions")))[0]!;
+  const session = ((await readdir(join(home, ".schway", "sessions"))).filter(file => file.endsWith(".jsonl")))[0]!;
   expect(await readFile(join(home, ".schway", "sessions", session), "utf8")).toContain('"tool_result"');
 }));
 
@@ -119,14 +119,14 @@ test("rotation rejection cannot suppress tool or session settlement", async () =
   expect(await readFile(join(home, "note.txt"), "utf8")).toBe("settled");
   expect(await readFile(destination, "utf8")).toBe(original);
   expect(await readFile(join(`${destination}.3`, "keep"), "utf8")).toBe("unchanged");
-  const session = (await readdir(join(home, ".schway", "sessions")))[0]!;
+  const session = ((await readdir(join(home, ".schway", "sessions"))).filter(file => file.endsWith(".jsonl")))[0]!;
   expect(await readFile(join(home, ".schway", "sessions", session), "utf8")).toContain('"tool_result"');
 }));
 
 test("debug path targeting a resumed session, including symlink alias, cannot corrupt history", async () => withHome(async home => {
   const io = { cwd: home, env: { HOME: home }, stdout: { write() {} }, stderr: { write() {} }, model: createScriptedModel({ text: "ok" }) };
   expect(await runCli(["-p", "hello"], io)).toBe(0);
-  const sessionName = (await readdir(join(home, ".schway", "sessions")))[0]!;
+  const sessionName = ((await readdir(join(home, ".schway", "sessions"))).filter(file => file.endsWith(".jsonl")))[0]!;
   const id = sessionName.slice(0, -".jsonl".length);
   const session = join(home, ".schway", "sessions", sessionName);
   const alias = join(home, "alias.jsonl");
@@ -139,5 +139,5 @@ test("debug path targeting a resumed session, including symlink alias, cannot co
     expect(after).not.toContain('"component":"cli"');
     expect(after).not.toContain('"event":"agent.finished"');
   }
-  expect((await readdir(join(home, ".schway", "sessions")))).toEqual([sessionName]);
+  expect(((await readdir(join(home, ".schway", "sessions"))).filter(file => file.endsWith(".jsonl")))).toEqual([sessionName]);
 }));

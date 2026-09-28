@@ -62,7 +62,7 @@ test("headless loop loads ordered extensions from the primary workspace before i
       { toolCallId: "greeting-call", status: "success", content: "Hello Ada" },
     ]);
     const sessionDir = join(home, ".schway/sessions");
-    const files = await readdir(sessionDir);
+    const files = (await readdir(sessionDir)).filter(file => file.endsWith(".jsonl"));
     const saved = (await Bun.file(join(sessionDir, files[0]!)).text()).trim().split("\n").flatMap(decodeStoredLine);
     expect(saved.filter((item) => item.type === "tool_result")).toHaveLength(1);
     expect(saved.some((item) => item.type === "tool.delta")).toBe(false);
@@ -210,7 +210,7 @@ test("headless tool policy rewrites a native edit and denies a sibling with dura
       { toolCallId: "deny", status: "error" },
     ]);
     const directory = join(home, ".schway/sessions");
-    const [file] = await readdir(directory);
+    const [file] = (await readdir(directory)).filter(file => file.endsWith(".jsonl"));
     const saved = (await Bun.file(join(directory, file!)).text()).trim().split("\n").flatMap(decodeStoredLine);
     const results = saved.filter(item => item.type === "tool_result");
     expect(results.map(result => result.toolCallId)).toEqual(["allow", "deny"]);

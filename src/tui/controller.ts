@@ -1,3 +1,5 @@
+import { discoverSessions, type SessionDiscovery } from "../session/jsonl.ts";
+import { resolveWorkspace as canonicalWorkspace } from "../workspace/workspace.ts";
 import { getEffectiveConversation, getEffectiveSummary, getLatestCompaction } from "../context/compaction.ts";
 import { estimateSessionTokens, estimateTextTokens } from "../context/tokens.ts";
 import { preferenceRows, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
@@ -134,6 +136,7 @@ export interface TuiSnapshot {
   /** Effective reasoning description shown alongside the requested value. */
   effectiveThinking?: string;
   preferences?: PreferencesSnapshot;
+  sessionPicker?: { query: string; allWorkspaces: boolean; entries: SessionDiscovery[]; selectedIndex: number; offset: number; total: number; loading: boolean; hasMore: boolean; error?: string };
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
   /** Available sign-in actions while the interactive chooser is open. */
@@ -477,6 +480,12 @@ export class TuiController {
   private preferenceTransaction?: ConfigTransaction;
   private preferenceGeneration = 0;
   private settingsFailure?: string;
+  private sessionPicker?: NonNullable<TuiSnapshot["sessionPicker"]>;
+  private sessionRows: SessionDiscovery[] = [];
+  private sessionMatches: SessionDiscovery[] = [];
+  private loadMoreSessions?: () => Promise<boolean>;
+  private resumePickedSession?: (id: string, signal: AbortSignal) => Promise<boolean>;
+  private sessionResumeAbort?: AbortController;
   private modelPicker?: ModelPickerSnapshot;
   private subscriptionModels?: readonly string[];
   private modelPickerAccess?: ModelPickerAccess;
@@ -615,6 +624,7 @@ export class TuiController {
       ...(this.provider === "openai" ? { activeRoute: `${activeRoute}${this.model ? "" : " (unavailable)"}` } : {}),
       ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
       preferences: this.preferences ? structuredClone(this.preferences) : undefined,
+      sessionPicker: this.sessionPicker ? structuredClone(this.sessionPicker) : undefined,
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
       ...(this.loginChooserIndex !== undefined ? { loginChooser: { selectedIndex: this.loginChooserIndex, choices: LOGIN_CHOICES.map(choice => choice.label) } } : {}),
@@ -1917,6 +1927,97 @@ export class TuiController {
     this.searchModels(returning.query);
   }
 
+  /** Discover bounded history once; subsequent search and paging use only the cached metadata. */
+  async openSessionPicker(directory: string, resume: (id: string, signal: AbortSignal) => Promise<boolean>, more = false): Promise<boolean> {
+    if (this.running || this.disposed || this.credentialEntry || this.loginCallbackValue !== undefined) return false;
+    this.closeModelPicker();
+    const picker = more && this.sessionPicker ? this.sessionPicker : { query: "", allWorkspaces: false, entries: [], selectedIndex: 0, offset: 0, total: 0, loading: true, hasMore: true };
+    if (!more) this.sessionRows = [];
+    picker.loading = true;
+    this.loadMoreSessions = () => this.openSessionPicker(directory, resume, true);
+    this.sessionPicker = picker;
+    this.resumePickedSession = resume;
+    try {
+      const rows = await discoverSessions(directory, this.sessionRows.length);
+      const roots = new Map<string, string>();
+      for (const row of rows) {
+        if (!row.workspaceRoot) continue;
+        if (!roots.has(row.workspaceRoot)) {
+          try { roots.set(row.workspaceRoot, (await canonicalWorkspace(row.workspaceRoot)).root); }
+          catch { roots.set(row.workspaceRoot, ""); }
+        }
+        const canonical = roots.get(row.workspaceRoot)!;
+        if (canonical) row.workspaceRoot = canonical;
+        else row.state = "Workspace unavailable · restore directory before resuming";
+      }
+      if (this.sessionPicker !== picker || this.disposed) return false;
+      this.sessionRows = [...this.sessionRows, ...rows].sort((a, b) => (b.activityAt ?? b.createdAt).localeCompare(a.activityAt ?? a.createdAt) || a.id.localeCompare(b.id));
+      picker.hasMore = rows.length === 100;
+      picker.loading = false;
+      this.searchSessions(picker.query, true);
+      return true;
+    } catch (error) {
+      if (this.sessionPicker === picker) { picker.loading = false; this.sessionPicker.error = `Cannot discover sessions: ${error instanceof Error ? error.message : String(error)}`; }
+      return false;
+    }
+  }
+
+  /** Scan the next bounded batch only on request; re-sort all discovered results by committed activity. */
+  async loadMoreSessionPicker(): Promise<boolean> {
+    if (!this.sessionPicker?.hasMore || this.sessionPicker.loading || !this.loadMoreSessions) return false;
+    return this.loadMoreSessions();
+  }
+
+  /** Filter cached task metadata within the explicit workspace scope and reset to its first page. */
+  searchSessions(query: string, refresh = false): void {
+    const picker = this.sessionPicker;
+    if (!picker) return;
+    if (!refresh && picker.query === query.slice(0, 256)) return;
+    picker.query = query.slice(0, 256);
+    if (picker.loading) return;
+    const terms = picker.query.toLowerCase().split(/\s+/).filter(Boolean);
+    this.sessionMatches = this.sessionRows.filter(row => (picker.allWorkspaces || row.workspaceRoot === this.workspaceIdentity()?.root) && terms.every(term => `${row.title} ${row.workspaceRoot} ${row.id} ${row.state}`.toLowerCase().includes(term)));
+    picker.offset = 0; picker.selectedIndex = 0; picker.total = this.sessionMatches.length;
+    picker.entries = this.sessionMatches.slice(0, 8);
+  }
+
+  /** Toggle current-workspace discovery versus all retained history, including unknown or broken roots. */
+  toggleSessionScope(): void {
+    if (!this.sessionPicker || this.sessionPicker.loading) return;
+    this.sessionPicker.allWorkspaces = !this.sessionPicker.allWorkspaces;
+    this.searchSessions(this.sessionPicker.query, true);
+  }
+
+  /** Move the preview through cached results with pages of at most eight rows. */
+  moveSessionPicker(delta: number): void {
+    const picker = this.sessionPicker;
+    if (!picker || picker.loading || !picker.total) return;
+    const index = Math.max(0, Math.min(picker.total - 1, picker.offset + picker.selectedIndex + delta));
+    picker.offset = Math.floor(index / 8) * 8;
+    picker.selectedIndex = index - picker.offset;
+    picker.entries = this.sessionMatches.slice(picker.offset, picker.offset + 8);
+  }
+
+  /** Release discovery without reading, repairing or switching any saved conversation. */
+  closeSessionPicker(): void { this.sessionResumeAbort?.abort(); this.sessionResumeAbort = undefined; this.sessionPicker = undefined; this.sessionRows = []; this.sessionMatches = []; this.resumePickedSession = undefined; this.loadMoreSessions = undefined; }
+
+  /** Resume only after explicit confirmation, retaining the picker and current runtime on failure. */
+  async selectPickerSession(): Promise<boolean> {
+    const picker = this.sessionPicker;
+    const selected = picker?.entries[picker.selectedIndex];
+    if (!picker || picker.loading || !selected || !this.resumePickedSession || this.running) return false;
+    picker.loading = true;
+    const abort = new AbortController();
+    this.sessionResumeAbort = abort;
+    try {
+      const success = await this.resumePickedSession(selected.id, abort.signal);
+      if (abort.signal.aborted || this.sessionPicker !== picker) return false;
+      if (success) this.closeSessionPicker();
+      else { picker.error = "Resume failed; the current session is unchanged. See the diagnostic below; restore unavailable files or choose another row."; picker.loading = false; }
+      return success;
+    } catch (error) { picker.loading = false; picker.error = error instanceof Error ? error.message : String(error); return false; }
+  }
+
   /** Close the picker without changing the active model or settings. */
   closeModelPicker(): void {
     this.modelCatalogAbort?.abort();
@@ -2593,6 +2694,7 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction during terminal cleanup.
    */
   dispose(): void {
+    this.closeSessionPicker();
     this.startupAbort?.abort();
     this.disposed = true;
     this.closeModelPicker();

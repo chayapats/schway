@@ -33,7 +33,13 @@ export async function addWorkspaceRoots(workspace: Workspace, directories: reado
 
 /** Restore usable attachments without changing primary identity or discarding the caller's saved root metadata. */
 export async function restoreWorkspace(workspace: Workspace): Promise<{ workspace: Workspace; diagnostics: string[] }> {
-  let usable = { ...workspace, extraRoots: [] as string[] };
+  let canonical: string;
+  try {
+    canonical = await realpath(workspace.root);
+    if (!(await stat(canonical)).isDirectory()) throw new Error("not a directory");
+    await access(canonical, constants.R_OK | constants.X_OK);
+  } catch { throw new Error(`Saved workspace unavailable: ${workspace.root}. Restore the directory and retry; the current session remains active.`); }
+  let usable = { ...workspace, root: canonical, extraRoots: [] as string[] };
   const diagnostics: string[] = [];
   for (const root of workspace.extraRoots) {
     try {

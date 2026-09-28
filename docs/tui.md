@@ -383,3 +383,34 @@ Renderer keyboard/paste/resize fixtures invoke `/context`, retain a future draft
 during real tool execution at 44×18, and keep the composer usable at 24×8.
 These fixtures do not establish live-provider, OAuth, or human-terminal success;
 those checks remain unrun for the installed-journey gate.
+
+## Recent sessions
+
+Use `/sessions` or **Alt+S** to browse saved work. Alt+S keeps your multiline
+editor draft. Type a task, workspace or ID to search; arrows preview the selected
+row, PgUp/PgDn move eight results, and Enter explicitly resumes. Escape restores
+the draft, focus and reading position. Previewing does not switch the model,
+workspace or session, repair files, execute tools, or advance activity.
+
+The default scope is the current canonical workspace. Ctrl+W switches to all
+workspaces, including unknown/corrupt files for recovery. Rows show a bounded task
+preview, committed activity time (or “activity unknown”), workspace, state and a
+current-session marker. No provider generates titles. Saved auth commands and
+callback payloads are excluded from task previews.
+
+Discovery reads at most 100 files per request and 64 KiB per transcript, plus
+2 KiB metadata. “Partial results” means search and ordering cover only the loaded
+batch; Ctrl+L loads another 100 and reorders the accumulated results. Large files
+show a partial-preview state and are fully validated only on explicit resume.
+Older history without activity metadata uses creation time for ordering and
+truthfully displays unknown activity. Empty, legacy and corrupt files are retained;
+restore an unavailable directory or repair a corrupt file outside Schway, then
+reopen the picker. A failed resume retains the current conversation and draft.
+
+Verified with isolated scripted-model dispatcher and renderer tests: 106 sessions,
+search/paging, workspace roots/subdirectories/symlinks, branch and attachment
+resume, interrupted/legacy/corrupt/deleted files, keyboard/paste/resize and cancel,
+late resume cancellation, bounded previews and auth-command exclusion. Draft
+preservation here is in memory; this picker does not add persistent per-session
+draft recovery. Human
+terminal and live-provider journeys remain unrun; fixtures do not certify them.

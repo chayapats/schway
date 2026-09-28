@@ -150,3 +150,23 @@ Accepted attachments append independent metadata:
 This record has no entry ID or parent, advances no branch, and never becomes model conversation. The last metadata snapshot across the entire file supplies `Session.metadata.extraRoots`. The initial header remains unchanged. A format 1 session's first root-only change still appends `session_format` version 2 before the roots snapshot; it upgrades to version 3 later when branch data changes.
 
 `setExtraRoots` writes before publishing metadata; repeated accepted lists are a no-op. Resume callers use current `session.metadata.extraRoots`, not initial `header.extraRoots`, and validate availability through `restoreWorkspace`. Missing roots remain saved while runtime context excludes them. See [workspaces](workspaces.md).
+
+## Discovery metadata
+
+`/sessions` (Alt+S) provides searchable task/workspace discovery with explicit
+all-workspace and recovery scope (Ctrl+W). It never deletes history. See
+[the TUI guide](tui.md#recent-sessions) for paging, scan limits and verification.
+
+New committed `branch_append` operations carry an optional `committedAt` ISO time.
+Readers that ignore unknown fields remain compatible with formats 1–3. Branch
+selection, fork creation, metadata changes, interrupted-call settlement and
+preview do not advance conversational activity. Historical timestamps are not
+invented from filesystem modification times.
+
+A replaceable `<id>.jsonl.meta` file caches only the last known committed activity
+and a task preview of at most 160 characters. It is advisory: malformed or missing
+cache data cannot reject an already committed append or make history unreadable.
+Small histories recover metadata from validated JSONL; large histories display a
+partial-preview state. Cache updates use same-directory temporary replacement;
+JSONL remains the durable conversation authority. Recovery tools that enumerate
+transcripts should select `.jsonl` files, not every file in the sessions directory.
