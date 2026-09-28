@@ -389,13 +389,17 @@ those checks remain unrun for the installed-journey gate.
 Use `/sessions` or **Alt+S** to browse saved work. Alt+S keeps your multiline
 editor draft. Type a task, workspace or ID to search; arrows preview the selected
 row, PgUp/PgDn move eight results, and Enter explicitly resumes. Escape restores
-the draft, focus and reading position. Previewing does not switch the model,
+the draft, focus and reading position. Successful resume restores the destination
+conversation’s in-memory draft and reading position, or an empty editor at the
+latest message on its first visit. Returning to the source restores its draft;
+commands and credential-entry values are not cached. Previewing does not switch the model,
 workspace or session, repair files, execute tools, or advance activity.
 
 The default scope is the current canonical workspace. Ctrl+W switches to all
 workspaces, including unknown/corrupt files for recovery. Rows show a bounded task
 preview, committed activity time (or “activity unknown”), workspace, state and a
-current-session marker. No provider generates titles. Saved auth commands and
+current-session marker. The selected activity has its own line so long task
+previews do not hide it, including at narrow terminal sizes. No provider generates titles. Saved auth commands and
 callback payloads are excluded from task previews.
 
 Discovery reads at most 100 files per request and 64 KiB per transcript, plus
@@ -409,7 +413,7 @@ reopen the picker. A failed resume retains the current conversation and draft.
 
 Verified with isolated scripted-model dispatcher and renderer tests: 106 sessions,
 search/paging, workspace roots/subdirectories/symlinks, branch and attachment
-resume, interrupted/legacy/corrupt/deleted files, keyboard/paste/resize and cancel,
+resume, interrupted/legacy/corrupt/deleted files, keyboard/paste/resize and cancel, cross-workspace draft/viewport round trips,
 late resume cancellation, bounded previews and auth-command exclusion. Draft
 preservation here is in memory; this picker does not add persistent per-session
 draft recovery. Human

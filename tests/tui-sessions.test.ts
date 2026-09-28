@@ -168,25 +168,42 @@ test("bounded discovery batches and previews exclude saved auth payloads, tolera
   });
 });
 
-test("renderer keyboard, paste, resize preview/cancel restores multiline draft, focus and viewport", async () => {
+test("renderer keyboard, paste, resize and cross-workspace A→B→A preserve draft and viewport identity", async () => {
   await withTempDir(async home => {
     const f = await fixture(home);
+    f.session.append(...Array.from({ length: 40 }, (_, i) => user(`Source saved conversation line ${i}`)));
+    await handleSlashCommand("resume", f.session.header.id, f.ctx);
+    const other = join(home, "other"); await mkdir(other);
+    let destinationId = "";
     for (let i = 0; i < 24; i++) {
-      const s = await createJsonlSession({ directory: f.directory, workspace: f.workspace }); s.append(user(`saved task ${i === 15 ? "needle" : i}`));
+      const s = await createJsonlSession({ directory: f.directory, workspace: i === 15 ? { root: other, launchCwd: other, extraRoots: [] } : f.workspace });
+      s.append(user(`saved task ${i === 15 ? "needle" : i}`));
+      if (i === 15) {
+        destinationId = s.header.id;
+        s.append({ type: "assistant", id: "long-answer", content: [{ type: "text", text: Array.from({ length: 60 }, (_, j) => `Destination answer line ${j}`).join("\n\n") }] });
+      }
     }
-    for (let i = 0; i < 40; i++) f.controller.notice(`Current conversation line ${i}`);
     const terminal = await createTestRenderer({ width: 100, height: 30, kittyKeyboard: true });
     const view = createConversationView(terminal.renderer, { controller: f.controller, home, workspaceRoot: home, env: {}, secrets: [], quit() {}, submit: (value, accepted) => dispatchEditorInput(value, f.controller, command => handleSlashCommand(command.name, command.args, f.ctx), accepted) });
     const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
     const transcript = terminal.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
     const settle = async () => { await Bun.sleep(10); view.refresh(); await terminal.flush(); };
-    try {
-      await terminal.mockInput.pasteBracketedText("ordinary unsent\nmultiline draft"); await settle();
-      transcript.scrollTo(3); await terminal.flush(); const before = transcript.scrollTop;
+    const open = async () => {
       terminal.mockInput.pressKey("s", { meta: true }); await settle();
       for (let i = 0; i < 100 && (!f.controller.snapshot().sessionPicker || f.controller.snapshot().sessionPicker!.loading); i++) await settle();
       expect(f.controller.snapshot().sessionPicker?.loading).toBe(false);
-      await settle();
+      terminal.mockInput.pressKey("w", { ctrl: true }); await settle();
+    };
+    const select = async (query: string) => {
+      await open(); await terminal.mockInput.pasteBracketedText(query); await settle();
+      terminal.mockInput.pressEnter(); await settle();
+      for (let i = 0; i < 100 && f.controller.snapshot().sessionPicker; i++) await settle();
+      expect(f.controller.snapshot().sessionPicker).toBeUndefined();
+    };
+    try {
+      await terminal.mockInput.pasteBracketedText("ordinary unsent\nmultiline draft"); await settle();
+      transcript.scrollTo(3); await terminal.flush(); const before = transcript.scrollTop;
+      await open();
       terminal.mockInput.pressKey("\x1b[6~"); await settle();
       expect(f.controller.snapshot().sessionPicker?.offset).toBe(8);
       await terminal.mockInput.pasteBracketedText("saved task needle"); await settle();
@@ -197,15 +214,42 @@ test("renderer keyboard, paste, resize preview/cancel restores multiline draft, 
       terminal.mockInput.pressEscape(); await settle();
       expect(editor.plainText).toBe("ordinary unsent\nmultiline draft"); expect(editor.focused).toBe(true);
       expect(transcript.scrollTop).toBe(before);
+      await select("saved task needle");
+      expect(f.controller.snapshot().sessionId).toBe(destinationId);
+      expect(f.controller.workspaceIdentity()?.root).toBe(other);
+      expect(editor.plainText).toBe("");
+      expect(transcript.scrollTop).toBeGreaterThan(before);
+      await terminal.mockInput.pasteBracketedText("destination unsent\nother workspace"); await settle();
+      transcript.scrollTo(7); await terminal.flush();
+      await select(f.session.header.id);
+      expect(f.controller.snapshot().sessionId).toBe(f.session.header.id);
+      expect(editor.plainText).toBe("ordinary unsent\nmultiline draft");
+      expect(transcript.scrollTop).toBe(before);
+      await select(destinationId);
+      expect(editor.plainText).toBe("destination unsent\nother workspace");
+      expect(transcript.scrollTop).toBe(7);
       expect(f.calls()).toBe(0);
-      terminal.mockInput.pressKey("s", { meta: true }); await settle();
-      await terminal.mockInput.pasteBracketedText("saved task needle"); await settle();
-      terminal.mockInput.pressEnter(); await settle();
-      for (let i = 0; i < 100 && f.controller.snapshot().sessionPicker; i++) await settle();
-      expect(f.controller.snapshot().sessionPicker).toBeUndefined();
-      expect(f.controller.snapshot().sessionId).not.toBe(f.session.header.id);
-      expect(f.controller.snapshot().transcript.some(row => row.text.includes("saved task needle"))).toBe(true);
-      expect(f.calls()).toBe(0);
+    } finally { view.destroy(); f.controller.dispose(); terminal.renderer.destroy(); }
+  });
+});
+
+test("renderer keeps selected activity and essential controls visible beside long previews at narrow sizes", async () => {
+  await withTempDir(async home => {
+    const f = await fixture(home);
+    f.session.append(user("A".repeat(160)));
+    const expected = JSON.parse(await readFile(join(f.directory, `${f.session.header.id}.jsonl.meta`), "utf8")).activityAt as string;
+    const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
+    const view = createConversationView(terminal.renderer, { controller: f.controller, home, workspaceRoot: home, env: {}, secrets: [], quit() {}, submit: (value, accepted) => dispatchEditorInput(value, f.controller, command => handleSlashCommand(command.name, command.args, f.ctx), accepted) });
+    try {
+      terminal.mockInput.pressKey("s", { meta: true });
+      for (let i = 0; i < 100 && (!f.controller.snapshot().sessionPicker || f.controller.snapshot().sessionPicker!.loading); i++) { await Bun.sleep(5); view.refresh(); await terminal.flush(); }
+      view.refresh(); await terminal.flush();
+      expect(terminal.captureCharFrame()).toContain(`Last activity: ${expected}`);
+      for (const [width, height] of [[44, 18], [24, 8]]) {
+        terminal.resize(width!, height!); view.refresh(); await terminal.flush();
+        expect(terminal.captureCharFrame()).toContain(expected.slice(0, 16).replace("T", " "));
+        expect(terminal.captureCharFrame()).toContain("Enter Esc");
+      }
     } finally { view.destroy(); f.controller.dispose(); terminal.renderer.destroy(); }
   });
 });
