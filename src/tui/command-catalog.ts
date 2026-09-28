@@ -7,6 +7,7 @@ export interface CommandChoice { id: string; name: string; insertion: string; de
 /** Built-in discovery labels, shared by completion and ephemeral help. */
 export const COMMAND_DESCRIPTIONS: Record<string, string> = {
   model: "Choose model or profile", thinking: "Set reasoning level", theme: "Choose appearance",
+  "delete-session": "Delete a saved session and its draft",
   session: "Session and workspace details", new: "Start a session", sessions: "Browse recent sessions",
   resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Review changes and command evidence (Alt+R)",
   context: "Inspect context and summary", compact: "Summarize older context", skills: "List skills", "add-dir": "Attach a workspace",

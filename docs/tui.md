@@ -97,7 +97,7 @@ resume, explicit branch/auth/model, changed config over remembered billing,
 credential repair, deleted/corrupt suggestions, and repeated navigation. Existing
 interactive-memory tests cover missing profiles. These are deterministic model and
 credential fixtures; live OAuth, real provider and human-terminal verification
-remain unrun. Durable cross-process draft recovery is a separate slice.
+remain unrun. Durable cross-process draft recovery is described below.
 
 ## Turn outcomes and change review
 
@@ -466,3 +466,30 @@ terminal and live-provider journeys remain unrun; fixtures do not certify them.
 The confirmation controls explain that files and Git remain unchanged. Switching history neither undoes edits nor replays tools. While work runs, preview remains available but activation is refused. Failed activation retains the previous path. The list pages through large branch sets and truncates previews; exact IDs remain supported by explicit commands.
 
 Automated verification uses renderer keyboard, bracketed paste and resize input for duplicate shared-head paths, named forks, narrow Unicode lists, busy/failing confirmation, and draft/reading-position restoration. Controller/session fixtures verify persisted compaction isolation and no tool replay. Human terminal and live-provider checks are unrun; these fixtures do not establish live-provider or release success.
+
+
+## Leaving and recovering unfinished input
+
+Ordinary drafts checkpoint after 500 ms idle. A draft-only session appears as
+**Unsent draft** in recent work; **Alt+B**, `/sessions`, or `schway --resume <id>`
+restores it into that conversation without sending it. The recovery notice offers
+**Alt+D discard**. Accepted input clears its checkpoint, while a newer composed
+draft remains intact. Credential entry, callback entry and auth commands never
+become draft checkpoints; checkpointing pauses throughout credential surfaces.
+
+Quit attempts a checkpoint of the latest editor text in an isolated writer with a
+500 ms deadline, then restores the terminal even if storage stalls.
+The final message distinguishes a completed checkpoint from a save failure and
+prints a resume command for saved sessions. During an active tool, exit requests
+cancellation without waiting indefinitely; it does not claim the tool settled or
+its filesystem effects were undone. After a forced kill, only the last completed
+checkpoint is promised. See [retention, deletion and storage limits](sessions.md#unsent-draft-checkpoints).
+
+Automated coverage uses real renderer keyboard/paste/resize input and isolated app
+subprocesses: multiline checkpoint/kill/reopen, discard, accepted cleanup, late
+acceptance, cross-workspace switching, masked keys/callbacks, permission/disk-full
+failures, conflicting writers, normal-exit flush, a deliberately blocked exit writer, terminal stop/destroy and a silent
+tool that ignores cancellation. Store subprocesses also kill an atomic replacement
+between temporary-file sync and rename. These fixtures use scripted models and fake
+credential stores; live providers, actual OAuth, human terminal restoration and
+macOS filesystem behavior remain unrun installed-journey checks.

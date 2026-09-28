@@ -1,3 +1,4 @@
+import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
 import { createContextManager, type ContextManager } from "../context/manager.ts";
 import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
 import type { ResolvedSettings } from "../config/config.ts";
@@ -13,6 +14,7 @@ import { createNativeCredentialStore, type CredentialStore } from "../auth/store
 import type { Model } from "../model/model.ts";
 import {
   createJsonlSession,
+  deleteJsonlSession,
   loadJsonlSession,
   sessionsDirectory,
   type JsonlSession,
@@ -450,7 +452,7 @@ async function runTuiRenderer(options: {
   try {
     renderer.start();
     view = createConversationView(renderer, {
-      controller: options.controller, home: options.home, workspaceRoot: options.workspaceRoot,
+      controller: options.controller, home: options.home, workspaceRoot: options.workspaceRoot, draftPersistence: true,
       env: options.env, secrets: options.secrets, quit: finishQuit,
       openUrl: openBrowserUrl,
       submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command, onAccepted) => {
@@ -478,13 +480,22 @@ async function runTuiRenderer(options: {
       await Bun.sleep(50);
     }
   } finally {
+    const interrupted = options.controller.running;
+    const resume = options.controller.draftCheckpointTarget();
+    let frozen: ReturnType<NonNullable<typeof view>["freezeDraftForExit"]> | undefined;
+    let draft: ExitDraftResult | undefined;
+    try { frozen = view?.freezeDraftForExit(); }
+    catch { draft = { saved: false, failed: true }; }
+    try { options.controller.dispose(); }
+    catch { options.stderr.write("Cancellation cleanup failed; restoring the terminal.\n"); }
+    try { draft ??= frozen?.task ? await flushDraftOnExit(frozen.task) : frozen; }
+    catch { draft = { saved: false, failed: true }; }
     try { view?.destroy(); }
     catch { options.stderr.write("Could not release a TUI widget; restoring the terminal.\n"); }
     options.signal?.removeEventListener("abort", onAbort);
-    if (options.controller.running) options.diagnostics.record("tui", "shutdown", {
+    if (interrupted) options.diagnostics.record("tui", "shutdown", {
       state: "cancellation_requested", reason: options.signal?.aborted ? "signal" : quit || quitting ? "quit" : "renderer_cleanup",
     }, "warn");
-    options.controller.dispose();
     try {
       renderer.stop();
     } catch {
@@ -495,6 +506,11 @@ async function runTuiRenderer(options: {
     } catch (error) {
       options.stderr.write(`Failed to restore terminal: ${messageOf(error)}\n`);
     }
+    if (draft && "timedOut" in draft && draft.timedOut) options.stderr.write("Draft checkpoint timed out; unsaved input was not confirmed saved.\n");
+    else if (draft?.failed) options.stderr.write("Draft checkpoint failed; unsaved input was not confirmed saved.\n");
+    else if (draft?.saved) options.stderr.write("Latest completed draft checkpoint saved.\n");
+    if (interrupted) options.stderr.write("Cancellation requested. Running tools may have changed files; completion was not confirmed.\n");
+    if (resume.persisted() || (draft && "persisted" in draft && draft.persisted)) options.stderr.write(`Resume: schway --resume ${resume.sessionId}\n`);
   }
 }
 
@@ -541,6 +557,13 @@ export async function handleSlashCommand(
       void ctx.controller.offerRecentSession(ctx.sessionsDir);
       ctx.controller.notice("New session. Type / for commands or /session for details.");
       return true;
+    }
+    case "delete-session": {
+      const id = args.trim();
+      if (!id || /\s/.test(id)) { ctx.controller.fail("Usage: /delete-session <exact-session-id>. Switch away with /new first."); return false; }
+      if (id === ctx.controller.snapshot().sessionId) { ctx.controller.fail("Switch away with /new before deleting this session."); return false; }
+      try { await deleteJsonlSession({ directory: ctx.sessionsDir, home: ctx.home, id }); ctx.controller.notice("Session and associated draft content deleted."); return true; }
+      catch (error) { ctx.controller.fail(`Cannot delete session: ${messageOf(error)}`); return false; }
     }
     case "sessions": {
       return ctx.controller.openSessionPicker(ctx.sessionsDir, (id, signal) => handleSlashCommand("resume", id, ctx, undefined, undefined, signal));

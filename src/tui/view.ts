@@ -1,4 +1,6 @@
 import { PREFERENCE_SCOPES } from "./preferences.ts";
+import type { ExitDraftCheckpoint } from "../drafts/exit.ts";
+import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/store.ts";
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
@@ -16,6 +18,8 @@ export interface ConversationViewOptions {
   workspaceRoot: string;
   env: Record<string, string | undefined>;
   secrets: string[];
+  /** Enable private ordinary-draft checkpoints for the real interactive application. */
+  draftPersistence?: boolean;
   submit(value: string, accepted: () => void): Promise<unknown>;
   quit(): void;
   openUrl?(url: string): Promise<void>;
@@ -77,6 +81,43 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let interactionNotice = "";
   let interactionNoticeUntil = 0;
   let paintedCancellationId: number | undefined;
+  type DraftState = { store?: DraftStore; target: ReturnType<TuiController["draftCheckpointTarget"]>; text: string; revision: number; dirty: boolean; suppressed: boolean; notice: string; timer?: ReturnType<typeof setTimeout> };
+  const durableDrafts = new Map<string, DraftState>();
+  let durableDraft: DraftState | undefined;
+  let draftFrozen = false;
+
+  function checkpointDraft(state = durableDraft): void {
+    if (!state) return;
+    clearTimeout(state.timer); state.timer = undefined;
+    if (!state.dirty || state.suppressed || !state.store) return;
+    try {
+      if (!isOrdinaryDraft(state.text, false, options.secrets)) return;
+      if (state.text) state.target.ensurePersisted();
+      if (state.store.save(state.text, ++state.revision)) {
+        state.dirty = false;
+        state.notice = state.text ? "Draft checkpoint saved · Alt+D discard" : "";
+      }
+    } catch { state.notice = "Draft NOT saved · text kept here; previous checkpoint retained"; }
+  }
+
+  function observeDraft(text: string, suppressed: boolean): void {
+    const state = durableDraft;
+    if (!state || draftFrozen) return;
+    if (suppressed || text.trimStart().startsWith("/") || !isOrdinaryDraft(text, false, options.secrets)) {
+      clearTimeout(state.timer); state.timer = undefined; state.suppressed = true; return;
+    }
+    state.suppressed = false;
+    if (state.text !== text) { state.text = text; state.dirty = true; clearTimeout(state.timer); state.timer = undefined; }
+    if (state.dirty && !state.timer) state.timer = setTimeout(() => { checkpointDraft(state); refresh(); }, 500);
+  }
+
+  function clearDurableDraft(state = durableDraft): boolean {
+    if (!state?.store) return true;
+    clearTimeout(state.timer); state.timer = undefined;
+    state.dirty = false;
+    try { state.store.clear(++state.revision); state.text = ""; state.notice = ""; return true; }
+    catch { state.notice = "Draft cleanup failed · previous checkpoint may reappear; use Alt+D to retry"; return false; }
+  }
 
   const root = new BoxRenderable(renderer, { id: "conversation", width: "100%", height: "100%", flexDirection: "column", paddingX: 2, backgroundColor: theme.background });
   renderer.root.add(root);
@@ -131,6 +172,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   root.add(footer);
   const hints = new TextRenderable(renderer, { id: "hints", height: 1, flexShrink: 0, fg: theme.muted });
   root.add(hints);
+  const draftStatus = new TextRenderable(renderer, { id: "draft-status", height: 1, flexShrink: 0, fg: theme.muted, visible: false });
+  root.add(draftStatus);
 
   // Like a primary ScrollView, non-scrollable chrome routes wheel input to the
   // conversation. Preserve native handling over a scroller or multiline editor.
@@ -265,6 +308,22 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       const sessionChanged = !!activeSessionId && activeSessionId !== snapshot.sessionId;
+      let recoveredText: string | undefined;
+      if (options.draftPersistence && (!durableDraft || durableDraft.target.sessionId !== snapshot.sessionId)) {
+        checkpointDraft();
+        const target = controller.draftCheckpointTarget();
+        const identity = `${target.workspaceRoot ?? options.workspaceRoot}/${target.sessionId}`;
+        durableDraft = durableDrafts.get(identity);
+        if (!durableDraft) {
+          durableDraft = { target, text: "", revision: 0, dirty: false, suppressed: false, notice: "" };
+          durableDrafts.set(identity, durableDraft);
+          try {
+            durableDraft.store = openDraftStore({ home: options.home, workspaceRoot: target.workspaceRoot ?? options.workspaceRoot, sessionId: target.sessionId });
+            const recovered = durableDraft.store.checkpoint;
+            if (recovered) { durableDraft.text = recovered.text; recoveredText = recovered.text; durableDraft.notice = "Recovered draft · Alt+D discard"; }
+          } catch { durableDraft.notice = "Draft recovery unavailable · storage was not changed"; }
+        } else recoveredText = durableDraft.text;
+      }
       let destination: { draft: string; cursor: number; scroll: number } | undefined;
       if (sessionChanged) {
         const draft = panelMode ? savedDraft : editor.plainText;
@@ -273,7 +332,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           cursor: panelMode ? savedDraftCursor : editor.cursorOffset,
           scroll: panelMode === "sessions" ? sessionOriginalScroll : transcript.scrollTop });
         destination = sessionViewState.get(snapshot.sessionId);
-        savedDraft = destination?.draft ?? "";
+        savedDraft = destination?.draft ?? recoveredText ?? "";
         savedDraftCursor = destination?.cursor ?? 0;
         sessionOriginalScroll = destination?.scroll ?? 0;
       }
@@ -307,6 +366,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         panelFingerprint = "";
       }
       if (sessionChanged && !nextPanel) { setDraft(savedDraft); editor.cursorOffset = savedDraftCursor; }
+      if (!sessionChanged && recoveredText !== undefined && !nextPanel) setDraft(recoveredText);
+      const secretSurface = !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser;
+      observeDraft(panelMode ? savedDraft : editor.plainText, secretSurface);
+      draftStatus.visible = !!durableDraft?.notice;
+      draftStatus.content = fitLine(durableDraft?.notice ?? "", width);
       editor.visible = !snapshot.changeReview && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
       credential.visible = !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
       if (snapshot.changeReview) { editor.blur(); }
@@ -580,8 +644,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (pendingAcceptance) return;
     if (observedDraft !== value) { observedDraft = value; editorRevision++; }
     const revision = editorRevision;
+    const submittedDraft = durableDraft;
     const accept = () => {
       pendingAcceptance = false;
+      if (!value.trimStart().startsWith("/") && submittedDraft &&
+        (submittedDraft.text === value || submittedDraft.store?.checkpoint?.text === value)) {
+        const newer = submittedDraft.text !== value ? submittedDraft.text : "";
+        clearDurableDraft(submittedDraft);
+        if (newer) { submittedDraft.text = newer; submittedDraft.dirty = true; checkpointDraft(submittedDraft); }
+      }
       // Credential callback commands must never enter prompt recall.
       if (!value.trimStart().startsWith("/") && history.at(-1) !== value) {
         history.push(value); if (history.length > 100) history.shift();
@@ -644,10 +715,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function onKey(key: KeyEvent) {
+    if (draftFrozen) { key.preventDefault(); key.stopPropagation(); return; }
     if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().credentialEntry || controller.snapshot().loginCallbackEntry) return;
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
+    if ((key.meta || key.option) && name === "d" && !panelMode && options.draftPersistence) {
+      if (clearDurableDraft()) { setDraft(""); savedDraft = ""; }
+      handled(); return;
+    }
     if (snapshot.sessionPicker) {
       if (name === "escape") { if (controller.running) controller.cancel(); else controller.closeSessionPicker(); handled(); return; }
       if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") { controller.moveSessionPicker(name === "up" ? -1 : name === "down" ? 1 : name === "pageup" ? -8 : 8); handled(); return; }
@@ -894,10 +970,32 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   refresh();
   return {
     refresh,
+    /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */
+    freezeDraftForExit(): { task?: ExitDraftCheckpoint; saved: boolean; failed: boolean } {
+      const snapshot = controller.snapshot();
+      observeDraft(panelMode ? savedDraft : editor.plainText, ["credential", "callback", "approval", "login"].includes(panelMode) || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser);
+      draftFrozen = true;
+      for (const state of durableDrafts.values()) { clearTimeout(state.timer); state.timer = undefined; }
+      const state = durableDraft;
+      if (state && !state.text && !state.store?.checkpoint) return { saved: false, failed: false };
+      if (state?.dirty && !state.suppressed && state.store && isOrdinaryDraft(state.text, false, options.secrets)) {
+        return { task: { home: options.home, workspaceRoot: state.target.workspaceRoot ?? options.workspaceRoot,
+          sessionId: state.target.sessionId, text: state.text, generation: state.store.generation, deferredSession: state.target.deferredSession() }, saved: false, failed: false };
+      }
+      return { saved: !!state?.store?.checkpoint && !state.dirty, failed: !!state?.notice.match(/NOT saved|failed|unavailable/) };
+    },
+    /** Attempt one bounded-size synchronous checkpoint without waiting for model/tool settlement. */
+    flushDraft() {
+      const snapshot = controller.snapshot();
+      observeDraft(panelMode ? savedDraft : editor.plainText, ["credential", "callback", "approval", "login"].includes(panelMode) || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser);
+      checkpointDraft();
+      return { failed: !!durableDraft?.notice.match(/NOT saved|failed|unavailable/), saved: !!durableDraft?.store?.checkpoint && !durableDraft.dirty };
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
       clearInterval(activityTimer);
+      for (const state of durableDrafts.values()) clearTimeout(state.timer);
       unbindCredential();
       renderer.keyInput.off("keypress", onKey);
       renderer.off("selection", onSelection);

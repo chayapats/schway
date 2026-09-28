@@ -69,7 +69,7 @@ globalThis.fetch = async (url, init) => {
   }
   throw new Error("Unexpected network in installed startup fixture");
 };
-const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
+const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true, exitOnCtrlC: false, exitSignals: [] });
 mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => terminal.renderer }));
 const assert = (condition, message) => { if (!condition) throw new Error(message + "\\n" + terminal.captureCharFrame()); };
 const settle = async (ready, label) => {
@@ -151,7 +151,7 @@ void (async () => {
       if (scenario === "invalid-model-config") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai", openaiAuth: "codex", model: "invalid-explicit-model" }));
       const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"] : [];
       const output = await run([executable, ...args], work, env);
-      expect(output.stderr).toBe("");
+      expect(output.stderr).toMatch(/^(?:Latest completed draft checkpoint saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
       expect(output.exit).toBe(0);
       expect((await Bun.file(result).json()).requests).toBe(scenario === "fresh" ? 1 : 0);
       const sessions = join(home, ".schway/sessions");

@@ -3,6 +3,7 @@ import * as core from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { openDraftStore } from "../../src/drafts/store.ts";
 import { createJsonlSession, sessionsDirectory, loadJsonlSession } from "../../src/session/jsonl.ts";
 import { resolveWorkspace } from "../../src/workspace/workspace.ts";
 import { fakeCredentialStore } from "./credential-store.ts";
@@ -29,7 +30,8 @@ await Bun.sleep(3);
 const foreign = await createJsonlSession({ directory, workspace: await resolveWorkspace(other) });
 foreign.append({ type: "user", id: "foreign-user", content: [{ type: "text", text: "Other workspace task" }] });
 await createJsonlSession({ directory, workspace });
-const originalCount = (await readdir(directory)).filter(name => name.endsWith(".jsonl")).length;
+const originalFiles = (await readdir(directory)).filter(name => name.endsWith(".jsonl"));
+const originalCount = originalFiles.length;
 let requests = 0;
 const loaded: Array<{ provider: string; model?: string }> = [];
 const args: CliArgs = { json: false, help: false, provider: "openai", model: "current-model", openaiAuth: "api-key", apiKey: "fixture-private-key" };
@@ -95,7 +97,8 @@ try {
       terminal.mockInput.pressEscape();
       await wait(() => editor.plainText.includes("keep this separate"), "draft restored");
     }
-    assert(await count() === originalCount, "navigation creates no empty sessions");
+    const afterNavigation = (await readdir(directory)).filter(name => name.endsWith(".jsonl") && !originalFiles.includes(name));
+    for (const file of afterNavigation) assert(!!openDraftStore({ home, workspaceRoot: workspace.root, sessionId: file.slice(0, -6) }).checkpoint, "only a completed ordinary draft may materialize during navigation");
     if (["missing", "corrupt", "partial-corrupt"].includes(scenario)) {
       const path = join(directory, `${old.header.id}.jsonl`);
       if (scenario === "missing") await rm(path);
@@ -111,7 +114,7 @@ try {
       editor.setText("/new"); terminal.mockInput.pressEnter();
       await wait(() => frame().includes("New session."), "fresh task action");
       assert(editor.plainText === "", "old session draft not pasted into new task");
-      assert(await count() === originalCount, "new navigation is not persisted empty");
+      assert(await count() === originalCount + 1, "only the checkpointed new-task draft materializes; /new remains deferred");
     }
     if (scenario !== "resume" && scenario !== "large") {
       terminal.mockInput.pressEnter();

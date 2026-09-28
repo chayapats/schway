@@ -15,6 +15,7 @@ export const ACTIVE_SKILL_SECTION_NAME = "active-skill";
 export const RESERVED_SKILL_NAMES: readonly string[] = [
   "new",
   "sessions",
+  "delete-session",
   "resume",
   "model",
   "thinking",

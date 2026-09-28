@@ -186,3 +186,45 @@ Small histories recover metadata from validated JSONL; large histories display a
 partial-preview state. Cache updates use same-directory temporary replacement;
 JSONL remains the durable conversation authority. Recovery tools that enumerate
 transcripts should select `.jsonl` files, not every file in the sessions directory.
+
+## Unsent draft checkpoints
+
+Interactive ordinary input checkpoints separately under `~/.schway/drafts` after
+500 ms of idle typing. The first checkpoint materializes its session header, so a
+conversation containing only an unsent draft can be reopened from **Alt+B** or
+`/sessions`. Ordinary launch still starts a new conversation. Explicit resume
+restores the draft in its original session without submitting it. **Alt+D** removes
+the current draft; accepted submission removes the accepted text without clearing a
+newer draft typed while the handoff was pending.
+
+Only the latest checkpoint is retained, with no automatic expiry or history archive.
+A content-free generation marker remains after cleanup to prevent stale writers
+from restoring deleted text. To delete a saved conversation and associated draft
+content, switch away with `/new`, then run `/delete-session <exact-session-id>`.
+Deleting the currently active session is rejected. Manually removing only a JSONL
+file does not perform this draft cleanup; use the command.
+
+Checkpoints use private directories (0700), files (0600), exclusive writer locks,
+and same-directory atomic replacement. Encoded checkpoints larger than 4 MiB are
+rejected while the in-memory text and previous checkpoint remain available. Masked
+credential input, OAuth callback entry, sensitive auth commands and known credentials
+are excluded before any temporary write; all composer checkpointing pauses while a
+credential surface is open. Other slash commands are not checkpointed as drafts.
+
+Reopening removes a stopped writer's incomplete replacement only when its recorded
+process is proved absent. Active, reused, unknown or malformed writer identities
+remain locked and produce a save failure rather than silently taking ownership.
+Unexpected symlink targets are rejected. Linux pins directory descriptors; portable
+platforms check no-follow directory opens and inode identities immediately before
+synchronous access. The portable check is not a sandbox against hostile same-user
+filesystem races. No real macOS filesystem run is claimed by the Linux fixtures.
+
+After abrupt termination only the latest completed checkpoint is recoverable, not
+every keystroke. Ordinary exit freezes edits and attempts one current checkpoint in an isolated
+writer with a 500 ms deadline, requests cancellation, and restores the terminal
+without awaiting model/tool settlement. A slow writer is killed; an unconfirmed
+replacement is never reported as saved. The writer compares the captured checkpoint
+generation before changing storage, so shutdown cannot overwrite another process. Saving
+errors are reported as failures, not success. A resume command is printed only when
+a durable session exists. Interrupted tools may already have changed files; resume
+marks pending tool calls interrupted and never replays them or claims to undo them.
