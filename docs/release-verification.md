@@ -8,10 +8,14 @@ journey or judged the assembled interface in a human terminal. Issue #106 must
 remain open; no package was published and historical issue #58 was not changed.
 Closed prerequisite issues are implementation history, not a passed journey.
 
-The exact code candidate exercised was
-`a49f1e51d080446ddd436c499fe3dd3ea80065a5` (`origin/main` after #105).
-This issue changes test synchronization and this report, with no packaged file
-or runtime behavior change. Tests ran on Linux
+The packed **runtime revision** was
+`a49f1e51d080446ddd436c499fe3dd3ea80065a5` (`origin/main` after #105):
+the issue changes tests and this report, with no packaged file or runtime
+behavior change. The first repaired verification tree was commit
+`7433ba0794111984b2877b1564bac5ff52989073`; the final test/report
+revision is recorded as the linked PR head and issue comment after the last
+full run. These are separate revisions because the test harness changed after
+packing the unchanged runtime. Tests ran on Linux
 x86_64 with Bun 1.4.2 and npm 11.19.1. `tests/startup-installed.test.ts` and
 `tests/packaging.test.ts` packed this candidate with `npm pack`, installed it
 outside the checkout, and ran its installed entrypoints with isolated HOME,
@@ -24,9 +28,9 @@ renderer. Neither fixture is a human terminal or a live provider.
 | Category | Result for this candidate | Boundary and limit |
 | --- | --- | --- |
 | Implementation completeness | Present for the listed journeys | The merged #93, #96-#100 and #102-#105 contracts are in the candidate; this says what can be exercised, not what a user observed. |
-| Offline renderer and protocol | **Passed**: 133 focused tests across 13 files, 0 failures; scripted eval 7/7 cases, grader exit 0 | Renderer keyboard, paste and resize; controller/loop, auth-route and retry fixtures. Separate tests cover parts of a working day; they do not prove one uninterrupted human journey. |
+| Offline renderer and protocol | **Passed**: 133 focused tests across 13 files, 0 failures; one assembled working-journey renderer/loop/tool test; scripted eval 7/7 cases, grader exit 0 | Renderer keyboard, paste and resize; controller/loop, auth-route and retry fixtures. The assembled scripted working journey does not prove human terminal or live-provider behavior. |
 | Installed package and public consumer | **Passed** in focused run | Packed binary outside the checkout: fresh connection, remembered choice, explicit unavailable subscription model, headless tool round trip, extension typecheck, branch/compaction resume, and isolated profiles. `tests/startup-installed.test.ts` also launched the binary in a Linux OS PTY. |
-| Full repository checks | **Passed:** `bun test` 1,208/1,208 across 91 files, 0 failures; `bun run typecheck` passed | Two earlier full runs exposed fixture timing failures, repaired as described below. |
+| Full repository checks | **Passed:** `bun test` 1,209/1,209 across 92 files, 0 failures; `bun run typecheck` passed | Two earlier full runs exposed fixture timing failures, repaired as described below. The final run includes the assembled working-journey test. |
 | Human terminal, browser and live provider | **Pending** | No operator approval, real browser OAuth, native credential-store check, paid inference, or human visual judgment was performed for this candidate. `bun run live-smoke --provider all` exited 2 with all four routes `skipped/live_disabled`. |
 
 ### Journey ledger
@@ -37,12 +41,28 @@ pending when its required installed, human or live lane has not been observed.
 | Journey | Implementation | Offline observation | Human/live verdict and remaining friction |
 | --- | --- | --- | --- |
 | T1: clean installed start, connect, choose model/auth, send Thai multiline task | Present | **Passed offline:** installed executable, injected secure store and model, real renderer paste/keyboard/resize, one explicit send and one durable user turn (`tests/startup-installed.test.ts`). | **Pending:** native store, real browser approval/account discovery, live task and human screen reading. |
-| T2: read/edit/check, inspect/copy/search, compact, review, finish | Present | **Partial:** installed headless tool/extension and controller branch/compact paths passed; renderer inspection, search, context and review caller tests passed separately. | **Pending:** one continuous installed TUI tool journey with all panels and a human judgment of continuity. A fixture pass must not be called complete daily use. |
-| T3: auth expiry, bad model, partial retry, disk failure, cancellation, interrupted exit | Present | **Partial:** wrong subscription model and denied credential read reached installed startup; controller/renderer tests passed for retry, saved tool effects, disk failure, cancel and interrupted exit. | **Pending:** installed adverse checkpoints and actual auth expiry/repair with a live route. No paid retry or effect replay was attempted. |
-| T4: returning user, explicit overrides, two workspaces, branches and draft policy | Present | **Partial:** installed remembered/explicit model paths and packaged branch/compaction resume passed; fresh-process renderer tests passed for precedence, workspace isolation, recent resume and ordinary/sensitive draft handling. | **Pending:** a continuous installed restart across two workspaces and both real auth routes. Current effective settings must be rechecked at resume before any paid turn. |
+| T2: read/edit/check, inspect/copy/search, compact, review, finish | Present | **Passed at the renderer/loop/tool boundary:** `tests/daily-use-journey.test.ts` sends one Thai multiline task through real keyboard input and tools, checks the file and command exit, copies a result, searches, reviews, compacts and reloads durable history. Installed package headless tools and controller branch/compact paths also passed. | **Pending:** human judgment of the assembled installed TUI path and live model output. The scripted source renderer is not a human installed terminal. |
+| T3: auth expiry, bad model, partial retry, disk failure, cancellation, interrupted exit | Present | **Passed across the required separate offline checkpoints:** expired token transport, unavailable model, partial retry, failed persistence, cancellation and interrupted exit use protocol/controller/renderer/app subprocess boundaries. Wrong subscription model and denied credential read also reached installed startup. | **Pending:** actual auth expiry/repair with an authorized live route and human installed recovery observations. No paid retry or effect replay was attempted. |
+| T4: returning user, explicit overrides, two workspaces, branches and draft policy | Present | **Passed at fresh-process/controller boundaries:** installed remembered/explicit model paths and packaged branch/compaction resume; fresh-process tests cover precedence, two workspace scopes, recent resume, branch navigation and ordinary/sensitive drafts. | **Pending:** human installed restart across both workspaces and real auth routes. Current effective settings must be rechecked at resume before any paid turn. |
 | T5: normal/narrow/light/dark/no-color, Unicode and terminal controls | Present | **Partial:** installed xterm PTY passed 80×24 to 32×12, Thai/CJK/emoji/combining paste, Ctrl+L and exit; renderer tests passed appearance, keyboard/focus and narrow layouts. | **Pending:** human direct-terminal and multiplexer visual judgment across the assembled panels. Raw PTY bytes cannot certify cell alignment. |
 | T6: actual Schway coding task, exit and resume | Present as an intended workflow | **Pending:** scripted eval is a fixture, not this task. | **Pending:** explicit authorization for live/provider use and an operator with an installed terminal session. Record actual revision, model/auth route, diff, checks and resumed session without secrets. |
-| T7: release verdict | Gate and report present | **Passed offline:** full suite 1,208/1,208, package-consumer checks, typecheck and scripted eval passed. | **Pending** while T1-T6 required observations remain pending. No release or issue closure follows from this report. |
+| T7: release verdict | Gate and report present | **Passed offline:** full suite 1,209/1,209, package-consumer checks, typecheck and scripted eval passed. | **Pending** while T1-T6 required observations remain pending. No release or issue closure follows from this report. |
+
+### Reproduction steps by journey
+
+Each `bun test` command below uses fixtures with isolated user state. Inspect the
+named assertion and its captured file/session/UI result; a green command alone
+is not a human or provider observation.
+
+| Journey | Offline reproduction and injection | Still needed for the installed acceptance lane |
+| --- | --- | --- |
+| T1 | `bun test tests/startup-installed.test.ts tests/packaging.test.ts`: `fresh` starts the installed binary outside the checkout, enters fixture credential and Thai multiline input, then checks one send and the JSONL user record. The package consumer runs its exported extension and headless tool path. | In a human installed terminal, repeat connect, model/auth selection, send and reopen with native credential storage and an authorized route. |
+| T2 | `bun test tests/daily-use-journey.test.ts`: paste the Thai task, observe read→edit→bash exit zero, inspect/copy, search, review the changed file, compact and reload without replay. `tests/packaging.test.ts` checks the installed tool/extension and persisted branch/compact paths. | Repeat the assembled path in the installed TUI with a human reading/copying results; retain the actual diff and check output. |
+| T3 | `bun test tests/codex-subscription.test.ts tests/startup-installed.test.ts tests/tui-retry.test.ts tests/tui-recovery.test.ts tests/tui-drafts.test.ts`: inject an expired/revoked token, explicit unavailable account model, partial stream then retry, failed session/draft writes, cancellation during retry/tool work, and killed or interrupted exit, respectively. Check the retained user/tool records and “not saved” labels after each separate checkpoint. | With an authorized route and operator, repeat auth repair and failed/cancelled installed turns; compare file effects before retry so no effect is replayed. |
+| T4 | `bun test tests/interactive-memory.test.ts tests/recent-startup.test.ts tests/model-picker-routes.test.ts tests/tui-branches.test.ts tests/tui-drafts.test.ts tests/packaging.test.ts`: start two canonical workspaces, set a remembered route, override it with config/CLI and explicit headless settings, exercise both fixture auth routes, restart, use recent resume/branches, and restore/discard ordinary drafts while excluding sensitive entry. Inspect selected route before a turn. | Repeat both workspaces from installed fresh processes with each authorized real auth route and verify current billing selection before sending. |
+| T5 | `bun test tests/tui-view.test.ts tests/startup-installed.test.ts`: exercise 80×24, 44×18, 32×12 and 24×8 renderer layouts with keyboard/focus/resize and Thai/Unicode; appearance cases cover auto/dark/light and `NO_COLOR`. The installed Linux PTY injects bracketed Unicode paste at 80×24, resizes to 32×12, sends Enter/Ctrl+L/Ctrl+C, and checks alternate-screen cleanup. | A human checks direct light/dark/no-color terminals and a multiplexer at normal/narrow sizes, including selection/copy and Unicode cell alignment. Record terminal versions and failures separately. |
+| T6 | `bun run eval --provider scripted --case all` verifies only seven scripted coding cases. | Separately authorize a live route and operator; use installed Schway for one bounded real edit/check, exit and resume, then retain revision, model, diff and result without secrets. |
+| T7 | `bun run typecheck`, `bun test`, the installed package tests above, and `bun run live-smoke --provider all` without live enablement show the offline outcomes and explicit skipped live routes. | Keep this gate open until every required installed, human and live checkpoint is observed passed; do not publish a release from this ticket. |
 
 The first full `bun test` exposed a test-harness failure before repair: 1,204
 passed and four failed across 91 files. All four were in
@@ -62,12 +82,15 @@ one invalid-command assertion observed idle before asynchronous rejection.
 The subprocess test now has a 20-second test deadline; its own output/read
 deadlines and production exit deadlines did not change. The command test now
 waits for the error state. A later two-file run of `tui-view` and `tui-drafts`
-passed 82/82 tests, and typecheck passed. The final `bun test` then passed
-1,208/1,208 tests across 91 files with zero failures in 182.32 seconds.
+passed 82/82 tests, and typecheck passed. The last full `bun test` before the
+assembled working-journey fixture passed 1,208/1,208 tests across 91 files
+with zero failures in 182.32 seconds. With the assembled fixture added, the
+final full run passed 1,209/1,209 tests across 92 files with zero failures
+in 123.63 seconds.
 
 ### Reproduce and complete the open lanes
 
-1. From this exact candidate, run `bun install --frozen-lockfile`,
+1. From the issue branch at the recorded runtime base, run `bun install --frozen-lockfile`,
    `bun test tests/startup-installed.test.ts tests/packaging.test.ts`,
    `bun run typecheck`, and `bun test`. The installed tests create temporary
    consumers and isolated user state; they do not use developer credentials.
