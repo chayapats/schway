@@ -1592,6 +1592,13 @@ export class TuiController {
     this.gitSnapshotError = undefined;
   }
 
+  /** Capture this conversation's checkpoint target so delayed writes cannot materialize a different session. */
+  draftCheckpointTarget(): { sessionId: string; workspaceRoot?: string; ensurePersisted: () => void; persisted: () => boolean; deferredSession: () => { path: string; header: unknown } | undefined } {
+    const session = this.session as Session & { ensurePersisted?: () => void; persisted?: boolean; deferredCheckpoint?: () => { path: string; header: unknown } | undefined };
+    return { sessionId: this.sessionId, workspaceRoot: this.workspace?.root,
+      ensurePersisted: () => session.ensurePersisted?.(), persisted: () => session.persisted ?? session.items.length > 0, deferredSession: () => session.deferredCheckpoint?.() };
+  }
+
   /** Return a copy of the currently usable root identities for discovery and status. */
   workspaceIdentity(): Workspace | undefined {
     return this.workspace ? { ...this.workspace, extraRoots: [...this.workspace.extraRoots] } : undefined;
@@ -1976,9 +1983,9 @@ export class TuiController {
     const roots = new Map<string, string>();
     try {
       for (let offset = 0; ; offset += 100) {
-        const rows = await discoverSessions(directory, offset);
+        const rows = await discoverSessions(directory, offset, this.home);
         for (const row of rows) {
-          if (!row.workspaceRoot || row.id === this.sessionId || row.state === "Empty history" || (!row.hasWork && !row.previewIncomplete)) continue;
+          if (!row.workspaceRoot || row.id === this.sessionId || (!row.hasDraft && (row.state === "Empty history" || (!row.hasWork && !row.previewIncomplete)))) continue;
           if (this.disposed || this.session !== session || generation !== this.recentDiscoveryGeneration) return;
           if (!roots.has(row.workspaceRoot)) {
             try { roots.set(row.workspaceRoot, (await canonicalWorkspace(row.workspaceRoot)).root); }
@@ -1990,7 +1997,7 @@ export class TuiController {
         if (this.disposed || this.session !== session || generation !== this.recentDiscoveryGeneration) return;
         if (rows.length < 100) break;
       }
-      this.recentSession = latest && !latest.hasWork
+      this.recentSession = latest && !latest.hasWork && !latest.hasDraft
         ? { ...latest, title: "Recent history (preview unavailable)" } : latest;
     } catch {
       if (!this.disposed && this.session === session) this.notice("Recent history is unavailable. Start a new task or use /sessions to recover saved work.");
@@ -2011,7 +2018,7 @@ export class TuiController {
     this.sessionPicker = picker;
     this.resumePickedSession = resume;
     try {
-      const rows = await discoverSessions(directory, this.sessionRows.length);
+      const rows = await discoverSessions(directory, this.sessionRows.length, this.home);
       const roots = new Map<string, string>();
       for (const row of rows) {
         if (!row.workspaceRoot) continue;

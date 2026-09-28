@@ -19,6 +19,6 @@ mock.module("node:fs", () => ({ ...fs, writeFileSync: ((...args: Parameters<type
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
   }
 } }));
-const { openDraftStore } = await import("./store.ts");
+const { openDraftStore } = await import("../../src/drafts/store.ts");
 try { openDraftStore(JSON.parse(process.argv[2]!)).save("incomplete replacement", 1); process.stdout.write("save-completed\n"); }
 catch (error) { process.stdout.write(`save-failed:${(error as Error).message}\n`); }

@@ -1,5 +1,6 @@
 import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { openDraftStore } from "../drafts/store.ts";
 import { basename, join } from "node:path";
 import type {
   AssistantContent,
@@ -29,6 +30,12 @@ export interface SessionHeader {
 /** Session with a persisted header whose appends synchronously write JSONL before updating in-memory history. */
 export interface JsonlSession extends Session {
   readonly header: SessionHeader;
+  /** Materialize a deferred header for a completed draft checkpoint without adding conversation. */
+  ensurePersisted(): void;
+  /** Whether a resume target exists on disk. */
+  readonly persisted: boolean;
+  /** Capture an unmaterialized header for an isolated exit checkpoint writer. */
+  deferredCheckpoint(): { path: string; header: SessionHeader } | undefined;
 }
 
 /** Create a workspace-bound session, optionally deferring its JSONL header until the first durable mutation. */
@@ -231,7 +238,7 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
       if (version === 1) version = 2;
     },
   });
-  return Object.assign(session, { header });
+  return Object.defineProperties(Object.assign(session, { header, deferredCheckpoint() { return deferred ? { path, header } : undefined; }, ensurePersisted() { if (deferred) write(""); } }), { persisted: { get: () => !deferred } }) as JsonlSession;
 }
 
 /** Replay version-specific records without normalizing valid bytes or repairing semantic corruption. */
@@ -459,6 +466,7 @@ export interface SessionDiscovery extends SessionSummary {
   title: string;
   /** Whether bounded inspection found saved conversation work, independent of its redacted title. */
   hasWork?: boolean;
+  hasDraft?: boolean;
   /** The read window ended before complete history validation; unknown work must remain recoverable. */
   previewIncomplete?: boolean;
   activityAt?: string;
@@ -466,7 +474,7 @@ export interface SessionDiscovery extends SessionSummary {
 }
 
 /** Read one batch of at most 100 histories with 64 KiB transcript windows, retaining every file for explicit recovery. */
-export async function discoverSessions(directory: string, offset = 0): Promise<SessionDiscovery[]> {
+export async function discoverSessions(directory: string, offset = 0, home?: string): Promise<SessionDiscovery[]> {
   let names: string[];
   try { names = await readdir(directory); } catch (error) { if (isNotFound(error)) return []; throw error; }
   const rows: SessionDiscovery[] = [];
@@ -479,6 +487,10 @@ export async function discoverSessions(directory: string, offset = 0): Promise<S
       if (!isSessionHeader(header) || header.id !== row.id) continue;
       row.createdAt = header.createdAt;
       row.workspaceRoot = header.workspaceRoot;
+      if (home) {
+        try { row.hasDraft = !!openDraftStore({ home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).checkpoint; }
+        catch { /* Draft recovery errors remain visible when explicitly reopened. */ }
+      }
       if (![1, 2, 3].includes(header.version)) { row.state = "Unsupported history · use a compatible Schway build"; continue; }
       try {
         const metadata: unknown = JSON.parse(await readWindow(join(directory, `${name}.meta`), 2048));
@@ -504,12 +516,12 @@ export async function discoverSessions(directory: string, offset = 0): Promise<S
         const loaded = loadRecords(text);
         const items = branchAncestry(loaded.state, loaded.state.branches.get(loaded.state.activeBranchId)!.headId).map(entry => entry.item);
         row.hasWork = items.some(item => item.type === "user");
-        row.title = items.map(taskTitle).filter(Boolean).at(-1) || row.title;
+        row.title = items.map(taskTitle).filter(Boolean).at(-1) || (row.hasDraft ? "Unsent draft" : row.title);
         const times = text.split("\n").flatMap(line => {
           try { const value = JSON.parse(line); return value.type === "branch_append" && typeof value.committedAt === "string" && Number.isFinite(Date.parse(value.committedAt)) ? [value.committedAt as string] : []; } catch { return []; }
         });
         row.activityAt = times.at(-1) ?? row.activityAt;
-        row.state = loaded.text !== (text.endsWith("\n") ? text : text + "\n") || pendingCalls(items).length ? "Interrupted · Enter recovers without replaying tools" : !items.length ? "Empty history" : header.version < 3 ? "Legacy history · supported" : "Ready";
+        row.state = loaded.text !== (text.endsWith("\n") ? text : text + "\n") || pendingCalls(items).length ? "Interrupted · Enter recovers without replaying tools" : !items.length ? (row.hasDraft ? "Unsent draft · Enter restores without sending" : "Empty history") : header.version < 3 ? "Legacy history · supported" : "Ready";
       }
     } catch { row.state = "Corrupt/unreadable history · recover file manually"; }
   }
@@ -531,4 +543,15 @@ function taskTitle(item: SessionRecord): string {
 function safeTaskText(text: string): string {
   if (/(^|\s)\/(?:login|auth|logout|connect|config|model|callback)\b|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization|oauth|https?:\/\/[^\s]*[?&](?:code|token)=)/i.test(text) || text.trimStart().startsWith("/")) return "";
   return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+/** Delete an explicitly selected saved session after clearing its private draft content. */
+export async function deleteJsonlSession(options: { directory: string; id: string; home: string }): Promise<void> {
+  const path = sessionFilePath(options.directory, options.id);
+  const firstLine = await readFirstLine(path);
+  const header: unknown = JSON.parse(firstLine ?? "null");
+  if (!isSessionHeader(header) || header.id !== options.id) throw new Error("Cannot delete an invalid session header");
+  openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
+  await unlink(path);
+  try { await unlink(`${path}.meta`); } catch (error) { if (!isNotFound(error)) throw error; }
 }

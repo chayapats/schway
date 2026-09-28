@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { isOrdinaryDraft, openDraftStore } from "./store.ts";
+import { isOrdinaryDraft, openDraftStore } from "../src/drafts/store.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -93,7 +93,7 @@ describe("durable draft checkpoint", () => {
   });
   test("recovers previous checkpoint and removes a killed writer's incomplete replacement", async () => {
     const { options, store } = fixture(); store.save("previous completed", 1);
-    const child = Bun.spawn([process.execPath, join(import.meta.dir, "interrupted-writer.fixture.ts"), JSON.stringify(options)], { stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interrupted-draft-writer.ts"), JSON.stringify(options)], { stdout: "pipe", stderr: "pipe" });
     try {
       const reader = child.stdout.getReader();
       const { value } = await reader.read();
@@ -110,7 +110,7 @@ describe("durable draft checkpoint", () => {
   test("permission and full-disk write failures retain the completed checkpoint and remove temporary files", async () => {
     const { options, store } = fixture(); store.save("previous completed", 1);
     for (const failure of ["EACCES", "ENOSPC"]) {
-      const child = Bun.spawn([process.execPath, join(import.meta.dir, "interrupted-writer.fixture.ts"), JSON.stringify(options), failure], { stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interrupted-draft-writer.ts"), JSON.stringify(options), failure], { stdout: "pipe", stderr: "pipe" });
       expect(await new Response(child.stdout).text()).toContain(`save-failed:${failure}`);
       expect(await child.exited).toBe(0);
       expect(openDraftStore(options).checkpoint?.text).toBe("previous completed");
@@ -119,7 +119,7 @@ describe("durable draft checkpoint", () => {
   });
   test("portable directory validation works without descriptor traversal paths", async () => {
     const { options } = fixture();
-    const child = Bun.spawn([process.execPath, join(import.meta.dir, "interrupted-writer.fixture.ts"), JSON.stringify(options), "portable"], { stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interrupted-draft-writer.ts"), JSON.stringify(options), "portable"], { stdout: "pipe", stderr: "pipe" });
     expect(await new Response(child.stdout).text()).toContain("save-completed");
     expect(await child.exited).toBe(0);
     expect(openDraftStore(options).checkpoint?.text).toBe("incomplete replacement");

@@ -6,6 +6,7 @@ import type { TuiController } from "./controller.ts";
 /** Slash command requested from the TUI input editor. */
 export type SlashCommandName =
   | "new"
+  | "delete-session"
   | "sessions"
   | "resume"
   | "model"
@@ -45,6 +46,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
   const args = space === -1 ? "" : trimmed.slice(space + 1).trim();
   switch (name) {
     case "new":
+    case "delete-session":
     case "sessions":
     case "resume":
     case "model":
@@ -73,6 +75,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
   return [
     "Commands:",
     "/new - start a new session",
+    "/delete-session <id> - delete a saved conversation and its draft (switch away first)",
     "/sessions - browse recent sessions",
     "/resume <id> [branch-id] - resume a saved session on its active branch or one stable branch ID",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",

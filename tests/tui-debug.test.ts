@@ -202,7 +202,7 @@ test("actual interactive quit while a turn is active logs truthful cancellation 
     expect(code).toBe(0);
     expect(await new Response(child.stdout).text()).toContain("EXIT:0");
     const stderr = await new Response(child.stderr).text();
-    expect(stderr).toBe("");
+    expect(stderr.trim()).toMatch(/^Cancellation requested\. Running tools may have changed files; completion was not confirmed\.\n\nResume: schway --resume [a-f0-9-]+$/);
     const records = (await readFile(diagnosticPath(home), "utf8")).trim().split("\n").map(line => JSON.parse(line) as { component: string; event: string; fields: { state?: string; reason?: string } });
     expect(records.some(record => record.component === "tui" && record.event === "shutdown" && record.fields.state === "cancellation_requested" && record.fields.reason === "quit")).toBe(true);
     expect(records.some(record => record.event === "agent.finished")).toBe(false);

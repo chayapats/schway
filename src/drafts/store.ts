@@ -20,6 +20,7 @@ export function isOrdinaryDraft(text: string, credentialEntry = false, secrets: 
 export interface DraftStore {
   readonly checkpoint: DraftCheckpoint | undefined;
   readonly path: string;
+  readonly generation: string;
   save(text: string, revision: number): boolean;
   clear(revision: number): boolean;
 }
@@ -80,6 +81,7 @@ export function openDraftStore(options: { home: string; workspaceRoot: string; s
 
   return {
     path,
+    get generation() { return createHash("sha256").update(expected ?? "missing").digest("hex"); },
     get checkpoint() { return checkpoint; },
     save: (text, revision) => mutate(text, revision),
     clear: revision => mutate(undefined, revision),
