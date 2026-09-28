@@ -73,8 +73,10 @@ the conversation; **Ctrl+End** returns to the latest message.
 
 Appearance follows the terminal's light/dark mode when available. `/theme` overrides
 it for the current session; set `SCHWAY_THEME=dark` or `SCHWAY_THEME=light` for a
-launch preference. A nonempty `NO_COLOR` disables semantic colors. See the
-[TUI guide](docs/tui.md) for the palette and offline preview.
+launch preference. A nonempty `NO_COLOR` disables semantic colors. Interactive
+launches open with a short lightning splash that any key skips;
+`SCHWAY_MOTION=reduced` or `SCHWAY_MOTION=off` tones down or disables animation.
+See the [TUI guide](docs/tui.md) for the palette, motion and offline preview.
 
 Esc cancels the running turn through the shared AbortSignal path and returns to
 the input editor. Ctrl+C cancels when running and quits when idle. Quitting

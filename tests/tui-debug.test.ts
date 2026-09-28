@@ -19,7 +19,7 @@ test("interactive startup diagnostics are opt-in and never require OpenTUI for p
     for (const enabled of [false, true]) {
       const parsed = parseArgs(["--resume", "missing-session", ...(enabled ? ["--debug"] : [])]);
       if ("error" in parsed) throw new Error(parsed.error);
-      const code = await runInteractiveTui({ args: parsed.args, env: { HOME: home }, cwd: home,
+      const code = await runInteractiveTui({ args: parsed.args, env: { HOME: home, SCHWAY_MOTION: "off" }, cwd: home,
         stdout: { write() {} }, stderr: { write() {} } });
       expect(code).toBe(1);
       expect(await Bun.file(diagnosticPath(home)).exists()).toBe(enabled);
@@ -29,7 +29,7 @@ test("interactive startup diagnostics are opt-in and never require OpenTUI for p
 
     const configArgs = parseArgs(["--debug", "--provider", "openai-compatible"]);
     if ("error" in configArgs) throw new Error(configArgs.error);
-    expect(await runInteractiveTui({ args: configArgs.args, env: { HOME: home }, cwd: home,
+    expect(await runInteractiveTui({ args: configArgs.args, env: { HOME: home, SCHWAY_MOTION: "off" }, cwd: home,
       stdout: { write() {} }, stderr: { write() {} } })).toBe(1);
     expect(await readFile(diagnosticPath(home), "utf8")).toContain('"event":"invalid_configuration"');
   } finally { await rm(home, { recursive: true, force: true }); }
@@ -187,7 +187,7 @@ test("actual interactive quit while a turn is active logs truthful cancellation 
       const failure = new Error("aborted"); failure.name = "AbortError"; throw failure;
     } };
     const code = await runInteractiveTui({ args: { json: false, help: false, debug: true },
-      env: { HOME: process.env.HOME }, cwd: process.env.HOME, model,
+      env: { HOME: process.env.HOME, SCHWAY_MOTION: "off" }, cwd: process.env.HOME, model,
       stdout: { write() {} }, stderr: { write(text) { console.error(text); } } });
     console.log("EXIT:" + code);
   `;

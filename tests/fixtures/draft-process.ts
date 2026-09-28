@@ -79,7 +79,7 @@ mock.module(join(import.meta.dir, "../../src/tui/credential-input.ts"), () => ({
 const { runInteractiveTui } = await import("../../src/tui/app.ts");
 let stderr = "";
 const model = mode === "tool" ? createScriptedModel({ toolCalls: [{ id: "silent-tool", name: "bash", arguments: { command: "fixture" } }] }) : createScriptedModel({ text: "must not be sent" });
-const code = await runInteractiveTui({ cwd: home, env: { HOME: home }, args: { json: false, help: false, ...(resume ? { resume } : {}) }, model, signal: abort.signal, credentialStore: fakeCredentialStore(), stdout: { write() {} }, stderr: { write(text) { stderr += text; } } });
+const code = await runInteractiveTui({ cwd: home, env: { HOME: home, SCHWAY_MOTION: "off" }, args: { json: false, help: false, ...(resume ? { resume } : {}) }, model, signal: abort.signal, credentialStore: fakeCredentialStore(), stdout: { write() {} }, stderr: { write(text) { stderr += text; } } });
 await driver;
 event({ code, stopped, destroyed, stderr });
 if (mode === "tool") setInterval(() => {}, 1000);

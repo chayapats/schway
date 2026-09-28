@@ -28,7 +28,7 @@ try {
   } };
   process.exitCode = await runInteractiveTui({
     args: { json: false, help: false, provider: "openai", model: "offline-demo" },
-    env: { HOME: demoHome, PATH: process.env.PATH, SCHWAY_THEME: process.env.SCHWAY_THEME, NO_COLOR: process.env.NO_COLOR, COLORFGBG: process.env.COLORFGBG },
+    env: { HOME: demoHome, PATH: process.env.PATH, SCHWAY_THEME: process.env.SCHWAY_THEME, NO_COLOR: process.env.NO_COLOR, COLORFGBG: process.env.COLORFGBG, SCHWAY_MOTION: process.env.SCHWAY_MOTION },
     cwd: workspace, stdout: process.stdout, stderr: process.stderr, model,
     credentialStore: fakeCredentialStore(),
   });

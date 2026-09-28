@@ -1,4 +1,6 @@
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
+import { version } from "../../package.json";
+import { resolveMotion } from "./motion-policy.ts";
 import { createContextManager, type ContextManager } from "../context/manager.ts";
 import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
 import type { ResolvedSettings } from "../config/config.ts";
@@ -362,6 +364,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         signal: io.signal,
         stderr: io.stderr,
         diagnostics,
+        splash: !io.args.resume,
       });
     } catch (error) {
       diagnostics.record("tui", "renderer_failed", { category: "terminal_setup" }, "error");
@@ -424,6 +427,8 @@ async function runTuiRenderer(options: {
   signal?: AbortSignal;
   stderr: TuiWriter;
   diagnostics: DiagnosticSink;
+  /** Offer the startup splash; resumed sessions skip it to return to work immediately. */
+  splash?: boolean;
 }): Promise<void> {
   const { createCliRenderer } = await loadCredentialSafeTui();
   const { createConversationView } = await import("./view.ts");
@@ -457,6 +462,7 @@ async function runTuiRenderer(options: {
       controller: options.controller, home: options.home, workspaceRoot: options.workspaceRoot, draftPersistence: true,
       env: options.env, secrets: options.secrets, quit: finishQuit,
       openUrl: openBrowserUrl,
+      motion: resolveMotion(options.env), splash: options.splash, version,
       submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command, onAccepted) => {
         return handleSlashCommand(command.name, command.args, {
           controller: options.controller,

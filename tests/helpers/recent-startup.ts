@@ -47,7 +47,7 @@ let errors = "";
 let terminal = await createTestRenderer({ width: 100, height: 32, kittyKeyboard: true });
 mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => terminal.renderer }));
 const store = fakeCredentialStore();
-const start = (launchArgs: CliArgs) => runInteractiveTui({ cwd: root, env: { HOME: home }, args: launchArgs,
+const start = (launchArgs: CliArgs) => runInteractiveTui({ cwd: root, env: { HOME: home, SCHWAY_MOTION: "off" }, args: launchArgs,
   credentialStore: store, stdout: { write() {} }, stderr: { write(text) { errors += text; } },
   createModel: async input => { loaded.push({ provider: input.provider, model: input.model }); return { provider: input.provider, id: input.model ?? "fixture", async *stream() {
     requests++;
@@ -63,7 +63,7 @@ const wait = async (ready: () => boolean, label: string) => {
 const count = async () => (await readdir(directory)).filter(name => name.endsWith(".jsonl")).length;
 const app = start(args);
 try {
-  await wait(() => !!terminal.renderer.root.findDescendantById("prompt") && frame().includes(scenario === "repair" ? "Needs attention" : "Ready"), "startup");
+  await wait(() => !!terminal.renderer.root.findDescendantById("prompt") && frame().includes(scenario === "repair" ? "ATTENTION" : "READY"), "startup");
   const editor = terminal.renderer.root.findDescendantById("prompt") as core.TextareaRenderable;
   if (["explicit", "repair", "preferences"].includes(scenario)) {
     await wait(() => frame().includes("Restored workspace:"), "restored identity");
@@ -80,7 +80,7 @@ try {
       await wait(() => frame().includes("Enter saves"), "credential entry");
       await terminal.mockInput.pasteBracketedText("fixture-private-key");
       terminal.mockInput.pressEnter();
-      await wait(() => frame().includes("Ready") && !frame().includes("Needs attention"), "auth repaired");
+      await wait(() => frame().includes("READY") && !frame().includes("ATTENTION"), "auth repaired");
       assert(requests === 0, "repair never sends a task");
     }
   } else {

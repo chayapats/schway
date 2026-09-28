@@ -9,7 +9,7 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { handleSlashCommand } from "../src/tui/app.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { fitLine } from "../src/tui/presentation.ts";
-import { resolveTheme, TUI_THEMES } from "../src/tui/theme.ts";
+import { mixColor, resolveTheme, tint, TUI_THEMES } from "../src/tui/theme.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { credentialStoreError } from "../src/auth/store.ts";
 import { codexSubscriptionIdentity } from "../src/auth/store.ts";
@@ -569,8 +569,8 @@ test("slash completion uses Tab without sending a prompt; light theme updates a 
   await settle(ui);
   expect(ui.session.items).toHaveLength(0);
   const mark = ui.renderer.root.findDescendantById("composer")?.getChildren()[0] as TextRenderable;
-  await waitForUiState(ui, () => mark.fg.toInts()[0] === 7, "light theme render");
-  expect(mark.fg.toInts().slice(0, 3)).toEqual([7, 89, 133]);
+  await waitForUiState(ui, () => mark.fg.equals(RGBA.fromHex(TUI_THEMES.light.accent)), "light theme render");
+  expect((ui.renderer.root.findDescendantById("composer") as BoxRenderable).backgroundColor.equals(RGBA.fromHex(TUI_THEMES.light.surface))).toBe(true);
   expect(ui.captureCharFrame()).toContain("Enter send");
   ui.resize(100, 30);
   await settle(ui);
@@ -601,11 +601,24 @@ test("semantic text remains readable on both surfaces and Unicode clipping prese
     const rgb = hex.slice(1).match(/../g)!.map(channel => parseInt(channel, 16) / 255).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
     return rgb[0]! * 0.2126 + rgb[1]! * 0.7152 + rgb[2]! * 0.0722;
   }
-  for (const theme of Object.values(TUI_THEMES)) for (const background of [theme.background, theme.surface]) {
-    for (const foreground of [theme.text, theme.muted, theme.accent, theme.success, theme.warning, theme.error, theme.code]) {
-      const values = [luminance(background), luminance(foreground)].sort((a, b) => a - b);
-      expect((values[1]! + 0.05) / (values[0]! + 0.05)).toBeGreaterThanOrEqual(4.5);
+  const contrast = (foreground: string, background: string) => {
+    const values = [luminance(background), luminance(foreground)].sort((a, b) => a - b);
+    return (values[1]! + 0.05) / (values[0]! + 0.05);
+  };
+  for (const theme of Object.values(TUI_THEMES)) {
+    const semantic = [theme.accent, theme.success, theme.warning, theme.error, theme.code, theme.cyan, theme.violet];
+    for (const background of [theme.background, theme.surface, theme.surface2]) {
+      for (const foreground of [theme.text, theme.muted, ...semantic]) expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5);
     }
+    // Tinted blocks (pills, diffs, selection) carry only body text or their own semantic color.
+    for (const color of semantic) for (const base of [theme.surface, theme.surface2]) {
+      expect(contrast(color, tint(theme, color, base))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(theme.text, tint(theme, color, base))).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const fill of [theme.accent, theme.warning, theme.error]) expect(contrast(theme.onFill, fill)).toBeGreaterThanOrEqual(4.5);
+    const errorBlock = mixColor(theme.background, theme.error, 0.12);
+    expect(contrast(theme.error, errorBlock)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(theme.text, errorBlock)).toBeGreaterThanOrEqual(4.5);
   }
   expect(resolveTheme("auto", "light", {})).toBe(TUI_THEMES.light);
   expect(resolveTheme("dark", "light", {})).toBe(TUI_THEMES.dark);
@@ -758,7 +771,7 @@ test("resize keeps the editor and status inside the viewport with a populated tr
     const footer = ui.renderer.root.findDescendantById("footer")!;
     expect(composer.y + composer.height, `composer at ${width}x${height}`).toBeLessThanOrEqual(height!);
     expect(footer.y + footer.height, `footer at ${width}x${height}`).toBeLessThanOrEqual(height!);
-    expect(ui.captureCharFrame(), `status at ${width}x${height}`).toContain("Ready");
+    expect(ui.captureCharFrame(), `status at ${width}x${height}`).toContain("READY");
   }
   ui.mockInput.pressEscape();
   await settle(ui);
@@ -795,12 +808,12 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   await settle(ui);
   expect(ui.controller.snapshot().activity?.operationId).toBe(operationId);
   expect(ui.editor.cursorOffset).toBe(draftCursor);
-  expect(ui.captureCharFrame()).toContain("Retry 2/3");
+  expect(ui.captureCharFrame()).toContain("RETRY 2/3");
   expect(ui.captureCharFrame()).toContain("Esc stops");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
   ui.mockInput.pressEscape();
   await ui.flush();
-  expect(ui.captureCharFrame()).toContain("Cancel requested");
+  expect(ui.captureCharFrame()).toContain("CANCEL REQUESTED");
   expect(ui.controller.snapshot().activity?.cancellation).toBe("settling");
   ui.view.refresh();
   await ui.flush();
@@ -810,7 +823,7 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   await ui.controller.waitForIdle();
   await settle(ui);
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
-  expect(ui.captureCharFrame()).toContain("Ready");
+  expect(ui.captureCharFrame()).toContain("READY");
 });
 
 test("real renderer replaces failed stream and preserves an earlier reading position", async () => {
@@ -1036,7 +1049,7 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     ui.editor.setText("/theme wrong");
     ui.mockInput.pressEscape(); await settle(ui);
     ui.mockInput.pressEnter(); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("! Needs attention");
+    expect(ui.captureCharFrame()).toContain("! ATTENTION");
     expect(ui.editor.plainText).toBe("/theme wrong");
   });
 });
@@ -1670,8 +1683,8 @@ test("context inspection uses keyboard input and retains draft and controls duri
     ui.resize(44, 18);
     await settle(ui);
     const narrow = ui.captureCharFrame();
-    expect(narrow).toContain("Context ~");
-    expect(narrow).toContain("Tools 1");
+    expect(narrow).toContain("ctx ~");
+    expect(narrow).toContain("TOOLS 1");
     expect(narrow).toContain("Esc stops");
     expect(narrow).toContain("future draft");
     expect(narrow).not.toContain("% complete");

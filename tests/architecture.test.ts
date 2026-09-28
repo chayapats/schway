@@ -118,7 +118,7 @@ test("core modules never import the renderer", async () => {
 });
 
 test("TUI controller stays renderer-free; raw-input-safe renderer module loads OpenTUI lazily", async () => {
-  for (const file of ["src/tui/controller.ts", "src/tui/commands.ts"]) {
+  for (const file of ["src/tui/controller.ts", "src/tui/commands.ts", "src/tui/motion-policy.ts", "src/tui/git-head.ts", "src/tui/presentation.ts", "src/tui/theme.ts"]) {
     const source = await Bun.file(file).text();
     expect(source.includes("@opentui")).toBe(false);
   }

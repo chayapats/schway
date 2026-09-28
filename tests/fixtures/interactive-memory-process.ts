@@ -87,7 +87,7 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
 }) }));
 const { runCli } = await import("../../src/cli/main.ts");
 const args = mode === "override" ? ["--provider", "anthropic"] : mode === "override-full" ? ["--provider", "openai", "--model", "gpt-4o", "--openai-auth", "api-key"] : [];
-const code = await runCli(args, { cwd: workspace, env: { HOME: home }, credentialStore: store,
+const code = await runCli(args, { cwd: workspace, env: { HOME: home, SCHWAY_MOTION: "off" }, credentialStore: store,
   fetch: async () => Response.json({ models: [{ slug: mode === "missing-model" ? "replacement-model" : "account-model", visibility: "list", supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }] }] }),
   createModel: async input => {
     requests.push({ ...input, apiKey: input.apiKey === "fixture-stored-key" ? "stored" : input.apiKey ? "anthropic" : undefined });
