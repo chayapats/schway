@@ -28,8 +28,10 @@ export interface ConversationViewOptions {
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
 export function createConversationView(renderer: CliRenderer, options: ConversationViewOptions) {
   const controller = options.controller;
-  let mode: ThemeMode = options.env.SCHWAY_THEME === "light" || options.env.SCHWAY_THEME === "dark" ? options.env.SCHWAY_THEME : "auto";
-  let theme = resolveTheme(mode, renderer.themeMode, options.env);
+  const environmentMode = options.env.SCHWAY_THEME === "light" || options.env.SCHWAY_THEME === "dark" ? options.env.SCHWAY_THEME : undefined;
+  let configuredMode = controller.appearanceMode();
+  let mode: ThemeMode = configuredMode;
+  let theme = resolveTheme(environmentMode ?? mode, renderer.themeMode, options.env);
   let syntax = markdownStyle(theme);
   let destroyed = false;
   let refreshing = false;
@@ -269,7 +271,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function applyTheme() {
-    theme = resolveTheme(mode, renderer.themeMode, options.env);
+    theme = resolveTheme(environmentMode ?? mode, renderer.themeMode, options.env);
     resetRows();
     clear(tree);
     clear(picker);
@@ -294,6 +296,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (destroyed || refreshing) return;
     refreshing = true;
     try {
+      const currentConfiguredMode = controller.appearanceMode();
+      if (configuredMode !== currentConfiguredMode) {
+        configuredMode = currentConfiguredMode;
+        mode = currentConfiguredMode;
+        applyTheme();
+      }
       const snapshot = controller.snapshot();
       // Startup readiness is transient chrome; recovery details remain available on demand.
       const entries = snapshot.readiness !== "ready" && snapshot.transcript.length === 1 && !snapshot.recovery?.accepted && snapshot.transcript[0]?.id === snapshot.recovery?.entryId ? [] : snapshot.transcript;
@@ -497,21 +505,32 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const panel = snapshot.preferences;
           const row = panel.rows[panel.selectedIndex]!;
           const choice = row.choices[panel.choiceIndex];
+          const compact = renderer.width < 45 || renderer.height < 16;
+          const selected = `${panel.selectedIndex + 1}/${panel.rows.length}`;
+          const compactHeader = renderer.width < 32
+            ? `Prefs ${panel.scope} ${selected}`
+            : `Preferences · ${panel.scope} · ${selected}`;
+          const compactChoice = panel.error
+            ? `! Not saved: ${choice === undefined ? "Reset" : String(choice)}`
+            : panel.preview
+              ? `Enter saves · ${choice === undefined ? "Reset" : String(choice)}`
+              : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)}`;
           const lines = [
-            `Preferences · ${panel.scope} · ${panel.selectedIndex + 1}/${panel.rows.length}`,
-            "↑/↓ field · ←/→ choice · Tab scope",
-            "Enter preview/confirm · Esc back · PgUp/PgDn scroll",
+            compact ? fitLine(compactHeader, width) : `Preferences · ${panel.scope} · ${selected}`,
+            compact ? fitLine(`› ${row.key}: ${row.value}`, width) : `› ${row.key}: ${row.value} [${row.origin}]`,
+            compact ? fitLine(compactChoice, width) : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
+            panel.error ?? panel.preview ?? "Enter previews; no changes yet.",
+            compact ? "↑↓ field · ←→ choice · Tab scope · Enter accept · Esc back" : "↑/↓ field · ←/→ choice · Tab scope",
+            ...(compact ? [] : ["Enter preview/confirm · Esc back · PgUp/PgDn scroll"]),
             PREFERENCE_SCOPES[panel.scope],
-            `${row.key}: ${row.value} [${row.origin}]`,
+            ...(compact ? [`Effective source: ${row.origin}`] : []),
             `Saved: ${row.saved}`,
             row.reset,
-            `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
-            panel.error ?? panel.preview ?? "Enter previews; no changes yet.",
           ];
           // Wrap details, including scope/confirmation, instead of silently clipping at narrow widths.
           for (const line of lines) textRow(preferencePanel, safe(line), theme.text).wrapMode = "word";
-          if (panel.preview || panel.error) preferenceScrollToEnd = true;
-          else preferencePanel.scrollTo(0);
+          if ((panel.preview || panel.error) && !compact) preferenceScrollToEnd = true;
+          else { preferenceScrollToEnd = false; preferencePanel.scrollTo(0); }
         } else if (snapshot.loginChooser) {
           textRow(picker, fitLine("Sign in · ↑/↓ select · Enter continue · Esc back", width - 2), theme.accent);
           const choices = snapshot.loginChooser.choices;
@@ -684,7 +703,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (themeCommand) {
         const requested = themeCommand[1]?.trim() || "auto";
         if (!["auto", "dark", "light"].includes(requested)) controller.fail("Usage: /theme [auto|dark|light]");
-        else { mode = requested as ThemeMode; applyTheme(); accept(); }
+        else if (controller.hasAppearancePreferences()) {
+          pendingAcceptance = true;
+          void controller.configCommand(`set appearance ${requested}`).then(applied => {
+            pendingAcceptance = false;
+            if (applied) accept();
+            refresh();
+          }, error => { pendingAcceptance = false; fail(error); });
+        } else { mode = requested as ThemeMode; applyTheme(); accept(); }
         refresh(); return;
       }
       if (value.trim() === "/session") {
@@ -923,7 +949,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   renderer.keyInput.on("keypress", onKey);
   renderer.on("selection", onSelection);
   const unbindCredential = bindCredentialInput(renderer.keyInput, controller, refresh);
-  const onTheme = () => { if (mode === "auto") applyTheme(); };
+  const onTheme = () => { if ((environmentMode ?? mode) === "auto") applyTheme(); };
   renderer.on("theme_mode", onTheme);
   renderer.on("resize", refresh);
   const scrollToSearchMatch = (match: TranscriptSearchMatch) => {

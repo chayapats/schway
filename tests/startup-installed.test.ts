@@ -12,7 +12,35 @@ async function run(argv: string[], cwd: string, env?: Record<string, string>) {
   } finally { clearTimeout(timeout); }
 }
 
-test("packed executable outside checkout shows fresh/remembered readiness, preserves setup draft, and exits actionably for broken config/storage", async () => {
+test("installed PTY fixture reaps its executable after an outer timeout signal", async () => {
+  if (process.platform !== "linux" || !Bun.which("python3")) return;
+  await withTempDir(async root => {
+    const pidPath = join(root, "installed.pid");
+    const script = "import os,sys,time; open(sys.argv[1], 'w').write(str(os.getpid())); print('Type a task', flush=True); time.sleep(30)";
+    const fixture = Bun.spawn(["python3", join(resolve(import.meta.dir, ".."), "tests/fixtures/installed-pty.py"),
+      "python3", "-c", script, pidPath], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    let installedPid: number | undefined;
+    try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (await Bun.file(pidPath).exists()) {
+          installedPid = Number(await Bun.file(pidPath).text());
+          break;
+        }
+        await Bun.sleep(20);
+      }
+      expect(installedPid).toBeGreaterThan(0);
+      process.kill(fixture.pid, "SIGTERM");
+      expect(await fixture.exited).not.toBe(0);
+      expect(() => process.kill(installedPid!, 0)).toThrow();
+    } finally {
+      if (fixture.exitCode === null) fixture.kill();
+      if (installedPid) { try { process.kill(-installedPid, "SIGKILL"); } catch { /* Already reaped. */ } }
+      await fixture.exited;
+    }
+  });
+});
+
+test("packed executable verifies startup, appearance and Linux PTY cleanup with isolated state", async () => {
   await withTempDir(async root => {
     const repo = resolve(import.meta.dir, "..");
     const packed = await run(["npm", "pack", "--silent", "--pack-destination", root], repo);
@@ -32,7 +60,7 @@ import * as storeModule from "./node_modules/schway/src/auth/store.ts";
 import { InteractiveMemory } from "./node_modules/schway/src/config/interactive-memory.ts";
 const scenario = process.env.STARTUP_SCENARIO;
 const values = new Map();
-if (scenario === "returning") {
+if (scenario.startsWith("returning")) {
   values.set("api-key:anthropic", "installed-fixture-key");
   await (await InteractiveMemory.load(process.env.HOME!, process.cwd())).write({ provider: "anthropic", model: "claude-sonnet-4-6" });
 }
@@ -43,7 +71,7 @@ if (scenario.startsWith("invalid-model")) {
 mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
   get: async identity => {
     // Returning startup deliberately exceeds the old fixed 80 ms wait.
-    if (scenario === "returning") await Bun.sleep(150);
+    if (scenario.startsWith("returning")) await Bun.sleep(150);
     if (scenario === "denied") throw new Error(storeModule.credentialStoreError("read"));
     return values.get(identity.account) ?? null;
   },
@@ -83,7 +111,7 @@ const settle = async (ready, label) => {
 };
 const screenIncludes = text => terminal.captureCharFrame().includes(text);
 void (async () => {
-  const startupAction = scenario === "returning" ? "Type a task"
+  const startupAction = scenario.startsWith("returning") ? "Type a task"
     : scenario === "denied" ? "Repair connection"
     : scenario.startsWith("invalid-model") ? "Choose an available model" : "Connect to get started";
   await settle(() => terminal.renderer.root.findDescendantById("prompt") && screenIncludes(startupAction), "startup readiness");
@@ -91,9 +119,22 @@ void (async () => {
   const initial = terminal.captureCharFrame();
   assert(initial.includes(process.cwd().split("/").at(-1)), "workspace missing");
   assert(!initial.includes("Session ready.") && !initial.includes("Interactive memory:"), "recurring transcript guidance");
-  if (scenario === "returning") {
+  if (scenario.startsWith("returning")) {
     assert(initial.includes("claude-sonnet-4-6") && initial.includes("Type a task"), "remembered readiness missing");
     assert(!initial.includes("Connect to get started"), "redundant setup");
+    if (scenario.startsWith("returning-appearance")) {
+      const expected = scenario.endsWith("-env") ? "#fafaf8" : "#15181e";
+      const canvas = terminal.renderer.root.findDescendantById("conversation");
+      assert(canvas.backgroundColor.equals(core.RGBA.fromHex(expected)), "installed appearance or environment precedence wrong");
+      terminal.mockInput.pressKey("p", { meta: true });
+      await settle(() => screenIncludes("Preferences"), "installed appearance preferences");
+      terminal.mockInput.pressTab(); terminal.mockInput.pressTab();
+      for (let index = 0; index < 11; index++) terminal.mockInput.pressArrow("down");
+      await settle(() => screenIncludes("appearance"), "installed appearance row");
+      assert(screenIncludes(scenario.endsWith("-env") ? "environment" : "user-global"), "appearance source hidden");
+      terminal.mockInput.pressEscape();
+      await settle(() => editor.focused && !screenIncludes("Preferences"), "appearance panel return");
+    }
   } else if (scenario === "denied" || scenario.startsWith("invalid-model")) {
     assert(initial.includes(scenario === "denied" ? "Repair connection" : "Choose an available model"), "repair action missing");
     if (scenario.startsWith("invalid-model")) assert(initial.includes("Selected model is not available in this account."), "selected model explanation missing");
@@ -143,11 +184,16 @@ void (async () => {
     const launcher = join(launchers, "bun");
     await Bun.write(launcher, `#!/bin/bash\nexec ${shell(process.execPath)} --preload ${shell(fixture)} "$@"\n`);
     await chmod(launcher, 0o755);
-    for (const scenario of ["fresh", "returning", "denied", "invalid-model", "invalid-model-config"]) {
+    for (const scenario of ["fresh", "returning", "returning-appearance", "returning-appearance-env", "denied", "invalid-model", "invalid-model-config"]) {
       const home = join(root, `home-${scenario}`), work = join(root, `workspace-${scenario}`), result = join(root, `${scenario}.json`);
       await mkdir(home); await mkdir(work);
       const env = buildIsolatedCliEnv(home, { PATH: `${launchers}:${process.env.PATH}`, STARTUP_SCENARIO: scenario, STARTUP_RESULT: result,
+        ...(scenario.endsWith("-env") ? { SCHWAY_THEME: "light" } : {}),
       });
+      if (scenario.startsWith("returning-appearance")) {
+        await mkdir(join(home, ".schway"), { recursive: true });
+        await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ appearance: "dark" }));
+      }
       if (scenario === "invalid-model-config") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai", openaiAuth: "codex", model: "invalid-explicit-model" }));
       const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"] : [];
       const output = await run([executable, ...args], work, env);
@@ -159,6 +205,38 @@ void (async () => {
       let users = 0;
       for (const file of sessionFiles) users += (await Bun.file(join(sessions, file)).text()).split("\n").filter(line => { try { return JSON.parse(line).entries?.some((entry: { item?: { type?: string } }) => entry.item?.type === "user"); } catch { return false; } }).length;
       expect(users).toBe(scenario === "fresh" ? 1 : 0);
+    }
+    if (process.platform === "linux" && Bun.which("python3")) {
+      const ptyPreload = join(install, "pty-preload.ts");
+      await Bun.write(ptyPreload, `
+import { mock } from "bun:test";
+import * as storeModule from "./node_modules/schway/src/auth/store.ts";
+mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
+  get: async () => null, set: async () => {}, delete: async () => {},
+}) }));
+mock.module("./node_modules/schway/src/model/loader.ts", () => ({ loadProviderModel: async input => ({
+  provider: input.provider, id: input.model,
+  async *stream() {
+    const text = "Answer: ไทย 中文 👩‍💻 é";
+    yield { type: "text_delta", text };
+    yield { type: "message_complete", message: { type: "assistant", id: "installed-pty-response", content: [{ type: "text", text }] } };
+  },
+}) }));
+`);
+      const ptyLaunchers = join(root, "pty-launchers");
+      await mkdir(ptyLaunchers);
+      const ptyLauncher = join(ptyLaunchers, "bun");
+      await Bun.write(ptyLauncher, `#!/bin/bash\nexec ${shell(process.execPath)} --preload ${shell(ptyPreload)} "$@"\n`);
+      await chmod(ptyLauncher, 0o755);
+      const ptyHome = join(root, "pty-home"), ptyWork = join(root, "pty-work");
+      await mkdir(ptyHome); await mkdir(ptyWork);
+      const pty = await run(["python3", join(repo, "tests/fixtures/installed-pty.py"), executable, "--provider", "openai", "--model", "offline-demo"],
+        ptyWork, buildIsolatedCliEnv(ptyHome, { PATH: `${ptyLaunchers}:${process.env.PATH}`, OPENAI_API_KEY: "fixture-key", NO_COLOR: "1" }));
+      if (pty.exit !== 0) throw new Error(pty.stderr || pty.stdout);
+      expect(pty.exit).toBe(0);
+      const result = JSON.parse(pty.stdout) as Record<string, unknown>;
+      expect(result).toMatchObject({ exit: 0, thai: true, cjk: true, emoji: true, combining: true,
+        alternate_enter: true, alternate_exit: true, answer: true, draft_input: true, narrow_recovery: true });
     }
     const plainHome = join(root, "plain-home"), plainWork = join(root, "plain-work");
     await mkdir(plainHome); await mkdir(plainWork);

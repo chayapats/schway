@@ -13,6 +13,7 @@ test("config edits preserve provenance and reset to lower precedence without cre
     expect(editor.settings.maxTurns).toBe(7);
     expect(editor.origins.maxTurns).toBe("CLI");
     expect(editor.origins.provider).toBe("built-in default");
+    expect(editor.origins.appearance).toBe("built-in default");
     expect(editor.origins.contextWindow).toBe("catalog");
     const edit = await editor.prepare({ scope: "session", key: "maxTurns", value: 3 });
     expect(editor.settings.maxTurns).toBe(7);

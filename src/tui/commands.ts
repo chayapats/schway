@@ -80,7 +80,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/resume <id> [branch-id] - resume a saved session on its active branch or one stable branch ID",
     "/model [provider/model-id | provider model-id | model-id | profile:<name>] - open searchable picker or switch the model or profile",
     "/thinking [off|low|medium|high|xhigh|max|ultra|reset] - show or switch reasoning level for future requests",
-    "/theme [auto|dark|light] - choose appearance for this session (default: auto)",
+    "/theme [auto|dark|light] - choose appearance for this session; /config shows saved choices and overrides",
     "/session - show session ID, conversation branch, model, and workspace roots",
     "/context - inspect context estimate and active summary (read-only)",
     "/compact - summarize older turns to free context",

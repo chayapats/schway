@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
-import { TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
+import { BoxRenderable, RGBA, TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView, type ConversationViewOptions } from "../src/tui/view.ts";
 import { TuiController, buildTranscriptFromSession, type CodexLoginRunner, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -26,7 +26,7 @@ import { resolveWorkspace } from "../src/workspace/workspace.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}, submitOverride?: ConversationViewOptions["submit"]) {
+async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}, submitOverride?: ConversationViewOptions["submit"], viewEnv: Record<string, string> = {}) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
   const session = overrides.session ?? createSession();
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
@@ -35,6 +35,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     model: createScriptedModel({ responses: [{ text: "## Result\n\nHello **world**.\n\n```ts\nconst answer = 42;\n```" }] }),
     contextManager: createContextManager(workspace), secrets: ["secret-sentinel"],
     credentials: { store: fakeCredentialStore(), env: credentialEnv, reload: async () => ({ model: createScriptedModel() }), codexLogin },
+    appearanceEnvironment: viewEnv.SCHWAY_THEME === "dark" || viewEnv.SCHWAY_THEME === "light" ? viewEnv.SCHWAY_THEME : undefined,
     ...overrides,
   });
   let quit = false;
@@ -42,7 +43,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
   const opened: string[] = [];
   terminal.renderer.copyToClipboardOSC52 = text => { copied.push(text); return true; };
   const view = createConversationView(terminal.renderer, {
-    controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: ["secret-sentinel"],
+    controller, workspaceRoot: "/project", home: "/home/test", env: viewEnv, secrets: ["secret-sentinel"],
     quit: () => { quit = true; },
     openUrl: async url => { opened.push(url); },
     submit: submitOverride ?? ((value, accepted) => dispatchEditorInput(value, controller, async command => {
@@ -558,6 +559,7 @@ test("slash completion uses Tab without sending a prompt; light theme updates a 
   await settle(ui);
   expect(ui.session.items).toHaveLength(0);
   const mark = ui.renderer.root.findDescendantById("composer")?.getChildren()[0] as TextRenderable;
+  await ui.waitFor(() => mark.fg.toInts()[0] === 7);
   expect(mark.fg.toInts().slice(0, 3)).toEqual([7, 89, 133]);
   expect(ui.captureCharFrame()).toContain("Enter send");
   ui.resize(100, 30);
@@ -768,7 +770,7 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
         }, { once: true });
       }),
     },
-  });
+  }, undefined, { NO_COLOR: "1" });
   await ui.mockInput.typeText("start work");
   ui.mockInput.pressEnter();
   await retryStarted.promise;
@@ -777,6 +779,12 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   await ui.mockInput.pressKeys(["\u001b[5~"]);
   ui.resize(44, 18);
   await settle(ui);
+  const operationId = ui.controller.snapshot().activity?.operationId;
+  const draftCursor = ui.editor.cursorOffset;
+  ui.renderer.emit("theme_mode");
+  await settle(ui);
+  expect(ui.controller.snapshot().activity?.operationId).toBe(operationId);
+  expect(ui.editor.cursorOffset).toBe(draftCursor);
   expect(ui.captureCharFrame()).toContain("Retry 2/3");
   expect(ui.captureCharFrame()).toContain("Esc stops");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
@@ -798,7 +806,9 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
 test("real renderer replaces failed stream and preserves an earlier reading position", async () => {
   let releaseRetry!: () => void;
   const retry = new Promise<void>(resolve => { releaseRetry = resolve; });
+  const retryStarted = Promise.withResolvers<void>();
   const ui = await setup(80, 24, {}, undefined, {
+    onRuntimeEvent: event => { if (event.type === "model.retry") retryStarted.resolve(); },
     model: createScriptedModel({ responses: [
       { chunks: ["Hel"], error: "busy", status: 503, throwAfter: "chunks" },
       { chunks: ["Hello world"] },
@@ -808,7 +818,7 @@ test("real renderer replaces failed stream and preserves an earlier reading posi
   for (let i = 0; i < 65; i++) ui.controller.notice(`Earlier message ${i}`);
   await ui.mockInput.pasteBracketedText("hello");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "retry");
+  await retryStarted.promise;
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("Hel");
   expect(ui.controller.snapshot().transcript.filter(entry => entry.kind === "assistant")).toMatchObject([{ text: "Hel", incomplete: true }]);
@@ -932,7 +942,7 @@ test("Ctrl+L resets terminal output without losing the draft, scrollback or pick
 });
 
 
-async function preferenceFixture(root: string, extra: Partial<TuiControllerOptions> = {}, cli: Parameters<typeof loadConfigEditor>[0]["cli"] = {}) {
+async function preferenceFixture(root: string, extra: Partial<TuiControllerOptions> = {}, cli: Parameters<typeof loadConfigEditor>[0]["cli"] = {}, viewEnv: Record<string, string> = {}) {
   const home = join(root, "home"), workspaceRoot = join(root, "workspace");
   await mkdir(workspaceRoot, { recursive: true });
   const workspace = { root: workspaceRoot, launchCwd: workspaceRoot, extraRoots: [] };
@@ -940,7 +950,7 @@ async function preferenceFixture(root: string, extra: Partial<TuiControllerOptio
   const settings = configEditor.settings;
   const ui = await setup(80, 28, {}, undefined, { workspace, configEditor, provider: settings.provider, modelId: settings.model,
     model: createScriptedModel({ provider: settings.provider, id: settings.model }),
-    stageSettings: async next => ({ model: createScriptedModel({ provider: next.provider, id: next.model }), contextManager: createContextManager(workspace) }), ...extra });
+    stageSettings: async next => ({ model: createScriptedModel({ provider: next.provider, id: next.model }), contextManager: createContextManager(workspace) }), ...extra }, undefined, viewEnv);
   return { ...ui, home, workspaceRoot, configEditor };
 }
 
@@ -952,6 +962,156 @@ async function preferenceEnter(ui: Awaited<ReturnType<typeof preferenceFixture>>
   ui.view.refresh();
   await ui.flush();
 }
+
+test("appearance preference persists across launch and environment override keeps its source visible", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    await ui.mockInput.pasteBracketedText("ไทย 中文 👩‍💻 e\u0301 draft");
+    ui.editor.cursorOffset = 4;
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); await settle(ui);
+    const rowIndex = ui.controller.snapshot().preferences?.rows.findIndex(row => row.key === "appearance");
+    expect(rowIndex).toBeGreaterThanOrEqual(0);
+    for (let index = 0; index < rowIndex!; index++) ui.mockInput.pressArrow("down");
+    ui.mockInput.pressArrow("right"); ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(ui.configEditor.settings.appearance).toBe("dark");
+    expect((ui.renderer.root.findDescendantById("conversation") as BoxRenderable).backgroundColor.equals(RGBA.fromHex(TUI_THEMES.dark.background))).toBe(true);
+    expect(JSON.parse(await readFile(join(ui.home, ".schway/config.json"), "utf8")).appearance).toBe("dark");
+    ui.resize(32, 12); await settle(ui);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("ไทย 中文 👩‍💻 e\u0301 draft");
+    expect(ui.editor.cursorOffset).toBe(4);
+
+    const reopened = await preferenceFixture(root, {}, {}, { SCHWAY_THEME: "light" });
+    expect(reopened.configEditor.settings.appearance).toBe("dark");
+    expect((reopened.renderer.root.findDescendantById("conversation") as BoxRenderable).backgroundColor.equals(RGBA.fromHex(TUI_THEMES.light.background))).toBe(true);
+    reopened.mockInput.pressKey("p", { meta: true }); await settle(reopened);
+    const appearance = reopened.controller.snapshot().preferences?.rows.find(row => row.key === "appearance");
+    expect(appearance).toMatchObject({ value: "light", origin: "environment", saved: expect.stringContaining("user config=dark") });
+    reopened.mockInput.pressTab(); reopened.mockInput.pressTab();
+    for (let index = 0; index < rowIndex!; index++) reopened.mockInput.pressArrow("down");
+    await preferenceEnter(reopened); await preferenceEnter(reopened);
+    expect(JSON.parse(await readFile(join(reopened.home, ".schway/config.json"), "utf8")).appearance).toBeUndefined();
+    expect(reopened.configEditor.settings.appearance).toBe("auto");
+    reopened.mockInput.pressArrow("right");
+    await preferenceEnter(reopened); await preferenceEnter(reopened);
+    expect(JSON.parse(await readFile(join(reopened.home, ".schway/config.json"), "utf8")).appearance).toBe("auto");
+    reopened.mockInput.pressArrow("right"); reopened.mockInput.pressArrow("right");
+    await preferenceEnter(reopened); await preferenceEnter(reopened);
+    expect(JSON.parse(await readFile(join(reopened.home, ".schway/config.json"), "utf8")).appearance).toBe("light");
+  });
+});
+
+test("narrow preferences keep the selected field and keyboard choice visible without color", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, {}, { NO_COLOR: "1" });
+    await ui.mockInput.pasteBracketedText("draft 日本語");
+    ui.editor.cursorOffset = 3;
+    ui.resize(32, 12);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    const frame = ui.captureCharFrame();
+    expect(frame).toContain("› thinking");
+    expect(frame).toContain("Choice:");
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("› maxTurns");
+    ui.resize(80, 24); await settle(ui);
+    ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
+    ui.resize(32, 12); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("› maxTurns");
+    expect(ui.captureCharFrame()).toContain("Enter saves");
+    ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("draft 日本語");
+    expect(ui.editor.cursorOffset).toBe(3);
+    ui.editor.setText("/theme wrong");
+    ui.mockInput.pressEscape(); await settle(ui);
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("! Needs attention");
+    expect(ui.editor.plainText).toBe("/theme wrong");
+  });
+});
+
+test("long configured values do not hide the keyboard choice on the smallest panel", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "home/.schway"), { recursive: true });
+    await writeFile(join(root, "home/.schway/config.json"), JSON.stringify({ model: "very-long-" + "model-id-".repeat(16) }));
+    const ui = await preferenceFixture(root);
+    ui.resize(24, 8);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    const modelIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "model");
+    for (let index = 0; index < modelIndex; index++) ui.mockInput.pressArrow("down");
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("› model");
+    expect(ui.captureCharFrame()).toContain("Choice:");
+  });
+});
+
+test("compact preferences show project scope and confirmation before a write", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    ui.resize(24, 8);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("memory");
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("project");
+    expect(ui.captureCharFrame()).toContain("project");
+    ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Enter confirms");
+    expect(ui.captureCharFrame()).toContain("Enter saves");
+  });
+});
+
+test("appearance edit rejects externally changed runtime settings", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    const path = join(ui.workspaceRoot, ".schway/config.json");
+    await mkdir(join(ui.workspaceRoot, ".schway"));
+    await writeFile(path, '{"provider":"openai"}');
+    expect(await ui.controller.configCommand("set appearance dark --scope project")).toBe(false);
+    expect(ui.configEditor.settings.provider).toBe("anthropic");
+    expect(ui.configEditor.settings.appearance).toBe("auto");
+    expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Reload");
+    ui.resize(24, 8);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    const appearanceIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
+    for (let index = 0; index < appearanceIndex; index++) ui.mockInput.pressArrow("down");
+    ui.mockInput.pressArrow("right"); ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.error).toContain("Reload");
+    expect(ui.captureCharFrame()).toContain("! Not saved: dark");
+    expect(ui.configEditor.settings.provider).toBe("anthropic");
+    expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
+  });
+});
+
+test("session theme command and preferences share the effective source without requiring a model", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, { model: undefined,
+      stageSettings: async () => { throw new Error("appearance must not load a model"); } }, {}, { SCHWAY_THEME: "dark" });
+    await ui.mockInput.pasteBracketedText("/theme light");
+    ui.mockInput.pressEnter();
+    await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.configEditor.settings.appearance).toBe("light");
+    expect((ui.renderer.root.findDescendantById("conversation") as BoxRenderable).backgroundColor.equals(RGBA.fromHex(TUI_THEMES.dark.background))).toBe(true);
+    expect(await ui.controller.configCommand("show")).toBe(true);
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("appearance: dark [environment] (configured: light [current-session override])");
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "appearance")).toMatchObject({
+      value: "dark", origin: "environment", saved: expect.stringContaining("session=light"),
+    });
+    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).settings.appearance).toBe("auto");
+    ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    const appearanceIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
+    for (let index = 0; index < appearanceIndex; index++) ui.mockInput.pressArrow("down");
+    for (let index = 0; index < 3; index++) ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui); await preferenceEnter(ui);
+    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).settings.appearance).toBe("light");
+  });
+});
 
 test("preferences real keyboard scopes preview save reset and restart preserve the pending draft", async () => {
   await withTempDir(async root => {

@@ -7,7 +7,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "git"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "git", "appearance"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -102,6 +102,7 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
   origins.auth ??= "built-in default";
   origins.openaiAuth ??= "built-in default";
   origins.profile ??= selectedName !== undefined ? origins.profile ?? "built-in default" : origins.profile;
+  origins.appearance ??= "built-in default";
   return { origins, modelFallbackSource };
 }
 
@@ -166,7 +167,7 @@ export class ConfigEditor {
     const result: Record<string, Record<string, unknown>> = {};
     for (const [name, layer] of Object.entries({ ...this.layers, memory: this.memory?.choice ?? this.layers.memory } as Layers)) {
       result[name] = {};
-      for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"] as const) {
+      for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "appearance"] as const) {
         if (layer?.[key] !== undefined) result[name]![key] = structuredClone(layer[key]);
       }
       if (layer?.git?.changeTracking !== undefined) result[name]!.git = layer.git.changeTracking;
