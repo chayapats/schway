@@ -67,6 +67,16 @@ async function settle(ui: TestRendererSetup & { view: ReturnType<typeof createCo
   await ui.flush();
 }
 
+async function waitForUiState(
+  ui: TestRendererSetup & { view: ReturnType<typeof createConversationView> },
+  predicate: () => boolean,
+  label: string,
+) {
+  const deadline = Date.now() + 10_000;
+  while (!predicate() && Date.now() < deadline) await settle(ui);
+  if (!predicate()) throw new Error(`Timed out waiting for ${label}\n${ui.captureCharFrame()}`);
+}
+
 test("rejected draft survives connect cancellation and recovery keys run only the saved turn", async () => {
   const missing = await setup(80, 24, {}, undefined, { model: undefined });
   await missing.mockInput.pasteBracketedText("unsent task");
@@ -89,11 +99,11 @@ test("rejected draft survives connect cancellation and recovery keys run only th
   ] }), agentClock: { now: () => 0, sleep: async () => {} } });
   await accepted.mockInput.pasteBracketedText("accepted task");
   accepted.mockInput.pressEnter();
-  await accepted.waitFor(() => !accepted.controller.running);
+  await accepted.controller.waitForIdle();
   await settle(accepted);
   expect(accepted.controller.snapshot().recovery?.actions).toContain("continue");
   accepted.mockInput.pressKey("r", { ctrl: true });
-  await accepted.waitFor(() => !accepted.controller.running);
+  await accepted.controller.waitForIdle();
   await settle(accepted);
   expect(accepted.session.items.filter(item => item.type === "user")).toHaveLength(1);
   expect(accepted.captureCharFrame()).toContain("continued once");
@@ -122,7 +132,7 @@ test("credential-store retry uses real keyboard input and leaves the draft unsen
   expect(ui.session.items).toHaveLength(0);
   expect(ui.editor.plainText).toBe("draft after unlock");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
   expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
 });
 
@@ -135,7 +145,7 @@ test("multiline paste and Ctrl+J submit one prompt; Markdown renders with stable
   expect(ui.editor.plainText).toBe("ช่วยแก้ไข\nบรรทัดที่สอง\nlast line");
   ui.mockInput.pressEnter();
   await settle(ui);
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
   await settle(ui);
   expect(ui.session.items[0]).toMatchObject({ type: "user", content: [{ type: "text", text: "ช่วยแก้ไข\nบรรทัดที่สอง\nlast line" }] });
   expect(ui.editor.plainText).toBe("");
@@ -169,7 +179,7 @@ test("missing credentials retain a Thai multiline prompt and cursor through real
   ui.controller.setModel(createScriptedModel({ text: "ready" }), "scripted", "ready");
   ui.mockInput.pressEnter();
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
   await settle(ui);
   expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
   expect(ui.session.items[0]).toMatchObject({ content: [{ type: "text", text: "ช่วยแก้ไข\nบรรทัดที่สอง" }] });
@@ -212,7 +222,7 @@ test("invalid local command remains editable after Enter", async () => {
   ui.editor.cursorOffset = 5;
   const before = ui.editor.cursorOffset;
   ui.mockInput.pressEnter();
-  await settle(ui);
+  await waitForUiState(ui, () => ui.controller.snapshot().status === "error", "invalid command result");
   expect(ui.editor.plainText).toBe("/theme wrong");
   expect(ui.editor.cursorOffset).toBe(before);
   expect(ui.controller.snapshot().status).toBe("error");
@@ -266,7 +276,7 @@ test("a real extension command releases input at handoff and cannot clear a newe
     const ui = await setup(44, 18, {}, undefined, { workspace, extensions: loaded.runtime, home: join(root, "home") });
     await ui.mockInput.typeText("/delay");
     ui.mockInput.pressEnter();
-    await ui.waitFor(() => typeof module.finish === "function");
+    await waitForUiState(ui, () => typeof module.finish === "function", "extension command handoff");
     await settle(ui);
     expect(ui.controller.running).toBe(true);
     expect(ui.editor.plainText).toBe("");
@@ -285,7 +295,7 @@ test("model failure after acceptance remains one failed turn, not a restored dra
   const ui = await setup(80, 24, {}, undefined, { model: createScriptedModel({ error: "offline" }) });
   await ui.mockInput.typeText("one saved turn");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
   await settle(ui);
   expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
   expect(ui.editor.plainText).toBe("");
@@ -445,15 +455,15 @@ test("keyboard connection at 44×18 restores the picker search and ordinary draf
   const ui = await setup(44, 18);
   await ui.mockInput.pasteBracketedText("ordinary draft");
   ui.mockInput.pressKey("m", { meta: true });
-  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.accessLoading);
+  await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.accessLoading, "model access discovery");
   await ui.mockInput.typeText("anthropic/claude-sonnet-4-6");
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("connect needed");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !!ui.controller.snapshot().credentialEntry);
+  await waitForUiState(ui, () => !!ui.controller.snapshot().credentialEntry, "credential entry");
   await ui.mockInput.pasteBracketedText("masked-route-secret");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !!ui.controller.snapshot().modelPicker && !ui.controller.snapshot().modelPicker?.loading);
+  await waitForUiState(ui, () => !!ui.controller.snapshot().modelPicker && !ui.controller.snapshot().modelPicker?.loading, "model picker reload");
   await settle(ui);
   expect(ui.controller.snapshot().modelPicker?.query).toBe("anthropic/claude-sonnet-4-6");
   expect(ui.captureCharFrame()).toContain("API key");
@@ -469,7 +479,7 @@ test("active OpenAI billing route stays visible at 80×24 and 44×18 after keybo
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("OpenAI API key");
   ui.mockInput.pressKey("m", { meta: true });
-  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.accessLoading);
+  await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.accessLoading, "model access discovery");
   await ui.mockInput.typeText("gpt-5.4");
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("configured, unverified");
@@ -496,7 +506,7 @@ test("explicit API preference changes only through keyboard route selection at b
     });
     expect(ui.controller.snapshot().activeRoute).toBe("OpenAI API key");
     ui.mockInput.pressKey("m", { meta: true });
-    await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+    await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "model picker loading");
     await ui.mockInput.typeText("gpt-5.4");
     await settle(ui);
     expect(configEditor.settings.openaiAuth).toBe("api-key");
@@ -504,18 +514,18 @@ test("explicit API preference changes only through keyboard route selection at b
     expect(ui.captureCharFrame()).toContain("ChatGPT");
     ui.mockInput.pressArrow("down");
     ui.mockInput.pressEnter();
-    await ui.waitFor(() => !ui.controller.snapshot().modelPicker);
+    await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker, "model picker close");
     expect(ui.controller.snapshot().activeRoute).toBe("ChatGPT subscription");
     expect(configEditor.settings.openaiAuth).toBe("codex");
     ui.resize(44, 18);
     ui.mockInput.pressKey("m", { meta: true });
-    await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+    await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "model picker loading");
     await ui.mockInput.typeText("gpt-5.4");
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("ChatGPT");
     ui.mockInput.pressArrow("down");
     ui.mockInput.pressEnter();
-    await ui.waitFor(() => !ui.controller.snapshot().modelPicker);
+    await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker, "model picker close");
     await settle(ui);
     expect(ui.controller.snapshot().activeRoute).toBe("OpenAI API key");
     expect(configEditor.settings.openaiAuth).toBe("api-key");
@@ -535,7 +545,7 @@ test("retry shortcut leaves ordinary r available in a failed-catalog search", as
     } },
   });
   ui.mockInput.pressKey("m", { meta: true });
-  await ui.waitFor(() => !ui.controller.snapshot().modelPicker?.loading);
+  await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "model picker loading");
   expect(ui.controller.snapshot().modelPicker?.error).toContain("Ctrl+R");
   await ui.mockInput.typeText("openroute");
   ui.mockInput.pressKey("r");
@@ -543,7 +553,7 @@ test("retry shortcut leaves ordinary r available in a failed-catalog search", as
   expect(ui.controller.snapshot().modelPicker?.query).toBe("openrouter");
   expect(calls).toBe(1);
   ui.mockInput.pressKey("r", { ctrl: true });
-  await ui.waitFor(() => calls === 2 && !ui.controller.snapshot().modelPicker?.loading);
+  await waitForUiState(ui, () => calls === 2 && !ui.controller.snapshot().modelPicker?.loading, "model picker retry");
   expect(ui.controller.snapshot().modelPicker?.query).toBe("openrouter");
 });
 
@@ -559,7 +569,7 @@ test("slash completion uses Tab without sending a prompt; light theme updates a 
   await settle(ui);
   expect(ui.session.items).toHaveLength(0);
   const mark = ui.renderer.root.findDescendantById("composer")?.getChildren()[0] as TextRenderable;
-  await ui.waitFor(() => mark.fg.toInts()[0] === 7);
+  await waitForUiState(ui, () => mark.fg.toInts()[0] === 7, "light theme render");
   expect(mark.fg.toInts().slice(0, 3)).toEqual([7, 89, 133]);
   expect(ui.captureCharFrame()).toContain("Enter send");
   ui.resize(100, 30);
@@ -656,7 +666,7 @@ test("/login without arguments reaches the chooser through editor dispatch", asy
   const ui = await setup();
   await ui.mockInput.typeText("/login");
   ui.mockInput.pressEnter();
-  await settle(ui);
+  await waitForUiState(ui, () => !!ui.controller.snapshot().loginChooser, "login chooser");
   expect(ui.controller.snapshot().loginChooser).toBeDefined();
   expect(ui.captureCharFrame()).toContain("ChatGPT");
   ui.mockInput.pressEscape();
@@ -701,7 +711,7 @@ test("branch navigation keeps draft separate from its preview and returns to the
   const ui = await setup();
   await ui.mockInput.typeText("first prompt");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
   await settle(ui);
   const originalBranch = ui.session.activeBranchId;
   await ui.mockInput.typeText("keep this draft");
@@ -1223,8 +1233,8 @@ test("preferences cancellation during provider staging never commits or loses th
     } });
     await ui.mockInput.pasteBracketedText("cancel me safely");
     ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
-    ui.mockInput.pressEnter(); await ui.waitFor(() => ui.controller.running);
-    ui.mockInput.pressEscape(); release(); await ui.waitFor(() => !ui.controller.running); await settle(ui);
+    ui.mockInput.pressEnter(); await waitForUiState(ui, () => ui.controller.running, "active turn");
+    ui.mockInput.pressEscape(); release(); await ui.controller.waitForIdle(); await settle(ui);
     expect(ui.configEditor.settings.maxTurns).toBe(32);
     expect(ui.editor.plainText).toBe("cancel me safely");
     expect(ui.controller.snapshot().preferences).toBeUndefined();
@@ -1302,7 +1312,8 @@ test("preferences at narrow width scroll preview and Escape keeps pasted task an
     await ui.mockInput.pasteBracketedText("paste while viewing");
     ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("my original task"); expect(ui.editor.cursorOffset).toBe(3);
-    ui.editor.setText("/config"); ui.mockInput.pressEnter(); await settle(ui);
+    ui.editor.setText("/config"); ui.mockInput.pressEnter();
+    await waitForUiState(ui, () => !!ui.controller.snapshot().preferences, "preferences command");
     expect(ui.controller.snapshot().preferences).toBeDefined();
     ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("");
@@ -1478,7 +1489,8 @@ test("/help uses the real application dispatcher without transcript spam; theme 
     for (const name of ["theme", "session"]) {
       await mkdir(join(ui.workspaceRoot, ".agents/skills", name), { recursive: true });
       await writeFile(join(ui.workspaceRoot, ".agents/skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: collision\n---\nbody`);
-      ui.editor.setText(`/${name}`); ui.mockInput.pressEnter(); await settle(ui);
+      ui.editor.setText(`/${name}`); ui.mockInput.pressEnter();
+      await waitForUiState(ui, () => ui.controller.snapshot().transcript.at(-1)?.text.includes("conflicts with skill") ?? false, "skill collision");
       expect(ui.editor.plainText).toBe(`/${name}`);
       expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("conflicts with skill");
     }
@@ -1620,7 +1632,7 @@ test("turn command totals retain an early failure beyond the latest fifty eviden
   expect(ui.controller.snapshot().outcome!.toolResults).toBe(51);
   expect(ui.captureCharFrame()).toContain("1 nonzero");
   ui.mockInput.pressKey("r", { meta: true });
-  await ui.waitFor(() => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview?.loading);
+  await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview?.loading, "change review");
   await settle(ui);
   const heading = ui.controller.snapshot().changeReview!.heading;
   expect(heading).toContain("50 exit 0 / 1 nonzero / 0 unknown");
@@ -1646,14 +1658,14 @@ test("context inspection uses keyboard input and retains draft and controls duri
     }), accepted));
     await ui.mockInput.pasteBracketedText("/context");
     ui.mockInput.pressEnter();
-    await settle(ui);
+    await waitForUiState(ui, () => ui.captureCharFrame().includes("Selected model context"), "context inspection");
     expect(ui.captureCharFrame()).toContain("Selected model context");
     expect(ui.captureCharFrame()).toContain("unknown");
     expect(calls).toBe(0);
     expect(session.items).toHaveLength(0);
     await ui.mockInput.pasteBracketedText("start tool");
     ui.mockInput.pressEnter();
-    await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "tools");
+    await waitForUiState(ui, () => ui.controller.snapshot().activity?.phase === "tools", "active tool phase");
     await ui.mockInput.pasteBracketedText("future draft");
     ui.resize(44, 18);
     await settle(ui);
