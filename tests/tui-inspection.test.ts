@@ -12,7 +12,7 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
 async function setup(width = 80, height = 24) {
-  const ui = await createTestRenderer({ width, height, kittyKeyboard: true });
+  const ui = await createTestRenderer({ width, height, kittyKeyboard: true, exitOnCtrlC: false });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({
     session: createSession(), workspace, provider: "scripted", modelId: "test-model", sessionId: "inspection-session",
@@ -217,4 +217,29 @@ test("links, selection and mouse tool toggles still work during inspection", asy
   expect(ui.editor.focused).toBe(false);
   ui.mockInput.pressKey("c");
   expect(ui.copied.at(-1)).toBe("Click result");
+});
+
+test("Ctrl+C cancels a running turn during inspection without copying or losing the draft", async () => {
+  const ui = await setup();
+  ui.controller.setModel(createScriptedModel({ waitForAbort: true }), "scripted", "waiting");
+  const turn = ui.controller.submit("accepted task");
+  await ui.waitFor(() => ui.controller.running);
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "previous", name: "read" });
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "previous", name: "read", status: "success", content: "previous result" });
+  await ui.mockInput.pasteBracketedText("future draft");
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  expect(ui.editor.focused).toBe(false);
+  expect(ui.captureCharFrame()).toContain("C copy");
+  ui.mockInput.pressKey("c", { ctrl: true });
+  await turn;
+  await ui.settle();
+  expect(ui.controller.running).toBe(false);
+  expect(ui.copied).toEqual([]);
+  expect(ui.didQuit()).toBe(false);
+  expect(ui.editor.plainText).toBe("future draft");
+  expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("previous result"))).toBe(true);
+  ui.mockInput.pressKey("c", { ctrl: true });
+  expect(ui.copied.at(-1)).toBe("previous result");
 });

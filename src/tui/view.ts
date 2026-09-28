@@ -481,7 +481,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         } else copyInspection(snapshot.transcript);
         handled(); return;
       }
-      if (name === "c" || (key.ctrl && name === "c")) { copyInspection(snapshot.transcript); handled(); return; }
+      if (key.ctrl && name === "c" && controller.running) { controller.cancel(); handled(); return; }
+      if (name === "c") { copyInspection(snapshot.transcript); handled(); return; }
       if (key.ctrl && name === "o") { allExpanded = !allExpanded; expandedTools.clear(); handled(); return; }
       if (key.ctrl && name === "end") { latest(); handled(); return; }
       if (name === "pageup" || name === "pagedown") { transcript.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, transcript.viewport.height - 2)); handled(); return; }
