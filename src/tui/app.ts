@@ -231,8 +231,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
     };
-    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model) => stageInteractiveSettings(next, settings, {
-      model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
+    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean) => stageInteractiveSettings(next, settings, {
+      forceLoad: activate, model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
       signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
     });
     const codexLogin = createCodexLoginRunner({ store: credentialStore, fetch: io.fetch, secrets });
@@ -391,11 +391,11 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 export async function stageInteractiveSettings(
   next: ResolvedSettings,
   previous: ResolvedSettings,
-  options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
+  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
 ): Promise<{ model?: Model; contextManager: ContextManager }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
-  if ((next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
+  if ((options.forceLoad && !model) || (next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
       maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,

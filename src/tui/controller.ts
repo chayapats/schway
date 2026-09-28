@@ -162,7 +162,7 @@ export interface TuiControllerOptions {
     listSubscriptionCatalog?: (signal: AbortSignal) => Promise<readonly ModelCapability[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
-  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model) => Promise<{ model?: Model; contextManager: ContextManager }>;
+  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean) => Promise<{ model?: Model; contextManager: ContextManager }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
   /** Receive a choice only after its model and route are active. */
@@ -1720,10 +1720,10 @@ export class TuiController {
         return false;
       }
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via ChatGPT subscription.`);
+        () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
     } else if (selection.authRoute === "api-key") {
       applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via OpenAI API key.`);
+        () => `Switched to openai/${this.modelId} via OpenAI API key.`, undefined, true);
     } else applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
     if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
@@ -1746,7 +1746,7 @@ export class TuiController {
     const applied = await this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
       const active = this.configEditor!.settings.profile ?? trimmed;
       return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}).`;
-    });
+    }, undefined, true);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: "provider", profile: trimmed });
     return applied;
   }
@@ -1795,7 +1795,7 @@ export class TuiController {
     const applied = await this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
       ? this.configEditor!.prepareSubscriptionModel(selection.modelId)
       : this.configEditor!.prepareModel(selection.provider, selection.modelId),
-      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}).`);
+      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}).`, undefined, true);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
       authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
     return applied;
@@ -1825,9 +1825,9 @@ export class TuiController {
     if (selection === "show") { this.notice(this.describeThinking()); return true; }
     let applied: boolean;
     if (selection === "reset") {
-      applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}.`);
+      applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}.`, undefined, true);
     }
-    else applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}.`);
+    else applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}.`, undefined, true);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
     return applied;
   }
@@ -1886,7 +1886,7 @@ export class TuiController {
     });
   }
 
-  private async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string): Promise<boolean> {
+  private async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate = false): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
     if (!this.configEditor || !this.stageSettings) { this.fail("Interactive settings are unavailable in this session."); return false; }
@@ -1897,8 +1897,9 @@ export class TuiController {
       try {
         const transaction = await prepare();
         abort.signal.throwIfAborted();
-        const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model);
+        const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate);
         abort.signal.throwIfAborted();
+        if (activate && !staged.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
         if (this.disposed || this.activeAbort !== abort) return false;
         await transaction.commit(abort.signal);
         // Once the transaction commits, publish the matching runtime even if cancellation arrives at that boundary.

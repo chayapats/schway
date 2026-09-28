@@ -1,3 +1,5 @@
+import { stageInteractiveSettings } from "../src/tui/app.ts";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { mkdir, readdir, readFile, writeFile, rm, symlink } from "node:fs/promises";
@@ -265,5 +267,23 @@ test("resume into another workspace resolves its current memory and project sett
     await mkdir(join(b, ".schway")); await writeFile(join(b, ".schway/config.json"), JSON.stringify({ model: "claude-opus-4-6" }));
     expect(await first.controller.switchSession(createSession(), "older-saved-in-b", { workspace: destination, contextManager: createContextManager(destination) })).toBe(true);
     expect(first.controller.snapshot().modelId).toBe("claude-opus-4-6"); first.controller.dispose();
+  });
+});
+
+test("reselecting the unchanged startup model cannot remember an activation without credentials", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const workspace = await resolveWorkspace(root);
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+    const initial = editor.settings;
+    const controller = new TuiController({ session: createSession(), sessionId: "unavailable", workspace,
+      provider: initial.provider, modelId: initial.model, configEditor: editor, contextManager: createContextManager(workspace),
+      stageSettings: (next, signal, currentWorkspace, model, activate) => stageInteractiveSettings(next, initial, {
+        signal, workspace: currentWorkspace!, model, home, env: {}, secrets: [], runtimeApiKey: undefined, credentialStore: fakeCredentialStore(), forceLoad: activate,
+      }),
+    });
+    expect(await controller.selectModel("anthropic/claude-sonnet-4-6")).toBe(false);
+    expect(await Bun.file(join(home, ".schway/interactive")).exists()).toBe(false);
+    controller.dispose();
   });
 });
