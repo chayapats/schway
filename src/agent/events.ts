@@ -53,7 +53,7 @@ export type RuntimeEvent =
   | {
       type: "compaction.finished";
       reason: CompactionReason;
-      status: "failed" | "noop";
+      status: "failed" | "noop" | "cancelled";
       message?: string;
     }
   | { type: "error"; message: string; origin?: "model" | "harness"; category?: "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" | "session-write" };

@@ -338,3 +338,42 @@ Automated coverage uses isolated credentials, controller/dispatcher fixtures,
 actual renderer keyboard/paste/resize at 44×18, and fresh-process metadata/SDK
 loading checks. Human terminal use, real OAuth, and live provider journeys were
 not run for this slice and remain part of the installed-journey gate.
+
+## Context and conversation continuity
+
+The context line estimates the selected branch's conversation plus its active
+summary in tokens. It excludes system instructions, tool definitions and provider
+overhead; it is not a complete request size, billing total, or task completion
+percentage. The selected model appears separately in the footer. Capacity comes
+from an explicit limit, catalog or advertised account metadata; unknown models
+show unknown capacity even though the runtime uses a conservative fallback.
+Reasoning support alone does not establish context capacity.
+
+Use `/context` to inspect the estimate's scope, selected model, last reported turn
+request usage and active summary. Missing input/output usage remains unknown,
+including after resume. Reported usage is separate from the local estimate and
+is not a billing total. Inspection never sends a model request, compacts history,
+changes branches or writes a session record.
+
+Automatic context pressure, provider overflow and manual `/compact` show their
+reason in the activity area. Completion, no-op, cancellation and failure are
+reported separately. A successful summary keeps every original conversation
+record; the transcript marks where recent model context begins, while older rows
+remain searchable and inspectable. `/branch tree` browses ancestry; only the
+selected branch's summary is active. Resume reconstructs that same boundary.
+
+If compaction fails or is cancelled, the previous durable history remains valid.
+Check the connection and session storage before retrying `/compact`, or select a
+model with more context using `/model`. A no-op can mean there are no older turns
+to summarize or the model produced no usable summary. Incomplete summary streams
+are failures and are never committed as successful summaries. Pressure failures
+preserve the existing loop policy; overflow without freed context stops with a
+recovery explanation instead of retrying forever.
+
+Implemented behavior is verified by isolated scripted controller/loop tests for
+pressure, overflow, manual summary, incomplete streams, cancellation, persistence
+failure, unknown usage, capacity changes, branch isolation and disk resume.
+Renderer keyboard/paste/resize fixtures invoke `/context`, retain a future draft
+during real tool execution at 44×18, and keep the composer usable at 24×8.
+These fixtures do not establish live-provider, OAuth, or human-terminal success;
+those checks remain unrun for the installed-journey gate.

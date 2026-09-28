@@ -23,14 +23,23 @@ export function activityStatus(activity: TuiActivity, compact = false, tiny = fa
 
 /** Summarize current work without implying that a quiet provider or tool has stalled. */
 export function activityDetail(activity: TuiActivity): string {
+  const detail = currentWorkDetail(activity);
+  return activity.compactionOutcome && activity.phase !== "stopping"
+    ? `Compaction ${activity.compactionOutcome === "noop" ? "no-op" : activity.compactionOutcome} · ${detail}`
+    : detail;
+}
+
+/** Describe the current phase independently of the prior compaction result. */
+function currentWorkDetail(activity: TuiActivity): string {
   if (activity.phase === "stopping") return activity.cancellation === "requested" ? "Cancellation requested · stop signal sent" : "Stopping · waiting for active work to settle";
+  if (activity.phase === "compacting") return `${activity.compactionReason === "overflow" ? "Context overflow" : activity.compactionReason === "pressure" ? "Context pressure" : "Manual compaction"} · summarizing older turns; history retained`;
   if (activity.phase === "tools") {
     const names = [...new Set(activity.toolNames)];
     return names.length ? `Running ${activity.activeTools} tool${activity.activeTools === 1 ? "" : "s"}: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}` : `Running ${activity.activeTools} tools`;
   }
   if (activity.phase === "retry" && activity.retry) return `Provider retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} after the requested delay`;
   if (activity.phase === "retry") return "Retrying provider request…";
-  return { preparing: "Preparing request…", waiting: "Waiting for provider response…", streaming: "Receiving response…", compacting: "Compacting context…" }[activity.phase];
+  return { preparing: "Preparing request…", waiting: "Waiting for provider response…", streaming: "Receiving response…" }[activity.phase];
 }
 
 /** Remove terminal control sequences while retaining ordinary Unicode, tabs, and newlines. */

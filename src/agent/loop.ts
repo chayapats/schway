@@ -88,11 +88,11 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       if (pressure) {
         yield prepared.compaction
           ? { type: "compaction.finished", reason: "pressure", status: "completed", recordId: prepared.compaction.id, firstKeptId: prepared.compaction.firstKeptId }
-          : { type: "compaction.finished", reason: "pressure", status: "noop" };
+          : { type: "compaction.finished", reason: "pressure", status: signal?.aborted ? "cancelled" : prepared.compactionOutcome === "failed" ? "failed" : "noop" };
       }
       return prepared;
     } catch (error) {
-      if (pressure) yield { type: "compaction.finished", reason: "pressure", status: "failed" };
+      if (pressure) yield { type: "compaction.finished", reason: "pressure", status: signal?.aborted ? "cancelled" : "failed" };
       throw error;
     }
   }
@@ -124,10 +124,17 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       return null;
     }
     yield { type: "compaction.started", reason: "overflow" };
-    const record = await options.contextManager.compact(options.session, options.model, {
-      reason: "overflow",
-      signal,
-    });
+    let record;
+    let compactionFailed = false;
+    try {
+      record = await options.contextManager.compact(options.session, options.model, {
+        reason: "overflow", signal,
+        onOutcome: outcome => { compactionFailed = outcome === "failed"; },
+      });
+    } catch (error) {
+      yield { type: "compaction.finished", reason: "overflow", status: signal?.aborted ? "cancelled" : "failed" };
+      throw error;
+    }
     yield* compactionUsage();
     if (signal?.aborted) {
       if (record) {
@@ -139,7 +146,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
           firstKeptId: record.firstKeptId,
         };
       } else {
-        yield { type: "compaction.finished", reason: "overflow", status: "noop" };
+        yield { type: "compaction.finished", reason: "overflow", status: "cancelled" };
       }
       yield { type: "agent.finished", reason: "cancelled" };
       return null;
@@ -148,7 +155,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       yield {
         type: "compaction.finished",
         reason: "overflow",
-        status: "failed",
+        status: compactionFailed ? "failed" : "noop",
         message: "compaction did not produce a record",
       };
       yield {

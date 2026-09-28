@@ -589,6 +589,10 @@ export async function handleSlashCommand(
     case "changes": {
       return ctx.controller.changesCommand(args);
     }
+    case "context": {
+      ctx.controller.notice(ctx.controller.describeContext());
+      return true;
+    }
     case "compact": {
       return ctx.controller.compact(accepted);
     }

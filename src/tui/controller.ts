@@ -1,3 +1,5 @@
+import { getEffectiveConversation, getEffectiveSummary, getLatestCompaction } from "../context/compaction.ts";
+import { estimateSessionTokens, estimateTextTokens } from "../context/tokens.ts";
 import { preferenceRows, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { AgentClock } from "../agent/retry.ts";
@@ -7,11 +9,11 @@ import { MaskedCredentialEntry, removeStoredCredential } from "../auth/managemen
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable, isOpenAIAuthPreference } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
-import type { ContextManager } from "../context/manager.ts";
+import type { CompactionOutcome, ContextManager } from "../context/manager.ts";
 import type { SessionRecord } from "../conversation/types.ts";
 import { commandCatalog, type CommandChoice } from "./command-catalog.ts";
-import { getThinkingSupport, lookupModel, type ModelCapability } from "../model/catalog.ts";
-import type { Model } from "../model/model.ts";
+import { getThinkingSupport, listCatalog, lookupModel, type ModelCapability } from "../model/catalog.ts";
+import type { Model, ModelUsage } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { SessionEntry } from "../session/branches.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
@@ -51,6 +53,8 @@ export interface TuiActivity {
   activeTools: number;
   toolNames: readonly string[];
   retry?: { failedAttempt: number; maxAttempts: number; remainingMs: number };
+  compactionReason?: "pressure" | "overflow" | "manual";
+  compactionOutcome?: CompactionOutcome;
   cancellation: "none" | "requested" | "settling";
 }
 
@@ -69,6 +73,7 @@ export interface TuiRecovery {
 /** One renderable row in the TUI transcript. */
 export interface TuiTranscriptEntry {
   id: string;
+  sessionRecordId?: string;
   kind: "user" | "assistant" | "tool" | "system" | "error";
   text: string;
   toolName?: string;
@@ -103,6 +108,8 @@ export interface ChangeReview {
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
 export interface TuiSnapshot {
   status: TuiStatus;
+  context: { estimatedTokens: number; capacity: number | null; providerUsage: ModelUsage | null; summaryId?: string; firstKeptId?: string };
+  compactionNotice?: string;
   outcome?: TurnOutcome;
   changeReview?: ChangeReview;
   /** Whether startup is still resolving the selected route, ready, or needs explicit setup. */
@@ -487,7 +494,10 @@ export class TuiController {
   private status: TuiStatus = "idle";
   private readonly activityClock: () => number;
   private readonly agentClock?: AgentClock;
-  private activity?: { id: number; phase: TuiActivityPhase; startedAt: number; elapsedMs: number; activeTools: Map<string, string>; retry?: { failedAttempt: number; maxAttempts: number; until: number }; cancellation: "none" | "requested" | "settling" };
+  private compactionNotice?: { identity: string; text: string };
+  private contextEstimate?: { session: Session; branch: string; last?: SessionRecord; tokens: number; summaryId?: string; firstKeptId?: string };
+  private reportedUsage?: { identity: string; usage: ModelUsage };
+  private activity?: { compactionOutcome?: CompactionOutcome; compactionReason?: "pressure" | "overflow" | "manual"; id: number; phase: TuiActivityPhase; startedAt: number; elapsedMs: number; activeTools: Map<string, string>; retry?: { failedAttempt: number; maxAttempts: number; until: number }; cancellation: "none" | "requested" | "settling" };
   private operationSequence = 0;
   private activeAbort?: AbortController;
   private activeTurn?: Promise<void>;
@@ -575,8 +585,11 @@ export class TuiController {
       ? this.model.provider === "codex-subscription" ? "ChatGPT subscription" : this.model.provider === "openai" ? "OpenAI API key" : "OpenAI route"
       : this.openaiAuth === "codex" ? "ChatGPT subscription" : this.openaiAuth === "api-key" ? "OpenAI API key" : "OpenAI route";
     const recovery = this.currentRecovery();
+    const context = this.contextSnapshot();
     return {
       status: this.status,
+      context,
+      compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
       changeReview: this.changeReview ? structuredClone(this.changeReview) : undefined,
       readiness: this.startupAbort ? "loading" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
@@ -586,7 +599,9 @@ export class TuiController {
             : /Selected model is not available/.test(this.startupDiagnostic) ? "Selected model is not available in this account."
               : undefined } : {}),
       ...(this.activity ? { activity: this.activitySnapshot() } : {}),
-      transcript: this.transcript.map((entry) =>
+      transcript: this.transcript.flatMap(entry => context.summaryId && context.firstKeptId === entry.sessionRecordId
+        ? [{ id: `boundary-${context.summaryId}`, kind: "system" as const, text: "Active summary boundary · earlier rows remain history; recent model context starts below · /context" }, entry]
+        : [entry]).map((entry) =>
         this.secrets.length === 0
           ? entry
           : { ...entry, text: redactSecrets(entry.text, this.secrets), toolSummary: entry.toolSummary ? redactSecrets(entry.toolSummary, this.secrets) : undefined },
@@ -650,6 +665,7 @@ export class TuiController {
   }
 
   private beginActivity(phase: TuiActivityPhase): number {
+    this.compactionNotice = undefined;
     const id = ++this.operationSequence;
     this.activity = { id, phase, startedAt: this.activityClock(), elapsedMs: 0, activeTools: new Map(), cancellation: "none" };
     return id;
@@ -667,6 +683,8 @@ export class TuiController {
       toolNames: [...activity.activeTools.values()].map(name => redactSecrets(name, this.secrets)),
       ...(activity.retry ? { retry: { failedAttempt: activity.retry.failedAttempt, maxAttempts: activity.retry.maxAttempts, remainingMs: Math.max(0, activity.retry.until - now) } } : {}),
       cancellation: activity.cancellation,
+      compactionReason: activity.compactionReason,
+      compactionOutcome: activity.compactionOutcome,
     };
   }
 
@@ -1465,6 +1483,7 @@ export class TuiController {
   }
 
   private finishOutcome(reason?: TurnOutcome["reason"]): void {
+    this.compactionNotice = undefined;
     if (!this.outcome) return;
     if (reason) this.outcome.reason = reason;
     const comparison = this.gitComparison;
@@ -2237,6 +2256,45 @@ export class TuiController {
     this.onSettingsCommitted?.(next, staged.contextManager);
   }
 
+  private contextIdentity(): string { return `${this.sessionId}/${this.session.activeBranchId}/${this.provider}/${this.modelId}`; }
+
+  private contextSnapshot(): TuiSnapshot["context"] {
+    const items = this.session.items;
+    const last = items.at(-1);
+    if (!this.contextEstimate || this.contextEstimate.session !== this.session || this.contextEstimate.branch !== this.session.activeBranchId || this.contextEstimate.last !== last) {
+      const boundary = getLatestCompaction(items);
+      this.contextEstimate = {
+        session: this.session, branch: this.session.activeBranchId, last,
+        tokens: estimateSessionTokens(getEffectiveConversation(items)) + estimateTextTokens(getEffectiveSummary(items) ?? ""),
+        ...(boundary ? { summaryId: boundary.id, firstKeptId: boundary.firstKeptId } : {}),
+      };
+    }
+    const settings = this.configEditor?.settings;
+    const capability = this.configEditor?.modelCapability(this.modelId);
+    const known = this.explicitContextWindow !== undefined || listCatalog().some(model => model.provider === this.provider && model.id === this.modelId)
+      || (settings?.provider === this.provider && settings.model === this.modelId && settings.openaiAuth === "codex" && capability?.contextWindow !== undefined);
+    return {
+      estimatedTokens: this.contextEstimate.tokens,
+      capacity: known ? this.effectiveBudgets().contextWindow : null,
+      providerUsage: this.reportedUsage?.identity === this.contextIdentity() ? { ...this.reportedUsage.usage } : null,
+      ...(this.contextEstimate.summaryId ? { summaryId: this.contextEstimate.summaryId, firstKeptId: this.contextEstimate.firstKeptId } : {}),
+    };
+  }
+
+  /** Inspect selected-branch context and its active summary without preparing or changing conversation state. */
+  describeContext(): string {
+    const context = this.contextSnapshot();
+    const usage = context.providerUsage;
+    return [
+      `Selected model context: ${this.provider}/${this.modelId}`,
+      `Estimated conversation + summary: ~${context.estimatedTokens} tokens (excludes system prompt, instructions, tools and provider overhead).`,
+      `Context capacity: ${context.capacity ?? "unknown (runtime fallback is not verified capacity)"}.`,
+      `Last reported provider usage (turn request): input ${usage?.inputTokens ?? "unknown"}, output ${usage?.outputTokens ?? "unknown"}. Not a billing total or task progress.`,
+      context.summaryId ? `Active summary ${context.summaryId}; recent conversation starts at ${context.firstKeptId}. Original history remains available above and in /branch tree.` : "No active summary on this branch. Original history is retained.",
+      ...(context.summaryId ? [`Summary: ${boundDisplay(getEffectiveSummary(this.session.items) ?? "", 4000)}`] : []),
+    ].join("\n");
+  }
+
   /** Effective context and output budgets for the current model with overrides. */
   effectiveBudgets(): { contextWindow: number; maxOutput: number } {
     const resolved = this.configEditor?.settings;
@@ -2332,63 +2390,36 @@ export class TuiController {
       );
       return false;
     }
-    this.transcript.push(this.systemEntry("Compacting…"));
     this.status = "running";
     const operationId = this.beginActivity("compacting");
     const abort = new AbortController();
     this.activeAbort = abort;
     try { accepted(); } catch { /* Presentation cannot cancel an accepted compaction. */ }
-    this.observeRuntimeEvent({ type: "compaction.started", reason: "manual" });
-    const task = this.contextManager.compact(this.session, this.model, {
-      reason: "manual",
-      signal: abort.signal,
-    });
-    const tracked = task.then(
-      () => undefined,
-      () => undefined,
-    );
+    const publish = (event: RuntimeEvent) => { this.applyEvent(event, operationId); this.observeRuntimeEvent(event); };
+    publish({ type: "compaction.started", reason: "manual" });
+    const result: { outcome: CompactionOutcome } = { outcome: "noop" };
+    const task = Promise.resolve().then(() => this.contextManager.compact(this.session, this.model!, {
+      reason: "manual", signal: abort.signal, onOutcome: value => { result.outcome = value; },
+    }));
+    const tracked = task.then(() => undefined, () => undefined);
     this.activeTurn = tracked;
-    let record: Awaited<typeof task>;
     try {
-      record = await task;
-      if (this.activeAbort === abort) {
-        this.observeRuntimeEvent(record && !abort.signal.aborted
-          ? { type: "compaction.finished", reason: "manual", status: "completed", recordId: record.id, firstKeptId: record.firstKeptId }
-          : { type: "compaction.finished", reason: "manual", status: "noop" });
-      }
-    } catch (error) {
-      if (this.activeAbort === abort) this.observeRuntimeEvent({ type: "compaction.finished", reason: "manual", status: "failed" });
-      throw error;
+      const record = await task;
+      if (this.activeAbort !== abort) return false;
+      publish(record
+        ? { type: "compaction.finished", reason: "manual", status: "completed", recordId: record.id, firstKeptId: record.firstKeptId }
+        : { type: "compaction.finished", reason: "manual", status: abort.signal.aborted ? "cancelled" : result.outcome === "failed" ? "failed" : "noop" });
+      this.invalidateBranchTreeCache();
+      return !!record;
+    } catch {
+      if (this.activeAbort === abort) publish({ type: "compaction.finished", reason: "manual", status: abort.signal.aborted ? "cancelled" : "failed" });
+      return false;
     } finally {
-      for (const entry of this.contextManager.takeUsage()) {
-        this.observeRuntimeEvent({ type: "model.usage", phase: "compaction", ...entry });
-      }
-      if (this.activeAbort === abort) {
-        this.activeAbort = undefined;
-      }
-      if (this.activeTurn === tracked) {
-        this.activeTurn = undefined;
-      }
+      for (const entry of this.contextManager.takeUsage()) this.observeRuntimeEvent({ type: "model.usage", phase: "compaction", ...entry });
+      if (this.activeAbort === abort) { this.activeAbort = undefined; this.status = "idle"; }
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
       this.settleActivity(operationId);
     }
-    this.invalidateBranchTreeCache();
-    if (abort.signal.aborted) {
-      this.transcript.push(this.systemEntry("Cancelled."));
-      this.status = "idle";
-      return false;
-    }
-    if (record) {
-      this.transcript.push(this.systemEntry("Context compacted."));
-      this.status = "idle";
-      return true;
-    }
-    this.transcript.push(
-      this.systemEntry(
-        "Compaction did not produce a record. The conversation is unchanged; try again after more turns.",
-      ),
-    );
-    this.status = "idle";
-    return false;
   }
 
   /** Stage workspace capabilities and atomically switch sessions, preserving the current runtime on failure or cancellation. */
@@ -2594,6 +2625,7 @@ export class TuiController {
       return false;
     }
     const userEntry: TuiTranscriptEntry = {
+      sessionRecordId: crypto.randomUUID(),
       id: this.nextId("user"),
       kind: "user",
       text,
@@ -2601,7 +2633,7 @@ export class TuiController {
     try {
       this.session.append({
         type: "user",
-        id: crypto.randomUUID(),
+        id: userEntry.sessionRecordId!,
         content: [{ type: "text", text }],
       });
     } catch {
@@ -2814,16 +2846,20 @@ export class TuiController {
         case "model.retry": activity.phase = "retry"; activity.retry = { failedAttempt: event.attempt, maxAttempts: event.maxAttempts, until: this.activityClock() + event.delayMs }; break;
         case "tool.started": activity.activeTools.set(event.toolCallId, event.name); activity.phase = "tools"; break;
         case "tool.finished": activity.activeTools.delete(event.toolCallId); activity.phase = activity.activeTools.size ? "tools" : "preparing"; break;
-        case "compaction.started": activity.phase = "compacting"; break;
-        case "compaction.finished": activity.phase = "preparing"; break;
+        case "compaction.started": activity.phase = "compacting"; activity.compactionReason = event.reason; activity.compactionOutcome = undefined; break;
+        case "compaction.finished": activity.phase = "preparing"; activity.compactionOutcome = event.status; break;
       }
     } else if (activity && event.type === "tool.finished") {
       activity.activeTools.delete(event.toolCallId);
     }
     switch (event.type) {
+      case "model.usage":
+        if (event.phase === "turn") this.reportedUsage = { identity: this.contextIdentity(), usage: { ...event.usage } };
+        return;
       case "agent.started":
         return;
       case "model.started": {
+        this.reportedUsage = undefined;
         this.discardProvisionalAssistant();
         this.modelAttemptBaseAssistantId = this.session.items.findLast(item => item.type === "assistant")?.id;
         this.modelAttemptStarted = true;
@@ -2927,21 +2963,21 @@ export class TuiController {
           this.systemEntry(
             event.reason === "overflow"
               ? "Context overflow. Compacting…"
-              : "Context pressure. Compacting…",
+              : event.reason === "manual" ? "Manual compaction. Compacting older turns…" : "Context pressure. Compacting…",
           ),
         );
         return;
       }
       case "compaction.finished": {
-        if (event.status === "completed") {
-          this.transcript.push(this.systemEntry("Context compacted."));
-        } else {
-          this.transcript.push(
-            this.systemEntry(
-              `Compaction ${event.status}: ${event.message ?? "no summary produced"}`,
-            ),
-          );
-        }
+        const text = event.status === "completed"
+          ? "Context compacted. Original history remains inspectable; /context shows the active summary boundary."
+          : event.status === "cancelled"
+            ? "Compaction cancelled. History unchanged; /compact retries when ready."
+            : event.status === "failed"
+              ? "Compaction failed. History unchanged; check connection and session storage, then /compact to retry or /model to choose a larger context."
+              : "Compaction no-op: no older turns or usable summary. History unchanged; try /compact after more turns.";
+        this.compactionNotice = { identity: this.contextIdentity(), text };
+        this.transcript.push(this.systemEntry(text));
         return;
       }
       case "error": {
@@ -3129,7 +3165,7 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
     if (item.type === "user") {
       const text = item.content.map((block) => block.text).join("");
       if (text.length > 0) {
-        transcript.push({ id: nextId("user"), kind: "user", text });
+        transcript.push({ id: nextId("user"), sessionRecordId: item.id, kind: "user", text });
       }
     } else if (item.type === "assistant") {
       const textParts: string[] = [];
@@ -3167,7 +3203,7 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
       transcript.push({
         id: nextId("sys"),
         kind: "system",
-        text: `Context compacted: ${boundDisplay(item.summary, 500)}`,
+        text: `Context compacted (saved summary; original history retained): ${boundDisplay(item.summary, 500)}`,
       });
     }
   }

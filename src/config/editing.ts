@@ -149,6 +149,12 @@ export class ConfigEditor {
     this.revision++;
   }
 
+  /** Return verified account metadata for a model without exposing mutable editor state. */
+  modelCapability(id: string): ModelCapability | undefined {
+    const capability = this.modelCapabilities?.find(model => model.id === id);
+    return capability ? structuredClone(capability) : undefined;
+  }
+
   /** Return a copy of effective settings so callers cannot alter committed layers. */
   get settings(): ResolvedSettings { return structuredClone(this.current); }
 

@@ -1455,3 +1455,51 @@ test("turn command totals retain an early failure beyond the latest fifty eviden
   expect(heading).not.toContain("check-0:");
   expect(heading).toContain("check-50:");
 });
+
+test("context inspection uses keyboard input and retains draft and controls during narrow tool activity", async () => {
+  await withTempDir(async home => {
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    const session = createSession();
+    const contextManager = createContextManager(workspace, { home });
+    const config = await loadConfigEditor({ home, workspaceRoot: home });
+    let calls = 0;
+    const releaseTool = Promise.withResolvers<void>();
+    const ui = await setup(100, 26, {}, undefined, { session, workspace, contextManager,
+      tools: createToolRegistry([{ name: "context_wait", execution: "exclusive", description: "Wait for fixture release", inputSchema: { type: "object", properties: {} }, execute: async () => { await releaseTool.promise; return { content: "done" }; } }]),
+      model: { provider: "scripted", id: "fixture", async *stream() { calls++; yield { type: "message_complete", message: { type: "assistant", id: `a${calls}`, content: calls === 1 ? [{ type: "tool_call", id: "context-tool", name: "context_wait", arguments: {} }] : [{ type: "text", text: "done" }] } }; } },
+    }, async (text, accepted) => dispatchEditorInput(text, ui.controller, command => handleSlashCommand(command.name, command.args, {
+      controller: ui.controller, home, workspaceRoot: home, skillScope: { manager: contextManager, workspaceRoot: home },
+      sessionsDir: join(home, "sessions"), settings: () => config.settings, env: {}, secrets: [], finishQuit: () => {}, stderr: { write: () => {} },
+    }), accepted));
+    await ui.mockInput.pasteBracketedText("/context");
+    ui.mockInput.pressEnter();
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Selected model context");
+    expect(ui.captureCharFrame()).toContain("unknown");
+    expect(calls).toBe(0);
+    expect(session.items).toHaveLength(0);
+    await ui.mockInput.pasteBracketedText("start tool");
+    ui.mockInput.pressEnter();
+    await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "tools");
+    await ui.mockInput.pasteBracketedText("future draft");
+    ui.resize(44, 18);
+    await settle(ui);
+    const narrow = ui.captureCharFrame();
+    expect(narrow).toContain("Context ~");
+    expect(narrow).toContain("Tools 1");
+    expect(narrow).toContain("Esc stops");
+    expect(narrow).toContain("future draft");
+    expect(narrow).not.toContain("% complete");
+    expect(ui.editor.plainText).toBe("future draft");
+    ui.resize(24, 8);
+    await settle(ui);
+    expect(ui.editor.visible).toBe(true);
+    expect(ui.editor.plainText).toBe("future draft");
+    expect(calls).toBe(1);
+    releaseTool.resolve();
+    await ui.controller.waitForIdle();
+    ui.resize(80, 24);
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Turn completed");
+  });
+});

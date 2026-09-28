@@ -97,6 +97,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const reviewText = new TextRenderable(renderer, { id: "change-review-text", content: "", fg: theme.text, wrapMode: "word" });
   reviewPanel.add(reviewText);
   root.add(reviewPanel);
+  const contextStatus = new TextRenderable(renderer, { id: "context-status", height: 1, flexShrink: 0, fg: theme.muted });
+  root.add(contextStatus);
   const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted });
   root.add(activity);
   const picker = new BoxRenderable(renderer, { id: "picker", flexDirection: "column", flexShrink: 0, backgroundColor: theme.surface, paddingX: 1, visible: false });
@@ -250,6 +252,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
       root.paddingX = renderer.width < 60 ? 1 : 2;
       header.visible = activity.visible = renderer.height >= 10;
+      contextStatus.visible = renderer.height >= 12;
+      const context = snapshot.context;
+      contextStatus.content = fitLine(`Context ~${context.estimatedTokens} tokens conversation+summary · cap ${context.capacity ?? "unknown"} · excludes prompt/tools · /context${context.summaryId ? " · active summary" : ""}`, width);
       hints.visible = renderer.height >= 14;
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
@@ -293,7 +298,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
       header.content = new StyledText([bold(fg(theme.accent)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), width - 8)}`)]);
       const status = snapshot.readiness === "loading" ? "Checking connection" : snapshot.activity ? activityStatus(snapshot.activity, width < 60, width < 32) : snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
-      const model = safe(`${snapshot.activeRoute ? `${snapshot.activeRoute} · ` : ""}${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
+      const model = safe(`${snapshot.activeRoute ? `${snapshot.activeRoute} · ` : ""}${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · reasoning ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
       const statusWidth = Bun.stringWidth(status);
       footer.content = new StyledText([
         fg(theme.muted)(`${fitLine(model, Math.max(0, width - statusWidth - 3))}${width > statusWidth + 3 ? "   " : ""}`),
@@ -366,7 +371,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const completed = snapshot.outcome;
       const counts = completed?.commandCounts;
       const outcomeText = completed ? width < 65 ? `Turn ${completed.reason} · Alt+R review · ${counts!.nonzero} nonzero exits` : `Turn ${completed.reason} · commands: ${counts!.exitZero} exit 0 / ${counts!.nonzero} nonzero / ${counts!.unknown} unknown · Alt+R review` : "";
-      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : outcomeText, width);
+      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : snapshot.compactionNotice ?? outcomeText, width);
       activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
@@ -384,7 +389,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ? (renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval[2]!)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval[1]!)/(width - 2))
         : 2;
       const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
-      const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
+      const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (contextStatus.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
