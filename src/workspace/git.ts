@@ -506,8 +506,12 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}).` };
   const toplevel = resolved.toplevel;
-  const unstagedArgs = path ? ["diff", "--no-color", "--no-ext-diff", "--stat", "--patch", "--", path] : ["diff", "--no-color", "--no-ext-diff", "--stat", "--patch", "--"];
-  const stagedArgs = path ? ["diff", "--cached", "--no-color", "--no-ext-diff", "--stat", "--patch", "--", path] : ["diff", "--cached", "--no-color", "--no-ext-diff", "--stat", "--patch", "--"];
+  // Both names must participate in the pathspec or Git presents a rename as an added file.
+  const status = path ? await runGit(toplevel, ["status", "--porcelain=v2", "-z", "--untracked-files=no"]) : undefined;
+  const original = status?.exitCode === 0 ? parsePorcelainV2(status.stdout).files.find(file => file.path === path)?.origPath : undefined;
+  const paths = path ? original ? [original, path] : [path] : [];
+  const unstagedArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
+  const stagedArgs = ["diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
   const [unstaged, staged] = await Promise.all([runGit(toplevel, unstagedArgs), runGit(toplevel, stagedArgs)]);
   if (unstaged.exitCode !== 0) {
     return { error: `Git diff failed: ${(unstaged.stderr.trim() || unstaged.stdout.trim() || "unknown error").slice(0, 500)}` };

@@ -30,6 +30,7 @@ import {
   formatGitStatus,
   getGitDiffPreview,
   inspectGitStatus,
+  type GitFileChange,
   type GitSnapshot,
   type GitTurnComparison,
 } from "../workspace/git.ts";
@@ -79,9 +80,29 @@ export interface TuiTranscriptEntry {
   toolSummary?: string;
 }
 
+/** Observed completion and command evidence for the latest accepted turn in this conversation. */
+export interface TurnOutcome {
+  reason: "completed" | "failed" | "cancelled" | "limit";
+  commands: { callId: string; command: string; exitCode: number | null; status: TuiToolStatus }[];
+  toolResults: number;
+  failedTools: number;
+  changes: string;
+}
+
+/** Bounded read-only working-tree review; file contents are current, never a rollback preview. */
+export interface ChangeReview {
+  heading: string;
+  files: GitFileChange[];
+  selected: number;
+  detail: string;
+  loading: boolean;
+}
+
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
 export interface TuiSnapshot {
   status: TuiStatus;
+  outcome?: TurnOutcome;
+  changeReview?: ChangeReview;
   /** Whether startup is still resolving the selected route, ready, or needs explicit setup. */
   readiness: "loading" | "ready" | "connect" | "choose-model" | "repair";
   /** A bounded known startup explanation; raw provider diagnostics remain behind recovery details. */
@@ -492,6 +513,10 @@ export class TuiController {
   /** Active subscription sign-in abort; unlike submitted OS writes, the OAuth wait stays cancellable. */
   private codexLoginAbort?: AbortController;
   private explicitChangeTracking?: GitChangeTrackingMode;
+  private outcome?: TurnOutcome;
+  private outcomeIdentity?: string;
+  private changeReview?: ChangeReview;
+  private reviewGeneration = 0;
   private gitBaseline?: GitSnapshot;
   private gitAfter?: GitSnapshot;
   private gitComparison?: GitTurnComparison;
@@ -550,6 +575,8 @@ export class TuiController {
     const recovery = this.currentRecovery();
     return {
       status: this.status,
+      outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
+      changeReview: this.changeReview ? structuredClone(this.changeReview) : undefined,
       readiness: this.startupAbort ? "loading" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
       ...(!this.model && this.startupDiagnostic ? { readinessDetail:
         /Missing OpenAI API key/.test(this.startupDiagnostic) ? "Missing OpenAI API key."
@@ -1325,6 +1352,7 @@ export class TuiController {
   /** Show Git branch, HEAD, dirty state, and bounded changes without managing commits or branches. */
   async changesCommand(args: string): Promise<boolean> {
     if (this.disposed) return false;
+    if (args.trim() === "review") return this.openChangeReview();
     const mode = this.gitChangeTracking();
     if (mode === "off") {
       this.notice("Change tracking is off (git.changeTracking=\"off\"). No Git state was read. Set git.changeTracking to \"on-demand\" or \"snapshot\" to inspect changes.");
@@ -1357,7 +1385,7 @@ export class TuiController {
       return true;
     }
     if (action !== "status" && trimmed.length > 0) {
-      this.fail("Usage: /changes [status|diff [-- <path>]]. Change tracking itself is configured with git.changeTracking.");
+      this.fail("Usage: /changes [review|status|diff [-- <path>]]. Change tracking itself is configured with git.changeTracking.");
       return false;
     }
     const status = await inspectGitStatus(this.workspace.root);
@@ -1380,6 +1408,69 @@ export class TuiController {
     }
     this.notice(redactSecrets(lines.join("\n"), this.secrets).slice(0, 50_000));
     return true;
+  }
+
+  /** Open explicit observational review without enabling snapshots or mutating repository state. */
+  async openChangeReview(): Promise<boolean> {
+    if (this.disposed || this.running) return false;
+    const generation = ++this.reviewGeneration;
+    this.changeReview = { heading: "Loading current working tree…", files: [], selected: 0, detail: "", loading: true };
+    const mode = this.gitChangeTracking();
+    const evidence = this.snapshot().outcome;
+    const prefix = evidence ? `Turn ${evidence.reason}. ${evidence.toolResults} tool results; ${evidence.failedTools} failed tools.\nCommand results (latest 50; exit codes, not a test-suite guarantee):\n${evidence.commands.map(c => `${c.callId}: ${c.command} → ${c.exitCode === null ? "no exit observed" : `exit ${c.exitCode}`} (${c.status})`).join("\n") || "No command exit evidence."}\n\n` : "No retained turn outcome.\n";
+    let heading = mode === "off" ? "Change tracking off. No Git state read; attribution unavailable." : !this.workspace ? "No workspace; changes unavailable." : "";
+    let files: GitFileChange[] = [];
+    if (!heading && this.workspace) {
+      const status = await inspectGitStatus(this.workspace.root);
+      if (generation !== this.reviewGeneration || this.disposed) return false;
+      if ("error" in status) heading = `Changes unavailable: ${status.error}`;
+      else if (!status.isGit) heading = "Non-Git workspace. Git changes and attribution unavailable.";
+      else {
+        files = status.files.slice(0, 50);
+        heading = status.dirty ? `Current working tree: ${status.totalFiles} changed paths${status.truncated || status.totalFiles > files.length ? " (list truncated)" : ""}.` : "No working-tree changes.";
+        heading += "\nCurrent working-tree content is unattributed; external edits may be included.";
+        if (mode === "snapshot" && evidence && this.gitBaseline && this.gitAfter && this.gitComparison) {
+          heading += `\n${formatGitComparison(this.gitBaseline, this.gitAfter, this.gitComparison)}\nSnapshots show changes observed during the turn, not exclusive Schway authorship. Current diffs may include later edits.`;
+        } else heading += `\nSnapshot attribution unavailable (${mode}${this.gitSnapshotError ? `: ${this.gitSnapshotError}` : ""}).`;
+      }
+    }
+    if (generation !== this.reviewGeneration || this.disposed) return false;
+    const explanation = redactSecrets(prefix + heading + "\nReview is read-only. Files remain changed after failure/cancellation; conversation branching does not restore files.", this.secrets);
+    this.changeReview = { heading: explanation.length > 14000 ? `${explanation.slice(0, 13900)}\n… Review truncated; inspect individual results and git status for full evidence.` : explanation, files, selected: 0, detail: "", loading: false };
+    await this.selectReviewFile(0);
+    return true;
+  }
+
+  /** Select a current changed path and load its bounded textual or binary explanation. */
+  async selectReviewFile(delta: number): Promise<void> {
+    const review = this.changeReview;
+    if (!review || !review.files.length || !this.workspace) return;
+    review.selected = (review.selected + delta + review.files.length) % review.files.length;
+    const path = review.files[review.selected]!.path;
+    const generation = ++this.reviewGeneration;
+    review.loading = true;
+    review.detail = "Loading diff…";
+    const preview = await getGitDiffPreview(this.workspace.root, path);
+    if (this.changeReview !== review || generation !== this.reviewGeneration || this.disposed) return;
+    review.detail = redactSecrets("error" in preview ? preview.error : formatGitDiffPreview(preview), this.secrets).slice(0, 12000);
+    review.loading = false;
+  }
+
+  /** Close review while leaving the conversation, draft, files, and Git state untouched. */
+  closeChangeReview(): void {
+    this.reviewGeneration++;
+    this.changeReview = undefined;
+  }
+
+  private finishOutcome(reason?: TurnOutcome["reason"]): void {
+    if (!this.outcome) return;
+    if (reason) this.outcome.reason = reason;
+    const comparison = this.gitComparison;
+    this.outcome.changes = comparison
+      ? `${comparison.newChanges.length} new paths; ${comparison.updatedPreExisting.length} pre-existing paths changed further; ${comparison.preExistingUnchanged.length} pre-existing unchanged (observed snapshots; not exclusive authorship).`
+      : this.gitSnapshotError ? `Attribution unavailable: ${this.gitSnapshotError}`
+      : "Changes not inspected; snapshot attribution unavailable. Alt+R review.";
+    this.outcome.changes = redactSecrets(this.outcome.changes, this.secrets);
   }
 
   /** Capture a snapshot baseline for the owning turn signal, dropping stale results after replacement. */
@@ -2409,6 +2500,8 @@ export class TuiController {
     this.gitAfter = undefined;
     this.gitComparison = undefined;
     this.gitSnapshotError = undefined;
+    this.outcome = undefined;
+    this.closeChangeReview();
   }
 
   /** Append a system line without touching session history. */
@@ -2608,6 +2701,9 @@ export class TuiController {
   }
 
   private async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
+    this.closeChangeReview();
+    this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
+    this.outcome = { reason: "completed", commands: [], toolResults: 0, failedTools: 0, changes: "Turn running." };
     const operationId = this.beginActivity("preparing");
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -2671,11 +2767,13 @@ export class TuiController {
         this.clearRetryNotice();
         this.transcript.push(this.systemEntry("Cancelled."));
         await this.captureTurnResult();
+        this.finishOutcome("cancelled");
         this.status = "idle";
         this.offerRecovery("provider", true, "The saved turn was stopped. Completed results remain available; continue when ready.", undefined, operationId, false);
         return;
       }
       await this.captureTurnResult();
+      this.finishOutcome();
       if (this.status === "running") {
         this.status = "idle";
       }
@@ -2688,6 +2786,7 @@ export class TuiController {
       this.clearRetryNotice();
       this.fail(redactSecrets(message, this.secrets));
       await this.captureTurnResult();
+      this.finishOutcome(signal.aborted ? "cancelled" : "failed");
     }
   }
 
@@ -2782,6 +2881,16 @@ export class TuiController {
         return;
       }
       case "tool.finished": {
+        if (this.outcome) {
+          this.outcome.toolResults++;
+          if (event.status === "error") this.outcome.failedTools++;
+          if (event.name === "bash") {
+            const details = event.details as { command?: unknown; exitCode?: unknown } | undefined;
+            const exitCode = typeof details?.exitCode === "number" && Number.isInteger(details.exitCode) ? details.exitCode : null;
+            this.outcome.commands.push({ callId: redactSecrets(event.toolCallId, this.secrets).slice(0, 80), command: redactSecrets(typeof details?.command === "string" ? details.command : "bash", this.secrets).slice(0, 200), exitCode, status: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error" });
+            if (this.outcome.commands.length > 50) this.outcome.commands.shift();
+          }
+        }
         const entry = this.toolEntryByCallId.get(event.toolCallId);
         const display = formatToolFinishedText(
           event.name,
@@ -2844,6 +2953,7 @@ export class TuiController {
         return;
       }
       case "agent.finished": {
+        if (this.outcome) this.outcome.reason = event.reason === "error" ? "failed" : event.reason === "max_turns" ? "limit" : event.reason;
         if (event.reason === "cancelled" || event.reason === "error") {
           this.markProvisionalIncomplete();
           this.clearRetryNotice();
