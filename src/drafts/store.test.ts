@@ -117,4 +117,11 @@ describe("durable draft checkpoint", () => {
       expect(readdirSync(dirname(store.path))).toHaveLength(1);
     }
   });
+  test("portable directory validation works without descriptor traversal paths", async () => {
+    const { options } = fixture();
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "interrupted-writer.fixture.ts"), JSON.stringify(options), "portable"], { stdout: "pipe", stderr: "pipe" });
+    expect(await new Response(child.stdout).text()).toContain("save-completed");
+    expect(await child.exited).toBe(0);
+    expect(openDraftStore(options).checkpoint?.text).toBe("incomplete replacement");
+  });
 });

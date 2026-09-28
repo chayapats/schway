@@ -93,11 +93,13 @@ function directoryIdentity(path: string): string {
   try { const stat = fstatSync(fd); return `${stat.dev}:${stat.ino}`; } finally { closeSync(fd); }
 }
 
-// Pin each ancestor through a directory descriptor. A rename/symlink substitution
-// cannot redirect a later lock, temporary write, or replacement into another tree.
+// Linux pins ancestors through descriptors. Other platforms validate no-follow
+// opens and inode identities immediately before the synchronous operation; this
+// rejects unexpected replacements but is not a sandbox against same-user races.
 function withDirectory<T>(home: string, identity: string, create: boolean, run: (root: string) => T): T | undefined {
   const descriptors: number[] = [];
-  const fdPath = (fd: number) => `${process.platform === "linux" ? "/proc/self/fd" : "/dev/fd"}/${fd}`;
+  const paths = [home];
+  const fdPath = (fd: number) => process.platform === "linux" ? `/proc/self/fd/${fd}` : paths.at(-1)!;
   try {
     let fd = openSync(home, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     descriptors.push(fd);
@@ -109,9 +111,16 @@ function withDirectory<T>(home: string, identity: string, create: boolean, run: 
       try { fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW); }
       catch (error) { if (!create && missing(error)) return undefined; throw error; }
       descriptors.push(fd);
+      paths.push(join(paths.at(-1)!, name));
       const child = fstatSync(fd);
       if (typeof process.getuid === "function" && child.uid !== process.getuid()) throw new Error("Draft storage directory belongs to another user");
       if (name === "drafts" && (child.mode & 0o077) !== 0) throw new Error("Draft storage directory must have private permissions (0700)");
+    }
+    if (process.platform !== "linux") {
+      paths.forEach((path, index) => {
+        const stat = fstatSync(descriptors[index]!);
+        if (directoryIdentity(path) !== `${stat.dev}:${stat.ino}`) throw new Error("Draft directory changed during access; reopen before saving");
+      });
     }
     return run(fdPath(fd));
   } finally { for (const fd of descriptors.reverse()) closeSync(fd); }
