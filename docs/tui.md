@@ -61,6 +61,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, Ctrl+R to retry a failed account catalog, Esc to cancel |
 | Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
+| Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one tool result; C copies the selected item; Esc returns to the draft |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
 | Recover stale terminal cells | Ctrl+L; preserves the draft and scroll position |
@@ -152,6 +153,16 @@ Expansion reveals the controller's bounded output, including edit hunks with bot
 signs and colors. It does not remove the existing output limits. Markdown blocks
 use the local parser and native terminal widgets; fenced code is presented in a
 distinct surface and color without downloading syntax parsers.
+
+Inspection highlights one tool result or fenced code block and keeps the draft
+and cursor in place. C copies the selected result or code body through OSC 52,
+without borders, heading text, or Markdown fences. The copied text is the
+redacted transcript representation. If a result was truncated for display,
+the copied text includes that truncation marker and a notice identifies it as
+a bounded preview; the complete result remains in the session file. If OSC 52
+is unavailable, Schway reports the failure and leaves the selection and draft
+intact. New streamed rows and tool completion keep the selected item and the
+reader's scroll position.
 
 ## Offline preview and checks
 

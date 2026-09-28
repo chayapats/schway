@@ -40,6 +40,26 @@ export function displayText(text: string): string {
     .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 }
 
+/** Extract completed fenced code bodies from the same sanitized text rendered in the transcript. */
+export function fencedCodeBlocks(text: string): string[] {
+  const lines = displayText(text).split("\n");
+  const blocks: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const open = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/.exec(lines[index]!);
+    if (!open) continue;
+    const fence = open[1]!;
+    if (fence[0] === "`" && open[2]!.includes("`")) continue;
+    const start = index + 1;
+    let end = start;
+    const close = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`);
+    while (end < lines.length && !close.test(lines[end]!)) end++;
+    if (end === lines.length) break;
+    blocks.push(end > start ? `${lines.slice(start, end).join("\n")}\n` : "");
+    index = end;
+  }
+  return blocks;
+}
+
 /** Fit one line to terminal columns without splitting a Unicode grapheme. */
 export function fitLine(text: string, columns: number): string {
   const line = displayText(text).replace(/\s+/g, " ");

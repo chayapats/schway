@@ -2,7 +2,7 @@ import { BoxRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable,
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
-import { activityDetail, activityStatus, displayText, fitLine } from "./presentation.ts";
+import { activityDetail, activityStatus, displayText, fencedCodeBlocks, fitLine } from "./presentation.ts";
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
@@ -37,6 +37,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let refreshing = false;
   let allExpanded = false;
   const expandedTools = new Set<string>();
+  type InspectionTarget = { id: string; kind: "tool" | "code"; index: number };
+  let inspection: InspectionTarget | undefined;
+  let scrollToInspection = false;
   const rows = new Map<string, TranscriptItemView>();
   let sessionKey = "";
   let panelMode = "";
@@ -127,6 +130,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     showInteractionNotice(copied ? "Copied selection" : "Clipboard unavailable · use the terminal's native selection");
     return true;
   };
+  const inspectionTargets = (entries: readonly TuiTranscriptEntry[]): InspectionTarget[] => entries.flatMap<InspectionTarget>(entry =>
+    entry.kind === "tool" ? [{ id: entry.id, kind: "tool" as const, index: 0 }]
+      : entry.kind === "assistant" ? fencedCodeBlocks(safe(entry.text)).map((_, index) => ({ id: entry.id, kind: "code" as const, index })) : []);
+  const copyInspection = (entries: readonly TuiTranscriptEntry[]) => {
+    if (!inspection) return;
+    const entry = entries.find(item => item.id === inspection!.id);
+    if (!entry) return;
+    const text = inspection.kind === "tool" ? safe(entry.text) : fencedCodeBlocks(safe(entry.text))[inspection.index];
+    if (text === undefined) return;
+    let copied = false;
+    try { copied = renderer.copyToClipboardOSC52(text); } catch { /* Clipboard support is optional. */ }
+    const bounded = inspection.kind === "tool" && text.endsWith("… truncated. Full output is in the session file.");
+    showInteractionNotice(copied ? bounded ? "Copied bounded result preview · full output is in the session file" : inspection.kind === "tool" ? "Copied displayed result" : "Copied displayed code without Markdown fences" : "Clipboard unavailable · select text in the terminal");
+  };
   const onSelection = (selection: Selection) => {
     if (selection.isStart && selection.behavior === "cell") return;
     // Typing and selecting inside the editor must not overwrite the clipboard.
@@ -215,7 +232,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       if (sessionKey !== key) {
-        resetRows(); sessionKey = key; expandedTools.clear(); unseen = false; lastTail = "";
+        resetRows(); sessionKey = key; expandedTools.clear(); inspection = undefined; unseen = false; lastTail = "";
         latest();
       }
       const nextPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
@@ -235,7 +252,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : snapshot.loginCallbackEntry
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
-      } else if (!editor.focused) editor.focus();
+      } else if (!inspection && !editor.focused) editor.focus();
       editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
@@ -260,6 +277,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       tree.visible = !!snapshot.branchTree;
       empty.visible = snapshot.transcript.length === 0;
       const ids = new Set(snapshot.transcript.map(entry => entry.id));
+      if (inspection && !inspectionTargets(snapshot.transcript).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
+        inspection = undefined;
+        if (!panelMode) editor.focus();
+      }
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
       for (const entry of snapshot.transcript) {
         let row = rows.get(entry.id);
@@ -271,7 +292,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           rows.set(entry.id, row);
           transcript.add(row.root);
         }
-        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1);
+        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
+          inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
+          inspection?.id === entry.id && inspection.kind === "tool");
       }
 
       const available = completions();
@@ -350,7 +373,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(`branch-${branches.selectedId}`);
         }
       }
-      hints.content = fitLine(panelMode ? "Enter confirm · Esc back" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+J newline · / help" : "Enter send · Ctrl+J newline · Ctrl+O tools · Alt+M model · / commands", width);
+      hints.content = fitLine(panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Alt+I inspect · / help" : "Enter send · Alt+I inspect · Ctrl+O tools · Alt+M model · / commands", width);
     } finally { refreshing = false; }
   }
 
@@ -440,6 +463,32 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       renderer.clearSelection();
       handled(); return;
     }
+    if (inspection) {
+      const targets = inspectionTargets(snapshot.transcript);
+      const current = targets.findIndex(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index);
+      if (name === "escape" || ((key.meta || key.option) && name === "i")) {
+        inspection = undefined; editor.focus(); handled(); return;
+      }
+      if (name === "up" || name === "down" || name === "tab") {
+        const delta = name === "up" || (name === "tab" && key.shift) ? -1 : 1;
+        inspection = targets[Math.max(0, Math.min(targets.length - 1, current + delta))];
+        scrollToInspection = true; handled(); return;
+      }
+      if (name === "return" || name === "kpenter") {
+        if (inspection.kind === "tool") {
+          if (expandedTools.has(inspection.id)) expandedTools.delete(inspection.id); else expandedTools.add(inspection.id);
+          scrollToInspection = true;
+        } else copyInspection(snapshot.transcript);
+        handled(); return;
+      }
+      if (name === "c" || (key.ctrl && name === "c")) { copyInspection(snapshot.transcript); handled(); return; }
+      if (key.ctrl && name === "o") { allExpanded = !allExpanded; expandedTools.clear(); handled(); return; }
+      if (key.ctrl && name === "end") { latest(); handled(); return; }
+      if (name === "pageup" || name === "pagedown") { transcript.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, transcript.viewport.height - 2)); handled(); return; }
+      if (key.ctrl && name === "f") return;
+      // Inspection owns input until Esc returns to the unchanged composer.
+      handled(); return;
+    }
     if (key.ctrl && name === "l") {
       // Re-enter the terminal through the renderer's lifecycle so stale physical
       // cells are repainted even when its cached scene has not changed.
@@ -448,6 +497,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if ((key.meta || key.option) && name === "m") { controller.openModelPicker(); handled(); return; }
+    if ((key.meta || key.option) && name === "i" && !panelMode) {
+      inspection = inspectionTargets(snapshot.transcript)[0];
+      if (inspection) { editor.blur(); scrollToInspection = true; }
+      else showInteractionNotice("No tool results or code blocks to inspect");
+      handled(); return;
+    }
     if (snapshot.modelPicker?.error && name === "r" && key.ctrl && !key.meta && !key.option &&
       ["empty", "offline", "failed"].includes(snapshot.modelPicker.catalogState ?? "")) {
       controller.retryModelPickerCatalog(); handled(); return;
@@ -505,6 +560,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   renderer.on("theme_mode", onTheme);
   renderer.on("resize", refresh);
   const onFrame = () => {
+    if (scrollToInspection && inspection) {
+      scrollToInspection = false;
+      transcript.scrollChildIntoView(inspection.kind === "tool" ? `message-${inspection.id}` : `code-${inspection.id}-${inspection.index}`);
+    }
     if (paintedCancellationId === undefined) return;
     controller.acknowledgeCancellationFrame(paintedCancellationId);
     paintedCancellationId = undefined;

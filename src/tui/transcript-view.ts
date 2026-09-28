@@ -27,13 +27,13 @@ function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { str
   });
 }
 
-function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTheme): BoxRenderable | TextRenderable | undefined {
+function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTheme, code?: { entryId: string; index: number; selected: boolean }): BoxRenderable | TextRenderable | undefined {
   // Tables and rules use OpenTUI's native structured widgets. Text uses the
   // already-tokenized Markdown AST so first paint never waits for a WASM download.
   if (token.type === "table" || token.type === "hr") return undefined;
   if (token.type === "code") {
-    const block = new BoxRenderable(renderer, { flexDirection: "column", backgroundColor: theme.surface, paddingX: 1, marginTop: 1, marginBottom: 1 });
-    block.add(new TextRenderable(renderer, { content: token.lang || "code", fg: theme.muted }));
+    const block = new BoxRenderable(renderer, { id: code ? `code-${code.entryId}-${code.index}` : undefined, flexDirection: "column", backgroundColor: theme.surface, paddingX: 1, marginTop: 1, marginBottom: 1 });
+    block.add(new TextRenderable(renderer, { content: `${code?.selected ? "› " : ""}${token.lang || "code"}`, fg: code?.selected ? theme.accent : theme.muted }));
     block.add(new TextRenderable(renderer, { content: linkify([fg(theme.code)(token.text ?? "")]), fg: theme.code, wrapMode: "word" }));
     return block;
   }
@@ -65,7 +65,7 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
 /** A stable transcript item whose text can change without replacing neighboring messages. */
 export interface TranscriptItemView {
   root: BoxRenderable;
-  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number): void;
+  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
 }
 
 /** Create Markdown styles from the same semantic palette used by tools and controls. */
@@ -88,12 +88,16 @@ export function markdownStyle(theme: TuiTheme): SyntaxStyle {
 /** Mount one semantic message, rendering Markdown and code locally without downloading parsers. */
 export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscriptEntry, theme: TuiTheme, syntaxStyle: SyntaxStyle, toggleTool: () => void): TranscriptItemView {
   const root = new BoxRenderable(renderer, { id: `message-${initial.id}`, flexDirection: "column", flexShrink: 0, marginTop: initial.kind === "assistant" ? 1 : 0, marginBottom: initial.kind === "tool" ? 0 : 1 });
+  let codeIndex = 0;
+  let selectedCode: number | undefined;
+  let renderedFocus: number | undefined;
+  const renderMarkdownNode = (token: MarkdownToken) => markdownBlock(renderer, token, theme, token.type === "code" ? { entryId: initial.id, index: codeIndex++, selected: selectedCode === codeIndex - 1 } : undefined);
   const label = new TextRenderable(renderer, { content: "", fg: theme.muted, flexShrink: 0 });
   const body = initial.kind === "assistant"
     ? new MarkdownRenderable(renderer, {
       content: "", syntaxStyle, fg: theme.text, streaming: true, internalBlockMode: "top-level",
       tableOptions: { style: "columns", wrapMode: "word", cellPaddingX: 1 },
-      renderNode: (token) => markdownBlock(renderer, token, theme),
+      renderNode: renderMarkdownNode,
     })
     : new TextRenderable(renderer, { content: "", fg: theme.text, wrapMode: "word" });
   if (initial.kind === "user") {
@@ -122,18 +126,26 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   let fingerprint = "";
   return {
     root,
-    update(entry, expanded, streaming, width) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width]);
+    update(entry, expanded, streaming, width, focusedCode, focusedTool) {
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
       if (next === fingerprint) return;
       fingerprint = next;
+      selectedCode = focusedCode;
+      codeIndex = 0;
+      if (body instanceof MarkdownRenderable && focusedCode !== renderedFocus) {
+        renderedFocus = focusedCode;
+        body.renderNode = token => renderMarkdownNode(token);
+        codeIndex = 0;
+      }
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const suffix = ` · ${tool.state}`;
-        const name = fitLine(entry.toolName ?? "tool", Math.max(1, width - Bun.stringWidth(suffix) - 5));
-        const targetWidth = width - Bun.stringWidth(name + suffix) - 5;
+        const focusWidth = focusedTool ? 2 : 0;
+        const name = fitLine(entry.toolName ?? "tool", Math.max(1, width - Bun.stringWidth(suffix) - 5 - focusWidth));
+        const targetWidth = width - Bun.stringWidth(name + suffix) - 5 - focusWidth;
         const target = targetWidth > 0 && tool.target ? ` ${fitLine(tool.target, targetWidth)}` : "";
         label.content = new StyledText([
-          fg(theme.muted)(`${expanded ? "▾" : "▸"} `),
+          fg(focusedTool ? theme.accent : theme.muted)(`${focusedTool ? "› " : ""}${expanded ? "▾" : "▸"} `),
           fg(theme[tool.tone])(`${tool.marker} `),
           fg(theme.text)(name),
           fg(theme.muted)(target),
