@@ -3023,7 +3023,7 @@ function recoveryMessage(category: TuiRecovery["category"]): string {
 /** Classify startup adapter failures before showing any provider or OS diagnostic text. */
 function startupFailureCategory(message: string): "auth" | "credential-store" | "model" | "provider" {
   if (/Cannot (read|save|delete) credential in the OS secure store|secure store|Secret Service|libsecret/i.test(message)) return "credential-store";
-  if (/\b(model|deployment)\b.*\b(unavailable|no longer available|not found|unknown|invalid)|\b(unavailable|unknown|invalid)\s+model\b/i.test(message)) return "model";
+  if (/\b(model|deployment)\b.*\b(unavailable|no longer available|not available|not found|unknown|invalid)|\b(unavailable|unknown|invalid)\s+model\b/i.test(message)) return "model";
   if (/missing.*(api key|credential)|no .*login found|unauthorized|authentication required/i.test(message)) return "auth";
   return "provider";
 }

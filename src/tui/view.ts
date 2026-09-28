@@ -297,7 +297,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : snapshot.readiness === "choose-model" ? "Choose an available model · Alt+M"
         : snapshot.recovery?.category === "credential-store" ? "Repair connection: unlock OS credential storage · Ctrl+R retry"
         : "Repair connection: choose model/settings · Alt+M";
-      empty.content = safe(`${path}\n${snapshot.provider}/${snapshot.modelId} · ${route}\n\n${snapshot.readinessDetail ? `${snapshot.readinessDetail}\n` : ""}${action}${snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? "\nCtrl+I failure details · Your task stays in the editor" : ""}`);
+      empty.content = safe(`${path}\n${snapshot.provider}/${snapshot.modelId} · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n${snapshot.readinessDetail ? `${snapshot.readinessDetail}\n` : ""}${action}${snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? "\nCtrl+I failure details · Your task stays in the editor" : ""}`);
       const ids = new Set(entries.map(entry => entry.id));
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
       for (const entry of entries) {

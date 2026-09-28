@@ -199,7 +199,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const initialize = async (signal: AbortSignal) => {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {
         signal,
-        verifySubscriptionChoice: configEditor.origins.model === "interactive memory",
+        verifySubscriptionChoice: configEditor.origins.model === "interactive memory" ? true : settings.openaiAuth === "codex" ? "selected" : false,
         maxTokens: settings.maxOutput,
         baseUrl: settings.baseUrl,
         headers: settings.headers,
@@ -838,8 +838,8 @@ export async function loadInteractiveModel(
     openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
     modelCapability?: import("../model/catalog.ts").ModelCapability;
-    /** Revalidate a restored account selection without falling back to another billing route. */
-    verifySubscriptionChoice?: boolean;
+    /** Validate an account selection without fallback; true retains remembered-choice diagnostics. */
+    verifySubscriptionChoice?: boolean | "selected";
     profile?: string;
     credentialEnv?: string;
     credentialIdentity?: string;
@@ -867,8 +867,12 @@ export async function loadInteractiveModel(
         try {
           const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
           capability = (await fetchSubscriptionCatalog({ store, fetch: options.fetch, signal: options.signal })).find(entry => entry.id === modelId);
-          if (!capability) return { error: "Remembered model is no longer available in this ChatGPT account. Use /model to choose an available model or /model forget; no API-key fallback was used." };
-          if (options.thinking && !capability.supportedThinking.includes(options.thinking)) return { error: "Remembered reasoning is no longer supported by this account model. Use /model to repair the choice or /model forget; no API-key fallback was used." };
+          if (!capability) return { error: options.verifySubscriptionChoice === "selected"
+            ? "Selected model is not available in this ChatGPT account. Use /model to choose an available model; no API-key fallback was used."
+            : "Remembered model is no longer available in this ChatGPT account. Use /model to choose an available model or /model forget; no API-key fallback was used." };
+          if (options.thinking && !capability.supportedThinking.includes(options.thinking)) return { error: options.verifySubscriptionChoice === "selected"
+            ? "Selected reasoning is not supported by this account model. Use /model to repair the choice; no API-key fallback was used."
+            : "Remembered reasoning is no longer supported by this account model. Use /model to repair the choice or /model forget; no API-key fallback was used." };
         } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
       }
       const input = {

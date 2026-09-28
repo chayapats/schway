@@ -35,6 +35,11 @@ credential check is pending, you can type, paste and resize; **Esc** cancels the
 check. Setup actions wait for that check to finish or be cancelled. No browser or
 model inference is started by opening the screen. An explicit broken selection
 stays selected until you repair it; startup does not switch billing routes.
+Explicit and remembered ChatGPT subscription models are checked against the account
+catalog. API routes are labelled **configured, unverified**: initialization does not
+probe the provider or reject custom model IDs absent from Schway's built-in catalog.
+Sending is available once local initialization completes; the first explicit task
+may still reveal a remote authentication or model error.
 
 Type your task before connecting if useful. The login/model panels temporarily
 own their input and restore the task and cursor after cancellation or activation.
@@ -48,8 +53,8 @@ Automated coverage uses the actual renderer's keyboard, paste and resize input,
 plus a packed-and-installed executable launched outside the checkout with isolated
 HOME, credential storage, terminal and model fixtures. It covers fresh startup,
 remembered credentials/model, setup cancellation and activation, one explicit send,
-invalid explicit models, denied credential storage, missing profiles/HOME and
-invalid configuration. Renderer tests additionally delay startup, simulate offline
+explicit subscription models absent from the fixture account catalog, denied
+credential storage, missing profiles/HOME and invalid configuration. Renderer tests additionally delay startup, simulate offline
 failure and fence late results after cancellation/disposal. These fixtures do not
 verify a human terminal, real OS secure storage, live OAuth or a paid provider;
 those checks remain unrun for the final installed-journey gate.

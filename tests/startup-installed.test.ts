@@ -36,21 +36,34 @@ if (scenario === "returning") {
   values.set("api-key:anthropic", "installed-fixture-key");
   await (await InteractiveMemory.load(process.env.HOME!, process.cwd())).write({ provider: "anthropic", model: "claude-sonnet-4-6" });
 }
+if (scenario.startsWith("invalid-model")) {
+  values.set("codex-subscription:chatgpt", JSON.stringify({ accessToken: "fixture-subscription", expiresAt: Date.now() + 600_000 }));
+  values.set("api-key:openai", "must-not-fallback");
+}
 mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
   get: async identity => { if (scenario === "denied") throw new Error(storeModule.credentialStoreError("read")); return values.get(identity.account) ?? null; },
   set: async (identity, value) => { values.set(identity.account, value); },
   delete: async identity => values.delete(identity.account),
 }) }));
 let requests = 0;
+let loaderCalls = 0;
+let catalogRequests = 0;
 mock.module("./node_modules/schway/src/model/loader.ts", () => ({ loadProviderModel: async input => {
-  if (input.model === "invalid-explicit-model") throw new Error("Unknown model invalid-explicit-model");
+  loaderCalls++;
   return { provider: input.provider, id: input.model, async *stream() {
     requests++;
     yield { type: "text_delta", text: "fixture complete" };
     yield { type: "message_complete", message: { type: "assistant", id: "fixture-response", content: [{ type: "text", text: "fixture complete" }] } };
   } };
 } }));
-globalThis.fetch = async () => { throw new Error("Unexpected network in installed startup fixture"); };
+globalThis.fetch = async (url, init) => {
+  if (scenario.startsWith("invalid-model") && String(url).includes("/models?")) {
+    catalogRequests++;
+    if (init.headers.Authorization !== "Bearer fixture-subscription") throw new Error("Wrong catalog route");
+    return Response.json({ models: [{ slug: "available-account-model", visibility: "list", supported_reasoning_levels: [{ effort: "medium" }] }] });
+  }
+  throw new Error("Unexpected network in installed startup fixture");
+};
 const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
 mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => terminal.renderer }));
 const assert = (condition, message) => { if (!condition) throw new Error(message + "\\n" + terminal.captureCharFrame()); };
@@ -65,10 +78,10 @@ void (async () => {
   if (scenario === "returning") {
     assert(initial.includes("claude-sonnet-4-6") && initial.includes("Type a task"), "remembered readiness missing");
     assert(!initial.includes("Connect to get started"), "redundant setup");
-  } else if (scenario === "denied" || scenario === "invalid-model") {
+  } else if (scenario === "denied" || scenario.startsWith("invalid-model")) {
     assert(initial.includes(scenario === "denied" ? "Repair connection" : "Choose an available model"), "repair action missing");
     terminal.mockInput.pressKey("i", { ctrl: true }); await settle();
-    assert(terminal.captureCharFrame().includes(scenario === "denied" ? "secure store" : "invalid-explicit-model"), "actual failure unavailable");
+    assert(terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "actual failure unavailable");
   } else {
     assert(initial.includes("Connect to get started"), "fresh connect action missing");
     const draft = "ตรวจงานนี้\\nอธิบายภาษาไทย";
@@ -90,6 +103,9 @@ void (async () => {
     terminal.mockInput.pressEnter(); await settle();
     assert(requests === 1, "explicit send did not produce exactly one request");
   }
+  if (scenario.startsWith("invalid-model")) {
+    assert(catalogRequests === 1 && loaderCalls === 0, "explicit account model bypassed catalog validation or fell back");
+  }
   assert(requests === (scenario === "fresh" ? 1 : 0), "unexpected inference");
   await Bun.write(process.env.STARTUP_RESULT!, JSON.stringify({ initial, requests }));
   terminal.mockInput.pressKey("c", { ctrl: true });
@@ -102,12 +118,13 @@ void (async () => {
     const launcher = join(launchers, "bun");
     await Bun.write(launcher, `#!/bin/bash\nexec ${shell(process.execPath)} --preload ${shell(fixture)} "$@"\n`);
     await chmod(launcher, 0o755);
-    for (const scenario of ["fresh", "returning", "denied", "invalid-model"]) {
+    for (const scenario of ["fresh", "returning", "denied", "invalid-model", "invalid-model-config"]) {
       const home = join(root, `home-${scenario}`), work = join(root, `workspace-${scenario}`), result = join(root, `${scenario}.json`);
       await mkdir(home); await mkdir(work);
       const env = buildIsolatedCliEnv(home, { PATH: `${launchers}:${process.env.PATH}`, STARTUP_SCENARIO: scenario, STARTUP_RESULT: result,
-        ...(scenario === "invalid-model" ? { ANTHROPIC_API_KEY: "fixture-key" } : {}) });
-      const args = scenario === "invalid-model" ? ["--model", "invalid-explicit-model"] : [];
+      });
+      if (scenario === "invalid-model-config") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai", openaiAuth: "codex", model: "invalid-explicit-model" }));
+      const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"] : [];
       const output = await run([executable, ...args], work, env);
       expect(output.stderr).toBe("");
       expect(output.exit).toBe(0);

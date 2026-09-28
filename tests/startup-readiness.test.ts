@@ -132,3 +132,24 @@ test("cancelled or disposed startup cannot publish a late adapter", async () => 
     } finally { ui.close(); }
   }
 });
+
+test("real API adapters accept custom IDs offline and readiness does not claim provider validation", async () => {
+  let network = 0;
+  const store = fakeCredentialStore();
+  for (const provider of ["anthropic", "openai"] as const) {
+    const loaded = await loadInteractiveModel(provider, "custom-deployment-not-in-catalog", {
+      openaiAuth: "api-key", runtimeApiKey: "fixture-api-key", env: {}, secrets: [], credentialStore: store,
+      fetch: async () => { network++; throw new Error("No startup model probe is allowed"); },
+    });
+    expect("error" in loaded).toBe(false);
+    if ("model" in loaded) expect(loaded.model.id).toBe("custom-deployment-not-in-catalog");
+  }
+  expect(network).toBe(0);
+  const ui = await setup();
+  try {
+    await ui.controller.initializeStartup(async () => ({ model: ui.model }));
+    await ui.settle();
+    expect(ui.captureCharFrame()).toContain("configured, unverified");
+    expect(ui.requests()).toBe(0);
+  } finally { ui.close(); }
+});
