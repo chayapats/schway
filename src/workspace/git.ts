@@ -325,14 +325,15 @@ export async function inspectGitStatus(root: string): Promise<GitStatusSummary |
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { isGit: false, root } as GitStatusSummary;
   const toplevel = resolved.toplevel;
-  const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z"]);
+  const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"]);
   if (status.exitCode !== 0) {
     return { error: `Git status failed: ${(status.stderr.trim() || status.stdout.trim() || "unknown error").slice(0, 500)}` };
   }
   const parsed = parsePorcelainV2(status.stdout);
   const binary = await binaryPathsFromNumstat(toplevel);
   const files: GitFileChange[] = [];
-  for (const entry of parsed.files) {
+  parsed.files.sort((a, b) => a.path.localeCompare(b.path));
+  for (const entry of parsed.files.slice(0, MAX_GIT_DISPLAY_FILES)) {
     let isBinary = binary.has(entry.path) || (entry.origPath !== undefined && binary.has(entry.origPath));
     if (!isBinary && !entry.untracked) {
       isBinary = await hasNullByte(toplevel, entry.path);
@@ -342,11 +343,10 @@ export async function inspectGitStatus(root: string): Promise<GitStatusSummary |
     }
     files.push({ path: entry.path, ...(entry.origPath !== undefined ? { origPath: entry.origPath } : {}), staged: entry.staged, unstaged: entry.unstaged, untracked: entry.untracked, binary: isBinary });
   }
-  files.sort((a, b) => a.path.localeCompare(b.path));
-  const stagedCount = files.filter((file) => file.staged !== "." && file.staged !== "?" && file.staged !== "!").length;
-  const unstagedCount = files.filter((file) => file.unstaged !== "." && file.staged !== "?").length + files.filter((file) => file.untracked).length;
-  const untrackedCount = files.filter((file) => file.untracked).length;
-  const totalFiles = files.length;
+  const stagedCount = parsed.files.filter((file) => file.staged !== "." && file.staged !== "?" && file.staged !== "!").length;
+  const unstagedCount = parsed.files.filter((file) => file.unstaged !== "." && file.staged !== "?").length + parsed.files.filter((file) => file.untracked).length;
+  const untrackedCount = parsed.files.filter((file) => file.untracked).length;
+  const totalFiles = parsed.files.length;
   const truncated = totalFiles > MAX_GIT_DISPLAY_FILES;
   return {
     isGit: true,
@@ -501,7 +501,7 @@ export function formatGitComparison(before: GitSnapshot, after: GitSnapshot, com
   return lines.join("\n");
 }
 
-/** Read a bounded diff preview without altering index, HEAD, branches, or working files. */
+/** Read a bounded diff for a literal path or the whole tree without altering Git or working files. */
 export async function getGitDiffPreview(root: string, path?: string, maxChars: number = MAX_GIT_DIFF_CHARS): Promise<GitDiffPreview | { error: string }> {
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}).` };
@@ -510,8 +510,8 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
   const status = path ? await runGit(toplevel, ["status", "--porcelain=v2", "-z", "--untracked-files=no"]) : undefined;
   const original = status?.exitCode === 0 ? parsePorcelainV2(status.stdout).files.find(file => file.path === path)?.origPath : undefined;
   const paths = path ? original ? [original, path] : [path] : [];
-  const unstagedArgs = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
-  const stagedArgs = ["diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
+  const unstagedArgs = ["--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
+  const stagedArgs = ["--literal-pathspecs", "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
   const [unstaged, staged] = await Promise.all([runGit(toplevel, unstagedArgs), runGit(toplevel, stagedArgs)]);
   if (unstaged.exitCode !== 0) {
     return { error: `Git diff failed: ${(unstaged.stderr.trim() || unstaged.stdout.trim() || "unknown error").slice(0, 500)}` };
@@ -541,7 +541,7 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
 
 /** Return a bounded preview for an untracked path without mutating Git state. */
 async function readUntrackedPreview(root: string, path: string, maxChars: number): Promise<GitDiffPreview | undefined> {
-  const listed = await runGit(root, ["ls-files", "--others", "--exclude-standard", "--", path]);
+  const listed = await runGit(root, ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "--", path]);
   if (listed.exitCode !== 0) return undefined;
   const matches = listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
   if (matches.length === 0) return undefined;

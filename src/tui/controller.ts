@@ -84,6 +84,8 @@ export interface TuiTranscriptEntry {
 export interface TurnOutcome {
   reason: "completed" | "failed" | "cancelled" | "limit";
   commands: { callId: string; command: string; exitCode: number | null; status: TuiToolStatus }[];
+  /** Counts cover the entire turn even when the retained command evidence list is truncated. */
+  commandCounts: { exitZero: number; nonzero: number; unknown: number };
   toolResults: number;
   failedTools: number;
   changes: string;
@@ -1417,7 +1419,7 @@ export class TuiController {
     this.changeReview = { heading: "Loading current working tree…", files: [], selected: 0, detail: "", loading: true };
     const mode = this.gitChangeTracking();
     const evidence = this.snapshot().outcome;
-    const prefix = evidence ? `Turn ${evidence.reason}. ${evidence.toolResults} tool results; ${evidence.failedTools} failed tools.\nCommand results (latest 50; exit codes, not a test-suite guarantee):\n${evidence.commands.map(c => `${c.callId}: ${c.command} → ${c.exitCode === null ? "no exit observed" : `exit ${c.exitCode}`} (${c.status})`).join("\n") || "No command exit evidence."}\n\n` : "No retained turn outcome.\n";
+    const prefix = evidence ? `Turn ${evidence.reason}. ${evidence.toolResults} tool results; ${evidence.failedTools} failed tools.\nCommands: ${evidence.commandCounts.exitZero} exit 0 / ${evidence.commandCounts.nonzero} nonzero / ${evidence.commandCounts.unknown} unknown (entire turn).\nCommand results (latest 50; exit codes, not a test-suite guarantee):\n${evidence.commands.map(c => `${c.callId}: ${c.command} → ${c.exitCode === null ? "no exit observed" : `exit ${c.exitCode}`} (${c.status})`).join("\n") || "No command exit evidence."}\n\n` : "No retained turn outcome.\n";
     let heading = mode === "off" ? "Change tracking off. No Git state read; attribution unavailable." : !this.workspace ? "No workspace; changes unavailable." : "";
     let files: GitFileChange[] = [];
     if (!heading && this.workspace) {
@@ -2703,7 +2705,7 @@ export class TuiController {
   private async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
     this.closeChangeReview();
     this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
-    this.outcome = { reason: "completed", commands: [], toolResults: 0, failedTools: 0, changes: "Turn running." };
+    this.outcome = { reason: "completed", commands: [], commandCounts: { exitZero: 0, nonzero: 0, unknown: 0 }, toolResults: 0, failedTools: 0, changes: "Turn running." };
     const operationId = this.beginActivity("preparing");
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -2887,6 +2889,7 @@ export class TuiController {
           if (event.name === "bash") {
             const details = event.details as { command?: unknown; exitCode?: unknown } | undefined;
             const exitCode = typeof details?.exitCode === "number" && Number.isInteger(details.exitCode) ? details.exitCode : null;
+            this.outcome.commandCounts[exitCode === null ? "unknown" : exitCode === 0 ? "exitZero" : "nonzero"]++;
             this.outcome.commands.push({ callId: redactSecrets(event.toolCallId, this.secrets).slice(0, 80), command: redactSecrets(typeof details?.command === "string" ? details.command : "bash", this.secrets).slice(0, 200), exitCode, status: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error" });
             if (this.outcome.commands.length > 50) this.outcome.commands.shift();
           }

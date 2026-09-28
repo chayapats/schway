@@ -1414,6 +1414,8 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     expect(ui.controller.snapshot().changeReview!.detail).toContain("not shown");
     await ui.mockInput.pressKeys(["\u001b[6~"]);
     await settle(ui);
+    await ui.mockInput.pressKeys(["\u001b[6~"]);
+    await settle(ui);
     expect(ui.captureCharFrame()).toContain("binary");
     ui.mockInput.pressEscape();
     ui.resize(80, 24);
@@ -1423,4 +1425,33 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     expect(ui.editor.cursorOffset).toBe(cursor);
     expect(ui.transcript.scrollTop).toBe(top);
   });
+});
+
+test("turn command totals retain an early failure beyond the latest fifty evidence rows", async () => {
+  const ui = await setup(90, 24, {}, undefined, {
+    model: createScriptedModel({ responses: [{ toolCalls: Array.from({ length: 51 }, (_, i) => ({ id: `check-${i}`, name: "bash", arguments: { command: i ? "pass" : "fail" } })) }, { text: "done" }] }),
+    tools: createToolRegistry([{
+      name: "bash", description: "fixture check", execution: "exclusive",
+      inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+      execute: async (input: unknown) => {
+        const command = (input as { command: string }).command;
+        return { content: "fixture result", details: { command, exitCode: command === "fail" ? 7 : 0 } };
+      },
+    }]),
+  });
+  await ui.mockInput.pasteBracketedText("run all checks");
+  ui.mockInput.pressEnter();
+  await ui.controller.waitForIdle();
+  await settle(ui);
+  expect(ui.controller.snapshot().outcome!.commands).toHaveLength(50);
+  expect(ui.controller.snapshot().outcome!.toolResults).toBe(51);
+  expect(ui.captureCharFrame()).toContain("1 nonzero");
+  ui.mockInput.pressKey("r", { meta: true });
+  await ui.waitFor(() => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview?.loading);
+  await settle(ui);
+  const heading = ui.controller.snapshot().changeReview!.heading;
+  expect(heading).toContain("50 exit 0 / 1 nonzero / 0 unknown");
+  expect(heading).toContain("latest 50");
+  expect(heading).not.toContain("check-0:");
+  expect(heading).toContain("check-50:");
 });

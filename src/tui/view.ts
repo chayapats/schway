@@ -364,9 +364,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
       if (searchOpen && !activity.visible) footer.content = fitLine(searchStatus, width);
       const completed = snapshot.outcome;
-      const observed = completed?.commands.filter(c => c.exitCode !== null) ?? [];
-      const nonzero = observed.filter(c => c.exitCode !== 0).length;
-      const outcomeText = completed ? width < 65 ? `Turn ${completed.reason} · Alt+R review · ${nonzero} nonzero exits` : `Turn ${completed.reason} · commands: ${observed.length - nonzero} exit 0 / ${nonzero} nonzero / ${completed.commands.length - observed.length} unknown · Alt+R review` : "";
+      const counts = completed?.commandCounts;
+      const outcomeText = completed ? width < 65 ? `Turn ${completed.reason} · Alt+R review · ${counts!.nonzero} nonzero exits` : `Turn ${completed.reason} · commands: ${counts!.exitZero} exit 0 / ${counts!.nonzero} nonzero / ${counts!.unknown} unknown · Alt+R review` : "";
       activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : outcomeText, width);
       activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };

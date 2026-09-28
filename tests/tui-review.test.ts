@@ -165,3 +165,56 @@ test("a successful bash invocation without a recorded exit remains unknown despi
     c.dispose();
   });
 });
+
+test("review treats selected glob and magic filenames and rename pairs as literal paths", async () => {
+  await withTempDir(async dir => {
+    await repo(dir);
+    const originals = ["*.txt", ":(glob)*", "rename*.txt", "unrelated.txt"];
+    for (const path of originals) await writeFile(join(dir, path), `before ${path}\n`);
+    await git(dir, "add", ".");
+    await git(dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "commit", "-qm", "literal names");
+    await writeFile(join(dir, "*.txt"), "selected wildcard evidence\n");
+    await writeFile(join(dir, ":(glob)*"), "selected magic evidence\n");
+    await writeFile(join(dir, "unrelated.txt"), "unrelated evidence must not appear\n");
+    await git(dir, "--literal-pathspecs", "mv", "rename*.txt", "moved?.txt");
+    await writeFile(join(dir, "untracked?.txt"), "untracked literal evidence\n");
+    const c = controller(dir, [{ text: "done" }]);
+    await c.submit("review");
+    await c.openChangeReview();
+    for (const [path, expected] of [
+      ["*.txt", "selected wildcard evidence"],
+      [":(glob)*", "selected magic evidence"],
+      ["moved?.txt", "rename to moved?.txt"],
+      ["untracked?.txt", "untracked literal evidence"],
+    ]) {
+      const review = c.snapshot().changeReview!;
+      const index = review.files.findIndex(file => file.path === path);
+      expect(index).toBeGreaterThanOrEqual(0);
+      await c.selectReviewFile(index - review.selected);
+      const detail = c.snapshot().changeReview!.detail;
+      expect(detail).toContain(expected!);
+      expect(detail).not.toContain("unrelated evidence must not appear");
+      expect(detail).not.toContain("diff --git a/unrelated.txt");
+    }
+    c.dispose();
+  });
+});
+
+test("review enumerates inspectable new-directory files and bounds large untracked lists", async () => {
+  await withTempDir(async dir => {
+    await repo(dir);
+    const c = controller(dir, [{ toolCalls: [{ id: "nested", name: "write", arguments: { path: "new-dir/added.txt", content: "nested file evidence\n" } }] }, { text: "done" }]);
+    await c.submit("create a nested file");
+    await c.openChangeReview();
+    expect(c.snapshot().changeReview!.files.map(file => file.path)).toEqual(["new-dir/added.txt"]);
+    expect(c.snapshot().changeReview!.detail).toContain("nested file evidence");
+    for (let i = 0; i < 55; i++) await writeFile(join(dir, "new-dir", `${String(i).padStart(3, "0")}.txt`), `bounded file ${i}\n`);
+    c.closeChangeReview();
+    await c.openChangeReview();
+    expect(c.snapshot().changeReview!.files).toHaveLength(50);
+    expect(c.snapshot().changeReview!.heading).toContain("56 changed paths (list truncated)");
+    expect(c.snapshot().changeReview!.detail).toContain("bounded file 0");
+    expect(c.snapshot().changeReview!.files.every(file => !file.path.endsWith("/"))).toBe(true);
+    c.dispose();
+  });
+});

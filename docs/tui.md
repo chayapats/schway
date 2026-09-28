@@ -63,14 +63,17 @@ those checks remain unrun for the final installed-journey gate.
 
 After an accepted turn settles, the activity line reports **completed**, **failed**,
 **cancelled**, or **limit** separately from the model's answer. Command counts report
-observed exit zero, nonzero, and unknown results. A completed model turn can contain
+observed exit zero, nonzero, and unknown results across the entire turn, even when
+only the latest 50 command details are retained. A completed model turn can contain
 a failed check. These are command results, not a claim that a test suite passed;
 model prose and command invocation alone provide no verification evidence.
 
 **Alt+R** or `/changes review` opens a read-only panel with the latest turn's tool
 counts and up to 50 command results, identified by call ID and command. **Alt+I**
 inspects individual tool results in the conversation. Up/Down selects from at most
-50 current changed paths; PageUp/PageDown scrolls details. Each diff is bounded,
+50 current changed file paths, including files inside new untracked directories;
+PageUp/PageDown scrolls details. Selected names are literal paths, including glob
+characters and Git pathspec syntax. Each diff is bounded,
 with explicit truncation, deleted-file content, rename metadata, or a binary-content
 explanation. Esc restores the same conversation position, unsent draft, and cursor.
 `/changes status` and `/changes diff -- <path>` remain available as textual commands.
