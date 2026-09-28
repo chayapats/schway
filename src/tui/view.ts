@@ -45,6 +45,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const searchIndex = new TranscriptSearchIndex();
   const rows = new Map<string, TranscriptItemView>();
   let sessionKey = "";
+  let activeSessionId = "";
+  const sessionViewState = new Map<string, { draft: string; cursor: number; scroll: number }>();
   let panelMode = "";
   let savedDraft = "";
   let savedDraftCursor = 0;
@@ -64,6 +66,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let discoveryOpen = false;
   let helpOriginalScroll = 0;
   let reviewOriginalScroll = 0;
+  let sessionOriginalScroll = 0;
   let reviewContent = "";
   let helpInserted = false;
   let lastQuery = "";
@@ -258,6 +261,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       hints.visible = renderer.height >= 14;
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
+      const sessionChanged = !!activeSessionId && activeSessionId !== snapshot.sessionId;
+      let destination: { draft: string; cursor: number; scroll: number } | undefined;
+      if (sessionChanged) {
+        const draft = panelMode ? savedDraft : editor.plainText;
+        // Ordinary drafts stay local to their conversation; commands and credential surfaces are never cached.
+        sessionViewState.set(activeSessionId, { draft: draft.trimStart().startsWith("/") ? "" : draft,
+          cursor: panelMode ? savedDraftCursor : editor.cursorOffset,
+          scroll: panelMode === "sessions" ? sessionOriginalScroll : transcript.scrollTop });
+        destination = sessionViewState.get(snapshot.sessionId);
+        savedDraft = destination?.draft ?? "";
+        savedDraftCursor = destination?.cursor ?? 0;
+        sessionOriginalScroll = destination?.scroll ?? 0;
+      }
+      activeSessionId = snapshot.sessionId;
       if (sessionKey !== key) {
         discoveryOpen = false; completionId = undefined;
         resetRows(); sessionKey = key; expandedTools.clear(); inspection = undefined; unseen = false; lastTail = "";
@@ -265,22 +282,26 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
         searchIndex.clear();
         latest();
+        if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; }
       }
-      const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.changeReview ? "review" : "";
+      const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.changeReview ? "review" : "";
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
+        if (nextPanel === "sessions") { sessionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (panelMode === "sessions" && !nextPanel && !sessionChanged) searchRestoreScroll = sessionOriginalScroll;
         if (nextPanel === "review") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
-        if (panelMode === "review" && !nextPanel) searchRestoreScroll = reviewOriginalScroll;
+        if (panelMode === "review" && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
         if (nextPanel === "help") { helpInserted = false; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
-        if (panelMode === "help" && !nextPanel) searchRestoreScroll = helpOriginalScroll;
+        if (panelMode === "help" && !nextPanel && !sessionChanged) searchRestoreScroll = helpOriginalScroll;
         panelMode = nextPanel;
         setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
         if (!panelMode) editor.cursorOffset = savedDraftCursor;
         panelFingerprint = "";
       }
+      if (sessionChanged && !nextPanel) { setDraft(savedDraft); editor.cursorOffset = savedDraftCursor; }
       editor.visible = !snapshot.changeReview && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
       credential.visible = !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
       if (snapshot.changeReview) { editor.blur(); }
@@ -292,7 +313,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
+      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
@@ -382,18 +403,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (editor.plainText !== lastQuery) { completionIndex = 0; completionId = available[0]?.id; lastQuery = editor.plainText; }
       else if (completionId) completionIndex = available.findIndex(entry => entry.id === completionId && entry.available);
       else completionIndex = -1;
-      picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || browsing;
+      picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
       const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
       const deviceApproval = snapshot.loginApproval ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
       const approvalRows = deviceApproval
         ? (renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval[2]!)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval[1]!)/(width - 2))
         : 2;
-      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
+      const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
+      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
       const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (contextStatus.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.sessionPicker, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
@@ -431,6 +453,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             textRow(picker, deviceApproval[2]!, theme.accent).wrapMode = "char";
             textRow(picker, deviceApproval[1]!, theme.text).wrapMode = "char";
           } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
+        } else if (snapshot.sessionPicker) {
+          const sessions = snapshot.sessionPicker;
+          if (renderer.height >= 12) textRow(picker, fitLine(`${sessions.hasMore ? "Partial results · Ctrl+L load 100 more" : "Recent sessions"} · ${sessions.allWorkspaces ? "All workspaces + recovery" : "Current workspace"} · Ctrl+W scope`, width - 2), theme.accent);
+          const start = Math.max(0, sessions.selectedIndex - sessionVisibleRows + 1);
+          sessions.entries.slice(start, start + sessionVisibleRows).forEach((entry, index) => {
+            textRow(picker, fitLine(`${start + index === sessions.selectedIndex ? "›" : " "} ${entry.id === snapshot.sessionId ? "● current · " : ""}${entry.title} · ${entry.activityAt ?? "activity unknown"}`, width - 2), start + index === sessions.selectedIndex ? theme.accent : theme.text);
+          });
+          const selected = sessions.entries[sessions.selectedIndex];
+          if (!selected) textRow(picker, fitLine("No results · ^W scope", width - 2), theme.muted);
+          const activity = selected?.activityAt ? selected.activityAt.slice(0, 16).replace("T", " ") : "Activity unknown";
+          textRow(picker, fitLine(width >= 50 ? `Last activity: ${selected?.activityAt ?? "unknown"}` : activity, width - 2), theme.muted);
+          if (renderer.height >= 14) textRow(picker, fitLine(selected ? `${selected.workspaceRoot || "Unknown workspace"} · ${selected.id}` : "Ctrl+W includes other workspaces and recovery files", width - 2), theme.muted);
+          if (renderer.height >= 10) textRow(picker, fitLine(sessions.error ?? (sessions.loading ? "Loading…" : selected?.state ?? "Nothing selected"), width - 2), sessions.error ? theme.error : theme.muted);
+          textRow(picker, fitLine(width < 60 ? "↑↓ Enter Esc ^W ^L" : `↑↓ preview · PgUp/PgDn page · Enter resume · Esc restore · ${sessions.total ? sessions.offset + sessions.selectedIndex + 1 : 0}/${sessions.total}`, width - 2), theme.muted);
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
           textRow(picker, fitLine("Choose model + route · ↑/↓ select · Enter apply/connect · Ctrl+R retry · Esc back", width - 2), theme.accent);
@@ -501,6 +537,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       void controller.selectPreference().then(refresh, fail);
       return;
     }
+    if (snapshot.sessionPicker) { void controller.selectPickerSession().then(refresh, fail); return; }
     if (snapshot.modelPicker) {
       void controller.selectPickerModel().then(refresh, fail);
       return;
@@ -582,6 +619,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
+    if (snapshot.sessionPicker) {
+      if (name === "escape") { if (controller.running) controller.cancel(); else controller.closeSessionPicker(); handled(); return; }
+      if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") { controller.moveSessionPicker(name === "up" ? -1 : name === "down" ? 1 : name === "pageup" ? -8 : 8); handled(); return; }
+      if (key.ctrl && name === "w") { controller.toggleSessionScope(); handled(); return; }
+      if (key.ctrl && name === "l") { void controller.loadMoreSessionPicker().then(refresh, fail); handled(); return; }
+      if (key.meta || key.option || name === "tab") { handled(); return; }
+    }
+    if ((key.meta || key.option) && name === "s" && !panelMode && !controller.running) { void options.submit("/sessions", () => {}).then(refresh, fail); handled(); return; }
     if (snapshot.changeReview) {
       if (name === "escape") { controller.closeChangeReview(); handled(); return; }
       if (name === "up" || name === "down") { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewPanel.scrollTo(0); }
@@ -762,6 +807,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   editor.onContentChange = () => {
     if (refreshing || destroyed) return;
     if (observedDraft !== editor.plainText) { observedDraft = editor.plainText; editorRevision++; }
+    if (controller.snapshot().sessionPicker) controller.searchSessions(editor.plainText);
     if (controller.snapshot().modelPicker) controller.searchModels(editor.plainText);
     refresh();
   };
