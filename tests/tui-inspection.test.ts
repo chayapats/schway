@@ -20,19 +20,20 @@ async function setup(width = 80, height = 24) {
     credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) },
   });
   const copied: string[] = [];
+  const opened: string[] = [];
   let clipboardWorks = true;
   let quit = false;
   ui.renderer.copyToClipboardOSC52 = text => { if (clipboardWorks) copied.push(text); return clipboardWorks; };
   const view = createConversationView(ui.renderer, {
     controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: ["secret-sentinel"],
-    quit: () => { quit = true; }, submit: async () => {},
+    quit: () => { quit = true; }, submit: async () => {}, openUrl: async url => { opened.push(url); },
   });
   cleanups.push(() => { view.destroy(); controller.dispose(); ui.renderer.destroy(); });
   await ui.flush();
   const editor = ui.renderer.root.findDescendantById("prompt") as TextareaRenderable;
   const transcript = ui.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
   const settle = async () => { view.refresh(); await ui.flush(); };
-  return { ...ui, controller, view, editor, transcript, copied, settle, setClipboard: (works: boolean) => { clipboardWorks = works; }, didQuit: () => quit };
+  return { ...ui, controller, view, editor, transcript, copied, opened, settle, setClipboard: (works: boolean) => { clipboardWorks = works; }, didQuit: () => quit };
 }
 
 test("keyboard inspects one collapsed result and returns to the original draft and cursor", async () => {
@@ -73,7 +74,7 @@ test("code and Unicode result copies use displayed content without fences or dec
   const ui = await setup(80, 28);
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "unicode", name: "bash" });
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: "unicode", name: "bash", status: "success", content: "ไทย\n漢字 😀\nsecret-sentinel" });
-  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```ts\nconst emoji = '😀';\n```" } });
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```ts\nconst emoji = '😀';\nsecret-sentinel\n```" } });
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
   ui.mockInput.pressKey("c");
@@ -82,7 +83,7 @@ test("code and Unicode result copies use displayed content without fences or dec
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("C copy");
   ui.mockInput.pressKey("c");
-  expect(ui.copied.at(-1)).toBe("const emoji = '😀';\n");
+  expect(ui.copied.at(-1)).toBe("const emoji = '😀';\n***");
   expect(ui.copied.join("\n")).not.toContain("secret-sentinel");
   expect(ui.copied.at(-1)).not.toContain("```");
 });
@@ -133,7 +134,7 @@ test("multiple code blocks navigate individually through streaming and resize", 
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
   ui.mockInput.pressKey("c");
-  expect(ui.copied.at(-1)).toBe("first ภาษาไทย\n");
+  expect(ui.copied.at(-1)).toBe("first ภาษาไทย");
   ui.mockInput.pressTab();
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("C copy");
@@ -142,9 +143,78 @@ test("multiple code blocks navigate individually through streaming and resize", 
   ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "\nLater text" } });
   await ui.settle();
   ui.mockInput.pressKey("c");
-  expect(ui.copied.at(-1)).toBe("second 😀\n");
+  expect(ui.copied.at(-1)).toBe("second 😀");
   ui.mockInput.pressKey("f", { ctrl: true });
   expect(ui.editor.plainText).toBe("future draft");
   ui.mockInput.pressEscape();
   expect(ui.editor.focused).toBe(true);
+});
+
+test("five streamed code blocks retain distinct focus IDs and copies", async () => {
+  const ui = await setup(44, 18);
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```js\n0\n```\n\n" } });
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  for (let index = 1; index < 5; index++) {
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: `\`\`\`js\n${index}\n\`\`\`\n\n` } });
+    await ui.settle();
+  }
+  expect(ui.editor.focused).toBe(false);
+  ui.mockInput.pressKey("c");
+  expect(ui.copied.at(-1)).toBe("0");
+  for (let index = 1; index < 5; index++) {
+    ui.mockInput.pressArrow("down");
+    await ui.settle();
+    ui.mockInput.pressKey("c");
+    expect(ui.copied.at(-1)).toBe(String(index));
+    expect(ui.transcript.findDescendantById(`code-${ui.controller.snapshot().transcript[0]!.id}-${index}`)).toBeDefined();
+  }
+  expect(ui.captureCharFrame()).toContain("› js");
+});
+
+test("nested list, quote and unfinished streamed fences use rendered code targets", async () => {
+  const ui = await setup(60, 24);
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "- Nested\n\n  ```ts\n  const nested = 1;\n  ```\n\n> ```js\n> const quoted = 2;\n> ```\n\n```sh\necho unfinished" } });
+  await ui.settle();
+  const frame = ui.captureCharFrame();
+  expect(frame).toContain("const nested = 1;");
+  expect(frame).toContain("const quoted = 2;");
+  expect(frame).toContain("echo unfinished");
+  ui.mockInput.pressKey("i", { meta: true });
+  for (const expected of ["const nested = 1;", "const quoted = 2;", "echo unfinished"]) {
+    ui.mockInput.pressKey("c");
+    expect(ui.copied.at(-1)).toBe(expected);
+    ui.mockInput.pressArrow("down");
+    await ui.settle();
+  }
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "\n```" } });
+  await ui.settle();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied.at(-1)).toBe("echo unfinished");
+});
+
+test("links, selection and mouse tool toggles still work during inspection", async () => {
+  const ui = await setup(80, 24);
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "mouse", name: "read" });
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "mouse", name: "read", status: "success", content: "Click result" });
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "[Documentation](https://example.test/docs)\n\n```txt\ncode\n```" } });
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  const toolRow = ui.transcript.getChildren().find(row => row.id.startsWith("message-") && row.id.includes("tool"))!;
+  await ui.mockMouse.click(toolRow.x + 2, toolRow.y);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Click result");
+  const lines = ui.captureCharFrame().split("\n");
+  const y = lines.findIndex(line => line.includes("Documentation"));
+  const x = lines[y]!.indexOf("Documentation");
+  await ui.mockMouse.click(x + 1, y);
+  expect(ui.opened).toEqual(["https://example.test/docs"]);
+  await ui.mockMouse.drag(x, y, x + 5, y);
+  await ui.settle();
+  expect(ui.opened).toHaveLength(1);
+  expect(ui.copied.length).toBeGreaterThan(0);
+  expect(ui.editor.focused).toBe(false);
+  ui.mockInput.pressKey("c");
+  expect(ui.copied.at(-1)).toBe("Click result");
 });

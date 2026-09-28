@@ -2,7 +2,7 @@ import { BoxRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable,
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
-import { activityDetail, activityStatus, displayText, fencedCodeBlocks, fitLine } from "./presentation.ts";
+import { activityDetail, activityStatus, displayText, fitLine } from "./presentation.ts";
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
@@ -132,12 +132,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   };
   const inspectionTargets = (entries: readonly TuiTranscriptEntry[]): InspectionTarget[] => entries.flatMap<InspectionTarget>(entry =>
     entry.kind === "tool" ? [{ id: entry.id, kind: "tool" as const, index: 0 }]
-      : entry.kind === "assistant" ? fencedCodeBlocks(safe(entry.text)).map((_, index) => ({ id: entry.id, kind: "code" as const, index })) : []);
+      : entry.kind === "assistant" ? (rows.get(entry.id)?.codeBlocks() ?? []).map((_, index) => ({ id: entry.id, kind: "code" as const, index })) : []);
   const copyInspection = (entries: readonly TuiTranscriptEntry[]) => {
     if (!inspection) return;
     const entry = entries.find(item => item.id === inspection!.id);
     if (!entry) return;
-    const text = inspection.kind === "tool" ? safe(entry.text) : fencedCodeBlocks(safe(entry.text))[inspection.index];
+    const text = inspection.kind === "tool" ? safe(entry.text) : rows.get(entry.id)?.codeBlocks()[inspection.index]?.text;
     if (text === undefined) return;
     let copied = false;
     try { copied = renderer.copyToClipboardOSC52(text); } catch { /* Clipboard support is optional. */ }
@@ -277,10 +277,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       tree.visible = !!snapshot.branchTree;
       empty.visible = snapshot.transcript.length === 0;
       const ids = new Set(snapshot.transcript.map(entry => entry.id));
-      if (inspection && !inspectionTargets(snapshot.transcript).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
-        inspection = undefined;
-        if (!panelMode) editor.focus();
-      }
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
       for (const entry of snapshot.transcript) {
         let row = rows.get(entry.id);
@@ -295,6 +291,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
           inspection?.id === entry.id && inspection.kind === "tool");
+      }
+      if (inspection && !inspectionTargets(snapshot.transcript).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
+        inspection = undefined;
+        if (!panelMode) editor.focus();
       }
 
       const available = completions();

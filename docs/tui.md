@@ -156,8 +156,11 @@ distinct surface and color without downloading syntax parsers.
 
 Inspection highlights one tool result or fenced code block and keeps the draft
 and cursor in place. C copies the selected result or code body through OSC 52,
-without borders, heading text, or Markdown fences. The copied text is the
-redacted transcript representation. If a result was truncated for display,
+without borders, heading text, or Markdown fences. Code copy uses the rendered
+Markdown code body, including code inside lists and quotes and an unfinished
+streamed fence; Markdown may normalize its surrounding indentation and final
+newline. The copied text is the redacted transcript representation. If a result
+was truncated for display,
 the copied text includes that truncation marker and a notice identifies it as
 a bounded preview; the complete result remains in the session file. If OSC 52
 is unavailable, Schway reports the failure and leaves the selection and draft
