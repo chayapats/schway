@@ -345,7 +345,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const route = snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`);
       returnContext.visible = !panelMode && (!!snapshot.recentSession || !!snapshot.restored);
       returnContext.content = (safe(snapshot.recentSession
-        ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n/sessions for all history`
+        ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Preview incomplete · resume validates history" : "/sessions for all history"}`
         : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${snapshot.provider}/${snapshot.modelId} · ${route}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
       const action = snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
         : snapshot.readiness === "ready" ? "Type a task · Enter sends"

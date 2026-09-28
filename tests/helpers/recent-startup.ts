@@ -1,7 +1,7 @@
 import { mock } from "bun:test";
 import * as core from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createJsonlSession, sessionsDirectory, loadJsonlSession } from "../../src/session/jsonl.ts";
 import { resolveWorkspace } from "../../src/workspace/workspace.ts";
@@ -17,9 +17,14 @@ await mkdir(root); await mkdir(other);
 const workspace = await resolveWorkspace(root);
 const directory = sessionsDirectory(home);
 const old = await createJsonlSession({ directory, workspace });
-old.append({ type: "user", id: "old-user", content: [{ type: "text", text: "Continue the local task" }] });
+old.append({ type: "user", id: "old-user", content: [{ type: "text", text: ["large", "partial-corrupt"].includes(scenario) ? "x".repeat(70000) : "Continue the local task" }] });
 old.append({ type: "assistant", id: "old-answer", content: [{ type: "text", text: "Saved local answer" }] });
 const branch = old.forkBranch("old-answer", "side task");
+if (["large", "partial-corrupt"].includes(scenario)) await rm(join(directory, `${old.header.id}.jsonl.meta`));
+if (scenario === "partial-corrupt") {
+  const path = join(directory, `${old.header.id}.jsonl`);
+  await writeFile(path, (await readFile(path, "utf8")).replace('"type":"user"', '"type":INVALID'));
+}
 await Bun.sleep(3);
 const foreign = await createJsonlSession({ directory, workspace: await resolveWorkspace(other) });
 foreign.append({ type: "user", id: "foreign-user", content: [{ type: "text", text: "Other workspace task" }] });
@@ -77,7 +82,8 @@ try {
       assert(requests === 0, "repair never sends a task");
     }
   } else {
-    await wait(() => frame().includes("Alt+B resume: Continue the local task"), "current workspace meaningful offer");
+    await wait(() => frame().includes(["large", "partial-corrupt"].includes(scenario) ? "Alt+B resume:" : "Alt+B resume: Continue the local task"), "current workspace meaningful offer");
+    if (["large", "partial-corrupt"].includes(scenario)) assert(frame().includes("Preview incomplete · resume validates history"), "unknown preview explicitly labelled");
     assert(!frame().includes("Saved local answer") && !frame().includes("Other workspace task"), "new context only");
     assert(await count() === originalCount, "startup creates no empty session");
     await terminal.mockInput.pasteBracketedText("งานใหม่\nkeep this separate");
@@ -90,14 +96,14 @@ try {
       await wait(() => editor.plainText.includes("keep this separate"), "draft restored");
     }
     assert(await count() === originalCount, "navigation creates no empty sessions");
-    if (scenario === "missing" || scenario === "corrupt") {
+    if (["missing", "corrupt", "partial-corrupt"].includes(scenario)) {
       const path = join(directory, `${old.header.id}.jsonl`);
       if (scenario === "missing") await rm(path);
-      else await writeFile(path, "broken history\n");
+      else if (scenario === "corrupt") await writeFile(path, "broken history\n");
       terminal.mockInput.pressKey("b", { meta: true });
       await wait(() => frame().includes("recoverable history"), "recoverable failure");
       assert(editor.plainText.includes("keep this separate"), "failed resume retains new draft");
-    } else if (scenario === "resume") {
+    } else if (scenario === "resume" || scenario === "large") {
       terminal.mockInput.pressKey("b", { meta: true });
       await wait(() => frame().includes("Restored workspace:"), "one-action restore");
       assert(editor.plainText === "", "new draft not copied into restored conversation");
@@ -107,7 +113,7 @@ try {
       assert(editor.plainText === "", "old session draft not pasted into new task");
       assert(await count() === originalCount, "new navigation is not persisted empty");
     }
-    if (scenario !== "resume") {
+    if (scenario !== "resume" && scenario !== "large") {
       terminal.mockInput.pressEnter();
       await wait(() => requests === 1 && frame().includes("New task answer"), "new send");
       const files = (await readdir(directory)).filter(name => name.endsWith(".jsonl") && ![old.header.id, foreign.header.id].some(id => name === `${id}.jsonl`));

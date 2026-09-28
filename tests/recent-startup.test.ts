@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
-for (const scenario of ["new", "resume", "explicit", "repair", "preferences", "missing", "corrupt"]) {
+for (const scenario of ["new", "resume", "explicit", "repair", "preferences", "missing", "corrupt", "large", "partial-corrupt"]) {
   test(`actual interactive startup and terminal input: ${scenario}`, async () => {
     await withTempDir(async home => {
       const child = Bun.spawn([process.execPath, join(import.meta.dir, "helpers/recent-startup.ts"), home, scenario], {

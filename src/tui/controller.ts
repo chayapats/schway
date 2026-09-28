@@ -1946,7 +1946,7 @@ export class TuiController {
       for (let offset = 0; ; offset += 100) {
         const rows = await discoverSessions(directory, offset);
         for (const row of rows) {
-          if (!row.workspaceRoot || row.id === this.sessionId || row.state === "Empty history" || !row.hasWork) continue;
+          if (!row.workspaceRoot || row.id === this.sessionId || row.state === "Empty history" || (!row.hasWork && !row.previewIncomplete)) continue;
           if (this.disposed || this.session !== session || generation !== this.recentDiscoveryGeneration) return;
           if (!roots.has(row.workspaceRoot)) {
             try { roots.set(row.workspaceRoot, (await canonicalWorkspace(row.workspaceRoot)).root); }
@@ -1958,7 +1958,8 @@ export class TuiController {
         if (this.disposed || this.session !== session || generation !== this.recentDiscoveryGeneration) return;
         if (rows.length < 100) break;
       }
-      this.recentSession = latest;
+      this.recentSession = latest && !latest.hasWork
+        ? { ...latest, title: "Recent history (preview unavailable)" } : latest;
     } catch {
       if (!this.disposed && this.session === session) this.notice("Recent history is unavailable. Start a new task or use /sessions to recover saved work.");
     }

@@ -68,7 +68,12 @@ is not a modal choice and never starts a model turn. **Alt+S** or `/sessions` op
 all saved history, including entries that need recovery. Suggestions use committed
 activity in the canonical current workspace and ignore empty navigation sessions.
 Discovery runs after startup with bounded per-file previews; large collections can
-take longer to produce the offer.
+take longer to produce the offer. If the read window cannot establish whether a
+large history contains work (for example, a large first message without cached
+metadata), the workspace history remains eligible with **preview unavailable** and
+**resume validates history** labels. This is an unverified candidate, not proof of
+meaningful work; explicit activation validates its contents and leaves new work
+usable on failure. Known-empty histories remain excluded.
 
 Explicit `--resume <id> --branch <id>` takes precedence and suppresses the offer.
 After a restore, a compact summary identifies the workspace, conversation branch,

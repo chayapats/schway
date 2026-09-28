@@ -459,6 +459,8 @@ export interface SessionDiscovery extends SessionSummary {
   title: string;
   /** Whether bounded inspection found saved conversation work, independent of its redacted title. */
   hasWork?: boolean;
+  /** The read window ended before complete history validation; unknown work must remain recoverable. */
+  previewIncomplete?: boolean;
   activityAt?: string;
   state: string;
 }
@@ -486,6 +488,7 @@ export async function discoverSessions(directory: string, offset = 0): Promise<S
       } catch { /* Older histories do not have a discovery cache. */ }
       if (Buffer.byteLength(text) >= 65536) {
         row.state = "Partial preview · large history validated only on resume";
+        row.previewIncomplete = true;
         for (const line of text.split("\n").slice(1, -1)) {
           try {
             const record = JSON.parse(line);
