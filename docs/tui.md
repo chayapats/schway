@@ -158,9 +158,15 @@ are decorative. Symbols and labels retain meaning without color. Nonempty
 not a plain-text output mode; use `-p` for headless text.
 
 The default is automatic terminal light/dark detection, then `COLORFGBG`, then
-dark. `/theme auto`, `/theme dark`, and `/theme light` apply to the current session.
-Set `SCHWAY_THEME=light` or `SCHWAY_THEME=dark` in the launch environment to choose
-a default across sessions. Schway does not edit the terminal's configuration.
+dark. In `/config` (Alt+P), select **appearance** and choose **Reset (inherit)**,
+`auto`, `dark`, or `light`. Tab selects session, user or project scope; Enter
+previews and a second Enter saves. User and project choices survive restart.
+`auto` follows terminal detection; Reset removes only the selected scope's
+override. `/theme auto|dark|light` changes the session appearance through the
+same preferences when configuration is available. A valid
+`SCHWAY_THEME=dark|light` in the launch environment overrides every saved or
+session appearance choice; preferences show its effective source and the saved
+choice beneath it. Schway does not edit terminal, shell or window-manager settings.
 
 ## Interaction
 
@@ -187,6 +193,28 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Recover stale terminal cells | Ctrl+L; preserves the draft and scroll position |
 | Cancel | Esc or Ctrl+C during a turn when no text is selected |
 | Quit | `/quit`, Ctrl+C while idle with no selection, or Ctrl+D with empty input |
+
+The keyboard contract for the panels present in this version is: the composer
+owns ordinary text; opening a panel preserves its draft and cursor; the active
+panel owns its navigation keys; Enter acts on the highlighted choice only; Esc
+returns one level toward the composer without submitting the draft. Login
+approval waits for the external result, so Enter does not claim to approve it.
+Credential and callback entry mask their text. Resizing reflows the active
+panel without changing its selection or operation. At 32×12, preferences put
+the selected field and value choice above longer guidance so both remain
+visible. Ctrl+L re-enters the renderer and keeps conversation, draft and
+reading position.
+
+| Panel | Navigation and action | Renderer fixture |
+| --- | --- | --- |
+| Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back | `tui-view.test.ts` appearance/preferences |
+| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+R retries catalog | `tui-view.test.ts`, `tui-sessions.test.ts` |
+| Credential, callback, approval | Masked entry or external wait, Enter only on entry, Esc cancel | `tui-view.test.ts` credential/login/approval |
+| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown | `tui-view.test.ts` branch/review |
+| Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer | `tui-view.test.ts`, `tui-search.test.ts`, `tui-inspection.test.ts` |
+
+New panels added after this slice require their own renderer and installed
+journey checks in the final gate; this contract alone does not verify them.
 
 The conversation follows new output until you scroll back. Streaming then keeps
 your reading position; Ctrl+End resumes following. Wheel input over non-scrollable
@@ -347,9 +375,11 @@ Textual `/config set`, `/config reset` and `/config show` remain available.
 The preference journeys are covered by real renderer keyboard, paste, resize and
 isolated persisted-state fixtures in `tests/tui-view.test.ts`: scoped save/reset,
 restart, CLI shadowing, file/memory conflicts, malformed files, unavailable models,
-staging cancellation, secret exclusion and draft/cursor restoration. Live provider,
-OAuth and human-terminal preference checks have not been run; they remain for the
-installed-journey gate.
+staging cancellation, secret exclusion, draft/cursor restoration, appearance
+palettes and environment precedence. `tests/startup-installed.test.ts` exercises
+the appearance canvas and source through a packed executable in fresh isolated
+processes. Live provider, OAuth and human-terminal preference checks have not
+been run; they remain for the installed-journey gate.
 
 ## Discover commands and skills
 

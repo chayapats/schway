@@ -31,7 +31,7 @@ export const PREFERENCE_SCOPES = {
 } as const;
 
 /** Build a secret-free view from the same editor used by the effective resolver. */
-export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot["scope"], secrets: readonly string[]): PreferenceRow[] {
+export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot["scope"], secrets: readonly string[], appearanceEnvironment?: "dark" | "light"): PreferenceRow[] {
   const settings = editor.settings;
   const safe = (value: unknown) => redactSecrets(value === undefined ? "unset" : String(value), secrets).replace(/https?:\/\/[^\s]+/g, "[URL hidden]").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
   const layers = editor.preferenceLayers;
@@ -42,11 +42,12 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
     contextWindow: [undefined, 8192, 32768, 65536, 131072, 200000],
     maxOutput: [undefined, 1024, 4096, 8192, 16384, 32768],
     git: [undefined, "off", "on-demand", "snapshot"],
+    appearance: [undefined, "auto", "dark", "light"],
   };
   if (scope === "memory") return [{ key: "workspace choice", value: safe(`${settings.provider}/${settings.model} (${settings.openaiAuth ?? settings.auth})`), origin: editor.origins.model ?? "built-in default",
     saved: layers.memory?.model ? safe(`${layers.memory.provider}/${layers.memory.model} (${layers.memory.openaiAuth ?? "provider auth"}); thinking ${layers.memory.thinking ?? "default"}; profile ${layers.memory.profile ?? "none"}`) : "unset",
     reset: "Reset removes only workspace memory; explicit config and session overrides remain.", choices: ["remember active choice", "reset workspace memory"] }];
-  return ["thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "git", "provider", "model", "profile", "auth", "openaiAuth"].map(key => {
+  return ["thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "git", "provider", "model", "profile", "auth", "openaiAuth", "appearance"].map(key => {
     const origin = safe(editor.origins[key as keyof typeof editor.origins] ?? "built-in default");
     const originScope = origin === "CLI" ? undefined : origin === "interactive memory" ? "memory" : origin === "user-global" ? "user" : origin === "project" ? "project" : origin === "current-session override" ? "session" : undefined;
     const memoryConflict = ["session", "cli", "project", "user"].flatMap(name => {
@@ -55,9 +56,9 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
       const conflict = ["provider", "profile", "openaiAuth"].find(field => layer[field] !== undefined && (layer[field] ?? undefined) !== memory[field]);
       return conflict ? [`${labels[name]} ${conflict} selection shadows workspace memory; reset that ${labels[name]} override to restore it.`] : [];
     })[0];
-    return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(settings.effectiveThinking)})` : safe(key === "git" ? settings.gitChangeTracking : settings[key as keyof typeof settings]), origin,
+    return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(settings.effectiveThinking)})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,
       saved: Object.entries(layers).filter(([, layer]) => layer[key] !== undefined).map(([name, layer]) => `${labels[name]}=${safe(layer[key])}`).join("; ") || "No saved override",
-      reset: memoryConflict ?? (origin.startsWith("profile ") ? "The selected profile supplies this value; reset its selection on the profile row or edit the named profile configuration." : origin === "CLI" ? "CLI shadows lower values: remove the launch flag to inherit." : originScope ? `Reset in ${labels[originScope]} to inherit lower values.` : "Inherited default; reset the selected scope to inherit."),
+      reset: key === "appearance" && appearanceEnvironment ? "SCHWAY_THEME overrides saved appearance. Remove it to use the saved preference; reset a scope to inherit auto." : memoryConflict ?? (origin.startsWith("profile ") ? "The selected profile supplies this value; reset its selection on the profile row or edit the named profile configuration." : origin === "CLI" ? "CLI shadows lower values: remove the launch flag to inherit." : originScope ? `Reset in ${labels[originScope]} to inherit lower values.` : "Inherited default; reset the selected scope to inherit."),
       choices: choices[key] ?? [undefined, "open model + route picker (activates and remembers)"] };
   });
 }

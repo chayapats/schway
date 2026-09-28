@@ -32,7 +32,7 @@ import * as storeModule from "./node_modules/schway/src/auth/store.ts";
 import { InteractiveMemory } from "./node_modules/schway/src/config/interactive-memory.ts";
 const scenario = process.env.STARTUP_SCENARIO;
 const values = new Map();
-if (scenario === "returning") {
+if (scenario.startsWith("returning")) {
   values.set("api-key:anthropic", "installed-fixture-key");
   await (await InteractiveMemory.load(process.env.HOME!, process.cwd())).write({ provider: "anthropic", model: "claude-sonnet-4-6" });
 }
@@ -43,7 +43,7 @@ if (scenario.startsWith("invalid-model")) {
 mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
   get: async identity => {
     // Returning startup deliberately exceeds the old fixed 80 ms wait.
-    if (scenario === "returning") await Bun.sleep(150);
+    if (scenario.startsWith("returning")) await Bun.sleep(150);
     if (scenario === "denied") throw new Error(storeModule.credentialStoreError("read"));
     return values.get(identity.account) ?? null;
   },
@@ -83,7 +83,7 @@ const settle = async (ready, label) => {
 };
 const screenIncludes = text => terminal.captureCharFrame().includes(text);
 void (async () => {
-  const startupAction = scenario === "returning" ? "Type a task"
+  const startupAction = scenario.startsWith("returning") ? "Type a task"
     : scenario === "denied" ? "Repair connection"
     : scenario.startsWith("invalid-model") ? "Choose an available model" : "Connect to get started";
   await settle(() => terminal.renderer.root.findDescendantById("prompt") && screenIncludes(startupAction), "startup readiness");
@@ -91,9 +91,22 @@ void (async () => {
   const initial = terminal.captureCharFrame();
   assert(initial.includes(process.cwd().split("/").at(-1)), "workspace missing");
   assert(!initial.includes("Session ready.") && !initial.includes("Interactive memory:"), "recurring transcript guidance");
-  if (scenario === "returning") {
+  if (scenario.startsWith("returning")) {
     assert(initial.includes("claude-sonnet-4-6") && initial.includes("Type a task"), "remembered readiness missing");
     assert(!initial.includes("Connect to get started"), "redundant setup");
+    if (scenario.startsWith("returning-appearance")) {
+      const expected = scenario.endsWith("-env") ? "#fafaf8" : "#15181e";
+      const canvas = terminal.renderer.root.findDescendantById("conversation");
+      assert(canvas.backgroundColor.equals(core.RGBA.fromHex(expected)), "installed appearance or environment precedence wrong");
+      terminal.mockInput.pressKey("p", { meta: true });
+      await settle(() => screenIncludes("Preferences"), "installed appearance preferences");
+      terminal.mockInput.pressTab(); terminal.mockInput.pressTab();
+      for (let index = 0; index < 11; index++) terminal.mockInput.pressArrow("down");
+      await settle(() => screenIncludes("appearance"), "installed appearance row");
+      assert(screenIncludes(scenario.endsWith("-env") ? "environment" : "user-global"), "appearance source hidden");
+      terminal.mockInput.pressEscape();
+      await settle(() => editor.focused && !screenIncludes("Preferences"), "appearance panel return");
+    }
   } else if (scenario === "denied" || scenario.startsWith("invalid-model")) {
     assert(initial.includes(scenario === "denied" ? "Repair connection" : "Choose an available model"), "repair action missing");
     if (scenario.startsWith("invalid-model")) assert(initial.includes("Selected model is not available in this account."), "selected model explanation missing");
@@ -143,11 +156,16 @@ void (async () => {
     const launcher = join(launchers, "bun");
     await Bun.write(launcher, `#!/bin/bash\nexec ${shell(process.execPath)} --preload ${shell(fixture)} "$@"\n`);
     await chmod(launcher, 0o755);
-    for (const scenario of ["fresh", "returning", "denied", "invalid-model", "invalid-model-config"]) {
+    for (const scenario of ["fresh", "returning", "returning-appearance", "returning-appearance-env", "denied", "invalid-model", "invalid-model-config"]) {
       const home = join(root, `home-${scenario}`), work = join(root, `workspace-${scenario}`), result = join(root, `${scenario}.json`);
       await mkdir(home); await mkdir(work);
       const env = buildIsolatedCliEnv(home, { PATH: `${launchers}:${process.env.PATH}`, STARTUP_SCENARIO: scenario, STARTUP_RESULT: result,
+        ...(scenario.endsWith("-env") ? { SCHWAY_THEME: "light" } : {}),
       });
+      if (scenario.startsWith("returning-appearance")) {
+        await mkdir(join(home, ".schway"), { recursive: true });
+        await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ appearance: "dark" }));
+      }
       if (scenario === "invalid-model-config") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai", openaiAuth: "codex", model: "invalid-explicit-model" }));
       const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"] : [];
       const output = await run([executable, ...args], work, env);

@@ -126,6 +126,30 @@ scroll position and model picker. This is a recovery control, not a fix for all
 multiplexer width differences. The user confirmed their report came from a
 Schway process that had not yet been restarted after the UI changes.
 
+## Appearance and keyboard slice (#105, 2026-09-28)
+
+The packed executable fixture in `tests/startup-installed.test.ts` passed with
+isolated user state: saved dark appearance painted a dark canvas on restart,
+and `SCHWAY_THEME=light` painted the light canvas while preferences named the
+environment as the effective source. Renderer keyboard tests exercised
+auto/dark/light persistence and reset, `NO_COLOR`, 32×12 preference focus,
+Unicode draft/cursor preservation, and appearance edits while no model was
+available. Existing renderer tests cover the panel keyboard and resize
+contract listed in `docs/tui.md`; they do not verify future panels.
+
+The terminal observations below used the scripted source demo, without provider
+credentials. They are kept separate from the installed renderer result:
+
+| Environment and input | Observed result | Limit |
+| --- | --- | --- |
+| Linux OS PTY, `TERM=xterm-256color`, no multiplexer, 80×24→32×12, bracketed Thai/CJK/emoji/combining paste, Enter, Ctrl+L, Ctrl+C | Process exited 0 and emitted alternate-screen enter/exit. Captured bytes contained Thai, emoji and the decomposed combining sequence; a second `--scroll` run contained CJK output. | Raw PTY bytes do not prove visual cell alignment in a human terminal. |
+| Detached tmux PTY, 80×24→32×12, literal Thai/CJK/emoji/combining input, Enter, Ctrl+L | Captured draft displayed Thai, CJK and emoji; the narrow completed screen retained `Ready` before and after Ctrl+L. | The decomposed combining sequence was absent from `capture-pane`; this run does not establish its tmux rendering. |
+
+No new human-operated direct Kitty check was run for this slice. The earlier
+direct Kitty and tmux findings above remain separate historical evidence. A
+human terminal pass, multiplexer Unicode judgment, and installed checks for
+panels added after #105 remain pending in the final installed-journey gate.
+
 ## External evidence to collect
 
 1. With explicit operator consent and credentials, run the bounded installed live-smoke CLI for each selected provider, retain dated JSON with revision and model (see [live providers](live-providers.md)); skipped/pending/failed lanes cannot pass.

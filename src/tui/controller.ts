@@ -190,6 +190,8 @@ export interface TuiControllerOptions {
   loadWorkspaceExtensions?: (workspace: Workspace, signal: AbortSignal) => Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }>;
   home?: string;
   configEditor?: ConfigEditor;
+  /** Explicit launch appearance overrides saved TUI appearance. */
+  appearanceEnvironment?: "dark" | "light";
   /** Secure credential management and forced adapter refresh for the current settings. */
   credentials?: {
     store: CredentialStore;
@@ -480,6 +482,7 @@ export class TuiController {
   private profile?: string;
   private thinking?: string;
   private configEditor?: ConfigEditor;
+  private readonly appearanceEnvironment?: "dark" | "light";
   private readonly stageSettings?: TuiControllerOptions["stageSettings"];
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
   private readonly onModelActivated?: TuiControllerOptions["onModelActivated"];
@@ -580,6 +583,7 @@ export class TuiController {
     this.extensions = options.extensions;
     this.home = options.home;
     this.configEditor = options.configEditor;
+    this.appearanceEnvironment = options.appearanceEnvironment;
     this.credentials = options.credentials;
     this.explicitChangeTracking = options.changeTracking;
     this.stageSettings = options.stageSettings;
@@ -2262,11 +2266,17 @@ export class TuiController {
     return `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
   }
 
+  /** Return the effective configured appearance before a launch environment override. */
+  appearanceMode(): "auto" | "dark" | "light" { return this.configEditor?.settings.appearance ?? "auto"; }
+
+  /** Report whether appearance can use the shared session and saved preferences. */
+  hasAppearancePreferences(): boolean { return !!this.configEditor; }
+
   /** Open bounded preferences without changing the composer or any configuration layer. */
   openPreferences(): boolean {
     if (this.running || this.disposed || !this.configEditor || this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserIndex !== undefined || this.loginApproval !== undefined) return false;
     this.closeModelPicker();
-    this.preferences = { scope: "session", selectedIndex: 0, choiceIndex: 0, rows: preferenceRows(this.configEditor, "session", this.secrets) };
+    this.preferences = { scope: "session", selectedIndex: 0, choiceIndex: 0, rows: preferenceRows(this.configEditor, "session", this.secrets, this.appearanceEnvironment) };
     return true;
   }
 
@@ -2289,7 +2299,7 @@ export class TuiController {
     if (kind === "scope") {
       const scopes = Object.keys(PREFERENCE_SCOPES) as PreferencesSnapshot["scope"][];
       panel.scope = scopes[wrap(scopes.indexOf(panel.scope), scopes.length)]!;
-      panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets);
+      panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment);
       panel.selectedIndex = 0; panel.choiceIndex = 0;
     } else if (kind === "row") {
       panel.selectedIndex = wrap(panel.selectedIndex, panel.rows.length); panel.choiceIndex = 0;
@@ -2299,8 +2309,9 @@ export class TuiController {
   /** Stage the selected action for confirmation, then apply that exact validated transaction atomically. */
   async selectPreference(): Promise<boolean> {
     const panel = this.preferences;
-    if (!panel || this.running || !this.configEditor || !this.stageSettings) return false;
+    if (!panel || this.running || !this.configEditor) return false;
     const row = panel.rows[panel.selectedIndex]!;
+    if (row.key !== "appearance" && !this.stageSettings) return false;
     const choice = row.choices[panel.choiceIndex];
     if (panel.scope !== "memory" && typeof choice === "string" && choice.startsWith("open model")) {
       this.preferences = undefined;
@@ -2310,9 +2321,9 @@ export class TuiController {
     if (this.preferenceTransaction && panel.preview) {
       const transaction = this.preferenceTransaction;
       const message = panel.preview.replace("Enter confirms; Esc cancels.", "Applied.");
-      const applied = await this.changeSettings(async () => transaction, () => message, undefined, true);
+      const applied = await this.changeSettings(async () => transaction, () => message, undefined, row.key !== "appearance", row.key === "appearance");
       if (this.preferences === panel) {
-        if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets); }
+        if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment); }
         else panel.error = `Not applied: ${this.settingsFailure ?? "previous settings retained"} Change selection to stage again, or Esc to cancel.`;
       }
       return applied;
@@ -2332,13 +2343,15 @@ export class TuiController {
           transaction = await this.configEditor!.prepareMemory(choice);
         } else transaction = await this.configEditor!.prepare({ scope: panel.scope, key: row.key, value: row.key === "git" && choice !== undefined ? { changeTracking: choice } : choice });
         abort.signal.throwIfAborted();
-        const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, true);
-        abort.signal.throwIfAborted();
-        if (!staged.model) throw new Error("The selected model is unavailable; previous settings remain active.");
+        if (row.key !== "appearance") {
+          const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, true);
+          abort.signal.throwIfAborted();
+          if (!staged.model) throw new Error("The selected model is unavailable; previous settings remain active.");
+        }
         if (this.disposed || this.preferences !== panel || generation !== this.preferenceGeneration) return false;
         this.preferenceTransaction = transaction;
-        const origin = transaction.origins[row.key as keyof ConfigLayer] ?? transaction.origins.model;
-        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "git" ? transaction.settings.gitChangeTracking : transaction.settings[row.key as keyof ResolvedSettings];
+        const origin = row.key === "appearance" && this.appearanceEnvironment ? "environment" : transaction.origins[row.key as keyof ConfigLayer] ?? transaction.origins.model;
+        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : transaction.settings[row.key as keyof ResolvedSettings];
         const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin ? ` Saved but not effective: shadowed by ${origin}.` : "";
         panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.key}: ${choice === undefined ? "reset override" : String(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
@@ -2373,8 +2386,8 @@ export class TuiController {
     else if (key === "git" && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail('Invalid git value. Use JSON like {"changeTracking":"snapshot"}.'); return false; } }
     else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted config value."); return false; } }
     return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
-      const origin = this.configEditor!.origins[key as keyof ConfigLayer];
-      const effective = key === "git" ? this.configEditor!.settings.gitChangeTracking : this.configEditor!.settings[key as keyof ResolvedSettings];
+      const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
+      const effective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : this.configEditor!.settings[key as keyof ResolvedSettings];
       const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
       const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
@@ -2382,13 +2395,13 @@ export class TuiController {
       const shadowed = action === "set" && source !== origin ? `; shadowed by ${shadowingSource}`
         : action === "reset" && providerSource ? `; ${providerSource} provider selection uses its default model` : "";
       return `${key} (${scope}): ${saved}. Effective: ${displaySetting(key!, effective)} [${origin}]${shadowed}.`;
-    });
+    }, undefined, false, key === "appearance");
   }
 
-  private async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate = false): Promise<boolean> {
+  private async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate = false, appearanceOnly = false): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
-    if (!this.configEditor || !this.stageSettings) { this.fail("Interactive settings are unavailable in this session."); return false; }
+    if (!this.configEditor || (!appearanceOnly && !this.stageSettings)) { this.fail("Interactive settings are unavailable in this session."); return false; }
     this.settingsFailure = undefined;
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -2397,13 +2410,14 @@ export class TuiController {
       try {
         const transaction = await prepare();
         abort.signal.throwIfAborted();
-        const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate);
+        const staged = appearanceOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate);
         abort.signal.throwIfAborted();
-        if (activate && !staged.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
+        if (activate && !staged?.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
         if (this.disposed || this.activeAbort !== abort) return false;
         await transaction.commit(abort.signal);
         // Once the transaction commits, publish the matching runtime even if cancellation arrives at that boundary.
-        this.publishSettings(transaction.settings, staged);
+        if (appearanceOnly) this.onSettingsCommitted?.(transaction.settings, this.contextManager);
+        else this.publishSettings(transaction.settings, staged!);
         this.closeModelPicker();
         this.status = "idle";
         this.notice(redactSecrets(message(), this.secrets));
@@ -2508,6 +2522,9 @@ export class TuiController {
       const settings = this.configEditor.settings;
       const origins = this.configEditor.origins;
       lines.splice(0, lines.length, ...EDITABLE_CONFIG_KEYS.filter(key => (settings as unknown as Record<string, unknown>)[key] !== undefined).map(key => {
+        if (key === "appearance" && this.appearanceEnvironment) {
+          return `appearance: ${this.appearanceEnvironment} [environment] (configured: ${settings.appearance} [${origins.appearance ?? "built-in default"}])`;
+        }
         if (key === "thinking") {
           const requested = (settings as unknown as Record<string, unknown>)[key];
           const effective = this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, requested as never, settings.model);

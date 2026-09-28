@@ -50,6 +50,7 @@ export const CONFIG_SETTING_NAMES = [
   "profiles",
   "profile",
   "git",
+  "appearance",
 ] as const;
 
 const ProviderSchema = Type.Union([
@@ -96,6 +97,9 @@ export const GitConfigSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+/** Saved TUI appearance; auto follows terminal background detection. */
+export const AppearanceSchema = Type.Union([Type.Literal("auto"), Type.Literal("dark"), Type.Literal("light")]);
 
 const PositiveInt = Type.Integer({ minimum: 1 });
 
@@ -144,6 +148,7 @@ export const ConfigSchema = Type.Object(
     profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
     git: Type.Optional(GitConfigSchema),
+    appearance: Type.Optional(AppearanceSchema),
   },
   { additionalProperties: false },
 );
@@ -210,6 +215,8 @@ export interface ResolvedSettings {
   credentialIdentity?: string;
   /** Observational Git change-tracking mode; on-demand reads only on explicit inspection. */
   gitChangeTracking: GitChangeTrackingMode;
+  /** TUI appearance preference before an explicit environment override. */
+  appearance: "auto" | "dark" | "light";
 }
 
 /** Lowest-precedence settings. Files and CLI override these; nothing writes them. */
@@ -571,6 +578,7 @@ export function resolveSettings(input: {
     maxOutput: catalog.maxOutput,
     catalog,
     gitChangeTracking: merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
+    appearance: merged.appearance ?? "auto",
     openaiAuth: merged.openaiAuth ?? "auto",
     ...(merged.contextWindow !== undefined
       ? { explicitContextWindow: merged.contextWindow }
