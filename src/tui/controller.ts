@@ -54,6 +54,15 @@ export interface TuiActivity {
 /** Tool execution state shown in the transcript. */
 export type TuiToolStatus = "running" | "success" | "error" | "cancelled";
 
+/** Recovery choices bound to one failed operation and its current conversation identity. */
+export interface TuiRecovery {
+  operationId: number;
+  entryId: string;
+  category: "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" | "tool" | "session-write";
+  accepted: boolean;
+  actions: readonly ("connect" | "retry-credentials" | "choose-model" | "continue" | "details" | "keep-editing")[];
+}
+
 /** One renderable row in the TUI transcript. */
 export interface TuiTranscriptEntry {
   id: string;
@@ -100,6 +109,8 @@ export interface TuiSnapshot {
   branchTree?: BranchTreeSnapshot;
   /** Renderer-free branch-tree build failure shown instead of a tree. */
   branchTreeError?: string;
+  /** Available actions for the most recent failure, omitted after its session or branch changes. */
+  recovery?: TuiRecovery;
 }
 
 /** Dependencies for one interactive conversation; mirrors headless loop inputs. */
@@ -407,6 +418,9 @@ export class TuiController {
   private provider: string;
   private modelId: string;
   private sessionId: string;
+  private startupRecoveryCategory: "auth" | "credential-store" | "model" | "provider" = "auth";
+  private startupDiagnostic?: string;
+  private sessionWriteBlocked = false;
   private maxTurns?: number;
   private maxConcurrentTools?: number;
   private explicitContextWindow?: number;
@@ -447,6 +461,9 @@ export class TuiController {
   private modelAttemptBaseAssistantId?: string;
   private modelAttemptStarted = false;
   private retryNoticeId?: string;
+  private recovery?: TuiRecovery & { sessionId: string; branchId: string; userId?: string; details?: string; model?: Model;
+    provider: string; modelId: string; profile?: string; openaiAuth?: string };
+  private recoveryRepair = false;
   private toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
   private extensions?: ExtensionRuntime;
   private readonly home?: string;
@@ -478,6 +495,8 @@ export class TuiController {
     this.provider = options.provider;
     this.modelId = options.modelId;
     this.sessionId = options.sessionId;
+    this.startupDiagnostic = options.startupError;
+    if (options.startupError) this.startupRecoveryCategory = startupFailureCategory(options.startupError);
     this.maxTurns = options.maxTurns;
     this.maxConcurrentTools = options.maxConcurrentTools;
     this.explicitContextWindow = options.explicitContextWindow;
@@ -503,8 +522,8 @@ export class TuiController {
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
     if (options.startupError) {
-      this.transcript.push({ ...this.systemEntry(options.startupError), kind: "error" });
-      this.status = "error";
+      const category = this.startupRecoveryCategory;
+      this.offerRecovery(category, false, startupRecoveryMessage(category), options.startupError);
     }
   }
 
@@ -516,6 +535,7 @@ export class TuiController {
     const activeRoute = this.model
       ? this.model.provider === "codex-subscription" ? "ChatGPT subscription" : this.model.provider === "openai" ? "OpenAI API key" : "OpenAI route"
       : this.openaiAuth === "codex" ? "ChatGPT subscription" : this.openaiAuth === "api-key" ? "OpenAI API key" : "OpenAI route";
+    const recovery = this.currentRecovery();
     return {
       status: this.status,
       ...(this.activity ? { activity: this.activitySnapshot() } : {}),
@@ -539,6 +559,7 @@ export class TuiController {
       ...(this.loginApproval !== undefined ? { loginApproval: this.loginApproval } : {}),
       ...(branchTree.tree !== undefined ? { branchTree: branchTree.tree } : {}),
       ...(branchTree.error !== undefined ? { branchTreeError: branchTree.error } : {}),
+      ...(recovery ? { recovery } : {}),
     };
   }
 
@@ -1479,6 +1500,8 @@ export class TuiController {
 
   /** Replace the adapter and displayed provider/model ids without changing session history. */
   setModel(model: Model | undefined, provider: string, modelId: string, profile?: string): void {
+    if (!this.recoveryRepair && (this.model !== model || this.provider !== provider || this.modelId !== modelId ||
+      profile !== undefined && this.profile !== profile)) this.recovery = undefined;
     this.model = model;
     this.provider = provider;
     this.modelId = modelId;
@@ -1678,6 +1701,7 @@ export class TuiController {
     this.modelPicker = undefined;
     this.pickerPreferredIdentity = undefined;
     this.pickerSelectionTouched = false;
+    if (this.recoveryRepair && this.recovery && !this.recoveryIdentityChanged(this.recovery)) this.recoveryRepair = false;
   }
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
@@ -2109,6 +2133,7 @@ export class TuiController {
     sessionId: string,
     options: { workspace?: Workspace; contextManager?: ContextManager } = {},
   ): void {
+    if (session !== this.session) this.sessionWriteBlocked = false;
     this.closeModelPicker();
     this.abortActiveTurn();
     this.extensions?.replaceSession();
@@ -2124,6 +2149,8 @@ export class TuiController {
     }
     this.transcript = buildTranscriptFromSession(session.items);
     this.status = "idle";
+    this.recovery = undefined;
+    this.recoveryRepair = false;
     this.currentAssistantId = undefined;
     this.modelAttemptBaseAssistantId = undefined;
     this.modelAttemptStarted = false;
@@ -2160,15 +2187,16 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction.
    */
   cancel(): void {
-    if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.notice("Callback entry cancelled; no credential was changed."); return; }
-    if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.codexLoginAbort.abort(); return; }
-    if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; return; }
+    if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.notice("Callback entry cancelled; no credential was changed."); return; }
+    if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.codexLoginAbort.abort(); return; }
+    if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; this.recoveryRepair = false; return; }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.credentialEntry) {
       this.credentialEntry.cancel();
       this.credentialEntry = undefined;
       this.credentialTarget = undefined;
       this.pickerReturn = undefined;
+      this.recoveryRepair = false;
       this.notice("Credential entry cancelled; nothing saved.");
       return;
     }
@@ -2214,10 +2242,14 @@ export class TuiController {
     if (text.trim().length === 0 || this.running || this.disposed) {
       return false;
     }
+    if (this.sessionWriteBlocked) {
+      this.notice("This session cannot safely save another turn. Open a new or repaired session before sending this draft.");
+      return false;
+    }
     if (!this.model) {
-      this.fail(this.subscriptionReactivationRequired
-        ? "ChatGPT subscription account changed. Open /model to select an available model for the new account; no request was sent."
-        : "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.");
+      const category = this.subscriptionReactivationRequired ? "model" : this.startupRecoveryCategory;
+      this.offerRecovery(category, false,
+        startupRecoveryMessage(category), this.startupDiagnostic);
       return false;
     }
     const userEntry: TuiTranscriptEntry = {
@@ -2232,11 +2264,104 @@ export class TuiController {
         content: [{ type: "text", text }],
       });
     } catch {
-      this.fail("Could not save your prompt. Check session storage and retry; nothing was sent.");
+      this.offerRecovery("session-write", false, "Could not save your prompt. Your draft is still in the editor and nothing was sent. Open a new or repaired session before sending it.");
       return false;
     }
+    this.recovery = undefined;
     this.transcript.push(userEntry);
     this.status = "running";
+    return this.startAcceptedTurn(accepted);
+  }
+
+  /** Continue an accepted failed turn from its durable session head without appending the user's task again. */
+  async continueRecovery(): Promise<boolean> {
+    const recovery = this.currentRecovery();
+    if (!recovery || !recovery.accepted || !recovery.actions.includes("continue") || this.running || this.disposed || !this.model) return false;
+    this.recovery = undefined;
+    this.status = "running";
+    return this.startAcceptedTurn();
+  }
+
+  /** Open the valid repair surface for the current failure without accepting a draft. */
+  openRecoveryRepair(action: "connect" | "choose-model"): boolean {
+    const recovery = this.currentRecovery();
+    if (!recovery || !recovery.actions.includes(action) || this.running) return false;
+    if (action === "choose-model") {
+      const opened = this.openModelPicker();
+      this.recoveryRepair = opened;
+      return opened;
+    }
+    this.recoveryRepair = true;
+    void this.login("");
+    return true;
+  }
+
+  /** Retry a failed secure-store read without accepting or replaying the editor draft. */
+  async retryCredentialRecovery(): Promise<boolean> {
+    const recovery = this.currentRecovery();
+    if (!recovery || recovery.category !== "credential-store" || !recovery.actions.includes("retry-credentials") ||
+      !this.credentials || this.running || this.disposed) return false;
+    const session = this.session;
+    const sessionId = this.sessionId;
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    this.status = "running";
+    const task = (async () => {
+      let loaded: Awaited<ReturnType<NonNullable<TuiControllerOptions["credentials"]>["reload"]>>;
+      try { loaded = await this.credentials!.reload(this.configEditor?.settings); }
+      catch { loaded = { error: credentialStoreError("read") }; }
+      if (abort.signal.aborted || this.disposed || this.activeAbort !== abort || this.session !== session ||
+        this.sessionId !== sessionId || this.recovery?.entryId !== recovery.entryId) return false;
+      if ("error" in loaded) {
+        const failure = startupFailureCategory(loaded.error);
+        const category = failure === "provider" ? "credential-store" : failure;
+        this.startupRecoveryCategory = category;
+        this.startupDiagnostic = loaded.error;
+        this.offerRecovery(category, recovery.accepted,
+          recovery.accepted ? recoveryMessage(category) : startupRecoveryMessage(category), loaded.error);
+        return false;
+      }
+      this.model = loaded.model;
+      this.status = "idle";
+      if (recovery.accepted && this.recovery) {
+        this.recovery.model = loaded.model;
+        this.recovery.actions = ["continue", ...(this.recovery.details ? ["details" as const] : []), "keep-editing"];
+        const entry = this.transcript.find(item => item.id === this.recovery?.entryId);
+        if (entry) entry.text = `Credential access restored. Continue the saved turn when ready.\nCtrl+R continue · ${this.recovery.details ? "Ctrl+I details · " : ""}Esc keep editing`;
+      } else {
+        this.recovery = undefined;
+        this.notice("Credential access restored. Your draft is ready to send when you press Enter.");
+      }
+      return true;
+    })();
+    const tracked = task.then(() => {});
+    this.activeTurn = tracked;
+    try { return await task; } finally {
+      if (this.activeAbort === abort && abort.signal.aborted) {
+        this.status = "idle";
+        this.notice("Credential retry cancelled. The draft and earlier recovery remain available.");
+      }
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+      if (this.activeTurn === tracked) this.activeTurn = undefined;
+    }
+  }
+
+  /** Dismiss controls while retaining the editor and durable accepted records. */
+  keepEditingRecovery(): boolean {
+    if (!this.currentRecovery()) return false;
+    this.recovery = undefined;
+    return true;
+  }
+
+  /** Show optional redacted diagnostics for the current failed operation. */
+  inspectRecovery(): boolean {
+    const recovery = this.currentRecovery();
+    if (!recovery || !recovery.actions.includes("details")) return false;
+    this.notice(`Failure details: ${this.recovery?.details ?? "No additional diagnostics are available."}`);
+    return true;
+  }
+
+  private async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
     const operationId = this.beginActivity("preparing");
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -2301,6 +2426,7 @@ export class TuiController {
         this.transcript.push(this.systemEntry("Cancelled."));
         await this.captureTurnResult();
         this.status = "idle";
+        this.offerRecovery("provider", true, "The saved turn was stopped. Completed results remain available; continue when ready.", undefined, operationId, false);
         return;
       }
       await this.captureTurnResult();
@@ -2314,7 +2440,7 @@ export class TuiController {
       const message = error instanceof Error ? error.message : String(error);
       this.markProvisionalIncomplete();
       this.clearRetryNotice();
-      this.fail(actionableError(message));
+      this.fail(redactSecrets(message, this.secrets));
       await this.captureTurnResult();
     }
   }
@@ -2383,7 +2509,7 @@ export class TuiController {
       }
       case "model.retry": {
         this.markProvisionalIncomplete();
-        this.showRetryNotice(`Retrying provider request (attempt ${event.attempt + 1}/${event.maxAttempts}): ${event.message}`);
+        this.showRetryNotice(`Retrying provider connection (attempt ${event.attempt + 1}/${event.maxAttempts}).`);
         return;
       }
       case "tool.started": {
@@ -2417,15 +2543,16 @@ export class TuiController {
           event.details,
           event.status,
         );
+        const text = event.status === "error" ? `${display}\nTool failed. Inspect this result before continuing.` : display;
         if (entry) {
-          entry.text = display;
+          entry.text = text;
           entry.toolStatus =
             event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error";
         } else {
           this.transcript.push({
             id: this.nextId("tool"),
             kind: "tool",
-            text: display,
+            text,
             toolName: event.name,
             toolCallId: event.toolCallId,
             toolStatus: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error",
@@ -2462,7 +2589,12 @@ export class TuiController {
       case "error": {
         this.markProvisionalIncomplete();
         this.clearRetryNotice();
-        this.fail(actionableError(event.message));
+        if (event.origin === "harness" && event.category !== "session-write") {
+          this.fail(redactSecrets(event.message, this.secrets));
+        } else {
+          this.offerRecovery(event.category ?? "provider", true,
+            recoveryMessage(event.category ?? "provider"), event.message, operationId);
+        }
         return;
       }
       case "agent.finished": {
@@ -2546,6 +2678,71 @@ export class TuiController {
   private nextId(prefix: string): string {
     this.counter += 1;
     return `${prefix}-${this.counter}`;
+  }
+
+  private currentRecovery(): TuiRecovery | undefined {
+    const recovery = this.recovery;
+    if (recovery && this.recoveryRepair && this.recoveryIdentityChanged(recovery) && this.model &&
+      !this.modelPicker && this.loginChooserIndex === undefined && !this.credentialMutation) {
+      recovery.model = this.model;
+      recovery.provider = this.provider;
+      recovery.modelId = this.modelId;
+      recovery.profile = this.profile;
+      recovery.openaiAuth = this.openaiAuth;
+      if (recovery.accepted && (recovery.category === "auth" || recovery.category === "model")) {
+        recovery.actions = ["continue", ...(recovery.details ? ["details" as const] : []), "keep-editing"];
+        const entry = this.transcript.find(item => item.id === recovery.entryId);
+        if (entry) entry.text = `${recoveryMessage(recovery.category)}\nCtrl+R continue · ${recovery.details ? "Ctrl+I details · " : ""}Esc keep editing`;
+      }
+      this.recoveryRepair = false;
+    }
+    if (!recovery || recovery.sessionId !== this.sessionId || recovery.branchId !== this.session.activeBranchId ||
+      recovery.userId !== this.session.items.findLast(item => item.type === "user")?.id ||
+      (!this.recoveryRepair && this.recoveryIdentityChanged(recovery))) return undefined;
+    const { sessionId: _sessionId, branchId: _branchId, userId: _userId, details: _details, model: _model,
+      provider: _provider, modelId: _modelId, profile: _profile, openaiAuth: _openaiAuth, ...publicRecovery } = recovery;
+    return publicRecovery;
+  }
+
+  private recoveryIdentityChanged(recovery: NonNullable<typeof this.recovery>): boolean {
+    return recovery.model !== this.model || recovery.provider !== this.provider || recovery.modelId !== this.modelId ||
+      recovery.profile !== this.profile || recovery.openaiAuth !== this.openaiAuth;
+  }
+
+  private offerRecovery(category: TuiRecovery["category"], accepted: boolean, message: string, details?: string, operationId = this.operationSequence, markError = true): void {
+    if (category === "session-write") {
+      this.sessionWriteBlocked = true;
+      if (accepted) this.markUnsavedToolResults();
+    }
+    const canContinue = accepted && category !== "session-write" && category !== "credential-store" && category !== "auth" && category !== "model" && this.model !== undefined;
+    const actions: TuiRecovery["actions"] = [
+      ...(category === "auth" ? ["connect" as const] : []),
+      ...(category === "credential-store" && this.credentials ? ["retry-credentials" as const] : []),
+      ...(category === "model" ? ["choose-model" as const] : []),
+      ...(canContinue ? ["continue" as const] : []),
+      ...(details ? ["details" as const] : []),
+      "keep-editing",
+    ];
+    const controls = actions.map(action => ({ connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry credential access", "choose-model": "Alt+M choose model", continue: "Ctrl+R continue", details: "Ctrl+I details", "keep-editing": "Esc keep editing" })[action]);
+    const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: "error", text: `${message}\n${controls.join(" · ")}` };
+    this.transcript.push(entry);
+    if (markError) this.status = "error";
+    this.recovery = { operationId, entryId: entry.id, category, accepted, actions,
+      sessionId: this.sessionId, branchId: this.session.activeBranchId,
+      userId: this.session.items.findLast(item => item.type === "user")?.id,
+      details: details ? redactRecoveryDetails(details, this.secrets) : undefined, model: this.model,
+      provider: this.provider, modelId: this.modelId, profile: this.profile, openaiAuth: this.openaiAuth };
+  }
+
+  /** Label completed effects whose result could not be found after their latest durable call. */
+  private markUnsavedToolResults(): void {
+    const items = this.session.items;
+    for (const [callId, entry] of this.toolEntryByCallId) {
+      const callIndex = items.findLastIndex(item => item.type === "assistant" &&
+        item.content.some(block => block.type === "tool_call" && block.id === callId));
+      if (callIndex < 0 || items.slice(callIndex + 1).some(item => item.type === "tool_result" && item.toolCallId === callId)) continue;
+      entry.text = `${boundDisplay(entry.text, MAX_TOOL_DISPLAY_CHARS - 90)}\nThis tool may have completed, but its result was not saved to the session.`;
+    }
   }
 
   private abortActiveTurn(): void {
@@ -2727,23 +2924,48 @@ function asEditDetails(details: unknown): EditDetailsDisplay | undefined {
   return { path: record.path, hunks };
 }
 
-/** Explain API-key recovery for interactive provider failures. */
-function actionableError(message: string): string {
-  const lowered = message.toLowerCase();
-  if (lowered.includes("provider request failed after") && lowered.includes("transient attempts")) {
-    return `${message} Check the provider connection or rate limit, then continue this session. Completed tool calls remain saved; any incomplete preview was not saved.`;
+/** Plain-language recovery guidance never includes provider diagnostic text. */
+function recoveryMessage(category: TuiRecovery["category"]): string {
+  switch (category) {
+    case "auth": return "The selected provider rejected its sign-in. Connect again, then continue this saved turn. Completed results remain available.";
+    case "credential-store": return "Credential storage is locked or unavailable. Restore OS secure-store access, then retry credential access. Saved task progress remains available.";
+    case "model": return "The selected model is unavailable. Choose a model, then continue this saved turn. Completed results remain available.";
+    case "offline": return "The provider connection timed out or is offline. Check the connection, then continue this saved turn.";
+    case "rate-limit": return "The provider rate limit is still exhausted after retries. Wait for access, then continue this saved turn.";
+    case "session-write": return "Could not save progress to this session. Further tool execution stopped. Inspect the visible output and repair storage before starting new work.";
+    case "tool": return "A tool failed. Inspect its result before deciding how to proceed; completed effects remain in this session.";
+    default: return "The provider could not finish this step. Inspect details or continue this session when ready.";
   }
-  if (
-    lowered.includes("missing anthropic api key") ||
-    lowered.includes("missing openai api key") ||
-    lowered.includes("missing api key")
-  ) {
-    return `${message} Use /login <provider> to save an API key, or set --api-key or the provider environment variable and restart schway.`;
+}
+
+/** Classify startup adapter failures before showing any provider or OS diagnostic text. */
+function startupFailureCategory(message: string): "auth" | "credential-store" | "model" | "provider" {
+  if (/Cannot (read|save|delete) credential in the OS secure store|secure store|Secret Service|libsecret/i.test(message)) return "credential-store";
+  if (/\b(model|deployment)\b.*\b(unavailable|not found|unknown|invalid)|\b(unavailable|unknown|invalid)\s+model\b/i.test(message)) return "model";
+  if (/missing.*(api key|credential)|no .*login found|unauthorized|authentication required/i.test(message)) return "auth";
+  return "provider";
+}
+
+/** Explain a startup failure while keeping its diagnostic out of the primary row. */
+function startupRecoveryMessage(category: "auth" | "credential-store" | "model" | "provider"): string {
+  switch (category) {
+    case "auth": return "Missing credentials. Use /login or connect to the selected provider. Your draft is still in the editor.";
+    case "credential-store": return "Credential storage is locked or unavailable. Restore OS secure-store access, then retry credential access. Your draft is still in the editor.";
+    case "model": return "The selected model is unavailable. Choose an available model; your draft is still in the editor.";
+    case "provider": return "The selected provider could not be loaded. Inspect details and repair its settings; your draft is still in the editor.";
   }
-  if (lowered.includes("login")) {
-    return message;
-  }
-  return message;
+}
+
+/** Bound and mask provider diagnostics before optional display. */
+function redactRecoveryDetails(message: string, secrets: readonly string[]): string {
+  return redactSecrets(message, secrets)
+    .split(/\r?\n/)
+    .map(line => /\b(?:payload|body|data)\b["']?\s*[:=]/i.test(line) ? "[provider payload redacted]" : line)
+    .join("\n")
+    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, "$1 ***")
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,}|gh[opusr]_[A-Za-z0-9_]{8,})\b/g, "***")
+    .replace(/\b(authorization|x-api-key|api-key|api_key|access_token|refresh_token|client_secret|password|session_token|secret|token)\s*[:=]\s*[^\s,;]+/gi, "$1: ***")
+    .slice(0, 2000);
 }
 
 /** Render one resolved setting with secrets masked and structured values summarized. */

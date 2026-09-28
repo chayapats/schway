@@ -10,6 +10,7 @@ import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { fitLine } from "../src/tui/presentation.ts";
 import { resolveTheme, TUI_THEMES } from "../src/tui/theme.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { credentialStoreError } from "../src/auth/store.ts";
 import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
@@ -61,6 +62,65 @@ async function settle(ui: TestRendererSetup & { view: ReturnType<typeof createCo
   ui.view.refresh();
   await ui.flush();
 }
+
+test("rejected draft survives connect cancellation and recovery keys run only the saved turn", async () => {
+  const missing = await setup(80, 24, {}, undefined, { model: undefined });
+  await missing.mockInput.pasteBracketedText("unsent task");
+  missing.mockInput.pressEnter();
+  await settle(missing);
+  expect(missing.editor.plainText).toBe("unsent task");
+  expect(missing.session.items).toHaveLength(0);
+  expect(missing.controller.snapshot().recovery?.actions).toContain("connect");
+  missing.mockInput.pressKey("l", { meta: true });
+  await settle(missing);
+  expect(missing.controller.snapshot().loginChooser).toBeDefined();
+  missing.mockInput.pressEscape();
+  await settle(missing);
+  expect(missing.controller.snapshot().loginChooser).toBeUndefined();
+  expect(missing.editor.plainText).toBe("unsent task");
+
+  const accepted = await setup(80, 24, {}, undefined, { model: createScriptedModel({ responses: [
+    { error: "offline", code: "ENETUNREACH" }, { error: "offline", code: "ENETUNREACH" },
+    { error: "offline", code: "ENETUNREACH" }, { text: "continued once" },
+  ] }), agentClock: { now: () => 0, sleep: async () => {} } });
+  await accepted.mockInput.pasteBracketedText("accepted task");
+  accepted.mockInput.pressEnter();
+  await accepted.waitFor(() => !accepted.controller.running);
+  await settle(accepted);
+  expect(accepted.controller.snapshot().recovery?.actions).toContain("continue");
+  accepted.mockInput.pressKey("r", { ctrl: true });
+  await accepted.waitFor(() => !accepted.controller.running);
+  await settle(accepted);
+  expect(accepted.session.items.filter(item => item.type === "user")).toHaveLength(1);
+  expect(accepted.captureCharFrame()).toContain("continued once");
+});
+
+test("credential-store retry uses real keyboard input and leaves the draft unsent", async () => {
+  let locked = true;
+  const ui = await setup(80, 24, {}, undefined, {
+    model: undefined, startupError: credentialStoreError("read"),
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => locked
+      ? { error: credentialStoreError("read") } : { model: createScriptedModel({ text: "ready" }) } },
+  });
+  await ui.mockInput.pasteBracketedText("draft after unlock");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.editor.plainText).toBe("draft after unlock");
+  expect(ui.controller.snapshot().recovery?.category).toBe("credential-store");
+  ui.mockInput.pressKey("r", { ctrl: true });
+  await settle(ui);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.controller.snapshot().recovery?.category).toBe("credential-store");
+  locked = false;
+  ui.mockInput.pressKey("r", { ctrl: true });
+  await settle(ui);
+  expect(ui.session.items).toHaveLength(0);
+  expect(ui.editor.plainText).toBe("draft after unlock");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !ui.controller.running);
+  expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
+});
 
 test("multiline paste and Ctrl+J submit one prompt; Markdown renders with stable message objects", async () => {
   const ui = await setup();
@@ -129,7 +189,17 @@ test("failed session append retains the editor and never starts the model", asyn
   expect(ui.editor.focused).toBe(true);
   expect(ui.session.items).toHaveLength(0);
   expect(requests).toBe(0);
-  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Could not save your prompt");
+  const guidance = ui.controller.snapshot().transcript.at(-1)?.text ?? "";
+  expect(guidance).toContain("Could not save your prompt");
+  expect(guidance).toContain("draft is still in the editor");
+  expect(guidance).toContain("Open a new or repaired session");
+  expect(guidance).not.toContain("send the draft again");
+  ui.mockInput.pressEnter();
+  await settle(ui);
+  expect(ui.editor.plainText).toBe("  เก็บข้อความ\nและบรรทัดนี้  ");
+  expect(ui.session.items).toHaveLength(0);
+  expect(requests).toBe(0);
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("cannot safely save another turn");
 });
 
 test("invalid local command remains editable after Enter", async () => {
