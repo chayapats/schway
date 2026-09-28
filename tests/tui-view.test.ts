@@ -707,6 +707,8 @@ test("branch navigation keeps draft separate from its preview and returns to the
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("Conversation branches");
   expect(ui.editor.plainText).toBe("");
+  ui.mockInput.pressTab();
+  await settle(ui);
   const before = ui.controller.snapshot().branchTree?.selectedId;
   ui.mockInput.pressArrow("up");
   await settle(ui);
@@ -1502,4 +1504,96 @@ test("context inspection uses keyboard input and retains draft and controls duri
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("Turn completed");
   });
+});
+
+test("branch keyboard selects duplicate shared heads, names a separate fork, and preserves files and draft", async () => {
+  await withTempDir(async dir => {
+    const file = join(dir, "edited.txt");
+    await writeFile(file, "edited outside conversation history");
+    const session = createSession([
+      { type: "user", id: "u", content: [{ type: "text", text: "initial task" }] },
+      { type: "assistant", id: "a", content: [{ type: "text", text: "completed turn" }] },
+    ]);
+    const first = session.forkBranch("a", "same label");
+    const second = session.forkBranch("a", "same label");
+    session.selectBranch("main");
+    const ui = await setup(80, 24, {}, undefined, { session });
+    await ui.mockInput.pasteBracketedText("preserved task\nsecond line");
+    ui.editor.cursorOffset = 4;
+    ui.controller.openBranchTree(); await settle(ui);
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    expect(ui.controller.snapshot().branchTree?.selectedBranchId).toBe(first);
+    expect(session.activeBranchId).toBe("main");
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    expect(ui.controller.snapshot().branchTree?.selectedBranchId).toBe(second);
+    expect(ui.captureCharFrame()).toContain("3. same label");
+    ui.resize(36, 16); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Files/Git unchanged");
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(session.activeBranchId).toBe(second);
+    expect(ui.editor.plainText).toBe("preserved task\nsecond line");
+    ui.controller.openBranchTree(); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().branchTree?.selectedBranchId).toBeUndefined();
+    expect(ui.captureCharFrame()).toContain("Files/Git unchanged");
+    await ui.mockInput.pasteBracketedText("ทางเลือกใหม่");
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(session.listBranches().find(branch => branch.active)?.name).toBe("ทางเลือกใหม่");
+    expect(session.items.map(item => item.id)).toEqual(["u", "a"]);
+    expect(await readFile(file, "utf8")).toBe("edited outside conversation history");
+    expect(ui.editor.plainText).toBe("preserved task\nsecond line");
+    expect(ui.editor.cursorOffset).toBe(4);
+  });
+});
+
+test("branch browsing pages Unicode duplicate labels beyond the cap at narrow width and cancels to reading position", async () => {
+  const session = createSession([
+    { type: "user", id: "u", content: [{ type: "text", text: "task\n".repeat(90) }] },
+    { type: "assistant", id: "a", content: [{ type: "text", text: "done" }] },
+  ]);
+  const branches = Array.from({ length: 65 }, () => session.forkBranch("a", "日本語ไทย🙂".repeat(8)));
+  const ui = await setup(44, 18, {}, undefined, { session });
+  await ui.mockInput.pasteBracketedText("keep me");
+  ui.transcript.scrollTo(12); await settle(ui);
+  const before = ui.transcript.scrollTop;
+  ui.controller.openBranchTree(); await settle(ui);
+  expect(ui.controller.snapshot().branchTree?.selectedBranchId).toBe(branches.at(-1));
+  expect(ui.controller.snapshot().branchTree!.branches.length).toBeLessThanOrEqual(12);
+  expect(ui.captureCharFrame()).toContain("66.");
+  for (let i = 0; i < 64; i++) ui.mockInput.pressArrow("up");
+  await settle(ui);
+  expect(ui.controller.snapshot().branchTree?.selectedBranchId).toBe(branches[0]);
+  expect(session.activeBranchId).toBe(branches.at(-1)!);
+  ui.resize(36, 16); await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Files/Git unchanged");
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.editor.plainText).toBe("keep me");
+  // Restore the original dimensions before comparing viewport position.
+  ui.resize(44, 18); await settle(ui);
+  expect(ui.transcript.scrollTop).toBe(before);
+});
+
+test("busy and failed branch confirmation retain ancestry and the saved draft", async () => {
+  const ui = await setup(44, 18, {}, undefined, { model: createScriptedModel({ waitForAbort: true }) });
+  const turn = ui.controller.submit("running task");
+  await Bun.sleep(10);
+  await ui.mockInput.pasteBracketedText("next task");
+  ui.controller.openBranchTree(); await settle(ui);
+  ui.mockInput.pressEnter(); await settle(ui);
+  expect(ui.controller.isBranchTreeOpen()).toBe(true);
+  expect(ui.session.activeBranchId).toBe("main");
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.editor.plainText).toBe("next task");
+  expect(ui.controller.running).toBe(true);
+  ui.controller.cancel(); await turn;
+  ui.controller.openBranchTree(); await settle(ui);
+  const original = ui.session.selectBranch;
+  ui.session.selectBranch = () => { throw new Error("fixture persistence failure"); };
+  try {
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.controller.isBranchTreeOpen()).toBe(true);
+    expect(ui.session.activeBranchId).toBe("main");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("next task");
+  } finally { ui.session.selectBranch = original; }
 });

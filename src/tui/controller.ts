@@ -292,6 +292,11 @@ export interface BranchTreeBranchRow {
 
 /** Renderer-free branch-tree snapshot with preview-only selection separate from the durable head. */
 export interface BranchTreeSnapshot {
+  /** Stable branch selected for an explicit continue action; absent for a new fork. */
+  selectedBranchId?: string;
+  branchOffset?: number;
+  totalBranchCount?: number;
+  activeBranchLabel?: string;
   rootId: string;
   activeBranchId: string;
   branches: readonly BranchTreeBranchRow[];
@@ -504,6 +509,7 @@ export class TuiController {
   private modelCatalogAbort?: AbortController;
   private branchTreeOpen = false;
   private branchTreeSelectedId?: string;
+  private branchTreeSelectedBranchId?: string;
   private branchTreeCache?: BranchTreeSnapshot;
   private transcript: TuiTranscriptEntry[] = [];
   private status: TuiStatus = "idle";
@@ -1181,7 +1187,7 @@ export class TuiController {
       if (action === "fork") this.session.forkBranch(id, label.length ? label.join(" ") : undefined);
       else this.session.selectBranch(id);
       this.replaceSession(this.session, this.sessionId);
-      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes.`);
+      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes or switch Git branches.`);
       return true;
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
@@ -1195,6 +1201,7 @@ export class TuiController {
     if (this.disposed) return false;
     if (!this.branchTreeOpen) {
       this.branchTreeOpen = true;
+      this.branchTreeSelectedBranchId = this.session.activeBranchId;
       this.branchTreeSelectedId = this.session.activeBranchId ? this.activeHeadId() ?? this.session.rootId : this.session.rootId;
       this.branchTreeCache = undefined;
     }
@@ -1238,13 +1245,12 @@ export class TuiController {
     if (!this.branchTreeOpen || this.disposed) return false;
     const tree = this.currentBranchTree();
     if (!tree || !tree.nodes.length) return false;
-    const order = new Map(tree.nodes.map((node, index) => [node.id, index] as const));
-    const forks = tree.nodes.map((node, index) => ({ node, index })).filter(entry => entry.node.isForkPoint);
-    if (!forks.length) return false;
-    const current = order.get(tree.selectedId) ?? (direction === 1 ? -1 : tree.nodes.length);
-    const candidate = direction === 1 ? forks.find(entry => entry.index > current) ?? forks[0]! : [...forks].reverse().find(entry => entry.index < current) ?? forks.at(-1)!;
-    if (candidate.node.id === tree.selectedId) return false;
-    return this.selectBranchTreeNode(candidate.node.id);
+    const eligible = new Set(this.session.listBranches().flatMap(branch => branch.forkPoints));
+    const points = [this.session.rootId, ...this.session.entries.map(entry => entry.item.id)].filter(id => eligible.has(id));
+    if (!points.length) return false;
+    const current = points.indexOf(tree.selectedId);
+    const next = current < 0 ? 0 : (current + direction + points.length) % points.length;
+    return this.selectBranchTreeNode(points[next]!);
   }
 
   /** Move preview selection to one stable branch head without persisting a switch. */
@@ -1254,7 +1260,10 @@ export class TuiController {
     try { headId = this.session.listBranches().find(branch => branch.id === branchId)?.headId; }
     catch { return false; }
     if (!headId) return false;
-    return this.selectBranchTreeNode(headId);
+    if (!this.selectBranchTreeNode(headId)) return false;
+    this.branchTreeSelectedBranchId = branchId;
+    this.branchTreeCache = undefined;
+    return true;
   }
 
   /** Select one stable entry or root ID for preview, rejecting ancestry-broken IDs without moving selection. */
@@ -1264,7 +1273,7 @@ export class TuiController {
       try { branchTreeAncestryRecords(this.session, id); }
       catch { return false; }
     }
-    if (this.branchTreeSelectedId === id && this.branchTreeCache?.selectedId === id) return true;
+    this.branchTreeSelectedBranchId = undefined;
     this.branchTreeSelectedId = id;
     this.branchTreeCache = undefined;
     return true;
@@ -1287,7 +1296,7 @@ export class TuiController {
     try {
       this.session.selectBranch(branchId);
       this.replaceSession(this.session, this.sessionId);
-      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes.`);
+      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes or switch Git branches.`);
       return true;
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
@@ -1303,7 +1312,7 @@ export class TuiController {
     try {
       this.session.forkBranch(entryId, trimmed);
       this.replaceSession(this.session, this.sessionId);
-      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes.`);
+      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes or switch Git branches.`);
       return true;
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
@@ -1311,26 +1320,32 @@ export class TuiController {
     }
   }
 
-  /** Confirm the preview selection: switch when it is a branch head, otherwise fork its complete turn. */
+  /** Toggle between continuing an existing stable branch and creating a complete-turn fork. */
+  toggleBranchTreeAction(): void {
+    if (!this.branchTreeOpen) return;
+    if (this.branchTreeSelectedBranchId) {
+      this.branchTreeSelectedBranchId = undefined;
+      this.branchTreeCache = undefined;
+      const tree = this.currentBranchTree();
+      if (!tree?.nodes.find(node => node.id === tree.selectedId)?.isForkPoint) this.focusBranchTreeForkPoint(-1);
+    } else this.focusBranchTreeBranch(this.session.activeBranchId);
+  }
+
+  /** Browse every existing branch by stable identity, or complete-turn fork points, without activation. */
+  moveBranchTreeAction(delta: number): boolean {
+    if (!this.branchTreeOpen || !Number.isFinite(delta)) return false;
+    if (!this.branchTreeSelectedBranchId) return this.focusBranchTreeForkPoint(delta < 0 ? -1 : 1);
+    const branches = this.session.listBranches();
+    const index = branches.findIndex(branch => branch.id === this.branchTreeSelectedBranchId);
+    const next = Math.max(0, Math.min(branches.length - 1, index + Math.trunc(delta)));
+    return this.focusBranchTreeBranch(branches[next]!.id);
+  }
+
+  /** Confirm the explicitly selected existing branch or create a named complete-turn fork. */
   confirmBranchTreeSelection(name?: string): boolean {
     if (!this.branchTreeOpen || this.disposed) return false;
-    const tree = this.currentBranchTree();
-    const selected = tree?.selectedId ?? this.branchTreeSelectedId ?? this.activeHeadId() ?? this.session.rootId;
-    let branches: ReturnType<Session["listBranches"]>;
-    try { branches = this.session.listBranches(); }
-    catch (error) { this.fail(error instanceof Error ? error.message : String(error)); return false; }
-    const matches = branches.filter(branch => branch.headId === selected);
-    if (matches.length === 1) return this.activateBranchTreeBranch(matches[0]!.id);
-    if (matches.length > 1) {
-      const active = matches.find(branch => branch.active);
-      if (active && selected === this.activeHeadId()) {
-        this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes.`);
-        return true;
-      }
-      this.fail(`Several branches share head ${selected}. Use /branch switch <branch-id> with one stable ID: ${matches.map(branch => branch.id).join(", ")}.`);
-      return false;
-    }
-    return this.forkBranchTreeNode(selected, name);
+    if (this.branchTreeSelectedBranchId) return this.activateBranchTreeBranch(this.branchTreeSelectedBranchId);
+    return this.forkBranchTreeNode(this.branchTreeSelectedId ?? this.session.rootId, name);
   }
 
   /** Read the durable active head without throwing when the graph is corrupt. */
@@ -1351,6 +1366,22 @@ export class TuiController {
     if (this.branchTreeCache) return this.branchTreeCache;
     try {
       const tree = buildBranchTreeSnapshot(this.session, this.branchTreeSelectedId ?? this.activeHeadId() ?? this.session.rootId);
+      const branches = this.session.listBranches();
+      const activeIndex = branches.findIndex(branch => branch.active);
+      const active = branches[activeIndex];
+      tree.activeBranchLabel = `${activeIndex + 1}. ${active?.name ?? "Conversation path"}`;
+      if (this.branchTreeSelectedBranchId) {
+        const index = branches.findIndex(branch => branch.id === this.branchTreeSelectedBranchId);
+        const offset = Math.max(0, index - 5);
+        tree.branches = branches.slice(offset, offset + 12).map(branch => ({
+          id: branch.id, name: branch.name?.replace(/\s+/g, " ").slice(0, 120), active: branch.active,
+          headId: branch.headId, entryCount: branch.entryCount,
+          preview: branchTreePreviewForRecord(branchTreeAncestryRecords(this.session, branch.headId).find(item => item.type === "user")),
+        }));
+        tree.branchOffset = offset;
+        tree.totalBranchCount = branches.length;
+        tree.selectedBranchId = this.branchTreeSelectedBranchId;
+      }
       this.branchTreeSelectedId = tree.selectedId;
       this.branchTreeCache = tree;
       return tree;
@@ -1374,7 +1405,8 @@ export class TuiController {
     if (!this.secrets.length) return tree;
     return {
       ...tree,
-      branches: tree.branches.map(branch => ({ ...branch, preview: redactSecrets(branch.preview, this.secrets) })),
+      activeBranchLabel: tree.activeBranchLabel ? redactSecrets(tree.activeBranchLabel, this.secrets) : undefined,
+      branches: tree.branches.map(branch => ({ ...branch, name: branch.name ? redactSecrets(branch.name, this.secrets) : undefined, preview: redactSecrets(branch.preview, this.secrets) })),
       nodes: tree.nodes.map(node => ({ ...node, preview: redactSecrets(node.preview, this.secrets) })),
     };
   }

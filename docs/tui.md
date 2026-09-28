@@ -458,3 +458,11 @@ late resume cancellation, bounded previews and auth-command exclusion. Draft
 preservation here is in memory; this picker does not add persistent per-session
 draft recovery. Human
 terminal and live-provider journeys remain unrun; fixtures do not certify them.
+
+## Alternate conversation paths
+
+`/branch tree` opens a preview browser. Arrow keys select numbered, named existing paths; `●` means active and `›` means preview. Duplicate labels still select exact branch identities. Enter continues the selected existing path. Tab chooses a separate new-fork action at a complete turn; type a name and press Enter. Tab returns to existing paths. Escape returns to the ordinary draft, cursor and reading position. See [session branching](sessions.md#browsing-branches-in-the-tui).
+
+The confirmation controls explain that files and Git remain unchanged. Switching history neither undoes edits nor replays tools. While work runs, preview remains available but activation is refused. Failed activation retains the previous path. The list pages through large branch sets and truncates previews; exact IDs remain supported by explicit commands.
+
+Automated verification uses renderer keyboard, bracketed paste and resize input for duplicate shared-head paths, named forks, narrow Unicode lists, busy/failing confirmation, and draft/reading-position restoration. Controller/session fixtures verify persisted compaction isolation and no tool replay. Human terminal and live-provider checks are unrun; these fixtures do not establish live-provider or release success.
