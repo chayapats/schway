@@ -9,7 +9,7 @@ export const COMMAND_DESCRIPTIONS: Record<string, string> = {
   model: "Choose model or profile", thinking: "Set reasoning level", theme: "Choose appearance",
   session: "Session and workspace details", new: "Start a session", sessions: "List saved sessions",
   resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Review changes and command evidence (Alt+R)",
-  compact: "Summarize older context", skills: "List skills", "add-dir": "Attach a workspace",
+  context: "Inspect context and summary", compact: "Summarize older context", skills: "List skills", "add-dir": "Attach a workspace",
   config: "Preferences (Alt+P)", login: "Sign in", logout: "Remove stored credential", help: "Search commands (Alt+H)", quit: "Exit Schway",
 };
 

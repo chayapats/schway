@@ -14,6 +14,7 @@ export type SlashCommandName =
   | "session"
   | "branch"
   | "changes"
+  | "context"
   | "compact"
   | "skills"
   | "add-dir"
@@ -52,6 +53,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "session":
     case "branch":
     case "changes":
+    case "context":
     case "compact":
     case "skills":
     case "add-dir":
@@ -77,6 +79,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/thinking [off|low|medium|high|xhigh|max|ultra|reset] - show or switch reasoning level for future requests",
     "/theme [auto|dark|light] - choose appearance for this session (default: auto)",
     "/session - show session ID, conversation branch, model, and workspace roots",
+    "/context - inspect context estimate and active summary (read-only)",
     "/compact - summarize older turns to free context",
     "/branch list | tree | fork <entry-id> [name] | switch <branch-id> - browse the session tree or continue a saved conversation path",
     "/changes [review|status|diff [-- <path>]] - review changes and command evidence (Alt+R)",

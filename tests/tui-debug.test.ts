@@ -142,12 +142,14 @@ test("interactive /compact reports completed, noop, cancellation and rejected tr
     workspace, provider: "scripted", modelId: "scripted", sessionId,
     onRuntimeEvent: event => { sink.runtime(event); if (event.type === "compaction.started") throw Error("observer failed"); },
   });
-  await expect(failure.compact()).rejects.toThrow("private-manual-error");
+  expect(await failure.compact()).toBe(false);
+  expect(failure.snapshot().status).toBe("idle");
+  expect(failure.snapshot().compactionNotice).toContain("/compact");
   await sink.close();
   const text = await readFile(diagnosticPath(home), "utf8");
   expect(text).not.toContain("private-manual-error");
   const records = text.trim().split("\n").map(line => JSON.parse(line) as { sessionId: string; event: string; fields: { status?: string; reason?: string } });
-  for (const [id, status] of [["manual-success", "completed"], ["manual-noop", "noop"], ["manual-cancel", "noop"], ["manual-failure", "failed"]]) {
+  for (const [id, status] of [["manual-success", "completed"], ["manual-noop", "noop"], ["manual-cancel", "cancelled"], ["manual-failure", "failed"]]) {
     const matching = records.filter(record => record.sessionId === id && record.event.startsWith("compaction."));
     expect(matching.map(record => record.event)).toEqual(["compaction.started", "compaction.finished"]);
     expect(matching[0]?.fields.reason).toBe("manual");

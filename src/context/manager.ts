@@ -54,7 +54,11 @@ export interface PreparedContext {
   items: readonly ConversationItem[];
   /** Compaction record created by this prepare via pressure, if any. */
   compaction?: CompactionRecord;
+  compactionOutcome?: CompactionOutcome;
 }
+
+/** Distinguish a persisted summary from an unchanged, failed, or cancelled attempt. */
+export type CompactionOutcome = "completed" | "noop" | "failed" | "cancelled";
 
 /** Options for creating a context manager with explicit budget overrides. */
 export interface ContextManagerOptions {
@@ -69,6 +73,7 @@ export interface ContextManagerOptions {
 export interface CompactOptions {
   reason: CompactionReason;
   signal?: AbortSignal;
+  onOutcome?: (outcome: CompactionOutcome) => void;
 }
 
 /** Prepare volatile model context and append compaction records while preserving original session history. */
@@ -168,6 +173,7 @@ export function createContextManager(
       let summary = getEffectiveSummary(session.items);
       let items = getEffectiveConversation(session.items);
       let compaction: CompactionRecord | undefined;
+      let compactionOutcome: CompactionOutcome | undefined;
 
       if (model) {
         const window = resolveWindow(model);
@@ -182,6 +188,7 @@ export function createContextManager(
             reason: "pressure",
             signal: prepareOptions.signal,
             keepTurns,
+            onOutcome: outcome => { compactionOutcome = outcome; },
           });
           if (record) {
             compaction = record;
@@ -196,6 +203,7 @@ export function createContextManager(
         context: [...base.slice(0, 1), ...summarySections(summary), ...base.slice(1)],
         items,
         ...(compaction ? { compaction } : {}),
+        ...(compactionOutcome ? { compactionOutcome } : {}),
       };
     },
 
@@ -204,6 +212,7 @@ export function createContextManager(
         reason: compactOptions.reason,
         signal: compactOptions.signal,
         keepTurns,
+        onOutcome: compactOptions.onOutcome,
       });
     },
 
@@ -273,9 +282,11 @@ export function createContextManager(
     compactOptions: CompactOptions & { keepTurns: number },
   ): Promise<CompactionRecord | null> {
     if (compactOptions.signal?.aborted) {
+      compactOptions.onOutcome?.("cancelled");
       return null;
     }
     const release = session.acquireOperation();
+    let outcome: CompactionOutcome = "noop";
     try {
       const effective = getEffectiveConversation(session.items);
       const boundary = findCompactionBoundary(effective, compactOptions.keepTurns);
@@ -305,6 +316,7 @@ export function createContextManager(
       const tokensBefore = estimateSessionTokens(session.items);
       const summary = await summarizeWithModel(model, inputText, compactOptions.signal, (usage, complete) => {
         summaryUsage.push({ usage, complete });
+        if (!complete) outcome = "failed";
       });
       if (!summary || compactOptions.signal?.aborted) {
         return null;
@@ -318,8 +330,15 @@ export function createContextManager(
         ...(latest ? { parentCompactionId: latest.id } : {}),
       };
       session.append(record);
+      outcome = "completed";
       return record;
-    } finally { release(); }
+    } catch (error) {
+      outcome = "failed";
+      throw error;
+    } finally {
+      release();
+      compactOptions.onOutcome?.(compactOptions.signal?.aborted && outcome !== "completed" ? "cancelled" : outcome);
+    }
   }
 }
 
@@ -405,7 +424,7 @@ async function summarizeWithModel(
       }
     }
     const trimmed = text.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return complete && trimmed.length > 0 ? trimmed : null;
   } catch {
     complete = false;
     return null;

@@ -563,6 +563,6 @@ test("aborting during forced compaction discards a late summary and reports canc
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "cancelled" });
   const finished = events.filter((e) => e.type === "compaction.finished");
   expect(finished).toHaveLength(1);
-  expect(finished[0]).toMatchObject({ status: "noop" });
+  expect(finished[0]).toMatchObject({ status: "cancelled" });
   expect(session.items.some((item) => item.type === "compaction")).toBe(false);
 });
