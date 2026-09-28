@@ -261,7 +261,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       contextStatus.visible = renderer.height >= 12;
       const context = snapshot.context;
       contextStatus.content = fitLine(`Context ~${context.estimatedTokens} tokens conversation+summary · cap ${context.capacity ?? "unknown"} · excludes prompt/tools · /context${context.summaryId ? " · active summary" : ""}`, width);
-      hints.visible = renderer.height >= 14;
+      hints.visible = renderer.height >= 14 || !!snapshot.branchTree;
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       const sessionChanged = !!activeSessionId && activeSessionId !== snapshot.sessionId;
@@ -318,7 +318,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue existing · Tab for new fork" : "New fork name (optional)…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
+      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
@@ -502,14 +502,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (snapshot.branchTree) {
           clear(tree);
           const branches = snapshot.branchTree;
-          textRow(tree, "Conversation branches", theme.accent);
-          textRow(tree, fitLine(`● Active: ${branches.activeBranchLabel ?? branches.activeBranchId}`, width), theme.muted);
-          textRow(tree, branches.selectedBranchId ? "Continue existing · Tab: new fork" : "New fork at complete turn · Tab: existing", theme.accent);
-          textRow(tree, "↑/↓ preview · Enter confirm · Esc cancel", theme.muted);
+          if (renderer.height >= 16) textRow(tree, "Conversation branches", theme.accent);
+          if (renderer.height >= 12) {
+            textRow(tree, fitLine(`● Active: ${branches.activeBranchLabel ?? branches.activeBranchId}`, width), theme.muted);
+            textRow(tree, fitLine(branches.selectedBranchId ? "Continue existing · Tab: new fork" : "New fork · Tab: existing", width), theme.accent);
+          }
+          if (renderer.height >= 16) textRow(tree, "↑/↓ preview · Enter confirm · Esc cancel", theme.muted);
+          const visibleRows = Math.max(1, Math.min(8, renderer.height - 14));
           if (branches.selectedBranchId) {
             const selectedIndex = branches.branches.findIndex(branch => branch.id === branches.selectedBranchId);
-            const start = Math.max(0, selectedIndex - 1);
-            branches.branches.slice(start, start + Math.max(1, Math.min(8, renderer.height - 14))).forEach((branch, offset) => {
+            const start = Math.max(0, selectedIndex - Math.min(1, visibleRows - 1));
+            branches.branches.slice(start, start + visibleRows).forEach((branch, offset) => {
               const index = start + offset;
               const selected = branch.id === branches.selectedBranchId;
               const ordinal = (branches.branchOffset ?? 0) + index + 1;
@@ -520,9 +523,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           } else {
             const points = branches.nodes.filter(node => node.isForkPoint);
             const selectedIndex = points.findIndex(node => node.id === branches.selectedId);
-            const start = Math.max(0, selectedIndex - 1);
-            for (const node of points.slice(start, start + Math.max(1, Math.min(8, renderer.height - 14)))) {
-              const row = textRow(tree, fitLine(`${node.id === branches.selectedId ? "›" : " "}${node.isActiveHead ? "●" : " "} ${node.kind} · ${node.preview}`, width), node.id === branches.selectedId ? theme.accent : theme.text);
+            const start = Math.max(0, selectedIndex - Math.min(1, visibleRows - 1));
+            for (const node of points.slice(start, start + visibleRows)) {
+              const row = textRow(tree, fitLine(`${node.id === branches.selectedId ? "›" : " "}${node.isActiveHead ? "●" : " "} ${node.preview}`, width), node.id === branches.selectedId ? theme.accent : theme.text);
               row.id = `branch-${node.id}`;
             }
             if (branches.truncated) textRow(tree, "Windowed turns · arrows browse all complete turns", theme.warning);

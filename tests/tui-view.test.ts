@@ -1597,3 +1597,28 @@ test("busy and failed branch confirmation retain ancestry and the saved draft", 
     expect(ui.editor.plainText).toBe("next task");
   } finally { ui.session.selectBranch = original; }
 });
+
+test("short branch windows always display the exact highlighted existing path and fork point", async () => {
+  const session = createSession([
+    { type: "user", id: "u", content: [{ type: "text", text: "task" }] },
+    { type: "assistant", id: "a", content: [{ type: "text", text: "FORK TARGET" }] },
+  ]);
+  const branch = session.forkBranch("a", "TARGET PATH");
+  const ui = await setup(44, 18, {}, undefined, { session });
+  ui.controller.openBranchTree(); await settle(ui);
+  for (const [width, height] of [[44, 15], [36, 12], [24, 8]]) {
+    ui.resize(width!, height!); await settle(ui);
+    expect(ui.controller.snapshot().branchTree?.selectedBranchId).toBe(branch);
+    expect(ui.captureCharFrame()).toContain("›● 2. TARGET PATH");
+    expect(ui.captureCharFrame()).toContain("Files/Git unchanged");
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().branchTree?.selectedId).toBe("a");
+    expect(ui.captureCharFrame()).toContain("FORK TARGET");
+    ui.mockInput.pressArrow("up"); await settle(ui);
+    expect(ui.controller.snapshot().branchTree?.selectedId).toBe(session.rootId);
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("FORK TARGET");
+    ui.mockInput.pressTab(); await settle(ui);
+  }
+  expect(session.activeBranchId).toBe(branch);
+});
