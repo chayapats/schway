@@ -363,8 +363,11 @@ remain searchable and inspectable. `/branch tree` browses ancestry; only the
 selected branch's summary is active. Resume reconstructs that same boundary.
 
 If compaction fails or is cancelled, the previous durable history remains valid.
-Check the connection and session storage before retrying `/compact`, or select a
-model with more context using `/model`. A no-op can mean there are no older turns
+For a model failure, check the connection before retrying `/compact`, or select a
+model with more context using `/model`. After a session-storage failure, repair
+storage and run the displayed `/resume <session-id>` command before retrying
+`/compact`. Restoring storage alone does not reopen a session handle fenced after
+a failed write. A no-op can mean there are no older turns
 to summarize or the model produced no usable summary. Incomplete summary streams
 are failures and are never committed as successful summaries. Pressure failures
 preserve the existing loop policy; overflow without freed context stops with a
@@ -372,7 +375,10 @@ recovery explanation instead of retrying forever.
 
 Implemented behavior is verified by isolated scripted controller/loop tests for
 pressure, overflow, manual summary, incomplete streams, cancellation, persistence
-failure, unknown usage, capacity changes, branch isolation and disk resume.
+failure, unknown usage, capacity changes, branch isolation and disk resume. A
+real JSONL fault fixture verifies that restoring storage still leaves the old
+handle fenced, and the actual `/resume` dispatcher reloads it before compaction
+can succeed without losing original records.
 Renderer keyboard/paste/resize fixtures invoke `/context`, retain a future draft
 during real tool execution at 44×18, and keep the composer usable at 24×8.
 These fixtures do not establish live-provider, OAuth, or human-terminal success;

@@ -2974,9 +2974,9 @@ export class TuiController {
           : event.status === "cancelled"
             ? "Compaction cancelled. History unchanged; /compact retries when ready."
             : event.status === "failed"
-              ? "Compaction failed. History unchanged; check connection and session storage, then /compact to retry or /model to choose a larger context."
+              ? `Compaction failed. History unchanged. For a model failure, check connection then /compact or /model. After a storage failure, repair storage and /resume ${this.sessionId} to reload before retrying /compact.`
               : "Compaction no-op: no older turns or usable summary. History unchanged; try /compact after more turns.";
-        this.compactionNotice = { identity: this.contextIdentity(), text };
+        this.compactionNotice = { identity: this.contextIdentity(), text: redactSecrets(text, this.secrets) };
         this.transcript.push(this.systemEntry(text));
         return;
       }

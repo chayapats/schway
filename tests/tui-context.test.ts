@@ -2,19 +2,20 @@ import { expect, test } from "bun:test";
 import { createContextManager } from "../src/context/manager.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createSession } from "../src/session/session.ts";
-import type { SessionRecord } from "../src/conversation/types.ts";
+import type { ConversationItem } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import type { Model } from "../src/model/model.ts";
 import { SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
 import { activityDetail } from "../src/tui/presentation.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
+import { handleSlashCommand } from "../src/tui/app.ts";
 
-function history(): SessionRecord[] {
-  return Array.from({ length: 8 }, (_, i) => [
+function history(count = 8): ConversationItem[] {
+  return Array.from({ length: count }, (_, i) => [
     { type: "user" as const, id: `u${i}`, content: [{ type: "text" as const, text: `original ${i}` }] },
     { type: "assistant" as const, id: `a${i}`, content: [{ type: "text" as const, text: `answer ${i}` }] },
   ]).flat();
@@ -33,6 +34,42 @@ test("manual summary failure is failed, preserves history, and permits retry", a
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("/compact");
     expect(controller.running).toBe(false);
     expect(await controller.compact()).toBe(true);
+    controller.dispose();
+  });
+});
+
+test("persisted summary write failure requires explicit resume before compaction can recover", async () => {
+  await withTempDir(async home => {
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    const directory = join(home, "sessions");
+    const session = await createJsonlSession({ directory, workspace });
+    session.append(...history(12));
+    const path = join(directory, `${session.header.id}.jsonl`);
+    const saved = `${path}.saved`;
+    const durable = await readFile(path, "utf8");
+    const controller = new TuiController({ session, workspace, sessionId: session.header.id, provider: "scripted", modelId: "scripted",
+      model: createScriptedModel({ responses: [{ text: "first summary" }, { text: "retry summary" }, { text: "recovered summary" }] }),
+      contextManager: createContextManager(workspace, { home, keepTurns: 2 }) });
+    await rename(path, saved);
+    await mkdir(path);
+    expect(await controller.compact()).toBe(false);
+    expect(controller.snapshot().compactionNotice).toContain(`/resume ${session.header.id}`);
+    expect(controller.snapshot().compactionNotice).not.toContain("EISDIR");
+    expect(session.items).toEqual(history(12));
+    await rm(path, { recursive: true });
+    await rename(saved, path);
+    expect(await controller.compact()).toBe(false); // Restoring storage does not un-fence the old handle.
+    expect(await readFile(path, "utf8")).toBe(durable);
+    const config = await loadConfigEditor({ home, workspaceRoot: home });
+    expect(await handleSlashCommand("resume", session.header.id, {
+      controller, home, workspaceRoot: home, skillScope: { workspaceRoot: home }, sessionsDir: directory,
+      settings: () => config.settings, env: {}, secrets: [], finishQuit: () => {}, stderr: { write: () => {} },
+    })).toBe(true);
+    expect(await controller.compact()).toBe(true);
+    const resumed = await loadJsonlSession({ directory, id: session.header.id });
+    expect(resumed.items.filter(item => item.type !== "compaction")).toEqual(history(12));
+    expect(resumed.items.filter(item => item.type === "compaction")).toHaveLength(1);
+    expect(controller.running).toBe(false);
     controller.dispose();
   });
 });
