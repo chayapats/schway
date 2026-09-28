@@ -1,3 +1,4 @@
+import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { stageInteractiveSettings } from "../src/tui/app.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { expect, test } from "bun:test";
@@ -18,7 +19,7 @@ async function launch(home: string, cwd: string, cli = {}, stage?: () => Promise
   const controller = new TuiController({ session: createSession(), sessionId: "memory", workspace,
     configEditor: editor, provider: settings.provider, modelId: settings.model,
     model: createScriptedModel(), contextManager: createContextManager(workspace),
-    stageSettings: async next => { await stage?.(); return { model: createScriptedModel({ provider: next.provider, id: next.model }), contextManager: createContextManager(workspace) }; },
+    stageSettings: async next => { await stage?.(); return { model: createScriptedModel({ provider: next.openaiAuth === "codex" ? "codex-subscription" : next.provider, id: next.model }), contextManager: createContextManager(workspace) }; },
   });
   return { controller, editor };
 }
@@ -285,5 +286,35 @@ test("reselecting the unchanged startup model cannot remember an activation with
     expect(await controller.selectModel("anthropic/claude-sonnet-4-6")).toBe(false);
     expect(await Bun.file(join(home, ".schway/interactive")).exists()).toBe(false);
     controller.dispose();
+  });
+});
+
+test("resumed subscription capabilities support later reasoning edits even when the picker already cached a catalog", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), a = join(root, "a"), b = join(root, "b"); await mkdir(a); await mkdir(b);
+    const capabilities = [{ id: "account-a", supportedThinking: ["high" as const, "max" as const] }, { id: "account-b", supportedThinking: ["high" as const, "max" as const] }];
+    for (const [path, model] of [[a, "account-a"], [b, "account-b"]] as const) {
+      const seed = await launch(home, path, { provider: "openai", openaiAuth: "codex", model });
+      seed.editor.setModelCapabilities(capabilities);
+      expect(await seed.controller.thinkingCommand("high")).toBe(true); seed.controller.dispose();
+    }
+    const workspace = await resolveWorkspace(a), destination = await resolveWorkspace(b);
+    const editor = await loadConfigEditor({ home, workspaceRoot: a, interactiveMemory: true });
+    let previous = editor.settings;
+    const store = fakeCredentialStore(); await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-token", expiresAt: Date.now() + 600_000 }));
+    const controller = new TuiController({ session: createSession(), sessionId: "account-a", workspace,
+      provider: "openai", modelId: "account-a", model: createScriptedModel({ provider: "codex-subscription", id: "account-a" }), configEditor: editor, contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => capabilities },
+      stageSettings: (next, signal, nextWorkspace, model, activate) => stageInteractiveSettings(next, previous, {
+        model, signal, workspace: nextWorkspace!, home, runtimeApiKey: undefined, env: {}, secrets: [], credentialStore: store, forceLoad: activate,
+        fetch: async () => Response.json({ models: capabilities.map(capability => ({ slug: capability.id, visibility: "list", supported_reasoning_levels: capability.supportedThinking.map(effort => ({ effort })) })) }),
+        createModel: async input => createScriptedModel({ provider: "codex-subscription", id: input.model }),
+      }), onSettingsCommitted: settings => { previous = settings; },
+    });
+    controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1); controller.closeModelPicker();
+    expect(await controller.switchSession(createSession(), "account-b", { workspace: destination, contextManager: createContextManager(destination) })).toBe(true);
+    expect(await controller.thinkingCommand("max")).toBe(true);
+    expect(controller.describeThinking()).toContain("Thinking: max");
+    expect(await controller.configCommand("set maxTurns 9")).toBe(true); controller.dispose();
   });
 });

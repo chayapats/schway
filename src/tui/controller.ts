@@ -162,7 +162,7 @@ export interface TuiControllerOptions {
     listSubscriptionCatalog?: (signal: AbortSignal) => Promise<readonly ModelCapability[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
-  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean) => Promise<{ model?: Model; contextManager: ContextManager }>;
+  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean) => Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: ModelCapability }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
   /** Receive a choice only after its model and route are active. */
@@ -1731,6 +1731,7 @@ export class TuiController {
 
   /** Notify persistence consumers only after the selected route has activated. */
   private async emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): Promise<void> {
+    if (!this.model) return;
     try {
       if (await this.configEditor?.rememberChoice(choice.authRoute)) this.notice("Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.");
       this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
@@ -1825,7 +1826,7 @@ export class TuiController {
     if (selection === "show") { this.notice(this.describeThinking()); return true; }
     let applied: boolean;
     if (selection === "reset") {
-      applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}.`, undefined, true);
+      applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}.`);
     }
     else applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}.`, undefined, true);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
@@ -2115,9 +2116,13 @@ export class TuiController {
     try {
       const editor = await this.configEditor?.forWorkspace(options.workspace.root);
       if (editor?.memoryProblem) throw new Error(editor.memoryProblem);
-      const nextSettings = editor?.settings;
+      let nextSettings = editor?.settings;
       const nextRuntime = nextSettings && this.stageSettings ? await this.stageSettings(nextSettings, abort.signal, options.workspace, this.model) : undefined;
       abort.signal.throwIfAborted();
+      if (editor && nextRuntime?.modelCapability) {
+        editor.setModelCapabilities([nextRuntime.modelCapability]);
+        nextSettings = editor.settings;
+      }
       staged = await this.loadWorkspaceExtensions?.(options.workspace, abort.signal);
       abort.signal.throwIfAborted();
       if (this.disposed || this.activeAbort !== abort) return false;

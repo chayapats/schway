@@ -392,9 +392,10 @@ export async function stageInteractiveSettings(
   next: ResolvedSettings,
   previous: ResolvedSettings,
   options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
-): Promise<{ model?: Model; contextManager: ContextManager }> {
+): Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: import("../model/catalog.ts").ModelCapability }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
+  let modelCapability: import("../model/catalog.ts").ModelCapability | undefined;
   if ((options.forceLoad && !model) || (next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
@@ -405,9 +406,10 @@ export async function stageInteractiveSettings(
     options.signal.throwIfAborted();
     if ("error" in loaded) throw new Error(loaded.error);
     model = loaded.model;
+    modelCapability = loaded.capability;
   }
   options.signal.throwIfAborted();
-  return { model, contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
+  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
