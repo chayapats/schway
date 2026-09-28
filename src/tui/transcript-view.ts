@@ -1,4 +1,4 @@
-import { BoxRenderable, MarkdownRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type CliRenderer, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type BaseRenderable, type CliRenderer, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 import type { TuiTheme } from "./theme.ts";
@@ -27,13 +27,15 @@ function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { str
   });
 }
 
-function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTheme): BoxRenderable | TextRenderable | undefined {
+function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTheme, registerCode: (box: BoxRenderable, text: string, title: string) => void): BoxRenderable | TextRenderable | undefined {
   // Tables and rules use OpenTUI's native structured widgets. Text uses the
   // already-tokenized Markdown AST so first paint never waits for a WASM download.
   if (token.type === "table" || token.type === "hr") return undefined;
   if (token.type === "code") {
     const block = new BoxRenderable(renderer, { flexDirection: "column", backgroundColor: theme.surface, paddingX: 1, marginTop: 1, marginBottom: 1 });
-    block.add(new TextRenderable(renderer, { content: token.lang || "code", fg: theme.muted }));
+    const title = token.lang || "code";
+    registerCode(block, token.text ?? "", title);
+    block.add(new TextRenderable(renderer, { content: title, fg: theme.muted }));
     block.add(new TextRenderable(renderer, { content: linkify([fg(theme.code)(token.text ?? "")]), fg: theme.code, wrapMode: "word" }));
     return block;
   }
@@ -46,14 +48,14 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
         itemBox.add(new TextRenderable(renderer, { content: marker, fg: theme.muted, flexShrink: 0 }));
         const contents = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1 });
         for (const child of item.tokens ?? [{ type: "text", text: item.text }]) {
-          const rendered = markdownBlock(renderer, child, theme);
+          const rendered = markdownBlock(renderer, child, theme, registerCode);
           if (rendered) contents.add(rendered);
         }
         itemBox.add(contents);
         block.add(itemBox);
       }
     } else for (const child of token.tokens ?? []) {
-      const rendered = markdownBlock(renderer, child, theme);
+      const rendered = markdownBlock(renderer, child, theme, registerCode);
       if (rendered) block.add(rendered);
     }
     return block;
@@ -65,7 +67,9 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
 /** A stable transcript item whose text can change without replacing neighboring messages. */
 export interface TranscriptItemView {
   root: BoxRenderable;
-  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number): void;
+  /** Return code blocks in rendered order with the exact sanitized representation shown by Markdown. */
+  codeBlocks(): { id: string; text: string }[];
+  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
 }
 
 /** Create Markdown styles from the same semantic palette used by tools and controls. */
@@ -88,12 +92,31 @@ export function markdownStyle(theme: TuiTheme): SyntaxStyle {
 /** Mount one semantic message, rendering Markdown and code locally without downloading parsers. */
 export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscriptEntry, theme: TuiTheme, syntaxStyle: SyntaxStyle, toggleTool: () => void): TranscriptItemView {
   const root = new BoxRenderable(renderer, { id: `message-${initial.id}`, flexDirection: "column", flexShrink: 0, marginTop: initial.kind === "assistant" ? 1 : 0, marginBottom: initial.kind === "tool" ? 0 : 1 });
+  const codeData = new WeakMap<BoxRenderable, { text: string; title: string }>();
+  const registerCode = (box: BoxRenderable, text: string, title: string) => { codeData.set(box, { text, title }); };
+  const renderMarkdownNode = (token: MarkdownToken) => markdownBlock(renderer, token, theme, registerCode);
+  const codeBlocks = () => {
+    const blocks: { id: string; text: string }[] = [];
+    const visit = (node: BaseRenderable) => {
+      if (node instanceof BoxRenderable) {
+        const code = codeData.get(node);
+        if (code) {
+          const id = `code-${initial.id}-${blocks.length}`;
+          node.id = id;
+          blocks.push({ id, text: code.text });
+        }
+      }
+      for (const child of node.getChildren()) visit(child);
+    };
+    visit(root);
+    return blocks;
+  };
   const label = new TextRenderable(renderer, { content: "", fg: theme.muted, flexShrink: 0 });
   const body = initial.kind === "assistant"
     ? new MarkdownRenderable(renderer, {
       content: "", syntaxStyle, fg: theme.text, streaming: true, internalBlockMode: "top-level",
       tableOptions: { style: "columns", wrapMode: "word", cellPaddingX: 1 },
-      renderNode: (token) => markdownBlock(renderer, token, theme),
+      renderNode: renderMarkdownNode,
     })
     : new TextRenderable(renderer, { content: "", fg: theme.text, wrapMode: "word" });
   if (initial.kind === "user") {
@@ -122,18 +145,20 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   let fingerprint = "";
   return {
     root,
-    update(entry, expanded, streaming, width) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width]);
+    codeBlocks,
+    update(entry, expanded, streaming, width, focusedCode, focusedTool) {
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
       if (next === fingerprint) return;
       fingerprint = next;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const suffix = ` · ${tool.state}`;
-        const name = fitLine(entry.toolName ?? "tool", Math.max(1, width - Bun.stringWidth(suffix) - 5));
-        const targetWidth = width - Bun.stringWidth(name + suffix) - 5;
+        const focusWidth = focusedTool ? 2 : 0;
+        const name = fitLine(entry.toolName ?? "tool", Math.max(1, width - Bun.stringWidth(suffix) - 5 - focusWidth));
+        const targetWidth = width - Bun.stringWidth(name + suffix) - 5 - focusWidth;
         const target = targetWidth > 0 && tool.target ? ` ${fitLine(tool.target, targetWidth)}` : "";
         label.content = new StyledText([
-          fg(theme.muted)(`${expanded ? "▾" : "▸"} `),
+          fg(focusedTool ? theme.accent : theme.muted)(`${focusedTool ? "› " : ""}${expanded ? "▾" : "▸"} `),
           fg(theme[tool.tone])(`${tool.marker} `),
           fg(theme.text)(name),
           fg(theme.muted)(target),
@@ -154,6 +179,15 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         body.content = body instanceof MarkdownRenderable ? displayText(entry.text) : linkify([fg(color)(displayText(entry.text))]);
         if (body instanceof MarkdownRenderable) body.streaming = streaming;
         else body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
+        if (entry.kind === "assistant") {
+          codeBlocks().forEach(({ id }, index) => {
+            const code = root.findDescendantById(id) as BoxRenderable;
+            const label = code.getChildren()[0] as TextRenderable;
+            const title = codeData.get(code)!.title;
+            label.content = `${focusedCode === index ? "› " : ""}${title}`;
+            label.fg = focusedCode === index ? theme.accent : theme.muted;
+          });
+        }
       }
     },
   };
