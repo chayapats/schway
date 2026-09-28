@@ -145,7 +145,7 @@ without provider credentials. All lanes name their actual environment:
 
 | Environment and input | Observed result | Limit |
 | --- | --- | --- |
-| Installed package, Linux OS PTY, `TERM=xterm-256color`, `NO_COLOR=1`, 80×24→32×12, bracketed paste, Enter, Ctrl+L, Ctrl+C | Automated fixture passed: scripted answer emitted Thai/CJK/emoji/combining bytes; process exited 0 with alternate-screen enter/exit. | Raw PTY bytes verify input/output and cleanup, not human visual cell alignment. This lane runs only on Linux with Python 3 available. |
+| Installed package, Linux OS PTY, `TERM=xterm-256color`, `NO_COLOR=1`, 80×24→32×12, bracketed paste, Enter, Ctrl+L, Ctrl+C | Automated fixture passed: Thai/CJK/emoji/combining draft bytes appeared before Enter; after resize, Ctrl+L redrew `Ready` and `Ask Schway`; process exited 0 with alternate-screen enter/exit. | Raw PTY bytes verify input/output and cleanup, not human visual cell alignment. This lane runs only on Linux with Python 3 available. |
 | Linux OS PTY, `TERM=xterm-256color`, no multiplexer, 80×24→32×12, bracketed Thai/CJK/emoji/combining paste, Enter, Ctrl+L, Ctrl+C | Process exited 0 and emitted alternate-screen enter/exit. Captured bytes contained Thai, emoji and the decomposed combining sequence; a second `--scroll` run contained CJK output. | Raw PTY bytes do not prove visual cell alignment in a human terminal. |
 | Detached tmux PTY, 80×24→32×12, literal Thai/CJK/emoji/combining input, Enter, Ctrl+L | Captured draft displayed Thai, CJK and emoji; the narrow completed screen retained `Ready` before and after Ctrl+L. | The decomposed combining sequence was absent from `capture-pane`; this run does not establish its tmux rendering. |
 
