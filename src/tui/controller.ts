@@ -547,7 +547,8 @@ export class TuiController {
       ...(!this.model && this.startupDiagnostic ? { readinessDetail:
         /Missing OpenAI API key/.test(this.startupDiagnostic) ? "Missing OpenAI API key."
           : /no longer available/.test(this.startupDiagnostic) ? "Remembered model is no longer available in this account."
-            : undefined } : {}),
+            : /Selected model is not available/.test(this.startupDiagnostic) ? "Selected model is not available in this account."
+              : undefined } : {}),
       ...(this.activity ? { activity: this.activitySnapshot() } : {}),
       transcript: this.transcript.map((entry) =>
         this.secrets.length === 0

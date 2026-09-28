@@ -191,8 +191,10 @@ returns to the same search and highlight after a successful save. Connection
 cancellation leaves the model unchanged. An empty, offline, or failed ChatGPT
 catalog shows a retry action; it never substitutes API-key billing for a
 subscription choice. Explicit CLI and configuration preferences remain visible
-until the user selects a different route. Picker choices apply to the current
-session; cross-launch workspace preference persistence is a separate slice.
+until the user selects a different route. Successful picker choices apply to the
+current session and are remembered for later interactive launches in the same
+canonical workspace, below explicit CLI and configuration preferences.
+Headless launches do not automatically consume this memory.
 
 Prompt recall excludes slash commands. API keys and pasted browser callbacks
 use separate masked entries that intercept keyboard and paste events; neither

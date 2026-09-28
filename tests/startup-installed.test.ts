@@ -41,7 +41,12 @@ if (scenario.startsWith("invalid-model")) {
   values.set("api-key:openai", "must-not-fallback");
 }
 mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
-  get: async identity => { if (scenario === "denied") throw new Error(storeModule.credentialStoreError("read")); return values.get(identity.account) ?? null; },
+  get: async identity => {
+    // Returning startup deliberately exceeds the old fixed 80 ms wait.
+    if (scenario === "returning") await Bun.sleep(150);
+    if (scenario === "denied") throw new Error(storeModule.credentialStoreError("read"));
+    return values.get(identity.account) ?? null;
+  },
   set: async (identity, value) => { values.set(identity.account, value); },
   delete: async identity => values.delete(identity.account),
 }) }));
@@ -67,10 +72,21 @@ globalThis.fetch = async (url, init) => {
 const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
 mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => terminal.renderer }));
 const assert = (condition, message) => { if (!condition) throw new Error(message + "\\n" + terminal.captureCharFrame()); };
-const settle = async () => { await Bun.sleep(80); await terminal.flush(); };
+const settle = async (ready, label) => {
+  const deadline = performance.now() + 5000;
+  do {
+    await terminal.flush();
+    if (ready()) return;
+    await Bun.sleep(10);
+  } while (performance.now() < deadline);
+  assert(false, "Timed out waiting for " + label);
+};
+const screenIncludes = text => terminal.captureCharFrame().includes(text);
 void (async () => {
-  for (let i = 0; i < 100 && !terminal.renderer.root.findDescendantById("prompt"); i++) await Bun.sleep(10);
-  await settle();
+  const startupAction = scenario === "returning" ? "Type a task"
+    : scenario === "denied" ? "Repair connection"
+    : scenario.startsWith("invalid-model") ? "Choose an available model" : "Connect to get started";
+  await settle(() => terminal.renderer.root.findDescendantById("prompt") && screenIncludes(startupAction), "startup readiness");
   const editor = terminal.renderer.root.findDescendantById("prompt");
   const initial = terminal.captureCharFrame();
   assert(initial.includes(process.cwd().split("/").at(-1)), "workspace missing");
@@ -80,7 +96,9 @@ void (async () => {
     assert(!initial.includes("Connect to get started"), "redundant setup");
   } else if (scenario === "denied" || scenario.startsWith("invalid-model")) {
     assert(initial.includes(scenario === "denied" ? "Repair connection" : "Choose an available model"), "repair action missing");
-    terminal.mockInput.pressKey("i", { ctrl: true }); await settle();
+    if (scenario.startsWith("invalid-model")) assert(initial.includes("Selected model is not available in this account."), "selected model explanation missing");
+    terminal.mockInput.pressKey("i", { ctrl: true });
+    await settle(() => terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "failure details");
     assert(terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "actual failure unavailable");
   } else {
     assert(initial.includes("Connect to get started"), "fresh connect action missing");
@@ -88,19 +106,26 @@ void (async () => {
     await terminal.mockInput.pasteBracketedText(draft);
     terminal.mockInput.pressArrow("left");
     const cursor = editor.cursorOffset;
-    terminal.mockInput.pressKey("l", { meta: true }); await settle();
+    terminal.mockInput.pressKey("l", { meta: true });
+    await settle(() => screenIncludes("Anthropic API key"), "sign-in choices");
     assert(terminal.captureCharFrame().includes("Anthropic API key"), "keyboard connect unavailable");
-    terminal.mockInput.pressEscape(); await settle();
+    terminal.mockInput.pressEscape();
+    await settle(() => editor.focused && editor.plainText === draft && editor.cursorOffset === cursor && !screenIncludes("Sign in ·"), "cancelled setup");
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "cancel lost draft/cursor");
-    terminal.mockInput.pressKey("l", { meta: true }); await settle();
+    terminal.mockInput.pressKey("l", { meta: true });
+    await settle(() => screenIncludes("Anthropic API key"), "reopened sign-in choices");
     for (let i = 0; i < 4; i++) terminal.mockInput.pressArrow("down");
-    terminal.mockInput.pressEnter(); await settle();
+    terminal.mockInput.pressEnter();
+    await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");
-    terminal.mockInput.pressEnter(); await settle();
+    terminal.mockInput.pressEnter();
+    await settle(() => loaderCalls === 1 && editor.focused && screenIncludes("Ready"), "connection activation");
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "activation lost draft/cursor");
     assert(requests === 0, "setup submitted task");
-    terminal.resize(44, 18); await settle();
-    terminal.mockInput.pressEnter(); await settle();
+    terminal.resize(44, 18);
+    await settle(() => terminal.renderer.width === 44 && editor.focused && screenIncludes("Ready"), "resized task editor");
+    terminal.mockInput.pressEnter();
+    await settle(() => requests === 1 && screenIncludes("fixture complete"), "explicit task completion");
     assert(requests === 1, "explicit send did not produce exactly one request");
   }
   if (scenario.startsWith("invalid-model")) {
