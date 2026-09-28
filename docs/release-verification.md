@@ -131,17 +131,21 @@ Schway process that had not yet been restarted after the UI changes.
 The packed executable fixture in `tests/startup-installed.test.ts` passed with
 isolated user state: saved dark appearance painted a dark canvas on restart,
 and `SCHWAY_THEME=light` painted the light canvas while preferences named the
-environment as the effective source. Renderer keyboard tests exercised
-auto/dark/light persistence and reset, `NO_COLOR`, 32×12 preference focus,
+environment as the effective source. Its Linux OS PTY lane launched the packed
+executable through a real pseudo-terminal with a scripted installed model and
+fake credential store; no paid API or developer credential store was used.
+Renderer keyboard tests exercised
+auto/dark/light persistence and reset, `NO_COLOR`, 24×8/32×12 preference focus,
 Unicode draft/cursor preservation, and appearance edits while no model was
 available. Existing renderer tests cover the panel keyboard and resize
 contract listed in `docs/tui.md`; they do not verify future panels.
 
-The terminal observations below used the scripted source demo, without provider
-credentials. They are kept separate from the installed renderer result:
+The additional manual terminal observations used the scripted source demo,
+without provider credentials. All lanes name their actual environment:
 
 | Environment and input | Observed result | Limit |
 | --- | --- | --- |
+| Installed package, Linux OS PTY, `TERM=xterm-256color`, `NO_COLOR=1`, 80×24→32×12, bracketed paste, Enter, Ctrl+L, Ctrl+C | Automated fixture passed: scripted answer emitted Thai/CJK/emoji/combining bytes; process exited 0 with alternate-screen enter/exit. | Raw PTY bytes verify input/output and cleanup, not human visual cell alignment. This lane runs only on Linux with Python 3 available. |
 | Linux OS PTY, `TERM=xterm-256color`, no multiplexer, 80×24→32×12, bracketed Thai/CJK/emoji/combining paste, Enter, Ctrl+L, Ctrl+C | Process exited 0 and emitted alternate-screen enter/exit. Captured bytes contained Thai, emoji and the decomposed combining sequence; a second `--scroll` run contained CJK output. | Raw PTY bytes do not prove visual cell alignment in a human terminal. |
 | Detached tmux PTY, 80×24→32×12, literal Thai/CJK/emoji/combining input, Enter, Ctrl+L | Captured draft displayed Thai, CJK and emoji; the narrow completed screen retained `Ready` before and after Ctrl+L. | The decomposed combining sequence was absent from `capture-pane`; this run does not establish its tmux rendering. |
 

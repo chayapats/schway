@@ -12,7 +12,7 @@ async function run(argv: string[], cwd: string, env?: Record<string, string>) {
   } finally { clearTimeout(timeout); }
 }
 
-test("packed executable outside checkout shows fresh/remembered readiness, preserves setup draft, and exits actionably for broken config/storage", async () => {
+test("packed executable verifies startup, appearance and Linux PTY cleanup with isolated state", async () => {
   await withTempDir(async root => {
     const repo = resolve(import.meta.dir, "..");
     const packed = await run(["npm", "pack", "--silent", "--pack-destination", root], repo);
@@ -177,6 +177,37 @@ void (async () => {
       let users = 0;
       for (const file of sessionFiles) users += (await Bun.file(join(sessions, file)).text()).split("\n").filter(line => { try { return JSON.parse(line).entries?.some((entry: { item?: { type?: string } }) => entry.item?.type === "user"); } catch { return false; } }).length;
       expect(users).toBe(scenario === "fresh" ? 1 : 0);
+    }
+    if (process.platform === "linux" && Bun.which("python3")) {
+      const ptyPreload = join(install, "pty-preload.ts");
+      await Bun.write(ptyPreload, `
+import { mock } from "bun:test";
+import * as storeModule from "./node_modules/schway/src/auth/store.ts";
+mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
+  get: async () => null, set: async () => {}, delete: async () => {},
+}) }));
+mock.module("./node_modules/schway/src/model/loader.ts", () => ({ loadProviderModel: async input => ({
+  provider: input.provider, id: input.model,
+  async *stream() {
+    const text = "Answer: ไทย 中文 👩‍💻 é";
+    yield { type: "text_delta", text };
+    yield { type: "message_complete", message: { type: "assistant", id: "installed-pty-response", content: [{ type: "text", text }] } };
+  },
+}) }));
+`);
+      const ptyLaunchers = join(root, "pty-launchers");
+      await mkdir(ptyLaunchers);
+      const ptyLauncher = join(ptyLaunchers, "bun");
+      await Bun.write(ptyLauncher, `#!/bin/bash\nexec ${shell(process.execPath)} --preload ${shell(ptyPreload)} "$@"\n`);
+      await chmod(ptyLauncher, 0o755);
+      const ptyHome = join(root, "pty-home"), ptyWork = join(root, "pty-work");
+      await mkdir(ptyHome); await mkdir(ptyWork);
+      const pty = await run(["python3", join(repo, "tests/fixtures/installed-pty.py"), executable, "--provider", "openai", "--model", "offline-demo"],
+        ptyWork, buildIsolatedCliEnv(ptyHome, { PATH: `${ptyLaunchers}:${process.env.PATH}`, OPENAI_API_KEY: "fixture-key", NO_COLOR: "1" }));
+      expect(pty.exit).toBe(0);
+      const result = JSON.parse(pty.stdout) as Record<string, unknown>;
+      expect(result).toMatchObject({ exit: 0, thai: true, cjk: true, emoji: true, combining: true,
+        alternate_enter: true, alternate_exit: true, answer: true });
     }
     const plainHome = join(root, "plain-home"), plainWork = join(root, "plain-work");
     await mkdir(plainHome); await mkdir(plainWork);

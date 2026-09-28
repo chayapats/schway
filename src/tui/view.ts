@@ -507,9 +507,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const choice = row.choices[panel.choiceIndex];
           const compact = renderer.width < 45 || renderer.height < 16;
           const lines = [
-            `Preferences · ${panel.scope} · ${panel.selectedIndex + 1}/${panel.rows.length}`,
-            `› ${row.key}: ${row.value}${compact ? "" : ` [${row.origin}]`}`,
-            `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
+            compact ? fitLine(`Preferences · ${panel.selectedIndex + 1}/${panel.rows.length}`, width) : `Preferences · ${panel.scope} · ${panel.selectedIndex + 1}/${panel.rows.length}`,
+            compact ? fitLine(`› ${row.key}: ${row.value}`, width) : `› ${row.key}: ${row.value} [${row.origin}]`,
+            compact ? fitLine(`Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)}`, width) : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
             panel.error ?? panel.preview ?? "Enter previews; no changes yet.",
             compact ? "↑↓ field · ←→ choice · Tab scope · Enter accept · Esc back" : "↑/↓ field · ←/→ choice · Tab scope",
             ...(compact ? [] : ["Enter preview/confirm · Esc back · PgUp/PgDn scroll"]),

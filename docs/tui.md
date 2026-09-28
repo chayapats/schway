@@ -200,9 +200,10 @@ panel owns its navigation keys; Enter acts on the highlighted choice only; Esc
 returns one level toward the composer without submitting the draft. Login
 approval waits for the external result, so Enter does not claim to approve it.
 Credential and callback entry mask their text. Resizing reflows the active
-panel without changing its selection or operation. At 32×12, preferences put
-the selected field and value choice above longer guidance so both remain
-visible. Ctrl+L re-enters the renderer and keeps conversation, draft and
+panel without changing its selection or operation. At 24×8 and 32×12,
+preferences put the selected field and value choice above longer guidance,
+clipping long display values so both controls remain visible. Ctrl+L
+re-enters the renderer and keeps conversation, draft and
 reading position.
 
 | Panel | Navigation and action | Renderer fixture |
@@ -378,7 +379,8 @@ restart, CLI shadowing, file/memory conflicts, malformed files, unavailable mode
 staging cancellation, secret exclusion, draft/cursor restoration, appearance
 palettes and environment precedence. `tests/startup-installed.test.ts` exercises
 the appearance canvas and source through a packed executable in fresh isolated
-processes. Live provider, OAuth and human-terminal preference checks have not
+processes, plus installed Unicode/resize/recovery input and terminal cleanup
+through a Linux OS PTY. Live provider, OAuth and human-terminal preference checks have not
 been run; they remain for the installed-journey gate.
 
 ## Discover commands and skills

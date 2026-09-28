@@ -1030,6 +1030,21 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
   });
 });
 
+test("long configured values do not hide the keyboard choice on the smallest panel", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "home/.schway"), { recursive: true });
+    await writeFile(join(root, "home/.schway/config.json"), JSON.stringify({ model: "very-long-" + "model-id-".repeat(16) }));
+    const ui = await preferenceFixture(root);
+    ui.resize(24, 8);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    const modelIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "model");
+    for (let index = 0; index < modelIndex; index++) ui.mockInput.pressArrow("down");
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("› model");
+    expect(ui.captureCharFrame()).toContain("Choice:");
+  });
+});
+
 test("session theme command and preferences share the effective source without requiring a model", async () => {
   await withTempDir(async root => {
     const ui = await preferenceFixture(root, { model: undefined,
