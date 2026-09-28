@@ -42,7 +42,7 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
         await command(mode === "select-codex" ? "/thinking max" : "/thinking high");
       }
       if (mode.startsWith("forget")) { await command("/model forget"); screen += "\n" + terminal.captureCharFrame(); }
-      await command("/config");
+      await command("/config show");
       screen += "\n" + terminal.captureCharFrame();
       terminal.resize(44, 18);
       await terminal.flush();

@@ -1,3 +1,4 @@
+import { PREFERENCE_SCOPES } from "./preferences.ts";
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
@@ -25,7 +26,7 @@ const COMMANDS: Record<string, string> = {
   session: "Show session and workspace details", new: "Start a session", sessions: "List saved sessions",
   resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Inspect Git changes",
   compact: "Summarize older context", skills: "List available skills", "add-dir": "Attach a workspace",
-  config: "Show or change settings", login: "Sign in", logout: "Remove a credential", help: "Commands and shortcuts", quit: "Exit Schway",
+  config: "Preferences: inspect, change or reset", login: "Sign in", logout: "Remove a credential", help: "Commands and shortcuts", quit: "Exit Schway",
 };
 
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
@@ -57,6 +58,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let savedDraftCursor = 0;
   let savedDraftRevision = 0;
   let panelFingerprint = "";
+  let preferenceScrollToEnd = false;
   let treePreviewKey = "";
   let treePreview: readonly TuiTranscriptEntry[] = [];
   let historyIndex = -1;
@@ -90,6 +92,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   transcript.add(empty);
   const tree = new ScrollBoxRenderable(renderer, { id: "branch-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   root.add(tree);
+  const preferencePanel = new ScrollBoxRenderable(renderer, { id: "preferences-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
+  root.add(preferencePanel);
   const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted });
   root.add(activity);
   const picker = new BoxRenderable(renderer, { id: "picker", flexDirection: "column", flexShrink: 0, backgroundColor: theme.surface, paddingX: 1, visible: false });
@@ -124,7 +128,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (target instanceof ScrollBoxRenderable || target === editor) return;
     }
     event.stopPropagation();
-    (controller.snapshot().branchTree ? tree : transcript).processMouseEvent(event);
+    (controller.snapshot().preferences ? preferencePanel : controller.snapshot().branchTree ? tree : transcript).processMouseEvent(event);
   };
 
   const showInteractionNotice = (text: string) => {
@@ -250,7 +254,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         searchIndex.clear();
         latest();
       }
-      const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
+      const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : "";
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : "");
       if (nextPanel !== panelMode) {
@@ -287,7 +291,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      transcript.visible = !snapshot.branchTree;
+      transcript.visible = !snapshot.branchTree && !snapshot.preferences;
+      preferencePanel.visible = !!snapshot.preferences;
       tree.visible = !!snapshot.branchTree;
       empty.visible = entries.length === 0;
       const route = snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`);
@@ -357,11 +362,31 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.loginChooser, snapshot.loginApproval, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
-        if (snapshot.loginChooser) {
+        clear(preferencePanel);
+        if (snapshot.preferences) {
+          const panel = snapshot.preferences;
+          const row = panel.rows[panel.selectedIndex]!;
+          const choice = row.choices[panel.choiceIndex];
+          const lines = [
+            `Preferences · ${panel.scope} · ${panel.selectedIndex + 1}/${panel.rows.length}`,
+            "↑/↓ field · ←/→ choice · Tab scope",
+            "Enter preview/confirm · Esc back · PgUp/PgDn scroll",
+            PREFERENCE_SCOPES[panel.scope],
+            `${row.key}: ${row.value} [${row.origin}]`,
+            `Saved: ${row.saved}`,
+            row.reset,
+            `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
+            panel.error ?? panel.preview ?? "Enter previews; no changes yet.",
+          ];
+          // Wrap details, including scope/confirmation, instead of silently clipping at narrow widths.
+          for (const line of lines) textRow(preferencePanel, safe(line), theme.text).wrapMode = "word";
+          if (panel.preview || panel.error) preferenceScrollToEnd = true;
+          else preferencePanel.scrollTo(0);
+        } else if (snapshot.loginChooser) {
           textRow(picker, fitLine("Sign in · ↑/↓ select · Enter continue · Esc back", width - 2), theme.accent);
           const choices = snapshot.loginChooser.choices;
           const start = Math.max(0, Math.min(snapshot.loginChooser.selectedIndex - Math.floor(maxRows / 2), choices.length - maxRows));
@@ -433,6 +458,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (snapshot.readiness === "loading" || snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
       void controller.selectLoginChoice().then(refresh, fail);
+      return;
+    }
+    if (snapshot.preferences) {
+      void controller.selectPreference().then(refresh, fail);
       return;
     }
     if (snapshot.modelPicker) {
@@ -538,7 +567,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       searchScrollToMatch = false;
       handled(); return;
     }
-    if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser) {
+    if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser && !snapshot.preferences) {
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("retry-credentials")) {
         void controller.retryCredentialRecovery().then(refresh, fail); handled(); return;
       }
@@ -594,6 +623,21 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // cells are repainted even when its cached scene has not changed.
       renderer.suspend();
       renderer.resume();
+      handled(); return;
+    }
+    if ((key.meta || key.option) && name === "p") {
+      if (!panelMode && !inspection) controller.openPreferences();
+      else if (!snapshot.preferences) showInteractionNotice("Close the current panel with Esc before opening preferences.");
+      handled(); return;
+    }
+    if (snapshot.preferences) {
+      if (name === "pageup" || name === "pagedown") preferencePanel.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, preferencePanel.viewport.height - 2));
+      else if (name === "escape") controller.closePreferences();
+      else if (name === "up" || name === "down") controller.movePreference(name === "up" ? -1 : 1);
+      else if (name === "left" || name === "right") controller.movePreference(name === "left" ? -1 : 1, "choice");
+      else if (name === "tab") controller.movePreference(key.shift ? -1 : 1, "scope");
+      else if (name === "return" || name === "kpenter") void controller.selectPreference().then(refresh, fail);
+      else if (key.ctrl && name === "c") { if (controller.running) controller.cancel(); else options.quit(); }
       handled(); return;
     }
     if ((key.meta || key.option) && name === "m") { controller.openModelPicker(); handled(); return; }
@@ -677,6 +721,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     transcript.scrollTo(targetTop + visualLine - Math.floor(transcript.viewport.height / 2));
   };
   const onFrame = () => {
+    if (preferenceScrollToEnd) { preferenceScrollToEnd = false; preferencePanel.scrollTo(preferencePanel.scrollHeight); }
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;

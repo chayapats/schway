@@ -42,7 +42,8 @@ export class InteractiveMemory {
   }
 
   /** Atomically replace or forget this workspace's choice only if its observed revision remains current. */
-  async write(choice?: InteractiveChoice): Promise<void> {
+  async write(choice?: InteractiveChoice, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (choice) validateChoice(choice);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const lockPath = `${this.path}.lock`;
@@ -61,6 +62,7 @@ export class InteractiveMemory {
       const text = JSON.stringify(record) + "\n";
       const file = await open(temporary, "wx", 0o600);
       try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
+      signal?.throwIfAborted();
       await rename(temporary, this.path);
       this.before = text;
       this.choice = choice;

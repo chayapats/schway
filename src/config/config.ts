@@ -458,7 +458,7 @@ export function effectiveInteractiveMemory(input: { memory?: ConfigLayer; user?:
   for (const layer of [input.user, input.project, input.cli, input.session]) {
     if (!layer) continue;
     if (layer.provider !== undefined && layer.provider !== input.memory.provider ||
-        layer.profile !== undefined && layer.profile !== input.memory.profile) return undefined;
+        layer.profile !== undefined && (layer.profile ?? undefined) !== input.memory.profile) return undefined;
     if (layer.openaiAuth !== undefined && layer.openaiAuth !== input.memory.openaiAuth) { delete memory.model; delete memory.thinking; delete memory.openaiAuth; }
     if (layer.model !== undefined && layer.model !== memory.model) delete memory.thinking;
   }

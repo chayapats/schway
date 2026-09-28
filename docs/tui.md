@@ -97,6 +97,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Complete command | Type `/`, Up/Down to select, Tab to insert |
 | Dismiss suggestions | Esc |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
+| Preferences | `/config` or Alt+P; Up/Down field, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
 | Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, Ctrl+R to retry a failed account catalog, Esc to cancel |
 | Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
@@ -250,3 +251,23 @@ those checks remain for the installed-journey gate.
 Renderer tests exercise real keyboard/paste events, Markdown, output disclosure,
 draft preservation, scroll anchoring, theme changes, Unicode, and resizing. Tests
 assert behavior and a few stable layout landmarks, not snapshots of every cell.
+
+
+Open preferences from the task composer. If another panel is open, Escape returns
+to the task before Alt+P; preferences likewise keep ownership of input until closed
+(or their explicit model-picker action is selected). Repeated Alt+P preserves the
+current preference selection and preview.
+
+Preferences show effective values, their origins, and separately saved lower values.
+Session edits disappear on restart; workspace memory, user config and project
+config are distinct explicit scopes, explained before confirmation. Project scope
+writes only after the second Enter. Credential material is excluded; model-route
+selection is a separate action that activates and remembers a successful choice.
+Textual `/config set`, `/config reset` and `/config show` remain available.
+
+The preference journeys are covered by real renderer keyboard, paste, resize and
+isolated persisted-state fixtures in `tests/tui-view.test.ts`: scoped save/reset,
+restart, CLI shadowing, file/memory conflicts, malformed files, unavailable models,
+staging cancellation, secret exclusion and draft/cursor restoration. Live provider,
+OAuth and human-terminal preference checks have not been run; they remain for the
+installed-journey gate.
