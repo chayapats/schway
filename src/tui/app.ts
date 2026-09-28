@@ -42,7 +42,6 @@ import type { CodexLoginRunner } from "./controller.ts";
 import type { BranchTreeSnapshot } from "./controller.ts";
 import {
   dispatchEditorInput,
-  helpText,
   parseSkillInvocation,
 } from "./commands.ts";
 import {
@@ -615,8 +614,7 @@ export async function handleSlashCommand(
       return ctx.controller.logout(args);
     }
     case "help": {
-      ctx.controller.notice(helpText(ctx.controller.extensionCommands()));
-      return true;
+      return ctx.controller.openCommandHelp();
     }
     case "quit": {
       ctx.finishQuit();

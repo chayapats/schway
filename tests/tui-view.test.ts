@@ -6,6 +6,7 @@ import { TuiController, buildTranscriptFromSession, type CodexLoginRunner, type 
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
+import { handleSlashCommand } from "../src/tui/app.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { fitLine } from "../src/tui/presentation.ts";
 import { resolveTheme, TUI_THEMES } from "../src/tui/theme.ts";
@@ -15,7 +16,7 @@ import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
 import { join } from "node:path";
-import { realpath, mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { realpath, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { pathToFileURL } from "node:url";
 import { loadExtensions } from "../src/extensions/loader.ts";
@@ -361,13 +362,14 @@ test("copying tool headings does not expand them or copy redacted secrets", asyn
 });
 
 test("copy works on scrolled multiline output and does not cancel a running turn", async () => {
-  const ui = await setup(60, 18);
+  const streamed = Promise.withResolvers<void>();
+  const ui = await setup(60, 18, {}, undefined, { onRuntimeEvent: event => {
+    if (event.type === "model.delta" && event.content.type === "text" && event.content.text.includes("Line 59")) streamed.resolve();
+  } });
   ui.controller.setModel(createScriptedModel({ text: Array.from({ length: 60 }, (_, i) => `Line ${String(i).padStart(2, "0")} ข้อความภาษาไทย\n\n`).join(""), waitForAbort: true }), "scripted", "streaming");
   const turn = ui.controller.submit("Produce long output");
-  await ui.waitFor(async () => {
-    await Bun.sleep(5);
-    return ui.controller.snapshot().transcript.at(-1)?.text.includes("Line 59") === true;
-  }, { maxPasses: 100 });
+  await streamed.promise;
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Line 59");
   await settle(ui);
   await ui.mockInput.pressKeys(["\u001b[5~"]);
   await settle(ui);
@@ -640,7 +642,8 @@ test("login chooser and masked callback use real keyboard and paste input while 
   expect(ui.editor.cursorOffset).toBe(8);
   expect(ui.session.items).toHaveLength(0);
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
+  expect(ui.controller.running).toBe(false);
   await settle(ui);
   ui.mockInput.pressArrow("up");
   expect(ui.editor.plainText).toBe("continue this task\nsecond line");
@@ -749,9 +752,11 @@ test("resize keeps the editor and status inside the viewport with a populated tr
 });
 
 test("retry and cancellation stay visible at 44×18 while a future draft survives paste, scroll and resize", async () => {
+  const retryStarted = Promise.withResolvers<void>();
   let releaseSettlement!: () => void;
   const settlement = new Promise<void>(resolve => { releaseSettlement = resolve; });
   const ui = await setup(80, 24, {}, undefined, {
+    onRuntimeEvent: event => { if (event.type === "model.retry") retryStarted.resolve(); },
     model: createScriptedModel({ error: "temporary outage", status: 503, headers: { "Retry-After": "30" } }),
     agentClock: {
       now: () => 0,
@@ -764,7 +769,8 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   });
   await ui.mockInput.typeText("start work");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "retry");
+  await retryStarted.promise;
+  expect(ui.controller.snapshot().activity?.phase).toBe("retry");
   await ui.mockInput.pasteBracketedText("future draft\nsecond line");
   await ui.mockInput.pressKeys(["\u001b[5~"]);
   ui.resize(44, 18);
@@ -859,13 +865,14 @@ test("mouse and keyboard scrolling keep a long Markdown transcript stable across
 });
 
 test("scrolling through a streaming answer preserves the visible text while its tail grows", async () => {
-  const ui = await setup(70, 20);
+  const streamed = Promise.withResolvers<void>();
+  const ui = await setup(70, 20, {}, undefined, { onRuntimeEvent: event => {
+    if (event.type === "model.delta" && event.content.type === "text" && event.content.text.includes("Paragraph 59")) streamed.resolve();
+  } });
   ui.controller.setModel(createScriptedModel({ text: Array.from({ length: 60 }, (_, i) => `Paragraph ${i}\n\n`).join(""), waitForAbort: true }), "scripted", "streaming-model");
   const turn = ui.controller.submit("Stream a long answer");
-  await ui.waitFor(async () => {
-    await Bun.sleep(5);
-    return ui.controller.snapshot().transcript.at(-1)?.text.includes("Paragraph 59") === true;
-  }, { maxPasses: 100 });
+  await streamed.promise;
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Paragraph 59");
   await settle(ui);
   expect(ui.controller.snapshot().status).toBe("running");
   await ui.mockInput.pressKeys(["\u001b[5~"]);
@@ -937,8 +944,11 @@ async function preferenceFixture(root: string, extra: Partial<TuiControllerOptio
 
 async function preferenceEnter(ui: Awaited<ReturnType<typeof preferenceFixture>>) {
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
-  await settle(ui);
+  // Renderer-idle passes do not wait for filesystem fsync/rename or model staging.
+  await ui.controller.waitForIdle();
+  expect(ui.controller.running).toBe(false);
+  ui.view.refresh();
+  await ui.flush();
 }
 
 test("preferences real keyboard scopes preview save reset and restart preserve the pending draft", async () => {
@@ -1199,5 +1209,148 @@ test("preferences refuse competing login and branch panels and restore the origi
       expect(ui.editor.plainText).toBe("retained task\nsecond line"); expect(ui.editor.cursorOffset).toBe(5);
       expect(ui.editor.focused).toBe(true);
     }
+  });
+});
+
+
+test("command help real keyboard search and Escape retain task cursor and transcript at 44x18", async () => {
+  const ui = await setup(44, 18);
+  await ui.mockInput.pasteBracketedText("retained task 日本語\nsecond line"); ui.editor.cursorOffset = 4;
+  const entries = ui.controller.snapshot().transcript.length;
+  for (let count = 0; count < 3; count++) {
+    ui.mockInput.pressKey("h", { meta: true }); await settle(ui);
+    expect(ui.controller.commandHelpOpen).toBe(true);
+    await ui.mockInput.pasteBracketedText("no-such-command-zz"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("No matches");
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.session.items).toHaveLength(0);
+    ui.mockInput.pressKey("m", { meta: true }); await settle(ui);
+    expect(ui.controller.snapshot().modelPicker).toBeUndefined();
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("retained task 日本語\nsecond line"); expect(ui.editor.cursorOffset).toBe(4);
+    expect(ui.controller.snapshot().transcript).toHaveLength(entries);
+  }
+  ui.mockInput.pressKey("h", { meta: true }); await settle(ui);
+  await ui.mockInput.pasteBracketedText("appearance"); await settle(ui);
+  expect(ui.captureCharFrame()).toContain("/theme");
+  ui.mockInput.pressTab(); await settle(ui);
+  expect(ui.editor.plainText).toBe("/theme ");
+  expect(ui.session.items).toHaveLength(0);
+  ui.mockInput.pressArrow("down"); ui.mockInput.pressTab(); await settle(ui);
+  expect(ui.editor.plainText).toBe("/theme dark");
+  expect(ui.session.items).toHaveLength(0);
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.editor.plainText).toBe("retained task 日本語\nsecond line"); expect(ui.editor.cursorOffset).toBe(4);
+});
+
+test("dynamic skill refresh cannot transfer an active completion selection to its neighbor", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    for (const name of ["alpha", "alpine"]) {
+      await mkdir(join(root, ".agents/skills", name), { recursive: true });
+      await writeFile(join(root, ".agents/skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: Unicode 日本語 ${"description ".repeat(30)}\n---\nBODY`);
+    }
+    const ui = await setup(44, 18, {}, undefined, { workspace, home: join(root, "home") });
+    await ui.controller.refreshCommands();
+    await ui.mockInput.pasteBracketedText("/al"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("project skill");
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    await rm(join(root, ".agents/skills/alpine"), { recursive: true });
+    await ui.controller.refreshCommands(); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe("/al");
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe("/alpha ");
+    expect(ui.session.items).toHaveLength(0);
+    ui.mockInput.pressEscape(); await settle(ui);
+    await mkdir(join(root, ".agents/skills/alpine"), { recursive: true });
+    await writeFile(join(root, ".agents/skills/alpine/SKILL.md"), "---\nname: alpine\ndescription: Returned\n---\nBODY");
+    ui.editor.setText("/al"); await settle(ui); await ui.controller.refreshCommands(); await settle(ui);
+    expect(ui.controller.commandChoices("/al").map(entry => entry.name)).toEqual(["alpha", "alpine"]);
+  });
+});
+
+
+test("reasoning argument completion uses actual budget validation and never invents subscription levels", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { provider: "anthropic", model: "claude-sonnet-4-6", maxOutput: 2048 });
+    expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset", "thinking off", "thinking low"]);
+    ui.controller.setModel(createScriptedModel({ provider: "codex-subscription", id: "unknown" }), "openai", "unknown");
+    expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset"]);
+    await ui.mockInput.pasteBracketedText("/thinking "); await settle(ui);
+    expect(ui.captureCharFrame()).not.toContain("thinking high");
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe("/thinking reset");
+    expect(ui.session.items).toHaveLength(0);
+  });
+});
+
+
+test("compatible reasoning conflict and verified subscription metadata constrain controller choices", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "home/.schway"), { recursive: true });
+    await writeFile(join(root, "home/.schway/config.json"), JSON.stringify({ extraBody: { reasoning_effort: "high" } }));
+    const ui = await preferenceFixture(root, {}, { provider: "openai-compatible", model: "custom", baseUrl: "http://localhost:1234/v1", auth: "none" });
+    expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset"]);
+  });
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "account-model", openaiAuth: "codex" });
+    ui.configEditor.setModelCapabilities([{ id: "account-model", supportedThinking: ["medium", "high"] }]);
+    ui.controller.setModel(createScriptedModel({ provider: "codex-subscription", id: "account-model" }), "openai", "account-model");
+    expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset", "thinking medium", "thinking high"]);
+  });
+});
+
+
+test("/help uses the real application dispatcher without transcript spam; theme and session collisions retain input", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    const context = { controller: ui.controller, home: ui.home, workspaceRoot: ui.workspaceRoot,
+      skillScope: { workspaceRoot: ui.workspaceRoot }, sessionsDir: join(root, "sessions"), settings: () => ui.configEditor.settings,
+      env: {}, secrets: [], finishQuit: () => {}, stderr: { write() {} } };
+    const before = ui.controller.snapshot().transcript.length;
+    expect(await dispatchEditorInput("/help", ui.controller, (command, accepted) => handleSlashCommand(command.name, command.args, context, command.raw, accepted))).toBe(true);
+    await settle(ui);
+    expect(ui.controller.commandHelpOpen).toBe(true); expect(ui.controller.snapshot().transcript).toHaveLength(before);
+    ui.mockInput.pressEscape(); await settle(ui);
+    for (const name of ["theme", "session"]) {
+      await mkdir(join(ui.workspaceRoot, ".agents/skills", name), { recursive: true });
+      await writeFile(join(ui.workspaceRoot, ".agents/skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: collision\n---\nbody`);
+      ui.editor.setText(`/${name}`); ui.mockInput.pressEnter(); await settle(ui);
+      expect(ui.editor.plainText).toBe(`/${name}`);
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("conflicts with skill");
+    }
+    expect(ui.session.items).toHaveLength(0);
+  });
+});
+
+
+test("editing while view-local command validation waits preserves the newer draft", async () => {
+  const ui = await setup();
+  let finish!: (collision: boolean) => void;
+  ui.controller.commandCollision = () => new Promise(resolve => { finish = resolve; });
+  await ui.mockInput.pasteBracketedText("/theme light"); ui.mockInput.pressEnter();
+  await ui.mockInput.pasteBracketedText(" changed"); await settle(ui);
+  finish(false); await settle(ui);
+  expect(ui.editor.plainText).toBe("/theme light changed");
+  expect(ui.controller.snapshot().transcript).toHaveLength(0);
+});
+
+
+test("renaming skill metadata at the same path cannot silently change the selected invocation", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const path = join(root, ".agents/skills/alpha/SKILL.md");
+    await mkdir(join(root, ".agents/skills/alpha"), { recursive: true });
+    await writeFile(path, "---\nname: alpha\ndescription: Original\n---\nbody");
+    const ui = await setup(44, 18, {}, undefined, { workspace, home: join(root, "home") });
+    await ui.controller.refreshCommands();
+    await ui.mockInput.pasteBracketedText("/al"); await settle(ui);
+    await writeFile(path, "---\nname: alpine\ndescription: Renamed\n---\nbody");
+    await ui.controller.refreshCommands(); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe("/al");
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe("/alpine "); expect(ui.session.items).toHaveLength(0);
   });
 });

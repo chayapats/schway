@@ -9,16 +9,17 @@ import { credentialEnvironmentVariable, isOpenAIAuthPreference } from "../auth/c
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { SessionRecord } from "../conversation/types.ts";
-import { lookupModel, type ModelCapability } from "../model/catalog.ts";
+import { commandCatalog, type CommandChoice } from "./command-catalog.ts";
+import { getThinkingSupport, lookupModel, type ModelCapability } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import type { SessionEntry } from "../session/branches.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
-import { discoverSkills } from "../skills/skills.ts";
+import { discoverSkills, type SkillDiscovery } from "../skills/skills.ts";
 import type { ConfigLayer, ResolvedSettings } from "../config/config.ts";
-import { DEFAULT_GIT_CHANGE_TRACKING, describeEffectiveThinking, type GitChangeTrackingMode } from "../config/config.ts";
+import { DEFAULT_GIT_CHANGE_TRACKING, validateThinking, describeEffectiveThinking, type GitChangeTrackingMode } from "../config/config.ts";
 import { EDITABLE_CONFIG_KEYS, type ConfigEditor, type ConfigScope, type ConfigTransaction } from "../config/editing.ts";
 import { parseLoginTarget, parseModelArgs, parseThinkingArgs, LOGIN_USAGE } from "./commands.ts";
 import {
@@ -1483,6 +1484,63 @@ export class TuiController {
     }
   }
 
+  /** Whether the ephemeral command help surface owns the editor. */
+  commandHelpOpen = false;
+
+  /** Open searchable command help without appending to the conversation. */
+  openCommandHelp(): boolean { if (this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserIndex !== undefined || this.loginApproval || this.credentialEntry || this.loginCallbackValue !== undefined) return false; this.commandHelpOpen = true; return true; }
+
+  private discoveredCommands?: SkillDiscovery;
+  private commandDiscoveryGeneration = 0;
+
+  /** Refresh only skill frontmatter; stale workspace/session results cannot replace current choices. */
+  async refreshCommands(): Promise<boolean> {
+    const generation = ++this.commandDiscoveryGeneration;
+    const workspace = this.workspace;
+    const session = this.session;
+    if (!workspace) return true;
+    const skills = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true });
+    if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) return false;
+    this.discoveredCommands = skills;
+    return true;
+  }
+
+  /** Expose safe discovery entries without loading providers or activating skills. */
+  commandChoices(input = "/", help = false): CommandChoice[] {
+    const commands = commandCatalog(this.extensionCommands(), this.discoveredCommands);
+    if (help) {
+      const query = input.trim().toLowerCase();
+      return commands.filter(entry => `${entry.name} ${entry.description} ${entry.source}`.toLowerCase().includes(query));
+    }
+    const match = /^\/(thinking|theme|login|logout)\s+([^\s]*)$/.exec(input);
+    if (match) {
+      const name = match[1]!;
+      if (commands.some(entry => entry.name === name && !entry.available)) return commands.filter(entry => entry.name === name);
+      const settings = this.configEditor?.settings;
+      const subscription = this.openaiAuth === "codex" || this.model?.provider === "codex-subscription";
+      const advertised = settings?.provider === this.provider && settings.model === this.modelId ? settings.supportedThinking : undefined;
+      const levels = advertised ?? (subscription ? [] : getThinkingSupport(this.provider, this.modelId).supported);
+      const applicable = levels.filter(level => !validateThinking(this.provider, this.modelId, level, settings?.extraBody, settings?.provider === this.provider && settings.model === this.modelId ? settings.maxOutput : this.effectiveBudgets().maxOutput, subscription ? advertised ? { id: this.modelId, supportedThinking: advertised } : null : undefined));
+      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["anthropic", "openai", "openai-compatible", "codex"];
+      return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
+    }
+    if (!/^\/[^\s]*$/.test(input)) return [];
+    return commands.filter(entry => entry.name.startsWith(input.slice(1).toLowerCase()));
+  }
+
+  /** Revalidate command collisions immediately before explicit dispatch. */
+  async commandCollision(name: string): Promise<boolean> {
+    const generation = ++this.commandDiscoveryGeneration;
+    const workspace = this.workspace;
+    const session = this.session;
+    const skills = workspace ? await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true }) : undefined;
+    if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) { this.notice("Command availability changed. Retry the retained command."); return true; }
+    this.discoveredCommands = skills;
+    const choices = commandCatalog(this.extensionCommands(), skills).filter(entry => entry.name === name);
+    if (choices.some(entry => !entry.available)) { this.notice(`/${name} conflicts with skill or command sources: ${choices.map(entry => entry.source).join(", ")}. Rename the skill or extension; use /help to inspect sources.`); return true; }
+    return false;
+  }
+
   /** Return active extension command metadata for help and editor dispatch. */
   extensionCommands() { return this.extensions?.commandList() ?? []; }
 
@@ -2316,6 +2374,9 @@ export class TuiController {
     sessionId: string,
     options: { workspace?: Workspace; contextManager?: ContextManager } = {},
   ): void {
+    this.commandHelpOpen = false;
+    this.discoveredCommands = undefined;
+    this.commandDiscoveryGeneration++;
     if (session !== this.session) this.sessionWriteBlocked = false;
     this.closeModelPicker();
     this.abortActiveTurn();

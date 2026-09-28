@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { discoverPackages, type EnabledPackage } from "../packages/packages.ts";
 
@@ -220,13 +220,15 @@ export async function discoverSkills(options: {
   reservedNames?: readonly string[];
   signal?: AbortSignal;
   packages?: readonly EnabledPackage[];
+  /** Read bounded frontmatter only for interactive discovery; activation validates the body. */
+  metadataOnly?: boolean;
 }): Promise<SkillDiscovery> {
   options.signal?.throwIfAborted();
   const reserved = options.reservedNames ?? RESERVED_SKILL_NAMES;
   const projectScopes = [];
   const roots = new Set(await Promise.all([options.workspaceRoot, ...(options.extraRoots ?? [])].map(canonicalDir)));
   for (const root of roots) {
-    projectScopes.push(await readSkillScope(join(root, ".agents", "skills"), "project", options.workspaceRoot, options.signal));
+    projectScopes.push(await readSkillScope(join(root, ".agents", "skills"), "project", options.workspaceRoot, options.signal, options.metadataOnly));
   }
   const project = {
     skills: projectScopes.flatMap(scope => scope.skills),
@@ -239,12 +241,12 @@ export async function discoverSkills(options: {
           join(await canonicalDir(options.home), ".schway", "skills"),
           "global",
           undefined,
-          options.signal,
+          options.signal, options.metadataOnly,
         );
   options.signal?.throwIfAborted();
   const packages = options.packages ?? await discoverPackages(options);
-  const projectPackages = await readPackageSkills(packages.filter(pkg => pkg.scope === "project"), options.signal);
-  const globalPackages = await readPackageSkills(packages.filter(pkg => pkg.scope === "global"), options.signal);
+  const projectPackages = await readPackageSkills(packages.filter(pkg => pkg.scope === "project"), options.signal, options.metadataOnly);
+  const globalPackages = await readPackageSkills(packages.filter(pkg => pkg.scope === "global"), options.signal, options.metadataOnly);
   const levels = [project, projectPackages, globalScope, globalPackages];
   const diagnostics = levels.flatMap(level => level.diagnostics);
   const ambiguous: AmbiguousSkill[] = [];
@@ -524,6 +526,7 @@ async function readSkillScope(
   scope: SkillScope,
   workspaceRoot?: string,
   signal?: AbortSignal,
+  metadataOnly = false,
 ): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
   signal?.throwIfAborted();
   const skills: SkillMetadata[] = [];
@@ -579,7 +582,7 @@ async function readSkillScope(
     }
     let content: string;
     try {
-      content = await readFile(canonicalSkillFile, { encoding: "utf8", signal });
+      content = metadataOnly ? await readSkillFrontmatter(canonicalSkillFile, signal) : await readFile(canonicalSkillFile, { encoding: "utf8", signal });
     } catch {
       signal?.throwIfAborted();
       diagnostics.push({ source: display, reason: "SKILL.md cannot be read" });
@@ -596,7 +599,7 @@ async function readSkillScope(
         reason: `skill name '${parsed.value.name}' does not match directory '${entry}'; invoking as '${parsed.value.name}'`,
       });
     }
-    if (parsed.value.body.trim().length === 0) {
+    if (!metadataOnly && parsed.value.body.trim().length === 0) {
       diagnostics.push({ source: display, reason: `skill '${entry}' has an empty body` });
       continue;
     }
@@ -614,7 +617,7 @@ async function readSkillScope(
 }
 
 /** Parse only manifest-declared skill directories, keeping package identity in diagnostics. */
-async function readPackageSkills(packages: readonly EnabledPackage[], signal?: AbortSignal): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
+async function readPackageSkills(packages: readonly EnabledPackage[], signal?: AbortSignal, metadataOnly = false): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
   const skills: SkillMetadata[] = [];
   const diagnostics: SkillDiagnostic[] = [];
   for (const pkg of packages) {
@@ -625,7 +628,7 @@ async function readPackageSkills(packages: readonly EnabledPackage[], signal?: A
       let content: string;
       try {
         skillFile = await realpath(declaredFile);
-        content = await readFile(skillFile, { encoding: "utf8", signal });
+        content = metadataOnly ? await readSkillFrontmatter(skillFile, signal) : await readFile(skillFile, { encoding: "utf8", signal });
         signal?.throwIfAborted();
       } catch {
         signal?.throwIfAborted();
@@ -634,7 +637,7 @@ async function readPackageSkills(packages: readonly EnabledPackage[], signal?: A
       }
       const displayPath = `${pkg.source}: ${skillFile}`;
       const parsed = parseSkillFile(content);
-      if (!parsed.ok || !parsed.value.body.trim()) {
+      if (!parsed.ok || (!metadataOnly && !parsed.value.body.trim())) {
         diagnostics.push({ source: displayPath, reason: parsed.ok ? "skill has an empty body" : parsed.error });
         continue;
       }
@@ -696,4 +699,25 @@ async function canonicalDir(path: string): Promise<string> {
 function isInside(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+}
+
+/** Read bounded metadata chunks and stop at the closing frontmatter, never loading the full body. */
+async function readSkillFrontmatter(path: string, signal?: AbortSignal): Promise<string> {
+  const file = await open(path, "r");
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) throw new Error("SKILL.md is not a file");
+    const chunks: Buffer[] = [];
+    for (let position = 0; position < 16_384; position += 512) {
+      signal?.throwIfAborted();
+      const chunk = Buffer.alloc(512);
+      const { bytesRead } = await file.read(chunk, 0, chunk.length, position);
+      chunks.push(chunk.subarray(0, bytesRead));
+      const content = Buffer.concat(chunks).toString("utf8") + (position + bytesRead >= info.size ? "\n" : "");
+      const match = /^\s*---[^\S\n]*\r?\n[\s\S]*?\n---[^\S\n]*\r?\n/.exec(content);
+      if (match) return match[0];
+      if (bytesRead < chunk.length) break;
+    }
+    throw new Error("missing closing frontmatter or metadata exceeds 16 KiB");
+  } finally { await file.close(); }
 }

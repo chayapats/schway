@@ -21,14 +21,6 @@ export interface ConversationViewOptions {
   openUrl?(url: string): Promise<void>;
 }
 
-const COMMANDS: Record<string, string> = {
-  model: "Choose model or profile", thinking: "Set reasoning level", theme: "auto / dark / light",
-  session: "Show session and workspace details", new: "Start a session", sessions: "List saved sessions",
-  resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Inspect Git changes",
-  compact: "Summarize older context", skills: "List available skills", "add-dir": "Attach a workspace",
-  config: "Preferences: inspect, change or reset", login: "Sign in", logout: "Remove a credential", help: "Commands and shortcuts", quit: "Exit Schway",
-};
-
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
 export function createConversationView(renderer: CliRenderer, options: ConversationViewOptions) {
   const controller = options.controller;
@@ -65,8 +57,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let historyDraft = "";
   const history: string[] = [];
   let editorRevision = 0;
+  let observedDraft = "";
   let pendingAcceptance = false;
   let completionIndex = 0;
+  let completionId: string | undefined;
+  let discoveryOpen = false;
+  let helpOriginalScroll = 0;
+  let helpInserted = false;
   let lastQuery = "";
   let dismissedQuery: string | undefined;
   let unseen = false;
@@ -204,11 +201,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   };
 
   function completions() {
-    if (panelMode || !/^\/[^\s]*$/.test(editor.plainText) || editor.plainText === dismissedQuery) return [];
-    const query = editor.plainText.slice(1).toLowerCase();
-    const commands = new Map(Object.entries(COMMANDS));
-    for (const command of controller.extensionCommands()) commands.set(command.name, command.description);
-    return [...commands].filter(([name]) => name.toLowerCase().startsWith(query));
+    if (panelMode && panelMode !== "help" || editor.plainText === dismissedQuery) return [];
+    return controller.commandChoices(editor.plainText, panelMode === "help" && !helpInserted);
+  }
+
+  function refreshDiscovery() {
+    // Explicit dispatch already refreshes metadata; its own repaint must not supersede it.
+    if (pendingAcceptance) return;
+    void controller.refreshCommands().then(() => { if (!destroyed) refresh(); }, () => {});
   }
 
   function applyTheme() {
@@ -248,6 +248,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       if (sessionKey !== key) {
+        discoveryOpen = false; completionId = undefined;
         resetRows(); sessionKey = key; expandedTools.clear(); inspection = undefined; unseen = false; lastTail = "";
         searchOpen = false; searchSelected = -1; searchLastQuery = "";
         searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
@@ -255,10 +256,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         latest();
       }
       const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : "";
+      if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
-      const nextPanel = externalPanel || (searchOpen ? "search" : "");
+      const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
+        if (nextPanel === "help") { helpInserted = false; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (panelMode === "help" && !nextPanel) searchRestoreScroll = helpOriginalScroll;
         panelMode = nextPanel;
         setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
         if (!panelMode) editor.cursorOffset = savedDraftCursor;
@@ -274,7 +278,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
+      editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
@@ -348,16 +352,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
+      const browsing = panelMode === "help" || (!panelMode && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery);
+      if (browsing && !discoveryOpen) refreshDiscovery();
+      discoveryOpen = browsing;
       const available = completions();
-      if (editor.plainText !== lastQuery) { completionIndex = 0; lastQuery = editor.plainText; }
-      completionIndex = Math.min(completionIndex, Math.max(0, available.length - 1));
-      picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || available.length > 0;
+      if (editor.plainText !== lastQuery) { completionIndex = 0; completionId = available[0]?.id; lastQuery = editor.plainText; }
+      else if (completionId) completionIndex = available.findIndex(entry => entry.id === completionId && entry.available);
+      else completionIndex = -1;
+      picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || browsing;
       const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
       const deviceApproval = snapshot.loginApproval ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
       const approvalRows = deviceApproval
         ? (renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval[2]!)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval[1]!)/(width - 2))
         : 2;
-      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.min(maxRows, available.length);
+      const pickerRows = snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
       const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
@@ -416,10 +424,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
               : `${selected?.authRoute === "api-key" ? "OpenAI API key" : selected?.access ?? "Provider"} · ${selected?.access === "Login required" ? "connect needed" : selected?.access === "No key required" ? "no key required" : "configured, unverified"}`;
           const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString()} context · ${selected.maxOutput.toLocaleString()} output`}` : "No matches. Try provider/model-id.";
           textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
-        } else if (available.length) {
+        } else if (browsing) {
           const start = Math.max(0, completionIndex - maxRows + 1);
-          available.slice(start, start + maxRows).forEach(([name, description], offset) => {
-            textRow(picker, fitLine(`${start + offset === completionIndex ? "›" : " "} /${name}  ${description}`, width - 2), start + offset === completionIndex ? theme.accent : theme.muted);
+          if (!available.length) textRow(picker, "No matches · Esc dismiss", theme.muted);
+          available.slice(start, start + maxRows).forEach((entry, offset) => {
+            textRow(picker, fitLine(`${start + offset === completionIndex ? "›" : " "} ${entry.available ? "" : "! "}[${entry.source.startsWith("extension ") ? "extension" : entry.source}] /${entry.name} ${entry.description}`, width - 2), start + offset === completionIndex ? theme.accent : theme.muted);
           });
         }
         if (snapshot.branchTree) {
@@ -444,11 +453,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(`branch-${branches.selectedId}`);
         }
       }
-      hints.content = fitLine(searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
+      hints.content = fitLine(panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
     } finally { refreshing = false; }
   }
 
   function submit() {
+    if (panelMode === "help") {
+      if (helpInserted) { const command = editor.plainText; controller.commandHelpOpen = false; refresh(); setDraft(command); refresh(); }
+      return;
+    }
     if (searchOpen) {
       if (searchScrollToMatch && searchResult.matches[searchSelected]) searchAcceptPending = true;
       else closeSearch(false);
@@ -475,6 +488,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const value = editor.plainText;
     if (!value.trim()) return;
     if (pendingAcceptance) return;
+    if (observedDraft !== value) { observedDraft = value; editorRevision++; }
     const revision = editorRevision;
     const accept = () => {
       pendingAcceptance = false;
@@ -492,21 +506,35 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       latest();
       refresh();
     };
-    const themeCommand = /^\/theme(?:\s+(.*))?$/.exec(value.trim());
-    if (themeCommand) {
-      const requested = themeCommand[1]?.trim() || "auto";
-      if (!["auto", "dark", "light"].includes(requested)) controller.fail("Usage: /theme [auto|dark|light]");
-      else { mode = requested as ThemeMode; applyTheme(); accept(); }
-      refresh(); return;
+    if (controller.running && /^\/(theme|session)(?:\s|$)/.test(value.trim())) { controller.notice("Already running. Press Esc to cancel first."); return; }
+    if (/^\/(theme|session)(?:\s|$)/.test(value.trim())) {
+      pendingAcceptance = true;
+      void controller.commandCollision(value.trim().split(/\s/)[0]!.slice(1)).then(collides => {
+        pendingAcceptance = false;
+        if (collides || editorRevision !== revision) { refresh(); return; }
+        if (controller.running) { controller.notice("Already running. Press Esc to cancel first."); refresh(); return; }
+        submitLocal();
+      }, error => { pendingAcceptance = false; fail(error); });
+      return;
     }
-    if (value.trim() === "/session") {
-      const workspace = controller.workspaceIdentity();
-      controller.notice(`Session: ${snapshot.sessionId}\nConversation branch: ${snapshot.branchId}\nModel: ${snapshot.provider}/${snapshot.modelId}\nPrimary: ${workspace?.root ?? options.workspaceRoot}\nAttached: ${workspace?.extraRoots.join(", ") || "none"}`);
-      accept(); refresh(); return;
+    submitLocal();
+    function submitLocal() {
+      const themeCommand = /^\/theme(?:\s+(.*))?$/.exec(value.trim());
+      if (themeCommand) {
+        const requested = themeCommand[1]?.trim() || "auto";
+        if (!["auto", "dark", "light"].includes(requested)) controller.fail("Usage: /theme [auto|dark|light]");
+        else { mode = requested as ThemeMode; applyTheme(); accept(); }
+        refresh(); return;
+      }
+      if (value.trim() === "/session") {
+        const workspace = controller.workspaceIdentity();
+        controller.notice(`Session: ${snapshot.sessionId}\nConversation branch: ${snapshot.branchId}\nModel: ${snapshot.provider}/${snapshot.modelId}\nPrimary: ${workspace?.root ?? options.workspaceRoot}\nAttached: ${workspace?.extraRoots.join(", ") || "none"}`);
+        accept(); refresh(); return;
+      }
+      pendingAcceptance = true;
+      void options.submit(value, accept).then(() => { pendingAcceptance = false; refresh(); }, error => { pendingAcceptance = false; fail(error); });
+      refresh();
     }
-    pendingAcceptance = true;
-    void options.submit(value, accept).then(() => { pendingAcceptance = false; refresh(); }, error => { pendingAcceptance = false; fail(error); });
-    refresh();
   }
 
   function fail(error: unknown) {
@@ -567,7 +595,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       searchScrollToMatch = false;
       handled(); return;
     }
-    if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser && !snapshot.preferences) {
+    if (panelMode === "help" && ((key.meta || key.option) || key.ctrl && !["c", "a", "e", "u", "k", "w"].includes(name))) { handled(); return; }
+    if (snapshot.recovery && !panelMode && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser && !snapshot.preferences) {
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("retry-credentials")) {
         void controller.retryCredentialRecovery().then(refresh, fail); handled(); return;
       }
@@ -640,6 +669,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else if (key.ctrl && name === "c") { if (controller.running) controller.cancel(); else options.quit(); }
       handled(); return;
     }
+    if ((key.meta || key.option) && name === "h" && !panelMode) { controller.openCommandHelp(); handled(); return; }
+    if (panelMode === "help" && name === "escape") { controller.commandHelpOpen = false; handled(); return; }
     if ((key.meta || key.option) && name === "m") { controller.openModelPicker(); handled(); return; }
     if ((key.meta || key.option) && name === "i" && !panelMode) {
       inspection = inspectionTargets(snapshot.transcript)[0];
@@ -662,7 +693,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (snapshot.loginChooser) controller.cancel();
       else if (snapshot.modelPicker) controller.closeModelPicker();
       else if (snapshot.branchTree) controller.closeBranchTree();
-      else if (completions().length) dismissedQuery = editor.plainText;
+      else if (discoveryOpen) dismissedQuery = editor.plainText;
       else if (controller.running) controller.cancel();
       handled(); return;
     }
@@ -674,7 +705,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (snapshot.modelPicker) { controller.moveModelPicker(delta); handled(); return; }
       if (snapshot.branchTree) { controller.moveBranchTreeSelection(delta); handled(); return; }
       const choices = completions();
-      if (choices.length) { completionIndex = (completionIndex + delta + choices.length) % choices.length; handled(); return; }
+      if (choices.length) { completionIndex = (completionIndex + delta + choices.length) % choices.length; completionId = choices[completionIndex]?.id; handled(); return; }
+      if (panelMode === "help") { handled(); return; }
       if (!key.shift && !key.ctrl && !key.meta && history.length && (name === "up" ? editor.visualCursor.visualRow === 0 : editor.visualCursor.visualRow >= editor.virtualLineCount - 1)) {
         if (historyIndex === -1 && name === "down") return;
         if (historyIndex === -1) { historyDraft = editor.plainText; historyIndex = history.length; }
@@ -686,14 +718,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if (name === "tab" && !key.shift) {
       const selected = completions()[completionIndex];
-      if (selected) { setDraft(`/${selected[0]} `); handled(); }
+      if (selected?.available) {
+        if (panelMode === "help") helpInserted = true;
+        setDraft(selected.insertion); handled();
+      }
     }
   }
 
   editor.onSubmit = submit;
   editor.onContentChange = () => {
     if (refreshing || destroyed) return;
-    editorRevision++;
+    if (observedDraft !== editor.plainText) { observedDraft = editor.plainText; editorRevision++; }
     if (controller.snapshot().modelPicker) controller.searchModels(editor.plainText);
     refresh();
   };
