@@ -15,7 +15,8 @@ import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
 import { join } from "node:path";
-import { realpath } from "node:fs/promises";
+import { realpath, mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { pathToFileURL } from "node:url";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -45,6 +46,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
     openUrl: async url => { opened.push(url); },
     submit: submitOverride ?? ((value, accepted) => dispatchEditorInput(value, controller, async command => {
       if (command.name === "model") return controller.openModelPicker();
+      if (command.name === "config") return controller.configCommand(command.args);
       if (command.name === "login") return controller.login(command.args);
       if (command.name === "help") { controller.notice("Help text"); return true; }
       return false;
@@ -918,4 +920,244 @@ test("Ctrl+L resets terminal output without losing the draft, scrollback or pick
   ui.mockInput.pressEscape();
   await settle(ui);
   expect(ui.editor.plainText).toBe("เก็บข้อความนี้\nsecond line");
+});
+
+
+async function preferenceFixture(root: string, extra: Partial<TuiControllerOptions> = {}, cli: Parameters<typeof loadConfigEditor>[0]["cli"] = {}) {
+  const home = join(root, "home"), workspaceRoot = join(root, "workspace");
+  await mkdir(workspaceRoot, { recursive: true });
+  const workspace = { root: workspaceRoot, launchCwd: workspaceRoot, extraRoots: [] };
+  const configEditor = await loadConfigEditor({ home, workspaceRoot, cli, interactiveMemory: true });
+  const settings = configEditor.settings;
+  const ui = await setup(80, 28, {}, undefined, { workspace, configEditor, provider: settings.provider, modelId: settings.model,
+    model: createScriptedModel({ provider: settings.provider, id: settings.model }),
+    stageSettings: async next => ({ model: createScriptedModel({ provider: next.provider, id: next.model }), contextManager: createContextManager(workspace) }), ...extra });
+  return { ...ui, home, workspaceRoot, configEditor };
+}
+
+async function preferenceEnter(ui: Awaited<ReturnType<typeof preferenceFixture>>) {
+  ui.mockInput.pressEnter();
+  await ui.waitFor(() => !ui.controller.running);
+  await settle(ui);
+}
+
+test("preferences real keyboard scopes preview save reset and restart preserve the pending draft", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { maxTurns: 7 });
+    await ui.mockInput.pasteBracketedText("pending\nThai ไทย draft");
+    ui.editor.cursorOffset = 4;
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Preferences");
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    expect(ui.configEditor.settings.maxTurns).toBe(7);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Session only");
+    await preferenceEnter(ui);
+    expect(ui.configEditor.settings.maxTurns).toBe(8);
+    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot, cli: { maxTurns: 7 }, interactiveMemory: true })).settings.maxTurns).toBe(7);
+    ui.mockInput.pressArrow("left"); await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(ui.configEditor.settings.maxTurns).toBe(7);
+    // User and project are explicit scopes; lower-priority persistence does not claim a live switch.
+    for (const [tabs, scope, path] of [[2, "user", join(ui.home, ".schway/config.json")], [1, "project", join(ui.workspaceRoot, ".schway/config.json")]] as const) {
+      for (let n = 0; n < tabs; n++) ui.mockInput.pressTab();
+      ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
+      await preferenceEnter(ui);
+      expect(ui.controller.snapshot().preferences?.scope).toBe(scope);
+      expect(ui.controller.snapshot().preferences?.preview).toContain("Saved but not effective: shadowed by CLI");
+      await preferenceEnter(ui);
+      expect(JSON.parse(await readFile(path, "utf8")).maxTurns).toBe(8);
+      expect(ui.configEditor.settings.maxTurns).toBe(7);
+      const restarted = await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot, interactiveMemory: true });
+      expect(restarted.settings.maxTurns).toBe(8);
+      ui.mockInput.pressArrow("left"); await preferenceEnter(ui); await preferenceEnter(ui);
+      expect(JSON.parse(await readFile(path, "utf8")).maxTurns).toBeUndefined();
+    }
+    ui.resize(36, 16); await settle(ui);
+    expect(ui.editor.y + ui.editor.height).toBeLessThanOrEqual(16);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("pending\nThai ไทย draft"); expect(ui.editor.cursorOffset).toBe(4);
+    expect(ui.editor.focused).toBe(true);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "maxTurns")).toMatchObject({ value: "7", origin: "CLI" });
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toContain("Thai ไทย");
+  });
+});
+
+test("preferences workspace memory is an explicit complete choice, isolated and reset without clearing session", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    await ui.controller.configCommand("set thinking low");
+    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
+    await preferenceEnter(ui);
+    expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice).toBeUndefined();
+    await preferenceEnter(ui);
+    const memory = await InteractiveMemory.load(ui.home, ui.workspaceRoot);
+    expect(memory.choice).toMatchObject({ provider: ui.configEditor.settings.provider, model: ui.configEditor.settings.model });
+    const other = join(root, "other"); await mkdir(other);
+    expect((await InteractiveMemory.load(ui.home, other)).choice).toBeUndefined();
+    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot, interactiveMemory: true })).origins.model).toBe("interactive memory");
+    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).origins.model).toBe("built-in default");
+    ui.mockInput.pressArrow("right"); await preferenceEnter(ui); await preferenceEnter(ui);
+    expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice).toBeUndefined();
+    expect(await readdir(ui.workspaceRoot)).toEqual([]);
+    expect(ui.configEditor.settings.thinking).toBe("low");
+  });
+});
+
+test("preferences staged conflict malformed files unavailable model and Escape retain previous runtime and composer", async () => {
+  await withTempDir(async root => {
+    let unavailable = false;
+    const ui = await preferenceFixture(root, { stageSettings: async (settings, _signal, workspace) => {
+      if (unavailable) throw new Error("Fixture model unavailable");
+      return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace!) };
+    } });
+    await ui.mockInput.pasteBracketedText("never discard");
+    ui.mockInput.pressKey("p", { meta: true });
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    const path = join(ui.workspaceRoot, ".schway/config.json");
+    await mkdir(join(ui.workspaceRoot, ".schway")); await writeFile(path, '{"maxTurns":17}');
+    await preferenceEnter(ui);
+    expect(ui.configEditor.settings.maxTurns).toBe(32);
+    expect(await readFile(path, "utf8")).toBe('{"maxTurns":17}');
+    expect(ui.controller.snapshot().preferences?.error).toContain("Not applied");
+    ui.mockInput.pressEscape(); // dismiss failed preview, keep choice
+    await writeFile(path, '{broken');
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.error).toContain("malformed JSON");
+    expect(await readFile(path, "utf8")).toBe('{broken');
+    await writeFile(path, '{}'); unavailable = true;
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.error).toContain("unavailable");
+    expect(ui.controller.snapshot().preferences?.choiceIndex).toBe(1);
+    unavailable = false; await preferenceEnter(ui);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(await readFile(path, "utf8")).toBe('{}');
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("never discard");
+    expect(ui.configEditor.settings.maxTurns).toBe(32);
+  });
+});
+
+test("preferences cancellation during provider staging never commits or loses the draft", async () => {
+  await withTempDir(async root => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ui = await preferenceFixture(root, { stageSettings: async (settings, _signal, workspace) => {
+      await gate;
+      return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace!) };
+    } });
+    await ui.mockInput.pasteBracketedText("cancel me safely");
+    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
+    ui.mockInput.pressEnter(); await ui.waitFor(() => ui.controller.running);
+    ui.mockInput.pressEscape(); release(); await ui.waitFor(() => !ui.controller.running); await settle(ui);
+    expect(ui.configEditor.settings.maxTurns).toBe(32);
+    expect(ui.editor.plainText).toBe("cancel me safely");
+    expect(ui.controller.snapshot().preferences).toBeUndefined();
+  });
+});
+
+test("preferences inspect actual origins and lower memory while omitting connection secrets", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), workspaceRoot = join(root, "workspace");
+    await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+    await writeFile(join(home, ".schway/config.json"), JSON.stringify({ maxTurns: 11, maxConcurrentTools: 2 }));
+    await writeFile(join(workspaceRoot, ".schway/config.json"), JSON.stringify({ maxTurns: 13 }));
+    const memory = await InteractiveMemory.load(home, workspaceRoot);
+    await memory.write({ provider: "anthropic", model: "claude-opus-4-6", thinking: "low" });
+    const ui = await preferenceFixture(root, {}, { maxTurns: 17, baseUrl: "https://fixture-user:fixture-password@example.com", headers: { Authorization: "Bearer header-secret" }, extraBody: { token: "body-secret" } });
+    await ui.controller.configCommand("set maxTurns 19");
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    const rows = ui.controller.snapshot().preferences!.rows;
+    expect(rows.find(row => row.key === "maxTurns")).toMatchObject({ value: "19", origin: "current-session override", saved: "user config=11; project config=13; CLI=17; session=19" });
+    expect(rows.find(row => row.key === "model")).toMatchObject({ value: "claude-opus-4-6", origin: "interactive memory" });
+    expect(rows.find(row => row.key === "maxConcurrentTools")?.origin).toBe("user-global");
+    const artifacts = JSON.stringify(ui.controller.snapshot().preferences) + ui.captureCharFrame();
+    for (const secret of ["fixture-user", "fixture-password", "header-secret", "body-secret", "Authorization"]) expect(artifacts).not.toContain(secret);
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui); await preferenceEnter(ui);
+    expect((await InteractiveMemory.load(home, workspaceRoot)).choice?.thinking).toBe("low");
+    // Unsupported textual values remain errors and ordinary secrets are never accepted as preferences.
+    expect(await ui.controller.configCommand("set thinking impossible")).toBe(false);
+    expect(await ui.controller.configCommand("set apiKey never-store-this")).toBe(false);
+    expect(await readFile(join(home, ".schway/config.json"), "utf8")).toBe(JSON.stringify({ maxTurns: 11, maxConcurrentTools: 2 }));
+  });
+});
+
+
+test("preferences memory conflicts preserve the newer workspace choice and expose the specific failure", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain(`${ui.configEditor.settings.provider}/${ui.configEditor.settings.model}`);
+    const concurrent = await InteractiveMemory.load(ui.home, ui.workspaceRoot);
+    await concurrent.write({ provider: "openai", model: "gpt-5.4", openaiAuth: "api-key" });
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.error).toContain("changed in another process");
+    expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice?.provider).toBe("openai");
+    expect(ui.configEditor.settings.provider).toBe("anthropic");
+  });
+});
+
+test("preferences picker has no guessed Codex effort and never saves credential fields", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4", openaiAuth: "codex" });
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    expect(ui.controller.snapshot().preferences!.rows[0]!.choices).toEqual([undefined]);
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    const path = join(ui.workspaceRoot, ".schway/config.json");
+    await mkdir(join(ui.workspaceRoot, ".schway")); await writeFile(path, '{"apiKey":"secret-not-loaded"}');
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.error).toContain("API keys must not be stored");
+    expect(JSON.stringify(ui.controller.snapshot().preferences)).not.toContain("secret-not-loaded");
+    expect(await readFile(path, "utf8")).toBe('{"apiKey":"secret-not-loaded"}');
+    await writeFile(path, '{}');
+    ui.mockInput.pressEscape(); await settle(ui);
+  });
+});
+
+test("preferences at narrow width scroll preview and Escape keeps pasted task and cursor; textual forms stay available", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    await ui.mockInput.pasteBracketedText("my original task"); ui.editor.cursorOffset = 3;
+    ui.mockInput.pressKey("p", { meta: true }); ui.resize(36, 16); await settle(ui);
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
+    ui.mockInput.pressKey("pagedown"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Esc cancels");
+    expect(ui.editor.y + ui.editor.height).toBeLessThanOrEqual(16);
+    await ui.mockInput.pasteBracketedText("paste while viewing");
+    ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("my original task"); expect(ui.editor.cursorOffset).toBe(3);
+    ui.editor.setText("/config"); ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.controller.snapshot().preferences).toBeDefined();
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("");
+    expect(await ui.controller.configCommand("show")).toBe(true);
+    expect(await ui.controller.configCommand("set maxTurns 15")).toBe(true);
+    expect(ui.configEditor.settings.maxTurns).toBe(15);
+    expect(await ui.controller.configCommand("reset maxTurns")).toBe(true);
+    expect(ui.configEditor.settings.maxTurns).toBe(32);
+  });
+});
+
+
+test("preferences reset inherits the latest remembered model and preserves unrelated saved configuration", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    expect(await ui.controller.selectModel("anthropic/claude-opus-4-6")).toBe(true);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "model")?.saved).toContain("workspace memory=claude-opus-4-6");
+    // Model is row eight; reset current-session model using the bounded reset action.
+    for (let n = 0; n < 7; n++) ui.mockInput.pressArrow("down");
+    await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(ui.configEditor.settings.model).toBe("claude-opus-4-6");
+    expect(ui.configEditor.origins.model).toBe("interactive memory");
+    ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    const path = join(ui.home, ".schway/config.json");
+    await writeFile(path, JSON.stringify({ headers: { "X-Region": "west" }, extraBody: { temperature: 0.2 }, maxConcurrentTools: 3 }));
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ headers: { "X-Region": "west" }, extraBody: { temperature: 0.2 }, maxConcurrentTools: 3, maxTurns: 8 });
+  });
 });

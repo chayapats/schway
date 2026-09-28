@@ -155,6 +155,39 @@ export class ConfigEditor {
   /** Return the source of each currently effective setting. */
   get origins(): ConfigOrigins { return configOrigins(this.layers); }
 
+  /** Return only ordinary displayable preferences from each layer, never connection secrets. */
+  get preferenceLayers(): Record<string, Record<string, unknown>> {
+    const result: Record<string, Record<string, unknown>> = {};
+    for (const [name, layer] of Object.entries({ ...this.layers, memory: this.memory?.choice ?? this.layers.memory } as Layers)) {
+      result[name] = {};
+      for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"] as const) {
+        if (layer?.[key] !== undefined) result[name]![key] = structuredClone(layer[key]);
+      }
+      if (layer?.git?.changeTracking !== undefined) result[name]!.git = layer.git.changeTracking;
+    }
+    return result;
+  }
+
+  /** Stage an indivisible workspace memory update without changing session or explicit config overrides. */
+  async prepareMemory(choice?: InteractiveChoice): Promise<ConfigTransaction> {
+    if (!this.memory) throw new Error("Interactive memory is unavailable in this session.");
+    const revision = this.revision;
+    const layers = { ...this.layers, memory: choice };
+    const settings = resolved(layers, this.modelCapabilities);
+    return { settings, origins: configOrigins(layers), commit: async signal => {
+      signal?.throwIfAborted();
+      if (revision !== this.revision || this.committing) throw new Error("Configuration changed while this edit was staged. Retry the edit.");
+      this.committing = true;
+      try {
+        await this.memory!.write(choice, signal);
+        this.layers = layers;
+        this.current = settings;
+        this.memoryProblem = undefined;
+        this.revision++;
+      } finally { this.committing = false; }
+    } };
+  }
+
   /** Return merged compatible profiles with project definitions replacing whole same-name profiles. */
   get profiles(): Record<string, CompatibleProfile> {
     return structuredClone(mergeProfileMaps(this.layers.user?.profiles, this.layers.project?.profiles, this.layers.cli?.profiles, this.layers.session?.profiles));
@@ -204,6 +237,8 @@ export class ConfigEditor {
       ...(current.profile ? { profile: current.profile } : {}),
       ...(current.thinking ? { thinking: current.thinking } : {}) };
     await this.memory.write(choice);
+    this.layers.memory = choice;
+    this.revision++;
     this.memoryProblem = undefined;
     return true;
   }

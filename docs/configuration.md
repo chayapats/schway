@@ -20,7 +20,20 @@ Textual commands remain available:
 /config reset model --scope project
 ```
 
-`/config` displays effective values and their origins: built-in default, interactive memory, user-global, project, CLI, or current-session override. Context/output limits show `catalog` when derived from model metadata (including conservative unknown-model fallback), and `explicit limit` when a layer supplies the limit. Connection headers and extra request bodies are shown as configured with values hidden; URLs omit credentials, queries and fragments, and known API keys are redacted.
+`/config` (or Alt+P) opens keyboard preferences; `/config show` prints the textual inspection. Both show effective values and their origins: built-in default, interactive memory, user-global, project, CLI, or current-session override. Context/output limits show `catalog` when derived from model metadata (including conservative unknown-model fallback), and `explicit limit` when a layer supplies the limit. Connection headers and extra request bodies are shown as configured with values hidden; URLs omit credentials, queries and fragments, and known API keys are redacted.
+
+In preferences, Up/Down selects a setting, Left/Right selects a bounded value or **Reset (inherit)**, and Tab/Shift+Tab chooses scope. Enter first validates and previews; a second Enter confirms the staged edit. Escape discards the preview, then returns to the unchanged task and cursor. PageUp/PageDown or the mouse scrolls details on narrow terminals. The view shows separately saved lower-layer values and identifies which source shadows them. Remove a CLI flag to reset a CLI override; resetting a lower scope does not remove the flag.
+
+The scope explanation appears before confirmation:
+
+- **Session:** changes only the running process; it is not automatically remembered.
+- **Workspace memory:** explicitly remembers the complete currently activated provider/model/auth/profile/reasoning choice, or resets just that workspace's memory. Reset leaves explicit config and session overrides intact. Headless ignores interactive memory.
+- **User:** deliberately writes `~/.schway/config.json`, shared across workspaces.
+- **Project:** deliberately writes the canonical primary workspace's `.schway/config.json`; opening the view never changes repository files.
+
+Thinking choices come from supported model capabilities (verified account metadata for Codex); unknown Codex capabilities expose reset only. Numeric controls offer presets; exact positive limits remain available through textual commands. A preset incompatible with the current model is rejected with the selection retained. Connection rows expose scoped reset and the separate **model + route picker**, which activates and remembers a successful choice regardless of the preferences scope; it does not write user/project config. URLs, headers, request bodies and credentials are excluded from the preference inspector. Existing unrelated settings are preserved during explicit file edits.
+
+Malformed files, unavailable models, cancellation, and changes made by another writer retain the previous working state. Confirmation commits the transaction prepared for that preview, so a file changed between preview and confirmation is not overwritten. A lower value saved beneath CLI/session overrides is labeled **saved but not effective** with its overriding source.
 
 Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`. Limits must be positive integers. Providers are `anthropic`, `openai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
 
@@ -194,7 +207,7 @@ Credentials:
 
 Display and selection:
 
-- `/config` and the status header show the active `profile` with redacted effective settings (`credentialEnv`/`credentialIdentity` names are shown, values hidden; URLs sanitized; headers/bodies hidden).
+- `/config show` and the status header show the active `profile` with redacted effective settings (`credentialEnv`/`credentialIdentity` names are shown, values hidden; URLs sanitized; headers/bodies hidden).
 - `/model` opens the picker with profile rows (`profile:<name>`); `/model profile:<name>` and `/config set profile <name>` switch profiles. Only the explicit `profile:<name>` form switches profiles; a bare model token never selects a profile, so direct model IDs cannot collide with profile names. `/model <provider>/<id>` clears the profile for direct selection. `/model <provider>/<id>` and `/config reset profile` record a session-only cleared profile that outranks user, project, and CLI selections.
 
 Runnable example with two local protocol fixtures (no paid APIs):

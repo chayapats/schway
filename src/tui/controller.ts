@@ -1,3 +1,4 @@
+import { preferenceRows, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { AgentClock } from "../agent/retry.ts";
 import { toolTarget } from "./presentation.ts";
@@ -101,6 +102,7 @@ export interface TuiSnapshot {
   thinking?: string;
   /** Effective reasoning description shown alongside the requested value. */
   effectiveThinking?: string;
+  preferences?: PreferencesSnapshot;
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
   /** Available sign-in actions while the interactive chooser is open. */
@@ -440,6 +442,10 @@ export class TuiController {
   private readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
   private readonly onModelActivated?: TuiControllerOptions["onModelActivated"];
   private readonly onRuntimeEvent?: TuiControllerOptions["onRuntimeEvent"];
+  private preferences?: PreferencesSnapshot;
+  private preferenceTransaction?: ConfigTransaction;
+  private preferenceGeneration = 0;
+  private settingsFailure?: string;
   private modelPicker?: ModelPickerSnapshot;
   private subscriptionModels?: readonly string[];
   private modelPickerAccess?: ModelPickerAccess;
@@ -563,6 +569,7 @@ export class TuiController {
       ...(this.openaiAuth !== undefined ? { openaiAuth: this.openaiAuth } : {}),
       ...(this.provider === "openai" ? { activeRoute: `${activeRoute}${this.model ? "" : " (unavailable)"}` } : {}),
       ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
+      preferences: this.preferences ? structuredClone(this.preferences) : undefined,
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
       ...(this.loginChooserIndex !== undefined ? { loginChooser: { selectedIndex: this.loginChooserIndex, choices: LOGIN_CHOICES.map(choice => choice.label) } } : {}),
@@ -1557,6 +1564,7 @@ export class TuiController {
   /** Open model search while idle, selecting the currently active entry. */
   openModelPicker(): boolean {
     if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
+    this.preferences = undefined; this.preferenceTransaction = undefined; this.preferenceGeneration++;
     this.closeModelPicker();
     this.pickerSelectionTouched = false;
     this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() || this.credentials ? { loading: true, catalogState: "loading" } : {}),
@@ -1900,9 +1908,101 @@ export class TuiController {
     return `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
   }
 
+  /** Open bounded preferences without changing the composer or any configuration layer. */
+  openPreferences(): boolean {
+    if (this.running || this.disposed || !this.configEditor) return false;
+    this.closeModelPicker();
+    this.preferences = { scope: "session", selectedIndex: 0, choiceIndex: 0, rows: preferenceRows(this.configEditor, "session", this.secrets) };
+    return true;
+  }
+
+  /** Cancel a pending preview or close preferences without committing it. */
+  closePreferences(): void {
+    this.preferenceGeneration++;
+    if (this.running) this.cancel();
+    this.preferenceTransaction = undefined;
+    if (this.preferences?.preview) this.preferences.preview = undefined;
+    else this.preferences = undefined;
+  }
+
+  /** Move a bounded preference, value or explicit persistence scope and discard stale previews. */
+  movePreference(delta: number, kind: "row" | "choice" | "scope" = "row"): void {
+    const panel = this.preferences;
+    if (!panel || this.running || !this.configEditor) return;
+    this.preferenceGeneration++;
+    this.preferenceTransaction = undefined; panel.preview = undefined; panel.error = undefined;
+    const wrap = (index: number, count: number) => (index + delta + count) % count;
+    if (kind === "scope") {
+      const scopes = Object.keys(PREFERENCE_SCOPES) as PreferencesSnapshot["scope"][];
+      panel.scope = scopes[wrap(scopes.indexOf(panel.scope), scopes.length)]!;
+      panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets);
+      panel.selectedIndex = 0; panel.choiceIndex = 0;
+    } else if (kind === "row") {
+      panel.selectedIndex = wrap(panel.selectedIndex, panel.rows.length); panel.choiceIndex = 0;
+    } else panel.choiceIndex = wrap(panel.choiceIndex, panel.rows[panel.selectedIndex]!.choices.length);
+  }
+
+  /** Stage the selected action for confirmation, then apply that exact validated transaction atomically. */
+  async selectPreference(): Promise<boolean> {
+    const panel = this.preferences;
+    if (!panel || this.running || !this.configEditor || !this.stageSettings) return false;
+    const row = panel.rows[panel.selectedIndex]!;
+    const choice = row.choices[panel.choiceIndex];
+    if (panel.scope !== "memory" && typeof choice === "string" && choice.startsWith("open model")) {
+      this.preferences = undefined;
+      this.notice("Model + route picker activates and remembers a successful choice for this workspace; it does not write user or project config.");
+      return this.openModelPicker();
+    }
+    if (this.preferenceTransaction && panel.preview) {
+      const transaction = this.preferenceTransaction;
+      const message = panel.preview.replace("Enter confirms; Esc cancels.", "Applied.");
+      const applied = await this.changeSettings(async () => transaction, () => message, undefined, true);
+      if (this.preferences === panel) {
+        if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets); }
+        else panel.error = `Not applied: ${this.settingsFailure ?? "previous settings retained"} Change selection to stage again, or Esc to cancel.`;
+      }
+      return applied;
+    }
+    const generation = ++this.preferenceGeneration;
+    const abort = new AbortController();
+    this.activeAbort = abort; this.status = "running";
+    const task = (async () => {
+      try {
+        let transaction: ConfigTransaction;
+        if (panel.scope === "memory") {
+          const settings = this.configEditor!.settings;
+          if (panel.choiceIndex === 0 && !this.model) throw new Error("Activate a model successfully before remembering its choice.");
+          const choice = panel.choiceIndex === 0 ? { provider: settings.provider, model: settings.model,
+            ...(settings.provider === "openai" ? { openaiAuth: this.model?.provider === "codex-subscription" ? "codex" as const : "api-key" as const } : {}),
+            ...(settings.profile ? { profile: settings.profile } : {}), ...(settings.thinking ? { thinking: settings.thinking } : {}) } : undefined;
+          transaction = await this.configEditor!.prepareMemory(choice);
+        } else transaction = await this.configEditor!.prepare({ scope: panel.scope, key: row.key, value: row.key === "git" && choice !== undefined ? { changeTracking: choice } : choice });
+        abort.signal.throwIfAborted();
+        const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, true);
+        abort.signal.throwIfAborted();
+        if (!staged.model) throw new Error("The selected model is unavailable; previous settings remain active.");
+        if (this.disposed || this.preferences !== panel || generation !== this.preferenceGeneration) return false;
+        this.preferenceTransaction = transaction;
+        const origin = transaction.origins[row.key as keyof ConfigLayer] ?? transaction.origins.model;
+        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "git" ? transaction.settings.gitChangeTracking : transaction.settings[row.key as keyof ResolvedSettings];
+        const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
+        const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin ? ` Saved but not effective: shadowed by ${origin}.` : "";
+        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.key}: ${choice === undefined ? "reset override" : String(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
+        panel.error = undefined;
+        return true;
+      } catch (error) {
+        if (this.preferences === panel) panel.error = abort.signal.aborted ? "Cancelled; nothing changed." : redactSecrets(error instanceof Error ? error.message : String(error), this.secrets);
+        return false;
+      } finally { if (this.activeAbort === abort) this.activeAbort = undefined; this.status = "idle"; }
+    })();
+    const tracked = task.then(() => {}); this.activeTurn = tracked;
+    try { return await task; } finally { if (this.activeTurn === tracked) this.activeTurn = undefined; }
+  }
+
   /** Inspect settings or apply one validated session or explicitly scoped persisted edit. */
   async configCommand(args: string): Promise<boolean> {
-    if (!args.trim()) { this.notice(this.describeConfig()); return true; }
+    if (args.trim() === "show") { this.notice(this.describeConfig()); return true; }
+    if (!args.trim()) { if (this.configEditor) return this.openPreferences(); this.notice(this.describeConfig()); return true; }
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
     const scoped = args.trim().match(/\s+--scope\s+(\S+)$/);
     const scopeValue = scoped?.[1];
@@ -1935,6 +2035,7 @@ export class TuiController {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
     if (!this.configEditor || !this.stageSettings) { this.fail("Interactive settings are unavailable in this session."); return false; }
+    this.settingsFailure = undefined;
     const abort = new AbortController();
     this.activeAbort = abort;
     this.status = "running";
@@ -1954,6 +2055,7 @@ export class TuiController {
         this.notice(redactSecrets(message(), this.secrets));
         return true;
       } catch (error) {
+        this.settingsFailure = abort.signal.aborted ? "Settings change cancelled. Previous settings remain active." : failureMessage ?? redactSecrets(error instanceof Error ? error.message : String(error), this.secrets);
         if (abort.signal.aborted) { this.notice("Settings change cancelled. Previous settings remain active."); this.status = "idle"; }
         else this.fail(failureMessage ?? redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
         return false;
