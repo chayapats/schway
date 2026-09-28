@@ -194,12 +194,12 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   }
 
   try {
-    let model = io.model;
-    let startupError: string | undefined = configEditor.memoryActivationError;
-    let startupNotice: string | undefined;
-    if (!model && !startupError) {
+    const model = io.model;
+    const startupError = configEditor.memoryActivationError;
+    const initialize = async (signal: AbortSignal) => {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {
-        verifySubscriptionChoice: configEditor.origins.model === "interactive memory",
+        signal,
+        verifySubscriptionChoice: configEditor.origins.model === "interactive memory" ? true : settings.openaiAuth === "codex" ? "selected" : false,
         maxTokens: settings.maxOutput,
         baseUrl: settings.baseUrl,
         headers: settings.headers,
@@ -218,13 +218,12 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       });
       if ("error" in loaded) {
         diagnostics.record("model", "load_failed", { provider: settings.provider, category: "model_unavailable" }, "error");
-        startupError = loaded.error;
-      } else {
-        model = loaded.model;
-        if (loaded.capability) { configEditor.setModelCapabilities([loaded.capability]); settings = configEditor.settings; }
-        startupNotice = loaded.notice;
+        return loaded;
       }
-    }
+      return { model: loaded.model, activate: () => {
+        if (loaded.capability) { configEditor.setModelCapabilities([loaded.capability]); settings = configEditor.settings; }
+      } };
+    };
 
     let controller: TuiController;
     const managerOptions = contextManagerOptions(home, settings.explicitContextWindow);
@@ -295,9 +294,6 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           secrets,
         });
         if (!startupError) {
-          if (startupNotice) {
-            controller.notice(startupNotice);
-          }
           controller.notice(
             `Resumed ${resumed.items.length} saved records. /session for details.`,
           );
@@ -334,26 +330,21 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           startupError,
           secrets,
         });
-        if (!startupError) {
-          if (startupNotice) {
-            controller.notice(startupNotice);
-          }
-          controller.notice("Session ready. Type / for commands or /session for details.");
-        }
       }
     } catch (error) {
       diagnostics.record("session", "start_failed", { category: "session_setup" }, "error");
-      io.stderr.write(`${messageOf(error)}\n`);
+      io.stderr.write(`Cannot open session storage: ${messageOf(error)} Check that HOME/.schway/sessions is a writable directory.\n`);
       return 1;
     }
 
-    if (configEditor.memoryNotice) controller.notice(configEditor.memoryNotice);
+    if (configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(configEditor.memoryNotice);
     if (startupError && !configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(`Remembered choice could not activate: ${redactSecrets(startupError, secrets).slice(0, 500)} Use /model to repair it or /model forget; no alternate billing route was selected.`);
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
     for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
       await runTuiRenderer({
         controller,
+        initialize: !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
         home,
         workspaceRoot: workspace.root,
         skillScope,
@@ -415,6 +406,7 @@ export async function stageInteractiveSettings(
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
 async function runTuiRenderer(options: {
   controller: TuiController;
+  initialize?: () => Promise<void>;
   home: string;
   workspaceRoot: string;
   skillScope: { manager?: ContextManager; workspaceRoot: string };
@@ -479,6 +471,7 @@ async function runTuiRenderer(options: {
         }, command.raw, onAccepted);
       }, accepted),
     });
+    void options.initialize?.();
     while (!quit && !quitting) {
       view.refresh();
       if (options.signal?.aborted) break;
@@ -837,6 +830,7 @@ export async function loadInteractiveModel(
   modelId: string | undefined,
   options: {
     maxTokens?: number;
+    signal?: AbortSignal;
     baseUrl?: string;
     headers?: Record<string, string>;
     extraBody?: Record<string, unknown>;
@@ -844,8 +838,8 @@ export async function loadInteractiveModel(
     openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
     modelCapability?: import("../model/catalog.ts").ModelCapability;
-    /** Revalidate a restored account selection without falling back to another billing route. */
-    verifySubscriptionChoice?: boolean;
+    /** Validate an account selection without fallback; true retains remembered-choice diagnostics. */
+    verifySubscriptionChoice?: boolean | "selected";
     profile?: string;
     credentialEnv?: string;
     credentialIdentity?: string;
@@ -865,15 +859,20 @@ export async function loadInteractiveModel(
       env: options.env,
       store,
     });
+    options.signal?.throwIfAborted();
     if ("error" in selection) return selection;
     if (selection.transport === "codex") {
       let capability = options.modelCapability;
       if (options.verifySubscriptionChoice) {
         try {
           const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
-          capability = (await fetchSubscriptionCatalog({ store, fetch: options.fetch })).find(entry => entry.id === modelId);
-          if (!capability) return { error: "Remembered model is no longer available in this ChatGPT account. Use /model to choose an available model or /model forget; no API-key fallback was used." };
-          if (options.thinking && !capability.supportedThinking.includes(options.thinking)) return { error: "Remembered reasoning is no longer supported by this account model. Use /model to repair the choice or /model forget; no API-key fallback was used." };
+          capability = (await fetchSubscriptionCatalog({ store, fetch: options.fetch, signal: options.signal })).find(entry => entry.id === modelId);
+          if (!capability) return { error: options.verifySubscriptionChoice === "selected"
+            ? "Selected model is not available in this ChatGPT account. Use /model to choose an available model; no API-key fallback was used."
+            : "Remembered model is no longer available in this ChatGPT account. Use /model to choose an available model or /model forget; no API-key fallback was used." };
+          if (options.thinking && !capability.supportedThinking.includes(options.thinking)) return { error: options.verifySubscriptionChoice === "selected"
+            ? "Selected reasoning is not supported by this account model. Use /model to repair the choice; no API-key fallback was used."
+            : "Remembered reasoning is no longer supported by this account model. Use /model to repair the choice or /model forget; no API-key fallback was used." };
         } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
       }
       const input = {
@@ -896,6 +895,7 @@ export async function loadInteractiveModel(
     runtimeApiKey: options.runtimeApiKey, env: options.env,
     store,
   });
+  options.signal?.throwIfAborted();
   if ("error" in credential) return credential;
   if (credential.apiKey) options.secrets.push(credential.apiKey);
   const input = {

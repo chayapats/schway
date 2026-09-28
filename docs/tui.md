@@ -21,6 +21,44 @@ Retry progress uses one changing status row and the footer countdown. If retries
 run out or you cancel, any remaining preview is marked “Incomplete response · not
 saved”; completed tool results remain in the session.
 
+## First launch and readiness
+
+An empty conversation identifies the workspace, effective model and auth route,
+then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
+**Ctrl+R retry locked credential storage**, or **type a task**. **Ctrl+I** opens
+failure details. The ready screen does not add a recurring welcome or restored-choice
+message to the transcript; `/config` retains setting provenance and `/model forget`
+clears remembered interactive choices.
+
+The selected connection is checked after the editor opens. While a catalog or
+credential check is pending, you can type, paste and resize; **Esc** cancels the
+check. Setup actions wait for that check to finish or be cancelled. No browser or
+model inference is started by opening the screen. An explicit broken selection
+stays selected until you repair it; startup does not switch billing routes.
+Explicit and remembered ChatGPT subscription models are checked against the account
+catalog. API routes are labelled **configured, unverified**: initialization does not
+probe the provider or reject custom model IDs absent from Schway's built-in catalog.
+Sending is available once local initialization completes; the first explicit task
+may still reveal a remote authentication or model error.
+
+Type your task before connecting if useful. The login/model panels temporarily
+own their input and restore the task and cursor after cancellation or activation.
+Completing setup never sends the task: press **Enter** in the task editor when
+ready. Multiline paste stays one task. Missing HOME, malformed configuration,
+unknown profiles or unwritable session storage can instead cause an actionable
+startup exit before the terminal opens. Headless execution keeps its existing
+configuration and credential path and does not read interactive choice memory.
+
+Automated coverage uses the actual renderer's keyboard, paste and resize input,
+plus a packed-and-installed executable launched outside the checkout with isolated
+HOME, credential storage, terminal and model fixtures. It covers fresh startup,
+remembered credentials/model, setup cancellation and activation, one explicit send,
+explicit subscription models absent from the fixture account catalog, denied
+credential storage, missing profiles/HOME and invalid configuration. Renderer tests additionally delay startup, simulate offline
+failure and fence late results after cancellation/disposal. These fixtures do not
+verify a human terminal, real OS secure storage, live OAuth or a paid provider;
+those checks remain unrun for the final installed-journey gate.
+
 ## Color roles
 
 | Role | Dark | Light | Use |
@@ -153,8 +191,10 @@ returns to the same search and highlight after a successful save. Connection
 cancellation leaves the model unchanged. An empty, offline, or failed ChatGPT
 catalog shows a retry action; it never substitutes API-key billing for a
 subscription choice. Explicit CLI and configuration preferences remain visible
-until the user selects a different route. Picker choices apply to the current
-session; cross-launch workspace preference persistence is a separate slice.
+until the user selects a different route. Successful picker choices apply to the
+current session and are remembered for later interactive launches in the same
+canonical workspace, below explicit CLI and configuration preferences.
+Headless launches do not automatically consume this memory.
 
 Prompt recall excludes slash commands. API keys and pasted browser callbacks
 use separate masked entries that intercept keyboard and paste events; neither
