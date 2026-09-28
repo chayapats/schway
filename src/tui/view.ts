@@ -6,7 +6,7 @@ import { activityDetail, activityStatus, displayText, fitLine } from "./presenta
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
-import { TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
+import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -652,7 +652,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     let visualLine = segment.visualLine;
     const info = target instanceof TextBufferRenderable ? target.lineInfo : segment.lineInfo;
     if (info) {
-      const before = segment.text.normalize("NFC").slice(0, match.offset);
+      const before = segment.text.normalize("NFC").slice(0, renderedOffsetForFolded(segment.text, match.offset));
       const logicalLine = before.split("\n").length - 1;
       const column = Bun.stringWidth(before.slice(before.lastIndexOf("\n") + 1));
       for (let index = 0; index < info.lineSources.length; index++) {

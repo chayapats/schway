@@ -209,6 +209,24 @@ test("a match inside one very long wrapped paragraph reaches its visual line", a
   expect(ui.captureCharFrame()).toContain("paragraph-token");
 });
 
+test("a match starting inside lowercase expansion lands on the rendered line", async () => {
+  const answer = `${"İ ".repeat(900)}İdeep-expansion-token first ${"tail ".repeat(500)}İdeep-expansion-token second ${"tail ".repeat(500)}`;
+  const ui = await setup(createSession([user("u", "question"), assistant("a", answer)]), 44, 18);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.pasteBracketedText("\u0307deep-expansion-token");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Find 1/2");
+  ui.mockInput.pressArrow("down");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Find 2/2");
+  ui.mockInput.pressArrow("up");
+  ui.mockInput.pressEnter();
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("deep-expansion-token");
+  expect(ui.captureCharFrame()).toContain("first");
+  expect(ui.modelCalls()).toBe(0);
+});
+
 test("a match in a late row of a tall Markdown table lands on that row", async () => {
   const table = ["| Item | Detail |", "| --- | --- |", ...Array.from({ length: 55 }, (_, i) => `| row-${i} | ${i === 43 ? "late-hit-43" : i % 5 === 0 ? `ordinary-${i} repeated words across a wrapped table cell` : `ordinary-${i}`} |`)].join("\n");
   const ui = await setup(createSession([user("u", "show table"), assistant("a", table)]), 44, 18);

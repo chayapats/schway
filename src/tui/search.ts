@@ -24,6 +24,21 @@ export interface TranscriptSearchResult {
 const MAX_SEARCH_CHARS = 8_000_000;
 const MAX_SEARCH_MATCHES = 20_000;
 
+/** Map a folded search offset to its source character in NFC rendered text. */
+export function renderedOffsetForFolded(text: string, foldedOffset: number): number {
+  const normalized = text.normalize("NFC");
+  if (normalized.toLocaleLowerCase().length === normalized.length) return Math.min(foldedOffset, normalized.length);
+  let folded = 0;
+  let rendered = 0;
+  for (const character of normalized) {
+    const next = folded + character.toLocaleLowerCase().length;
+    if (foldedOffset < next) return rendered;
+    folded = next;
+    rendered += character.length;
+  }
+  return rendered;
+}
+
 type CachedRow = {
   segments: readonly string[];
   budget: number;
