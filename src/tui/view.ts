@@ -649,7 +649,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const segment = rows.get(match.id)?.searchSegments()[match.segment];
     if (!segment) { transcript.scrollChildIntoView(`message-${match.id}`); return; }
     const target = segment.target;
-    let visualLine = 0;
+    let visualLine = segment.visualLine;
     if (target instanceof TextBufferRenderable) {
       const before = segment.text.normalize("NFC").slice(0, match.offset);
       const logicalLine = before.split("\n").length - 1;

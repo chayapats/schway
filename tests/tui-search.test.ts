@@ -209,6 +209,17 @@ test("a match inside one very long wrapped paragraph reaches its visual line", a
   expect(ui.captureCharFrame()).toContain("paragraph-token");
 });
 
+test("a match in a late row of a tall Markdown table lands on that row", async () => {
+  const table = ["| Item | Detail |", "| --- | --- |", ...Array.from({ length: 55 }, (_, i) => `| row-${i} | ${i === 43 ? "late-hit-43" : i % 5 === 0 ? `ordinary-${i} repeated words across a wrapped table cell` : `ordinary-${i}`} |`)].join("\n");
+  const ui = await setup(createSession([user("u", "show table"), assistant("a", table)]), 44, 18);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("late-hit-43");
+  ui.mockInput.pressEnter();
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("late-hit-43");
+  expect(ui.submits()).toBe(0);
+});
+
 test("Unicode wraps logically, empty/no-match states stay usable, and live row changes preserve selection", async () => {
   const ui = await setup(createSession([user("u", "ข้อความภาษาไทย e\u0301 match"), assistant("a", "ไทย e\u0301 match")]), 44, 18);
   ui.mockInput.pressKey("f", { ctrl: true });
