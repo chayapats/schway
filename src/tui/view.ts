@@ -6,6 +6,7 @@ import { activityDetail, activityStatus, displayText, fitLine } from "./presenta
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
+import { TranscriptSearchIndex, transcriptSearchText, type TranscriptSearchResult } from "./search.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -40,6 +41,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   type InspectionTarget = { id: string; kind: "tool" | "code"; index: number };
   let inspection: InspectionTarget | undefined;
   let scrollToInspection = false;
+  let searchOpen = false;
+  let searchOriginalScroll = 0;
+  let searchRestoreScroll: number | undefined;
+  let searchScrollToMatch = false;
+  let searchSelected = -1;
+  let searchLastQuery = "";
+  let searchResult: TranscriptSearchResult = { matches: [], limited: false };
+  const searchIndex = new TranscriptSearchIndex();
   const rows = new Map<string, TranscriptItemView>();
   let sessionKey = "";
   let panelMode = "";
@@ -178,7 +187,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const clear = (box: BoxRenderable) => { for (const child of [...box.getChildren()]) child.destroyRecursively(); };
   const setDraft = (value: string) => { editor.setText(value); editor.gotoBufferEnd(); };
   const atBottom = () => transcript.scrollTop >= Math.max(0, transcript.scrollHeight - transcript.viewport.height) - 1;
-  const latest = () => { transcript.scrollTo(transcript.scrollHeight); unseen = false; };
+  const latest = () => { transcript.stickyScroll = true; transcript.scrollTo(transcript.scrollHeight); unseen = false; };
   const textRow = (box: BoxRenderable, text: string, color = theme.text) => {
     const row = new TextRenderable(renderer, { content: safe(text), fg: color, flexShrink: 0, wrapMode: "word" });
     box.add(row);
@@ -233,9 +242,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       if (sessionKey !== key) {
         resetRows(); sessionKey = key; expandedTools.clear(); inspection = undefined; unseen = false; lastTail = "";
+        searchOpen = false; searchSelected = -1; searchLastQuery = "";
+        searchRestoreScroll = undefined; searchScrollToMatch = false;
+        searchIndex.clear();
         latest();
       }
-      const nextPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
+      const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
+      if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchIndex.clear(); }
+      const nextPanel = externalPanel || (searchOpen ? "search" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
         panelMode = nextPanel;
@@ -252,8 +266,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : snapshot.loginCallbackEntry
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
-      } else if (!inspection && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : "Ask Schway…";
+      } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
+      editor.placeholder = panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
@@ -270,9 +284,29 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : "", width);
-      activity.fg = unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
-      activity.onMouseUp = () => { latest(); refresh(); };
+      if (searchOpen) {
+        const query = editor.plainText;
+        const previous = searchResult.matches[searchSelected];
+        const previousResult = searchResult;
+        const changedQuery = query !== searchLastQuery;
+        searchLastQuery = query;
+        searchResult = searchIndex.update(snapshot.transcript.map(entry => ({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined })), query,
+          id => allExpanded !== expandedTools.has(id), width - 1);
+        if (changedQuery) {
+          searchSelected = searchResult.matches.length ? 0 : -1;
+          searchScrollToMatch = searchSelected >= 0;
+        } else if (previous && searchResult !== previousResult) {
+          const preserved = searchResult.matches.findIndex(match => match.id === previous.id && match.offset === previous.offset);
+          searchSelected = preserved >= 0 ? preserved : Math.min(searchSelected, searchResult.matches.length - 1);
+        } else searchSelected = searchResult.matches.length ? Math.max(0, Math.min(searchSelected, searchResult.matches.length - 1)) : -1;
+      }
+      const searchStatus = !editor.plainText ? "Find in active branch · type a literal query" : searchResult.matches.length
+        ? `Find ${searchSelected + 1}/${searchResult.matches.length}${searchResult.limited ? "+ (limited)" : ""} · active branch, displayed text`
+        : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
+      if (searchOpen && !activity.visible) footer.content = fitLine(searchStatus, width);
+      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : "", width);
+      activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
+      activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
       transcript.visible = !snapshot.branchTree;
       tree.visible = !!snapshot.branchTree;
       empty.visible = snapshot.transcript.length === 0;
@@ -290,7 +324,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         }
         row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
-          inspection?.id === entry.id && inspection.kind === "tool");
+          inspection?.id === entry.id && inspection.kind === "tool", searchOpen && searchResult.matches[searchSelected]?.id === entry.id);
       }
       if (inspection && !inspectionTargets(snapshot.transcript).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
         inspection = undefined;
@@ -310,7 +344,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
-      editor.maxHeight = Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
+      editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
       const panelKey = JSON.stringify([snapshot.loginChooser, snapshot.loginApproval, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
@@ -373,11 +407,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(`branch-${branches.selectedId}`);
         }
       }
-      hints.content = fitLine(panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Alt+I inspect · / help" : "Enter send · Alt+I inspect · Ctrl+O tools · Alt+M model · / commands", width);
+      hints.content = fitLine(searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
     } finally { refreshing = false; }
   }
 
   function submit() {
+    if (searchOpen) { closeSearch(false); return; }
     const snapshot = controller.snapshot();
     if (snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
@@ -434,11 +469,50 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     refresh();
   }
 
+  function closeSearch(restore: boolean) {
+    if (!searchOpen) return;
+    searchOpen = false;
+    searchScrollToMatch = false;
+    searchIndex.clear();
+    if (restore) searchRestoreScroll = searchOriginalScroll;
+    refresh();
+    if (restore) transcript.scrollTo(searchOriginalScroll);
+  }
+
   function onKey(key: KeyEvent) {
     if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().credentialEntry || controller.snapshot().loginCallbackEntry) return;
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
+    if (searchOpen) {
+      if (name === "escape") { closeSearch(true); handled(); return; }
+      if (key.ctrl && name === "end") { closeSearch(false); latest(); handled(); return; }
+      if (name === "return" || name === "kpenter") { closeSearch(false); handled(); return; }
+      if (name === "up" || name === "down" || (key.ctrl && (name === "p" || name === "n"))) {
+        const count = searchResult.matches.length;
+        if (count) {
+          searchSelected = (searchSelected + (name === "up" || name === "p" ? -1 : 1) + count) % count;
+          searchScrollToMatch = true;
+        }
+        handled(); return;
+      }
+      if (name === "pageup" || name === "pagedown" || name === "tab" || (key.ctrl && name === "o") || ((key.meta || key.option) && (name === "i" || name === "m")) || (key.ctrl && name === "f")) {
+        handled(); return;
+      }
+      if (key.ctrl && name === "c" && controller.running) { controller.cancel(); handled(); return; }
+      return;
+    }
+    if (key.ctrl && name === "f" && !panelMode && !inspection) {
+      searchOriginalScroll = transcript.scrollTop;
+      transcript.stickyScroll = false;
+      searchOpen = true;
+      searchSelected = -1;
+      searchLastQuery = "";
+      inspection = undefined;
+      scrollToInspection = false;
+      searchScrollToMatch = false;
+      handled(); return;
+    }
     if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser) {
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("retry-credentials")) {
         void controller.retryCredentialRecovery().then(refresh, fail); handled(); return;
@@ -561,6 +635,25 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   renderer.on("theme_mode", onTheme);
   renderer.on("resize", refresh);
   const onFrame = () => {
+    if (searchRestoreScroll !== undefined) {
+      transcript.scrollTo(searchRestoreScroll);
+      searchRestoreScroll = undefined;
+    }
+    if (searchOpen && searchScrollToMatch) {
+      searchScrollToMatch = false;
+      const match = searchResult.matches[searchSelected];
+      if (match) {
+        const row = rows.get(match.id)?.root;
+        if (row && row.height > transcript.viewport.height) {
+          const entry = controller.snapshot().transcript.find(item => item.id === match.id);
+          if (entry) {
+            const source = transcriptSearchText({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), Math.max(1, transcript.viewport.width - 1));
+            const rowTop = transcript.scrollTop + row.y - transcript.viewport.y;
+            transcript.scrollTo(rowTop + Math.floor(match.offset / Math.max(1, source.length) * row.height) - Math.floor(transcript.viewport.height / 2));
+          }
+        } else transcript.scrollChildIntoView(`message-${match.id}`);
+      }
+    }
     if (scrollToInspection && inspection) {
       scrollToInspection = false;
       transcript.scrollChildIntoView(inspection.kind === "tool" ? `message-${inspection.id}` : `code-${inspection.id}-${inspection.index}`);

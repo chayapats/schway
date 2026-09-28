@@ -69,7 +69,7 @@ export interface TranscriptItemView {
   root: BoxRenderable;
   /** Return code blocks in rendered order with the exact sanitized representation shown by Markdown. */
   codeBlocks(): { id: string; text: string }[];
-  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
+  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean, searchMatch?: boolean): void;
 }
 
 /** Create Markdown styles from the same semantic palette used by tools and controls. */
@@ -146,10 +146,11 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   return {
     root,
     codeBlocks,
-    update(entry, expanded, streaming, width, focusedCode, focusedTool) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
+    update(entry, expanded, streaming, width, focusedCode, focusedTool, searchMatch) {
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, searchMatch]);
       if (next === fingerprint) return;
       fingerprint = next;
+      root.backgroundColor = searchMatch ? theme.border : entry.kind === "user" ? theme.surface : undefined;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const suffix = ` · ${tool.state}`;
