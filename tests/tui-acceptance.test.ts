@@ -46,7 +46,9 @@ test("manual compaction accepts at operation start and never sends a second acce
     const configEditor = await loadConfigEditor({ home, workspaceRoot: root });
     const manager = createContextManager(workspace, { home });
     let finish!: () => void;
-    manager.compact = async () => new Promise(resolve => { finish = () => resolve(null); });
+    let started!: () => void;
+    const operationStarted = new Promise<void>(resolve => { started = resolve; });
+    manager.compact = async () => new Promise(resolve => { finish = () => resolve(null); started(); });
     const controller = new TuiController({
       session: createSession(), sessionId: "compaction", workspace, contextManager: manager,
       provider: "scripted", modelId: "scripted", model: createScriptedModel(), configEditor,
@@ -59,6 +61,7 @@ test("manual compaction accepts at operation start and never sends a second acce
         env: {}, secrets: [], finishQuit() {}, stderr: { write() {} },
       }, command.raw, onAccepted), () => { accepted++; });
     try {
+      await operationStarted;
       expect(controller.running).toBe(true);
       expect(accepted).toBe(1);
       finish();

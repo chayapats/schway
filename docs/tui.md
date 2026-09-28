@@ -271,3 +271,31 @@ restart, CLI shadowing, file/memory conflicts, malformed files, unavailable mode
 staging cancellation, secret exclusion and draft/cursor restoration. Live provider,
 OAuth and human-terminal preference checks have not been run; they remain for the
 installed-journey gate.
+
+## Discover commands and skills
+
+Type `/` to browse built-ins, active extension commands, and user-invokable
+project/global skills, including user-only skills. Rows identify their source;
+`!` marks a collision or unavailable action. Rename conflicting skills or
+extensions before invoking either meaning of the name. Metadata refreshes when
+browsing reopens, and submission rechecks collisions. Removing or disabling a
+highlighted choice clears its selection: press an arrow before completing again.
+
+Use Up/Down to select, Tab to insert, and Escape to dismiss. Completion never
+executes an action. `/thinking ` suggests only validated current model levels
+(and `reset`); subscription levels require advertised account metadata.
+`/theme ` offers appearance choices; `/login ` and `/logout ` offer public
+connection names, never keys or callback payloads. Enter explicitly submits;
+rejected or busy commands remain in the editor for correction.
+
+**Alt+H** opens searchable ephemeral help while retaining your task and cursor;
+`/help` opens the same surface. Search names, descriptions, or sources. Escape
+restores the task and viewport. Tab previews the selected command within help,
+so Escape still restores the task. Enter transfers that preview to the composer;
+press Enter again to submit it. Help does not append repeated command lists to the transcript.
+Skill browsing reads bounded frontmatter; full body validation happens on invocation.
+
+Automated coverage uses isolated credentials, controller/dispatcher fixtures,
+actual renderer keyboard/paste/resize at 44×18, and fresh-process metadata/SDK
+loading checks. Human terminal use, real OAuth, and live provider journeys were
+not run for this slice and remain part of the installed-journey gate.

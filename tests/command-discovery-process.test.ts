@@ -1,0 +1,47 @@
+import { expect, test } from "bun:test";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { withTempDir } from "./helpers.ts";
+
+test("fresh command discovery reads bounded metadata and does not import provider SDKs", async () => {
+  await withTempDir(async root => {
+    const skill = join(root, ".agents/skills/study");
+    await mkdir(skill, { recursive: true });
+    await Bun.write(join(skill, "SKILL.md"), "---\nname: study\ndescription: Safe metadata\n---\n" + "BODY_SECRET".repeat(500_000));
+    const source = join(import.meta.dir, "../src");
+    const script = `
+      import fs from "node:fs/promises";
+      import { mock } from "bun:test";
+      let metadataBytes = 0;
+      const originalOpen = fs.open;
+      const metadataOpen = async (...args) => {
+        const file = await originalOpen(...args);
+        if (String(args[0]).endsWith("SKILL.md")) {
+          const originalRead = file.read.bind(file);
+          file.read = async (...readArgs) => { const result = await originalRead(...readArgs); metadataBytes += result.bytesRead; return result; };
+        }
+        return file;
+      };
+      const originalReadFile = fs.readFile;
+      const metadataReadFile = (...args) => { if (String(args[0]).endsWith("SKILL.md")) throw new Error("Whole-body read forbidden"); return originalReadFile(...args); };
+      mock.module("node:fs/promises", () => ({ ...fs, open: metadataOpen, readFile: metadataReadFile }));
+      const { TuiController } = await import(${JSON.stringify(join(source, "tui/controller.ts"))});
+      const { createSession } = await import(${JSON.stringify(join(source, "session/session.ts"))});
+      const { createContextManager } = await import(${JSON.stringify(join(source, "context/manager.ts"))});
+      const workspace = { root: ${JSON.stringify(root)}, launchCwd: ${JSON.stringify(root)}, extraRoots: [] };
+      const controller = new TuiController({ workspace, home: ${JSON.stringify(join(root, "home"))}, session: createSession(), sessionId: "discovery", provider: "scripted", modelId: "fixture", contextManager: createContextManager(workspace) });
+      await controller.refreshCommands();
+      const choices = controller.commandChoices("/study");
+      const imported = Object.keys(require.cache).filter(path => /node_modules\\/(?:openai|@anthropic-ai)/.test(path));
+      console.log(JSON.stringify({ names: choices.map(entry => entry.name), metadataBytes, imported }));
+      controller.dispose();
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, env: { PATH: process.env.PATH, HOME: join(root, "home") }, stdout: "pipe", stderr: "pipe" });
+    const output = await new Response(child.stdout).text();
+    const error = await new Response(child.stderr).text();
+    expect(await child.exited).toBe(0); expect(error).toBe("");
+    const result = JSON.parse(output);
+    expect(result.names).toEqual(["study"]); expect(result.metadataBytes).toBeGreaterThan(0); expect(result.metadataBytes).toBeLessThanOrEqual(512);
+    expect(result.imported).toEqual([]);
+  });
+});

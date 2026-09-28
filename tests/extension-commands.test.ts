@@ -7,12 +7,12 @@ import { loadExtensions } from "../src/extensions/loader.ts";
 import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { dispatchEditorInput, helpText } from "../src/tui/commands.ts";
-import { TuiController } from "../src/tui/controller.ts";
+import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
-async function commandFixture(dir: string, body: string, secrets: string[] = []) {
+async function commandFixture(dir: string, body: string, secrets: string[] = [], options: Partial<TuiControllerOptions> = {}) {
   await Bun.write(join(dir, "commands.ts"), body);
   const path = await realpath(join(dir, "commands.ts"));
   const workspace = await resolveWorkspace(dir);
@@ -27,7 +27,7 @@ async function commandFixture(dir: string, body: string, secrets: string[] = [])
     model: createScriptedModel({ responses: [request => {
       requests.push(...request.items.filter(item => item.type === "user").flatMap(item => item.content.map(block => block.text)));
       return { text: "normal loop response" };
-    }] }),
+    }] }), ...options,
   });
   return { ...loaded, module, session, requests, controller, path };
 }
@@ -192,3 +192,77 @@ for (const name of ["undefined", "42", "null"]) {
     });
   });
 }
+
+
+test("unified controller discovery exposes two extensions, user-only skills and collisions without execution", async () => {
+  await withTempDir(async dir => {
+    const fixture = await commandFixture(dir, `export let calls = 0; export default ctx => {
+      for (const name of ['ping', 'pong']) ctx.registerCommand({ name, description: 'Unicode 日本語', execute() { calls++; } });
+    };`);
+    try {
+      for (const name of ["study", "manual", "theme", "ping"]) {
+        await mkdir(join(dir, ".agents/skills", name), { recursive: true });
+        await Bun.write(join(dir, ".agents/skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: Metadata only\ndisable-model-invocation: ${name === "manual"}\n---\n${"BODY".repeat(100_000)}`);
+      }
+      await fixture.controller.refreshCommands();
+      const choices = fixture.controller.commandChoices("/");
+      expect(choices.find(entry => entry.name === "study")?.source).toBe("project skill");
+      expect(choices.find(entry => entry.name === "manual")?.source).toContain("user-only");
+      expect(choices.filter(entry => entry.name === "ping")).toHaveLength(2);
+      expect(choices.filter(entry => entry.name === "theme").every(entry => !entry.available)).toBe(true);
+      expect(choices.find(entry => entry.name === "pong")?.source).toContain("extension");
+      let accepted = false;
+      expect(await dispatchEditorInput("/theme dark", fixture.controller, noBuiltin, () => { accepted = true; })).toBe(false);
+      expect(await dispatchEditorInput("/ping", fixture.controller, noBuiltin)).toBe(false);
+      expect(await dispatchEditorInput("/thmee", fixture.controller, noBuiltin)).toBe(false);
+      expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("/thinking");
+      expect(accepted).toBe(false); expect(fixture.module.calls).toBe(0); expect(fixture.requests).toEqual([]);
+      expect(fixture.controller.commandChoices("/login ").map(entry => entry.insertion)).toEqual(["/login anthropic", "/login openai", "/login openai-compatible", "/login codex"]);
+    } finally { fixture.controller.dispose(); }
+  });
+});
+
+
+test("session changes fence in-flight command validation and busy dispatch skips discovery", async () => {
+  await withTempDir(async dir => {
+    const fixture = await commandFixture(dir, `export let calls = 0; export default ctx => {
+      ctx.registerCommand({ name: 'ping', description: 'Ping', execute() { calls++; } });
+    };`);
+    try {
+      const dispatch = dispatchEditorInput("/ping", fixture.controller, noBuiltin);
+      fixture.controller.replaceSession(createSession(), "new-session");
+      expect(await dispatch).toBe(false); expect(fixture.module.calls).toBe(0);
+      fixture.controller.setModel(createScriptedModel({ waitForAbort: true }), "scripted", "waiting");
+      const turn = fixture.controller.submit("wait");
+      const original = fixture.controller.commandCollision;
+      fixture.controller.commandCollision = async () => { throw new Error("Busy dispatch must not discover"); };
+      expect(await dispatchEditorInput("/ping", fixture.controller, noBuiltin)).toBe(false);
+      fixture.controller.commandCollision = original;
+      fixture.controller.cancel(); await turn;
+    } finally { fixture.controller.dispose(); }
+  });
+});
+
+
+test("enabled extension replacement refreshes command discovery through the actual session switch", async () => {
+  await withTempDir(async dir => {
+    await mkdir(join(dir, "next-workspace"));
+    const workspace = await resolveWorkspace(join(dir, "next-workspace"));
+    await Bun.write(join(dir, "next.ts"), `export default ctx => ctx.registerCommand({ name: 'next', description: 'New action', execute() {} });`);
+    const fixture = await commandFixture(dir, `export default ctx => ctx.registerCommand({ name: 'previous', description: 'Old action', execute() {} });`, [], {
+      loadWorkspaceExtensions: async () => { const loaded = await loadExtensions({ modules: [join(dir, "next.ts")], workspace, home: join(dir, "home"), tools: createToolRegistry() }); return { tools: loaded.tools, runtime: loaded.runtime }; },
+    });
+    try {
+      await mkdir(join(dir, ".agents/skills/old-skill"), { recursive: true });
+      await Bun.write(join(dir, ".agents/skills/old-skill/SKILL.md"), "---\nname: old-skill\ndescription: Previous workspace\n---\nbody");
+      await fixture.controller.refreshCommands();
+      expect(fixture.controller.commandChoices("/old-skill")).toHaveLength(1);
+      expect(fixture.controller.commandChoices("/previous")).toHaveLength(1);
+      expect(await fixture.controller.switchSession(createSession(), "replacement", { workspace, contextManager: createContextManager(workspace) })).toBe(true);
+      expect(fixture.controller.commandChoices("/old-skill")).toHaveLength(0);
+      await fixture.controller.refreshCommands();
+      expect(fixture.controller.commandChoices("/previous")).toHaveLength(0);
+      expect(fixture.controller.commandChoices("/next")).toHaveLength(1);
+    } finally { fixture.controller.dispose(); }
+  });
+});
