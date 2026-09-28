@@ -21,6 +21,39 @@ Retry progress uses one changing status row and the footer countdown. If retries
 run out or you cancel, any remaining preview is marked “Incomplete response · not
 saved”; completed tool results remain in the session.
 
+## First launch and readiness
+
+An empty conversation identifies the workspace, effective model and auth route,
+then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
+**Ctrl+R retry locked credential storage**, or **type a task**. **Ctrl+I** opens
+failure details. The ready screen does not add a recurring welcome or restored-choice
+message to the transcript; `/config` retains setting provenance and `/model forget`
+clears remembered interactive choices.
+
+The selected connection is checked after the editor opens. While a catalog or
+credential check is pending, you can type, paste and resize; **Esc** cancels the
+check. Setup actions wait for that check to finish or be cancelled. No browser or
+model inference is started by opening the screen. An explicit broken selection
+stays selected until you repair it; startup does not switch billing routes.
+
+Type your task before connecting if useful. The login/model panels temporarily
+own their input and restore the task and cursor after cancellation or activation.
+Completing setup never sends the task: press **Enter** in the task editor when
+ready. Multiline paste stays one task. Missing HOME, malformed configuration,
+unknown profiles or unwritable session storage can instead cause an actionable
+startup exit before the terminal opens. Headless execution keeps its existing
+configuration and credential path and does not read interactive choice memory.
+
+Automated coverage uses the actual renderer's keyboard, paste and resize input,
+plus a packed-and-installed executable launched outside the checkout with isolated
+HOME, credential storage, terminal and model fixtures. It covers fresh startup,
+remembered credentials/model, setup cancellation and activation, one explicit send,
+invalid explicit models, denied credential storage, missing profiles/HOME and
+invalid configuration. Renderer tests additionally delay startup, simulate offline
+failure and fence late results after cancellation/disposal. These fixtures do not
+verify a human terminal, real OS secure storage, live OAuth or a paid provider;
+those checks remain unrun for the final installed-journey gate.
+
 ## Color roles
 
 | Role | Dark | Light | Use |

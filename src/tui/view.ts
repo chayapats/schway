@@ -234,6 +234,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     refreshing = true;
     try {
       const snapshot = controller.snapshot();
+      // Startup readiness is transient chrome; recovery details remain available on demand.
+      const entries = snapshot.readiness !== "ready" && snapshot.transcript.length === 1 && !snapshot.recovery?.accepted && snapshot.transcript[0]?.id === snapshot.recovery?.entryId ? [] : snapshot.transcript;
       paintedCancellationId = snapshot.activity?.cancellation === "requested" ? snapshot.activity.operationId : undefined;
       const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
       root.paddingX = renderer.width < 60 ? 1 : 2;
@@ -273,24 +275,32 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
       header.content = new StyledText([bold(fg(theme.accent)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), width - 8)}`)]);
-      const status = snapshot.activity ? activityStatus(snapshot.activity, width < 60, width < 32) : snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
+      const status = snapshot.readiness === "loading" ? "Checking connection" : snapshot.activity ? activityStatus(snapshot.activity, width < 60, width < 32) : snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
       const model = safe(`${snapshot.activeRoute ? `${snapshot.activeRoute} · ` : ""}${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
       const statusWidth = Bun.stringWidth(status);
       footer.content = new StyledText([
         fg(theme.muted)(`${fitLine(model, Math.max(0, width - statusWidth - 3))}${width > statusWidth + 3 ? "   " : ""}`),
         fg(snapshot.activity?.phase === "stopping" ? theme.warning : snapshot.status === "error" ? theme.error : snapshot.status === "running" ? theme.accent : theme.muted)(fitLine(status, width)),
       ]);
-      const tail = snapshot.transcript.at(-1);
+      const tail = entries.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
       transcript.visible = !snapshot.branchTree;
       tree.visible = !!snapshot.branchTree;
-      empty.visible = snapshot.transcript.length === 0;
-      const ids = new Set(snapshot.transcript.map(entry => entry.id));
+      empty.visible = entries.length === 0;
+      const route = snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`);
+      const action = snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
+        : snapshot.readiness === "ready" ? "Type a task · Enter sends"
+        : snapshot.readiness === "connect" ? "Connect to get started · Alt+L"
+        : snapshot.readiness === "choose-model" ? "Choose an available model · Alt+M"
+        : snapshot.recovery?.category === "credential-store" ? "Repair connection: unlock OS credential storage · Ctrl+R retry"
+        : "Repair connection: choose model/settings · Alt+M";
+      empty.content = safe(`${path}\n${snapshot.provider}/${snapshot.modelId} · ${route}\n\n${snapshot.readinessDetail ? `${snapshot.readinessDetail}\n` : ""}${action}${snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? "\nCtrl+I failure details · Your task stays in the editor" : ""}`);
+      const ids = new Set(entries.map(entry => entry.id));
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
-      for (const entry of snapshot.transcript) {
+      for (const entry of entries) {
         let row = rows.get(entry.id);
         if (!row) {
           row = createTranscriptItem(renderer, entry, theme, syntax, () => {
@@ -304,7 +314,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
           inspection?.id === entry.id && inspection.kind === "tool");
       }
-      if (inspection && !inspectionTargets(snapshot.transcript).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
+      if (inspection && !inspectionTargets(entries).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
         inspection = undefined;
         if (!panelMode) editor.focus();
       }
@@ -314,7 +324,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const previousResult = searchResult;
         const changedQuery = query !== searchLastQuery;
         searchLastQuery = query;
-        searchResult = searchIndex.update(snapshot.transcript.map(entry => ({ id: entry.id, kind: entry.kind, segments: rows.get(entry.id)!.searchSegments().map(segment => segment.text) })), query);
+        searchResult = searchIndex.update(entries.map(entry => ({ id: entry.id, kind: entry.kind, segments: rows.get(entry.id)!.searchSegments().map(segment => segment.text) })), query);
         if (changedQuery) {
           searchSelected = searchResult.matches.length ? 0 : -1;
           searchScrollToMatch = searchSelected >= 0;
@@ -420,7 +430,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       return;
     }
     const snapshot = controller.snapshot();
-    if (snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
+    if (snapshot.readiness === "loading" || snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
       void controller.selectLoginChoice().then(refresh, fail);
       return;
@@ -512,6 +522,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (key.ctrl && name === "c" && controller.running) { controller.cancel(); handled(); return; }
       return;
+    }
+    if (snapshot.readiness === "loading" && ((key.meta || key.option) && (name === "m" || name === "l") || key.ctrl && name === "r")) { handled(); return; }
+    if ((key.meta || key.option) && name === "l" && !panelMode && !controller.running && !snapshot.recovery?.actions.includes("connect")) {
+      controller.openLoginChooser(); handled(); return;
     }
     if (key.ctrl && name === "f" && !panelMode && !inspection) {
       searchOriginalScroll = transcript.scrollTop;

@@ -80,6 +80,10 @@ export interface TuiTranscriptEntry {
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
 export interface TuiSnapshot {
   status: TuiStatus;
+  /** Whether startup is still resolving the selected route, ready, or needs explicit setup. */
+  readiness: "loading" | "ready" | "connect" | "choose-model" | "repair";
+  /** A bounded known startup explanation; raw provider diagnostics remain behind recovery details. */
+  readinessDetail?: string;
   /** Live phase and elapsed time while an operation is owned; absent once settled. */
   activity?: TuiActivity;
   transcript: readonly TuiTranscriptEntry[];
@@ -420,6 +424,7 @@ export class TuiController {
   private sessionId: string;
   private startupRecoveryCategory: "auth" | "credential-store" | "model" | "provider" = "auth";
   private startupDiagnostic?: string;
+  private startupAbort?: AbortController;
   private sessionWriteBlocked = false;
   private maxTurns?: number;
   private maxConcurrentTools?: number;
@@ -538,6 +543,11 @@ export class TuiController {
     const recovery = this.currentRecovery();
     return {
       status: this.status,
+      readiness: this.startupAbort ? "loading" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
+      ...(!this.model && this.startupDiagnostic ? { readinessDetail:
+        /Missing OpenAI API key/.test(this.startupDiagnostic) ? "Missing OpenAI API key."
+          : /no longer available/.test(this.startupDiagnostic) ? "Remembered model is no longer available in this account."
+            : undefined } : {}),
       ...(this.activity ? { activity: this.activitySnapshot() } : {}),
       transcript: this.transcript.map((entry) =>
         this.secrets.length === 0
@@ -563,9 +573,42 @@ export class TuiController {
     };
   }
 
-  /** True while a submitted turn or manual compaction owns the shared cancellation signal. */
+  /** True while startup, a turn, compaction or credential input owns interactive execution. */
   get running(): boolean {
-    return this.activeAbort !== undefined || this.credentialEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
+    return this.startupAbort !== undefined || this.activeAbort !== undefined || this.credentialEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
+  }
+
+  /** Resolve the selected startup adapter without blocking editing or implicitly submitting a task. */
+  async initializeStartup(load: (signal: AbortSignal) => Promise<{ model: Model; activate?: () => void } | { error: string }>): Promise<void> {
+    if (this.disposed || this.running || this.model) return;
+    const abort = new AbortController();
+    this.startupAbort = abort;
+    const session = this.session;
+    const branchId = session.activeBranchId;
+    const provider = this.provider;
+    const modelId = this.modelId;
+    const current = () => !this.disposed && this.startupAbort === abort && !this.model &&
+      this.session === session && this.session.activeBranchId === branchId && this.provider === provider && this.modelId === modelId;
+    try {
+      const result = await Promise.race([
+        load(abort.signal),
+        new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => reject(new Error("Startup connection check cancelled. Choose a model to retry.")), { once: true })),
+      ]);
+      if (!current()) return;
+      abort.signal.throwIfAborted();
+      if ("error" in result) throw new Error(result.error);
+      result.activate?.();
+      this.setModel(result.model, this.provider, this.modelId);
+      this.status = "idle";
+    } catch (error) {
+      if (!current()) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.startupDiagnostic = message;
+      this.startupRecoveryCategory = startupFailureCategory(message);
+      this.offerRecovery(this.startupRecoveryCategory, false, startupRecoveryMessage(this.startupRecoveryCategory), message);
+    } finally {
+      if (this.startupAbort === abort) this.startupAbort = undefined;
+    }
   }
 
   private beginActivity(phase: TuiActivityPhase): number {
@@ -2221,6 +2264,7 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction.
    */
   cancel(): void {
+    if (this.startupAbort) { this.startupAbort.abort(); return; }
     if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.notice("Callback entry cancelled; no credential was changed."); return; }
     if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.codexLoginAbort.abort(); return; }
     if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; this.recoveryRepair = false; return; }
@@ -2256,6 +2300,7 @@ export class TuiController {
    * Applies to both submitted turns and manual compaction during terminal cleanup.
    */
   dispose(): void {
+    this.startupAbort?.abort();
     this.disposed = true;
     this.closeModelPicker();
     if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; }
@@ -2759,6 +2804,9 @@ export class TuiController {
     ];
     const controls = actions.map(action => ({ connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry credential access", "choose-model": "Alt+M choose model", continue: "Ctrl+R continue", details: "Ctrl+I details", "keep-editing": "Esc keep editing" })[action]);
     const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: "error", text: `${message}\n${controls.join(" · ")}` };
+    if (!accepted && this.recovery && !this.recovery.accepted) {
+      this.transcript = this.transcript.filter(item => item.id !== this.recovery!.entryId);
+    }
     this.transcript.push(entry);
     if (markError) this.status = "error";
     this.recovery = { operationId, entryId: entry.id, category, accepted, actions,
@@ -2975,7 +3023,7 @@ function recoveryMessage(category: TuiRecovery["category"]): string {
 /** Classify startup adapter failures before showing any provider or OS diagnostic text. */
 function startupFailureCategory(message: string): "auth" | "credential-store" | "model" | "provider" {
   if (/Cannot (read|save|delete) credential in the OS secure store|secure store|Secret Service|libsecret/i.test(message)) return "credential-store";
-  if (/\b(model|deployment)\b.*\b(unavailable|not found|unknown|invalid)|\b(unavailable|unknown|invalid)\s+model\b/i.test(message)) return "model";
+  if (/\b(model|deployment)\b.*\b(unavailable|no longer available|not found|unknown|invalid)|\b(unavailable|unknown|invalid)\s+model\b/i.test(message)) return "model";
   if (/missing.*(api key|credential)|no .*login found|unauthorized|authentication required/i.test(message)) return "auth";
   return "provider";
 }
