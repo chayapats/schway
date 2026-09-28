@@ -2,6 +2,23 @@
 
 Sessions use append-only semantic JSONL under `~/.schway/sessions`. Each session has a conversation root, globally unique entry IDs, saved branch IDs and heads, and one active branch. `main` is the default branch. A branch head identifies a path through parent entries back to the root; sibling entries remain saved but never enter the selected branch's model context. Runtime events and dynamic environment, instruction, and skill bodies are not session records.
 
+## Starting new work or resuming
+
+An ordinary interactive launch starts fresh and offers **Alt+B** to restore the
+latest meaningful session in this canonical workspace. `/sessions` retains access
+to other workspaces and damaged histories. Explicit `--resume` / `--branch` choose
+the destination directly. Restoration displays the workspace, active conversation
+branch and current effective connection; history does not restore old credentials
+or billing settings and never replays tools.
+
+Untouched interactive conversations are held in memory: startup, `/new`, and
+opening/dismissing history navigation do not leave empty JSONL files. The first
+durable mutation writes the header together with that operation before changing
+in-memory history. Existing saved files and the default session API remain durable;
+headless behavior is unchanged. A failed write fences the handle until reload as
+before. Missing or corrupt suggested history leaves the new-task editor usable and
+never silently selects a substitute.
+
 ## Using branches
 
 Start or resume an interactive session, complete a turn, then use:

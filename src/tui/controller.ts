@@ -136,6 +136,9 @@ export interface TuiSnapshot {
   /** Effective reasoning description shown alongside the requested value. */
   effectiveThinking?: string;
   preferences?: PreferencesSnapshot;
+  recentSession?: SessionDiscovery;
+  /** Whether the current conversation was explicitly restored. */
+  restored?: boolean;
   sessionPicker?: { query: string; allWorkspaces: boolean; entries: SessionDiscovery[]; selectedIndex: number; offset: number; total: number; loading: boolean; hasMore: boolean; error?: string };
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
@@ -480,6 +483,9 @@ export class TuiController {
   private preferenceTransaction?: ConfigTransaction;
   private preferenceGeneration = 0;
   private settingsFailure?: string;
+  private recentSession?: SessionDiscovery;
+  private restored = false;
+  private recentDiscoveryGeneration = 0;
   private sessionPicker?: NonNullable<TuiSnapshot["sessionPicker"]>;
   private sessionRows: SessionDiscovery[] = [];
   private sessionMatches: SessionDiscovery[] = [];
@@ -624,6 +630,8 @@ export class TuiController {
       ...(this.provider === "openai" ? { activeRoute: `${activeRoute}${this.model ? "" : " (unavailable)"}` } : {}),
       ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
       preferences: this.preferences ? structuredClone(this.preferences) : undefined,
+      recentSession: this.session.items.length === 0 ? this.recentSession : undefined,
+      restored: this.restored,
       sessionPicker: this.sessionPicker ? structuredClone(this.sessionPicker) : undefined,
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
@@ -1927,6 +1935,39 @@ export class TuiController {
     this.searchModels(returning.query);
   }
 
+  /** Offer the latest meaningful canonical-workspace history without activating it or opening navigation. */
+  async offerRecentSession(directory: string): Promise<void> {
+    const generation = ++this.recentDiscoveryGeneration;
+    const session = this.session;
+    const root = this.workspaceIdentity()?.root;
+    let latest: SessionDiscovery | undefined;
+    const roots = new Map<string, string>();
+    try {
+      for (let offset = 0; ; offset += 100) {
+        const rows = await discoverSessions(directory, offset);
+        for (const row of rows) {
+          if (!row.workspaceRoot || row.id === this.sessionId || row.state === "Empty history" || (!row.hasWork && !row.previewIncomplete)) continue;
+          if (this.disposed || this.session !== session || generation !== this.recentDiscoveryGeneration) return;
+          if (!roots.has(row.workspaceRoot)) {
+            try { roots.set(row.workspaceRoot, (await canonicalWorkspace(row.workspaceRoot)).root); }
+            catch { roots.set(row.workspaceRoot, ""); }
+          }
+          if (roots.get(row.workspaceRoot) !== root) continue;
+          if (!latest || (row.activityAt ?? row.createdAt) > (latest.activityAt ?? latest.createdAt)) latest = row;
+        }
+        if (this.disposed || this.session !== session || generation !== this.recentDiscoveryGeneration) return;
+        if (rows.length < 100) break;
+      }
+      this.recentSession = latest && !latest.hasWork
+        ? { ...latest, title: "Recent history (preview unavailable)" } : latest;
+    } catch {
+      if (!this.disposed && this.session === session) this.notice("Recent history is unavailable. Start a new task or use /sessions to recover saved work.");
+    }
+  }
+
+  /** Mark an explicit restoration so the view explains its live workspace, branch and connection. */
+  markRestored(): void { this.restored = true; }
+
   /** Discover bounded history once; subsequent search and paging use only the cached metadata. */
   async openSessionPicker(directory: string, resume: (id: string, signal: AbortSignal) => Promise<boolean>, more = false): Promise<boolean> {
     if (this.running || this.disposed || this.credentialEntry || this.loginCallbackValue !== undefined) return false;
@@ -2599,6 +2640,9 @@ export class TuiController {
     sessionId: string,
     options: { workspace?: Workspace; contextManager?: ContextManager } = {},
   ): void {
+    this.recentSession = undefined;
+    this.restored = false;
+    this.recentDiscoveryGeneration++;
     this.commandHelpOpen = false;
     this.discoveredCommands = undefined;
     this.commandDiscoveryGeneration++;

@@ -81,6 +81,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   renderer.root.add(root);
   const header = new TextRenderable(renderer, { id: "header", height: 1, flexShrink: 0, marginBottom: 1 });
   root.add(header);
+  const returnContext = new TextRenderable(renderer, { id: "return-context", flexShrink: 0, fg: theme.muted, wrapMode: "word", visible: false });
+  root.add(returnContext);
   const transcript = new ScrollBoxRenderable(renderer, {
     id: "transcript", flexBasis: 0, flexGrow: 1, minHeight: 1, stickyScroll: true, stickyStart: "bottom", scrollX: false,
     contentOptions: { flexDirection: "column", paddingRight: 1 },
@@ -341,6 +343,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       tree.visible = !!snapshot.branchTree;
       empty.visible = entries.length === 0;
       const route = snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`);
+      returnContext.visible = !panelMode && (!!snapshot.recentSession || !!snapshot.restored);
+      returnContext.content = (safe(snapshot.recentSession
+        ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Preview incomplete · resume validates history" : "/sessions for all history"}`
+        : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${snapshot.provider}/${snapshot.modelId} · ${route}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
       const action = snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
         : snapshot.readiness === "ready" ? "Type a task · Enter sends"
         : snapshot.readiness === "connect" ? "Connect to get started · Alt+L"
@@ -625,6 +631,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (key.ctrl && name === "w") { controller.toggleSessionScope(); handled(); return; }
       if (key.ctrl && name === "l") { void controller.loadMoreSessionPicker().then(refresh, fail); handled(); return; }
       if (key.meta || key.option || name === "tab") { handled(); return; }
+    }
+    if ((key.meta || key.option) && name === "b" && !panelMode && !searchOpen && !controller.running && snapshot.recentSession) {
+      void options.submit(`/resume ${snapshot.recentSession.id}`, () => {}).then(refresh, fail); handled(); return;
     }
     if ((key.meta || key.option) && name === "s" && !panelMode && !controller.running) { void options.submit("/sessions", () => {}).then(refresh, fail); handled(); return; }
     if (snapshot.changeReview) {

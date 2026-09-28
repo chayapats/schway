@@ -291,13 +291,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           startupError,
           secrets,
         });
+        controller.markRestored();
         if (!startupError) {
           controller.notice(
             `Resumed ${resumed.items.length} saved records. /session for details.`,
           );
         }
       } else {
-        const session = await createJsonlSession({ directory, workspace });
+        const session = await createJsonlSession({ directory, workspace, deferred: true });
         diagnosticSessionId = session.header.id;
         const freshManager = createContextManager(workspace, managerOptions);
         skillScope.manager = freshManager;
@@ -335,6 +336,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       return 1;
     }
 
+    if (!io.args.resume) void controller.offerRecentSession(directory);
     if (configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(configEditor.memoryNotice);
     if (startupError && !configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(`Remembered choice could not activate: ${redactSecrets(startupError, secrets).slice(0, 500)} Use /model to repair it or /model forget; no alternate billing route was selected.`);
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
@@ -530,11 +532,13 @@ export async function handleSlashCommand(
       const session = await createJsonlSession({
         directory: ctx.sessionsDir,
         workspace,
+        deferred: true,
       });
       const manager = createContextManager(workspace, managerOptions);
       if (!await ctx.controller.switchSession(session, session.header.id, { workspace, contextManager: manager })) return false;
       ctx.skillScope.manager = ctx.controller.activeContextManager();
       ctx.skillScope.workspaceRoot = workspace.root;
+      void ctx.controller.offerRecentSession(ctx.sessionsDir);
       ctx.controller.notice("New session. Type / for commands or /session for details.");
       return true;
     }
@@ -554,6 +558,7 @@ export async function handleSlashCommand(
         const manager = createContextManager(workspace, managerOptions);
         if (resumeSignal?.aborted) return false;
         if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return false;
+        ctx.controller.markRestored();
         ctx.skillScope.manager = ctx.controller.activeContextManager();
         ctx.skillScope.workspaceRoot = workspace.root;
         for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
@@ -562,7 +567,7 @@ export async function handleSlashCommand(
         );
         return true;
       } catch (error) {
-        ctx.controller.fail(messageOf(error));
+        ctx.controller.fail(`${messageOf(error)}. Start a new task here or use /sessions for recoverable history.`);
         return false;
       }
     }
