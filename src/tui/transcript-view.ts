@@ -1,4 +1,4 @@
-import { BoxRenderable, MarkdownRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type BaseRenderable, type CliRenderer, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type BaseRenderable, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 import type { TuiTheme } from "./theme.ts";
@@ -69,6 +69,10 @@ export interface TranscriptItemView {
   root: BoxRenderable;
   /** Return code blocks in rendered order with the exact sanitized representation shown by Markdown. */
   codeBlocks(): { id: string; text: string }[];
+  /** Return visible text blocks and their exact rendered scroll targets. */
+  searchSegments(): readonly { text: string; target: Renderable; visualLine: number; lineInfo?: { lineSources: readonly number[]; lineStartCols: readonly number[] } }[];
+  /** Mark the selected search row without changing its rendered content. */
+  setSearchMatch(selected: boolean): void;
   update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
 }
 
@@ -143,9 +147,47 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   }
   root.add(body);
   let fingerprint = "";
+  let searchSelected = false;
   return {
     root,
     codeBlocks,
+    searchSegments() {
+      const segments: { text: string; target: Renderable; visualLine: number; lineInfo?: { lineSources: readonly number[]; lineStartCols: readonly number[] } }[] = [];
+      const visit = (node: BaseRenderable) => {
+        if (!node.visible) return;
+        if (node instanceof TextBufferRenderable) {
+          if (node.plainText) segments.push({ text: node.plainText, target: node, visualLine: 0 });
+          return;
+        }
+        if (node instanceof TextTableRenderable) {
+          // OpenTUI exposes table cells but not row geometry; its laid-out row
+          // offsets are the source of truth after a frame, including wrapped cells.
+          const table = node as unknown as {
+            _layout?: { rowOffsets?: readonly number[] };
+            _cells?: readonly (readonly ({ textBufferView?: { lineInfo: { lineSources: readonly number[]; lineStartCols: readonly number[] } } } | undefined)[])[];
+          };
+          const layout = table._layout;
+          for (const [rowIndex, cells] of node.content.entries()) {
+            for (const [columnIndex, cell] of cells.entries()) {
+              const text = cell?.map(chunk => chunk.text).join("") ?? "";
+              if (text) segments.push({
+                text, target: node, visualLine: (layout?.rowOffsets?.[rowIndex] ?? rowIndex) + 1 + node.cellPaddingY,
+                lineInfo: table._cells?.[rowIndex]?.[columnIndex]?.textBufferView?.lineInfo,
+              });
+            }
+          }
+          return;
+        }
+        for (const child of node.getChildren()) visit(child);
+      };
+      visit(root);
+      return segments;
+    },
+    setSearchMatch(selected) {
+      if (searchSelected === selected) return;
+      searchSelected = selected;
+      root.backgroundColor = selected ? theme.border : initial.kind === "user" ? theme.surface : undefined;
+    },
     update(entry, expanded, streaming, width, focusedCode, focusedTool) {
       const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
       if (next === fingerprint) return;

@@ -62,6 +62,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
 | Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one tool result; C copies the selected item; Esc returns to the draft |
+| Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
 | Recover stale terminal cells | Ctrl+L; preserves the draft and scroll position |
@@ -73,6 +74,18 @@ your reading position; Ctrl+End resumes following. Wheel input over non-scrollab
 chrome, including the footer, also scrolls the conversation. The multiline editor
 retains its own scrolling. The transcript has a fixed-width viewport so starting
 to overflow does not introduce a scrollbar and rewrap earlier messages.
+
+Ctrl+F searches the selected conversation branch locally and shows the current
+match and count. Search is literal and ignores case; it follows logical text
+across terminal wraps, including Unicode. It searches redacted, bounded display
+text: collapsed successful tools expose their summary, and expanding tools with
+Ctrl+O before searching includes their bounded output. Other branches and bytes
+past a truncation marker are outside the search. The status says when a very
+large search is limited. The search field replaces the composer temporarily;
+the draft and cursor return when search closes. Esc restores the original
+reading position, while Enter keeps the selected result in view. New streaming
+output updates the count without moving the current result. Ctrl+End explicitly
+closes search and follows the latest output again.
 
 After an accepted prompt clears, you can type or paste a future draft during the
 current turn. Enter does not queue it while work is active; the draft stays in the
