@@ -958,7 +958,7 @@ export class TuiController {
       const applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(preferred),
         () => `ChatGPT subscription active for this session: openai/${this.modelId}. ${this.describeThinking()}`,
         "Credential saved and account model found, but activation could not complete. Retry /model after checking the selected provider settings.");
-      if (applied) this.subscriptionPending = false;
+      if (applied) { this.subscriptionPending = false; await this.emitModelActivated({ provider: "openai", modelId: this.modelId, authRoute: "codex" }); }
       else this.notice(`Credential saved and account models found, but subscription activation failed. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
       return applied;
     }
@@ -1720,20 +1720,22 @@ export class TuiController {
         return false;
       }
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via ChatGPT subscription. Applies to this session only.`);
+        () => `Switched to openai/${this.modelId} via ChatGPT subscription.`);
     } else if (selection.authRoute === "api-key") {
       applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via OpenAI API key. Applies to this session only.`);
+        () => `Switched to openai/${this.modelId} via OpenAI API key.`);
     } else applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
-    if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) this.emitModelActivated(selection);
+    if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
   }
 
   /** Notify persistence consumers only after the selected route has activated. */
-  private emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): void {
-    try { this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
+  private async emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): Promise<void> {
+    try {
+      if (await this.configEditor?.rememberChoice(choice.authRoute)) this.notice("Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.");
+      this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
       ...(choice.profile ? { profile: choice.profile } : {}) }); }
-    catch { this.notice("Model activated, but its preference could not be remembered."); }
+    catch (error) { this.notice(`Model activated and usable, but its preference was not remembered. ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)} No additional login is needed.`); }
   }
 
   /** Switch the named compatible profile as one staged change, retaining previous on failure. */
@@ -1743,15 +1745,36 @@ export class TuiController {
     if (!trimmed) { this.fail("Usage: /model profile:<name>."); return false; }
     const applied = await this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
       const active = this.configEditor!.settings.profile ?? trimmed;
-      return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}). Applies to this session only.`;
+      return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}).`;
     });
-    if (applied) this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: "provider", profile: trimmed });
+    if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: "provider", profile: trimmed });
     return applied;
+  }
+
+  /** Forget workspace memory and expose inherited configuration even when its credentials need repair. */
+  async forgetModelChoice(): Promise<boolean> {
+    if (this.running || !this.configEditor || !this.stageSettings) { this.notice("Memory reset requires an idle configured session."); return false; }
+    this.status = "running";
+    try {
+      const editor = await this.configEditor.forgetChoice();
+      const next = editor.settings;
+      this.configEditor = editor;
+      const signal = new AbortController().signal;
+      let staged: { model?: Model; contextManager: ContextManager };
+      try { staged = await this.stageSettings(next, signal, this.workspace, this.model); }
+      catch { staged = { model: undefined, contextManager: this.contextManager }; }
+      this.publishSettings(next, staged);
+      this.recovery = undefined;
+      this.notice(`Forgot interactive memory for this workspace. Inherited configuration is active.${staged.model ? "" : " Configure access with /model or /login before submitting."}`);
+      return true;
+    } catch (error) { this.notice(`Could not forget interactive memory: ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)}`); return false; }
+    finally { this.status = "idle"; }
   }
 
   /** Apply the textual model or profile form through the same atomic session settings path as the picker. */
   async selectModel(args: string): Promise<boolean> {
     if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
+    if (["forget", "reset"].includes(args.trim())) return this.forgetModelChoice();
     const selection = parseModelArgs(args, this.provider);
     if ("error" in selection) { this.fail(selection.error); return false; }
     if (selection.profile !== undefined) {
@@ -1772,8 +1795,8 @@ export class TuiController {
     const applied = await this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
       ? this.configEditor!.prepareSubscriptionModel(selection.modelId)
       : this.configEditor!.prepareModel(selection.provider, selection.modelId),
-      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}). Applies to this session only.`);
-    if (applied) this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
+      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}).`);
+    if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
       authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
     return applied;
   }
@@ -1800,10 +1823,13 @@ export class TuiController {
       }
     }
     if (selection === "show") { this.notice(this.describeThinking()); return true; }
+    let applied: boolean;
     if (selection === "reset") {
-      return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}. Applies to this session only.`);
+      applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}.`);
     }
-    return this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}. Applies to this session only.`);
+    else applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}.`);
+    if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
+    return applied;
   }
 
   /** Requested and effective reasoning with provider/model for truthful display. */
@@ -2087,6 +2113,7 @@ export class TuiController {
     let staged: { tools: ToolRegistry; runtime: ExtensionRuntime } | undefined;
     try {
       const editor = await this.configEditor?.forWorkspace(options.workspace.root);
+      if (editor?.memoryProblem) throw new Error(editor.memoryProblem);
       const nextSettings = editor?.settings;
       const nextRuntime = nextSettings && this.stageSettings ? await this.stageSettings(nextSettings, abort.signal, options.workspace, this.model) : undefined;
       abort.signal.throwIfAborted();

@@ -451,13 +451,29 @@ export function mergeConfigLayers(
   return merged;
 }
 
+/** Drop remembered connection fields when a higher layer explicitly selects a different route or profile. */
+export function effectiveInteractiveMemory(input: { memory?: ConfigLayer; user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer }): ConfigLayer | undefined {
+  if (!input.memory) return undefined;
+  const memory = { ...input.memory };
+  for (const layer of [input.user, input.project, input.cli, input.session]) {
+    if (!layer) continue;
+    if (layer.provider !== undefined && layer.provider !== input.memory.provider ||
+        layer.profile !== undefined && layer.profile !== input.memory.profile) return undefined;
+    if (layer.openaiAuth !== undefined && layer.openaiAuth !== input.memory.openaiAuth) { delete memory.model; delete memory.thinking; delete memory.openaiAuth; }
+    if (layer.model !== undefined && layer.model !== memory.model) delete memory.thinking;
+  }
+  return memory;
+}
+
 /**
- * Resolve defaults, user, project, CLI and session overrides in increasing precedence with catalog budgets.
+ * Resolve defaults, optional interactive memory, user, project, CLI and session overrides in increasing precedence with catalog budgets.
  * Named compatible profiles merge by name across global/project config; the selected name resolves by
  * normal precedence while explicit CLI/session connection flags apply last over the profile.
  * Returns an error for unknown/malformed profiles or a missing base URL before any provider request.
  */
 export function resolveSettings(input: {
+  /** Opt-in, secret-free interactive choice below explicit configuration. */
+  memory?: ConfigLayer;
   user?: ConfigLayer;
   project?: ConfigLayer;
   cli?: ConfigLayer;
@@ -467,9 +483,11 @@ export function resolveSettings(input: {
   /** Preliminary headless resolution only; never use it for an outgoing request. */
   deferOpenAIThinking?: boolean;
 }): ResolvedSettings | { error: string } {
+  const memory = effectiveInteractiveMemory(input);
   const mergedProfiles = mergeProfileMaps(input.user?.profiles, input.project?.profiles, input.cli?.profiles, input.session?.profiles);
   const selection = mergeConfigLayers(
     BUILTIN_DEFAULTS,
+    memory,
     input.user,
     input.project,
     input.cli,
@@ -509,9 +527,9 @@ export function resolveSettings(input: {
     };
     merged = mergeConfigLayers(
       BUILTIN_DEFAULTS,
-      fileLayer(input.user),
-      fileLayer(input.project),
-      profileLayer,
+      ...(memory?.profile === selectedName
+        ? [profileLayer, omitProfileKeys(memory), omitProfileKeys(input.user), omitProfileKeys(input.project)]
+        : [memory, fileLayer(input.user), fileLayer(input.project), profileLayer]),
       omitProfileKeys(input.cli),
       omitProfileKeys(input.session),
     );
