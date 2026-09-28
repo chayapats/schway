@@ -1,3 +1,5 @@
+import { Database } from "bun:sqlite";
+import { openSync, closeSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -44,9 +46,14 @@ export class InteractiveMemory {
     if (choice) validateChoice(choice);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const lockPath = `${this.path}.lock`;
-    let lock;
-    try { lock = await open(lockPath, "wx", 0o600); }
-    catch { throw new Error("Interactive memory is being changed by another process. Reopen before choosing again."); }
+    // SQLite's process lock survives asynchronous file work but is released by the OS on exit.
+    // Keep its inode: deleting a lock database would let a contender lock a different file.
+    // Never open/close an existing lock inode outside SQLite: POSIX may release this process's locks.
+    try { closeSync(openSync(lockPath, "wx", 0o600)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    const lock = new Database(lockPath);
+    try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
+    catch { lock.close(); throw new Error("Interactive memory is being changed by another process. Retry after its update finishes."); }
     const temporary = `${this.path}.${crypto.randomUUID()}.tmp`;
     try {
       if (await readOptional(this.path) !== this.before) throw new Error("Interactive memory changed in another process. Reopen before choosing again; the newer choice was preserved.");
@@ -59,9 +66,7 @@ export class InteractiveMemory {
       this.choice = choice;
       this.problem = undefined;
     } finally {
-      await rm(temporary, { force: true });
-      await lock.close();
-      await rm(lockPath, { force: true });
+      try { await rm(temporary, { force: true }); } finally { lock.close(); }
     }
   }
 }

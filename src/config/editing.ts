@@ -173,9 +173,20 @@ export class ConfigEditor {
     return new ConfigEditor({ ...this.layers, memory: memory?.choice, project, session: same ? this.layers.session : undefined }, { ...this.paths, project: path }, same ? this.modelCapabilities : undefined, memory, this.home);
   }
 
+  /** Block unavailable memory only when explicit settings do not independently select a complete connection. */
+  get memoryActivationError(): string | undefined {
+    if (!this.memoryProblem) return undefined;
+    const explicit = mergeConfigLayers(this.layers.user, this.layers.project, this.layers.cli, this.layers.session);
+    if (typeof explicit.profile === "string" && explicit.profile === this.current.profile) return undefined;
+    if (explicit.provider !== this.current.provider || !explicit.model) return this.memoryProblem;
+    if (explicit.provider === "openai" && explicit.openaiAuth !== "api-key" && explicit.openaiAuth !== "codex") return this.memoryProblem;
+    if (explicit.provider === "openai-compatible" && (!explicit.baseUrl || !explicit.auth)) return this.memoryProblem;
+    return undefined;
+  }
+
   /** Describe remembered provenance and any explicit settings that shadow it. */
   get memoryNotice(): string | undefined {
-    if (this.memoryProblem) return this.memoryProblem;
+    if (this.memoryProblem) return this.memoryActivationError ?? `${this.memoryProblem} Explicit settings fully select the connection and take precedence; remembered state was left unchanged.`;
     if (!this.memory?.choice) return undefined;
     const shadowed = ["provider", "model", "profile", "openaiAuth", "thinking"].filter(key => {
       const origin = this.origins[key as keyof ConfigLayer];

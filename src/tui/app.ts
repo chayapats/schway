@@ -195,7 +195,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   try {
     let model = io.model;
-    let startupError: string | undefined = configEditor.memoryProblem;
+    let startupError: string | undefined = configEditor.memoryActivationError;
     let startupNotice: string | undefined;
     if (!model && !startupError) {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {

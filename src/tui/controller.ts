@@ -2115,7 +2115,7 @@ export class TuiController {
     let staged: { tools: ToolRegistry; runtime: ExtensionRuntime } | undefined;
     try {
       const editor = await this.configEditor?.forWorkspace(options.workspace.root);
-      if (editor?.memoryProblem) throw new Error(editor.memoryProblem);
+      if (editor?.memoryActivationError) throw new Error(editor.memoryActivationError);
       let nextSettings = editor?.settings;
       const nextRuntime = nextSettings && this.stageSettings ? await this.stageSettings(nextSettings, abort.signal, options.workspace, this.model) : undefined;
       abort.signal.throwIfAborted();
@@ -2137,6 +2137,7 @@ export class TuiController {
       if (editor && nextSettings && nextRuntime) {
         this.configEditor = editor;
         this.publishSettings(nextSettings, nextRuntime);
+        if (editor.memoryNotice) this.notice(editor.memoryNotice);
       }
       if (staged) {
         staged = undefined;

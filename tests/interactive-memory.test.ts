@@ -3,7 +3,7 @@ import { stageInteractiveSettings } from "../src/tui/app.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { mkdir, readdir, readFile, writeFile, rm, symlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rm, symlink, stat } from "node:fs/promises";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
@@ -121,7 +121,7 @@ test("interleaved controller updates preserve the newer revision and report stal
     expect(two.controller.snapshot().transcript.at(-1)?.text).toContain("newer choice was preserved");
     const reopen = await launch(home, root); expect(reopen.editor.settings.model).toBe("gpt-4o"); reopen.controller.dispose();
     expect(await one.controller.thinkingCommand("off")).toBe(true);
-    const stateFiles = await readdir(join(home, ".schway/interactive")); expect(stateFiles).toHaveLength(1);
+    const stateFiles = (await readdir(join(home, ".schway/interactive"))).filter(path => path.endsWith(".json")); expect(stateFiles).toHaveLength(1);
     const raw = await readFile(join(home, ".schway/interactive", stateFiles[0]!), "utf8"); expect(JSON.parse(raw).choice).toEqual({ provider: "openai", model: "gpt-4o", openaiAuth: "api-key", thinking: "off" });
     one.controller.dispose(); two.controller.dispose();
   });
@@ -177,7 +177,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
     };
     const selected = await run("select"); expect(selected.code).toBe(0);
     expect(selected.requests.at(-1)).toMatchObject({ provider: "openai", model: "gpt-5.4", thinking: "high", apiKey: "stored" });
-    const stateDirectory = join(home, ".schway/interactive"), stateFile = (await readdir(stateDirectory))[0]!;
+    const stateDirectory = join(home, ".schway/interactive"), stateFile = (await readdir(stateDirectory)).find(path => path.endsWith(".json"))!;
     const saved = await readFile(join(stateDirectory, stateFile), "utf8");
     const reopened = await run("reopen"); expect(reopened.requests).toHaveLength(1);
     expect(reopened.requests[0]).toMatchObject({ provider: "openai", model: "gpt-5.4", thinking: "high", apiKey: "stored" });
@@ -237,7 +237,7 @@ test("individual explicit model, reasoning and profile fields resolve at every h
   await withTempDir(async root => {
     const home = join(root, "home"), project = join(root, "project"); await mkdir(project);
     const first = await launch(home, project); await first.controller.selectModel("openai/gpt-5.4"); await first.controller.thinkingCommand("high"); first.controller.dispose();
-    const directory = join(home, ".schway/interactive"); const file = join(directory, (await readdir(directory))[0]!); const saved = await readFile(file, "utf8");
+    const directory = join(home, ".schway/interactive"); const file = join(directory, (await readdir(directory)).find(path => path.endsWith(".json"))!); const saved = await readFile(file, "utf8");
     for (const scope of ["user", "project", "cli"] as const) {
       for (const [override, expected] of [
         [{ model: "gpt-4o" }, { provider: "openai", model: "gpt-4o", thinking: undefined }],
@@ -316,5 +316,83 @@ test("resumed subscription capabilities support later reasoning edits even when 
     expect(await controller.thinkingCommand("max")).toBe(true);
     expect(controller.describeThinking()).toContain("Thinking: max");
     expect(await controller.configCommand("set maxTurns 9")).toBe(true); controller.dispose();
+  });
+});
+
+test("a live preference writer excludes contenders and SIGKILL releases ownership for selection and forget", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const seed = await launch(home, root); await seed.controller.selectModel("anthropic/claude-haiku-4-5"); seed.controller.dispose();
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-lock-owner.ts"), root], {
+      cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
+    });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+    try {
+      const reader = child.stdout.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain("LOCKED");
+      const stateDirectory = join(home, ".schway/interactive");
+      const lockFile = (await readdir(stateDirectory)).find(path => path.endsWith(".lock"))!;
+      expect((await stat(join(stateDirectory, lockFile))).mode & 0o777).toBe(0o600);
+      reader.releaseLock();
+      const contender = await launch(home, root);
+      expect(await contender.controller.selectModel("openai/gpt-5.4")).toBe(true);
+      expect(contender.controller.snapshot().transcript.at(-1)?.text).toContain("not remembered");
+      const unchanged = await launch(home, root); expect(unchanged.editor.settings.model).toBe("claude-haiku-4-5"); unchanged.controller.dispose();
+      child.kill("SIGKILL"); await child.exited;
+      const recovered = await launch(home, root);
+      expect(await recovered.controller.selectModel("openai/gpt-5.4")).toBe(true);
+      expect(recovered.controller.snapshot().transcript.at(-1)?.text).toContain("Choice remembered");
+      const reopened = await launch(home, root); expect(reopened.editor.settings.model).toBe("gpt-5.4"); reopened.controller.dispose();
+      expect(await recovered.controller.selectModel("forget")).toBe(true);
+      recovered.controller.dispose(); contender.controller.dispose();
+      const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe("claude-sonnet-4-6"); forgotten.controller.dispose();
+    } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
+  });
+}, 10000);
+
+test("corrupt memory cannot choose a fallback route but complete explicit CLI settings remain authoritative", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const seed = await launch(home, root); await seed.controller.selectModel("openai/gpt-5.4"); seed.controller.dispose();
+    const directory = join(home, ".schway/interactive"), path = join(directory, (await readdir(directory)).find(file => file.endsWith(".json"))!);
+    const corrupt = "{broken memory"; await writeFile(path, corrupt);
+    const run = async (mode: string) => {
+      const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-process.ts"), mode, root], {
+        cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
+      });
+      const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+      try {
+        const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        expect(code).toBe(0); expect(err).toBe("");
+        return JSON.parse(out) as { requests: Array<{ provider: string; model: string; apiKey?: string }>; screen: string };
+      } finally { clearTimeout(timer); }
+    };
+    for (const mode of ["reopen", "override"]) {
+      const blocked = await run(mode); expect(blocked.requests).toEqual([]);
+      expect(blocked.screen.replace(/\s+/g, " ")).toContain("could not be read");
+    }
+    const explicit = await run("override-full");
+    expect(explicit.requests).toHaveLength(1);
+    expect(explicit.requests[0]).toMatchObject({ provider: "openai", model: "gpt-4o", apiKey: "stored" });
+    expect(explicit.screen.replace(/\s+/g, " ")).toContain("Explicit settings fully select");
+    expect(await readFile(path, "utf8")).toBe(corrupt);
+  });
+}, 15000);
+
+test("resume past corrupt memory requires a complete explicit connection and explains the preserved state", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), a = join(root, "a"), b = join(root, "b"); await mkdir(a); await mkdir(b);
+    const seed = await launch(home, b); await seed.controller.selectModel("openai/gpt-5.4"); seed.controller.dispose();
+    const directory = join(home, ".schway/interactive"), path = join(directory, (await readdir(directory)).find(file => file.endsWith(".json"))!);
+    await writeFile(path, "{corrupt");
+    const destination = await resolveWorkspace(b);
+    const insufficient = await launch(home, a);
+    expect(await insufficient.controller.switchSession(createSession(), "b", { workspace: destination, contextManager: createContextManager(destination) })).toBe(false);
+    expect(insufficient.controller.workspaceIdentity()?.root).toBe(a); insufficient.controller.dispose();
+    const explicit = await launch(home, a, { provider: "openai", model: "gpt-4o", openaiAuth: "api-key" });
+    expect(await explicit.controller.switchSession(createSession(), "b", { workspace: destination, contextManager: createContextManager(destination) })).toBe(true);
+    expect(explicit.controller.snapshot().modelId).toBe("gpt-4o");
+    expect(explicit.controller.snapshot().transcript.some(entry => entry.text.includes("Explicit settings fully select"))).toBe(true);
+    expect(await readFile(path, "utf8")).toBe("{corrupt"); explicit.controller.dispose();
   });
 });
