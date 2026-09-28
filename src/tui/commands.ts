@@ -79,7 +79,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/session - show session ID, conversation branch, model, and workspace roots",
     "/compact - summarize older turns to free context",
     "/branch list | tree | fork <entry-id> [name] | switch <branch-id> - browse the session tree or continue a saved conversation path",
-    "/changes [status|diff [-- <path>]] - show Git branch, HEAD, and bounded working-tree changes",
+    "/changes [review|status|diff [-- <path>]] - review changes and command evidence (Alt+R)",
     "/skills - list available skills",
     "/add-dir <directory> - attach project context (relative to the primary root; idle only)",
     "/<skill-name> [arguments] - invoke an available skill for this turn",

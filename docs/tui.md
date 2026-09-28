@@ -59,6 +59,44 @@ failure and fence late results after cancellation/disposal. These fixtures do no
 verify a human terminal, real OS secure storage, live OAuth or a paid provider;
 those checks remain unrun for the final installed-journey gate.
 
+## Turn outcomes and change review
+
+After an accepted turn settles, the activity line reports **completed**, **failed**,
+**cancelled**, or **limit** separately from the model's answer. Command counts report
+observed exit zero, nonzero, and unknown results across the entire turn, even when
+only the latest 50 command details are retained. A completed model turn can contain
+a failed check. These are command results, not a claim that a test suite passed;
+model prose and command invocation alone provide no verification evidence.
+
+**Alt+R** or `/changes review` opens a read-only panel with the latest turn's tool
+counts and up to 50 command results, identified by call ID and command. **Alt+I**
+inspects individual tool results in the conversation. Up/Down selects from at most
+50 current changed file paths, including files inside new untracked directories;
+PageUp/PageDown scrolls details. Selected names are literal paths, including glob
+characters and Git pathspec syntax. Each diff is bounded,
+with explicit truncation, deleted-file content, rename metadata, or a binary-content
+explanation. Esc restores the same conversation position, unsent draft, and cursor.
+`/changes status` and `/changes diff -- <path>` remain available as textual commands.
+
+The default on-demand mode reads Git only when review is requested. Current
+working-tree changes are **unattributed** and may include prior or concurrent edits.
+If snapshot mode was explicitly enabled before the turn, review additionally shows
+its retained before/after comparison: prior dirt, newly observed paths, paths changed
+further, and resolved dirt. Those observations are not proof of exclusive Schway
+authorship; the current diff can also contain later edits. No-change, non-Git,
+tracking-off, and unavailable-attribution states are explicit. Review does not enable
+snapshots, commit, undo, or restore files. Failure, cancellation, and conversation
+branching leave completed filesystem effects in place. Turn summaries are transient;
+old/resumed sessions still expose their saved tool results and current Git review.
+
+Automated verification covers the actual loop/controller with successful edits and
+command exits, failed checks, cancellation and model failure after edits, pre-existing
+snapshot dirt, concurrent on-demand edits, read-only/no-change and non-Git workspaces.
+A real renderer fixture uses keyboard, paste, and resize input to navigate bounded
+text, deleted, renamed and binary diffs, then restores the draft, cursor and scroll.
+These deterministic fixtures use isolated workspaces and injected credentials; live
+providers, OAuth, real credential storage and a human terminal journey remain unrun.
+
 ## Color roles
 
 | Role | Dark | Light | Use |
@@ -101,6 +139,7 @@ a default across sessions. Schway does not edit the terminal's configuration.
 | Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, Ctrl+R to retry a failed account catalog, Esc to cancel |
 | Sign-in chooser | `/login`; Up/Down, Enter, Esc |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
+| Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
 | Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one tool result; C copies the selected item; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
