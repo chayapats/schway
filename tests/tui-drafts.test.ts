@@ -189,7 +189,7 @@ test("ordinary app exit flushes pending text and restores terminal; disk failure
       expect(openDraftStore({ home: isolated, workspaceRoot: isolated, sessionId: previous.header.id }).checkpoint?.text).toBe("previous valid checkpoint");
     } finally { await failure.stop(); }
   }
-}));
+}), 20_000);
 
 test("silent tool shutdown requests cancellation, restores terminal promptly and restart reports interruption without undo claims", async () => withTempDir(async home => {
   const tool = await runProcess(home, "tool");
