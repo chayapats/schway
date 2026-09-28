@@ -1,4 +1,5 @@
-import { BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { InteractiveMemory, type InteractiveChoice } from "./interactive-memory.ts";
+import { effectiveInteractiveMemory, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
 import { getThinkingSupport, type ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
@@ -29,7 +30,7 @@ export interface ConfigTransaction {
   commit(signal?: AbortSignal): Promise<void>;
 }
 
-type Layers = { user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer };
+type Layers = { memory?: ConfigLayer; user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer };
 
 /** Resolve effective origins with the same provider-change model inheritance rules as settings. */
 export function configOrigins(layers: Layers): ConfigOrigins {
@@ -38,10 +39,11 @@ export function configOrigins(layers: Layers): ConfigOrigins {
 
 /** Trace per-setting layer origins with provider-change model inheritance applied. */
 function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSource?: string } {
+  layers = { ...layers, memory: effectiveInteractiveMemory(layers) };
   const origins: ConfigOrigins = {};
   let modelFallbackSource: string | undefined;
   let merged: ConfigLayer = {};
-  for (const [origin, layer] of [["built-in default", BUILTIN_DEFAULTS], ["user-global", layers.user], ["project", layers.project], ["CLI", layers.cli], ["current-session override", layers.session]] as const) {
+  for (const [origin, layer] of [["built-in default", BUILTIN_DEFAULTS], ["interactive memory", layers.memory], ["user-global", layers.user], ["project", layers.project], ["CLI", layers.cli], ["current-session override", layers.session]] as const) {
     if (!layer) continue;
     if (layer.provider !== undefined && merged.provider !== undefined && layer.provider !== merged.provider && layer.model === undefined) {
       delete origins.model;
@@ -63,7 +65,9 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
             ? "current-session override"
             : origins.profiles;
     const profileLabel = `profile "${selectedName}"${definitionOrigin ? ` [${definitionOrigin}]` : ""}`;
-    const cliSessionOverrides = mergeConfigLayers(layers.cli, layers.session);
+    const cliSessionOverrides = layers.memory?.profile === selectedName
+      ? mergeConfigLayers(layers.memory, layers.user, layers.project, layers.cli, layers.session)
+      : mergeConfigLayers(layers.cli, layers.session);
     const activeProfile = mergeProfileMaps(layers.user?.profiles, layers.project?.profiles, layers.cli?.profiles, layers.session?.profiles)[selectedName];
     const profileLayer = activeProfile === undefined ? undefined : profileToLayer(activeProfile);
     // File direct connection keys sit below the selected profile while file budgets stay intact.
@@ -108,15 +112,23 @@ export class ConfigEditor {
   private committing = false;
   private current: ResolvedSettings;
   private modelCapabilities?: readonly ModelCapability[];
+  memoryProblem?: string;
 
   /** Initialize from validated layers without reading or writing configuration files. */
-  constructor(layers: Layers, private readonly paths: { user: string; project: string }, capabilities?: readonly ModelCapability[]) {
+  constructor(layers: Layers, private readonly paths: { user: string; project: string }, capabilities?: readonly ModelCapability[], private memory?: InteractiveMemory, private home?: string) {
     this.layers = structuredClone(layers);
     this.modelCapabilities = capabilities === undefined ? undefined : structuredClone(capabilities);
     // A saved Codex effort can be resolved after login, without blocking interactive recovery.
     const pendingCodexCatalog = this.modelCapabilities === undefined &&
-      mergeConfigLayers(BUILTIN_DEFAULTS, this.layers.user, this.layers.project, this.layers.cli, this.layers.session).openaiAuth === "codex";
-    this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog);
+      mergeConfigLayers(BUILTIN_DEFAULTS, this.layers.memory, this.layers.user, this.layers.project, this.layers.cli, this.layers.session).openaiAuth === "codex";
+    try { this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog); }
+    catch (error) {
+      if (!this.layers.memory) throw error;
+      this.memoryProblem = `Remembered interactive choice is unavailable: ${error instanceof Error ? error.message : String(error)} Use /model to repair it or /model forget.`;
+      this.layers.memory = undefined;
+      this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog);
+    }
+    this.memoryProblem ??= memory?.problem;
   }
 
   /** Install verified account capabilities for future session edits without persisting them. */
@@ -156,7 +168,53 @@ export class ConfigEditor {
     const path = projectConfigPath(workspaceRoot);
     const project = await readConfigFile(path);
     if (project && "error" in project) throw new Error(project.error);
-    return new ConfigEditor({ ...this.layers, project, session: path === this.paths.project ? this.layers.session : undefined }, { ...this.paths, project: path }, this.modelCapabilities);
+    const same = path === this.paths.project;
+    const memory = same ? this.memory : this.home && this.memory ? await InteractiveMemory.load(this.home, workspaceRoot) : undefined;
+    return new ConfigEditor({ ...this.layers, memory: memory?.choice, project, session: same ? this.layers.session : undefined }, { ...this.paths, project: path }, same ? this.modelCapabilities : undefined, memory, this.home);
+  }
+
+  /** Block unavailable memory only when explicit settings do not independently select a complete connection. */
+  get memoryActivationError(): string | undefined {
+    if (!this.memoryProblem) return undefined;
+    const explicit = mergeConfigLayers(this.layers.user, this.layers.project, this.layers.cli, this.layers.session);
+    if (typeof explicit.profile === "string" && explicit.profile === this.current.profile) return undefined;
+    if (explicit.provider !== this.current.provider || !explicit.model) return this.memoryProblem;
+    if (explicit.provider === "openai" && explicit.openaiAuth !== "api-key" && explicit.openaiAuth !== "codex") return this.memoryProblem;
+    if (explicit.provider === "openai-compatible" && (!explicit.baseUrl || !explicit.auth)) return this.memoryProblem;
+    return undefined;
+  }
+
+  /** Describe remembered provenance and any explicit settings that shadow it. */
+  get memoryNotice(): string | undefined {
+    if (this.memoryProblem) return this.memoryActivationError ?? `${this.memoryProblem} Explicit settings fully select the connection and take precedence; remembered state was left unchanged.`;
+    if (!this.memory?.choice) return undefined;
+    const shadowed = ["provider", "model", "profile", "openaiAuth", "thinking"].filter(key => {
+      const origin = this.origins[key as keyof ConfigLayer];
+      return origin && origin !== "interactive memory" && origin !== "built-in default";
+    });
+    return `Interactive memory: ${this.memory.choice.provider}/${this.memory.choice.model}.${shadowed.length ? ` Shadowed by explicit settings: ${shadowed.join(", ")}; /config shows their sources.` : " Restored for this workspace."} Use /model forget to reset.`;
+  }
+
+  /** Remember an explicit successful activation without changing the live settings or writing config. */
+  async rememberChoice(authRoute: string): Promise<boolean> {
+    if (!this.memory) return false;
+    const current = this.current;
+    const choice: InteractiveChoice = { provider: current.provider, model: current.model,
+      ...(current.provider === "openai" ? { openaiAuth: authRoute === "codex" ? "codex" as const : "api-key" as const } : {}),
+      ...(current.profile ? { profile: current.profile } : {}),
+      ...(current.thinking ? { thinking: current.thinking } : {}) };
+    await this.memory.write(choice);
+    this.memoryProblem = undefined;
+    return true;
+  }
+
+  /** Forget only this workspace's memory and session selection, retaining explicit inherited settings. */
+  async forgetChoice(): Promise<ConfigEditor> {
+    if (!this.memory) throw new Error("Interactive memory is unavailable in this session.");
+    await this.memory.write();
+    const session = { ...this.layers.session };
+    for (const key of ["provider", "model", "thinking", "profile", "openaiAuth"] as const) delete session[key];
+    return new ConfigEditor({ ...this.layers, memory: undefined, session }, this.paths, this.modelCapabilities, this.memory, this.home);
   }
 
   /** Stage one validated setting edit, retaining the previous settings until commit. */
@@ -314,13 +372,14 @@ async function atomicWrite(path: string, layer: ConfigLayer, before: string | un
 }
 
 /** Load editable settings from the explicit home and primary workspace without creating files. */
-export async function loadConfigEditor(input: { home: string; workspaceRoot: string; cli?: ConfigLayer }): Promise<ConfigEditor> {
+export async function loadConfigEditor(input: { home: string; workspaceRoot: string; cli?: ConfigLayer; interactiveMemory?: boolean }): Promise<ConfigEditor> {
   const paths = { user: userConfigPath(input.home), project: projectConfigPath(input.workspaceRoot) };
   const user = await readConfigFile(paths.user);
   if (user && "error" in user) throw new Error(user.error);
   const project = await readConfigFile(paths.project);
   if (project && "error" in project) throw new Error(project.error);
-  return new ConfigEditor({ user, project, cli: input.cli }, paths);
+  const memory = input.interactiveMemory ? await InteractiveMemory.load(input.home, input.workspaceRoot) : undefined;
+  return new ConfigEditor({ memory: memory?.choice, user, project, cli: input.cli }, paths, undefined, memory, input.home);
 }
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */

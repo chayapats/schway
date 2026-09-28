@@ -147,7 +147,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   let configEditor: ConfigEditor;
   try {
-    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args) });
+    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args), interactiveMemory: true });
   } catch (error) {
     diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");
     io.stderr.write(`${messageOf(error)}\n`);
@@ -195,10 +195,11 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   try {
     let model = io.model;
-    let startupError: string | undefined;
+    let startupError: string | undefined = configEditor.memoryActivationError;
     let startupNotice: string | undefined;
-    if (!model) {
+    if (!model && !startupError) {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {
+        verifySubscriptionChoice: configEditor.origins.model === "interactive memory",
         maxTokens: settings.maxOutput,
         baseUrl: settings.baseUrl,
         headers: settings.headers,
@@ -220,6 +221,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         startupError = loaded.error;
       } else {
         model = loaded.model;
+        if (loaded.capability) { configEditor.setModelCapabilities([loaded.capability]); settings = configEditor.settings; }
         startupNotice = loaded.notice;
       }
     }
@@ -229,8 +231,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
     };
-    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model) => stageInteractiveSettings(next, settings, {
-      model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
+    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean) => stageInteractiveSettings(next, settings, {
+      forceLoad: activate, model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
       signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
     });
     const codexLogin = createCodexLoginRunner({ store: credentialStore, fetch: io.fetch, secrets });
@@ -345,6 +347,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       return 1;
     }
 
+    if (configEditor.memoryNotice) controller.notice(configEditor.memoryNotice);
+    if (startupError && !configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(`Remembered choice could not activate: ${redactSecrets(startupError, secrets).slice(0, 500)} Use /model to repair it or /model forget; no alternate billing route was selected.`);
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
     for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
@@ -387,12 +391,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 export async function stageInteractiveSettings(
   next: ResolvedSettings,
   previous: ResolvedSettings,
-  options: Parameters<typeof loadInteractiveModel>[2] & { model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
-): Promise<{ model?: Model; contextManager: ContextManager }> {
+  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
+): Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: import("../model/catalog.ts").ModelCapability }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
-  if ((next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
+  let modelCapability: import("../model/catalog.ts").ModelCapability | undefined;
+  if ((options.forceLoad && !model) || (next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
+      verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
       maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
       ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
@@ -400,9 +406,10 @@ export async function stageInteractiveSettings(
     options.signal.throwIfAborted();
     if ("error" in loaded) throw new Error(loaded.error);
     model = loaded.model;
+    modelCapability = loaded.capability;
   }
   options.signal.throwIfAborted();
-  return { model, contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
+  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
@@ -837,6 +844,8 @@ export async function loadInteractiveModel(
     openaiAuth?: CliOpenAIAuth;
     thinking?: CliThinking;
     modelCapability?: import("../model/catalog.ts").ModelCapability;
+    /** Revalidate a restored account selection without falling back to another billing route. */
+    verifySubscriptionChoice?: boolean;
     profile?: string;
     credentialEnv?: string;
     credentialIdentity?: string;
@@ -847,7 +856,7 @@ export async function loadInteractiveModel(
     secrets: string[];
     credentialStore?: CredentialStore;
   },
-): Promise<{ model: Model; notice?: string } | { error: string }> {
+): Promise<{ model: Model; notice?: string; capability?: import("../model/catalog.ts").ModelCapability } | { error: string }> {
   const store = options.credentialStore ?? createNativeCredentialStore();
   if (provider === "openai") {
     const selection = await selectOpenAITransport({
@@ -858,15 +867,24 @@ export async function loadInteractiveModel(
     });
     if ("error" in selection) return selection;
     if (selection.transport === "codex") {
+      let capability = options.modelCapability;
+      if (options.verifySubscriptionChoice) {
+        try {
+          const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
+          capability = (await fetchSubscriptionCatalog({ store, fetch: options.fetch })).find(entry => entry.id === modelId);
+          if (!capability) return { error: "Remembered model is no longer available in this ChatGPT account. Use /model to choose an available model or /model forget; no API-key fallback was used." };
+          if (options.thinking && !capability.supportedThinking.includes(options.thinking)) return { error: "Remembered reasoning is no longer supported by this account model. Use /model to repair the choice or /model forget; no API-key fallback was used." };
+        } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
+      }
       const input = {
         provider, model: modelId, maxTokens: options.maxTokens,
         ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
-        ...(options.modelCapability !== undefined ? { modelCapability: options.modelCapability } : {}),
+        ...(capability !== undefined ? { modelCapability: capability } : {}),
         openaiAuth: "codex" as const,
       };
       try {
         const model = options.createModel ? await options.createModel(input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
-        return selection.notice !== undefined ? { model, notice: selection.notice } : { model };
+        return { model, ...(selection.notice ? { notice: selection.notice } : {}), ...(capability ? { capability } : {}) };
       } catch (error) {
         return { error: redactSecrets(messageOf(error), options.secrets) };
       }
