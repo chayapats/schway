@@ -1376,6 +1376,17 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     await writeFile(join(dir, "d-binary.bin"), Buffer.from([0, 1, 2, 3]));
     const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
     const ui = await setup(80, 24, {}, undefined, { workspace, contextManager: createContextManager(workspace) });
+    // Keyboard dispatch still starts each operation; await its actual Git I/O rather than visual frames.
+    let reviewOperation: Promise<unknown> | undefined;
+    const openReview = ui.controller.openChangeReview.bind(ui.controller);
+    const selectFile = ui.controller.selectReviewFile.bind(ui.controller);
+    ui.controller.openChangeReview = () => { const pending = openReview(); reviewOperation = pending; return pending; };
+    ui.controller.selectReviewFile = delta => { const pending = selectFile(delta); reviewOperation = pending; return pending; };
+    const awaitReview = async () => {
+      expect(reviewOperation).toBeDefined();
+      await reviewOperation;
+      expect(ui.controller.snapshot().changeReview?.loading).toBe(false);
+    };
     await ui.controller.submit("explain");
     for (let i = 0; i < 40; i++) ui.controller.notice(`Previous ${i}`);
     await settle(ui);
@@ -1388,7 +1399,7 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     const cursor = ui.editor.cursorOffset;
     const top = ui.transcript.scrollTop;
     ui.mockInput.pressKey("r", { meta: true });
-    await ui.waitFor(() => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview?.loading);
+    await awaitReview();
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("Turn completed");
     expect(ui.controller.snapshot().changeReview!.detail).toContain("truncated");
@@ -1399,18 +1410,18 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     await settle(ui);
     expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
     ui.mockInput.pressArrow("down");
-    await ui.waitFor(() => !ui.controller.snapshot().changeReview?.loading);
+    await awaitReview();
     await settle(ui);
     expect(ui.controller.snapshot().changeReview!.detail).toContain("-deleted evidence");
     ui.mockInput.pressArrow("down");
-    await ui.waitFor(() => !ui.controller.snapshot().changeReview?.loading);
+    await awaitReview();
     await settle(ui);
     expect(ui.controller.snapshot().changeReview!.files[2]?.origPath).toBe("old-name.txt");
     expect(ui.controller.snapshot().changeReview!.detail).toContain("rename to c-renamed.txt");
     ui.resize(44, 18);
     await settle(ui);
     ui.mockInput.pressArrow("down");
-    await ui.waitFor(() => !ui.controller.snapshot().changeReview?.loading);
+    await awaitReview();
     await settle(ui);
     expect(ui.controller.snapshot().changeReview!.detail).toContain("binary file");
     expect(ui.controller.snapshot().changeReview!.detail).toContain("not shown");
