@@ -362,13 +362,14 @@ test("copying tool headings does not expand them or copy redacted secrets", asyn
 });
 
 test("copy works on scrolled multiline output and does not cancel a running turn", async () => {
-  const ui = await setup(60, 18);
+  const streamed = Promise.withResolvers<void>();
+  const ui = await setup(60, 18, {}, undefined, { onRuntimeEvent: event => {
+    if (event.type === "model.delta" && event.content.type === "text" && event.content.text.includes("Line 59")) streamed.resolve();
+  } });
   ui.controller.setModel(createScriptedModel({ text: Array.from({ length: 60 }, (_, i) => `Line ${String(i).padStart(2, "0")} ข้อความภาษาไทย\n\n`).join(""), waitForAbort: true }), "scripted", "streaming");
   const turn = ui.controller.submit("Produce long output");
-  await ui.waitFor(async () => {
-    await Bun.sleep(5);
-    return ui.controller.snapshot().transcript.at(-1)?.text.includes("Line 59") === true;
-  }, { maxPasses: 100 });
+  await streamed.promise;
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Line 59");
   await settle(ui);
   await ui.mockInput.pressKeys(["\u001b[5~"]);
   await settle(ui);
@@ -641,7 +642,8 @@ test("login chooser and masked callback use real keyboard and paste input while 
   expect(ui.editor.cursorOffset).toBe(8);
   expect(ui.session.items).toHaveLength(0);
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
+  await ui.controller.waitForIdle();
+  expect(ui.controller.running).toBe(false);
   await settle(ui);
   ui.mockInput.pressArrow("up");
   expect(ui.editor.plainText).toBe("continue this task\nsecond line");
@@ -750,9 +752,11 @@ test("resize keeps the editor and status inside the viewport with a populated tr
 });
 
 test("retry and cancellation stay visible at 44×18 while a future draft survives paste, scroll and resize", async () => {
+  const retryStarted = Promise.withResolvers<void>();
   let releaseSettlement!: () => void;
   const settlement = new Promise<void>(resolve => { releaseSettlement = resolve; });
   const ui = await setup(80, 24, {}, undefined, {
+    onRuntimeEvent: event => { if (event.type === "model.retry") retryStarted.resolve(); },
     model: createScriptedModel({ error: "temporary outage", status: 503, headers: { "Retry-After": "30" } }),
     agentClock: {
       now: () => 0,
@@ -765,7 +769,8 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   });
   await ui.mockInput.typeText("start work");
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "retry");
+  await retryStarted.promise;
+  expect(ui.controller.snapshot().activity?.phase).toBe("retry");
   await ui.mockInput.pasteBracketedText("future draft\nsecond line");
   await ui.mockInput.pressKeys(["\u001b[5~"]);
   ui.resize(44, 18);
@@ -860,13 +865,14 @@ test("mouse and keyboard scrolling keep a long Markdown transcript stable across
 });
 
 test("scrolling through a streaming answer preserves the visible text while its tail grows", async () => {
-  const ui = await setup(70, 20);
+  const streamed = Promise.withResolvers<void>();
+  const ui = await setup(70, 20, {}, undefined, { onRuntimeEvent: event => {
+    if (event.type === "model.delta" && event.content.type === "text" && event.content.text.includes("Paragraph 59")) streamed.resolve();
+  } });
   ui.controller.setModel(createScriptedModel({ text: Array.from({ length: 60 }, (_, i) => `Paragraph ${i}\n\n`).join(""), waitForAbort: true }), "scripted", "streaming-model");
   const turn = ui.controller.submit("Stream a long answer");
-  await ui.waitFor(async () => {
-    await Bun.sleep(5);
-    return ui.controller.snapshot().transcript.at(-1)?.text.includes("Paragraph 59") === true;
-  }, { maxPasses: 100 });
+  await streamed.promise;
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Paragraph 59");
   await settle(ui);
   expect(ui.controller.snapshot().status).toBe("running");
   await ui.mockInput.pressKeys(["\u001b[5~"]);
