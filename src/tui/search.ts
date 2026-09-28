@@ -1,10 +1,17 @@
 import type { TuiTranscriptEntry } from "./controller.ts";
-import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 
-/** One literal occurrence in the bounded text presented for a transcript row. */
+/** One transcript row split into the text blocks actually presented by the renderer. */
+export interface TranscriptSearchRow {
+  id: string;
+  kind: TuiTranscriptEntry["kind"];
+  segments: readonly string[];
+}
+
+/** One literal occurrence in a visible text block of an active-branch row. */
 export interface TranscriptSearchMatch {
   id: string;
   kind: TuiTranscriptEntry["kind"];
+  segment: number;
   offset: number;
 }
 
@@ -17,32 +24,16 @@ export interface TranscriptSearchResult {
 const MAX_SEARCH_CHARS = 8_000_000;
 const MAX_SEARCH_MATCHES = 20_000;
 
-/** Return only the text available in a row's current display state, clipped to a search budget. */
-export function transcriptSearchText(entry: TuiTranscriptEntry, expanded: boolean, width: number, maxChars = Infinity): string {
-  if (entry.kind !== "tool") return displayText(entry.text.slice(0, maxChars));
-  const tool = toolPresentation(entry, expanded);
-  const suffix = ` · ${tool.state}`;
-  const name = fitLine(entry.toolName ?? "tool", Math.max(1, width - Bun.stringWidth(suffix) - 5));
-  const targetWidth = width - Bun.stringWidth(name + suffix) - 5;
-  const target = targetWidth > 0 ? fitLine(tool.target, targetWidth) : "";
-  return [name, target, tool.state, tool.detail].filter(Boolean).join("\n").slice(0, maxChars);
-}
-
 type CachedRow = {
-  text: string;
-  toolName?: string;
-  toolSummary?: string;
-  toolStatus?: TuiTranscriptEntry["toolStatus"];
-  expanded: boolean;
-  width: number;
+  segments: readonly string[];
   budget: number;
   matchBudget: number;
   sourceLength: number;
   limited: boolean;
-  hits: readonly number[];
+  hits: readonly { segment: number; offset: number }[];
 };
 
-/** Keep unchanged rows indexed while live output or a search query changes. */
+/** Keep unchanged rendered rows indexed while live output or a query changes. */
 export class TranscriptSearchIndex {
   private rows = new Map<string, CachedRow>();
   private query = "";
@@ -55,56 +46,59 @@ export class TranscriptSearchIndex {
     this.result = { matches: [], limited: false };
   }
 
-  /** Refresh bounded literal matches without revisiting unchanged row text. */
-  update(entries: readonly TuiTranscriptEntry[], query: string, expanded: (id: string) => boolean, width: number): TranscriptSearchResult {
+  /** Refresh capped literal matches without rescanning unchanged text blocks. */
+  update(entries: readonly TranscriptSearchRow[], query: string): TranscriptSearchResult {
     const needle = query.normalize("NFC").toLocaleLowerCase();
     if (!needle) {
-      this.query = "";
-      this.rows.clear();
-      this.result = { matches: [], limited: false };
+      this.clear();
       return this.result;
     }
     const queryChanged = needle !== this.query;
-    if (queryChanged) this.query = needle;
+    this.query = needle;
     let changed = queryChanged || entries.length !== this.rows.size;
     if (!changed) {
       let index = 0;
       for (const id of this.rows.keys()) if (id !== entries[index++]?.id) { changed = true; break; }
     }
     const next = new Map<string, CachedRow>();
-    let remaining = MAX_SEARCH_CHARS;
+    let remainingChars = MAX_SEARCH_CHARS;
     let remainingMatches = MAX_SEARCH_MATCHES;
     let limited = false;
     for (const entry of entries) {
-      if (remaining <= 0 || remainingMatches <= 0) { limited = true; break; }
-      const isExpanded = expanded(entry.id);
+      if (remainingChars <= 0 || remainingMatches <= 0) { limited = true; break; }
       const previous = this.rows.get(entry.id);
-      if (previous && !queryChanged && previous.text === entry.text && previous.toolName === entry.toolName &&
-        previous.toolSummary === entry.toolSummary && previous.toolStatus === entry.toolStatus && previous.expanded === isExpanded && previous.width === width && previous.budget === remaining && previous.matchBudget === remainingMatches) {
+      if (previous && !queryChanged && previous.budget === remainingChars && previous.matchBudget === remainingMatches &&
+        previous.segments.length === entry.segments.length && previous.segments.every((text, index) => text === entry.segments[index])) {
         next.set(entry.id, previous);
-        remaining -= previous.sourceLength;
+        remainingChars -= previous.sourceLength;
         remainingMatches -= previous.hits.length;
         limited ||= previous.limited;
         if (previous.limited) break;
         continue;
       }
       changed = true;
-      const source = transcriptSearchText(entry, isExpanded, width, remaining).normalize("NFC").toLocaleLowerCase();
-      const sourceLimited = entry.kind === "tool" ? transcriptSearchText(entry, isExpanded, width).length > remaining : entry.text.length > remaining;
-      const hits: number[] = [];
-      let matchLimited = false;
-      if (needle) for (let offset = 0; offset < source.length;) {
-        const found = source.indexOf(needle, offset);
-        if (found < 0) break;
-        if (hits.length >= remainingMatches) { matchLimited = true; break; }
-        hits.push(found);
-        offset = found + Math.max(1, needle.length);
+      const budget = remainingChars;
+      const matchBudget = remainingMatches;
+      const hits: { segment: number; offset: number }[] = [];
+      let rowLimited = false;
+      for (const [segment, text] of entry.segments.entries()) {
+        if (remainingChars <= 0 || remainingMatches <= 0) { rowLimited = true; break; }
+        const clipped = text.slice(0, remainingChars);
+        const source = clipped.normalize("NFC").toLocaleLowerCase();
+        for (let offset = 0; offset < source.length;) {
+          const found = source.indexOf(needle, offset);
+          if (found < 0) break;
+          if (remainingMatches <= 0) { rowLimited = true; break; }
+          hits.push({ segment, offset: found });
+          remainingMatches--;
+          offset = found + Math.max(1, needle.length);
+        }
+        remainingChars -= source.length;
+        if (text.length > clipped.length || rowLimited) { rowLimited = true; break; }
       }
-      next.set(entry.id, { text: entry.text, toolName: entry.toolName, toolSummary: entry.toolSummary, toolStatus: entry.toolStatus, expanded: isExpanded, width, budget: remaining, matchBudget: remainingMatches, sourceLength: source.length, limited: sourceLimited || matchLimited, hits });
-      remaining -= source.length;
-      remainingMatches -= hits.length;
-      limited ||= sourceLimited || matchLimited;
-      if (sourceLimited || matchLimited) break;
+      next.set(entry.id, { segments: entry.segments, budget, matchBudget, sourceLength: budget - remainingChars, limited: rowLimited, hits });
+      limited ||= rowLimited;
+      if (rowLimited) break;
     }
     this.rows = next;
     if (!changed) return this.result;
@@ -112,7 +106,7 @@ export class TranscriptSearchIndex {
     for (const entry of entries) {
       const row = next.get(entry.id);
       if (!row) break;
-      for (const offset of row.hits) matches.push({ id: entry.id, kind: entry.kind, offset });
+      for (const hit of row.hits) matches.push({ id: entry.id, kind: entry.kind, ...hit });
       if (row.limited) break;
     }
     this.result = { matches, limited };

@@ -1,4 +1,4 @@
-import { BoxRenderable, MarkdownRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type BaseRenderable, type CliRenderer, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type BaseRenderable, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 import type { TuiTheme } from "./theme.ts";
@@ -69,7 +69,11 @@ export interface TranscriptItemView {
   root: BoxRenderable;
   /** Return code blocks in rendered order with the exact sanitized representation shown by Markdown. */
   codeBlocks(): { id: string; text: string }[];
-  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean, searchMatch?: boolean): void;
+  /** Return visible text blocks and their exact rendered scroll targets. */
+  searchSegments(): readonly { text: string; target: Renderable }[];
+  /** Mark the selected search row without changing its rendered content. */
+  setSearchMatch(selected: boolean): void;
+  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
 }
 
 /** Create Markdown styles from the same semantic palette used by tools and controls. */
@@ -143,14 +147,39 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   }
   root.add(body);
   let fingerprint = "";
+  let searchSelected = false;
   return {
     root,
     codeBlocks,
-    update(entry, expanded, streaming, width, focusedCode, focusedTool, searchMatch) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, searchMatch]);
+    searchSegments() {
+      const segments: { text: string; target: Renderable }[] = [];
+      const visit = (node: BaseRenderable) => {
+        if (!node.visible) return;
+        if (node instanceof TextBufferRenderable) {
+          if (node.plainText) segments.push({ text: node.plainText, target: node });
+          return;
+        }
+        if (node instanceof TextTableRenderable) {
+          for (const cells of node.content) {
+            const text = cells.map(cell => cell?.map(chunk => chunk.text).join("") ?? "").join("  ");
+            if (text) segments.push({ text, target: node });
+          }
+          return;
+        }
+        for (const child of node.getChildren()) visit(child);
+      };
+      visit(root);
+      return segments;
+    },
+    setSearchMatch(selected) {
+      if (searchSelected === selected) return;
+      searchSelected = selected;
+      root.backgroundColor = selected ? theme.border : initial.kind === "user" ? theme.surface : undefined;
+    },
+    update(entry, expanded, streaming, width, focusedCode, focusedTool) {
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
       if (next === fingerprint) return;
       fingerprint = next;
-      root.backgroundColor = searchMatch ? theme.border : entry.kind === "user" ? theme.surface : undefined;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const suffix = ` · ${tool.state}`;

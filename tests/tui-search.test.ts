@@ -157,6 +157,58 @@ test("a match deep inside one wrapped answer is in view when accepted", async ()
   expect(ui.captureCharFrame()).toContain("deep-answer-token");
 });
 
+test("search indexes rendered Markdown text without hidden image URLs or syntax", async () => {
+  const answer = "**visible emphasis**\n\n![visible alt](https://hidden.example/hidden-url-token)\n\n[shown link](https://shown.example/visible-url-token)";
+  const ui = await setup(createSession([user("u", "question"), assistant("a", answer)]));
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("hidden-url-token");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("No matches");
+  ui.mockInput.pressEscape();
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("**");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("No matches");
+  ui.mockInput.pressEscape();
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("visible-url-token");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Find 1/1");
+  expect(ui.modelCalls()).toBe(0);
+});
+
+test("nonuniform Markdown scrolls to the exact wrapped block and immediate Enter keeps it in view", async () => {
+  const answer = [
+    "## Opening", "**a** ".repeat(900),
+    "```txt\n" + "code-data ".repeat(260) + "\n```",
+    "- first item\n- second item with target-after-code and more words",
+    ...Array.from({ length: 30 }, (_, i) => `Tail paragraph ${i} has ordinary text.`),
+  ].join("\n\n");
+  const ui = await setup(createSession([user("u", "question"), assistant("a", answer)]), 44, 18);
+  await ui.mockInput.pasteBracketedText("future draft\nsecond line");
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("target-after-code");
+  ui.mockInput.pressEnter();
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("target-after-code");
+  expect(ui.editor.plainText).toBe("future draft\nsecond line");
+  expect(ui.submits()).toBe(0);
+  expect(ui.modelCalls()).toBe(0);
+});
+
+test("a match inside one very long wrapped paragraph reaches its visual line", async () => {
+  const answer = `Opening ${"brief ".repeat(18)} ${"longer-word ".repeat(320)} inside-paragraph-token ${"tail ".repeat(120)}`;
+  const ui = await setup(createSession([user("u", "question"), assistant("a", answer)]), 44, 18);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("inside-paragraph-token");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("inside-paragraph-token");
+  ui.mockInput.pressEnter();
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("inside-");
+  expect(ui.captureCharFrame()).toContain("paragraph-token");
+});
+
 test("Unicode wraps logically, empty/no-match states stay usable, and live row changes preserve selection", async () => {
   const ui = await setup(createSession([user("u", "ข้อความภาษาไทย e\u0301 match"), assistant("a", "ไทย e\u0301 match")]), 44, 18);
   ui.mockInput.pressKey("f", { ctrl: true });

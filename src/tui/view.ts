@@ -1,4 +1,4 @@
-import { BoxRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection } from "@opentui/core";
+import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
@@ -6,7 +6,7 @@ import { activityDetail, activityStatus, displayText, fitLine } from "./presenta
 import { resolveTheme, type ThemeMode } from "./theme.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
-import { TranscriptSearchIndex, transcriptSearchText, type TranscriptSearchResult } from "./search.ts";
+import { TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -45,6 +45,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let searchOriginalScroll = 0;
   let searchRestoreScroll: number | undefined;
   let searchScrollToMatch = false;
+  let searchAcceptPending = false;
   let searchSelected = -1;
   let searchLastQuery = "";
   let searchResult: TranscriptSearchResult = { matches: [], limited: false };
@@ -243,12 +244,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (sessionKey !== key) {
         resetRows(); sessionKey = key; expandedTools.clear(); inspection = undefined; unseen = false; lastTail = "";
         searchOpen = false; searchSelected = -1; searchLastQuery = "";
-        searchRestoreScroll = undefined; searchScrollToMatch = false;
+        searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
         searchIndex.clear();
         latest();
       }
       const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.modelPicker ? "model" : snapshot.branchTree ? "tree" : "";
-      if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchIndex.clear(); }
+      if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
@@ -284,29 +285,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      if (searchOpen) {
-        const query = editor.plainText;
-        const previous = searchResult.matches[searchSelected];
-        const previousResult = searchResult;
-        const changedQuery = query !== searchLastQuery;
-        searchLastQuery = query;
-        searchResult = searchIndex.update(snapshot.transcript.map(entry => ({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined })), query,
-          id => allExpanded !== expandedTools.has(id), width - 1);
-        if (changedQuery) {
-          searchSelected = searchResult.matches.length ? 0 : -1;
-          searchScrollToMatch = searchSelected >= 0;
-        } else if (previous && searchResult !== previousResult) {
-          const preserved = searchResult.matches.findIndex(match => match.id === previous.id && match.offset === previous.offset);
-          searchSelected = preserved >= 0 ? preserved : Math.min(searchSelected, searchResult.matches.length - 1);
-        } else searchSelected = searchResult.matches.length ? Math.max(0, Math.min(searchSelected, searchResult.matches.length - 1)) : -1;
-      }
-      const searchStatus = !editor.plainText ? "Find in active branch · type a literal query" : searchResult.matches.length
-        ? `Find ${searchSelected + 1}/${searchResult.matches.length}${searchResult.limited ? "+ (limited)" : ""} · active branch, displayed text`
-        : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
-      if (searchOpen && !activity.visible) footer.content = fitLine(searchStatus, width);
-      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : "", width);
-      activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
-      activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
       transcript.visible = !snapshot.branchTree;
       tree.visible = !!snapshot.branchTree;
       empty.visible = snapshot.transcript.length === 0;
@@ -324,12 +302,36 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         }
         row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
-          inspection?.id === entry.id && inspection.kind === "tool", searchOpen && searchResult.matches[searchSelected]?.id === entry.id);
+          inspection?.id === entry.id && inspection.kind === "tool");
       }
       if (inspection && !inspectionTargets(snapshot.transcript).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
         inspection = undefined;
         if (!panelMode) editor.focus();
       }
+      if (searchOpen) {
+        const query = editor.plainText;
+        const previous = searchResult.matches[searchSelected];
+        const previousResult = searchResult;
+        const changedQuery = query !== searchLastQuery;
+        searchLastQuery = query;
+        searchResult = searchIndex.update(snapshot.transcript.map(entry => ({ id: entry.id, kind: entry.kind, segments: rows.get(entry.id)!.searchSegments().map(segment => segment.text) })), query);
+        if (changedQuery) {
+          searchSelected = searchResult.matches.length ? 0 : -1;
+          searchScrollToMatch = searchSelected >= 0;
+        } else if (previous && searchResult !== previousResult) {
+          const preserved = searchResult.matches.findIndex(match => match.id === previous.id && match.segment === previous.segment && match.offset === previous.offset);
+          searchSelected = preserved >= 0 ? preserved : Math.min(searchSelected, searchResult.matches.length - 1);
+        } else searchSelected = searchResult.matches.length ? Math.max(0, Math.min(searchSelected, searchResult.matches.length - 1)) : -1;
+      }
+      const selectedSearchId = searchOpen ? searchResult.matches[searchSelected]?.id : undefined;
+      for (const [id, row] of rows) row.setSearchMatch(id === selectedSearchId);
+      const searchStatus = !editor.plainText ? "Find in active branch · type a literal query" : searchResult.matches.length
+        ? `Find ${searchSelected + 1}/${searchResult.matches.length}${searchResult.limited ? "+ (limited)" : ""} · active branch, displayed text`
+        : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
+      if (searchOpen && !activity.visible) footer.content = fitLine(searchStatus, width);
+      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : "", width);
+      activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
+      activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
       const available = completions();
       if (editor.plainText !== lastQuery) { completionIndex = 0; lastQuery = editor.plainText; }
@@ -412,7 +414,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function submit() {
-    if (searchOpen) { closeSearch(false); return; }
+    if (searchOpen) {
+      if (searchScrollToMatch && searchResult.matches[searchSelected]) searchAcceptPending = true;
+      else closeSearch(false);
+      return;
+    }
     const snapshot = controller.snapshot();
     if (snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
@@ -473,6 +479,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (!searchOpen) return;
     searchOpen = false;
     searchScrollToMatch = false;
+    searchAcceptPending = false;
     searchIndex.clear();
     if (restore) searchRestoreScroll = searchOriginalScroll;
     refresh();
@@ -487,7 +494,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (searchOpen) {
       if (name === "escape") { closeSearch(true); handled(); return; }
       if (key.ctrl && name === "end") { closeSearch(false); latest(); handled(); return; }
-      if (name === "return" || name === "kpenter") { closeSearch(false); handled(); return; }
+      if (name === "return" || name === "kpenter") {
+        if (searchScrollToMatch && searchResult.matches[searchSelected]) searchAcceptPending = true;
+        else closeSearch(false);
+        handled(); return;
+      }
       if (name === "up" || name === "down" || (key.ctrl && (name === "p" || name === "n"))) {
         const count = searchResult.matches.length;
         if (count) {
@@ -634,6 +645,23 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const onTheme = () => { if (mode === "auto") applyTheme(); };
   renderer.on("theme_mode", onTheme);
   renderer.on("resize", refresh);
+  const scrollToSearchMatch = (match: TranscriptSearchMatch) => {
+    const segment = rows.get(match.id)?.searchSegments()[match.segment];
+    if (!segment) { transcript.scrollChildIntoView(`message-${match.id}`); return; }
+    const target = segment.target;
+    let visualLine = 0;
+    if (target instanceof TextBufferRenderable) {
+      const before = segment.text.normalize("NFC").slice(0, match.offset);
+      const logicalLine = before.split("\n").length - 1;
+      const column = Bun.stringWidth(before.slice(before.lastIndexOf("\n") + 1));
+      const info = target.lineInfo;
+      for (let index = 0; index < info.lineSources.length; index++) {
+        if (info.lineSources[index] === logicalLine && info.lineStartCols[index]! <= column) visualLine = index;
+      }
+    }
+    const targetTop = transcript.scrollTop + target.y - transcript.viewport.y;
+    transcript.scrollTo(targetTop + visualLine - Math.floor(transcript.viewport.height / 2));
+  };
   const onFrame = () => {
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
@@ -642,18 +670,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (searchOpen && searchScrollToMatch) {
       searchScrollToMatch = false;
       const match = searchResult.matches[searchSelected];
-      if (match) {
-        const row = rows.get(match.id)?.root;
-        if (row && row.height > transcript.viewport.height) {
-          const entry = controller.snapshot().transcript.find(item => item.id === match.id);
-          if (entry) {
-            const source = transcriptSearchText({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), Math.max(1, transcript.viewport.width - 1));
-            const rowTop = transcript.scrollTop + row.y - transcript.viewport.y;
-            transcript.scrollTo(rowTop + Math.floor(match.offset / Math.max(1, source.length) * row.height) - Math.floor(transcript.viewport.height / 2));
-          }
-        } else transcript.scrollChildIntoView(`message-${match.id}`);
-      }
+      if (match) scrollToSearchMatch(match);
     }
+    if (searchOpen && searchAcceptPending) closeSearch(false);
     if (scrollToInspection && inspection) {
       scrollToInspection = false;
       transcript.scrollChildIntoView(inspection.kind === "tool" ? `message-${inspection.id}` : `code-${inspection.id}-${inspection.index}`);
