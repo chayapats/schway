@@ -102,6 +102,7 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
   origins.auth ??= "built-in default";
   origins.openaiAuth ??= "built-in default";
   origins.profile ??= selectedName !== undefined ? origins.profile ?? "built-in default" : origins.profile;
+  origins.appearance ??= "built-in default";
   return { origins, modelFallbackSource };
 }
 

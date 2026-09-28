@@ -12,6 +12,34 @@ async function run(argv: string[], cwd: string, env?: Record<string, string>) {
   } finally { clearTimeout(timeout); }
 }
 
+test("installed PTY fixture reaps its executable after an outer timeout signal", async () => {
+  if (process.platform !== "linux" || !Bun.which("python3")) return;
+  await withTempDir(async root => {
+    const pidPath = join(root, "installed.pid");
+    const script = "import os,sys,time; open(sys.argv[1], 'w').write(str(os.getpid())); print('Type a task', flush=True); time.sleep(30)";
+    const fixture = Bun.spawn(["python3", join(resolve(import.meta.dir, ".."), "tests/fixtures/installed-pty.py"),
+      "python3", "-c", script, pidPath], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    let installedPid: number | undefined;
+    try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (await Bun.file(pidPath).exists()) {
+          installedPid = Number(await Bun.file(pidPath).text());
+          break;
+        }
+        await Bun.sleep(20);
+      }
+      expect(installedPid).toBeGreaterThan(0);
+      process.kill(fixture.pid, "SIGTERM");
+      expect(await fixture.exited).not.toBe(0);
+      expect(() => process.kill(installedPid!, 0)).toThrow();
+    } finally {
+      if (fixture.exitCode === null) fixture.kill();
+      if (installedPid) { try { process.kill(-installedPid, "SIGKILL"); } catch { /* Already reaped. */ } }
+      await fixture.exited;
+    }
+  });
+});
+
 test("packed executable verifies startup, appearance and Linux PTY cleanup with isolated state", async () => {
   await withTempDir(async root => {
     const repo = resolve(import.meta.dir, "..");

@@ -506,10 +506,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const row = panel.rows[panel.selectedIndex]!;
           const choice = row.choices[panel.choiceIndex];
           const compact = renderer.width < 45 || renderer.height < 16;
+          const selected = `${panel.selectedIndex + 1}/${panel.rows.length}`;
+          const compactHeader = renderer.width < 32
+            ? `Prefs ${panel.scope} ${selected}`
+            : `Preferences · ${panel.scope} · ${selected}`;
+          const compactChoice = panel.error
+            ? `! ${panel.error}`
+            : panel.preview
+              ? `Enter saves · ${choice === undefined ? "Reset" : String(choice)}`
+              : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)}`;
           const lines = [
-            compact ? fitLine(`Preferences · ${panel.selectedIndex + 1}/${panel.rows.length}`, width) : `Preferences · ${panel.scope} · ${panel.selectedIndex + 1}/${panel.rows.length}`,
+            compact ? fitLine(compactHeader, width) : `Preferences · ${panel.scope} · ${selected}`,
             compact ? fitLine(`› ${row.key}: ${row.value}`, width) : `› ${row.key}: ${row.value} [${row.origin}]`,
-            compact ? fitLine(`Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)}`, width) : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
+            compact ? fitLine(compactChoice, width) : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
             panel.error ?? panel.preview ?? "Enter previews; no changes yet.",
             compact ? "↑↓ field · ←→ choice · Tab scope · Enter accept · Esc back" : "↑/↓ field · ←/→ choice · Tab scope",
             ...(compact ? [] : ["Enter preview/confirm · Esc back · PgUp/PgDn scroll"]),

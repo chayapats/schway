@@ -1019,7 +1019,7 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
     ui.resize(32, 12); await settle(ui);
     expect(ui.captureCharFrame()).toContain("› maxTurns");
-    expect(ui.captureCharFrame()).toContain("Choice:");
+    expect(ui.captureCharFrame()).toContain("Enter saves");
     ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("draft 日本語");
     expect(ui.editor.cursorOffset).toBe(3);
@@ -1042,6 +1042,46 @@ test("long configured values do not hide the keyboard choice on the smallest pan
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("› model");
     expect(ui.captureCharFrame()).toContain("Choice:");
+  });
+});
+
+test("compact preferences show project scope and confirmation before a write", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    ui.resize(24, 8);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("memory");
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("project");
+    expect(ui.captureCharFrame()).toContain("project");
+    ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Enter confirms");
+    expect(ui.captureCharFrame()).toContain("Enter saves");
+  });
+});
+
+test("appearance edit rejects externally changed runtime settings", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    const path = join(ui.workspaceRoot, ".schway/config.json");
+    await mkdir(join(ui.workspaceRoot, ".schway"));
+    await writeFile(path, '{"provider":"openai"}');
+    expect(await ui.controller.configCommand("set appearance dark --scope project")).toBe(false);
+    expect(ui.configEditor.settings.provider).toBe("anthropic");
+    expect(ui.configEditor.settings.appearance).toBe("auto");
+    expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Reload");
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    const appearanceIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
+    for (let index = 0; index < appearanceIndex; index++) ui.mockInput.pressArrow("down");
+    ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.error).toContain("Reload");
+    expect(ui.configEditor.settings.provider).toBe("anthropic");
+    expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
   });
 });
 

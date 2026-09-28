@@ -46,10 +46,19 @@ def main() -> None:
     master, slave = pty.openpty()
     resize(slave, 80, 24)
     output = bytearray()
-    process = subprocess.Popen(sys.argv[1:], stdin=slave, stdout=slave, stderr=slave,
-                               env=dict(os.environ, TERM="xterm-256color"), start_new_session=True)
-    os.close(slave)
+    process = None
+    slave_closed = False
+
+    def stop_on_timeout(_signum, _frame) -> None:
+        """Unwind through cleanup when the outer test terminates this fixture."""
+        raise SystemExit(128 + signal.SIGTERM)
+
+    previous_sigterm = signal.signal(signal.SIGTERM, stop_on_timeout)
     try:
+        process = subprocess.Popen(sys.argv[1:], stdin=slave, stdout=slave, stderr=slave,
+                                   env=dict(os.environ, TERM="xterm-256color"), start_new_session=True)
+        os.close(slave)
+        slave_closed = True
         read_until(master, output, b"Type a task", 5)
         os.write(master, b"\x1b[200~" + "ไทย 中文 👩‍💻 é".encode() + b"\x1b[201~")
         read_for(master, output, 0.5)
@@ -95,9 +104,15 @@ def main() -> None:
                                       ("thai", "cjk", "emoji", "combining", "alternate_enter", "alternate_exit", "answer")):
             raise RuntimeError("installed PTY Unicode or cleanup check failed")
     finally:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        if process is not None and process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             process.wait()
+        if not slave_closed:
+            os.close(slave)
         os.close(master)
 
 

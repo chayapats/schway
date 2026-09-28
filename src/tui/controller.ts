@@ -40,6 +40,7 @@ import {
 } from "../workspace/git.ts";
 import { modelPickerEntries, modelPickerIdentity, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
 import { loadModelPickerAccess, type ModelPickerAccess } from "./model-access.ts";
+import { isDeepStrictEqual } from "node:util";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -2410,6 +2411,10 @@ export class TuiController {
       try {
         const transaction = await prepare();
         abort.signal.throwIfAborted();
+        if (appearanceOnly && !isDeepStrictEqual(
+          { ...this.configEditor!.settings, appearance: undefined },
+          { ...transaction.settings, appearance: undefined },
+        )) throw new Error("Other settings changed outside Schway. Reload before saving appearance.");
         const staged = appearanceOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate);
         abort.signal.throwIfAborted();
         if (activate && !staged?.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
