@@ -511,7 +511,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? `Prefs ${panel.scope} ${selected}`
             : `Preferences · ${panel.scope} · ${selected}`;
           const compactChoice = panel.error
-            ? `! ${panel.error}`
+            ? `! Not saved: ${choice === undefined ? "Reset" : String(choice)}`
             : panel.preview
               ? `Enter saves · ${choice === undefined ? "Reset" : String(choice)}`
               : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)}`;

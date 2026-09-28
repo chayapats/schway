@@ -1024,6 +1024,7 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     expect(ui.editor.plainText).toBe("draft 日本語");
     expect(ui.editor.cursorOffset).toBe(3);
     ui.editor.setText("/theme wrong");
+    ui.mockInput.pressEscape(); await settle(ui);
     ui.mockInput.pressEnter(); await settle(ui);
     expect(ui.captureCharFrame()).toContain("! Needs attention");
     expect(ui.editor.plainText).toBe("/theme wrong");
@@ -1073,13 +1074,15 @@ test("appearance edit rejects externally changed runtime settings", async () => 
     expect(ui.configEditor.settings.appearance).toBe("auto");
     expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
     expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Reload");
+    ui.resize(24, 8);
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
     ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
     const appearanceIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
     for (let index = 0; index < appearanceIndex; index++) ui.mockInput.pressArrow("down");
-    ui.mockInput.pressArrow("right");
+    ui.mockInput.pressArrow("right"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui); await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.error).toContain("Reload");
+    expect(ui.captureCharFrame()).toContain("! Not saved: dark");
     expect(ui.configEditor.settings.provider).toBe("anthropic");
     expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
   });
