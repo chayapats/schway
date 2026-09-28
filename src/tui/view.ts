@@ -567,7 +567,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       searchScrollToMatch = false;
       handled(); return;
     }
-    if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser) {
+    if (snapshot.recovery && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser && !snapshot.preferences) {
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("retry-credentials")) {
         void controller.retryCredentialRecovery().then(refresh, fail); handled(); return;
       }
@@ -625,7 +625,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       renderer.resume();
       handled(); return;
     }
-    if ((key.meta || key.option) && name === "p") { controller.openPreferences(); handled(); return; }
+    if ((key.meta || key.option) && name === "p") {
+      if (!panelMode && !inspection) controller.openPreferences();
+      else if (!snapshot.preferences) showInteractionNotice("Close the current panel with Esc before opening preferences.");
+      handled(); return;
+    }
     if (snapshot.preferences) {
       if (name === "pageup" || name === "pagedown") preferencePanel.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, preferencePanel.viewport.height - 2));
       else if (name === "escape") controller.closePreferences();

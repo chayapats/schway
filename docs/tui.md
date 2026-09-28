@@ -253,6 +253,11 @@ draft preservation, scroll anchoring, theme changes, Unicode, and resizing. Test
 assert behavior and a few stable layout landmarks, not snapshots of every cell.
 
 
+Open preferences from the task composer. If another panel is open, Escape returns
+to the task before Alt+P; preferences likewise keep ownership of input until closed
+(or their explicit model-picker action is selected). Repeated Alt+P preserves the
+current preference selection and preview.
+
 Preferences show effective values, their origins, and separately saved lower values.
 Session edits disappear on restart; workspace memory, user config and project
 config are distinct explicit scopes, explained before confirmation. Project scope

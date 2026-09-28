@@ -660,6 +660,7 @@ export class TuiController {
 
   /** Show provider and auth choices without consuming the ordinary composer draft. */
   openLoginChooser(): boolean {
+    if (this.preferences) return false;
     if (this.disposed || this.running) { this.notice("Busy: finish the current operation before signing in."); return false; }
     this.closeModelPicker();
     this.loginChooserIndex = 0;
@@ -1124,6 +1125,7 @@ export class TuiController {
 
   /** Open the interactive branch tree with preview-only selection at the durable active head. */
   openBranchTree(): boolean {
+    if (this.preferences) return false;
     if (this.disposed) return false;
     if (!this.branchTreeOpen) {
       this.branchTreeOpen = true;
@@ -1563,6 +1565,7 @@ export class TuiController {
 
   /** Open model search while idle, selecting the currently active entry. */
   openModelPicker(): boolean {
+    if (this.preferences) return false;
     if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
     this.preferences = undefined; this.preferenceTransaction = undefined; this.preferenceGeneration++;
     this.closeModelPicker();
@@ -1910,7 +1913,7 @@ export class TuiController {
 
   /** Open bounded preferences without changing the composer or any configuration layer. */
   openPreferences(): boolean {
-    if (this.running || this.disposed || !this.configEditor) return false;
+    if (this.running || this.disposed || !this.configEditor || this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserIndex !== undefined || this.loginApproval !== undefined) return false;
     this.closeModelPicker();
     this.preferences = { scope: "session", selectedIndex: 0, choiceIndex: 0, rows: preferenceRows(this.configEditor, "session", this.secrets) };
     return true;

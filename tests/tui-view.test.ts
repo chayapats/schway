@@ -1161,3 +1161,43 @@ test("preferences reset inherits the latest remembered model and preserves unrel
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ headers: { "X-Region": "west" }, extraBody: { temperature: 0.2 }, maxConcurrentTools: 3, maxTurns: 8 });
   });
 });
+
+
+test("preferences refuse competing login and branch panels and restore the original task and cursor", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    await ui.mockInput.pasteBracketedText("retained task\nsecond line"); ui.editor.cursorOffset = 5;
+    for (const panel of ["login", "branch"] as const) {
+      if (panel === "login") ui.mockInput.pressKey("l", { meta: true });
+      else expect(ui.controller.openBranchTree()).toBe(true);
+      await settle(ui);
+      const before = ui.controller.snapshot();
+      expect(panel === "login" ? before.loginChooser : before.branchTree).toBeDefined();
+      ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+      expect(ui.controller.snapshot().preferences).toBeUndefined();
+      expect(ui.controller.openPreferences()).toBe(false);
+      expect(panel === "login" ? ui.controller.snapshot().loginChooser : ui.controller.snapshot().branchTree).toEqual(panel === "login" ? before.loginChooser : before.branchTree);
+      ui.mockInput.pressEscape(); await settle(ui);
+      expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+      expect(ui.controller.snapshot().branchTree).toBeUndefined();
+      expect(ui.editor.plainText).toBe("retained task\nsecond line"); expect(ui.editor.cursorOffset).toBe(5);
+      ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+      expect(ui.controller.snapshot().preferences).toBeDefined();
+      // Reverse shortcuts and direct entry points cannot stack an input owner.
+      ui.mockInput.pressKey("l", { meta: true }); ui.mockInput.pressKey("m", { meta: true });
+      expect(ui.controller.openLoginChooser()).toBe(false);
+      expect(ui.controller.openBranchTree()).toBe(false);
+      expect(ui.controller.openModelPicker()).toBe(false);
+      expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+      expect(ui.controller.snapshot().branchTree).toBeUndefined();
+      expect(ui.controller.snapshot().modelPicker).toBeUndefined();
+      ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
+      const preview = ui.controller.snapshot().preferences;
+      ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+      expect(ui.controller.snapshot().preferences).toEqual(preview);
+      ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
+      expect(ui.editor.plainText).toBe("retained task\nsecond line"); expect(ui.editor.cursorOffset).toBe(5);
+      expect(ui.editor.focused).toBe(true);
+    }
+  });
+});
