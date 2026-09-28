@@ -204,10 +204,11 @@ mock.module("./node_modules/schway/src/model/loader.ts", () => ({ loadProviderMo
       await mkdir(ptyHome); await mkdir(ptyWork);
       const pty = await run(["python3", join(repo, "tests/fixtures/installed-pty.py"), executable, "--provider", "openai", "--model", "offline-demo"],
         ptyWork, buildIsolatedCliEnv(ptyHome, { PATH: `${ptyLaunchers}:${process.env.PATH}`, OPENAI_API_KEY: "fixture-key", NO_COLOR: "1" }));
+      if (pty.exit !== 0) throw new Error(pty.stderr || pty.stdout);
       expect(pty.exit).toBe(0);
       const result = JSON.parse(pty.stdout) as Record<string, unknown>;
       expect(result).toMatchObject({ exit: 0, thai: true, cjk: true, emoji: true, combining: true,
-        alternate_enter: true, alternate_exit: true, answer: true });
+        alternate_enter: true, alternate_exit: true, answer: true, draft_input: true, narrow_recovery: true });
     }
     const plainHome = join(root, "plain-home"), plainWork = join(root, "plain-work");
     await mkdir(plainHome); await mkdir(plainWork);

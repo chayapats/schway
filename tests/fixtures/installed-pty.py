@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 import pty
+import re
 import select
 import signal
 import struct
@@ -51,14 +52,22 @@ def main() -> None:
     try:
         read_until(master, output, b"Type a task", 5)
         os.write(master, b"\x1b[200~" + "ไทย 中文 👩‍💻 é".encode() + b"\x1b[201~")
-        read_for(master, output, 0.2)
+        read_for(master, output, 0.5)
+        draft_output = bytes(output)
+        draft_text = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", draft_output).decode(errors="replace")
+        if not all(value in draft_text for value in ("ไทย", "中文", "👩‍💻", "é")):
+            raise RuntimeError("installed PTY did not display the pasted Unicode draft")
         os.write(master, b"\r")
         read_until(master, output, b"Answer:", 5)
         resize(master, 32, 12)
         os.kill(process.pid, signal.SIGWINCH)
         read_for(master, output, 0.3)
+        recovery_start = len(output)
         os.write(master, b"\x0c")
         read_for(master, output, 0.3)
+        recovery_output = bytes(output[recovery_start:])
+        if b"Ready" not in recovery_output or b"Ask Schway" not in recovery_output:
+            raise RuntimeError("Ctrl+L did not restore the narrow installed screen")
         os.write(master, b"\x03")
         read_for(master, output, 0.3)
         if process.poll() is None:
@@ -77,6 +86,8 @@ def main() -> None:
             "alternate_enter": b"\x1b[?1049h" in output,
             "alternate_exit": b"\x1b[?1049l" in output,
             "answer": b"Answer:" in output,
+            "draft_input": True,
+            "narrow_recovery": True,
             "bytes": len(output),
         }
         print(json.dumps(result))
