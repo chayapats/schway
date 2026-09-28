@@ -66,6 +66,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let discoveryOpen = false;
   let helpOriginalScroll = 0;
   let reviewOriginalScroll = 0;
+  let treeOriginalScroll = 0;
   let sessionOriginalScroll = 0;
   let reviewContent = "";
   let helpInserted = false;
@@ -260,7 +261,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       contextStatus.visible = renderer.height >= 12;
       const context = snapshot.context;
       contextStatus.content = fitLine(`Context ~${context.estimatedTokens} tokens conversation+summary · cap ${context.capacity ?? "unknown"} · excludes prompt/tools · /context${context.summaryId ? " · active summary" : ""}`, width);
-      hints.visible = renderer.height >= 14;
+      hints.visible = renderer.height >= 14 || !!snapshot.branchTree;
       header.marginBottom = renderer.height < 20 ? 0 : 1;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       const sessionChanged = !!activeSessionId && activeSessionId !== snapshot.sessionId;
@@ -294,6 +295,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
         if (nextPanel === "sessions") { sessionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "sessions" && !nextPanel && !sessionChanged) searchRestoreScroll = sessionOriginalScroll;
+        if (nextPanel === "tree") { treeOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (panelMode === "tree" && !nextPanel && !sessionChanged) searchRestoreScroll = treeOriginalScroll;
         if (nextPanel === "review") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "review" && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
         if (nextPanel === "help") { helpInserted = false; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
@@ -315,7 +318,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? "Optional fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
+      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
@@ -499,14 +502,34 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (snapshot.branchTree) {
           clear(tree);
           const branches = snapshot.branchTree;
-          textRow(tree, "Conversation branches · ↑/↓ browse · Enter switch/fork · Esc back", theme.accent);
-          textRow(tree, `Active: ${branches.activeBranchId}`, theme.muted);
-          for (const node of branches.nodes) {
-            const selected = node.id === branches.selectedId;
-            const branchRow = textRow(tree, fitLine(`${selected ? "›" : " "} ${"  ".repeat(Math.min(node.depth, 6))}${node.isActiveHead ? "● " : ""}${node.kind} · ${node.preview}`, width), selected ? theme.accent : theme.text);
-            branchRow.id = `branch-${node.id}`;
+          if (renderer.height >= 16) textRow(tree, "Conversation branches", theme.accent);
+          if (renderer.height >= 12) {
+            textRow(tree, fitLine(`● Active: ${branches.activeBranchLabel ?? branches.activeBranchId}`, width), theme.muted);
+            textRow(tree, fitLine(branches.selectedBranchId ? "Continue existing · Tab: new fork" : "New fork · Tab: existing", width), theme.accent);
           }
-          if (branches.truncated) textRow(tree, `Showing ${branches.nodes.length}/${branches.totalNodeCount} entries · /branch list for IDs`, theme.warning);
+          if (renderer.height >= 16) textRow(tree, "↑/↓ preview · Enter confirm · Esc cancel", theme.muted);
+          const visibleRows = Math.max(1, Math.min(8, renderer.height - 14));
+          if (branches.selectedBranchId) {
+            const selectedIndex = branches.branches.findIndex(branch => branch.id === branches.selectedBranchId);
+            const start = Math.max(0, selectedIndex - Math.min(1, visibleRows - 1));
+            branches.branches.slice(start, start + visibleRows).forEach((branch, offset) => {
+              const index = start + offset;
+              const selected = branch.id === branches.selectedBranchId;
+              const ordinal = (branches.branchOffset ?? 0) + index + 1;
+              const row = textRow(tree, fitLine(`${selected ? "›" : " "}${branch.active ? "●" : " "} ${ordinal}. ${branch.name || branch.preview}`, width), selected ? theme.accent : theme.text);
+              row.id = `branch-choice-${branch.id}`;
+            });
+            textRow(tree, `● active · › preview · ${branches.totalBranchCount} paths`, theme.muted);
+          } else {
+            const points = branches.nodes.filter(node => node.isForkPoint);
+            const selectedIndex = points.findIndex(node => node.id === branches.selectedId);
+            const start = Math.max(0, selectedIndex - Math.min(1, visibleRows - 1));
+            for (const node of points.slice(start, start + visibleRows)) {
+              const row = textRow(tree, fitLine(`${node.id === branches.selectedId ? "›" : " "}${node.isActiveHead ? "●" : " "} ${node.preview}`, width), node.id === branches.selectedId ? theme.accent : theme.text);
+              row.id = `branch-${node.id}`;
+            }
+            if (branches.truncated) textRow(tree, "Windowed turns · arrows browse all complete turns", theme.warning);
+          }
           const previewKey = `${key}/${branches.selectedId}/${branches.totalNodeCount}`;
           if (previewKey !== treePreviewKey) {
             treePreviewKey = previewKey;
@@ -514,11 +537,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             catch { treePreview = [{ id: "error", kind: "error", text: "Preview unavailable. Reopen /branch tree to retry." }]; }
           }
           textRow(tree, "\nPreview", theme.accent);
-          textRow(tree, treePreview.map(entry => `${entry.kind}: ${entry.text}`).join("\n\n") || "Empty conversation", theme.muted);
-          tree.scrollChildIntoView(`branch-${branches.selectedId}`);
+          textRow(tree, treePreview.map(entry => `${entry.kind}: ${entry.text.slice(0, 1200)}`).join("\n\n") || "Empty conversation", theme.muted);
+          tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.content = fitLine(panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
+      hints.content = fitLine(panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
     } finally { refreshing = false; }
   }
 
@@ -549,7 +572,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       return;
     }
     if (snapshot.branchTree && !editor.plainText.trim().startsWith("/")) {
-      controller.confirmBranchTreeSelection(editor.plainText.trim() || undefined);
+      if (controller.confirmBranchTreeSelection(editor.plainText.trim() || undefined)) controller.closeBranchTree();
       refresh(); return;
     }
     const value = editor.plainText;
@@ -790,7 +813,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const delta = name === "up" ? -1 : 1;
       if (snapshot.loginChooser) { controller.moveLoginChooser(delta); handled(); return; }
       if (snapshot.modelPicker) { controller.moveModelPicker(delta); handled(); return; }
-      if (snapshot.branchTree) { controller.moveBranchTreeSelection(delta); handled(); return; }
+      if (snapshot.branchTree) { controller.moveBranchTreeAction(delta); handled(); return; }
       const choices = completions();
       if (choices.length) { completionIndex = (completionIndex + delta + choices.length) % choices.length; completionId = choices[completionIndex]?.id; handled(); return; }
       if (panelMode === "help") { handled(); return; }
@@ -803,6 +826,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         handled(); return;
       }
     }
+    if (snapshot.branchTree && name === "tab") { controller.toggleBranchTreeAction(); setDraft(""); handled(); return; }
     if (name === "tab" && !key.shift) {
       const selected = completions()[completionIndex];
       if (selected?.available) {

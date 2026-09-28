@@ -1,5 +1,7 @@
 // Each invocation runs the real interactive dispatcher and renderer with isolated credentials and transport.
 import { mock } from "bun:test";
+import type { CliRenderer, CliRendererConfig } from "@opentui/core";
+import type { ConversationViewOptions } from "../../src/tui/view.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 import { join } from "node:path";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
@@ -13,7 +15,30 @@ const store = fakeCredentialStore();
 if (mode !== "missing-key" && mode !== "forget-missing-key") await store.set(credentialIdentity({ provider: "openai" }), "fixture-stored-key");
 if (mode.includes("codex") || mode === "missing-model") await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-fixture", expiresAt: Date.now() + 600_000 }));
 await store.set(credentialIdentity({ provider: "anthropic" }), "fixture-anthropic-key");
-const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });
+let terminal: Awaited<ReturnType<typeof createTestRenderer>>;
+let controller: import("../../src/tui/controller.ts").TuiController | undefined;
+let submission: Promise<unknown> | undefined;
+let selection: Promise<unknown> | undefined;
+const viewPath = join(import.meta.dir, "../../src/tui/view.ts");
+const originalView = await import(viewPath);
+const createView = originalView.createConversationView;
+mock.module(viewPath, () => ({ ...originalView, createConversationView: (renderer: CliRenderer, options: ConversationViewOptions) => {
+  controller = options.controller;
+  const selectModel = controller.selectPickerModel.bind(controller);
+  controller.selectPickerModel = () => { const pending = selectModel(); selection = pending; return pending; };
+  return createView(renderer, { ...options, submit: (...args: Parameters<typeof options.submit>) => {
+    const pending = options.submit(...args);
+    submission = pending;
+    return pending;
+  } });
+} }));
+const until = async (predicate: () => boolean) => {
+  const deadline = Date.now() + 3000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Fixture operation did not settle (${mode})`);
+    await Bun.sleep(5);
+  }
+};
 const fixture = join(import.meta.dir, "../../src/tui/credential-input.ts");
 const credentialInput = await import(fixture);
 const core = await credentialInput.loadCredentialSafeTui();
@@ -21,24 +46,29 @@ let inputTask: Promise<void>;
 let screen = "";
 const requests: unknown[] = [];
 mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async () => ({ ...core,
-  createCliRenderer: async () => {
+  createCliRenderer: async (options: CliRendererConfig) => {
+    terminal = await createTestRenderer({ ...options, width: 80, height: 24, kittyKeyboard: true });
     inputTask = (async () => {
-      await Bun.sleep(30);
+      await until(() => !!controller && controller.snapshot().readiness !== "loading");
       const command = async (text: string) => {
         await terminal.mockInput.pasteBracketedText(text);
+        submission = undefined;
         terminal.mockInput.pressEnter();
-        await Bun.sleep(60);
+        await until(() => submission !== undefined);
+        await submission;
         await terminal.flush();
       };
       await terminal.flush();
       screen = terminal.captureCharFrame();
       if (mode === "select" || mode === "select-codex") {
         terminal.mockInput.pressKey("m", { meta: true });
-        await Bun.sleep(40);
-        await terminal.mockInput.typeText(mode === "select-codex" ? "account-model" : "gpt-5.4");
-        await Bun.sleep(20);
+        await until(() => !!controller?.snapshot().modelPicker);
+        const query = mode === "select-codex" ? "account-model" : "gpt-5.4";
+        await terminal.mockInput.typeText(query);
+        await until(() => { const picker = controller?.snapshot().modelPicker; return picker?.query === query && !picker.accessLoading && !picker.loading; });
         terminal.mockInput.pressEnter();
-        await Bun.sleep(80);
+        await until(() => selection !== undefined);
+        await selection;
         await command(mode === "select-codex" ? "/thinking max" : "/thinking high");
       }
       if (mode.startsWith("forget")) { await command("/model forget"); screen += "\n" + terminal.captureCharFrame(); }
@@ -49,6 +79,8 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
       screen += "\n" + terminal.captureCharFrame();
       await command("hello");
       terminal.mockInput.pressKey("c", { ctrl: true });
+      // Native Ctrl+C must leave teardown to the app's loop, just as in production.
+      if (terminal.renderer.isDestroyed) throw new Error("Native Ctrl+C destroyed the renderer before app cleanup");
     })();
     return terminal.renderer;
   },

@@ -49,17 +49,16 @@ Conversation branching does **not** undo file changes, create Git branches, or r
 
 ## Browsing branches in the TUI
 
-Open the interactive tree, then browse with stable IDs while the durable head stays put until confirmation:
+Open `/branch tree` to preview conversation history. Opening it never changes the durable active path.
 
-```text
-/branch tree
-```
+The browser starts in **Continue existing** mode. `●` marks the active path and `›` the preview selection. Labels and bounded task previews identify paths; numbered rows distinguish duplicate labels, even when they share one head. Selection uses the underlying stable branch ID. The list pages around the highlight, including paths beyond the first page.
 
-The header and status line always show the durable branch as `session <id> [branch <branch-id>]`. The tree shows parent/child entries with branch labels, `*` for the active head, `o` for other heads, `>` for the preview selection, and `[fork]` for complete-turn fork points. Previews are bounded to one line; the preview pane shows the last 8 transcript rows for the highlight without changing model context or persistence.
-
-- `Up`/`Down` moves the preview highlight across branches and fork points.
-- `Enter` switches when the highlight is a branch head, otherwise forks its complete turn (the input line becomes the optional new-branch name).
-- `Esc` cancels a running turn first, otherwise closes the tree without changing branches.
+- `Up`/`Down` previews existing paths without activation.
+- `Tab` changes to **New fork at complete turn**; arrows browse complete turns. Type an optional human name, then `Enter` creates and selects a new branch, even if that turn already heads an existing branch. `Tab` returns to existing paths.
+- `Enter` in Continue existing mode selects that exact path. Successful confirmation returns to the conversation and restores the ordinary draft.
+- `Esc` closes preview and restores the draft, cursor and reading position. It does not cancel a running turn while the browser is open; close the browser first to cancel the turn.
+- Files/Git remain unchanged is shown beside confirmation controls, including at narrow widths. This browser changes conversation ancestry, never file contents or Git branches.
+- Busy or failed confirmation keeps the previous ancestry and saved draft.
 - `/branch list | fork <entry-id> [name] | switch <branch-id>` still works for scripts and retains exact-ID selection.
 - `/resume <session-id> [branch-id]` restores one saved branch; a missing branch reports an error and keeps the current session.
 

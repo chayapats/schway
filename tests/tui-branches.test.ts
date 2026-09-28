@@ -313,7 +313,7 @@ test("busy turns reject switch and fork while preview stays side-effect-free", a
   });
 });
 
-test("missing and ambiguous targets fail without losing the previous branch", async () => {
+test("missing targets preserve ancestry and explicit fork selection can fork a shared head", async () => {
   await withTempDir(async (dir) => {
     const session = createSession([user("A"), assistant("B")], []);
     const controller = controllerFor(session, "tree-error", dir, createScriptedModel({ text: "ok" }));
@@ -329,7 +329,7 @@ test("missing and ambiguous targets fail without losing the previous branch", as
       expect(ids(session)).toEqual(["A", "B"]);
       expect(controller.snapshot().branchId).toBe("main");
       expect(controller.snapshot().transcript.some((entry) => entry.kind === "error")).toBe(true);
-      // Several branches may share one head; confirmation then requires one stable branch ID.
+      // Shared heads remain independently selectable; selecting a node explicitly creates a new fork.
       const first = session.forkBranch("B", "same");
       session.selectBranch("main");
       const second = session.forkBranch("B", "same");
@@ -341,9 +341,12 @@ test("missing and ambiguous targets fail without losing the previous branch", as
       controller.refreshBranchTree();
       // main and first still share head B while the active branch moved on.
       controller.selectBranchTreeNode("B");
-      expect(controller.confirmBranchTreeSelection()).toBe(false);
-      expect(session.activeBranchId).toBe(second);
-      expect(controller.snapshot().transcript.some((entry) => entry.text.includes("Several branches share head"))).toBe(true);
+      expect(controller.confirmBranchTreeSelection("new named path")).toBe(true);
+      expect(session.activeBranchId).not.toBe(second);
+      expect(session.listBranches().find(branch => branch.active)?.name).toBe("new named path");
+      expect(controller.focusBranchTreeBranch(first)).toBe(true);
+      expect(controller.confirmBranchTreeSelection()).toBe(true);
+      expect(session.activeBranchId).toBe(first);
       expect(transcriptBefore.length).toBeGreaterThan(0);
       expect(first).not.toBe(second);
     } finally {
@@ -597,4 +600,34 @@ test("capped tree keeps at most maxNodes when heads outnumber the limit", () => 
   expect(seen.has(activeHead!)).toBe(true);
   expect(seen.has(built.selectedId)).toBe(true);
   expect(built.truncated).toBe(true);
+});
+
+test("named fork compaction persists branch-local summary and reload displays the authoritative selected path", async () => {
+  await withTempDir(async dir => {
+    const directory = join(dir, "sessions");
+    const session = await createJsonlSession({ directory, workspace: workspace(dir) });
+    session.append(user("u"), assistant("a"), user("u2"), assistant("a2"));
+    const controller = controllerFor(session, session.header.id, dir, createScriptedModel());
+    try {
+      controller.openBranchTree();
+      controller.toggleBranchTreeAction();
+      expect(controller.confirmBranchTreeSelection("summary path")).toBe(true);
+      const fork = session.activeBranchId;
+      session.append({ type: "compaction", id: "summary", firstKeptId: "u2", summary: "ONLY ON FORK" });
+      session.append(user("after"), assistant("done"));
+      expect(controller.activateBranchTreeBranch("main")).toBe(true);
+      expect(session.items.some(item => item.type === "compaction")).toBe(false);
+      const mainReload = await loadJsonlSession({ directory, id: session.header.id });
+      controller.replaceSession(mainReload, session.header.id);
+      expect(controller.branchTreeSnapshot()?.activeBranchId).toBe("main");
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("ONLY ON FORK"))).toBe(false);
+      controller.focusBranchTreeBranch(fork);
+      expect(controller.confirmBranchTreeSelection()).toBe(true);
+      const forkReload = await loadJsonlSession({ directory, id: session.header.id });
+      controller.replaceSession(forkReload, session.header.id);
+      expect(controller.branchTreeSnapshot()?.activeBranchId).toBe(fork);
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("ONLY ON FORK"))).toBe(true);
+      expect(forkReload.items.map(item => item.id)).toEqual(["u", "a", "u2", "a2", "summary", "after", "done"]);
+    } finally { controller.dispose(); }
+  });
 });
