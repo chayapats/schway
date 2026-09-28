@@ -5,7 +5,7 @@ import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import { TuiController } from "../src/tui/controller.ts";
-import { activityStatus } from "../src/tui/presentation.ts";
+import { statusPill } from "../src/tui/presentation.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -53,7 +53,7 @@ test("preparation, quiet provider wait, streaming and cancellation keep one oper
     expect(controller.snapshot().activity?.elapsedMs).toBe(3_000);
     prepare.open();
     await until(() => controller.snapshot().activity?.phase === "waiting");
-    expect(activityStatus(controller.snapshot().activity!)).toContain("Waiting for model");
+    expect(statusPill(controller.snapshot()).label).toContain("WAITING");
     first.open();
     await until(() => controller.snapshot().activity?.phase === "streaming");
     expect(controller.snapshot().transcript.some(entry => entry.text.includes("partial answer"))).toBe(true);
@@ -91,10 +91,10 @@ test("cancel during a quiet first-token wait keeps the turn owned until provider
     await until(() => controller.snapshot().activity?.phase === "waiting");
     expect(controller.snapshot().transcript.some(entry => entry.kind === "assistant")).toBe(false);
     controller.cancel();
-    expect(activityStatus(controller.snapshot().activity!)).toContain("Cancel requested");
+    expect(statusPill(controller.snapshot()).label).toBe("CANCEL REQUESTED");
     expect(controller.snapshot().activity?.cancellation).toBe("requested");
     controller.acknowledgeCancellationFrame(controller.snapshot().activity!.operationId);
-    expect(activityStatus(controller.snapshot().activity!)).toContain("Stopping");
+    expect(statusPill(controller.snapshot()).label).toContain("STOPPING");
     expect(controller.snapshot().activity?.cancellation).toBe("settling");
     expect(controller.snapshot().status).toBe("running");
     first.open();
@@ -125,7 +125,7 @@ test("retry countdown uses the emitted delay and injected clock, then clears on 
     expect(controller.snapshot().activity?.retry).toMatchObject({ failedAttempt: 1, maxAttempts: 3, remainingMs: 3_000 });
     now += 1_200;
     expect(controller.snapshot().activity?.retry?.remainingMs).toBe(1_800);
-    expect(activityStatus(controller.snapshot().activity!)).toContain("Retry 2/3 in 2s");
+    expect(statusPill(controller.snapshot()).label).toBe("RETRY 2/3 · 2s");
     wake.open();
     await until(() => controller.snapshot().activity?.phase === "waiting");
     expect(controller.snapshot().activity?.retry).toBeUndefined();

@@ -123,7 +123,7 @@ void (async () => {
     assert(initial.includes("claude-sonnet-4-6") && initial.includes("Type a task"), "remembered readiness missing");
     assert(!initial.includes("Connect to get started"), "redundant setup");
     if (scenario.startsWith("returning-appearance")) {
-      const expected = scenario.endsWith("-env") ? "#fafaf8" : "#15181e";
+      const expected = scenario.endsWith("-env") ? "#f7f7f4" : "#0e1117";
       const canvas = terminal.renderer.root.findDescendantById("conversation");
       assert(canvas.backgroundColor.equals(core.RGBA.fromHex(expected)), "installed appearance or environment precedence wrong");
       terminal.mockInput.pressKey("p", { meta: true });
@@ -160,11 +160,11 @@ void (async () => {
     await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");
     terminal.mockInput.pressEnter();
-    await settle(() => loaderCalls === 1 && editor.focused && screenIncludes("Ready"), "connection activation");
+    await settle(() => loaderCalls === 1 && editor.focused && screenIncludes("READY"), "connection activation");
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "activation lost draft/cursor");
     assert(requests === 0, "setup submitted task");
     terminal.resize(44, 18);
-    await settle(() => terminal.renderer.width === 44 && editor.focused && screenIncludes("Ready"), "resized task editor");
+    await settle(() => terminal.renderer.width === 44 && editor.focused && screenIncludes("READY"), "resized task editor");
     terminal.mockInput.pressEnter();
     await settle(() => requests === 1 && screenIncludes("fixture complete"), "explicit task completion");
     assert(requests === 1, "explicit send did not produce exactly one request");

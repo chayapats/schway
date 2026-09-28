@@ -1,17 +1,26 @@
 # Conversation interface
 
-Schway uses one conversation column with a persistent multiline editor. Workspace
-context sits at the top; model, reasoning preference, and execution state sit below
-the editor. `/session` reveals session IDs, the conversation branch, and attached
+Schway uses one conversation column with a persistent multiline editor. The screen
+is divided into color blocks: a top bar names the workspace and checked-out Git
+branch; the conversation sits on the canvas; the composer is a raised block; the
+status bar below it carries the state pill, model, reasoning preference, and context
+meter; key hints sit on the last row. `/session` reveals session IDs, the conversation branch, and attached
 workspace paths. A conversation branch is distinct from a Git branch.
 
-The status line follows the active operation's runtime events: preparing context,
-waiting for the provider, streaming a response, running tools, waiting to retry,
-compacting, and stopping. It shows elapsed time; provider retry countdowns use the
-reported delay and attempt. Quiet providers and tools remain in their current phase
-with elapsed time, without an estimated percentage or a hang warning. Parallel tools
-share a compact count and name summary. At narrow widths the phase and `Esc stops`
-take priority in the footer.
+The status pill follows the active operation's runtime events: `PREPARING`,
+`WAITING` for the provider, `STREAMING` a response, `TOOLS n`, `RETRY a/b`,
+`COMPACTING`, `CANCEL REQUESTED` and `STOPPING`; otherwise it reads `READY`,
+`CHECKING` (connection check) or `ATTENTION` (a failure needs you). It is the only
+saturated block on screen: filled accent while working, warning while stopping,
+error when attention is needed, and a quiet green tint when ready. It shows elapsed
+time; provider retry countdowns use the reported delay and attempt. Quiet providers
+and tools remain in their current phase with elapsed time, without an estimated
+percentage or a hang warning. The activity row above the composer describes the
+current work; parallel tools share a compact count and name summary. The context
+meter shows the estimated share of known capacity (`ctx ━━━━ 19%`), or the token
+estimate (`ctx ~132`) when capacity is unknown; `/context` explains it. At narrow
+widths the pill, `Esc stops` and the context estimate take priority; the route,
+reasoning chip and then the model name are shortened first.
 
 Streamed assistant text is a preview until the provider finishes the attempt. A
 retry keeps an abandoned preview visibly marked as incomplete, then replaces it
@@ -139,23 +148,60 @@ providers, OAuth, real credential storage and a human terminal journey remain un
 
 ## Color roles
 
+The Voltage palette pairs calm canvases with color blocks for each zone.
+
 | Role | Dark | Light | Use |
 | --- | --- | --- | --- |
-| Background | `#15181e` | `#fafaf8` | Main canvas |
-| Surface | `#20252e` | `#eeefed` | User messages, code, pickers |
-| Text | `#e2e6ec` | `#242a33` | Conversation and errors' content |
-| Muted | `#a7b0be` | `#566170` | Metadata, hints, tool details |
-| Border | `#4a5565` | `#9ba3ad` | Composer and separators |
-| Accent | `#83bfff` | `#075985` | Selection, input marker, running |
-| Success | `#91c99a` | `#166534` | Completed tools, added lines |
-| Warning | `#e6c078` | `#854d0e` | Cancelled tools, notices needing attention |
-| Error | `#f29b9b` | `#b91c1c` | Failures, removed lines |
-| Code | `#cfb9ed` | `#6b3890` | Inline code and code blocks |
+| Background | `#0e1117` | `#f7f7f4` | Main canvas |
+| Surface | `#161b24` | `#ecedea` | Top bar, user messages, composer, code bodies, status bar |
+| Surface 2 | `#1e2430` | `#e1e3df` | Tool trays, code headers, pickers, model chip |
+| Text | `#e6eaf0` | `#1d232c` | Conversation and errors' content |
+| Muted | `#8b95a7` | `#545e6c` | Metadata, hints, tool details |
+| Border | `#2c3444` | `#c5c9cf` | Key chips, search highlight |
+| Accent | `#7cc4ff` | `#0a5894` | Working pill, focus bar, selection, read tools |
+| Success | `#8fd19e` | `#19612f` | Ready pill, completed tools, added lines |
+| Warning | `#f0c674` | `#7a5000` | Stopping pill, edit tools, cancelled tools |
+| Error | `#f79d9d` | `#a61f16` | Attention pill, error blocks, removed lines |
+| Code / Violet | `#c0acff` | `#6a3fb0` | Inline code, keywords, reasoning chip, shell tools |
+| Cyan | `#5ee7ff` | `#065e74` | Types in code, other tools, logo gradient start |
+| Bolt | `#ffd84a` | `#b27b00` | The ⚡ mark and splash sparks |
 
-All text tokens meet a 4.5:1 contrast ratio on both built-in backgrounds; borders
-are decorative. Symbols and labels retain meaning without color. Nonempty
-`NO_COLOR` maps semantic accents to the text color. This is a monochrome TUI,
-not a plain-text output mode; use `-p` for headless text.
+Tints mix a semantic color into Surface 2 (22% dark, 12% light) for pills, diff
+rows and selected picker rows; only body text or that same semantic color is drawn
+on a tint. Every text role meets a 4.5:1 contrast ratio on the canvas, both
+surfaces and every tint it is used on; `tests/tui-view.test.ts` checks the pairs.
+Symbols and labels retain meaning without color. Nonempty `NO_COLOR` maps semantic
+accents to the text color. This is a monochrome TUI, not a plain-text output mode;
+use `-p` for headless text.
+
+Code blocks use a small built-in lexer (keywords, strings, numbers, comments,
+types, calls) instead of downloaded parsers; copying still returns the exact code.
+
+## Motion and startup splash
+
+An interactive launch opens with a 2 second splash: the SCHWAY wordmark appears
+as a ghost, a lightning bolt crosses and ignites it, the screen flashes, the logo
+settles into its cyan-to-violet gradient while the tagline types in, then collapses
+like a CRT into one spark that flies into the top bar's ⚡ and reveals the
+interface. Startup keeps going underneath: the editor already has focus, and any
+key, paste or click skips the splash **and is still delivered** (the first typed
+character lands in the draft). The timeline starts at the first painted frame and
+holds across startup stalls, so no phase is skipped on a slow start. `--resume`
+launches, terminals smaller than 57×16, and reduced or disabled motion skip it.
+
+While working, the pill and tool rows show a braille spinner, the pill and
+activity text carry a moving highlight, a streamed answer ends in a blinking `▍`
+(never inside an open code fence), a finished tool row flashes green, the pill
+cross-fades between states and pickers slide up from the composer. Motion is
+decorative: text, layout and keys never depend on it, and the animation timer only
+runs while something is moving.
+
+`SCHWAY_MOTION=full|reduced|off` selects the level. `reduced` keeps spinners and a
+steady caret but removes the splash, highlights, flashes, caret blink and slides;
+`off` also replaces spinners with a static `●` and drops the caret. `NO_COLOR` or `TERM=dumb` default to `reduced`. Renderer fixtures run
+with `off`; `tests/tui-motion.test.ts` covers the splash timeline and gating, key
+forwarding, spinners, the completion flash and the streaming caret with an injected
+clock.
 
 The default is automatic terminal light/dark detection, then `COLORFGBG`, then
 dark. In `/config` (Alt+P), select **appearance** and choose **Reset (inherit)**,
@@ -240,7 +286,7 @@ current turn. Enter does not queue it while work is active; the draft stays in t
 editor until you send it after settlement. Pressing Esc or Ctrl+C shows
 “Cancel requested” immediately, then “Stopping” while active work settles.
 Running tools and other owned work may
-still need to settle. Completed output and tool results remain visible; “Ready”
+still need to settle. Completed output and tool results remain visible; `READY`
 returns only after settlement, and cancellation does not undo completed effects.
 
 Enter releases a prompt only after its user record is saved. Missing credentials,

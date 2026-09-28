@@ -82,6 +82,8 @@ export function buildIsolatedCliEnv(
     delete env[key];
   }
   env.HOME = home;
+  // Decorative TUI motion keeps renderer fixtures from ever reaching visual idle; animation has dedicated tests.
+  env.SCHWAY_MOTION = "off";
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) {
       delete env[key];

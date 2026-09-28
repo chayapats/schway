@@ -1,8 +1,28 @@
-import { BoxRenderable, MarkdownRenderable, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bold, italic, underline, link, type BaseRenderable, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
+import { highlightCode } from "./highlight.ts";
+import { HINT_KEY, keyHintChunks } from "./hints.ts";
+import { easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
-import type { TuiTheme } from "./theme.ts";
+import { mixColor, tint, type TuiTheme } from "./theme.ts";
 import { browserUrl, linkify } from "./links.ts";
+
+/** Left-edge bar used by user and error blocks; only the vertical glyph is ever drawn. */
+const BAR: BorderCharacters = { topLeft: "▌", topRight: " ", bottomLeft: "▌", bottomRight: " ", horizontal: " ", vertical: "▌", topT: " ", bottomT: " ", leftT: "▌", rightT: " ", cross: " " };
+
+/** Pill color by tool family: reads blue, writes amber, shell violet, everything else cyan. */
+function toolColor(name: string | undefined, theme: TuiTheme): string {
+  if (name === "edit" || name === "write") return theme.warning;
+  if (name === "bash") return theme.violet;
+  if (name === "read" || name === "ls" || name === "find" || name === "grep") return theme.accent;
+  return theme.cyan;
+}
+
+/** Blinking caret appended to a streaming answer outside fenced code. */
+const STREAM_CARET = "▍";
+
+/** Clock and motion policy shared by animated transcript rows. */
+export interface TranscriptMotion { now(): number; mode: MotionMode }
 
 type MarkdownToken = {
   type: string; text?: string; raw?: string; lang?: string; href?: string;
@@ -18,7 +38,11 @@ function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { str
       if (token.type === "link" && token.href) children.push(next.url ? link(next.url)(fg(theme.muted)(` (${token.href})`)) : fg(theme.muted)(` (${token.href})`));
       return children;
     }
-    let chunk = fg(next.code ? theme.code : next.link ? theme.accent : theme.text)(token.type === "br" ? "\n" : token.text ?? token.raw ?? "");
+    const text = token.type === "br" ? "\n" : token.text ?? token.raw ?? "";
+    // The streaming caret is presentation only; it is appended by the row and colored here.
+    if (!next.code && text.endsWith(STREAM_CARET)) return [...inline([{ ...token, text: text.slice(0, -1) }], theme, styles), fg(theme.accent)(STREAM_CARET)];
+    let chunk = fg(next.code ? theme.code : next.link ? theme.accent : theme.text)(text);
+    if (next.code) chunk = bg(tint(theme, theme.code))(chunk);
     if (next.strong) chunk = bold(chunk);
     if (next.emphasis) chunk = italic(chunk);
     if (next.link) chunk = underline(chunk);
@@ -32,11 +56,18 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
   // already-tokenized Markdown AST so first paint never waits for a WASM download.
   if (token.type === "table" || token.type === "hr") return undefined;
   if (token.type === "code") {
-    const block = new BoxRenderable(renderer, { flexDirection: "column", backgroundColor: theme.surface, paddingX: 1, marginTop: 1, marginBottom: 1 });
+    const block = new BoxRenderable(renderer, { flexDirection: "column", backgroundColor: theme.surface, marginTop: 1, marginBottom: 1 });
     const title = token.lang || "code";
     registerCode(block, token.text ?? "", title);
-    block.add(new TextRenderable(renderer, { content: title, fg: theme.muted }));
-    block.add(new TextRenderable(renderer, { content: linkify([fg(theme.code)(token.text ?? "")]), fg: theme.code, wrapMode: "word" }));
+    // Header strip: language pill left, copy hint right, on the second surface.
+    const header = new BoxRenderable(renderer, { flexDirection: "row", backgroundColor: theme.surface2, paddingX: 1 });
+    header.add(new TextRenderable(renderer, { content: codeTitle(title, false, theme), flexShrink: 0 }));
+    header.add(new BoxRenderable(renderer, { flexGrow: 1 }));
+    header.add(new TextRenderable(renderer, { content: "Alt+I copy", fg: theme.muted, flexShrink: 1, wrapMode: "none" }));
+    block.add(header);
+    const code = new BoxRenderable(renderer, { flexDirection: "column", paddingX: 1 });
+    code.add(new TextRenderable(renderer, { content: linkify(highlightCode(token.text ?? "", token.lang, theme)), fg: theme.code, wrapMode: "word" }));
+    block.add(code);
     return block;
   }
   if (token.type === "list" || token.type === "blockquote") {
@@ -44,8 +75,8 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
     if (token.type === "list") {
       for (const [index, item] of (token.items ?? []).entries()) {
         const itemBox = new BoxRenderable(renderer, { flexDirection: "row" });
-        const marker = item.task ? item.checked ? "[x] " : "[ ] " : token.ordered ? `${(token.start || 1) + index}. ` : "• ";
-        itemBox.add(new TextRenderable(renderer, { content: marker, fg: theme.muted, flexShrink: 0 }));
+        const marker = item.task ? item.checked ? "[x] " : "[ ] " : token.ordered ? `${(token.start || 1) + index}. ` : "▸ ";
+        itemBox.add(new TextRenderable(renderer, { content: marker, fg: item.task ? item.checked ? theme.success : theme.muted : token.ordered ? theme.muted : theme.accent, flexShrink: 0 }));
         const contents = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1 });
         for (const child of item.tokens ?? [{ type: "text", text: item.text }]) {
           const rendered = markdownBlock(renderer, child, theme, registerCode);
@@ -64,6 +95,11 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
   return new TextRenderable(renderer, { content: linkify(chunks), fg: theme.text, wrapMode: "word" });
 }
 
+/** Language pill for a code block header; focus adds the inspection marker. */
+function codeTitle(title: string, focused: boolean, theme: TuiTheme): StyledText {
+  return new StyledText([bold(bg(tint(theme, theme.accent))(fg(theme.accent)(` ${focused ? "› " : ""}${title} `)))]);
+}
+
 /** A stable transcript item whose text can change without replacing neighboring messages. */
 export interface TranscriptItemView {
   root: BoxRenderable;
@@ -74,6 +110,8 @@ export interface TranscriptItemView {
   /** Mark the selected search row without changing its rendered content. */
   setSearchMatch(selected: boolean): void;
   update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
+  /** Advance spinners and completion flashes; returns whether this row still animates. */
+  tick(): boolean;
 }
 
 /** Create Markdown styles from the same semantic palette used by tools and controls. */
@@ -94,8 +132,10 @@ export function markdownStyle(theme: TuiTheme): SyntaxStyle {
 }
 
 /** Mount one semantic message, rendering Markdown and code locally without downloading parsers. */
-export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscriptEntry, theme: TuiTheme, syntaxStyle: SyntaxStyle, toggleTool: () => void): TranscriptItemView {
-  const root = new BoxRenderable(renderer, { id: `message-${initial.id}`, flexDirection: "column", flexShrink: 0, marginTop: initial.kind === "assistant" ? 1 : 0, marginBottom: initial.kind === "tool" ? 0 : 1 });
+export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscriptEntry, theme: TuiTheme, syntaxStyle: SyntaxStyle, toggleTool: () => void, motion: TranscriptMotion = { now: () => Date.now(), mode: "off" }): TranscriptItemView {
+  const errorBlock = mixColor(theme.background, theme.error, 0.12);
+  const baseBackground = initial.kind === "user" ? theme.surface : initial.kind === "tool" ? theme.surface2 : initial.kind === "error" ? errorBlock : undefined;
+  const root = new BoxRenderable(renderer, { id: `message-${initial.id}`, flexDirection: "column", flexShrink: 0, marginTop: initial.kind === "assistant" ? 1 : 0, marginBottom: initial.kind === "tool" ? 0 : 1, backgroundColor: baseBackground });
   const codeData = new WeakMap<BoxRenderable, { text: string; title: string }>();
   const registerCode = (box: BoxRenderable, text: string, title: string) => { codeData.set(box, { text, title }); };
   const renderMarkdownNode = (token: MarkdownToken) => markdownBlock(renderer, token, theme, registerCode);
@@ -124,9 +164,8 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
     })
     : new TextRenderable(renderer, { content: "", fg: theme.text, wrapMode: "word" });
   if (initial.kind === "user") {
-    root.backgroundColor = theme.surface;
-    root.paddingX = 1;
-    label.content = new StyledText([bold(fg(theme.accent)("› You"))]);
+    Object.assign(root, { border: ["left"], borderColor: theme.accent, customBorderChars: BAR, paddingLeft: 1, paddingRight: 1 });
+    label.content = new StyledText([bold(fg(theme.accent)("You"))]);
     root.add(label);
   } else if (initial.kind === "assistant") {
     label.visible = false;
@@ -140,14 +179,40 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       press = undefined;
     };
     root.add(label);
-    body.paddingLeft = 2;
   } else if (initial.kind === "error") {
+    Object.assign(root, { border: ["left"], borderColor: theme.error, customBorderChars: BAR, paddingLeft: 1, paddingRight: 1 });
     label.content = new StyledText([bold(fg(theme.error)("! Error"))]);
     root.add(label);
   }
-  root.add(body);
+  // Text renderables do not pad their own content; tool output is indented under the target by a box.
+  if (initial.kind === "tool") {
+    const indent = new BoxRenderable(renderer, { flexDirection: "column", paddingLeft: 3, paddingRight: 1 });
+    indent.add(body);
+    root.add(indent);
+  } else root.add(body);
   let fingerprint = "";
   let searchSelected = false;
+  let focusedRow = false;
+  let flashStart: number | undefined;
+  let status = initial.toolStatus;
+  let paintLabel: (() => void) | undefined;
+  let streamText: string | undefined;
+  let caretOn: boolean | undefined;
+  const caretContent = () => {
+    const on = motion.mode !== "full" || Math.floor(motion.now() / 530) % 2 === 0;
+    caretOn = on;
+    return on && streamText ? `${streamText.trimEnd()}${STREAM_CARET}` : streamText ?? "";
+  };
+  const background = () => searchSelected ? theme.border : focusedRow ? tint(theme, theme.accent) : baseBackground;
+  /** Apply the row background, blending a decaying success flash over the tray color; returns whether it still flashes. */
+  const applyBackground = () => {
+    if (flashStart === undefined || searchSelected || focusedRow) { flashStart = searchSelected || focusedRow ? undefined : flashStart; root.backgroundColor = background(); return false; }
+    const k = progress(motion.now(), flashStart, 600);
+    root.backgroundColor = mixColor(mixColor(theme.surface2, theme.success, 0.35), theme.surface2, easeOut(k));
+    if (k < 1) return true;
+    flashStart = undefined;
+    return false;
+  };
   return {
     root,
     codeBlocks,
@@ -186,7 +251,20 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
     setSearchMatch(selected) {
       if (searchSelected === selected) return;
       searchSelected = selected;
-      root.backgroundColor = selected ? theme.border : initial.kind === "user" ? theme.surface : undefined;
+      applyBackground();
+    },
+    tick() {
+      if (initial.kind === "assistant" && streamText !== undefined && body instanceof MarkdownRenderable) {
+        const was = caretOn;
+        const next = caretContent();
+        if (caretOn !== was) body.content = next;
+        return motion.mode === "full";
+      }
+      if (initial.kind !== "tool") return false;
+      let animating = false;
+      if (status === "running" && motion.mode !== "off") { paintLabel?.(); animating = true; }
+      if (flashStart !== undefined && applyBackground()) animating = true;
+      return animating;
     },
     update(entry, expanded, streaming, width, focusedCode, focusedTool) {
       const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
@@ -194,40 +272,77 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       fingerprint = next;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
-        const suffix = ` · ${tool.state}`;
-        const focusWidth = focusedTool ? 2 : 0;
-        const name = fitLine(entry.toolName ?? "tool", Math.max(1, width - Bun.stringWidth(suffix) - 5 - focusWidth));
-        const targetWidth = width - Bun.stringWidth(name + suffix) - 5 - focusWidth;
-        const target = targetWidth > 0 && tool.target ? ` ${fitLine(tool.target, targetWidth)}` : "";
-        label.content = new StyledText([
-          fg(focusedTool ? theme.accent : theme.muted)(`${focusedTool ? "› " : ""}${expanded ? "▾" : "▸"} `),
-          fg(theme[tool.tone])(`${tool.marker} `),
-          fg(theme.text)(name),
-          fg(theme.muted)(target),
-          fg(tool.state === "done" ? theme.muted : theme[tool.tone])(suffix),
-        ]);
+        if (status === "running" && entry.toolStatus === "success" && motion.mode === "full") flashStart = motion.now();
+        status = entry.toolStatus;
+        focusedRow = !!focusedTool;
+        applyBackground();
+        // Tray row: status glyph, tool-family pill, target, non-success state, and the disclosure marker at the right edge.
+        const inner = Math.max(8, width - 2);
+        const color = toolColor(entry.toolName, theme);
+        const pillBg = tint(theme, color);
+        const focus = focusedTool ? "› " : "";
+        const kind = ` ${fitLine((entry.toolName ?? "tool").toUpperCase(), Math.max(1, Math.min(12, inner - 10)))} `;
+        const state = tool.state === "done" ? "" : tool.state === "running" ? "running…" : tool.state;
+        const fixed = Bun.stringWidth(`${focus}● ${kind}`) + 2;
+        const stateWidth = state ? Bun.stringWidth(state) + 2 : 0;
+        const targetWidth = inner - fixed - stateWidth - 1;
+        const target = targetWidth > 1 && tool.target ? ` ${fitLine(tool.target, targetWidth - 1)}` : "";
+        const gap = " ".repeat(Math.max(1, inner - fixed - Bun.stringWidth(target) - stateWidth));
+        paintLabel = () => {
+          const glyph = status === "running" ? spinnerFrame(motion.now(), motion.mode) : tool.marker;
+          label.content = new StyledText([
+            fg(theme.accent)(` ${focus}`),
+            bold(fg(theme[tool.tone])(glyph)),
+            fg(theme.text)(" "),
+            bold(bg(pillBg)(fg(color)(kind))),
+            fg(theme.text)(target),
+            ...(state ? [fg(theme.text)("  "), ...(status === "running" ? shimmer(state, motion.now(), theme.muted, theme.text, motion.mode) : [fg(theme[tool.tone])(state)])] : []),
+            fg(theme.muted)(`${gap}${expanded ? "▾" : "▸"} `),
+          ]);
+        };
+        paintLabel();
         body.visible = tool.detail.length > 0;
         root.marginBottom = tool.detail ? 1 : 0;
-        // Diffs retain explicit +/- markers; ordinary output stays neutral.
+        // Diffs keep explicit +/- markers on full-width tinted rows; ordinary output stays neutral.
         const isDiff = entry.toolName === "edit" || entry.toolName === "write";
-        body.content = linkify(tool.detail.split("\n").map((line, index) =>
-          fg(isDiff && line.startsWith("+") ? theme.success : isDiff && line.startsWith("-") ? theme.error : theme.muted)(`${index ? "\n" : ""}${line}`)));
+        const bodyWidth = Math.max(1, width - 4);
+        if (body instanceof TextRenderable) body.wrapMode = isDiff ? "char" : "word";
+        body.content = linkify(tool.detail.split("\n").flatMap((line, index) => {
+          const sign = isDiff && line.startsWith("+") ? theme.success : isDiff && line.startsWith("-") ? theme.error : undefined;
+          const prefix = index ? "\n" : "";
+          if (!sign) return [fg(theme.muted)(`${prefix}${line}`)];
+          const used = Bun.stringWidth(line);
+          const padded = line + " ".repeat(Math.max(0, Math.ceil(Math.max(1, used) / bodyWidth) * bodyWidth - used));
+          return [fg(theme.muted)(prefix), bg(tint(theme, sign))(fg(sign)(padded))];
+        }));
       } else {
         if (entry.kind === "assistant") {
           label.visible = !!entry.incomplete;
           label.content = entry.incomplete ? new StyledText([fg(theme.warning)("Incomplete response · not saved")]) : "";
         }
         const color = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
-        body.content = body instanceof MarkdownRenderable ? displayText(entry.text) : linkify([fg(color)(displayText(entry.text))]);
+        streamText = entry.kind === "assistant" && streaming && motion.mode !== "off" && (displayText(entry.text).match(/```/g)?.length ?? 0) % 2 === 0 ? displayText(entry.text) : undefined;
+        caretOn = undefined;
+        // Recovery lines such as "Ctrl+R continue · Esc keep editing" get key chips inside error blocks.
+        const errorLines = (line: string, index: number): TextChunk[] => {
+          const prefix = index ? [fg(color)("\n")] : [];
+          return entry.kind === "error" && HINT_KEY.test(line) && line.includes(" ")
+            ? [...prefix, ...keyHintChunks(line, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: theme.error })]
+            : [...prefix, fg(color)(line)];
+        };
+        body.content = body instanceof MarkdownRenderable ? streamText !== undefined ? caretContent() : displayText(entry.text) : linkify(displayText(entry.text).split("\n").flatMap(errorLines));
         if (body instanceof MarkdownRenderable) body.streaming = streaming;
         else body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
         if (entry.kind === "assistant") {
           codeBlocks().forEach(({ id }, index) => {
             const code = root.findDescendantById(id) as BoxRenderable;
-            const label = code.getChildren()[0] as TextRenderable;
-            const title = codeData.get(code)!.title;
-            label.content = `${focusedCode === index ? "› " : ""}${title}`;
-            label.fg = focusedCode === index ? theme.accent : theme.muted;
+            const header = code.getChildren()[0] as BoxRenderable;
+            const [label, , hint] = header.getChildren() as TextRenderable[];
+            const focused = focusedCode === index;
+            label!.content = codeTitle(codeData.get(code)!.title, focused, theme);
+            header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
+            hint!.content = focused ? "C copy · Esc back" : "Alt+I copy";
+            hint!.fg = focused ? theme.text : theme.muted;
           });
         }
       }

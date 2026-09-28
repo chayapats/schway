@@ -1,24 +1,28 @@
 import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
 
-/** Render an operation's event-backed phase with elapsed time and cancellation control. */
-export function activityStatus(activity: TuiActivity, compact = false, tiny = false): string {
+/** Tone of the status pill: calm when ready, filled while working, stopping, or needing attention. */
+export type StatusTone = "ready" | "active" | "stopping" | "attention";
+
+/** Uppercase footer pill for the current state; `spinning` marks labels that get the animated glyph. */
+export function statusPill(state: { readiness: string; status: string; activity?: TuiActivity }, tiny = false): { label: string; tone: StatusTone; spinning: boolean } {
+  const activity = state.activity;
+  if (state.readiness === "loading") return { label: "CHECKING", tone: "active", spinning: true };
+  if (!activity) {
+    if (state.status === "running") return { label: "WORKING", tone: "active", spinning: true };
+    if (state.status === "error") return { label: "ATTENTION", tone: "attention", spinning: false };
+    return { label: "READY", tone: "ready", spinning: false };
+  }
   const elapsed = Math.floor(activity.elapsedMs / 1000);
-  const duration = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
-  if (tiny) {
-    if (activity.phase === "stopping") return activity.cancellation === "requested" ? "◌ Cancel sent" : "◌ Stopping";
-    if (activity.phase === "retry" && activity.retry) return `◌ Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} · Esc`;
-    return `● ${{ preparing: "Prep", waiting: "Wait", streaming: "Stream", tools: `Tools ${activity.activeTools}`, retry: "Retry", compacting: "Compact" }[activity.phase]} · Esc`;
+  const duration = tiny ? "" : ` ${elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`}`;
+  if (activity.phase === "stopping") return { label: activity.cancellation === "requested" ? tiny ? "CANCEL SENT" : "CANCEL REQUESTED" : `STOPPING${duration}`, tone: "stopping", spinning: false };
+  if (activity.phase === "retry") {
+    const label = activity.retry
+      ? `RETRY ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts}${tiny ? "" : ` · ${Math.ceil(activity.retry.remainingMs / 1000)}s`}`
+      : `RETRYING${duration}`;
+    return { label, tone: "stopping", spinning: true };
   }
-  if (activity.phase === "stopping") return activity.cancellation === "requested" ? "◌ Cancel requested" : `◌ Stopping ${duration}`;
-  if (activity.phase === "retry" && activity.retry) {
-    if (compact) return `◌ Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} ${Math.ceil(activity.retry.remainingMs / 1000)}s · Esc stops`;
-    return `◌ Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} in ${Math.ceil(activity.retry.remainingMs / 1000)}s · ${duration} · Esc stops`;
-  }
-  if (activity.phase === "retry") return `◌ Retrying ${duration} · Esc stops`;
-  const phase = activity.phase === "tools" ? `Tools ${activity.activeTools}` : {
-    preparing: "Preparing", waiting: "Waiting for model", streaming: "Streaming", compacting: "Compacting",
-  }[activity.phase];
-  return `● ${compact && activity.phase === "waiting" ? "Waiting" : phase} ${duration} · Esc stops`;
+  const phase = activity.phase === "tools" ? `TOOLS ${activity.activeTools}` : { preparing: "PREPARING", waiting: "WAITING", streaming: "STREAMING", compacting: "COMPACTING" }[activity.phase];
+  return { label: `${phase}${duration}`, tone: "active", spinning: true };
 }
 
 /** Summarize current work without implying that a quiet provider or tool has stalled. */

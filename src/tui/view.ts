@@ -1,12 +1,16 @@
 import { PREFERENCE_SCOPES } from "./preferences.ts";
 import type { ExitDraftCheckpoint } from "../drafts/exit.ts";
 import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/store.ts";
-import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection } from "@opentui/core";
+import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection, type TextChunk } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
-import { activityDetail, activityStatus, displayText, fitLine } from "./presentation.ts";
-import { resolveTheme, type ThemeMode } from "./theme.ts";
+import { activityDetail, displayText, fitLine, statusPill, type StatusTone } from "./presentation.ts";
+import { keyHintChunks } from "./hints.ts";
+import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
+import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
+import { SPLASH_DURATION_MS, SPLASH_MIN_SIZE, SplashRenderable } from "./splash.ts";
+import { readGitHead } from "./git-head.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
@@ -23,11 +27,21 @@ export interface ConversationViewOptions {
   submit(value: string, accepted: () => void): Promise<unknown>;
   quit(): void;
   openUrl?(url: string): Promise<void>;
+  /** Decorative motion policy; omitted means off so renderer fixtures stay frame-stable. */
+  motion?: MotionMode;
+  /** Play the startup lightning splash when motion is full and the terminal is large enough. */
+  splash?: boolean;
+  /** Animation clock in milliseconds; defaults to performance.now. */
+  now?: () => number;
+  /** Version shown beneath the splash wordmark. */
+  version?: string;
 }
 
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
 export function createConversationView(renderer: CliRenderer, options: ConversationViewOptions) {
   const controller = options.controller;
+  const motion: MotionMode = options.motion ?? "off";
+  const now = options.now ?? (() => performance.now());
   const environmentMode = options.env.SCHWAY_THEME === "light" || options.env.SCHWAY_THEME === "dark" ? options.env.SCHWAY_THEME : undefined;
   let configuredMode = controller.appearanceMode();
   let mode: ThemeMode = configuredMode;
@@ -121,12 +135,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     catch { state.notice = "Draft cleanup failed · previous checkpoint may reappear; use Alt+D to retry"; return false; }
   }
 
-  const root = new BoxRenderable(renderer, { id: "conversation", width: "100%", height: "100%", flexDirection: "column", paddingX: 2, backgroundColor: theme.background });
+  // Zones: top bar (surface) · canvas (background) · raised composer · status bar (surface) · key hints.
+  const root = new BoxRenderable(renderer, { id: "conversation", width: "100%", height: "100%", flexDirection: "column", backgroundColor: theme.background });
   renderer.root.add(root);
-  const header = new TextRenderable(renderer, { id: "header", height: 1, flexShrink: 0, marginBottom: 1 });
-  root.add(header);
+  const topBar = new BoxRenderable(renderer, { id: "top-bar", height: 1, flexShrink: 0, flexDirection: "row", paddingX: 1, backgroundColor: theme.surface });
+  root.add(topBar);
+  const header = new TextRenderable(renderer, { id: "header", height: 1, flexGrow: 1, flexShrink: 1, wrapMode: "none" });
+  topBar.add(header);
+  const body = new BoxRenderable(renderer, { id: "body", flexDirection: "column", flexBasis: 0, flexGrow: 1, minHeight: 1, paddingX: 2, marginTop: 1 });
+  root.add(body);
   const returnContext = new TextRenderable(renderer, { id: "return-context", flexShrink: 0, fg: theme.muted, wrapMode: "word", visible: false });
-  root.add(returnContext);
+  body.add(returnContext);
   const transcript = new ScrollBoxRenderable(renderer, {
     id: "transcript", flexBasis: 0, flexGrow: 1, minHeight: 1, stickyScroll: true, stickyStart: "bottom", scrollX: false,
     contentOptions: { flexDirection: "column", paddingRight: 1 },
@@ -135,31 +154,34 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   // ScrollBar initializes automatic visibility after its constructor options.
   // Set the override afterwards so overflow never changes the text's width.
   transcript.verticalScrollBar.visible = false;
-  root.add(transcript);
+  body.add(transcript);
   const empty = new TextRenderable(renderer, { content: "Start with a task. Type / to browse commands.", fg: theme.muted, marginTop: 1 });
   transcript.add(empty);
   const tree = new ScrollBoxRenderable(renderer, { id: "branch-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
-  root.add(tree);
+  body.add(tree);
   const preferencePanel = new ScrollBoxRenderable(renderer, { id: "preferences-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
-  root.add(preferencePanel);
+  body.add(preferencePanel);
   const reviewPanel = new ScrollBoxRenderable(renderer, { id: "change-review-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   const reviewText = new TextRenderable(renderer, { id: "change-review-text", content: "", fg: theme.text, wrapMode: "word" });
   reviewPanel.add(reviewText);
-  root.add(reviewPanel);
-  const contextStatus = new TextRenderable(renderer, { id: "context-status", height: 1, flexShrink: 0, fg: theme.muted });
-  root.add(contextStatus);
-  const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted });
-  root.add(activity);
-  const picker = new BoxRenderable(renderer, { id: "picker", flexDirection: "column", flexShrink: 0, backgroundColor: theme.surface, paddingX: 1, visible: false });
-  root.add(picker);
-  const composer = new BoxRenderable(renderer, { id: "composer", flexDirection: "row", flexShrink: 0, border: ["top", "bottom"], borderColor: theme.border });
-  root.add(composer);
-  const promptMark = new TextRenderable(renderer, { content: "› ", fg: theme.accent, width: 2, flexShrink: 0 });
+  body.add(reviewPanel);
+  const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted, marginTop: 1 });
+  body.add(activity);
+  const picker = new BoxRenderable(renderer, { id: "picker", flexDirection: "column", flexShrink: 0, backgroundColor: theme.surface2, paddingX: 1, overflow: "hidden", visible: false });
+  body.add(picker);
+  // Half-block caps give the composer a raised block without spending rows on rules.
+  const composerTop = new TextRenderable(renderer, { id: "composer-top", height: 1, flexShrink: 0, fg: theme.surface, wrapMode: "none" });
+  body.add(composerTop);
+  const composer = new BoxRenderable(renderer, { id: "composer", flexDirection: "row", flexShrink: 0, backgroundColor: theme.surface });
+  body.add(composer);
+  const focusBar = new TextRenderable(renderer, { content: "▌", fg: theme.accent, width: 1, flexShrink: 0 });
+  composer.add(focusBar);
+  const promptMark = new TextRenderable(renderer, { content: " › ", fg: theme.accent, width: 3, flexShrink: 0 });
   composer.add(promptMark);
   const editor = new TextareaRenderable(renderer, {
     id: "prompt", flexGrow: 1, minHeight: 1, maxHeight: 6, wrapMode: "word",
     placeholder: "Ask Schway…", textColor: theme.text, focusedTextColor: theme.text,
-    backgroundColor: theme.background, focusedBackgroundColor: theme.background,
+    backgroundColor: theme.surface, focusedBackgroundColor: theme.surface,
     placeholderColor: theme.muted, cursorColor: theme.accent, selectionBg: theme.border,
     keyBindings: [
       { name: "return", action: "submit" }, { name: "kpenter", action: "submit" },
@@ -170,12 +192,31 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   composer.add(editor);
   const credential = new TextRenderable(renderer, { id: "credential", visible: false, fg: theme.text, flexGrow: 1, minWidth: 1 });
   composer.add(credential);
-  const footer = new TextRenderable(renderer, { id: "footer", height: 1, flexShrink: 0, fg: theme.muted });
+  const composerBottom = new TextRenderable(renderer, { id: "composer-bottom", height: 1, flexShrink: 0, fg: theme.surface, wrapMode: "none" });
+  body.add(composerBottom);
+  const footer = new TextRenderable(renderer, { id: "footer", height: 1, flexShrink: 0, fg: theme.muted, bg: theme.surface, wrapMode: "none" });
   root.add(footer);
-  const hints = new TextRenderable(renderer, { id: "hints", height: 1, flexShrink: 0, fg: theme.muted });
-  root.add(hints);
+  // Text renderables do not pad their own content, so the hint rows share a padded box with the body.
+  const hintBar = new BoxRenderable(renderer, { id: "hint-bar", flexDirection: "column", flexShrink: 0, paddingX: 2 });
+  root.add(hintBar);
+  const hints = new TextRenderable(renderer, { id: "hints", height: 1, flexShrink: 0, fg: theme.muted, wrapMode: "none" });
+  hintBar.add(hints);
   const draftStatus = new TextRenderable(renderer, { id: "draft-status", height: 1, flexShrink: 0, fg: theme.muted, visible: false });
-  root.add(draftStatus);
+  hintBar.add(draftStatus);
+
+  // Animated chrome is painted from these refresh-computed inputs on every tick.
+  let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
+  let pillFrom = theme.surface2;
+  let pillChangedAt = -Infinity;
+  let footerParts: { model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; override?: string } = { model: "", route: "", ctx: "", running: false };
+  type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean };
+  let activityPaint: ActivityPaint = { text: "", tone: "muted" };
+  let pickerOpenedAt: number | undefined;
+  let rowsAnimating = false;
+  let splash: SplashRenderable | undefined;
+  let gitHead: { root: string; at: number; value?: string } | undefined;
+  let pickerWasVisible = false;
+  let bodyPadding = 2;
 
   // Like a primary ScrollView, non-scrollable chrome routes wheel input to the
   // conversation. Preserve native handling over a scroller or multiline editor.
@@ -279,17 +320,124 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     syntax = markdownStyle(theme);
     root.backgroundColor = theme.background;
     renderer.setBackgroundColor(theme.background);
-    picker.backgroundColor = theme.surface;
-    composer.borderColor = theme.border;
+    picker.backgroundColor = theme.surface2;
+    topBar.backgroundColor = composer.backgroundColor = footer.bg = theme.surface;
+    composerTop.fg = composerBottom.fg = theme.surface;
     editor.textColor = editor.focusedTextColor = theme.text;
-    editor.backgroundColor = editor.focusedBackgroundColor = theme.background;
+    editor.backgroundColor = editor.focusedBackgroundColor = theme.surface;
     editor.placeholderColor = theme.muted;
-    editor.cursorColor = promptMark.fg = theme.accent;
+    editor.cursorColor = promptMark.fg = focusBar.fg = theme.accent;
     editor.selectionBg = theme.border;
     credential.fg = reviewText.fg = theme.text;
     hints.fg = footer.fg = empty.fg = theme.muted;
+    pillFrom = pillColors(pill.tone).bg;
+    pillChangedAt = -Infinity;
     panelFingerprint = "";
     refresh();
+  }
+
+  function pillColors(tone: StatusTone): { bg: string; fg: string } {
+    if (tone === "active") return { bg: theme.accent, fg: theme.onFill };
+    if (tone === "stopping") return { bg: theme.warning, fg: theme.onFill };
+    if (tone === "attention") return { bg: theme.error, fg: theme.onFill };
+    return { bg: tint(theme, theme.success, theme.surface), fg: theme.success };
+  }
+
+  const chunkWidth = (chunks: readonly TextChunk[]) => chunks.reduce((sum, chunk) => sum + Bun.stringWidth(chunk.text), 0);
+  const hintColors = (base: string) => ({ key: theme.text, chip: mixColor(base, theme.border, 0.9), action: theme.muted });
+
+  /** Key-chip hints that fit `columns`, dropping trailing hints before clipping text. */
+  function fittedHints(text: string, columns: number, base = theme.background): StyledText {
+    const segments = text.split(" · ");
+    while (segments.length > 1 && chunkWidth(keyHintChunks(segments.join(" · "), hintColors(base))) > columns) segments.pop();
+    const chunks = keyHintChunks(segments.join(" · "), hintColors(base));
+    return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
+  }
+
+  /** Status bar: the state pill is the loudest block; model chips follow and the context meter sits at the right. */
+  function paintFooter(at: number) {
+    const columns = Math.max(1, renderer.width);
+    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(` ${fitLine(footerParts.override, columns - 2)}`)]); return; }
+    const colors = pillColors(pill.tone);
+    const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
+    const fill = mixColor(pillFrom, colors.bg, fade);
+    const glyph = pill.spinning ? spinnerFrame(at, motion) : pill.tone === "stopping" ? "◌" : pill.tone === "attention" ? "!" : "●";
+    const label = ` ${glyph} ${pill.label} `;
+    const sweep = ((at / 30) % (label.length + 16)) - 8;
+    const pillChunks = [...label].map((char, index) => bold(bg(pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill)(fg(colors.fg)(char))));
+    const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
+    const thinking = footerParts.thinking ? [bg(tint(theme, theme.violet, theme.surface))(fg(theme.violet)(` ${footerParts.thinking} `))] : [];
+    const route = footerParts.route ? [fg(theme.muted)(` ${footerParts.route}`)] : [];
+    const cells = columns < 70 ? 5 : 10;
+    const filled = footerParts.ctxPercent === undefined ? 0 : Math.max(footerParts.ctxPercent > 0 ? 1 : 0, Math.round(footerParts.ctxPercent / 100 * cells));
+    const meterColor = (footerParts.ctxPercent ?? 0) < 60 ? theme.accent : (footerParts.ctxPercent ?? 0) < 85 ? theme.warning : theme.error;
+    const ctx = footerParts.ctxPercent === undefined
+      ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
+      : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
+    const esc = footerParts.running ? keyHintChunks("Esc stops", hintColors(theme.surface)) : [];
+    const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
+    // Narrow priority: pill, Esc stops and context stay; route then reasoning drop, then the model name is clipped.
+    const include = { route: true, thinking: thinking.length > 0, ctx: true };
+    const build = (modelChunks = model) => ({
+      left: [...pillChunks, fg(theme.muted)(" "), ...modelChunks, ...(include.thinking ? [fg(theme.muted)(" "), ...thinking] : []), ...(include.route ? route : [])],
+      right: [...esc, ...(esc.length && include.ctx ? gapChunk(2) : []), ...(include.ctx ? ctx : [])],
+    });
+    let { left, right } = build();
+    const fits = () => chunkWidth(left) + chunkWidth(right) + 3 <= columns;
+    for (const key of ["route", "thinking"] as const) {
+      if (fits()) break;
+      include[key] = false;
+      ({ left, right } = build());
+    }
+    for (const withContext of [true, false]) {
+      if (fits()) break;
+      include.ctx = withContext;
+      const room = columns - chunkWidth(pillChunks) - chunkWidth(build([]).right) - 6;
+      ({ left, right } = build(room > 3 ? [bg(theme.surface2)(fg(theme.text)(` ${fitLine(footerParts.model, room - 2)} `))] : []));
+    }
+    if (!fits()) { left = pillChunks; right = chunkWidth(pillChunks) + chunkWidth(esc) + 3 <= columns ? esc : []; }
+    footer.content = new StyledText([fg(theme.muted)(" "), ...left, ...gapChunk(columns - chunkWidth(left) - chunkWidth(right) - 2), ...right]);
+  }
+
+  /** Activity row above the composer: animated glyph, shimmering phase text, or a colored outcome with key chips. */
+  function paintActivity(at: number) {
+    const width = Math.max(1, renderer.width - 2 * bodyPadding);
+    const paint = activityPaint;
+    const color = theme[paint.tone === "muted" ? "muted" : paint.tone];
+    const glyph = paint.spin ? spinnerFrame(at, motion) : paint.glyph;
+    const lead = glyph ? [bold(fg(color)(glyph)), fg(theme.muted)(" ")] : [];
+    const text = fitLine(paint.text, width - (glyph ? 2 : 0));
+    const chunks = paint.spin ? shimmer(text, at, theme.muted, theme.text, motion)
+      : paint.chips ? keyHintChunks(text, hintColors(theme.background)) : [fg(paint.tone === "muted" ? theme.muted : color)(text)];
+    activity.content = new StyledText([...lead, ...(chunkWidth(chunks) + (glyph ? 2 : 0) <= width ? chunks : [fg(color)(text)])]);
+  }
+
+  /** Advance decorative motion without recomputing the transcript model. */
+  function animate() {
+    if (destroyed) return;
+    const at = now();
+    if (splash && (splash.elapsed() >= SPLASH_DURATION_MS || renderer.width < SPLASH_MIN_SIZE.width || renderer.height < SPLASH_MIN_SIZE.height)) endSplash();
+    paintFooter(at);
+    paintActivity(at);
+    rowsAnimating = false;
+    for (const row of rows.values()) if (row.tick()) rowsAnimating = true;
+    if (pickerOpenedAt !== undefined) {
+      const natural = picker.getChildren().length;
+      const k = easeOut(progress(at, pickerOpenedAt, 150));
+      if (k >= 1) { picker.height = "auto"; pickerOpenedAt = undefined; }
+      else picker.height = Math.max(1, Math.round(natural * k));
+    }
+    renderer.requestRender();
+  }
+
+  const ticker = createTicker(animate, () => !destroyed && motion !== "off" && (!!splash || pill.spinning || rowsAnimating || pickerOpenedAt !== undefined || now() - pillChangedAt < 200));
+
+  function endSplash() {
+    if (!splash) return;
+    splash.destroyRecursively();
+    splash = undefined;
+    editor.showCursor = true;
+    renderer.dropLive();
   }
 
   function refresh() {
@@ -307,13 +455,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const entries = snapshot.readiness !== "ready" && snapshot.transcript.length === 1 && !snapshot.recovery?.accepted && snapshot.transcript[0]?.id === snapshot.recovery?.entryId ? [] : snapshot.transcript;
       paintedCancellationId = snapshot.activity?.cancellation === "requested" ? snapshot.activity.operationId : undefined;
       const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
-      root.paddingX = renderer.width < 60 ? 1 : 2;
-      header.visible = activity.visible = renderer.height >= 10;
-      contextStatus.visible = renderer.height >= 12;
+      bodyPadding = renderer.width < 60 ? 1 : 2;
+      body.paddingX = hintBar.paddingX = bodyPadding;
+      composerTop.content = "▄".repeat(width);
+      composerBottom.content = "▀".repeat(width);
+      topBar.visible = activity.visible = renderer.height >= 10;
       const context = snapshot.context;
-      contextStatus.content = fitLine(`Context ~${context.estimatedTokens} tokens conversation+summary · cap ${context.capacity ?? "unknown"} · excludes prompt/tools · /context${context.summaryId ? " · active summary" : ""}`, width);
       hints.visible = renderer.height >= 14 || !!snapshot.branchTree;
-      header.marginBottom = renderer.height < 20 ? 0 : 1;
+      body.marginTop = topBar.visible && renderer.height >= 20 ? 1 : 0;
+      activity.marginTop = renderer.height >= 20 ? 1 : 0;
       const key = `${snapshot.sessionId}/${snapshot.branchId}`;
       const sessionChanged = !!activeSessionId && activeSessionId !== snapshot.sessionId;
       let recoveredText: string | undefined;
@@ -390,18 +540,28 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : "Ask Schway…";
+      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       let path = workspace?.root ?? options.workspaceRoot;
       if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
-      header.content = new StyledText([bold(fg(theme.accent)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), width - 8)}`)]);
-      const status = snapshot.readiness === "loading" ? "Checking connection" : snapshot.activity ? activityStatus(snapshot.activity, width < 60, width < 32) : snapshot.status === "running" ? "● Working · Esc stops" : snapshot.status === "error" ? "! Needs attention" : "Ready";
-      const model = safe(`${snapshot.activeRoute ? `${snapshot.activeRoute} · ` : ""}${snapshot.provider}/${snapshot.modelId}${snapshot.thinking ? ` · reasoning ${snapshot.thinking}` : ""}${snapshot.profile ? ` · ${snapshot.profile}` : ""}`);
-      const statusWidth = Bun.stringWidth(status);
-      footer.content = new StyledText([
-        fg(theme.muted)(`${fitLine(model, Math.max(0, width - statusWidth - 3))}${width > statusWidth + 3 ? "   " : ""}`),
-        fg(snapshot.activity?.phase === "stopping" ? theme.warning : snapshot.status === "error" ? theme.error : snapshot.status === "running" ? theme.accent : theme.muted)(fitLine(status, width)),
+      const headRoot = workspace?.root ?? options.workspaceRoot;
+      if (!gitHead || gitHead.root !== headRoot || Date.now() - gitHead.at > 2000) gitHead = { root: headRoot, at: Date.now(), value: readGitHead(headRoot) };
+      const branchLabel = gitHead.value ? safe(gitHead.value) : "";
+      const pathRoom = Math.max(4, renderer.width - 14 - (branchLabel ? Bun.stringWidth(branchLabel) + 4 : 0));
+      header.content = new StyledText([
+        bold(fg(theme.bolt)("⚡")), fg(theme.text)(" "), bold(fg(theme.text)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), pathRoom)}`),
+        ...(branchLabel && renderer.width >= 40 ? [fg(theme.muted)(" on "), fg(theme.violet)(fitLine(branchLabel, 24))] : []),
       ]);
+      const nextPill = statusPill(snapshot, width < 32);
+      if (nextPill.tone !== pill.tone) { pillFrom = pillColors(pill.tone).bg; pillChangedAt = now(); }
+      pill = nextPill;
+      const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
+      footerParts = {
+        model: safe(`${snapshot.provider}/${snapshot.modelId}`), thinking: snapshot.thinking ? safe(snapshot.thinking) : undefined,
+        route: safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`),
+        ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
+        running: !!snapshot.activity || snapshot.status === "running",
+      };
       const tail = entries.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
@@ -428,7 +588,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : snapshot.readiness === "choose-model" ? "Choose an available model · Alt+M"
         : snapshot.recovery?.category === "credential-store" ? "Repair connection: unlock OS credential storage · Ctrl+R retry"
         : "Repair connection: choose model/settings · Alt+M";
-      empty.content = safe(`${path}\n${snapshot.provider}/${snapshot.modelId} · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n${snapshot.readinessDetail ? `${snapshot.readinessDetail}\n` : ""}${action}${snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? "\nCtrl+I failure details · Your task stays in the editor" : ""}`);
+      // The top bar already names the workspace; repeat it only when that bar is hidden.
+      empty.content = new StyledText([
+        ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
+        bold(fg(theme.text)(safe(`${snapshot.provider}/${snapshot.modelId}`))),
+        fg(theme.muted)(safe(` · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n`)),
+        ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(`${safe(snapshot.readinessDetail)}\n`)] : []),
+        ...keyHintChunks(safe(action), hintColors(theme.background)),
+        ...(snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I failure details · Your task stays in the editor", hintColors(theme.background))] : []),
+      ]);
       const ids = new Set(entries.map(entry => entry.id));
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
       for (const entry of entries) {
@@ -437,7 +605,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           row = createTranscriptItem(renderer, entry, theme, syntax, () => {
             if (expandedTools.has(entry.id)) expandedTools.delete(entry.id); else expandedTools.add(entry.id);
             refresh();
-          });
+          }, { now, mode: motion });
           rows.set(entry.id, row);
           transcript.add(row.root);
         }
@@ -469,12 +637,21 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const searchStatus = !editor.plainText ? "Find in active branch · type a literal query" : searchResult.matches.length
         ? `Find ${searchSelected + 1}/${searchResult.matches.length}${searchResult.limited ? "+ (limited)" : ""} · active branch, displayed text`
         : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
-      if (searchOpen && !activity.visible) footer.content = fitLine(searchStatus, width);
+      footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
       const counts = completed?.commandCounts;
       const outcomeText = completed ? width < 65 ? `Turn ${completed.reason} · Alt+R review · ${counts!.nonzero} nonzero exits` : `Turn ${completed.reason} · commands: ${counts!.exitZero} exit 0 / ${counts!.nonzero} nonzero / ${counts!.unknown} unknown · Alt+R review` : "";
-      activity.content = fitLine(snapshot.activity?.phase === "stopping" ? activityDetail(snapshot.activity) : searchOpen ? searchStatus : Date.now() < interactionNoticeUntil ? interactionNotice : unseen ? "↓ New activity · Ctrl+End to return to latest" : snapshot.branchTreeError ? safe(snapshot.branchTreeError) : snapshot.activity ? activityDetail(snapshot.activity) : snapshot.status === "running" ? "Working on your request…" : snapshot.compactionNotice ?? outcomeText, width);
-      activity.fg = snapshot.activity?.phase === "stopping" ? theme.warning : searchOpen ? theme.accent : unseen ? theme.accent : snapshot.branchTreeError ? theme.error : theme.muted;
+      const outcomeGlyph = completed ? { completed: "✓", failed: "!", cancelled: "−", limit: "◌" }[completed.reason as string] ?? "●" : undefined;
+      const outcomeTone = completed ? ({ completed: "success", failed: "error" } as const)[completed.reason as "completed" | "failed"] ?? "warning" : "muted";
+      activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
+        : searchOpen ? { text: searchStatus, tone: "accent", glyph: "⌕" }
+        : Date.now() < interactionNoticeUntil ? { text: interactionNotice, tone: "muted" }
+        : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
+        : snapshot.branchTreeError ? { text: safe(snapshot.branchTreeError), tone: "error", glyph: "!" }
+        : snapshot.activity ? { text: activityDetail(snapshot.activity), tone: "accent", spin: true }
+        : snapshot.status === "running" ? { text: "Working on your request…", tone: "accent", spin: true }
+        : snapshot.compactionNotice ? { text: snapshot.compactionNotice, tone: "muted" }
+        : outcomeText ? { text: outcomeText, tone: outcomeTone, glyph: outcomeGlyph, chips: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
       const browsing = panelMode === "help" || (!panelMode && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery);
@@ -492,7 +669,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : 2;
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
       const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
-      const chromeRows = (header.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 : 0) + (contextStatus.visible ? 1 : 0) + (hints.visible ? 1 : 0) + 3;
+      const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
@@ -582,6 +759,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             textRow(picker, fitLine(`${start + offset === completionIndex ? "›" : " "} ${entry.available ? "" : "! "}[${entry.source.startsWith("extension ") ? "extension" : entry.source}] /${entry.name} ${entry.description}`, width - 2), start + offset === completionIndex ? theme.accent : theme.muted);
           });
         }
+        // Selected choices become a tinted row so the highlight reads as a block, not only a marker.
+        for (const child of picker.getChildren()) {
+          if (child instanceof TextRenderable && child.plainText.startsWith("› ")) { child.bg = tint(theme, theme.accent); child.fg = theme.text; }
+        }
         if (snapshot.branchTree) {
           clear(tree);
           const branches = snapshot.branchTree;
@@ -624,7 +805,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.content = fitLine(panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
+      hints.content = fittedHints(panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
+      if (!picker.visible) pickerOpenedAt = undefined;
+      else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
+      pickerWasVisible = picker.visible;
+      if (pickerOpenedAt === undefined) picker.height = "auto";
+      const focusColor = pill.tone === "stopping" ? theme.warning : pill.tone === "attention" ? theme.error : theme.accent;
+      focusBar.fg = focusColor;
+      animate();
+      ticker.ensure();
     } finally { refreshing = false; }
   }
 
@@ -741,6 +930,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function onKey(key: KeyEvent) {
+    // Any key skips the splash and still reaches the editor or the active panel.
+    if (splash) { endSplash(); refresh(); }
     if (draftFrozen) { key.preventDefault(); key.stopPropagation(); return; }
     if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().credentialEntry || controller.snapshot().loginCallbackEntry) return;
     const name = key.name.toLowerCase();
@@ -993,6 +1184,16 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   renderer.setBackgroundColor(theme.background);
   editor.focus();
   const activityTimer = setInterval(() => { if (!destroyed && controller.snapshot().activity) refresh(); }, 250);
+  const onPaste = () => { if (splash) { endSplash(); refresh(); } };
+  renderer.keyInput.on("paste", onPaste);
+  if (options.splash && motion === "full" && renderer.width >= SPLASH_MIN_SIZE.width && renderer.height >= SPLASH_MIN_SIZE.height) {
+    splash = new SplashRenderable(renderer, { now, theme: () => theme, version: options.version, seed: (Math.random() * 2 ** 32) >>> 0 });
+    splash.onMouseDown = () => { endSplash(); refresh(); };
+    renderer.root.add(splash);
+    // The editor keeps focus so early typing lands in the draft; only its cursor is hidden under the overlay.
+    editor.showCursor = false;
+    renderer.requestLive();
+  }
   refresh();
   return {
     refresh,
@@ -1019,8 +1220,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     },
     destroy() {
       if (destroyed) return;
+      endSplash();
       destroyed = true;
+      ticker.stop();
       clearInterval(activityTimer);
+      renderer.keyInput.off("paste", onPaste);
       for (const state of durableDrafts.values()) clearTimeout(state.timer);
       unbindCredential();
       renderer.keyInput.off("keypress", onKey);
