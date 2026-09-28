@@ -483,7 +483,7 @@ export async function discoverSessions(directory: string, offset = 0): Promise<S
       try {
         const metadata: unknown = JSON.parse(await readWindow(join(directory, `${name}.meta`), 2048));
         if (!isPlainObject(metadata)) throw new Error("Invalid discovery metadata");
-        if (typeof metadata.activityAt === "string" && Number.isFinite(Date.parse(metadata.activityAt))) { row.activityAt = metadata.activityAt; row.hasWork = true; }
+        if (typeof metadata.activityAt === "string" && Number.isFinite(Date.parse(metadata.activityAt))) row.activityAt = metadata.activityAt;
         if (typeof metadata.title === "string") row.title = safeTaskText(metadata.title) || row.title;
       } catch { /* Older histories do not have a discovery cache. */ }
       if (Buffer.byteLength(text) >= 65536) {

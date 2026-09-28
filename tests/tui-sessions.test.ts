@@ -272,3 +272,32 @@ test("cancel during disk resume fences late publication and typed discovery quer
     expect(f.calls()).toBe(0); f.controller.dispose();
   });
 });
+
+test("recent-work controller and renderer keep assistant-only activity metadata unverified", async () => {
+  await withTempDir(async home => {
+    const f = await fixture(home);
+    const saved = await createJsonlSession({ directory: f.directory, workspace: f.workspace });
+    saved.append({ type: "assistant", id: "large-assistant", content: [{ type: "text", text: "x".repeat(70000) }] });
+    const metadata = JSON.parse(await readFile(join(f.directory, `${saved.header.id}.jsonl.meta`), "utf8"));
+    expect(metadata.activityAt).toBeString();
+    await f.controller.offerRecentSession(f.directory);
+    expect(f.controller.snapshot().recentSession).toMatchObject({ id: saved.header.id, activityAt: metadata.activityAt,
+      previewIncomplete: true, title: "Recent history (preview unavailable)" });
+    expect(f.controller.snapshot().recentSession?.hasWork).toBeUndefined();
+    const terminal = await createTestRenderer({ width: 100, height: 24, kittyKeyboard: true });
+    const view = createConversationView(terminal.renderer, { controller: f.controller, home, workspaceRoot: home, env: {}, secrets: [], quit() {},
+      submit: (value, accepted) => dispatchEditorInput(value, f.controller, command => handleSlashCommand(command.name, command.args, f.ctx), accepted) });
+    try {
+      view.refresh(); await terminal.flush();
+      expect(terminal.captureCharFrame()).toContain("Recent history (preview unavailable)");
+      expect(terminal.captureCharFrame()).toContain("Preview incomplete · resume validates history");
+      expect(f.calls()).toBe(0);
+      await Bun.sleep(3);
+      const meaningful = await createJsonlSession({ directory: f.directory, workspace: f.workspace });
+      meaningful.append(user("Complete user record"));
+      meaningful.append({ type: "assistant", id: "large-answer", content: [{ type: "text", text: "x".repeat(70000) }] });
+      await f.controller.offerRecentSession(f.directory);
+      expect(f.controller.snapshot().recentSession).toMatchObject({ id: meaningful.header.id, hasWork: true, title: "Complete user record" });
+    } finally { view.destroy(); f.controller.dispose(); terminal.renderer.destroy(); }
+  });
+});
