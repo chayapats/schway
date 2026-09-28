@@ -206,6 +206,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function refreshDiscovery() {
+    // Explicit dispatch already refreshes metadata; its own repaint must not supersede it.
+    if (pendingAcceptance) return;
     void controller.refreshCommands().then(() => { if (!destroyed) refresh(); }, () => {});
   }
 

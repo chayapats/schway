@@ -1530,10 +1530,11 @@ export class TuiController {
 
   /** Revalidate command collisions immediately before explicit dispatch. */
   async commandCollision(name: string): Promise<boolean> {
+    const generation = ++this.commandDiscoveryGeneration;
     const workspace = this.workspace;
     const session = this.session;
     const skills = workspace ? await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true }) : undefined;
-    if (this.disposed || workspace !== this.workspace || session !== this.session) { this.notice("Command availability changed. Retry the retained command."); return true; }
+    if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) { this.notice("Command availability changed. Retry the retained command."); return true; }
     this.discoveredCommands = skills;
     const choices = commandCatalog(this.extensionCommands(), skills).filter(entry => entry.name === name);
     if (choices.some(entry => !entry.available)) { this.notice(`/${name} conflicts with skill or command sources: ${choices.map(entry => entry.source).join(", ")}. Rename the skill or extension; use /help to inspect sources.`); return true; }

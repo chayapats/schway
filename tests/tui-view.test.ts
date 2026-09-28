@@ -938,8 +938,11 @@ async function preferenceFixture(root: string, extra: Partial<TuiControllerOptio
 
 async function preferenceEnter(ui: Awaited<ReturnType<typeof preferenceFixture>>) {
   ui.mockInput.pressEnter();
-  await ui.waitFor(() => !ui.controller.running);
-  await settle(ui);
+  // Renderer-idle passes do not wait for filesystem fsync/rename or model staging.
+  await ui.controller.waitForIdle();
+  expect(ui.controller.running).toBe(false);
+  ui.view.refresh();
+  await ui.flush();
 }
 
 test("preferences real keyboard scopes preview save reset and restart preserve the pending draft", async () => {
