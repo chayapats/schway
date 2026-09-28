@@ -650,13 +650,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (!segment) { transcript.scrollChildIntoView(`message-${match.id}`); return; }
     const target = segment.target;
     let visualLine = segment.visualLine;
-    if (target instanceof TextBufferRenderable) {
+    const info = target instanceof TextBufferRenderable ? target.lineInfo : segment.lineInfo;
+    if (info) {
       const before = segment.text.normalize("NFC").slice(0, match.offset);
       const logicalLine = before.split("\n").length - 1;
       const column = Bun.stringWidth(before.slice(before.lastIndexOf("\n") + 1));
-      const info = target.lineInfo;
       for (let index = 0; index < info.lineSources.length; index++) {
-        if (info.lineSources[index] === logicalLine && info.lineStartCols[index]! <= column) visualLine = index;
+        if (info.lineSources[index] === logicalLine && info.lineStartCols[index]! <= column) visualLine = segment.visualLine + index;
       }
     }
     const targetTop = transcript.scrollTop + target.y - transcript.viewport.y;

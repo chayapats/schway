@@ -220,6 +220,21 @@ test("a match in a late row of a tall Markdown table lands on that row", async (
   expect(ui.submits()).toBe(0);
 });
 
+test("a match deep in one wrapped table cell lands on its visual line after immediate Enter", async () => {
+  const table = [
+    "| Item | Detail |", "| --- | --- |", "| first | short |",
+    `| target | ${"filler ".repeat(430)} deep-cell-hit ${"tail ".repeat(80)} |`,
+    "| last | short |",
+  ].join("\n");
+  const ui = await setup(createSession([user("u", "show table"), assistant("a", table)]), 44, 18);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("deep-cell-hit");
+  ui.mockInput.pressEnter();
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("deep-cell-hit");
+  expect(ui.submits()).toBe(0);
+});
+
 test("Unicode wraps logically, empty/no-match states stay usable, and live row changes preserve selection", async () => {
   const ui = await setup(createSession([user("u", "ข้อความภาษาไทย e\u0301 match"), assistant("a", "ไทย e\u0301 match")]), 44, 18);
   ui.mockInput.pressKey("f", { ctrl: true });
