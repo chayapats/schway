@@ -31,10 +31,12 @@ export interface JsonlSession extends Session {
   readonly header: SessionHeader;
 }
 
-/** Create a directory and UUID-named JSONL session with the supplied workspace header, rejecting on filesystem failure. */
+/** Create a workspace-bound session, optionally deferring its JSONL header until the first durable mutation. */
 export async function createJsonlSession(options: {
   directory: string;
   workspace: Workspace;
+  /** Keep an untouched interactive conversation in memory until its first durable mutation. */
+  deferred?: boolean;
 }): Promise<JsonlSession> {
   const header: SessionHeader = {
     type: "session",
@@ -47,8 +49,8 @@ export async function createJsonlSession(options: {
   };
   await mkdir(options.directory, { recursive: true });
   const path = sessionFilePath(options.directory, header.id);
-  await writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
-  return openPersisted(path, header, emptyBranchState(header.id), header.extraRoots, header.version);
+  if (!options.deferred) await writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
+  return openPersisted(path, header, emptyBranchState(header.id), header.extraRoots, header.version, options.deferred);
 }
 
 /** Join the supplied home directory with `.schway/sessions` without accessing the filesystem. */
@@ -173,7 +175,7 @@ function sessionFilePath(directory: string, id: string): string {
 }
 
 /** Bind atomic branch operations and separate workspace metadata to append-only version upgrades. */
-function openPersisted(path: string, header: SessionHeader, state: BranchState, extraRoots: readonly string[], version: number): JsonlSession {
+function openPersisted(path: string, header: SessionHeader, state: BranchState, extraRoots: readonly string[], version: number, deferred = false): JsonlSession {
   let failed = false;
   let discovery: { activityAt?: string; title?: string } = {};
   try {
@@ -191,7 +193,10 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
   /** Fence this handle after uncertain I/O so retries cannot append behind a partial durable write. */
   const write = (text: string): void => {
     if (failed) throw new Error("Session storage previously failed; reload the session before writing again");
-    try { appendFileSync(path, text, "utf8"); } catch (error) { failed = true; throw error; }
+    try {
+      if (deferred) { writeFileSync(path, `${JSON.stringify(header)}\n${text}`, { encoding: "utf8", flag: "wx", mode: 0o600 }); deferred = false; }
+      else appendFileSync(path, text, "utf8");
+    } catch (error) { failed = true; throw error; }
   };
   const session = createSession([], extraRoots, {
     state,
@@ -452,6 +457,8 @@ async function replaceFile(path: string, text: string): Promise<void> {
 /** Bounded, read-only discovery row; unknown activity is never inferred from filesystem modification time. */
 export interface SessionDiscovery extends SessionSummary {
   title: string;
+  /** Whether bounded inspection found saved conversation work, independent of its redacted title. */
+  hasWork?: boolean;
   activityAt?: string;
   state: string;
 }
@@ -474,13 +481,26 @@ export async function discoverSessions(directory: string, offset = 0): Promise<S
       try {
         const metadata: unknown = JSON.parse(await readWindow(join(directory, `${name}.meta`), 2048));
         if (!isPlainObject(metadata)) throw new Error("Invalid discovery metadata");
-        if (typeof metadata.activityAt === "string" && Number.isFinite(Date.parse(metadata.activityAt))) row.activityAt = metadata.activityAt;
+        if (typeof metadata.activityAt === "string" && Number.isFinite(Date.parse(metadata.activityAt))) { row.activityAt = metadata.activityAt; row.hasWork = true; }
         if (typeof metadata.title === "string") row.title = safeTaskText(metadata.title) || row.title;
       } catch { /* Older histories do not have a discovery cache. */ }
-      if (Buffer.byteLength(text) >= 65536) row.state = "Partial preview · large history validated only on resume";
+      if (Buffer.byteLength(text) >= 65536) {
+        row.state = "Partial preview · large history validated only on resume";
+        for (const line of text.split("\n").slice(1, -1)) {
+          try {
+            const record = JSON.parse(line);
+            const items = record.type === "branch_append" ? record.entries.map((entry: SessionEntry) => entry.item) : [record];
+            for (const item of items) if (item.type === "user" && Array.isArray(item.content) && item.content.every(isUserContent)) {
+              row.hasWork = true;
+              row.title = taskTitle(item) || row.title;
+            }
+          } catch { /* The bounded preview is advisory; only explicit resume validates the file. */ }
+        }
+      }
       else {
         const loaded = loadRecords(text);
         const items = branchAncestry(loaded.state, loaded.state.branches.get(loaded.state.activeBranchId)!.headId).map(entry => entry.item);
+        row.hasWork = items.some(item => item.type === "user");
         row.title = items.map(taskTitle).filter(Boolean).at(-1) || row.title;
         const times = text.split("\n").flatMap(line => {
           try { const value = JSON.parse(line); return value.type === "branch_append" && typeof value.committedAt === "string" && Number.isFinite(Date.parse(value.committedAt)) ? [value.committedAt as string] : []; } catch { return []; }

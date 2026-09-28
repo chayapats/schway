@@ -59,6 +59,41 @@ failure and fence late results after cancellation/disposal. These fixtures do no
 verify a human terminal, real OS secure storage, live OAuth or a paid provider;
 those checks remain unrun for the final installed-journey gate.
 
+## Returning to recent work
+
+Ordinary launch opens a new conversation. When this workspace has saved work,
+**Alt+B resume** appears above the conversation with its task preview. One press
+restores that exact session; typing and Enter continue to create new work. The offer
+is not a modal choice and never starts a model turn. **Alt+S** or `/sessions` opens
+all saved history, including entries that need recovery. Suggestions use committed
+activity in the canonical current workspace and ignore empty navigation sessions.
+Discovery runs after startup with bounded per-file previews; large collections can
+take longer to produce the offer.
+
+Explicit `--resume <id> --branch <id>` takes precedence and suppresses the offer.
+After a restore, a compact summary identifies the workspace, conversation branch,
+and current connection/model before sending. `/session` and `/config` show full
+identity and setting provenance when the terminal is too narrow. Current explicit
+config/CLI values and workspace interactive memory determine the connection; saved
+conversation history never restores an old billing route. Missing access retains
+its selected route and can be repaired with **Alt+L** or **Alt+M**.
+
+If the suggested file disappears or becomes unreadable, the current conversation
+and task text stay available. Use `/sessions` for recoverable history or send new
+work; Schway does not silently substitute another session. Opening/dismissing
+navigation or leaving an untouched new conversation creates no JSONL file. The
+first durable conversation mutation persists its header and records together.
+Drafts kept while switching conversations remain associated with their original
+session; returning to new work does not paste an older session's draft into it.
+
+`tests/recent-startup.test.ts` exercises actual interactive startup in isolated
+subprocesses with renderer keyboard, paste and resize: new/reopen, one-action
+resume, explicit branch/auth/model, changed config over remembered billing,
+credential repair, deleted/corrupt suggestions, and repeated navigation. Existing
+interactive-memory tests cover missing profiles. These are deterministic model and
+credential fixtures; live OAuth, real provider and human-terminal verification
+remain unrun. Durable cross-process draft recovery is a separate slice.
+
 ## Turn outcomes and change review
 
 After an accepted turn settles, the activity line reports **completed**, **failed**,
