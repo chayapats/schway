@@ -752,7 +752,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const routeDetail = selected?.connect ? "ChatGPT subscription · connect to discover models"
             : selected?.authRoute === "codex" ? `ChatGPT subscription · ${selected.verifiedCatalog ? "account catalog" : "catalog pending"}`
               : `${selected?.authRoute === "api-key" ? "OpenAI API key" : selected?.access ?? "Provider"} · ${selected?.access === "Login required" ? "connect needed" : selected?.access === "No key required" ? "no key required" : "configured, unverified"}`;
-          const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString()} context · ${selected.maxOutput.toLocaleString()} output`}` : "No matches. Try provider/model-id.";
+          const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`}` : "No matches. Try provider/model-id.";
           textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
         } else if (browsing) {
           const start = Math.max(0, completionIndex - maxRows + 1);
