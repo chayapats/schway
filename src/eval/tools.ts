@@ -1,18 +1,20 @@
 import { lstat } from "node:fs/promises";
 import { Type } from "@sinclair/typebox";
 import type { EvalCase } from "./cases.ts";
-import { join } from "node:path";
+import { dirname } from "node:path";
 import { bashTool } from "../tools/bash.ts";
 import { editTool } from "../tools/edit.ts";
-import { resolveToolPath } from "../tools/path.ts";
+import { DEFAULT_LS_DEPTH, MAX_LS_CHARS, lsTool, type LsDetails } from "../tools/ls.ts";
+import { displayToolPath, resolveToolPath } from "../tools/path.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 
-/** Expose only seeded case files and the selected verification command through real core tools. */
+/** Expose seeded-file discovery, restricted file operations, and the selected verification command. */
 export function createEvalTools(project: string, selected?: EvalCase): ToolRegistry {
-  const allowed = new Set((selected ? Object.keys(selected.seed) : ["src/math.ts", "test/math.test.ts"]).map(path => join(project, path)));
-  const writable = new Set((selected?.writable ?? ["src/math.ts"]).map(path => join(project, path)));
+  const root = resolveToolPath(project, ".");
+  const allowed = new Set((selected ? Object.keys(selected.seed) : ["src/math.ts", "test/math.test.ts"]).map(path => resolveToolPath(root, path)));
+  const writable = new Set((selected?.writable ?? ["src/math.ts"]).map(path => resolveToolPath(root, path)));
   const command = selected?.verifyCommand ?? (selected ? undefined : "bun test test/math.test.ts");
   const bashRestriction = command
     ? `Eval bash permits only the exact command ${JSON.stringify(command)}. Omit cwd; timeout is optional and must be an integer from 1 to 5000 ms (default 5000 ms).`
@@ -37,6 +39,39 @@ export function createEvalTools(project: string, selected?: EvalCase): ToolRegis
     await verifyPath(input.path, true);
     return writeTool.execute(input, ctx);
   } };
+  const directories = new Set([root]);
+  for (const file of allowed) {
+    for (let directory = dirname(file); directory !== root && directory !== dirname(directory); directory = dirname(directory)) directories.add(directory);
+  }
+  const entries = [...allowed, ...directories].filter(path => path !== root).sort((a, b) => a.localeCompare(b));
+  const restrictedLs: typeof lsTool = { ...lsTool,
+    description: "List only selected seeded case files and their parent directories; other filesystem entries are hidden. Relative paths resolve from the workspace root. Omit path to list the root; depth defaults to 1.",
+    async execute(input, ctx) {
+      const path = input.path ?? ".";
+      const resolvedPath = resolveToolPath(root, path);
+      if (!directories.has(resolvedPath)) throw new Error("Eval listing path is outside the allowed case directories");
+      const depth = input.depth ?? DEFAULT_LS_DEPTH;
+      const lines: string[] = [];
+      let chars = 0;
+      const walk = (directory: string, remaining: number): boolean => {
+        ctx.signal?.throwIfAborted();
+        for (const entry of entries.filter(target => dirname(target) === directory)) {
+          const isDirectory = directories.has(entry);
+          const line = displayToolPath(root, entry) + (isDirectory ? "/" : "");
+          const extra = (lines.length === 0 ? 0 : 1) + line.length;
+          if (lines.length > 0 && chars + extra > MAX_LS_CHARS) return true;
+          lines.push(line);
+          chars += extra;
+          if (isDirectory && remaining > 1 && walk(entry, remaining - 1)) return true;
+        }
+        return false;
+      };
+      const truncated = walk(resolvedPath, depth);
+      let content = lines.length === 0 ? "(empty directory)" : lines.join("\n");
+      if (truncated) content += "\n... truncated: output limited. Use a more specific path or lower depth.";
+      return { content, details: { path, resolvedPath, depth, entryCount: lines.length, truncated } satisfies LsDetails };
+    },
+  };
   const restrictedBash: typeof bashTool = { ...bashTool,
     description: `${bashRestriction} A non-zero exit code is ordinary result data, not a tool failure.`,
     inputSchema: command ? Type.Object({
@@ -50,5 +85,5 @@ export function createEvalTools(project: string, selected?: EvalCase): ToolRegis
     await verifyPath(selected?.verifyFile ?? "test/math.test.ts", false);
     return bashTool.execute({ command: input.command, timeout: input.timeout ?? 5000 }, ctx);
   } };
-  return createToolRegistry([restrictedRead, restrictedEdit, restrictedWrite, restrictedBash]);
+  return createToolRegistry([restrictedRead, restrictedEdit, restrictedWrite, restrictedBash, restrictedLs]);
 }

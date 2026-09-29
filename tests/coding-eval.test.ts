@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { withTempDir } from "./helpers.ts";
 import type { AgentClock } from "../src/agent/retry.ts";
 import { CODING_CASE, runCodingEval } from "../src/eval/coding.ts";
@@ -16,6 +16,90 @@ const edit = { path: "src/math.ts", edits: [{ oldText: "return Math.min(value, m
 function script(responses: ScriptedTurnFactory[]): Model {
   return createScriptedModel({ responses });
 }
+
+function toolContent(request: ModelRequest, id: string): string {
+  const result = request.items.find(item => item.type === "tool_result" && item.toolCallId === id);
+  if (result?.type !== "tool_result" || result.isError) throw new Error(`Missing successful ${id} result`);
+  return result.content;
+}
+
+test("locate implementation discovers unnamed candidates and derives the active route from their contents", async () => {
+  let candidates: string[] = [];
+  const result = await runCodingEval({ caseId: "locate-implementation", sourceRevision: revision, model: script([
+    request => {
+      expect(request.tools?.some(tool => tool.name === "ls")).toBe(true);
+      return { toolCalls: [{ id: "discover", name: "ls", arguments: { depth: 2 } }] };
+    },
+    request => {
+      candidates = toolContent(request, "discover").split("\n").filter(path => path.endsWith(".ts"));
+      expect(candidates.length).toBeGreaterThan(1);
+      return { toolCalls: candidates.map((path, index) => ({ id: `candidate-${index}`, name: "read", arguments: { path } })) };
+    },
+    request => {
+      const sources = candidates.map((path, index) => ({ path, source: toolContent(request, `candidate-${index}`) }));
+      const server = sources.find(file => file.source.includes("handleRequest"));
+      const imported = server?.source.match(/import \{ (\w+) \} from "([^"]+)"/);
+      if (!server || !imported) throw new Error("No active request handler import discovered");
+      const path = join(dirname(server.path), imported[2]!);
+      const implementation = sources.find(file => file.path === path);
+      expect(implementation?.source).toContain(`function ${imported[1]}`);
+      expect(implementation?.source).toContain('"/health"');
+      return { toolCalls: [{ id: "answer", name: "write", arguments: { path: "answer.json", content: JSON.stringify({ path, symbol: imported[1] }) } }] };
+    },
+    { text: "done" },
+  ]) });
+  expect(result.outcome).toBe("success");
+  expect(result.metrics.toolFailures).toBe(0);
+});
+
+test("parallel read discovers unnamed inputs and builds its answer from successful reads", async () => {
+  let inputs: string[] = [];
+  const result = await runCodingEval({ caseId: "parallel-read", sourceRevision: revision, model: script([
+    { toolCalls: [{ id: "discover", name: "ls", arguments: { depth: 2 } }] },
+    request => {
+      inputs = toolContent(request, "discover").split("\n").filter(path => path.endsWith(".txt"));
+      expect(inputs.length).toBe(3);
+      return { toolCalls: inputs.map((path, index) => ({ id: `input-${index}`, name: "read", arguments: { path } })) };
+    },
+    request => {
+      const answer = Object.fromEntries(inputs.map((_, index) => {
+        const value = toolContent(request, `input-${index}`).match(/\b(\w+)=(\w+)/);
+        if (!value) throw new Error("Input is missing its value");
+        return [value[1], value[1] === "quantity" ? Number(value[2]) : value[2]];
+      }));
+      return { toolCalls: [{ id: "answer", name: "write", arguments: { path: "answer.json", content: JSON.stringify(answer) } }] };
+    },
+    { text: "done" },
+  ]) });
+  expect(result.outcome).toBe("success");
+  expect(result.metrics.toolFailures).toBe(0);
+  expect(result.readOverlap).toBe(true);
+});
+
+test("eval listings expose seed names while hiding unseeded files and rejecting other directories", async () => {
+  await withTempDir(async project => {
+    const selected = DAILY_CASES.find(item => item.id === "locate-implementation")!;
+    await mkdir(join(project, "src"));
+    await mkdir(join(project, ".git"));
+    await writeFile(join(project, "src/private.ts"), "unseeded");
+    await writeFile(join(project, "package.json"), "{}");
+    const tools = createEvalTools(project, selected);
+    const ls = tools.get("ls")!;
+    const ctx = { workspace: await resolveWorkspace(project) };
+    expect((await ls.definition.execute({}, ctx)).content).toBe("answer.json\nsrc/");
+    const listing = await ls.definition.execute({ path: "./src", depth: 50 }, ctx);
+    expect(listing.content).toBe("src/logger.ts\nsrc/preview.ts\nsrc/router.ts\nsrc/server.ts");
+    expect(listing.content).not.toContain("private");
+    for (const path of ["..", ".git", "src/private.ts", "src/router.ts", join(project, "../outside")]) {
+      await expect(ls.definition.execute({ path }, ctx)).rejects.toThrow("allowed case directories");
+    }
+    expect(ls.validate({ depth: 0 }).ok).toBe(false);
+    await expect(tools.get("read")!.definition.execute({ path: "src/private.ts" }, ctx)).rejects.toThrow("allowed case files");
+    await expect(tools.get("write")!.definition.execute({ path: "src/private.ts", content: "changed" }, ctx)).rejects.toThrow("allowed case files");
+    await expect(tools.get("bash")!.definition.execute({ command: "ls" }, ctx)).rejects.toThrow("disabled");
+    expect(await readFile(join(project, "src/private.ts"), "utf8")).toBe("unseeded");
+  });
+});
 
 function prescribedCommand(task: string): string {
   const command = task.match(/Run (?:exactly )?(.+?) to verify the change\./)?.[1];
