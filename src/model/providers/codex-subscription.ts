@@ -1,3 +1,4 @@
+import { assertThinking } from "../thinking.ts";
 import type {
   AssistantContent,
   AssistantMessage,
@@ -543,7 +544,7 @@ export async function fetchSubscriptionCatalog(input: {
     }).filter((level): level is ThinkingLevel => level !== undefined))];
     const defaultThinking = item.default_reasoning_level === "none" ? "off" : item.default_reasoning_level;
     models.set(item.slug, {
-      id: item.slug,
+      id: item.slug, authRoute: "codex",
       ...(item.default === true || item.is_default === true ? { recommended: true } : {}),
       ...(typeof item.context_window === "number" && Number.isSafeInteger(item.context_window) && item.context_window > 0 && item.context_window <= 10_000_000 ? { contextWindow: item.context_window } : {}),
       ...(typeof item.max_output_tokens === "number" && Number.isSafeInteger(item.max_output_tokens) && item.max_output_tokens > 0 && item.max_output_tokens <= 1_000_000 ? { maxOutput: item.max_output_tokens } : {}),
@@ -907,14 +908,8 @@ export function resolveCodexReasoning(
   | { effort: "none" }
   | { effort: Exclude<ThinkingLevel, "off">; summary: "auto" }
   | undefined {
-  if (level === undefined) {
-    return undefined;
-  }
-  if (!capability) throw new Error(`Thinking level "${level}" requires verified subscription catalog capabilities for openai/${modelId}. Open /model or reset thinking.`);
-  if (capability.id !== modelId) throw new Error("Subscription capability does not match the selected model.");
-  if (!capability.supportedThinking.includes(level)) {
-    throw new Error(`Thinking level "${level}" is not listed for openai/${modelId} in this account's subscription catalog.`);
-  }
+  assertThinking({ provider: "openai", model: modelId, authRoute: "codex", capability: capability ?? null }, level);
+  if (level === undefined) return undefined;
   if (level === "off") return { effort: "none" };
   return { effort: level, summary: "auto" };
 }

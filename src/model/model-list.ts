@@ -1,4 +1,5 @@
 import { listCatalog, ROUTE_FALLBACK_MODELS, type ModelCapability } from "./catalog.ts";
+import { isOpenRouterEndpoint } from "./thinking.ts";
 import type { ThinkingLevel } from "./model.ts";
 import { THINKING_LEVELS } from "./model.ts";
 
@@ -13,6 +14,8 @@ export interface ListedModel {
   /** True when the provider marked this id as its default or recommendation. */
   recommended?: boolean;
   supportedThinking?: readonly ThinkingLevel[];
+  /** Reasoning metadata bound to its trusted endpoint. */
+  reasoningCapability?: ModelCapability;
   /** Provider-reported default reasoning level, when the list names one. */
   defaultThinking?: ThinkingLevel;
 }
@@ -72,9 +75,9 @@ export function requireXaiModels(models: readonly ListedModel[]): ListedModel[] 
 }
 
 /** Turn a parsed xAI list into capabilities, offering only off when the list names no reasoning efforts. */
-export function xaiModelCapabilities(models: readonly ListedModel[]): ModelCapability[] {
+export function xaiModelCapabilities(models: readonly ListedModel[], authRoute: "api-key" | "grok" = "api-key"): ModelCapability[] {
   return models.map(model => ({
-    id: model.id,
+    id: model.id, authRoute,
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
     ...(model.maxOutput !== undefined ? { maxOutput: model.maxOutput } : {}),
     ...(model.defaultThinking !== undefined ? { defaultThinking: model.defaultThinking } : {}),
@@ -154,11 +157,11 @@ export async function fetchProviderModelList(input: {
   } catch {
     throw new Error(`${input.label} model list returned invalid JSON.`);
   }
-  return parseModelList(payload, input.label);
+  return parseModelList(payload, input.label, input.url.replace(/\/models\/?$/, ""));
 }
 
 /** Parse an OpenAI-style `{ data: [...] }` list or a `{ models: [...] }` list without trusting extra fields. */
-export function parseModelList(payload: unknown, label: string): ListedModel[] {
+export function parseModelList(payload: unknown, label: string, baseUrl?: string): ListedModel[] {
   if (!payload || typeof payload !== "object") throw new Error(`${label} model list returned an invalid model list.`);
   const record = payload as Record<string, unknown>;
   const raw = Array.isArray(record.data) ? record.data : Array.isArray(record.models) ? record.models : undefined;
@@ -179,12 +182,14 @@ export function parseModelList(payload: unknown, label: string): ListedModel[] {
     const maxOutput = positiveInt(row.max_output_tokens ?? row.max_completion_tokens ?? row.maxOutput, 1_000_000);
     const supportedThinking = thinkingLevels(row.supported_reasoning_levels ?? row.supportedThinking ?? reasoningEfforts(row));
     const defaultThinking = oneThinkingLevel(row.default_reasoning_effort);
+    const reasoningCapability = isOpenRouterEndpoint(baseUrl) ? openRouterCapability(id, row.reasoning) : undefined;
     models.set(id, {
       id,
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...(maxOutput !== undefined ? { maxOutput } : {}),
       ...(row.default === true || row.recommended === true || row.is_default === true || id === marked ? { recommended: true } : {}),
       ...(supportedThinking ? { supportedThinking } : {}),
+      ...(reasoningCapability ? { reasoningCapability, supportedThinking: reasoningCapability.supportedThinking, defaultThinking: reasoningCapability.defaultThinking } : {}),
       ...(defaultThinking ? { defaultThinking } : {}),
     });
   }
@@ -234,4 +239,21 @@ function reasoningEfforts(row: Record<string, unknown>): unknown {
 function oneThinkingLevel(value: unknown): ThinkingLevel | undefined {
   const level = value === "none" ? "off" : value;
   return THINKING_LEVELS.includes(level as ThinkingLevel) ? level as ThinkingLevel : undefined;
+}
+
+/** Convert verified OpenRouter model metadata into endpoint-scoped policy evidence. */
+export function openRouterModelCapabilities(models: readonly ListedModel[]): ModelCapability[] {
+  return models.map(model => model.reasoningCapability ?? { id: model.id, baseUrl: "https://openrouter.ai/api/v1", reasoningKnown: false, supportedThinking: [] });
+}
+
+function openRouterCapability(id: string, value: unknown): ModelCapability {
+  const base = { id, baseUrl: "https://openrouter.ai/api/v1" };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { ...base, reasoningKnown: false, supportedThinking: [] };
+  const reasoning = value as Record<string, unknown>;
+  const all: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const advertised = reasoning.supported_efforts === null ? all : thinkingLevels(reasoning.supported_efforts) ?? [];
+  const supportedThinking = advertised.filter(level => all.includes(level) && !(reasoning.mandatory === true && level === "off"));
+  const defaultThinking = reasoning.default_enabled === false && reasoning.mandatory !== true ? "off" : oneThinkingLevel(reasoning.default_effort);
+  return { ...base, reasoningKnown: reasoning.supported_efforts === null || Array.isArray(reasoning.supported_efforts), mandatoryThinking: reasoning.mandatory === true, supportedThinking, supportsDisabling: supportedThinking.includes("off"),
+    ...(defaultThinking && !(reasoning.mandatory === true && defaultThinking === "off") ? { defaultThinking } : {}) };
 }

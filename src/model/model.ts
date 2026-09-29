@@ -2,10 +2,10 @@ import type { AssistantMessage, ConversationItem } from "../conversation/types.t
 import type { ContextSection } from "../context/manager.ts";
 
 /** User-facing reasoning level shared by all providers without assuming identical wire semantics. */
-export type ThinkingLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 /** Valid thinking levels in increasing reasoning strength, with off disabling reasoning. */
-export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 
 /** True when the value names a supported provider-independent thinking level. */
 export function isThinkingLevel(value: unknown): value is ThinkingLevel {

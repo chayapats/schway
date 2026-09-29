@@ -45,7 +45,7 @@ test("subscription catalog retains verified reasoning capabilities and context w
     { slug: "real-codex", visibility: "list", context_window: 111000, default_reasoning_level: "medium", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }, { effort: "xhigh" }, { effort: "max" }, { effort: "ultra" }] },
     { slug: "hidden-codex", visibility: "hide", default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }] },
   ] }) });
-  expect(models).toEqual([{ id: "real-codex", contextWindow: 111000, defaultThinking: "medium", supportedThinking: ["low", "medium", "high", "xhigh", "max", "ultra"] }]);
+  expect(models).toEqual([{ id: "real-codex", authRoute: "codex", contextWindow: 111000, defaultThinking: "medium", supportedThinking: ["low", "medium", "high", "xhigh", "max", "ultra"] }]);
   expect(JSON.stringify(models)).not.toContain("subscription-secret");
 });
 

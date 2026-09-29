@@ -1,3 +1,5 @@
+import { isOpenRouterEndpoint, resolveThinkingSelection } from "../model/thinking.ts";
+import { openRouterModelCapabilities } from "../model/model-list.ts";
 import { isOpenAIAuthPreference } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
@@ -127,7 +129,10 @@ export abstract class ModelsLayer extends CommandsLayer {
       tasks.push((async () => {
         try {
           this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl }));
-          if (current()) this.compatibleModelsUnavailable = false;
+          if (current()) {
+            this.compatibleModelsUnavailable = false;
+            if (isOpenRouterEndpoint(baseUrl)) this.configEditor?.setEndpointCapabilities("https://openrouter.ai/api/v1", openRouterModelCapabilities(this.compatibleModels));
+          }
         } catch {
           if (current()) { this.compatibleModels = undefined; this.compatibleModelsUnavailable = true; }
         }
@@ -146,7 +151,7 @@ export abstract class ModelsLayer extends CommandsLayer {
           if (current()) {
             this.xaiModels = undefined;
             this.xaiModelsUnavailable = true;
-            if (!this.grokSelected()) this.clearXaiCapabilities();
+            if (!this.grokSelected()) this.clearXaiCapabilities("api-key");
           }
         }
       })());
@@ -326,7 +331,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
     } else if (selection.authRoute === "grok") {
-      this.installXaiCapabilities(this.grokModels ?? []);
+      this.installXaiCapabilities(this.grokModels ?? [], "grok");
       applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(selection.modelId), () => `Switched to xai/${this.modelId} via Grok subscription.`, undefined, true, false, this.listedBudgets(selection));
     } else if (selection.provider === "xai") {
       applied = await this.changeSettings(() => this.configEditor!.prepareXaiModel(selection.modelId),
@@ -419,11 +424,18 @@ export abstract class ModelsLayer extends CommandsLayer {
   async thinkingCommand(args: string): Promise<boolean> {
     const selection = parseThinkingArgs(args);
     if (typeof selection === "object") { this.fail(selection.error); return false; }
+    const settings = this.configEditor?.settings;
+    if (this.provider === "openai-compatible" && isOpenRouterEndpoint(settings?.baseUrl ?? this.baseUrl) && selection !== "reset" && !settings?.reasoningCapability && this.credentials?.listRouteModels) {
+      try {
+        const models = await this.credentials.listRouteModels("compatible", AbortSignal.timeout(5_000), { baseUrl: settings?.baseUrl ?? this.baseUrl });
+        this.configEditor?.setEndpointCapabilities("https://openrouter.ai/api/v1", openRouterModelCapabilities(models));
+      } catch (error) { this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)); return false; }
+    }
     if (this.provider === "xai" && selection !== "show" && selection !== "reset" && this.configEditor?.modelCapability(this.modelId) === undefined && (this.grokSelected() ? this.credentials?.listGrokModels : this.credentials?.listRouteModels)) {
       try {
         const models = filterXaiModels(await (this.grokSelected() ? this.credentials!.listGrokModels!(AbortSignal.timeout(5_000)) : this.credentials!.listRouteModels!("xai", AbortSignal.timeout(5_000))));
         if (!models.length) throw new Error("xAI model list returned no selectable models.");
-        this.installXaiCapabilities(models);
+        this.installXaiCapabilities(models, this.grokSelected() ? "grok" : "api-key");
       } catch (error) {
         this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 500));
         return false;
@@ -456,26 +468,28 @@ export abstract class ModelsLayer extends CommandsLayer {
     return applied;
   }
 
+  /** Bind the runtime route to the shared selector without reusing another model's evidence. */
+  protected thinkingSelection(): ReturnType<typeof resolveThinkingSelection> {
+    const settings = this.configEditor?.settings;
+    const capability = settings?.provider === this.provider && settings.model === this.modelId ? settings.reasoningCapability : undefined;
+    return resolveThinkingSelection({ provider: this.provider, model: this.modelId,
+      openaiAuth: this.codexThinkingSelected() ? "codex" : "api-key", xaiAuth: this.grokSelected() ? "grok" : "api-key", baseUrl: settings?.baseUrl ?? this.baseUrl,
+      capability, extraBody: settings?.extraBody });
+  }
+
+  /** Reuse the selected evidence for effective reasoning descriptions. */
+  protected thinkingContext(): ReturnType<typeof resolveThinkingSelection>["context"] {
+    return this.thinkingSelection().context;
+  }
+
   /** Requested and effective reasoning with provider/model for truthful display. */
   describeThinking(): string {
-    const requested = this.configEditor?.settings.thinking ?? this.thinking;
-    const effective = this.configEditor?.settings.effectiveThinking ?? (requested as never);
+    const requested = this.configEditor ? this.configEditor.settings.thinking : this.thinking;
     const origin = this.configEditor?.origins.thinking;
-    const capability = this.codexThinkingSelected() ? this.configEditor?.settings : undefined;
-    if (capability?.supportedThinking !== undefined) {
-      const supported = capability.supportedThinking.join("/") || "none advertised";
-      const defaultLevel = capability.defaultThinking ?? "unspecified";
-      return requested === undefined
-        ? `Thinking: provider default (${defaultLevel}; no explicit control sent). Supported: ${supported} with ${this.provider}/${this.modelId}`
-        : `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (supported: ${supported}; provider default: ${defaultLevel}) with ${this.provider}/${this.modelId}`;
-    }
-    if (this.codexThinkingSelected()) {
-      return `Thinking: ${requested ?? "unset"} (subscription capability not yet verified; open /model) with ${this.provider}/${this.modelId}`;
-    }
-    const effectiveDesc = describeEffectiveThinking(this.provider, (effective ?? requested) as never, this.modelId);
-    if (requested === undefined) {
-      return `Thinking: unset (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
-    }
-    return `Thinking: ${requested}${origin ? ` [${origin}]` : ""} (effective: ${effectiveDesc}) with ${this.provider}/${this.modelId}`;
+    const context = this.thinkingContext();
+    const effective = describeEffectiveThinking(this.provider, requested as never, this.modelId, context);
+    const supported = this.configEditor?.settings.supportedThinking;
+    return `Thinking: ${requested ?? "unset"}${requested && origin ? ` [${origin}]` : ""} (effective: ${effective})${supported ? `; ${requested === undefined ? "Supported" : "supported"}: ${supported.join("/") || "none advertised"}` : ""} with ${this.provider}/${this.modelId}`;
   }
+
 }

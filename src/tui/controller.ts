@@ -18,8 +18,8 @@ export * from "./transcript-format.ts";
 export class TuiController extends TurnLayer {
   /** Return current state with a new transcript array, masking supplied known secrets in entry text. */
   snapshot(): TuiSnapshot {
-    const thinking = this.configEditor?.settings.thinking ?? this.thinking;
-    const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId);
+    const thinking = this.configEditor ? this.configEditor.settings.thinking : this.thinking;
+    const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId, this.thinkingContext());
     const branchTree = this.branchTreeForSnapshot();
     const activeRoute = this.model
       ? this.model.provider === "codex-subscription" ? "ChatGPT subscription" : this.model.provider === "openai" ? "OpenAI API key" : "OpenAI route"
@@ -56,7 +56,7 @@ export class TuiController extends TurnLayer {
       ...(this.openaiAuth !== undefined ? { openaiAuth: this.openaiAuth } : {}),
       ...(this.provider === "xai" ? { activeRoute: `${this.grokSelected() ? "Grok subscription" : "xAI API key"}${this.model ? "" : " (unavailable)"}` } : {}),
       ...(this.provider === "openai" ? { activeRoute: `${activeRoute}${this.model ? "" : " (unavailable)"}` } : {}),
-      ...(thinking !== undefined ? { thinking, effectiveThinking: effective } : {}),
+      ...(thinking !== undefined ? { thinking } : {}), effectiveThinking: effective,
       preferences: this.preferences ? structuredClone(this.preferences) : undefined,
       recentSession: this.session.items.length === 0 ? this.recentSession : undefined,
       restored: this.restored,

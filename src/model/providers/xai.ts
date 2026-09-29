@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ModelCapability } from "../catalog.ts";
+import { assertThinking } from "../thinking.ts";
 import { lookupModel } from "../catalog.ts";
 import type { Model, ModelRequest, ThinkingLevel } from "../model.ts";
 import { assembleResponsesStream, buildResponsesRequest, type ResponsesReasoning } from "./responses-stream.ts";
@@ -17,16 +18,12 @@ type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<
 export function resolveXaiReasoning(
   level: ThinkingLevel | undefined,
   capability?: ModelCapability,
+  modelId = capability?.id ?? "",
+  authRoute: "api-key" | "grok" = "api-key",
 ): ResponsesReasoning | undefined {
-  if (level === undefined) return undefined;
-  if (level === "off") {
-    if (capability?.supportsDisabling && capability.supportedThinking.includes("off")) {
-      return { effort: "none", summary: "auto" };
-    }
-    return undefined;
-  }
-  if (level === "ultra") return undefined;
-  return { effort: level, summary: "auto" };
+  const policy = assertThinking({ provider: "xai", model: modelId, authRoute, capability: capability ?? null }, level);
+  if (level === undefined || (level === "off" && !policy.supportsDisabling)) return undefined;
+  return { effort: level === "off" ? "none" : level, summary: "auto" };
 }
 
 function requiredModelId(model: string | undefined): string {
@@ -46,6 +43,7 @@ export function createXaiModel(options: {
   maxTokens?: number;
   thinking?: ThinkingLevel;
   modelCapability?: ModelCapability;
+  authRoute?: "api-key" | "grok";
   fetch?: FetchLike;
   /** Test-only origin; production uses `XAI_BASE_URL`. */
   baseUrl?: string;
@@ -67,7 +65,7 @@ export function createXaiModel(options: {
     id: modelId,
     /** Stream Schway events; function-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest) {
-      const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability);
+      const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability, modelId, options.authRoute);
       const body = buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" });
       let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal) : options.apiKey;
       const tokens = [token];
@@ -76,7 +74,8 @@ export function createXaiModel(options: {
         const message = tokens.reduce((text, secret) => secret ? text.replaceAll(secret, "[redacted]") : text, error instanceof Error ? error.message : "Grok request failed.");
         return Object.assign(new Error(message), error instanceof OpenAI.APIError ? { status: error.status, headers: error.headers } : {});
       };
-      const send = () => clientFor(token).responses.create(body, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
+      // The xAI catalog may advertise efforts beyond OpenAI SDK enums; preserve them exactly.
+      const send = () => clientFor(token).responses.create(body as OpenAI.Responses.ResponseCreateParamsStreaming, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
       let stream;
       try { stream = await send(); }
       catch (error) {

@@ -31,9 +31,17 @@ export interface ModelInfo {
   supportsThinking: boolean;
 }
 
-/** Verified account-scoped model capabilities, independent of provider response fields. */
+/** Verified route-scoped model capabilities, independent of provider response fields. */
 export interface ModelCapability {
   id: string;
+  /** Endpoint-scoped evidence must never be reused for another compatible service. */
+  baseUrl?: string;
+  /** Billing route that advertised this account capability; never transfer it across auth routes. */
+  authRoute?: "api-key" | "grok" | "codex";
+  /** False when a discovered model does not advertise a reasoning selector. */
+  reasoningKnown?: boolean;
+  /** True when the provider requires reasoning and cannot accept off. */
+  mandatoryThinking?: boolean;
   contextWindow?: number;
   maxOutput?: number;
   defaultThinking?: ThinkingLevel;
@@ -51,6 +59,8 @@ export interface ModelLimitOverrides {
 }
 
 const CATALOG: readonly ModelInfo[] = [
+  { id: "gpt-6-sol", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
+  { id: "gpt-6-luna", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
   { id: "gpt-6-astra", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
   { id: "gpt-5.6-terra", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
   { id: "gpt-5.6-luna", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
@@ -87,73 +97,5 @@ export function lookupModel(
   };
 }
 
-/** Capability outcome for a provider-independent thinking level without touching provider wire types. */
-export interface ThinkingSupport {
-  /** True when the provider/model pair appears in the built-in catalog. */
-  known: boolean;
-  /** Levels that can be requested truthfully; unknown and non-reasoning models expose only off. */
-  supported: readonly ThinkingLevel[];
-  /** True when explicit off sends a documented disable control; false means off leaves provider defaults untouched. */
-  supportsDisabling: boolean;
-}
-
-/** Static reasoning metadata refreshed from provider docs; account catalogs still override subscription models. */
-const OPENAI_THINKING: Record<string, { supported: readonly ThinkingLevel[]; supportsDisabling: boolean }> = {
-  "gpt-6-astra": { supported: ["low", "medium", "high", "xhigh", "max"], supportsDisabling: false },
-  "gpt-5.6-terra": { supported: ["off", "low", "medium", "high", "xhigh", "max"], supportsDisabling: true },
-  "gpt-5.6-luna": { supported: ["off", "low", "medium", "high", "xhigh", "max"], supportsDisabling: true },
-  "gpt-5.4": { supported: ["off", "low", "medium", "high"], supportsDisabling: true },
-};
-
-/** Return supported thinking levels; unknown IDs stay usable with off as a no-op that sends no controls. */
-export function getThinkingSupport(provider: string, modelId: string): ThinkingSupport {
-  const known = CATALOG.some((entry) => entry.provider === provider && entry.id === modelId);
-  const thinking = provider === "openai" ? OPENAI_THINKING[modelId] : undefined;
-  if (thinking) return { known: true, supported: thinking.supported, supportsDisabling: thinking.supportsDisabling };
-  if (known) return { known: true, supported: ["off"], supportsDisabling: false };
-  return { known: false, supported: ["off"], supportsDisabling: false };
-}
-
-/** True when the requested level can be applied truthfully for the provider/model pair. */
-export function isThinkingSupported(provider: string, modelId: string, level: ThinkingLevel): boolean {
-  return getThinkingSupport(provider, modelId).supported.includes(level);
-}
-
-/** Human-readable capability summary naming supported levels and disabling support for errors and disabled UI entries. */
-export function describeThinkingSupport(provider: string, modelId: string): string {
-  const support = getThinkingSupport(provider, modelId);
-  if (!support.known) {
-    return `Unknown model "${provider}/${modelId}". Reasoning support cannot be established; leave thinking unset or use off. Explicit low/medium/high would pretend a mapping applied. Explicit off sends no reasoning controls.`;
-  }
-  if (support.supported.length === 1) {
-    return `${provider}/${modelId} does not support reasoning; only thinking "off" (provider default, no reasoning controls) is supported.`;
-  }
-  const levels = support.supported.join("/");
-  return support.supportsDisabling
-    ? `${provider}/${modelId} supports thinking ${levels}. Explicit off sends the provider's documented disable control.`
-    : `${provider}/${modelId} supports thinking ${levels}. Off is not a supported level.`;
-}
-
-/** Extra-body keys treated as reasoning controls for compatible single-source-of-truth checks. */
-export const COMPATIBLE_REASONING_BODY_KEYS = [
-  "reasoning",
-  "reasoning_effort",
-  "reasoningEffort",
-  "reasoning_budget",
-  "thinking",
-  "thinking_budget",
-  "budget_tokens",
-] as const;
-
-/** Name the first extra-body reasoning key present, if any, for conflict errors. */
-export function findCompatibleReasoningBodyKey(extraBody: Record<string, unknown> | undefined): string | undefined {
-  if (!extraBody) {
-    return undefined;
-  }
-  for (const key of COMPATIBLE_REASONING_BODY_KEYS) {
-    if (extraBody[key] !== undefined) {
-      return key;
-    }
-  }
-  return undefined;
-}
+/** Compatibility exports for callers migrating to the shared reasoning policy. */
+export { getThinkingSupport, isThinkingSupported, describeThinkingSupport, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey, type ThinkingSupport } from "./thinking.ts";

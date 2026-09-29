@@ -5,14 +5,12 @@ import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
   type ModelCapability,
-  describeThinkingSupport,
-  findCompatibleReasoningBodyKey,
-  getThinkingSupport,
   lookupModel,
   UNKNOWN_MODEL_DEFAULTS,
   type ModelInfo,
 } from "../model/catalog.ts";
-import type { ThinkingLevel } from "../model/model.ts";
+import { validateThinking, resolveThinkingPolicy, isOpenRouterEndpoint } from "../model/thinking.ts";
+import { THINKING_LEVELS, type ThinkingLevel } from "../model/model.ts";
 import { removedProviderMessage } from "./removed-provider.ts";
 import {
   DEFAULT_MAX_CONCURRENT_TOOLS,
@@ -74,15 +72,7 @@ export const OpenAIAuthSchema = Type.Union([
 ]);
 
 /** Validated provider-independent reasoning levels without assuming identical wire semantics. */
-export const ThinkingSchema = Type.Union([
-  Type.Literal("off"),
-  Type.Literal("low"),
-  Type.Literal("medium"),
-  Type.Literal("high"),
-  Type.Literal("xhigh"),
-  Type.Literal("max"),
-  Type.Literal("ultra"),
-]);
+export const ThinkingSchema = Type.Union(THINKING_LEVELS.map(level => Type.Literal(level)));
 
 /** Validated Git change-tracking modes for observational inspection. */
 export const GitChangeTrackingSchema = Type.Union([
@@ -196,11 +186,13 @@ export interface ResolvedSettings {
   thinking?: ThinkingLevel;
   /** Effective reasoning level after capability checks; undefined means provider defaults. */
   effectiveThinking?: ThinkingLevel;
-  /** Account-advertised default when thinking is unset. */
+  /** Exact verified route metadata retained for adapter validation. */
+  reasoningCapability?: ModelCapability;
+  /** Provider-advertised default when thinking is unset; no explicit control is sent. */
   defaultThinking?: ThinkingLevel;
-  /** Account-advertised reasoning levels for a selected subscription or xAI model. */
+  /** Verified reasoning choices for the selected provider, model and route. */
   supportedThinking?: readonly ThinkingLevel[];
-  /** True when xAI off sends reasoning effort none; absent means off sends no reasoning field. */
+  /** True when explicit off sends a disable control; absent means off leaves defaults untouched. */
   supportsDisabling?: boolean;
   maxTurns: number;
   maxConcurrentTools: number;
@@ -503,10 +495,12 @@ export function resolveSettings(input: {
   project?: ConfigLayer;
   cli?: ConfigLayer;
   session?: ConfigLayer;
-  /** Verified account capabilities are applied only to the explicit Codex subscription. */
+  /** Verified account or endpoint capabilities for the selected billing route. */
   modelCapabilities?: readonly ModelCapability[];
   /** Preliminary headless resolution only; never use it for an outgoing request. */
   deferOpenAIThinking?: boolean;
+  /** Stage an uncached OpenRouter or xAI choice for verified discovery before interactive activation. */
+  deferUncachedThinking?: boolean;
 }): ResolvedSettings | { error: string } {
   const memory = effectiveInteractiveMemory(input);
   const mergedProfiles = mergeProfileMaps(input.user?.profiles, input.project?.profiles, input.cli?.profiles, input.session?.profiles);
@@ -576,7 +570,7 @@ export function resolveSettings(input: {
     }
     const unsetThinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
     const unsetThinkingError = unsetThinking === undefined ? undefined
-      : validateThinking(provider, model, unsetThinking, merged.extraBody);
+      : validateThinking(provider, model, unsetThinking, merged.extraBody, undefined, merged.baseUrl);
     if (unsetThinkingError !== undefined) return { error: unsetThinkingError };
     return finishResolvedSettings({
       provider,
@@ -598,17 +592,23 @@ export function resolveSettings(input: {
     });
   }
   const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
-  const listedSelected = subscriptionSelected || provider === "xai";
+  const routerSelected = provider === "openai-compatible" && isOpenRouterEndpoint(merged.baseUrl);
+  const listedSelected = subscriptionSelected || provider === "xai" || routerSelected;
+  const authRoute = provider === "xai" ? merged.xaiAuth === "grok" ? "grok" : merged.xaiAuth === "api-key" ? "api-key" : undefined : subscriptionSelected ? "codex" : undefined;
   const listedCatalog = listedSelected ? input.modelCapabilities : undefined;
-  const capability = listedCatalog?.find(entry => entry.id === model);
+  const capability = listedCatalog?.find(entry => entry.id === model && (!entry.authRoute || !authRoute || entry.authRoute === authRoute) && (!routerSelected || entry.baseUrl === "https://openrouter.ai/api/v1"));
   const metadata = lookupModel(provider, model, {
     contextWindow: merged.contextWindow ?? capability?.contextWindow,
     maxOutput: merged.maxOutput ?? capability?.maxOutput,
   });
   const catalog = capability ? { ...metadata, supportsThinking: capability.supportedThinking.length > 0 } : metadata;
   const thinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
-  const thinkingError = (input.deferOpenAIThinking && provider === "openai") || (provider === "xai" && input.modelCapabilities === undefined) ? undefined
-    : validateThinking(provider, model, thinking, merged.extraBody, listedSelected ? capability ?? null : undefined);
+  const uncachedInteractiveChoice = input.deferUncachedThinking && !capability;
+  const pendingCatalog = (provider === "xai" && (input.modelCapabilities === undefined || uncachedInteractiveChoice))
+    || (routerSelected && (!input.modelCapabilities?.some(entry => entry.baseUrl === "https://openrouter.ai/api/v1") || uncachedInteractiveChoice));
+  const deferThinking = (input.deferOpenAIThinking && provider === "openai") || pendingCatalog;
+  const thinkingError = deferThinking ? undefined
+    : validateThinking(provider, model, thinking, merged.extraBody, listedSelected ? capability ?? null : undefined, merged.baseUrl, authRoute);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
@@ -619,6 +619,7 @@ export function resolveSettings(input: {
         "Missing --base-url for OpenAI-compatible provider. Set baseUrl in config or pass --base-url.",
     };
   }
+  const policy = resolveThinkingPolicy({ provider, model, authRoute, baseUrl: merged.baseUrl, capability: listedSelected ? capability ?? null : undefined });
   return finishResolvedSettings({
     provider,
     model,
@@ -627,9 +628,10 @@ export function resolveSettings(input: {
     selectedName,
     activeProfile,
     thinking,
-    defaultThinking: capability?.defaultThinking,
-    supportedThinking: capability?.supportedThinking,
-    supportsDisabling: capability?.supportsDisabling,
+    reasoningCapability: capability,
+    defaultThinking: policy.defaultThinking,
+    supportedThinking: listedSelected && !capability ? undefined : policy.supported,
+    supportsDisabling: policy.supportsDisabling,
     contextWindow: catalog.contextWindow,
     maxOutput: catalog.maxOutput,
     catalog,
@@ -644,6 +646,7 @@ function finishResolvedSettings(input: {
   selectedName?: string;
   activeProfile?: CompatibleProfile;
   thinking?: ThinkingLevel;
+  reasoningCapability?: ModelCapability;
   defaultThinking?: ThinkingLevel;
   supportedThinking?: readonly ThinkingLevel[];
   supportsDisabling?: boolean;
@@ -656,6 +659,7 @@ function finishResolvedSettings(input: {
     model: input.model,
     modelConfigured: input.modelConfigured,
     ...(input.thinking !== undefined ? { thinking: input.thinking, effectiveThinking: input.thinking } : {}),
+    ...(input.reasoningCapability ? { reasoningCapability: input.reasoningCapability } : {}),
     ...(input.defaultThinking !== undefined ? { defaultThinking: input.defaultThinking } : {}),
     ...(input.supportedThinking !== undefined ? { supportedThinking: input.supportedThinking } : {}),
     ...(input.supportsDisabling ? { supportsDisabling: true } : {}),
@@ -682,61 +686,8 @@ function finishResolvedSettings(input: {
   };
 }
 
-/** Return an error when the requested thinking level is unsupported for the model or conflicts with extra-body reasoning controls, otherwise undefined. */
-export function validateThinking(
-  provider: string,
-  model: string,
-  thinking: ThinkingLevel | undefined,
-  extraBody: Record<string, unknown> | undefined,
-  accountCapability?: ModelCapability | null,
-): string | undefined {
-  if (thinking === undefined) {
-    return undefined;
-  }
-  if (provider === "openai-compatible") {
-    const bodyKey = findCompatibleReasoningBodyKey(extraBody);
-    if (bodyKey !== undefined) {
-      return `thinking "${thinking}" conflicts with extraBody.${bodyKey}; remove one to define a single source of truth for reasoning.`;
-    }
-  }
-  const support = accountCapability === undefined ? getThinkingSupport(provider, model) : undefined;
-  if (accountCapability !== undefined && !accountCapability?.supportedThinking.includes(thinking)) {
-    if (provider === "xai") {
-      return `Thinking level "${thinking}" is not listed for xai/${model} in the xAI model list. Leave thinking unset or select a listed level.`;
-    }
-    return `Thinking level "${thinking}" is not listed for ${provider}/${model} in this account's subscription catalog. Leave thinking unset or select an advertised level.`;
-  }
-  if (support && !support.supported.includes(thinking)) {
-    return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
-  }
-  return undefined;
-}
-
-/** Describe the effective wire control for a resolved thinking level without exposing provider field names in core. */
-export function describeEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined, modelId?: string): string {
-  if (thinking === undefined) {
-    return "provider default (no reasoning controls sent)";
-  }
-  if (thinking === "off") {
-    if (modelId !== undefined && !getThinkingSupport(provider, modelId).supportsDisabling) {
-      return "off (provider default, no reasoning controls sent)";
-    }
-    if (modelId === undefined && provider !== "openai") {
-      return "off (provider default, no reasoning controls sent)";
-    }
-    if (provider === "openai" && modelId !== undefined) {
-      return "off (reasoning effort none)";
-    }
-    if (provider === "openai") {
-      return "off (disable control on reasoning-capable models; otherwise no reasoning controls sent)";
-    }
-    return "off (provider default, no reasoning controls sent)";
-  }
-  if (provider === "openai" || provider === "xai") {
-    return `${thinking} (reasoning effort ${thinking})`;
-  }
-  return `${thinking} (via extraBody when configured; no automatic mapping)`;
-}
+/** Shared reasoning policy remains available to existing configuration callers. */
+export { validateThinking, describeEffectiveThinking } from "../model/thinking.ts";
 
 /** Expand one validated profile into a config layer that implies the compatible provider. */
 export function profileToLayer(profile: CompatibleProfile): ConfigLayer {
