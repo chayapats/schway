@@ -190,9 +190,9 @@ export interface ResolvedSettings {
   reasoningCapability?: ModelCapability;
   /** Provider-advertised default when thinking is unset; no explicit control is sent. */
   defaultThinking?: ThinkingLevel;
-  /** Account-advertised reasoning levels for a selected subscription or xAI model. */
+  /** Verified reasoning choices for the selected provider, model and route. */
   supportedThinking?: readonly ThinkingLevel[];
-  /** True when xAI off sends reasoning effort none; absent means off sends no reasoning field. */
+  /** True when explicit off sends a disable control; absent means off leaves defaults untouched. */
   supportsDisabling?: boolean;
   maxTurns: number;
   maxConcurrentTools: number;
@@ -495,10 +495,12 @@ export function resolveSettings(input: {
   project?: ConfigLayer;
   cli?: ConfigLayer;
   session?: ConfigLayer;
-  /** Verified account capabilities are applied only to the explicit Codex subscription. */
+  /** Verified account or endpoint capabilities for the selected billing route. */
   modelCapabilities?: readonly ModelCapability[];
   /** Preliminary headless resolution only; never use it for an outgoing request. */
   deferOpenAIThinking?: boolean;
+  /** Stage an uncached OpenRouter or xAI choice for verified discovery before interactive activation. */
+  deferUncachedThinking?: boolean;
 }): ResolvedSettings | { error: string } {
   const memory = effectiveInteractiveMemory(input);
   const mergedProfiles = mergeProfileMaps(input.user?.profiles, input.project?.profiles, input.cli?.profiles, input.session?.profiles);
@@ -592,16 +594,21 @@ export function resolveSettings(input: {
   const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
   const routerSelected = provider === "openai-compatible" && isOpenRouterEndpoint(merged.baseUrl);
   const listedSelected = subscriptionSelected || provider === "xai" || routerSelected;
+  const authRoute = provider === "xai" ? merged.xaiAuth === "grok" ? "grok" : merged.xaiAuth === "api-key" ? "api-key" : undefined : subscriptionSelected ? "codex" : undefined;
   const listedCatalog = listedSelected ? input.modelCapabilities : undefined;
-  const capability = listedCatalog?.find(entry => entry.id === model && (!routerSelected || entry.baseUrl === "https://openrouter.ai/api/v1"));
+  const capability = listedCatalog?.find(entry => entry.id === model && (!entry.authRoute || !authRoute || entry.authRoute === authRoute) && (!routerSelected || entry.baseUrl === "https://openrouter.ai/api/v1"));
   const metadata = lookupModel(provider, model, {
     contextWindow: merged.contextWindow ?? capability?.contextWindow,
     maxOutput: merged.maxOutput ?? capability?.maxOutput,
   });
   const catalog = capability ? { ...metadata, supportsThinking: capability.supportedThinking.length > 0 } : metadata;
   const thinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
-  const thinkingError = (input.deferOpenAIThinking && provider === "openai") || ((provider === "xai" && input.modelCapabilities === undefined) || (routerSelected && !input.modelCapabilities?.some(entry => entry.baseUrl === "https://openrouter.ai/api/v1"))) ? undefined
-    : validateThinking(provider, model, thinking, merged.extraBody, listedSelected ? capability ?? null : undefined, merged.baseUrl);
+  const uncachedInteractiveChoice = input.deferUncachedThinking && !capability;
+  const pendingCatalog = (provider === "xai" && (input.modelCapabilities === undefined || uncachedInteractiveChoice))
+    || (routerSelected && (!input.modelCapabilities?.some(entry => entry.baseUrl === "https://openrouter.ai/api/v1") || uncachedInteractiveChoice));
+  const deferThinking = (input.deferOpenAIThinking && provider === "openai") || pendingCatalog;
+  const thinkingError = deferThinking ? undefined
+    : validateThinking(provider, model, thinking, merged.extraBody, listedSelected ? capability ?? null : undefined, merged.baseUrl, authRoute);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
@@ -612,7 +619,7 @@ export function resolveSettings(input: {
         "Missing --base-url for OpenAI-compatible provider. Set baseUrl in config or pass --base-url.",
     };
   }
-  const policy = resolveThinkingPolicy({ provider, model, baseUrl: merged.baseUrl, capability: listedSelected ? capability ?? null : undefined });
+  const policy = resolveThinkingPolicy({ provider, model, authRoute, baseUrl: merged.baseUrl, capability: listedSelected ? capability ?? null : undefined });
   return finishResolvedSettings({
     provider,
     model,

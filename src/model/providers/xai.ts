@@ -19,8 +19,9 @@ export function resolveXaiReasoning(
   level: ThinkingLevel | undefined,
   capability?: ModelCapability,
   modelId = capability?.id ?? "",
+  authRoute: "api-key" | "grok" = "api-key",
 ): ResponsesReasoning | undefined {
-  const policy = assertThinking({ provider: "xai", model: modelId, capability: capability ?? null }, level);
+  const policy = assertThinking({ provider: "xai", model: modelId, authRoute, capability: capability ?? null }, level);
   if (level === undefined || (level === "off" && !policy.supportsDisabling)) return undefined;
   return { effort: level === "off" ? "none" : level, summary: "auto" };
 }
@@ -42,6 +43,7 @@ export function createXaiModel(options: {
   maxTokens?: number;
   thinking?: ThinkingLevel;
   modelCapability?: ModelCapability;
+  authRoute?: "api-key" | "grok";
   fetch?: FetchLike;
   /** Test-only origin; production uses `XAI_BASE_URL`. */
   baseUrl?: string;
@@ -63,7 +65,7 @@ export function createXaiModel(options: {
     id: modelId,
     /** Stream Schway events; function-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest) {
-      const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability, modelId);
+      const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability, modelId, options.authRoute);
       const body = buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" });
       let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal) : options.apiKey;
       const tokens = [token];

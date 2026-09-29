@@ -75,9 +75,9 @@ export function requireXaiModels(models: readonly ListedModel[]): ListedModel[] 
 }
 
 /** Turn a parsed xAI list into capabilities, offering only off when the list names no reasoning efforts. */
-export function xaiModelCapabilities(models: readonly ListedModel[]): ModelCapability[] {
+export function xaiModelCapabilities(models: readonly ListedModel[], authRoute: "api-key" | "grok" = "api-key"): ModelCapability[] {
   return models.map(model => ({
-    id: model.id,
+    id: model.id, authRoute,
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
     ...(model.maxOutput !== undefined ? { maxOutput: model.maxOutput } : {}),
     ...(model.defaultThinking !== undefined ? { defaultThinking: model.defaultThinking } : {}),

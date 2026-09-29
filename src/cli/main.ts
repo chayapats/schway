@@ -313,7 +313,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           ? await (await import("../model/providers/grok-subscription.ts")).fetchSubscriptionModels({ store, fetch: io.fetch, signal: io.signal })
           : requireXaiModels(await fetchProviderModelList({ url: XAI_MODELS_URL, apiKey: credential?.apiKey, fetch: io.fetch, signal: io.signal, label: "xAI" }));
         const chosen = await loadResolvedSettings({
-          home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: xaiModelCapabilities(models),
+          home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: xaiModelCapabilities(models, selected.transport === "grok" ? "grok" : "api-key"),
         });
         if ("error" in chosen) throw new Error(chosen.error);
         settings = chosen;
@@ -551,7 +551,7 @@ async function loadCliModel(
         model: settings.model,
         maxTokens: settings.maxOutput,
         ...(settings.thinking !== undefined ? { thinking: settings.thinking } : {}),
-        ...(settings.supportedThinking !== undefined ? { modelCapability: { id: settings.model, supportedThinking: settings.supportedThinking, ...(settings.supportsDisabling ? { supportsDisabling: true } : {}) } } : {}),
+        ...(settings.supportedThinking !== undefined ? { modelCapability: settings.reasoningCapability ?? { id: settings.model, supportedThinking: settings.supportedThinking, ...(settings.supportsDisabling ? { supportsDisabling: true } : {}) } } : {}),
         openaiAuth: "codex" as const,
       };
       try {
@@ -569,7 +569,7 @@ async function loadCliModel(
     if ("error" in selection) return selection;
     if (selection.transport === "grok") {
       const input = { provider: "xai" as const, xaiAuth: "grok" as const, model: settings.model, maxTokens: settings.maxOutput, thinking: settings.thinking,
-        ...(settings.supportedThinking !== undefined ? { modelCapability: { id: settings.model, supportedThinking: settings.supportedThinking, supportsDisabling: settings.supportsDisabling } } : {}) };
+        ...(settings.supportedThinking !== undefined ? { modelCapability: settings.reasoningCapability ?? { id: settings.model, supportedThinking: settings.supportedThinking, supportsDisabling: settings.supportsDisabling } } : {}) };
       try { return { model: io.createModel ? await io.createModel(input) : await loadProviderModel({ ...input, grokStore: credentialStore }, io.fetch) }; }
       catch (error) { return { error: redactSecrets(errorMessage(error), secrets) }; }
     }

@@ -134,15 +134,15 @@ export class ConfigEditor {
   }
 
   /** Replace one route's capabilities without dropping another route's verified entries. */
-  replaceRouteCapabilities(previousIds: readonly string[], capabilities: readonly ModelCapability[]): void {
+  replaceRouteCapabilities(previousIds: readonly string[], capabilities: readonly ModelCapability[], authRoute?: ModelCapability["authRoute"]): void {
     const drop = new Set(previousIds);
-    const kept = (this.modelCapabilities ?? []).filter(entry => !drop.has(entry.id));
-    this.setModelCapabilities([...kept, ...capabilities]);
+    const kept = (this.modelCapabilities ?? []).filter(entry => authRoute ? entry.authRoute !== authRoute : !drop.has(entry.id));
+    this.setModelCapabilities([...capabilities, ...kept]);
   }
 
   /** Install one activated model without discarding discoveries for other models or routes. */
   setModelCapability(capability: ModelCapability): void {
-    this.setModelCapabilities([...(this.modelCapabilities ?? []).filter(entry => entry.id !== capability.id || entry.baseUrl !== capability.baseUrl), capability]);
+    this.setModelCapabilities([capability, ...(this.modelCapabilities ?? []).filter(entry => entry.id !== capability.id || entry.baseUrl !== capability.baseUrl || entry.authRoute !== capability.authRoute)]);
   }
 
   /** Replace endpoint-scoped model evidence while preserving account catalogs for other routes. */
@@ -170,7 +170,7 @@ export class ConfigEditor {
 
   /** Return verified account metadata for a model without exposing mutable editor state. */
   modelCapability(id: string): ModelCapability | undefined {
-    const capability = this.modelCapabilities?.find(model => model.id === id && (this.current.provider === "openai-compatible" ? model.baseUrl === this.current.baseUrl?.replace(/\/+$/, "") : model.baseUrl === undefined));
+    const capability = this.modelCapabilities?.find(model => model.id === id && (!model.authRoute || this.current.provider !== "xai" || this.current.xaiAuth === "auto" || model.authRoute === this.current.xaiAuth) && (this.current.provider === "openai-compatible" ? model.baseUrl === this.current.baseUrl?.replace(/\/+$/, "") : model.baseUrl === undefined));
     return capability ? structuredClone(capability) : undefined;
   }
 
@@ -308,20 +308,20 @@ export class ConfigEditor {
 
   /** Stage an xAI API-key model for this session, clearing a thinking level the list does not offer. */
   async prepareXaiModel(model: string): Promise<ConfigTransaction> {
-    const capability = this.modelCapabilities?.find(entry => entry.id === model);
+    const capability = this.modelCapabilities?.find(entry => entry.id === model && (!entry.authRoute || entry.authRoute === "api-key"));
     return this.prepareChanges("session", [
       { key: "provider", value: "xai" }, { key: "xaiAuth", value: "api-key" }, { key: "model", value: model }, { key: "profile", value: null },
-      ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
+      ...(model !== this.current.model && capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }
 
   /** Stage the Grok subscription model and billing route as one reversible session edit. */
   async prepareGrokModel(model: string): Promise<ConfigTransaction> {
-    const capability = this.modelCapabilities?.find(entry => entry.id === model);
+    const capability = this.modelCapabilities?.find(entry => entry.id === model && (!entry.authRoute || entry.authRoute === "grok"));
     return this.prepareChanges("session", [
       { key: "provider", value: "xai" }, { key: "xaiAuth", value: "grok" },
       { key: "model", value: model }, { key: "profile", value: null },
-      ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
+      ...(model !== this.current.model && capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }
 
@@ -465,7 +465,7 @@ export async function loadConfigEditor(input: { home: string; workspaceRoot: str
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */
 function resolved(layers: Layers, modelCapabilities?: readonly ModelCapability[], deferOpenAIThinking = false): ResolvedSettings {
-  const settings = resolveSettings({ ...layers, modelCapabilities, deferOpenAIThinking });
+  const settings = resolveSettings({ ...layers, modelCapabilities, deferOpenAIThinking, deferUncachedThinking: true });
   if ("error" in settings) throw new Error(settings.error);
   return settings;
 }

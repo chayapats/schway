@@ -1,3 +1,4 @@
+import type { resolveThinkingSelection } from "../model/thinking.ts";
 import { isGrokModel } from "../model/loader.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
 import type { PreferencesSnapshot } from "./preferences.ts";
@@ -241,7 +242,8 @@ export abstract class ControllerCore {
   protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate?: boolean, appearanceOnly?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean>;
   abstract closeModelPicker(): void;
   abstract describeThinking(): string;
-  protected abstract thinkingContext(): { baseUrl?: string; capability?: ModelCapability | null; extraBody?: Record<string, unknown> };
+  protected abstract thinkingSelection(): ReturnType<typeof resolveThinkingSelection>;
+  protected abstract thinkingContext(): ReturnType<typeof resolveThinkingSelection>["context"];
   abstract effectiveBudgets(): { contextWindow: number; maxOutput: number };
   protected abstract emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): Promise<void>;
   protected abstract loadAccountCatalog(signal: AbortSignal): Promise<readonly ModelCapability[]>;

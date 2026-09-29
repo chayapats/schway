@@ -31,11 +31,13 @@ export interface ModelInfo {
   supportsThinking: boolean;
 }
 
-/** Verified account-scoped model capabilities, independent of provider response fields. */
+/** Verified route-scoped model capabilities, independent of provider response fields. */
 export interface ModelCapability {
   id: string;
   /** Endpoint-scoped evidence must never be reused for another compatible service. */
   baseUrl?: string;
+  /** Billing route that advertised this account capability; never transfer it across auth routes. */
+  authRoute?: "api-key" | "grok" | "codex";
   /** False when a discovered model does not advertise a reasoning selector. */
   reasoningKnown?: boolean;
   /** True when the provider requires reasoning and cannot accept off. */

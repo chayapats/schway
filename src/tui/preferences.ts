@@ -1,5 +1,5 @@
 import type { ConfigEditor, ConfigScope } from "../config/editing.ts";
-import { resolveThinkingPolicy, describeEffectiveThinking, isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
+import { resolveThinkingSelection, describeEffectiveThinking } from "../model/thinking.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 
 /** A bounded ordinary preference or an explicitly separate complete model-choice action. */
@@ -36,11 +36,10 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
   const safe = (value: unknown) => redactSecrets(value === undefined ? "unset" : String(value), secrets).replace(/https?:\/\/[^\s]+/g, "[URL hidden]").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
   const layers = editor.preferenceLayers;
   const labels: Record<string, string> = { memory: "workspace memory", user: "user config", project: "project config", cli: "CLI", session: "session" };
-  const listed = settings.provider === "xai" || settings.openaiAuth === "codex" || (settings.provider === "openai-compatible" && isOpenRouterEndpoint(settings.baseUrl));
-  const context = { baseUrl: settings.baseUrl, extraBody: settings.extraBody, ...(listed ? { capability: settings.reasoningCapability ?? null } : {}) };
-  const policy = resolveThinkingPolicy({ provider: settings.provider, model: settings.model, ...context });
+  const selection = resolveThinkingSelection({ ...settings, capability: settings.reasoningCapability });
+  const context = selection.context;
   const choices: Record<string, readonly unknown[]> = {
-    thinking: [undefined, ...policy.supported.filter(level => !validateThinking(settings.provider, settings.model, level, settings.extraBody, context.capability, settings.baseUrl))],
+    thinking: [undefined, ...selection.choices],
     maxTurns: [undefined, 8, 16, 32, 64, 128], maxConcurrentTools: [undefined, 1, 2, 5, 10, 20],
     contextWindow: [undefined, 8192, 32768, 65536, 131072, 200000],
     maxOutput: [undefined, 1024, 4096, 8192, 16384, 32768],

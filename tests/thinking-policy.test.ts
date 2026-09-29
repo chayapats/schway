@@ -12,10 +12,12 @@ import { runCli } from "../src/cli/main.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
-import { loadInteractiveModel } from "../src/tui/app.ts";
+import { stageInteractiveSettings, loadInteractiveModel } from "../src/tui/app.ts";
 import { preferenceRows } from "../src/tui/preferences.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
+import { grokSubscriptionIdentity } from "../src/auth/store.ts";
+import { bindGrokModel } from "../src/model/loader.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { sampleRequest, encodeSse, TEXT_STREAM_EVENTS } from "./fixtures/openai.ts";
 import { encodeChatCompletionsSse, TEXT_STREAM_CHUNKS } from "./fixtures/openai-compatible.ts";
@@ -181,4 +183,111 @@ test("xAI preserves an exact newly advertised effort instead of dropping it thro
     } });
   await collect(adapter.stream(sampleRequest()));
   expect(body?.reasoning).toEqual({ effort: "ultra", summary: "auto" });
+});
+
+
+test("typed OpenRouter model switches discover uncached targets and roll back unsupported efforts", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const editor = new ConfigEditor({ cli: { provider: "openai-compatible", model: modelId, thinking: "medium", baseUrl, auth: "none" } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") }, [capability()]);
+    const discovered: string[] = [];
+    const store = fakeCredentialStore();
+    const currentModel = createScriptedModel({ provider: "openai-compatible", id: modelId });
+    const controller = new TuiController({ session: createSession(), sessionId: "router-switch", workspace, configEditor: editor,
+      provider: "openai-compatible", modelId, baseUrl, model: currentModel, contextManager: createContextManager(workspace),
+      stageSettings: (next, signal, _workspace, model) => stageInteractiveSettings(next, editor.settings, {
+        forceLoad: true, model, signal, workspace, home: dir, runtimeApiKey: undefined, env: {}, secrets: [], credentialStore: store,
+        fetch: async url => { discovered.push(String(url)); return Response.json({ data: [
+          { id: "org/second", reasoning: { supported_efforts: ["medium"], default_effort: "medium" } },
+          { id: "org/unsupported", reasoning: { supported_efforts: ["low"] } },
+        ] }); },
+      }),
+    });
+    try {
+      expect(await controller.selectModel("openai-compatible/org/second")).toBe(true);
+      expect(editor.settings).toMatchObject({ model: "org/second", thinking: "medium", reasoningCapability: { id: "org/second" } });
+      expect(discovered).toEqual([`${baseUrl}/models`]);
+      expect(await controller.selectModel("openai-compatible/org/unsupported")).toBe(false);
+      expect(discovered).toEqual([`${baseUrl}/models`, `${baseUrl}/models`]);
+      expect(editor.settings.model).toBe("org/second");
+      expect(controller.snapshot().modelId).toBe("org/second");
+      expect(editor.settings.thinking).toBe("medium");
+    } finally { controller.dispose(); }
+  });
+});
+
+test("same-model Grok/API-key switches fetch the target route and reject its unsupported effort transactionally", async () => {
+  for (const from of ["grok", "api-key"] as const) await withTempDir(async dir => {
+    const to = from === "grok" ? "api-key" : "grok";
+    const modelId = "grok-shared";
+    const thinking = from === "grok" ? "medium" : "low";
+    let targetEffort: "low" | "medium" = from === "grok" ? "low" : "medium";
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const store = fakeCredentialStore();
+    await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-grok", obtainedAt: 1 }));
+    const editor = new ConfigEditor({ cli: { provider: "xai", xaiAuth: from, model: modelId, thinking } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") },
+      [{ id: modelId, authRoute: from, supportedThinking: [thinking] }]);
+    const current = createScriptedModel({ provider: "xai", id: modelId });
+    const requests: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "route-switch", workspace, configEditor: editor,
+      provider: "xai", xaiAuth: from, modelId, model: from === "grok" ? bindGrokModel(current) : current, contextManager: createContextManager(workspace),
+      stageSettings: (next, signal, _workspace, model) => stageInteractiveSettings(next, editor.settings, {
+        forceLoad: true, model, signal, workspace, home: dir, runtimeApiKey: undefined, env: { XAI_API_KEY: "fixture-api" }, secrets: [], credentialStore: store,
+        fetch: async (url, init) => { requests.push(String(url));
+          expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${to === "grok" ? "fixture-grok" : "fixture-api"}`);
+          return Response.json({ data: [{ id: modelId, capabilities: { reasoning_effort: [targetEffort] } }] });
+        },
+      }),
+    });
+    try {
+      expect(await controller.configCommand(`set xaiAuth ${to}`)).toBe(false);
+      expect(requests).toEqual(["https://api.x.ai/v1/models"]);
+      expect(editor.settings).toMatchObject({ xaiAuth: from, thinking });
+      expect(controller.snapshot().modelId).toBe(modelId);
+      targetEffort = thinking;
+      expect(await controller.configCommand(`set xaiAuth ${to}`)).toBe(true);
+      expect(requests).toEqual(["https://api.x.ai/v1/models", "https://api.x.ai/v1/models"]);
+      expect(editor.settings).toMatchObject({ xaiAuth: to, thinking, reasoningCapability: { authRoute: to } });
+    } finally { controller.dispose(); }
+  });
+});
+
+
+test("replacement Grok credentials invalidate the old adapter and reasoning catalog before failed discovery", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const editor = new ConfigEditor({ cli: { provider: "xai", xaiAuth: "grok", model: "grok-shared", thinking: "medium" } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") },
+      [{ id: "grok-shared", authRoute: "grok", supportedThinking: ["medium"] }]);
+    const controller = new TuiController({ session: createSession(), sessionId: "grok-replacement", workspace, configEditor: editor,
+      provider: "xai", xaiAuth: "grok", modelId: "grok-shared", model: bindGrokModel(createScriptedModel({ provider: "xai", id: "grok-shared" })), contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "not activated" }),
+        grokLogin: async ({ onSaved }) => { onSaved?.(); return { ok: true, status: "Signed in" }; },
+        listGrokModels: async () => { throw Error("Catalog unavailable"); },
+      },
+      stageSettings: async () => { throw Error("Must not activate without discovery"); },
+    });
+    try {
+      expect(await controller.login("grok")).toBe(false);
+      expect(editor.settings.reasoningCapability).toBeUndefined();
+      expect(await controller.submit("must not reach old account adapter")).toBe(false);
+    } finally { controller.dispose(); }
+  });
+});
+
+
+test("catalog updates preserve opposite billing-route evidence for the same model ID", async () => {
+  await withTempDir(async dir => {
+    const editor = new ConfigEditor({ cli: { provider: "xai", xaiAuth: "grok", model: "grok-shared" } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") },
+      [{ id: "grok-shared", authRoute: "grok", supportedThinking: ["medium"] }]);
+    editor.replaceRouteCapabilities([], [{ id: "grok-shared", authRoute: "api-key", supportedThinking: ["low"] }], "api-key");
+    expect(editor.settings.supportedThinking).toEqual(["medium"]);
+    expect((await editor.prepare({ scope: "session", key: "xaiAuth", value: "api-key" })).settings.supportedThinking).toEqual(["low"]);
+    editor.setModelCapability({ id: "grok-shared", authRoute: "grok", supportedThinking: ["high"] });
+    expect(editor.settings.supportedThinking).toEqual(["high"]);
+    expect((await editor.prepare({ scope: "session", key: "xaiAuth", value: "api-key" })).settings.supportedThinking).toEqual(["low"]);
+  });
 });

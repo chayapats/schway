@@ -27,8 +27,6 @@ export const DEVICE_LOGIN_INDEX = LOGIN_CHOICES.findIndex(choice => choice.actio
 
 /** Sign-in, credential entry, logout and subscription login actions. */
 export abstract class CredentialsLayer extends ControllerCore {
-  /** xAI capability IDs installed by sign-in or a picker refresh, so a later failure can drop only those. */
-  protected xaiCapabilityIds: string[] = [];
   /** Route login input and notify when an explicit subscription sign-in starts. */
   async login(args: string, accepted: () => void = () => {}): Promise<boolean> {
     if (!args.trim()) return this.openLoginChooser();
@@ -318,17 +316,22 @@ export abstract class CredentialsLayer extends ControllerCore {
   }
 
   /** Install xAI list capabilities without dropping another route's verified entries. */
-  protected installXaiCapabilities(models: readonly import("../model/model-list.ts").ListedModel[]): void {
-    const capabilities = xaiModelCapabilities(models);
-    this.configEditor?.replaceRouteCapabilities(this.xaiCapabilityIds, capabilities);
-    this.xaiCapabilityIds = capabilities.map(entry => entry.id);
+  protected installXaiCapabilities(models: readonly import("../model/model-list.ts").ListedModel[], authRoute: "api-key" | "grok" = "api-key"): void {
+    const capabilities = xaiModelCapabilities(models, authRoute);
+    this.configEditor?.replaceRouteCapabilities([], capabilities, authRoute);
   }
 
-  /** Drop only xAI capabilities installed by this session's list or sign-in. */
-  protected clearXaiCapabilities(): void {
-    if (!this.xaiCapabilityIds.length) return;
-    this.configEditor?.replaceRouteCapabilities(this.xaiCapabilityIds, []);
-    this.xaiCapabilityIds = [];
+  /** Drop xAI route evidence after credential changes, including capabilities loaded at startup. */
+  protected clearXaiCapabilities(authRoute?: "api-key" | "grok"): void {
+    for (const route of authRoute ? [authRoute] : ["api-key", "grok"] as const) this.configEditor?.replaceRouteCapabilities([], [], route);
+  }
+
+  /** Prevent an old Grok model from applying its capability after account credentials change. */
+  protected invalidateGrokAdapter(): void {
+    this.clearXaiCapabilities("grok");
+    this.grokModels = undefined;
+    if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; }
+    this.grokPending = true;
   }
 
   /** Block an old subscription adapter and discard catalog data after a credential replacement. */
@@ -357,17 +360,18 @@ export abstract class CredentialsLayer extends ControllerCore {
     const task = (async () => {
       try {
         const result = await runner({ device: target.device, signal: abort.signal,
-          onSaved: () => { saved = true; this.grokModels = undefined; this.grokPending = true; },
+          onSaved: () => { saved = true; this.invalidateGrokAdapter(); },
           onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Waiting for approval in your browser… · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
           onProgress: message => { this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserIndex = LOGIN_CHOICES.findIndex(choice => choice.action.kind === "grok" && choice.action.device); },
         });
         abort.signal.throwIfAborted(); if (this.disposed) return false;
         if (!result.ok) { this.fail(result.message); return false; }
+        if (!saved) this.invalidateGrokAdapter();
         saved = true; this.grokPending = true;
         if (!this.credentials?.listGrokModels || !this.configEditor || !this.stageSettings) { this.notice(result.status); return true; }
         const models = filterXaiModels(await this.credentials.listGrokModels(AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)])));
         abort.signal.throwIfAborted(); if (this.disposed) return false;
-        this.grokModels = models; this.installXaiCapabilities(models);
+        this.grokModels = models; this.installXaiCapabilities(models, "grok");
         const preferred = recommendedListedModel("grok", models) || ROUTE_FALLBACK_MODELS.xai;
         // Settings staging requires an idle controller; the abort still guards the preceding sign-in and list.
         this.activeAbort = undefined; this.loginAbort = undefined; this.credentialMutation = false; this.status = "idle";
@@ -399,7 +403,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       const { deleteSubscriptionTokens } = await import("../model/providers/grok-subscription.ts");
       const removed = await deleteSubscriptionTokens(this.credentials.store);
       this.notice(removed ? "Removed the Grok subscription (xAI OAuth) credential. The selected account can no longer run until sign-in and activation succeed again." : "No Grok subscription login found; nothing was removed.");
-      this.grokModels = undefined; this.grokPending = false;
+      this.grokModels = undefined; this.grokPending = false; this.clearXaiCapabilities("grok");
       if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("The removed active Grok account is blocked; Schway will not switch this conversation to xAI API-key billing."); }
       return true;
     } catch { this.fail(credentialStoreError("delete")); return false; }

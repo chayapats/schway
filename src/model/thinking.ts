@@ -3,9 +3,9 @@ import type { ThinkingLevel } from "./model.ts";
 
 /** Capability outcome for a provider-independent thinking level without touching provider wire types. */
 export interface ThinkingSupport {
-  /** True when the provider/model pair appears in the built-in catalog. */
+  /** True when verified metadata establishes the model’s reasoning capability. */
   known: boolean;
-  /** Levels that can be requested truthfully; unknown and non-reasoning models expose only off. */
+  /** Levels that can be requested truthfully using this capability evidence. */
   supported: readonly ThinkingLevel[];
   /** True when explicit off sends a documented disable control; false means off leaves provider defaults untouched. */
   supportsDisabling: boolean;
@@ -80,6 +80,7 @@ export interface ThinkingContext {
   provider: string;
   model: string;
   baseUrl?: string;
+  authRoute?: "api-key" | "grok" | "codex";
   /** Undefined uses documented public metadata; null means a required account catalog is unavailable. */
   capability?: ModelCapability | null;
 }
@@ -109,6 +110,7 @@ export function resolveThinkingPolicy(context: ThinkingContext): ThinkingPolicy 
     if (!capability) return { known: false, supported: [], supportsDisabling: false, provenance: "unknown" };
     if (capability.baseUrl && (!isOpenRouterEndpoint(context.baseUrl) || context.provider !== "openai-compatible")) return { known: false, supported: [], supportsDisabling: false, provenance: "unknown", error: "Capability does not match the selected endpoint." };
     if (context.provider === "openai-compatible" && isOpenRouterEndpoint(context.baseUrl) && capability.baseUrl !== "https://openrouter.ai/api/v1") return { known: false, supported: [], supportsDisabling: false, provenance: "unknown", error: "OpenRouter reasoning requires endpoint-scoped model metadata." };
+    if (capability.authRoute && context.authRoute && capability.authRoute !== context.authRoute) return { known: false, supported: [], supportsDisabling: false, provenance: "unknown", error: "Capability does not match the selected auth route." };
     if (capability.id !== context.model) return { known: false, supported: [], supportsDisabling: false, provenance: "unknown", error: "Capability does not match the selected model." };
     return { known: capability.reasoningKnown !== false, supported: capability.mandatoryThinking ? capability.supportedThinking.filter(level => level !== "off") : capability.supportedThinking, mandatory: capability.mandatoryThinking, supportsDisabling: context.provider === "openai" ? capability.supportedThinking.includes("off") : capability.supportsDisabling === true,
       provenance: capability.reasoningKnown === false ? "unknown" : capability.baseUrl ? "provider-catalog" : "account-catalog", ...(capability.defaultThinking !== undefined ? { defaultThinking: capability.defaultThinking } : {}) };
@@ -127,8 +129,9 @@ export function validateThinking(
   extraBody?: Record<string, unknown>,
   accountCapability?: ModelCapability | null,
   baseUrl?: string,
+  authRoute?: ThinkingContext["authRoute"],
 ): string | undefined {
-  const policy = resolveThinkingPolicy({ provider, model, baseUrl, capability: accountCapability });
+  const policy = resolveThinkingPolicy({ provider, model, baseUrl, authRoute, capability: accountCapability });
   if (policy.error) return policy.error;
   if (thinking === undefined) return undefined;
   const bodyKey = provider === "openai-compatible" ? findCompatibleReasoningBodyKey(extraBody) : undefined;
@@ -146,14 +149,14 @@ export function validateThinking(
 
 /** Validate adapter requests with the same policy as interactive and headless configuration. */
 export function assertThinking(context: ThinkingContext, thinking: ThinkingLevel | undefined, extraBody?: Record<string, unknown>): ThinkingPolicy {
-  const error = validateThinking(context.provider, context.model, thinking, extraBody, context.capability, context.baseUrl);
+  const error = validateThinking(context.provider, context.model, thinking, extraBody, context.capability, context.baseUrl, context.authRoute);
   if (error) throw new Error(error);
   return resolveThinkingPolicy(context);
 }
 
 /** Describe requested controls and advertised defaults from the same policy used to send requests. */
 export function describeEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined, modelId?: string,
-  context: { baseUrl?: string; capability?: ModelCapability | null; extraBody?: Record<string, unknown> } = {}): string {
+  context: { authRoute?: ThinkingContext["authRoute"]; baseUrl?: string; capability?: ModelCapability | null; extraBody?: Record<string, unknown> } = {}): string {
   const policy = resolveThinkingPolicy({ provider, model: modelId ?? "", ...context });
   if (thinking === undefined) {
     if (findCompatibleReasoningBodyKey(context.extraBody)) return "custom reasoning controls via extraBody";
@@ -166,4 +169,25 @@ export function describeEffectiveThinking(provider: string, thinking: ThinkingLe
     return "off (provider default, no reasoning controls sent)";
   }
   return `${thinking} (reasoning effort ${thinking})`;
+}
+
+
+/** Resolve route-bound evidence and valid choices once for every interactive reasoning selector. */
+export function resolveThinkingSelection(input: {
+  provider: string;
+  model: string;
+  openaiAuth?: string;
+  xaiAuth?: string;
+  baseUrl?: string;
+  capability?: ModelCapability;
+  extraBody?: Record<string, unknown>;
+}): { context: ThinkingContext & { extraBody?: Record<string, unknown> }; policy: ThinkingPolicy; choices: readonly ThinkingLevel[] } {
+  const listed = input.provider === "xai" || (input.provider === "openai" && input.openaiAuth === "codex")
+    || (input.provider === "openai-compatible" && isOpenRouterEndpoint(input.baseUrl));
+  const authRoute = input.provider === "xai" ? input.xaiAuth === "grok" || (input.xaiAuth !== "api-key" && input.capability?.authRoute === "grok") ? "grok" : "api-key" : input.provider === "openai" ? input.openaiAuth === "codex" ? "codex" : "api-key" : undefined;
+  const context: ThinkingContext & { extraBody?: Record<string, unknown> } = { authRoute, provider: input.provider, model: input.model, baseUrl: input.baseUrl, extraBody: input.extraBody,
+    ...(listed ? { capability: input.capability ?? null } : {}) };
+  const policy = resolveThinkingPolicy(context);
+  const choices = policy.supported.filter(level => !validateThinking(context.provider, context.model, level, context.extraBody, context.capability, context.baseUrl, context.authRoute));
+  return { context, policy, choices };
 }

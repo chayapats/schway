@@ -1,10 +1,8 @@
 import { redactSecrets } from "../auth/secrets.ts";
 import { commandCatalog, type CommandChoice } from "./command-catalog.ts";
-import { resolveThinkingPolicy } from "../model/thinking.ts";
 import type { Session } from "../session/session.ts";
 import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import { discoverSkills } from "../skills/skills.ts";
-import { validateThinking } from "../config/config.ts";
 import { CredentialsLayer } from "./controller-credentials.ts";
 
 
@@ -94,9 +92,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
     if (match) {
       const name = match[1]!;
       if (commands.some(entry => entry.name === name && !entry.available)) return commands.filter(entry => entry.name === name);
-      const context = this.thinkingContext();
-      const policy = resolveThinkingPolicy({ provider: this.provider, model: this.modelId, ...context });
-      const applicable = policy.supported.filter(level => !validateThinking(this.provider, this.modelId, level, context.extraBody, context.capability, context.baseUrl));
+      const applicable = this.thinkingSelection().choices;
       const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "xai", "openai-compatible", "codex", "grok"];
       return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
     }
