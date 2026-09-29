@@ -54,7 +54,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
     console.error("Invalid eval bounds"); return 2;
   }
   const capUsd = values.has("--max-spend") ? Number(values.get("--max-spend")) : 10;
-  const number = (key: string) => values.has(key) ? Number(values.get(key)) : undefined;
+  const number = (key: string) => values.has(key) ? (values.get(key)!.trim() === "" ? NaN : Number(values.get(key))) : undefined;
   const inputPrice = number("--input-price"), outputPrice = number("--output-price");
   if (!Number.isFinite(capUsd) || capUsd <= 0 || (inputPrice === undefined) !== (outputPrice === undefined) ||
       [inputPrice, outputPrice].some(price => price !== undefined && (!Number.isFinite(price) || price < 0))) {

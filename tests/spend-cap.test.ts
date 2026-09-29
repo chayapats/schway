@@ -127,6 +127,7 @@ test("free routes keep running after the cap stops a paid route", async () => {
 
 test("blank price operands are rejected", async () => {
   expect(await runEvalCli(["--provider", "openai", "--model", "x", "--allow-paid", "--input-price", "", "--output-price", ""], ENV_KEY)).toBe(2);
+  expect(await runEvalCli(["--provider", "openai", "--model", "x", "--allow-paid", "--input-price", " ", "--output-price", " "], ENV_KEY)).toBe(2);
 });
 
 test("a route without prerequisites stays a prerequisite skip when the cap trips", async () => {
