@@ -217,7 +217,7 @@ test("unified controller discovery exposes two extensions, user-only skills and 
       expect(await dispatchEditorInput("/thmee", fixture.controller, noBuiltin)).toBe(false);
       expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("/thinking");
       expect(accepted).toBe(false); expect(fixture.module.calls).toBe(0); expect(fixture.requests).toEqual([]);
-      expect(fixture.controller.commandChoices("/login ").map(entry => entry.insertion)).toEqual(["/login openai", "/login xai", "/login openai-compatible", "/login codex"]);
+      expect(fixture.controller.commandChoices("/login ").map(entry => entry.insertion)).toEqual(["/login openai", "/login xai", "/login openai-compatible", "/login codex", "/login grok"]);
     } finally { fixture.controller.dispose(); }
   });
 });

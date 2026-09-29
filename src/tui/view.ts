@@ -665,17 +665,21 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else completionIndex = -1;
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
       const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
-      const deviceApproval = snapshot.loginApproval ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
-      const approvalRows = deviceApproval
-        ? (renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval[2]!)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval[1]!)/(width - 2))
-        : 2;
+      const legacyDevice = snapshot.loginApproval && !snapshot.loginApprovalData ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
+      const deviceApproval = snapshot.loginApprovalData?.kind === "device"
+        ? { address: snapshot.loginApprovalData.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, ""), code: snapshot.loginApprovalData.userCode }
+        : legacyDevice ? { address: legacyDevice[1]!, code: legacyDevice[2]! } : undefined;
+      const splitApproval = !!deviceApproval && (!snapshot.loginApprovalData || Bun.stringWidth(snapshot.loginApproval ?? "") > width - 2);
+      const approvalRows = splitApproval
+        ? (!snapshot.loginApprovalData && renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval!.code)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval!.address)/(width - 2))
+        : snapshot.loginApprovalData ? Math.max(1, Math.ceil(Bun.stringWidth(snapshot.loginApproval ?? "")/(width - 2))) : 2;
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
       const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
       const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.sessionPicker, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.sessionPicker, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
@@ -719,10 +723,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             textRow(picker, fitLine(`${index === snapshot.loginChooser!.selectedIndex ? "›" : " "} ${choice}`, width - 2), index === snapshot.loginChooser!.selectedIndex ? theme.accent : theme.text);
           });
         } else if (snapshot.loginApproval) {
-          if (renderer.height >= 12) textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
-          if (deviceApproval) {
-            textRow(picker, deviceApproval[2]!, theme.accent).wrapMode = "char";
-            textRow(picker, deviceApproval[1]!, theme.text).wrapMode = "char";
+          if (!snapshot.loginApprovalData && renderer.height >= 12) textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
+          if (splitApproval) {
+            textRow(picker, deviceApproval!.code, theme.accent).wrapMode = "char";
+            textRow(picker, deviceApproval!.address, theme.text).wrapMode = "char";
           } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
         } else if (snapshot.sessionPicker) {
           const sessions = snapshot.sessionPicker;
@@ -750,6 +754,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           });
           const selected = models.entries[models.selectedIndex];
           const routeDetail = selected?.connect ? "ChatGPT subscription · connect to discover models"
+            : selected?.authRoute === "grok" ? "Grok subscription · account models"
             : selected?.authRoute === "codex" ? `ChatGPT subscription · ${selected.verifiedCatalog ? "account catalog" : "catalog pending"}`
               : `${selected?.authRoute === "api-key" ? "OpenAI API key" : selected?.access ?? "Provider"} · ${selected?.access === "Login required" ? "connect needed" : selected?.access === "No key required" ? "no key required" : "configured, unverified"}`;
           const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`}` : "No matches. Try provider/model-id.";

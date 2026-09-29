@@ -75,7 +75,7 @@ try {
     if (scenario === "repair") {
       terminal.mockInput.pressKey("l", { meta: true });
       await wait(() => frame().includes("Sign in"), "repair chooser");
-      for (let i = 0; i < 3; i++) terminal.mockInput.pressArrow("down");
+      for (let i = 0; i < 5; i++) terminal.mockInput.pressArrow("down");
       terminal.mockInput.pressEnter();
       await wait(() => frame().includes("Enter saves"), "credential entry");
       await terminal.mockInput.pasteBracketedText("fixture-private-key");

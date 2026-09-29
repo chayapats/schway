@@ -123,8 +123,8 @@ test("Grok picker models retain independent subscription access and active billi
   expect(missing.grok).toBe("Login required"); expect(missing.xaiApiKey).toBe("API key");
   await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "oauth", obtainedAt: 0 }));
   const access = await loadModelPickerAccess({ store, env: { XAI_API_KEY: "api-key" } }); expect(access.grok).toBe("Grok");
-  const entries = modelPickerEntries("grok-4.7", "xai", "grok-4.7", {}, { access, activeRoute: "grok", xaiModels: [{ id: "grok-4.7" }], grokModels: [{ id: "grok-4.7" }] });
+  const entries = modelPickerEntries("grok-4.7", "xai", "grok-4.7", {}, { access, activeRoute: "grok", xaiModels: [{ id: "grok-4.7" }], grokModels: [{ id: "grok-4.7", contextWindow: 777777, maxOutput: 12345 }] });
   expect(entries.filter(entry => entry.active).map(entry => entry.authRoute)).toEqual(["grok"]);
-  expect(entries.find(entry => entry.authRoute === "grok")?.access).toBe("Grok");
+  expect(entries.find(entry => entry.authRoute === "grok")).toMatchObject({ access: "Grok", contextWindow: 777777, maxOutput: 12345 });
   expect(entries.find(entry => entry.authRoute === "api-key")?.access).toBe("API key");
 });

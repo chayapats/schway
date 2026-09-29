@@ -47,7 +47,7 @@ export abstract class CredentialsLayer extends ControllerCore {
   /** Show provider and auth choices without consuming the ordinary composer draft. */
   openLoginChooser(): boolean {
     if (this.preferences) return false;
-    if (this.disposed || this.running) { this.notice("Busy: finish the current operation before signing in."); return false; }
+    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
     this.closeModelPicker();
     this.loginChooserIndex = 0;
     return true;
@@ -351,12 +351,13 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.closeModelPicker(); this.loginChooserIndex = undefined;
     const abort = new AbortController(); let saved = false;
     this.activeAbort = abort; this.loginAbort = abort; this.credentialMutation = true; this.status = "running";
+    this.loginApprovalData = { kind: "browser" };
     this.loginApproval = target.device ? "Starting Grok device approval… · Esc cancel" : "Waiting for approval in your browser… · Esc cancel";
     try { accepted(); } catch { /* Presentation cannot cancel an accepted operation. */ }
     const task = (async () => {
       try {
         const result = await runner({ device: target.device, signal: abort.signal,
-          onSaved: () => { saved = true; this.grokModels = undefined; this.grokPending = true; if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; } },
+          onSaved: () => { saved = true; this.grokModels = undefined; this.grokPending = true; },
           onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Waiting for approval in your browser… · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
           onProgress: message => { this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserIndex = LOGIN_CHOICES.findIndex(choice => choice.action.kind === "grok" && choice.action.device); },
         });

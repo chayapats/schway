@@ -101,6 +101,8 @@ test("credential changes wait for an active turn and cancelled entry leaves stor
     });
     const turn = controller.submit("ongoing turn");
     expect(controller.beginLogin("openai")).toBe(false);
+    expect(await controller.login("grok")).toBe(false);
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Busy: credential changes require an idle session.");
     expect(await controller.logout("openai")).toBe(false);
     expect(await store.get(credentialIdentity({ provider: "openai" }))).toBeNull();
     controller.cancel();
@@ -137,13 +139,13 @@ test("Grok sign-in activates its recommended model, emits billing route, and log
 });
 test("Grok plan rejection after saving preserves the previous model and saved login", async () => {
   const { grokSubscriptionIdentity } = await import("../src/auth/store.ts");
-  await withTempDir(async root => {
+  for (const previous of ["openai", "xai"] as const) await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] }, store = fakeCredentialStore();
-    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", model: "gpt-6-astra" } });
-    const controller = new TuiController({ session: createSession(), sessionId: "grok", workspace, configEditor: editor, provider: "openai", modelId: "gpt-6-astra", model: createScriptedModel(), contextManager: createContextManager(workspace),
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: previous, model: "previous-model", ...(previous === "xai" ? { xaiAuth: "grok" } : {}) } });
+    const controller = new TuiController({ session: createSession(), sessionId: "grok", workspace, configEditor: editor, provider: previous, xaiAuth: previous === "xai" ? "grok" : "auto", modelId: "previous-model", model: createScriptedModel({ provider: previous, id: "previous-model" }), contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved }) => { await store.set(grokSubscriptionIdentity(), "saved"); onSaved?.(); return { ok: true, status: "Saved" }; }, listGrokModels: async () => { throw Error("Your Grok plan doesn't include API access. Use an xAI API key instead."); } }, stageSettings: async () => { throw Error("must not activate"); },
     });
-    try { expect(await controller.login("grok")).toBe(false); expect(controller.snapshot().modelId).toBe("gpt-6-astra"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved"); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L"); }
+    try { expect(await controller.login("grok")).toBe(false); expect(controller.snapshot().modelId).toBe("previous-model"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved"); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L"); expect(await controller.submit("Previous model remains usable")).toBe(true); }
     finally { controller.dispose(); }
   });
 });
@@ -169,3 +171,22 @@ beforeAll(() => {
   }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
 });
 afterAll(() => { globalThis.fetch = unguardedFetch; });
+
+ test("Grok rejects pasted callbacks and restores a picker after cancellation", async () => {
+  const { LOGIN_USAGE } = await import("../src/tui/commands.ts");
+  const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
+  const controller = new TuiController({ session: createSession(), sessionId: "picker-grok", workspace, provider: "xai", modelId: "grok-4.7", contextManager: createContextManager(workspace),
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ signal, onApproval }) => { onApproval({ kind: "browser" }); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return { ok: false, message: "Cancelled" }; } },
+  });
+  try {
+    expect(await controller.login("grok --code forbidden")).toBe(false); expect(controller.snapshot().transcript.at(-1)?.text).toBe(LOGIN_USAGE);
+    controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+    controller.searchModels("Grok subscription");
+    const picker = controller.snapshot().modelPicker!;
+    const index = picker.entries.findIndex(entry => entry.authRoute === "grok"); expect(index).toBeGreaterThanOrEqual(0);
+    controller.moveModelPicker(index - picker.selectedIndex);
+    const signingIn = controller.selectPickerModel();
+    expect(controller.snapshot().loginApprovalData?.kind).toBe("browser"); controller.cancel(); await signingIn;
+    expect(controller.snapshot().modelPicker?.query).toBe("Grok subscription");
+  } finally { controller.dispose(); }
+});

@@ -35,10 +35,7 @@ function requiredModelId(model: string | undefined): string {
   return modelId;
 }
 
-/**
- * Create an xAI Responses adapter that reuses OpenAI Responses assembly and never retries inside the SDK.
- * Encrypted reasoning is stored and replayed only under `providerMetadata.xai`.
- */
+/** Create an xAI Responses adapter with per-request credentials, namespaced reasoning and no SDK retries. */
 export function createXaiModel(options: {
   apiKey: string | (() => Promise<string>);
   /** Renew a rejected subscription token once without entering the agent retry loop. */

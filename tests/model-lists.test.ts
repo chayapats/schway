@@ -474,7 +474,7 @@ test("xAI chat filter keeps grok-4.7 and treats an excluded-only list as a faile
   const listed = parseModelList({ data: ["grok-4.7", "grok-imagine-1", "grok-2-image", "grok-video-1", "grok-embed-1", "other-model"].map(id => ({ id })) }, "xAI");
   expect(filterXaiModels(listed).map(model => model.id)).toEqual(["grok-4.7"]);
   const rows = modelPickerEntries("", "xai", "", {}, { xaiModels: filterXaiModels(listed), access: { providers: { xai: "API key" }, profiles: {}, subscription: "Login required", openaiApiKey: "Login required", xaiApiKey: "API key" } });
-  expect(rows.filter(row => row.provider === "xai").map(row => row.modelId)).toEqual(["grok-4.7"]);
+  expect(rows.filter(row => row.provider === "xai" && row.authRoute === "api-key").map(row => row.modelId)).toEqual(["grok-4.7"]);
   expect(rows.find(row => row.modelId === "grok-4.7")).toMatchObject({ provider: "xai", authRoute: "api-key", access: "API key" });
   expect(() => requireXaiModels(filterXaiModels(parseModelList({ data: [{ id: "grok-imagine-1" }, { id: "other-model" }] }, "xAI")))).toThrow(/no selectable models/);
 });

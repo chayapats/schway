@@ -28,9 +28,9 @@ cursor 7 27 visible
    › ChatGPT · Browser approval
     ChatGPT · Device approval
     ChatGPT · Paste browser callback
+    Grok · Browser approval
+    Grok · Device approval
     OpenAI API key
-    xAI API key
-    OpenAI-compatible API key
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -90,18 +90,18 @@ cursor 7 27 visible
 21 78-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -
-22 3-18 #e6eaf0 #1e2430 -
-22 18-78 #ffffff #1e2430 -
+22 3-27 #e6eaf0 #1e2430 -
+22 27-78 #ffffff #1e2430 -
 22 78-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
-23 3-15 #e6eaf0 #1e2430 -
-23 15-78 #ffffff #1e2430 -
+23 3-26 #e6eaf0 #1e2430 -
+23 26-78 #ffffff #1e2430 -
 23 78-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -
-24 3-29 #e6eaf0 #1e2430 -
-24 29-78 #ffffff #1e2430 -
+24 3-18 #e6eaf0 #1e2430 -
+24 18-78 #ffffff #1e2430 -
 24 78-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -

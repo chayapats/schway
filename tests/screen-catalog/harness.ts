@@ -14,6 +14,7 @@ import { readTool } from "../../src/tools/read.ts";
 import { editTool } from "../../src/tools/edit.ts";
 import { bashTool } from "../../src/tools/bash.ts";
 import { createScriptedModel, type ScriptedTurn } from "../helpers/scripted-model.ts";
+import { grokSubscriptionIdentity } from "../../src/auth/store.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
 import type { Screen, Variant } from "./screens.ts";
 import { serializeScreen } from "./format.ts";
@@ -73,16 +74,24 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   const fresh = ["first-run", "sign-in-chooser", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";
+  const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
     session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: "catalog-session",
     model: fresh ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     agentClock: { now: () => 10_000, sleep: async (_ms, signal) => { if (screen.id === "retry-countdown") await stopped(signal); } },
-    credentials: { store: fakeCredentialStore(), env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
+    credentials: { store, grokLogin: async ({ device, signal, onApproval, onSaved }) => {
+      if (screen.id === "grok-plan-error") {
+        await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-access", obtainedAt: 1 })); onSaved?.();
+        return { ok: false, message: "Your Grok plan doesn't include API access. Use an xAI API key instead." };
+      }
+      onApproval(device ? { kind: "device", verificationUri: "https://x.ai/device", userCode: "ABCD-EFGH" } : { kind: "browser" });
+      await stopped(signal); return { ok: false, message: "Cancelled." };
+    }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
   const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: true });
   const controller = new TuiController(options);
-  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: false, now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, async () => false, accepted) });
+  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: false, now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();

@@ -81,7 +81,7 @@ mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, 
 let requests = 0;
 let loaderCalls = 0;
 let catalogRequests = 0;
-mock.module("./node_modules/schway/src/model/loader.ts", () => ({ loadProviderModel: async input => {
+mock.module("./node_modules/schway/src/model/loader.ts", () => ({ bindGrokModel: model => model, isGrokModel: () => false, loadProviderModel: async input => {
   loaderCalls++;
   return { provider: input.provider, id: input.model, async *stream() {
     requests++;
@@ -129,7 +129,7 @@ void (async () => {
       terminal.mockInput.pressKey("p", { meta: true });
       await settle(() => screenIncludes("Preferences"), "installed appearance preferences");
       terminal.mockInput.pressTab(); terminal.mockInput.pressTab();
-      for (let index = 0; index < 11; index++) terminal.mockInput.pressArrow("down");
+      for (let index = 0; index < 12; index++) terminal.mockInput.pressArrow("down");
       await settle(() => screenIncludes("appearance"), "installed appearance row");
       assert(screenIncludes(scenario.endsWith("-env") ? "environment" : "user-global"), "appearance source hidden");
       terminal.mockInput.pressEscape();
@@ -156,7 +156,7 @@ void (async () => {
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "cancel lost draft/cursor");
     terminal.mockInput.pressKey("l", { meta: true });
     await settle(() => screenIncludes("OpenAI API key"), "reopened sign-in choices");
-    for (let i = 0; i < 3; i++) terminal.mockInput.pressArrow("down");
+    for (let i = 0; i < 5; i++) terminal.mockInput.pressArrow("down");
     terminal.mockInput.pressEnter();
     await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");
@@ -216,7 +216,7 @@ import * as storeModule from "./node_modules/schway/src/auth/store.ts";
 mock.module("./node_modules/schway/src/auth/store.ts", () => ({ ...storeModule, createNativeCredentialStore: () => ({
   get: async () => null, set: async () => {}, delete: async () => {},
 }) }));
-mock.module("./node_modules/schway/src/model/loader.ts", () => ({ loadProviderModel: async input => ({
+mock.module("./node_modules/schway/src/model/loader.ts", () => ({ bindGrokModel: model => model, isGrokModel: () => false, loadProviderModel: async input => ({
   provider: input.provider, id: input.model,
   async *stream() {
     const text = "Answer: ไทย 中文 👩‍💻 é";

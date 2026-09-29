@@ -19,7 +19,7 @@ export abstract class TurnLayer extends CompactionLayer {
     this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
     if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.notice("Callback entry cancelled; no credential was changed."); return; }
-    if (this.loginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.loginAbort.abort(); return; }
+    if (this.loginAbort) { this.loginChooserIndex = undefined; if (!this.loginApprovalData) this.pickerReturn = undefined; this.recoveryRepair = false; this.loginAbort.abort(); return; }
     if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; this.recoveryRepair = false; return; }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.credentialEntry) {

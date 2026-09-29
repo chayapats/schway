@@ -126,7 +126,7 @@ export async function dispatchEditorInput(
   const accept = () => { if (!notified) { notified = true; accepted(); } };
   const slash = parseSlashCommand(text);
   const invocation = splitSlashCommand(text);
-  if (controller.running) { controller.notice(invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Busy: /${invocation.name} was not run. Press Esc to cancel the active operation, then retry.` : "Already running. Press Esc to cancel first, then retry the retained command."); return false; }
+  if (controller.running) { controller.notice(invocation?.name === "login" || invocation?.name === "logout" ? "Busy: credential changes require an idle session." : invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Busy: /${invocation.name} was not run. Press Esc to cancel the active operation, then retry.` : "Already running. Press Esc to cancel first, then retry the retained command."); return false; }
   if (invocation && await controller.commandCollision(invocation.name)) return false;
   if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
     const executed = await controller.runExtensionCommand(invocation.name, invocation.args, accept);
@@ -310,7 +310,7 @@ export type LoginTarget =
   | { kind: "grok"; device: boolean }
   | { error: string };
 
-/** Parse /login and /logout arguments into an API-key provider or the ChatGPT subscription flow. */
+/** Parse credential commands into explicit API-key, ChatGPT or Grok routes. */
 export function parseLoginTarget(args: string): LoginTarget {
   const tokens = args.trim().split(/\s+/).filter((token) => token.length > 0);
   const name = tokens[0]?.toLowerCase() ?? "";

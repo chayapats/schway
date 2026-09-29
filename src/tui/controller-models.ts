@@ -108,10 +108,10 @@ export abstract class ModelsLayer extends CommandsLayer {
   /** Fill connected routes together so one slow list cannot consume another's deadline. */
   protected async loadRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
     const load = this.credentials?.listRouteModels;
-    if (!load || !current()) return;
+    if (!current()) return;
     const settings = this.configEditor?.settings;
     const tasks: Promise<void>[] = [];
-    if (this.modelPickerAccess?.openaiApiKey === "API key") {
+    if (load && this.modelPickerAccess?.openaiApiKey === "API key") {
       tasks.push((async () => {
         try {
           this.apiModels = await this.boundedPickerTask(signal, load("api-key", signal));
@@ -123,7 +123,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     const baseUrl = settings?.baseUrl ?? this.baseUrl;
     const compatibleAccess = settings?.profile ? this.modelPickerAccess?.profiles[settings.profile] : this.modelPickerAccess?.providers["openai-compatible"];
-    if (baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
+    if (load && baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
       tasks.push((async () => {
         try {
           this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl }));
@@ -133,7 +133,7 @@ export abstract class ModelsLayer extends CommandsLayer {
         }
       })());
     }
-    if (this.modelPickerAccess?.xaiApiKey === "API key") {
+    if (load && this.modelPickerAccess?.xaiApiKey === "API key") {
       tasks.push((async () => {
         try {
           const listed = filterXaiModels(await this.boundedPickerTask(signal, load("xai", signal)));
@@ -419,9 +419,9 @@ export abstract class ModelsLayer extends CommandsLayer {
   async thinkingCommand(args: string): Promise<boolean> {
     const selection = parseThinkingArgs(args);
     if (typeof selection === "object") { this.fail(selection.error); return false; }
-    if (this.provider === "xai" && selection !== "show" && selection !== "reset" && this.configEditor?.modelCapability(this.modelId) === undefined && this.credentials?.listRouteModels) {
+    if (this.provider === "xai" && selection !== "show" && selection !== "reset" && this.configEditor?.modelCapability(this.modelId) === undefined && (this.grokSelected() ? this.credentials?.listGrokModels : this.credentials?.listRouteModels)) {
       try {
-        const models = filterXaiModels(await this.credentials.listRouteModels("xai", AbortSignal.timeout(5_000)));
+        const models = filterXaiModels(await (this.grokSelected() ? this.credentials!.listGrokModels!(AbortSignal.timeout(5_000)) : this.credentials!.listRouteModels!("xai", AbortSignal.timeout(5_000))));
         if (!models.length) throw new Error("xAI model list returned no selectable models.");
         this.installXaiCapabilities(models);
       } catch (error) {

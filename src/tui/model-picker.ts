@@ -1,4 +1,4 @@
-import { listCatalog, lookupModel, type ModelCapability } from "../model/catalog.ts";
+import { ROUTE_FALLBACK_MODELS, listCatalog, lookupModel, type ModelCapability } from "../model/catalog.ts";
 import type { CompatibleProfile } from "../config/config.ts";
 import { parseModelArgs } from "./commands.ts";
 import type { ModelAccess, ModelPickerAccess } from "./model-access.ts";
@@ -66,7 +66,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       const row: ModelPickerEntry = {
         identity: modelPickerIdentity({ provider: entry.provider, authRoute, modelId: entry.id }, entry.provider === "openai-compatible" ? options?.baseUrl : undefined, entry.provider === "openai-compatible" ? options?.credentialIdentity : undefined),
         provider: entry.provider, modelId: entry.id, authRoute, ...budgets(entry.provider, entry.id, limits),
-        active: entry.provider === provider && entry.id === modelId && options?.activeProfile === undefined && (entry.provider !== "openai" || activeRoute === "api-key"), custom: false,
+        active: entry.provider === provider && entry.id === modelId && options?.activeProfile === undefined && ((entry.provider !== "openai" && entry.provider !== "xai") || activeRoute === "api-key"), custom: false,
         ...(unavailable ? { listUnavailable: true } : {}),
         ...(options?.subscriptionMode ? { otherProvider: true } : {}),
       };
@@ -134,19 +134,20 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
-  const grok: readonly import("../model/model-list.ts").ListedModel[] = options?.grokModels ?? (options?.grokModelsUnavailable ? [] : listCatalog().filter(entry => entry.provider === "xai").map(entry => ({ id: entry.id })));
+  const grok: readonly import("../model/model-list.ts").ListedModel[] = options?.grokModels ?? (options?.grokModelsUnavailable ? [] : [{ id: ROUTE_FALLBACK_MODELS.xai }]);
   for (const listed of grok) {
     if (!matches("xai", listed.id, "Grok subscription")) continue;
     entries.push({ identity: modelPickerIdentity({ provider: "xai", authRoute: "grok", modelId: listed.id }), provider: "xai", modelId: listed.id, authRoute: "grok",
-      ...budgets("xai", listed.id, limits), active: provider === "xai" && modelId === listed.id && activeRoute === "grok", custom: false,
+      ...budgets("xai", listed.id, { contextWindow: listed.contextWindow ?? limits.contextWindow, maxOutput: listed.maxOutput ?? limits.maxOutput }), active: provider === "xai" && modelId === listed.id && activeRoute === "grok", custom: false,
       ...(listed.supportedThinking ? { supportedThinking: listed.supportedThinking } : {}),
+      ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
   const selection = parseModelArgs(query || `${provider}/${modelId}`, provider);
   if ((!query || query.includes("/")) && !("error" in selection) && selection.profile === undefined && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined && entry.authRoute !== "codex" && entry.authRoute !== "grok")) {
     const authRoute = selection.provider === "openai" || selection.provider === "xai" ? "api-key" as const : "provider" as const;
     entries.push({ ...selection, identity: modelPickerIdentity({ ...selection, authRoute }, selection.provider === "openai-compatible" ? options?.baseUrl : undefined, selection.provider === "openai-compatible" ? options?.credentialIdentity : undefined), authRoute,
-      ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined && (selection.provider !== "openai" || activeRoute === "api-key"), custom: true,
+      ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined && ((selection.provider !== "openai" && selection.provider !== "xai") || activeRoute === "api-key"), custom: true,
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
