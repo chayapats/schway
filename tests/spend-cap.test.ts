@@ -7,15 +7,15 @@ import type { Model } from "../src/model/model.ts";
 import { withTempDir } from "./helpers.ts";
 
 /** Scripted usage: every attempt reports one million input tokens and no output. */
-function usageModel(): Model {
-  return { provider: "openai", id: "gpt-5", async *stream() {
+function usageModel(provider: string, id: string): Model {
+  return { provider, id, async *stream() {
     yield { type: "usage", usage: { inputTokens: 1_000_000, outputTokens: 0 } };
     yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "text", text: "Done" }] } };
   } };
 }
 
 const ENV = { OPENAI_API_KEY: "fixture-secret" };
-const deps = { model: () => usageModel() };
+const deps = { model: (provider: string, id: string) => usageModel(provider, id) };
 
 async function run(dir: string, args: string[], env: Record<string, string> = ENV) {
   const output = join(dir, "out.json");
@@ -107,4 +107,14 @@ test("invalid max-spend is rejected", async () => {
   for (const value of ["0", "-1", "abc"]) {
     expect(await runEvalCli(["--provider", "scripted", "--max-spend", value], {})).toBe(2);
   }
+});
+
+test("free routes keep running after the cap stops a paid route", async () => {
+  await withTempDir(async dir => {
+    const { code, artifact } = await run(dir, ["--matrix", "openai:gpt-5,scripted:offline-v1", "--allow-paid", "--case", "all", "--max-spend", "3"]);
+    expect(code).toBe(3);
+    const scripted = artifact.results.filter((r: { provider: string }) => r.provider === "scripted");
+    expect(scripted).toHaveLength(7);
+    expect(scripted.every((r: { outcome: string }) => r.outcome !== "skipped_spend_cap")).toBe(true);
+  });
 });

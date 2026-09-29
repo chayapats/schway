@@ -12,7 +12,8 @@ export interface SpendEstimate {
   exact: boolean;
 }
 
-const FREE: TokenPrice = { inputPerMillion: 0, outputPerMillion: 0 };
+/** Price of routes that never bill per token. */
+export const FREE: TokenPrice = { inputPerMillion: 0, outputPerMillion: 0 };
 
 /** Published API-key list prices; models absent here need explicit prices. */
 const PRICES: Record<string, TokenPrice> = {
@@ -31,7 +32,12 @@ export function resolvePrice(provider: string, model: string, explicit?: TokenPr
 /** Convert recorded token totals to USD without treating missing usage as proof of zero spend. */
 export function estimateSpendUsd(metrics: Pick<EvalMetrics, "inputTokens" | "outputTokens" | "unknownInputAttempts" | "unknownOutputAttempts">, price: TokenPrice): SpendEstimate {
   const usd = ((metrics.inputTokens ?? 0) * price.inputPerMillion + (metrics.outputTokens ?? 0) * price.outputPerMillion) / 1_000_000;
-  return { usd: Math.round(usd * 1e6) / 1e6, exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.inputTokens !== null };
+  return { usd: roundUsd(usd), exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.inputTokens !== null };
+}
+
+/** Round to micro-dollars so float noise never shows up in reports. */
+export function roundUsd(usd: number): number {
+  return Math.round(usd * 1e6) / 1e6;
 }
 
 /** Format a USD amount for reports. */

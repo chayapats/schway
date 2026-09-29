@@ -7,7 +7,7 @@ import type { Model } from "../model/model.ts";
 import { loadProviderModel } from "../model/loader.ts";
 import { CODING_CASE, failedCodingEval, resolveEvalSettings, runCodingEval, skippedCodingEval, spendCapSkippedEval, type CodingEvalResult, type EvalSettings } from "./coding.ts";
 import { DAILY_CASES } from "./cases.ts";
-import { estimateSpendUsd, formatUsd, resolvePrice, type TokenPrice } from "./spend.ts";
+import { estimateSpendUsd, formatUsd, FREE, resolvePrice, roundUsd, type TokenPrice } from "./spend.ts";
 
 const exec = promisify(execFile);
 const USAGE = "Usage: bun run eval (--provider scripted | --provider anthropic|openai|openai-compatible --model ID --allow-paid | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]";
@@ -15,7 +15,7 @@ const USAGE = "Usage: bun run eval (--provider scripted | --provider anthropic|o
 /** Exit code when the spend cap stopped the run before every case started. */
 export const SPEND_CAP_EXIT_CODE = 3;
 
-/** Run one explicitly selected eval and write a credential-free JSON artifact; `deps.model` substitutes the provider model in tests. */
+/** Run the selected evals under a spend cap and write a credential-free JSON artifact; `deps.model` is a test seam. */
 export async function runEvalCli(argv: string[], env: Record<string, string | undefined> = process.env,
     deps: { model?: (provider: string, model: string, caseId: string) => Model } = {}): Promise<number> {
   if (argv.includes("--help")) { console.log(USAGE); return 0; }
@@ -80,12 +80,15 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   catch { console.error("Cannot reserve eval artifact path (it must be a new file in an existing directory)."); return 2; }
   try {
     const results: CodingEvalResult[] = [];
-    let spent = 0, capHit = false, highestCase = 0;
+    let spent = 0, capHit = false;
+    const highestCase = entries.map(() => 0);
     const total = entries.length * caseIds.length;
     for (const [entryIndex, entry] of entries.entries()) for (const id of caseIds) {
       const { provider, model: modelId } = entry;
-      // The next case is assumed to cost as much as the costliest case so far; the first case runs unless the cap is already spent.
-      if (capHit || spent >= capUsd || spent + highestCase > capUsd) {
+      // A paid case is assumed to cost as much as that route's costliest case so far; the first runs unless the cap is already spent. Free routes never spend, so they always run.
+      const price = prices[entryIndex] ?? FREE;
+      const paid = price.inputPerMillion > 0 || price.outputPerMillion > 0;
+      if (paid && (spent >= capUsd || spent + highestCase[entryIndex]! > capUsd)) {
         capHit = true;
         results.push({ ...spendCapSkippedEval(provider, modelId, sourceRevision, settings, id), spendUsd: 0, spendExact: true });
         console.log(`${id} ${provider}/${modelId}: skipped/spend_cap`);
@@ -105,16 +108,16 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
           result = failedCodingEval(provider, modelId, sourceRevision, settings, id);
         }
       }
-      const spend = estimateSpendUsd(result.metrics, prices[entryIndex] ?? { inputPerMillion: 0, outputPerMillion: 0 });
+      const spend = estimateSpendUsd(result.metrics, prices[entryIndex] ?? FREE);
       result.spendUsd = spend.usd;
       result.spendExact = spend.exact;
       spent += spend.usd;
-      highestCase = Math.max(highestCase, spend.usd);
+      highestCase[entryIndex] = Math.max(highestCase[entryIndex]!, spend.usd);
       results.push(result);
       console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}; spend=${spend.exact ? "" : "≥"}${formatUsd(spend.usd)}`);
     }
-    const casesRun = results.filter(result => result.outcome !== "skipped_spend_cap").length;
-    const spendSummary = { totalUsd: Math.round(spent * 1e6) / 1e6, capUsd, casesRun, casesTotal: total, exact: results.every(result => result.spendExact !== false), stoppedBySpendCap: capHit };
+    const casesRun = results.filter(result => result.outcome !== "skipped_spend_cap" && result.outcome !== "skipped_prerequisites").length;
+    const spendSummary = { totalUsd: roundUsd(spent), capUsd, casesRun, casesTotal: total, exact: results.every(result => result.spendExact !== false), stoppedBySpendCap: capHit };
     if (capHit) console.log(`stopped: spend cap reached (${formatUsd(capUsd)})`);
     console.log(`Spent ${formatUsd(spent)} of ${formatUsd(capUsd)} · ${casesRun}/${total} cases run`);
     const multiple = !!matrix || caseIds.length > 1;
