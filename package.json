@@ -37,7 +37,9 @@
     "live-smoke": "bun --no-env-file src/live/cli.ts",
     "eval": "bun --no-env-file src/eval/cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "screens:update": "SCHWAY_UPDATE_SCREENS=1 bun test tests/screen-catalog.test.ts",
+    "screens:gallery": "bun tests/screen-catalog/gallery.ts"
   },
   "engines": {
     "bun": ">=1.2.0"

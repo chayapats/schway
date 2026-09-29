@@ -1,0 +1,133 @@
+schway-screen 1
+screen model-picker
+title Model picker
+description Connected models show their context and output budgets.
+variant dark-120
+size 120x30
+cursor 7 27 visible
+== text
+ ⚡ schway  /project
+
+
+  openai/gpt-6-astra · OpenAI route · configured, unverified
+
+  Type a task · Enter sends
+
+
+
+
+
+
+
+
+
+
+
+   Choose model + route · ↑/↓ select · Enter apply/connect · Ctrl+R retry · Esc back
+   › API key · openai/gpt-6-astra ✓ current
+    API key · openai/gpt-5.6-terra
+    API key · openai/gpt-5.6-luna
+    API key · openai/gpt-4.1
+    Login required · openai-compatible/gpt-4o · Connect
+    Login required · openai-compatible/gpt-4o-mini · Connect
+   OpenAI API key · configured, unverified · 1/7 · 1,050,000 context · 128,000 output
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › Search models or type provider/model…
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ● READY   openai/gpt-6-astra  OpenAI route                                                          ctx ━━━━━━━━━━ 0%
+  Enter confirm · Esc back
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-120 #ffffff #161b24 -
+01 0-120 #ffffff #0e1117 -
+02 0-120 #ffffff #0e1117 -
+03 0-2 #ffffff #0e1117 -
+03 2-20 #e6eaf0 #0e1117 b
+03 20-60 #8b95a7 #0e1117 -
+03 60-120 #ffffff #0e1117 -
+04 0-120 #ffffff #0e1117 -
+05 0-2 #ffffff #0e1117 -
+05 2-16 #8b95a7 #0e1117 -
+05 16-21 #e6eaf0 #293140 b
+05 21-27 #8b95a7 #0e1117 -
+05 27-120 #ffffff #0e1117 -
+06 0-120 #ffffff #0e1117 -
+07 0-120 #ffffff #0e1117 -
+08 0-120 #ffffff #0e1117 -
+09 0-120 #ffffff #0e1117 -
+10 0-120 #ffffff #0e1117 -
+11 0-120 #ffffff #0e1117 -
+12 0-120 #ffffff #0e1117 -
+13 0-120 #ffffff #0e1117 -
+14 0-120 #ffffff #0e1117 -
+15 0-120 #ffffff #0e1117 -
+16 0-120 #ffffff #0e1117 -
+17 0-2 #ffffff #0e1117 -
+17 2-3 #ffffff #1e2430 -
+17 3-84 #7cc4ff #1e2430 -
+17 84-118 #ffffff #1e2430 -
+17 118-120 #ffffff #0e1117 -
+18 0-2 #ffffff #0e1117 -
+18 2-3 #ffffff #1e2430 -
+18 3-43 #e6eaf0 #33475e -
+18 43-118 #ffffff #1e2430 -
+18 118-120 #ffffff #0e1117 -
+19 0-2 #ffffff #0e1117 -
+19 2-3 #ffffff #1e2430 -
+19 3-34 #e6eaf0 #1e2430 -
+19 34-118 #ffffff #1e2430 -
+19 118-120 #ffffff #0e1117 -
+20 0-2 #ffffff #0e1117 -
+20 2-3 #ffffff #1e2430 -
+20 3-33 #e6eaf0 #1e2430 -
+20 33-118 #ffffff #1e2430 -
+20 118-120 #ffffff #0e1117 -
+21 0-2 #ffffff #0e1117 -
+21 2-3 #ffffff #1e2430 -
+21 3-28 #e6eaf0 #1e2430 -
+21 28-118 #ffffff #1e2430 -
+21 118-120 #ffffff #0e1117 -
+22 0-2 #ffffff #0e1117 -
+22 2-3 #ffffff #1e2430 -
+22 3-55 #e6eaf0 #1e2430 -
+22 55-118 #ffffff #1e2430 -
+22 118-120 #ffffff #0e1117 -
+23 0-2 #ffffff #0e1117 -
+23 2-3 #ffffff #1e2430 -
+23 3-60 #e6eaf0 #1e2430 -
+23 60-118 #ffffff #1e2430 -
+23 118-120 #ffffff #0e1117 -
+24 0-2 #ffffff #0e1117 -
+24 2-3 #ffffff #1e2430 -
+24 3-85 #8b95a7 #1e2430 -
+24 85-118 #ffffff #1e2430 -
+24 118-120 #ffffff #0e1117 -
+25 0-2 #ffffff #0e1117 -
+25 2-118 #161b24 #0e1117 -
+25 118-120 #ffffff #0e1117 -
+26 0-2 #ffffff #0e1117 -
+26 2-6 #7cc4ff #161b24 -
+26 6-43 #8b95a7 #161b24 -
+26 43-118 #ffffff #161b24 -
+26 118-120 #ffffff #0e1117 -
+27 0-2 #ffffff #0e1117 -
+27 2-118 #161b24 #0e1117 -
+27 118-120 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-10 #8fd19e #31433f b
+28 10-11 #8b95a7 #161b24 -
+28 11-31 #e6eaf0 #1e2430 -
+28 31-106 #8b95a7 #161b24 -
+28 106-116 #2c3444 #161b24 -
+28 116-119 #8b95a7 #161b24 -
+28 119-120 #ffffff #0e1117 -
+29 0-2 #ffffff #0e1117 -
+29 2-7 #e6eaf0 #293140 b
+29 7-18 #8b95a7 #0e1117 -
+29 18-21 #e6eaf0 #293140 b
+29 21-26 #8b95a7 #0e1117 -
+29 26-120 #ffffff #0e1117 -

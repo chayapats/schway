@@ -1,0 +1,135 @@
+schway-screen 1
+screen model-picker
+title Model picker
+description Connected models show their context and output budgets.
+variant light-50
+size 50x30
+cursor 6 27 visible
+== text
+ ⚡ schway  /project
+
+
+ openai/gpt-6-astra · OpenAI route · configured,
+ unverified
+
+ Type a task · Enter sends
+
+
+
+
+
+
+
+
+
+
+  Choose model + route · ↑/↓ select · Enter app…
+  › API key · openai/gpt-6-astra ✓ current
+   API key · openai/gpt-5.6-terra
+   API key · openai/gpt-5.6-luna
+   API key · openai/gpt-4.1
+   Login required · openai-compatible/gpt-4o · …
+   Login required · openai-compatible/gpt-4o-mi…
+  OpenAI API key · configured, unverified · 1/7…
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Search models or type provider/model…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ● READY   openai/gpt-6-astra       ctx ━━━━━ 0%
+ Enter confirm · Esc back
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-50 #ffffff #ecedea -
+01 0-50 #ffffff #f7f7f4 -
+02 0-50 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-19 #1d232c #f7f7f4 b
+03 19-48 #545e6c #f7f7f4 -
+03 48-50 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-11 #545e6c #f7f7f4 -
+04 11-50 #ffffff #f7f7f4 -
+05 0-50 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-15 #545e6c #f7f7f4 -
+06 15-20 #1d232c #caced3 b
+06 20-26 #545e6c #f7f7f4 -
+06 26-50 #ffffff #f7f7f4 -
+07 0-50 #ffffff #f7f7f4 -
+08 0-50 #ffffff #f7f7f4 -
+09 0-50 #ffffff #f7f7f4 -
+10 0-50 #ffffff #f7f7f4 -
+11 0-50 #ffffff #f7f7f4 -
+12 0-50 #ffffff #f7f7f4 -
+13 0-50 #ffffff #f7f7f4 -
+14 0-50 #ffffff #f7f7f4 -
+15 0-50 #ffffff #f7f7f4 -
+16 0-50 #ffffff #f7f7f4 -
+17 0-1 #ffffff #f7f7f4 -
+17 1-2 #ffffff #e1e3df -
+17 2-48 #0a5894 #e1e3df -
+17 48-49 #ffffff #e1e3df -
+17 49-50 #ffffff #f7f7f4 -
+18 0-1 #ffffff #f7f7f4 -
+18 1-2 #ffffff #e1e3df -
+18 2-42 #1d232c #c7d2d6 -
+18 42-49 #ffffff #e1e3df -
+18 49-50 #ffffff #f7f7f4 -
+19 0-1 #ffffff #f7f7f4 -
+19 1-2 #ffffff #e1e3df -
+19 2-33 #1d232c #e1e3df -
+19 33-49 #ffffff #e1e3df -
+19 49-50 #ffffff #f7f7f4 -
+20 0-1 #ffffff #f7f7f4 -
+20 1-2 #ffffff #e1e3df -
+20 2-32 #1d232c #e1e3df -
+20 32-49 #ffffff #e1e3df -
+20 49-50 #ffffff #f7f7f4 -
+21 0-1 #ffffff #f7f7f4 -
+21 1-2 #ffffff #e1e3df -
+21 2-27 #1d232c #e1e3df -
+21 27-49 #ffffff #e1e3df -
+21 49-50 #ffffff #f7f7f4 -
+22 0-1 #ffffff #f7f7f4 -
+22 1-2 #ffffff #e1e3df -
+22 2-48 #1d232c #e1e3df -
+22 48-49 #ffffff #e1e3df -
+22 49-50 #ffffff #f7f7f4 -
+23 0-1 #ffffff #f7f7f4 -
+23 1-2 #ffffff #e1e3df -
+23 2-48 #1d232c #e1e3df -
+23 48-49 #ffffff #e1e3df -
+23 49-50 #ffffff #f7f7f4 -
+24 0-1 #ffffff #f7f7f4 -
+24 1-2 #ffffff #e1e3df -
+24 2-48 #545e6c #e1e3df -
+24 48-49 #ffffff #e1e3df -
+24 49-50 #ffffff #f7f7f4 -
+25 0-1 #ffffff #f7f7f4 -
+25 1-49 #ecedea #f7f7f4 -
+25 49-50 #ffffff #f7f7f4 -
+26 0-1 #ffffff #f7f7f4 -
+26 1-5 #0a5894 #ecedea -
+26 5-42 #545e6c #ecedea -
+26 42-49 #ffffff #ecedea -
+26 49-50 #ffffff #f7f7f4 -
+27 0-1 #ffffff #f7f7f4 -
+27 1-49 #ecedea #f7f7f4 -
+27 49-50 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-10 #19612f #d3dcd4 b
+28 10-11 #545e6c #ecedea -
+28 11-31 #1d232c #e1e3df -
+28 31-41 #545e6c #ecedea -
+28 41-46 #c5c9cf #ecedea -
+28 46-49 #545e6c #ecedea -
+28 49-50 #ffffff #f7f7f4 -
+29 0-1 #ffffff #f7f7f4 -
+29 1-6 #1d232c #caced3 b
+29 6-17 #545e6c #f7f7f4 -
+29 17-20 #1d232c #caced3 b
+29 20-25 #545e6c #f7f7f4 -
+29 25-50 #ffffff #f7f7f4 -
