@@ -9,17 +9,20 @@ import { encodeChatCompletionsSse, sampleRequest as compatibleRequest, TEXT_STRE
 test("Responses records final usage and keeps missing dimensions unknown", async () => {
   const complete = openaiText.at(-1)!;
   const fixtures = [...openaiText.slice(0, -1), { ...complete, response: { ...complete.response, usage: { input_tokens: 23, output_tokens: 8 } } }];
-  const model = createOpenAIModel({ apiKey: "fixture", fetch: async () => new Response(openaiSse(fixtures), { headers: { "Content-Type": "text/event-stream" } }) });
+  const model = createOpenAIModel({
+    model: "gpt-6-astra", apiKey: "fixture", fetch: async () => new Response(openaiSse(fixtures), { headers: { "Content-Type": "text/event-stream" } }) });
   expect((await collect(model.stream(openaiRequest()))).filter(event => event.type === "usage")).toEqual([
     { type: "usage", usage: { inputTokens: 23, outputTokens: 8 } },
   ]);
-  const absent = createOpenAIModel({ apiKey: "fixture", fetch: async () => new Response(openaiSse(openaiText), { headers: { "Content-Type": "text/event-stream" } }) });
+  const absent = createOpenAIModel({
+    model: "gpt-6-astra", apiKey: "fixture", fetch: async () => new Response(openaiSse(openaiText), { headers: { "Content-Type": "text/event-stream" } }) });
   expect((await collect(absent.stream(openaiRequest()))).some(event => event.type === "usage")).toBe(false);
 });
 
 test("compatible usage-only SSE chunk is requested and normalized", async () => {
   let includeUsage = false;
-  const model = createOpenAICompatibleModel({ baseUrl: "https://example.test/v1", auth: "none", fetch: async (_, init) => {
+  const model = createOpenAICompatibleModel({
+    model: "gpt-4o", baseUrl: "https://example.test/v1", auth: "none", fetch: async (_, init) => {
     includeUsage = (JSON.parse(String(init?.body)) as { stream_options: { include_usage: boolean } }).stream_options.include_usage;
     return new Response(encodeChatCompletionsSse([...TEXT_STREAM_CHUNKS, { choices: [], usage: { prompt_tokens: 17, completion_tokens: 6 } }]), { headers: { "Content-Type": "text/event-stream" } });
   } });

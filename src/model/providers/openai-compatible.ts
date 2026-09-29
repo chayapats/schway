@@ -3,7 +3,7 @@ import type {
   AssistantContent,
   AssistantMessage,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../catalog.ts";
+import { describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../catalog.ts";
 import { reportedTokens } from "../model.ts";
 import type {
   Model,
@@ -12,10 +12,6 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-
-/** Default Chat Completions model when the caller does not specify one. */
-export const DEFAULT_OPENAI_COMPATIBLE_MODEL =
-  DEFAULT_MODEL_IDS["openai-compatible"];
 
 /** Control automatic bearer auth: require a key, send one if supplied, or omit automatic Authorization. */
 export type OpenAICompatibleAuth = "required" | "optional" | "none";
@@ -56,6 +52,12 @@ type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+function requiredModelId(model: string | undefined): string {
+  const modelId = model?.trim() ?? "";
+  if (!modelId) throw new Error("A model ID is required.");
+  return modelId;
+}
+
 /**
  * Create a Chat Completions fetch/SSE adapter that normalizes text and tool calls without automatic retries.
  * Streaming passes through cancellation and rejects missing required keys, HTTP failures, and malformed streams.
@@ -71,7 +73,7 @@ export function createOpenAICompatibleModel(options: {
   thinking?: ThinkingLevel;
   fetch?: FetchLike;
 }): Model {
-  const modelId = options.model?.trim() || DEFAULT_OPENAI_COMPATIBLE_MODEL;
+  const modelId = requiredModelId(options.model);
   const fetchFn = options.fetch ?? fetch;
   const auth = options.auth ?? "optional";
   const defaultThinking = options.thinking;

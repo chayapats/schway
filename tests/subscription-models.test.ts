@@ -627,7 +627,8 @@ test("account catalog selection reaches the real Schway loop and Codex request b
     const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", openaiAuth: "codex" } });
     const controller = new TuiController({
       session: createSession(), sessionId: "real-loop", workspace, configEditor,
-      provider: "openai", modelId: "gpt-5.4", model: createCodexSubscriptionModel({ store, fetch: transport }),
+      provider: "openai", modelId: "gpt-5.4", model: createCodexSubscriptionModel({
+        model: "gpt-6-astra", store, fetch: transport }),
       contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: signal => fetchSubscriptionCatalog({ store, fetch: transport, signal }) },
       stageSettings: async settings => ({ model: createCodexSubscriptionModel({ model: settings.model, thinking: settings.thinking, modelCapability: settings.supportedThinking ? { id: settings.model, supportedThinking: settings.supportedThinking } : undefined, store, fetch: transport }), contextManager: createContextManager(workspace) }),

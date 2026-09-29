@@ -24,8 +24,6 @@ export const DEVICE_LOGIN_INDEX = LOGIN_CHOICES.findIndex(choice => choice.actio
 
 /** Sign-in, credential entry, logout and subscription login actions. */
 export abstract class CredentialsLayer extends ControllerCore {
-  /** Fetched list budgets for the activation about to be staged; explicit config still wins. */
-  protected activationBudgets?: { contextWindow?: number; maxOutput?: number };
   /** Route login input and notify when an explicit subscription sign-in starts. */
   async login(args: string, accepted: () => void = () => {}): Promise<boolean> {
     if (!args.trim()) return this.openLoginChooser();
@@ -161,26 +159,44 @@ export abstract class CredentialsLayer extends ControllerCore {
   /** Select the route's recommended model after sign-in and remember it for the next interactive launch. */
   protected async activateSignedInModel(route: "api-key" | "compatible", target: CredentialTarget): Promise<boolean> {
     if (!this.configEditor || !this.stageSettings || this.disposed) return false;
+    const generation = this.selectionGeneration;
+    const provider = this.provider;
+    const profile = this.profile;
+    const listing = new AbortController();
+    this.signInListAbort = listing;
     const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : ROUTE_FALLBACK_MODELS.openai;
     let modelId: string = fallback;
     let listed: { contextWindow?: number; maxOutput?: number } | undefined;
     try {
-      const models = await this.credentials?.listRouteModels?.(route, AbortSignal.timeout(5_000), { baseUrl: target.baseUrl });
+      const models = await this.credentials?.listRouteModels?.(route, AbortSignal.any([listing.signal, AbortSignal.timeout(5_000)]), { baseUrl: target.baseUrl });
+      if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
       if (models?.length) {
         modelId = recommendedListedModel(route, models);
-        listed = models.find(model => model.id === modelId);
+        const chosen = models.find(model => model.id === modelId);
+        if (chosen && (chosen.contextWindow || chosen.maxOutput)) listed = { contextWindow: chosen.contextWindow, maxOutput: chosen.maxOutput };
       }
     } catch {
+      if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
       modelId = fallback;
+    } finally {
+      if (this.signInListAbort === listing) this.signInListAbort = undefined;
     }
-    this.activationBudgets = listed;
+    if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
     const applied = await this.changeSettings(
       () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId) : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
       () => `Signed in. Using ${target.provider}/${this.modelId}.`,
       "Credential saved, but the recommended model could not be activated. Choose one with /model.",
+      false,
+      false,
+      listed,
     );
     if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "api-key" ? "api-key" : "provider" });
     return applied;
+  }
+
+  /** True when a newer choice, disposal, or an active turn makes the pending sign-in activation unsafe. */
+  private signInSelectionStale(generation: number, provider: string, profile: string | undefined): boolean {
+    return this.disposed || this.running || this.modelId.trim().length > 0 || this.selectionGeneration !== generation || this.provider !== provider || this.profile !== profile;
   }
 
   /** Remove exactly one provider's saved credential without altering runtime or environment overrides. */

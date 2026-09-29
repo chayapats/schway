@@ -569,13 +569,14 @@ export function resolveSettings(input: {
     const unsetThinkingError = unsetThinking === undefined ? undefined
       : validateThinking(provider, model, unsetThinking, merged.extraBody);
     if (unsetThinkingError !== undefined) return { error: unsetThinkingError };
-    const empty: ResolvedSettings = {
+    return finishResolvedSettings({
       provider,
       model: "",
       modelConfigured: false,
-      ...(unsetThinking !== undefined ? { thinking: unsetThinking, effectiveThinking: unsetThinking } : {}),
-      maxTurns: merged.maxTurns ?? DEFAULT_MAX_TURNS,
-      maxConcurrentTools: merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
+      merged,
+      selectedName,
+      activeProfile,
+      thinking: unsetThinking,
       contextWindow: merged.contextWindow ?? UNKNOWN_MODEL_DEFAULTS.contextWindow,
       maxOutput: merged.maxOutput ?? UNKNOWN_MODEL_DEFAULTS.maxOutput,
       catalog: {
@@ -585,22 +586,7 @@ export function resolveSettings(input: {
         contextWindow: merged.contextWindow ?? UNKNOWN_MODEL_DEFAULTS.contextWindow,
         maxOutput: merged.maxOutput ?? UNKNOWN_MODEL_DEFAULTS.maxOutput,
       },
-      gitChangeTracking: merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
-      appearance: merged.appearance ?? "auto",
-      openaiAuth: merged.openaiAuth ?? "auto",
-      ...(merged.contextWindow !== undefined ? { explicitContextWindow: merged.contextWindow } : {}),
-      ...(merged.maxOutput !== undefined ? { explicitMaxOutput: merged.maxOutput } : {}),
-      ...(selectedName !== undefined ? { profile: selectedName } : {}),
-      ...(selectedName !== undefined && activeProfile?.credentialEnv !== undefined ? { credentialEnv: activeProfile.credentialEnv } : {}),
-      ...(selectedName !== undefined && activeProfile?.credentialIdentity !== undefined ? { credentialIdentity: activeProfile.credentialIdentity } : {}),
-      ...(provider === "openai-compatible" ? {
-        baseUrl: merged.baseUrl?.trim(),
-        headers: merged.headers,
-        extraBody: merged.extraBody,
-        auth: merged.auth ?? "optional",
-      } : {}),
-    };
-    return empty;
+    });
   }
   const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
   const subscriptionCatalog = subscriptionSelected ? input.modelCapabilities : undefined;
@@ -617,54 +603,68 @@ export function resolveSettings(input: {
     return { error: thinkingError };
   }
 
-  const resolved: ResolvedSettings = {
-    provider,
-    model,
-    modelConfigured: true,
-    ...(thinking !== undefined ? { thinking, effectiveThinking: thinking } : {}),
-    ...(capability?.defaultThinking !== undefined ? { defaultThinking: capability.defaultThinking } : {}),
-    ...(capability !== undefined ? { supportedThinking: capability.supportedThinking } : {}),
-    maxTurns: merged.maxTurns ?? DEFAULT_MAX_TURNS,
-    maxConcurrentTools:
-      merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
-    contextWindow: catalog.contextWindow,
-    maxOutput: catalog.maxOutput,
-    catalog,
-    gitChangeTracking: merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
-    appearance: merged.appearance ?? "auto",
-    openaiAuth: merged.openaiAuth ?? "auto",
-    ...(merged.contextWindow !== undefined
-      ? { explicitContextWindow: merged.contextWindow }
-      : {}),
-    ...(merged.maxOutput !== undefined
-      ? { explicitMaxOutput: merged.maxOutput }
-      : {}),
-    ...(selectedName !== undefined ? { profile: selectedName } : {}),
-    ...(selectedName !== undefined && activeProfile?.credentialEnv !== undefined
-      ? { credentialEnv: activeProfile.credentialEnv }
-      : {}),
-    ...(selectedName !== undefined && activeProfile?.credentialIdentity !== undefined
-      ? { credentialIdentity: activeProfile.credentialIdentity }
-      : {}),
-  };
-
-  if (provider !== "openai-compatible") {
-    return resolved;
-  }
-
-  const baseUrl = merged.baseUrl?.trim() ?? "";
-  if (baseUrl.length === 0) {
+  if (provider === "openai-compatible" && !(merged.baseUrl?.trim())) {
     return {
       error:
         "Missing --base-url for OpenAI-compatible provider. Set baseUrl in config or pass --base-url.",
     };
   }
+  return finishResolvedSettings({
+    provider,
+    model,
+    modelConfigured: true,
+    merged,
+    selectedName,
+    activeProfile,
+    thinking,
+    defaultThinking: capability?.defaultThinking,
+    supportedThinking: capability?.supportedThinking,
+    contextWindow: catalog.contextWindow,
+    maxOutput: catalog.maxOutput,
+    catalog,
+  });
+}
+
+function finishResolvedSettings(input: {
+  provider: ProviderFamily;
+  model: string;
+  modelConfigured: boolean;
+  merged: ConfigLayer;
+  selectedName?: string;
+  activeProfile?: CompatibleProfile;
+  thinking?: ThinkingLevel;
+  defaultThinking?: ThinkingLevel;
+  supportedThinking?: readonly ThinkingLevel[];
+  contextWindow: number;
+  maxOutput: number;
+  catalog: ModelInfo;
+}): ResolvedSettings {
   return {
-    ...resolved,
-    baseUrl,
-    headers: merged.headers,
-    extraBody: merged.extraBody,
-    auth: merged.auth ?? "optional",
+    provider: input.provider,
+    model: input.model,
+    modelConfigured: input.modelConfigured,
+    ...(input.thinking !== undefined ? { thinking: input.thinking, effectiveThinking: input.thinking } : {}),
+    ...(input.defaultThinking !== undefined ? { defaultThinking: input.defaultThinking } : {}),
+    ...(input.supportedThinking !== undefined ? { supportedThinking: input.supportedThinking } : {}),
+    maxTurns: input.merged.maxTurns ?? DEFAULT_MAX_TURNS,
+    maxConcurrentTools: input.merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
+    contextWindow: input.contextWindow,
+    maxOutput: input.maxOutput,
+    catalog: input.catalog,
+    gitChangeTracking: input.merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
+    appearance: input.merged.appearance ?? "auto",
+    openaiAuth: input.merged.openaiAuth ?? "auto",
+    ...(input.merged.contextWindow !== undefined ? { explicitContextWindow: input.merged.contextWindow } : {}),
+    ...(input.merged.maxOutput !== undefined ? { explicitMaxOutput: input.merged.maxOutput } : {}),
+    ...(input.selectedName !== undefined ? { profile: input.selectedName } : {}),
+    ...(input.selectedName !== undefined && input.activeProfile?.credentialEnv !== undefined ? { credentialEnv: input.activeProfile.credentialEnv } : {}),
+    ...(input.selectedName !== undefined && input.activeProfile?.credentialIdentity !== undefined ? { credentialIdentity: input.activeProfile.credentialIdentity } : {}),
+    ...(input.provider === "openai-compatible" ? {
+      baseUrl: input.merged.baseUrl?.trim(),
+      headers: input.merged.headers,
+      extraBody: input.merged.extraBody,
+      auth: input.merged.auth ?? "optional",
+    } : {}),
   };
 }
 

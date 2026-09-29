@@ -2,7 +2,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_MODEL_IDS } from "../model/catalog.ts";
+import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import type { SmokeProvider, SmokeReport, SmokeScenario, SmokeSelection } from "./smoke.ts";
 
 const MAX_REPLY_BYTES = 8192;
@@ -102,8 +102,8 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
   let stopped = true;
   let timedOut = false;
   for (const provider of [...new Set(selection.providers)]) {
-    const model = selection.models?.[provider] ?? ({ "openai-api-key": DEFAULT_MODEL_IDS.openai, compatible: DEFAULT_MODEL_IDS["openai-compatible"],
-      codex: DEFAULT_MODEL_IDS.openai } as const)[provider];
+    const model = selection.models?.[provider] ?? ({ "openai-api-key": ROUTE_FALLBACK_MODELS.openai, compatible: ROUTE_FALLBACK_MODELS["openai-compatible"],
+      codex: ROUTE_FALLBACK_MODELS.openai } as const)[provider];
     if (!selection.enabled) { scenarios.push(scenario(provider, model, "skipped", "live_disabled")); continue; }
     // Bun cannot certify or kill a Windows descendant tree without a Job Object. Never spend a call on a best-effort stop.
     if (process.platform === "win32") { scenarios.push(scenario(provider, model, "pending", "supervision_unavailable")); continue; }

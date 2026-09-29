@@ -6,7 +6,7 @@ import { runAgentLoop } from "../agent/loop.ts";
 import { resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
 import { codexSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { createContextManager } from "../context/manager.ts";
-import { DEFAULT_MODEL_IDS } from "../model/catalog.ts";
+import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { loadProviderModel, type ProviderLoaderInput } from "../model/loader.ts";
 import type { Model } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
@@ -84,9 +84,9 @@ const MAX_TURNS = 2;
 const MAX_TOKENS = 256;
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const DEFAULT_MODELS: Record<SmokeProvider, string> = {
-  "openai-api-key": DEFAULT_MODEL_IDS.openai,
-  compatible: DEFAULT_MODEL_IDS["openai-compatible"],
-  codex: DEFAULT_MODEL_IDS.openai,
+  "openai-api-key": ROUTE_FALLBACK_MODELS.openai,
+  compatible: ROUTE_FALLBACK_MODELS["openai-compatible"],
+  codex: ROUTE_FALLBACK_MODELS.openai,
 };
 
 /** Execute only explicitly enabled lanes through Schway's real streaming loop and isolated read tool. */

@@ -16,6 +16,7 @@ export abstract class TurnLayer extends CompactionLayer {
    * Applies to both submitted turns and manual compaction.
    */
   cancel(): void {
+    this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
     if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.notice("Callback entry cancelled; no credential was changed."); return; }
     if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.codexLoginAbort.abort(); return; }

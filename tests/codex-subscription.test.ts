@@ -636,9 +636,15 @@ test("locked subscription storage fails actionably instead of starting a browser
   expect(resolved).toMatchObject({ error: expect.stringContaining("secure store") });
 });
 
+test("createCodexSubscriptionModel rejects a missing or blank model ID", () => {
+  expect(() => createCodexSubscriptionModel({})).toThrow("A model ID is required.");
+  expect(() => createCodexSubscriptionModel({ model: " " })).toThrow("A model ID is required.");
+});
+
 test("subscription transport explicitly enables streaming to avoid the endpoint's HTTP 400", async () => {
   let requests = 0;
   const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     tokens: { accessToken: jwtWithAccount("acct-stream-required"), expiresAt: Date.now() + 3_600_000 },
     fetch: async (_input, init) => {
       requests++;
@@ -661,6 +667,7 @@ test("subscription transport explicitly enables streaming to avoid the endpoint'
 test.each([undefined, 128, 16_384])("subscription requests omit unsupported output limits (configured: %s)", async maxTokens => {
   let requests = 0;
   const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     maxTokens,
     tokens: { accessToken: jwtWithAccount("acct-output-limit"), expiresAt: Date.now() + 3_600_000 },
     fetch: async (_input, init) => {
@@ -739,6 +746,7 @@ test("subscription transport makes exactly one attempt and maps revocation disti
     return new Response("revoked detail", { status: 401 });
   };
   const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     tokens: { accessToken: token, expiresAt: Date.now() + 3_600_000 },
     fetch: revoked,
   });
@@ -751,6 +759,7 @@ test("subscription transport makes exactly one attempt and maps revocation disti
     return new Response("busy", { status: 500 });
   };
   const transientModel = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     tokens: { accessToken: token, expiresAt: Date.now() + 3_600_000 },
     fetch: transient,
   });
@@ -762,6 +771,7 @@ test("subscription failures redact token material from thrown errors", async () 
   const token = "top-secret-subscription-token";
   const leaking: CodexFetchLike = async () => new Response(`boom ${token}`, { status: 500 });
   const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     tokens: { accessToken: token, expiresAt: Date.now() + 3_600_000 },
     fetch: leaking,
   });
@@ -781,7 +791,9 @@ test("subscription cancellation aborts the transport without accepting a message
     expiresAt: Date.now() + 3_600_000,
   });
   const hanging: CodexFetchLike = () => new Promise<Response>(() => {});
-  const model = createCodexSubscriptionModel({ store: gate, fetch: hanging });
+  const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra", store: gate, fetch: hanging,
+  });
   const controller = new AbortController();
   const iterator = model.stream(sampleRequest({ signal: controller.signal }))[Symbol.asyncIterator]();
   const pending = iterator.next();
@@ -797,6 +809,7 @@ test("Schway executes the subscription tool call itself and submits its own resu
     return sseResponse(TEXT_EVENTS);
   }) satisfies CodexFetchLike;
   const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     tokens: { accessToken: "loop-token", expiresAt: Date.now() + 3_600_000 },
     fetch: scripted,
     onRequest: () => {},
@@ -847,6 +860,7 @@ test("resume across auth switches preserves prior openai metadata and codex roun
     return sseResponse(TEXT_EVENTS);
   }) satisfies CodexFetchLike;
   const model = createCodexSubscriptionModel({
+    model: "gpt-6-astra",
     tokens: { accessToken: "resume-token", expiresAt: Date.now() + 3_600_000 },
     fetch: fetchStub,
   });
@@ -1390,12 +1404,16 @@ test("revoked account is repaired through controller login then logout without A
     const controller = new TuiController({
       session: createSession(), sessionId: "repair-revoked", workspace,
       provider: "openai", modelId: "gpt-5.4", openaiAuth: "codex",
-      model: createCodexSubscriptionModel({ store, fetch: responseFetch }),
+      model: createCodexSubscriptionModel({
+        model: "gpt-6-astra", store, fetch: responseFetch,
+      }),
       contextManager: createContextManager(workspace), secrets,
       credentials: { store, env: { OPENAI_API_KEY: "explicit-env-secret" },
         reload: async () => {
           reloads++;
-          return { model: createCodexSubscriptionModel({ store, fetch: responseFetch }) };
+          return { model: createCodexSubscriptionModel({
+            model: "gpt-6-astra", store, fetch: responseFetch,
+          }) };
         },
         codexLogin: createCodexLoginRunner({ store, secrets,
           fetch: tokenEndpoint({ access_token: repairedAccess, refresh_token: "new-refresh-secret", expires_in: 3600 }) }) },

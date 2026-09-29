@@ -11,9 +11,6 @@ export const ROUTE_FALLBACK_MODELS = {
   "openai-compatible": "gpt-4o",
 } as const;
 
-/** Alias of the documented per-route fallbacks. Not applied when no model is configured. */
-export const DEFAULT_MODEL_IDS = ROUTE_FALLBACK_MODELS;
-
 /** Conservative metadata applied to model IDs absent from the built-in catalog. */
 export const UNKNOWN_MODEL_DEFAULTS = {
   contextWindow: 32_768,

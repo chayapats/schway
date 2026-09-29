@@ -4,7 +4,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, type ModelCapability } from "../catalog.ts";
+import type { ModelCapability } from "../catalog.ts";
 import { THINKING_LEVELS, reportedTokens } from "../model.ts";
 import type {
   Model,
@@ -57,9 +57,6 @@ export const CODEX_REFRESH_TIMEOUT_MS = 30_000;
 export const CODEX_LOGIN_TIMEOUT_MS = 10 * 60_000;
 /** Device-flow polling ceiling matching the verified beta timeout. */
 export const CODEX_DEVICE_TIMEOUT_MS = 900_000;
-/** Default model reported when the caller does not select one. */
-export const CODEX_SUBSCRIPTION_MODEL = DEFAULT_MODEL_IDS.openai;
-
 /** Short-lived subscription credential with its offline_access renewal secret. */
 export interface CodexTokens {
   accessToken: string;
@@ -942,6 +939,12 @@ export type CodexOutputItem = {
   summary?: Array<{ text?: string }>;
 };
 
+function requiredModelId(model: string | undefined): string {
+  const modelId = model?.trim() ?? "";
+  if (!modelId) throw new Error("A model ID is required.");
+  return modelId;
+}
+
 /**
  * Create the subscription Responses adapter with transport retries disabled and Schway-owned records.
  * Streaming forwards cancellation and provider failures while assembling function-call JSON before exposing a call.
@@ -965,7 +968,7 @@ export function createCodexSubscriptionModel(options: {
     tools: Array<{ name: string; description: string }>;
   }) => void;
 }): Model {
-  const modelId = options.model?.trim() || CODEX_SUBSCRIPTION_MODEL;
+  const modelId = requiredModelId(options.model);
   const secrets = [...(options.secrets ?? [])];
   const refresher = options.refresher ??
     (options.store ? createSubscriptionTokenRefresher({ store: options.store, fetch: options.fetch }) : undefined);

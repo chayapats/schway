@@ -638,6 +638,7 @@ test("openai-compatible 5xx responses retry with Retry-After and then exhaust cl
   const clock = recordingClock();
   let fetches = 0;
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:9/v1",
     auth: "none",
     fetch: async () => {
