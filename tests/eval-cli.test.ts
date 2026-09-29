@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runEvalCli, summarizeEvalResults } from "../src/eval/cli.ts";
@@ -88,4 +88,36 @@ test("mixed pass, fail and skip aggregates only observed outcomes", async () => 
   const summary = summarizeEvalResults([{ ...failed, outcome: "success" }, failed, skip]);
   expect(summary).toMatchObject({ success: 1, grader_failure: 1, skipped_prerequisites: 1, model_failure: 0 });
   expect(skip.case.id).toBe("parallel-read");
+});
+
+test("timed-out paid usage stops later cases for accounting rather than claiming the money cap was reached", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "timeout.json");
+    let attempts = 0;
+    const lines: string[] = [];
+    const log = spyOn(console, "log").mockImplementation(text => { lines.push(String(text)); });
+    try {
+      const code = await runEvalCli([
+        "--provider", "openai-compatible", "--model", "fixture", "--base-url", "https://fixture.invalid/v1",
+        "--allow-paid", "--case", "all", "--timeout-ms", "200", "--max-spend", "0.10",
+        "--input-price", "0.10", "--output-price", "0.20", "--output", output,
+      ], { OPENAI_COMPATIBLE_API_KEY: "fixture-secret" }, { model: () => ({
+        provider: "openai-compatible", id: "fixture", async *stream(request) {
+          attempts++;
+          await new Promise((_, reject) => {
+            request.signal!.throwIfAborted();
+            request.signal!.addEventListener("abort", () => reject(request.signal!.reason), { once: true });
+          });
+        },
+      }) });
+      const artifact = JSON.parse(await readFile(output, "utf8"));
+      expect(code).toBe(3);
+      expect(attempts).toBe(1);
+      expect(artifact.summary).toMatchObject({ timeout: 1, skipped_spend_cap: 6 });
+      expect(artifact.spend).toMatchObject({ totalUsd: 0, capUsd: 0.10, exact: false, stopReason: "usage_unknown" });
+      expect(lines.join("\n")).toContain("usage incomplete");
+      expect(lines.join("\n")).not.toContain("spend cap reached");
+      expect(await readFile(output, "utf8")).not.toContain("fixture-secret");
+    } finally { log.mockRestore(); }
+  });
 });

@@ -12,7 +12,7 @@ import { estimateSpendUsd, formatUsd, FREE, resolvePrice, roundUsd, type TokenPr
 const exec = promisify(execFile);
 const USAGE = "Usage: bun run eval (--provider scripted | --provider openai|xai|openai-compatible --model ID --allow-paid | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]";
 
-/** Exit code when the spend cap stopped the run before every case started. */
+/** Exit code when budget or incomplete usage prevents all selected paid cases from starting. */
 export const SPEND_CAP_EXIT_CODE = 3;
 
 /** Run the selected evals under a spend cap and write a credential-free JSON artifact; `deps.model` is a test seam. */
@@ -80,7 +80,8 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   catch { console.error("Cannot reserve eval artifact path (it must be a new file in an existing directory)."); return 2; }
   try {
     const results: CodingEvalResult[] = [];
-    let spent = 0, capHit = false, spendUnknown = false;
+    let spent = 0, spendUnknown = false;
+    let stopReason: "usage_unknown" | "spend_cap" | null = null;
     const highestCase = entries.map(() => 0);
     const total = entries.length * caseIds.length;
     for (const [entryIndex, entry] of entries.entries()) for (const id of caseIds) {
@@ -92,7 +93,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       // Soft cap: a paid case is assumed to cost as much as that route's costliest case so far (the first runs unless the cap is spent),
       // and unreported usage stops further paid cases. Free routes never spend, so they always run; unstartable routes stay prerequisite skips.
       if (startable && paid && (spendUnknown || spent >= capUsd || spent + highestCase[entryIndex]! > capUsd)) {
-        capHit = true;
+        stopReason = spendUnknown ? "usage_unknown" : "spend_cap";
         results.push({ ...spendCapSkippedEval(provider, modelId, sourceRevision, settings, id), spendUsd: 0, spendExact: true });
         console.log(`${id} ${provider}/${modelId}: skipped/spend_cap`);
         continue;
@@ -121,14 +122,15 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}; spend=${spend.exact ? "" : "≥"}${formatUsd(spend.usd)}`);
     }
     const casesRun = results.filter(result => result.outcome !== "skipped_spend_cap" && result.outcome !== "skipped_prerequisites").length;
-    const spendSummary = { totalUsd: roundUsd(spent), capUsd, casesRun, casesTotal: total, exact: results.every(result => result.spendExact !== false), stoppedBySpendCap: capHit };
-    if (capHit) console.log(`stopped: spend cap reached (${formatUsd(capUsd)})`);
+    const spendSummary = { totalUsd: roundUsd(spent), capUsd, casesRun, casesTotal: total, exact: results.every(result => result.spendExact !== false), stoppedBySpendCap: stopReason !== null, stopReason };
+    if (stopReason === "usage_unknown") console.log("stopped: usage incomplete; reconcile provider billing before starting more paid cases");
+    else if (stopReason === "spend_cap") console.log(`stopped: spend cap reached (${formatUsd(capUsd)})`);
     console.log(`Spent ${formatUsd(spent)} of ${formatUsd(capUsd)} · ${casesRun}/${total} cases run`);
     const multiple = !!matrix || caseIds.length > 1;
     const summary = summarizeEvalResults(results);
     await artifact.writeFile(`${JSON.stringify(multiple ? { sourceRevision, settings, results, summary, spend: spendSummary } : { ...results[0], spend: spendSummary }, null, 2)}\n`);
     console.log(`Artifact: ${path}`);
-    if (capHit) return SPEND_CAP_EXIT_CODE;
+    if (stopReason !== null) return SPEND_CAP_EXIT_CODE;
     return results.every(result => result.outcome === "success") ? 0 : 1;
   } finally {
     await artifact.close();

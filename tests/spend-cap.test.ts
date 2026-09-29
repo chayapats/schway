@@ -57,7 +57,7 @@ test("cap reached stops before the next case, skips the rest and exits 3", async
     expect(outcomes.filter((o: string) => o !== "skipped_spend_cap")).toHaveLength(2);
     expect(outcomes.slice(2).every((o: string) => o === "skipped_spend_cap")).toBe(true);
     expect(artifact.results[0].spendUsd).toBe(1.25);
-    expect(artifact.spend).toMatchObject({ totalUsd: 2.5, capUsd: 3, casesRun: 2, casesTotal: 7 });
+    expect(artifact.spend).toMatchObject({ totalUsd: 2.5, capUsd: 3, casesRun: 2, casesTotal: 7, stopReason: "spend_cap" });
     expect(logs).toContain("stopped: spend cap reached ($3.00)");
     expect(logs).toContain("Spent $2.50 of $3.00 · 2/7 cases run");
     expect(logs.some(line => line.includes("$1.25"))).toBe(true);
@@ -70,7 +70,7 @@ test("cap not reached runs every case and keeps the usual exit code", async () =
     expect(artifact.results.every((r: { outcome: string }) => r.outcome !== "skipped_spend_cap")).toBe(true);
     expect(code).not.toBe(3);
     const total = artifact.results.reduce((sum: number, r: { spendUsd: number }) => sum + r.spendUsd, 0);
-    expect(artifact.spend).toMatchObject({ totalUsd: total, capUsd: 100, casesRun: 7, casesTotal: 7 });
+    expect(artifact.spend).toMatchObject({ totalUsd: total, capUsd: 100, casesRun: 7, casesTotal: 7, stopReason: null });
     expect(logs).toContain(`Spent $${total.toFixed(2)} of $100.00 · 7/7 cases run`);
     expect(logs.some(line => line.startsWith("stopped:"))).toBe(false);
   });
