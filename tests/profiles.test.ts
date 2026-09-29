@@ -195,7 +195,7 @@ test("--profile selects the compatible provider and rejects other providers", ()
   expect(parsed.args.profile).toBe("tenant-a");
   expect(cliOverridesFromArgs(parsed.args).profile).toBe("tenant-a");
 
-  const conflict = parseArgs(["--profile", "a", "--provider", "anthropic"]);
+  const conflict = parseArgs(["--profile", "a", "--provider", "openai"]);
   expect("error" in conflict).toBe(true);
   if (!("error" in conflict)) throw new Error("expected provider conflict");
   expect(conflict.error).toContain("openai-compatible");
@@ -599,7 +599,7 @@ test("model picker lists profiles and /model profile syntax selects them", async
       activeProfile: editor.settings.profile,
     });
     expect(entries.some((entry) => entry.profile === "alpha" && entry.active)).toBe(true);
-    expect(parseModelArgs("profile:alpha", "anthropic")).toEqual({
+    expect(parseModelArgs("profile:alpha", "openai")).toEqual({
       provider: "openai-compatible",
       modelId: "",
       profile: "alpha",
@@ -741,7 +741,7 @@ test("bare model tokens never switch profiles", async () => {
       sessionId: "bare-name",
       workspace,
       configEditor: editor,
-      provider: "anthropic",
+      provider: "openai",
       modelId: "test-model",
       model: createScriptedModel({ text: "direct" }),
       contextManager: createContextManager(workspace),
@@ -753,7 +753,7 @@ test("bare model tokens never switch profiles", async () => {
     expect(controller.snapshot().profile).toBeUndefined();
     expect(await controller.selectModel("alpha")).toBe(true);
     expect(controller.snapshot().profile).toBeUndefined();
-    expect(controller.snapshot().provider).toBe("anthropic");
+    expect(controller.snapshot().provider).toBe("openai");
     expect(controller.snapshot().modelId).toBe("alpha");
   });
 });
@@ -838,13 +838,13 @@ test("direct model selection clears profiles selected through CLI layers", async
     };
     const editor = await loadConfigEditor(input);
     expect(editor.settings.profile).toBe("a");
-    const staged = await editor.prepareModel("anthropic", "claude-sonnet-4-6");
-    expect(staged.settings.provider).toBe("anthropic");
-    expect(staged.settings.model).toBe("claude-sonnet-4-6");
+    const staged = await editor.prepareModel("openai", "gpt-5.4");
+    expect(staged.settings.provider).toBe("openai");
+    expect(staged.settings.model).toBe("gpt-5.4");
     expect(staged.settings.profile).toBeUndefined();
     await staged.commit();
     expect(editor.settings.profile).toBeUndefined();
-    expect(editor.settings.provider).toBe("anthropic");
+    expect(editor.settings.provider).toBe("openai");
     const resetEditor = await loadConfigEditor(input);
     const reset = await resetEditor.prepare({ scope: "session", key: "profile", value: undefined });
     expect(reset.settings.profile).toBeUndefined();
@@ -874,8 +874,8 @@ test("non-HTTP(S) profile base URLs fail before any provider request", () => {
 
 test("narrow picker queries do not surface unrelated profiles", () => {
   const profiles = { a: { baseUrl: "https://a.example.test/v1", model: "model-a" } };
-  const unrelated = modelPickerEntries("claude", "anthropic", "claude-sonnet-4-6", {}, { profiles });
+  const unrelated = modelPickerEntries("claude", "openai", "gpt-5.4", {}, { profiles });
   expect(unrelated.some((entry) => entry.profile === "a")).toBe(false);
-  const matched = modelPickerEntries("model-a", "anthropic", "claude-sonnet-4-6", {}, { profiles });
+  const matched = modelPickerEntries("model-a", "openai", "gpt-5.4", {}, { profiles });
   expect(matched.some((entry) => entry.profile === "a")).toBe(true);
 });

@@ -192,10 +192,10 @@ test("missing credentials explain the interactive login path", async () => {
       contextManager: createContextManager(workspace),
       tools: createToolRegistry([readTool]),
       workspace,
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-6",
+      provider: "openai",
+      modelId: "gpt-5.4",
       sessionId: "sess-nokey",
-      startupError: "Missing Anthropic API key. Pass --api-key or set ANTHROPIC_API_KEY.",
+      startupError: "Missing OpenAI API key. Pass --api-key or set OPENAI_API_KEY.",
     });
     let snapshot = controller.snapshot();
     expect(snapshot.status).toBe("error");

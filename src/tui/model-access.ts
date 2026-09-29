@@ -35,7 +35,6 @@ export async function loadModelPickerAccess(input: {
     return "error" in result ? "Login required" : result.source === "none" ? "No key required" : "API key";
   };
   await Promise.all([
-    resolve({ provider: "anthropic" }).then(value => { access.providers.anthropic = value; }),
     (async () => {
       const [transport, subscription, apiKey] = await Promise.all([
         selectOpenAITransport(input),

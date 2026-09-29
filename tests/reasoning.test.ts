@@ -11,11 +11,6 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { readTool } from "../src/tools/read.ts";
 import { toPlainJsonSchema } from "../src/tools/schema.ts";
 import {
-  ANTHROPIC_THINKING_BUDGETS,
-  createAnthropicModel,
-  resolveAnthropicThinking,
-} from "../src/model/providers/anthropic.ts";
-import {
   OPENAI_THINKING_EFFORTS,
   createOpenAIModel,
   resolveOpenAIReasoning,
@@ -39,13 +34,6 @@ import { TuiController } from "../src/tui/controller.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 import {
-  encodeSse as encodeAnthropicSse,
-  sampleRequest as anthropicSample,
-  TEXT_STREAM_EVENTS as ANTHROPIC_TEXT,
-  THINKING_STREAM_EVENTS as ANTHROPIC_THINKING,
-  TOOL_USE_STREAM_EVENTS as ANTHROPIC_TOOL,
-} from "./fixtures/anthropic.ts";
-import {
   encodeSse as encodeOpenAISse,
   sampleRequest as openaiSample,
   TEXT_STREAM_EVENTS as OPENAI_TEXT,
@@ -60,18 +48,6 @@ import {
 } from "./fixtures/openai-compatible.ts";
 
 type Captured = { body?: unknown; calls: number; url?: string };
-
-/** Fake Anthropic fetch that records the request body and returns an SSE fixture. */
-function anthropicFetch(events: readonly object[], captured: Captured) {
-  return async (_input: string | URL | Request, init?: RequestInit) => {
-    captured.calls += 1;
-    captured.body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    return new Response(encodeAnthropicSse(events), {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    });
-  };
-}
 
 /** Fake OpenAI fetch that records the request body and returns an SSE fixture. */
 function openaiFetch(events: readonly object[], captured: Captured) {
@@ -198,52 +174,11 @@ test("explicit thinking for unknown models explains conservative handling", () =
 });
 
 test("validateThinking and describeEffectiveThinking stay provider-independent", () => {
-  expect(validateThinking("anthropic", "claude-sonnet-4-6", "medium", undefined)).toBeUndefined();
-  expect(validateThinking("anthropic", "claude-sonnet-4-6", "high", { reasoning: 1 })).toBeUndefined();
+  expect(validateThinking("openai", "gpt-5.4", "medium", undefined)).toBeUndefined();
+  expect(validateThinking("openai", "gpt-5.4", "high", { reasoning: 1 })).toBeUndefined();
   expect(validateThinking("openai-compatible", "gpt-4o", "low", { reasoning_effort: "low" })).toContain("extraBody");
-  expect(describeEffectiveThinking("anthropic", "medium")).toContain("4096");
   expect(describeEffectiveThinking("openai", "high")).toContain("high");
-  expect(describeEffectiveThinking("anthropic", undefined)).toContain("provider default");
-});
-
-test("anthropic thinking budgets are rejected at resolve time when max output is too small", () => {
-  const high = resolveSettings({
-    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high", maxOutput: 4096 },
-  });
-  expect("error" in high).toBe(true);
-  if (!("error" in high)) throw new Error("expected budget error");
-  expect(high.error).toContain("budget 8192");
-  const low = resolveSettings({
-    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "low", maxOutput: 1024 },
-  });
-  expect("error" in low).toBe(true);
-  if (!("error" in low)) throw new Error("expected budget error");
-  expect(low.error).toContain("budget 1024");
-});
-
-test("anthropic thinking budgets pass when the output limit fits and rejected edits keep prior settings", async () => {
-  const fitting = resolveSettings({
-    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high", maxOutput: 16384 },
-  });
-  expect("error" in fitting).toBe(false);
-  const catalogDefault = resolveSettings({
-    cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" },
-  });
-  expect("error" in catalogDefault).toBe(false);
-  await withTempDir(async (dir) => {
-    const home = join(dir, "home");
-    const root = join(dir, "project");
-    await mkdir(home, { recursive: true });
-    await mkdir(root, { recursive: true });
-    const editor = await loadConfigEditor({
-      home,
-      workspaceRoot: root,
-      cli: { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" },
-    });
-    const before = editor.settings;
-    await expect(editor.prepare({ scope: "session", key: "maxOutput", value: 4096 })).rejects.toThrow("budget");
-    expect(editor.settings).toEqual(before);
-  });
+  expect(describeEffectiveThinking("openai", undefined)).toContain("provider default");
 });
 
 // CLI
@@ -280,90 +215,16 @@ test("isThinkingLevel guards provider-independent levels", () => {
 // Catalog capability
 
 test("catalog reports per-model thinking support without changing lookup defaults", () => {
-  expect(getThinkingSupport("anthropic", "claude-sonnet-4-6").supported).toEqual(["off", "low", "medium", "high"]);
   expect(getThinkingSupport("openai", "gpt-5.4").supported).toEqual(["off", "low", "medium", "high"]);
   expect(getThinkingSupport("openai", "gpt-4o").supported).toEqual(["off"]);
   expect(getThinkingSupport("openai-compatible", "gpt-4o").supported).toEqual(["off"]);
   const unknown = getThinkingSupport("openai", "mystery-9");
   expect(unknown.known).toBe(false);
   expect(unknown.supported).toEqual(["off"]);
-  expect(isThinkingSupported("anthropic", "claude-sonnet-4-6", "high")).toBe(true);
+  expect(isThinkingSupported("openai", "gpt-5.4", "high")).toBe(true);
   expect(isThinkingSupported("openai", "gpt-4o", "high")).toBe(false);
   expect(describeThinkingSupport("openai", "mystery-9")).toContain("Unknown model");
   expect(describeThinkingSupport("openai", "gpt-4o")).toContain("only");
-});
-
-// Anthropic mapping
-
-test("anthropic off/low/medium/high map to documented thinking controls", async () => {
-  expect(ANTHROPIC_THINKING_BUDGETS).toEqual({ low: 1024, medium: 4096, high: 8192 });
-  expect(resolveAnthropicThinking(undefined, "claude-sonnet-4-6", 16384)).toBeUndefined();
-  expect(resolveAnthropicThinking("off", "claude-sonnet-4-6", 16384)).toEqual({ type: "disabled" });
-  expect(resolveAnthropicThinking("low", "claude-sonnet-4-6", 16384)).toEqual({ type: "enabled", budget_tokens: 1024 });
-  expect(resolveAnthropicThinking("medium", "claude-sonnet-4-6", 16384)).toEqual({ type: "enabled", budget_tokens: 4096 });
-  expect(resolveAnthropicThinking("high", "claude-sonnet-4-6", 16384)).toEqual({ type: "enabled", budget_tokens: 8192 });
-
-  for (const [level, budget] of [["low", 1024], ["medium", 4096], ["high", 8192]] as const) {
-    const captured: Captured = { calls: 0 };
-    const model = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: level, fetch: anthropicFetch(ANTHROPIC_TEXT, captured) });
-    await collect(model.stream(anthropicSample()));
-    expect(captured.calls).toBe(1);
-    expect((captured.body as { thinking: unknown }).thinking).toEqual({ type: "enabled", budget_tokens: budget });
-  }
-  const offCaptured: Captured = { calls: 0 };
-  const offModel = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "off", fetch: anthropicFetch(ANTHROPIC_TEXT, offCaptured) });
-  await collect(offModel.stream(anthropicSample()));
-  expect((offCaptured.body as { thinking: unknown }).thinking).toEqual({ type: "disabled" });
-});
-
-test("anthropic unset thinking leaves outgoing controls untouched", async () => {
-  const captured: Captured = { calls: 0 };
-  const model = createAnthropicModel({ apiKey: "sk-test", fetch: anthropicFetch(ANTHROPIC_TEXT, captured) });
-  await collect(model.stream(anthropicSample()));
-  expect(captured.calls).toBe(1);
-  expect("thinking" in ((captured.body as Record<string, unknown>) ?? {})).toBe(false);
-});
-
-test("anthropic request-level thinking overrides construction default", async () => {
-  const captured: Captured = { calls: 0 };
-  const model = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "low", fetch: anthropicFetch(ANTHROPIC_TEXT, captured) });
-  await collect(model.stream({ ...anthropicSample(), thinking: "high" }));
-  expect((captured.body as { thinking: unknown }).thinking).toEqual({ type: "enabled", budget_tokens: 8192 });
-});
-
-test("anthropic budget must stay below max output or fail before any request", async () => {
-  expect(() => resolveAnthropicThinking("high", "claude-sonnet-4-6", 4096)).toThrow(/budget.*max output/);
-  const captured: Captured = { calls: 0 };
-  const model = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "high", maxTokens: 1024, fetch: anthropicFetch(ANTHROPIC_TEXT, captured) });
-  await expect(collect(model.stream(anthropicSample()))).rejects.toThrow(/budget/);
-  expect(captured.calls).toBe(0);
-});
-
-test("anthropic unsupported and unknown levels fail before any request", async () => {
-  expect(() => resolveAnthropicThinking("high", "unknown-claude", 16384)).toThrow(/not supported/);
-  const captured: Captured = { calls: 0 };
-  const model = createAnthropicModel({ apiKey: "sk-test", model: "unknown-claude", thinking: "medium", fetch: anthropicFetch(ANTHROPIC_TEXT, captured) });
-  await expect(collect(model.stream(anthropicSample()))).rejects.toThrow(/not supported/);
-  expect(captured.calls).toBe(0);
-});
-
-test("anthropic thinking and tool metadata survive round trips", async () => {
-  const captured: Captured = { calls: 0 };
-  const model = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "low", fetch: anthropicFetch(ANTHROPIC_THINKING, captured) });
-  const events = await collect(model.stream(anthropicSample()));
-  const complete = events.at(-1);
-  if (complete?.type !== "message_complete") throw new Error("expected complete");
-  expect(complete.message.content[0]).toMatchObject({ type: "thinking" });
-  expect((captured.body as { thinking: unknown }).thinking).toEqual({ type: "enabled", budget_tokens: 1024 });
-
-  const replay: Captured = { calls: 0 };
-  const replayModel = createAnthropicModel({ apiKey: "sk-test", fetch: anthropicFetch(ANTHROPIC_TOOL, replay) });
-  const toolEvents = await collect(replayModel.stream({ ...anthropicSample(), items: [...anthropicSample().items, complete.message] }));
-  const toolComplete = toolEvents.at(-1);
-  if (toolComplete?.type !== "message_complete") throw new Error("expected tool complete");
-  expect(toolComplete.message.content.some((block) => block.type === "tool_call")).toBe(true);
-  const body = replay.body as { messages: Array<{ role: string; content: unknown }> };
-  expect(JSON.stringify(body.messages[1])).toContain("sig-");
 });
 
 // OpenAI mapping
@@ -479,14 +340,6 @@ test("compatible tool conversations preserve metadata with thinking unset", asyn
 // Loader
 
 test("loader maps thinking per provider without loading unselected providers", async () => {
-  const anthropicCaptured: Captured = { calls: 0 };
-  const anthropic = await loadProviderModel(
-    { provider: "anthropic", apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "medium" },
-    anthropicFetch(ANTHROPIC_TEXT, anthropicCaptured),
-  );
-  await collect(anthropic.stream(anthropicSample()));
-  expect((anthropicCaptured.body as { thinking: unknown }).thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
-
   const openaiCaptured: Captured = { calls: 0 };
   const openai = await loadProviderModel(
     { provider: "openai", apiKey: "sk-test", model: "gpt-5.4", thinking: "high" },
@@ -506,29 +359,15 @@ test("loader maps thinking per provider without loading unselected providers", a
 
 // Cancellation and budgets
 
-test("thinking adapters still forward cancellation without pretending success", async () => {
-  const model = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "low", fetch: async (_input, init) => {
-    if (init?.signal?.aborted) {
-      const error = new Error("aborted");
-      error.name = "AbortError";
-      throw error;
-    }
-    return new Response(encodeAnthropicSse(ANTHROPIC_TEXT), { headers: { "Content-Type": "text/event-stream" } });
-  } });
-  const controller = new AbortController();
-  controller.abort();
-  await expect(collect(model.stream({ ...anthropicSample(), signal: controller.signal }))).rejects.toThrow();
-});
-
 test("changing thinking affects future requests only and never rewrites history", async () => {
-  const history = [...anthropicSample().items];
+  const history = [...openaiSample().items];
   const first: Captured = { calls: 0 };
-  await collect(createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "low", fetch: anthropicFetch(ANTHROPIC_TEXT, first) }).stream({ ...anthropicSample(), items: history }));
-  expect((first.body as { thinking: unknown }).thinking).toEqual({ type: "enabled", budget_tokens: 1024 });
+  await collect(createOpenAIModel({ apiKey: "sk-test", model: "gpt-5.4", thinking: "low", fetch: openaiFetch(OPENAI_TEXT, first) }).stream({ ...openaiSample(), items: history }));
+  expect((first.body as { reasoning: unknown }).reasoning).toEqual({ effort: "low", summary: "auto" });
   expect(history).toHaveLength(1);
   const second: Captured = { calls: 0 };
-  await collect(createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "high", fetch: anthropicFetch(ANTHROPIC_TEXT, second) }).stream({ ...anthropicSample(), items: history }));
-  expect((second.body as { thinking: unknown }).thinking).toEqual({ type: "enabled", budget_tokens: 8192 });
+  await collect(createOpenAIModel({ apiKey: "sk-test", model: "gpt-5.4", thinking: "high", fetch: openaiFetch(OPENAI_TEXT, second) }).stream({ ...openaiSample(), items: history }));
+  expect((second.body as { reasoning: unknown }).reasoning).toEqual({ effort: "high", summary: "auto" });
   expect(history).toHaveLength(1);
 });
 
@@ -576,24 +415,24 @@ async function controllerWithThinking(dir: string, cli: Record<string, unknown> 
 
 test("controller /thinking shows requested and effective with provider/model", async () => {
   await withTempDir(async (dir) => {
-    const { controller } = await controllerWithThinking(dir, { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "medium" });
+    const { controller } = await controllerWithThinking(dir, { provider: "openai", model: "gpt-5.4", thinking: "medium" });
     const text = controller.describeThinking();
     expect(text).toContain("medium");
-    expect(text).toContain("anthropic/claude-sonnet-4-6");
-    expect(text).toContain("4096");
+    expect(text).toContain("openai/gpt-5.4");
+    expect(text).toContain("reasoning effort medium");
     const config = controller.describeConfig();
     expect(config).toContain("thinking");
     expect(config).toContain("medium");
     const snapshot = controller.snapshot();
     expect(snapshot.thinking).toBe("medium");
-    expect(snapshot.effectiveThinking).toContain("4096");
+    expect(snapshot.effectiveThinking).toContain("reasoning effort medium");
     controller.dispose();
   });
 });
 
 test("controller thinkingCommand sets, shows, resets, and rejects invalid levels", async () => {
   await withTempDir(async (dir) => {
-    const { controller } = await controllerWithThinking(dir, { provider: "anthropic", model: "claude-sonnet-4-6" });
+    const { controller } = await controllerWithThinking(dir, { provider: "openai", model: "gpt-5.4" });
     expect(await controller.thinkingCommand("")).toBe(true);
     expect(controller.snapshot().thinking).toBeUndefined();
     expect(await controller.thinkingCommand("high")).toBe(true);
@@ -610,7 +449,7 @@ test("controller thinkingCommand sets, shows, resets, and rejects invalid levels
 
 test("controller keeps previous state after an invalid model or level switch", async () => {
   await withTempDir(async (dir) => {
-    const { controller } = await controllerWithThinking(dir, { provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" });
+    const { controller } = await controllerWithThinking(dir, { provider: "openai", model: "gpt-5.4", thinking: "high" });
     const before = controller.snapshot();
     expect(await controller.selectModel("openai/gpt-4o")).toBe(false);
     const after = controller.snapshot();
@@ -682,18 +521,9 @@ test("controller configCommand edits thinking through the normal session path", 
 });
 
 test("off on unknown and non-reasoning models sends no wire controls", async () => {
-  expect(resolveAnthropicThinking("off", "unknown-claude", 16384)).toBeUndefined();
   expect(resolveOpenAIReasoning("off", "gpt-4o")).toBeUndefined();
   expect(resolveOpenAIReasoning("off", "mystery-9")).toBeUndefined();
-  expect(resolveAnthropicThinking("off", "claude-sonnet-4-6", 16384)).toEqual({ type: "disabled" });
   expect(resolveOpenAIReasoning("off", "gpt-5.4")).toEqual({ effort: "none" });
-
-  const anthropicUnknown: Captured = { calls: 0 };
-  await collect(
-    createAnthropicModel({ apiKey: "sk-test", model: "unknown-claude", thinking: "off", fetch: anthropicFetch(ANTHROPIC_TEXT, anthropicUnknown) }).stream(anthropicSample()),
-  );
-  expect(anthropicUnknown.calls).toBe(1);
-  expect("thinking" in ((anthropicUnknown.body as Record<string, unknown>) ?? {})).toBe(false);
 
   const openaiKnown: Captured = { calls: 0 };
   await collect(
@@ -711,17 +541,14 @@ test("off on unknown and non-reasoning models sends no wire controls", async () 
 });
 
 test("thinking support records disabling and describes off honestly", () => {
-  expect(getThinkingSupport("anthropic", "claude-sonnet-4-6").supportsDisabling).toBe(true);
   expect(getThinkingSupport("openai", "gpt-5.4").supportsDisabling).toBe(true);
   expect(getThinkingSupport("openai", "gpt-4o").supportsDisabling).toBe(false);
   expect(getThinkingSupport("openai", "mystery-9").supportsDisabling).toBe(false);
   expect(describeThinkingSupport("openai", "mystery-9")).toContain("no reasoning controls");
   expect(describeThinkingSupport("openai", "gpt-4o")).toContain("no reasoning controls");
   expect(describeThinkingSupport("openai", "gpt-5.4")).toContain("disable");
-  expect(describeThinkingSupport("anthropic", "claude-sonnet-4-6")).toContain("disable");
-  expect(describeEffectiveThinking("anthropic", "off", "unknown-claude")).toContain("no reasoning controls");
+  expect(describeEffectiveThinking("openai", "off", "mystery-9")).toContain("no reasoning controls");
   expect(describeEffectiveThinking("openai", "off", "gpt-4o")).toContain("no reasoning controls");
-  expect(describeEffectiveThinking("anthropic", "off", "claude-sonnet-4-6")).toContain("disabled");
   expect(describeEffectiveThinking("openai", "off", "gpt-5.4")).toContain("none");
 });
 
@@ -743,52 +570,6 @@ test("bare effort is not a compatible reasoning control and scanners share one s
     },
   });
   expect("error" in noConflict).toBe(false);
-});
-
-test("anthropic thinking metadata survives compaction and resume round trips", async () => {
-  const captured: Captured = { calls: 0 };
-  const source = createAnthropicModel({ apiKey: "sk-test", model: "claude-sonnet-4-6", thinking: "low", fetch: anthropicFetch(ANTHROPIC_THINKING, captured) });
-  const events = await collect(source.stream(anthropicSample()));
-  const complete = events.at(-1);
-  if (complete?.type !== "message_complete") throw new Error("expected complete");
-  const thinkingBlock = complete.message.content.find((block) => block.type === "thinking");
-  expect(thinkingBlock).toMatchObject({ type: "thinking" });
-  if (thinkingBlock?.type !== "thinking") throw new Error("expected thinking");
-  expect(JSON.stringify(thinkingBlock.providerMetadata)).toContain("sig-");
-
-  await withTempDir(async (dir) => {
-    const workspace = workspaceFor(join(dir, "project"));
-    const { mkdir: makeDir } = await import("node:fs/promises");
-    await makeDir(workspace.root, { recursive: true });
-    const session = createSession([
-      { type: "user", id: "u0", content: [{ type: "text", text: "first" }] },
-      { type: "assistant", id: "a0", content: [{ type: "text", text: "one" }] },
-      { type: "user", id: "u1", content: [{ type: "text", text: "second" }] },
-      { type: "assistant", id: "a1", content: [{ type: "text", text: "two" }] },
-      { type: "user", id: "u2", content: [{ type: "text", text: "third" }] },
-      { type: "assistant", id: "a2", content: [{ type: "text", text: "three" }] },
-      { type: "user", id: "u3", content: [{ type: "text", text: "fourth" }] },
-      { ...complete.message, id: "a3" },
-    ]);
-    const manager = createContextManager(workspace, { keepTurns: 2 });
-    const record = await manager.compact(session, createScriptedModel({ text: "## Goal\nkept\n## Constraints\nnone\n## Progress\ndid\n## Key Decisions\nnone\n## Current State\nok\n## Next Steps\nmore\n## Files\n### Read\nnone\n### Modified\nnone" }), { reason: "manual" });
-    expect(record).not.toBeNull();
-    const stored = session.items.find((item) => item.type === "assistant" && item.id === "a3");
-    expect(JSON.stringify(stored)).toContain("sig-");
-    const prepared = await manager.prepare(session);
-    expect(JSON.stringify(prepared.items)).toContain("sig-");
-
-    const sessionsDir = join(dir, "sessions");
-    const persisted = await createJsonlSession({ directory: sessionsDir, workspace });
-    for (const item of session.items) persisted.append(item);
-    const resumed = await loadJsonlSession({ directory: sessionsDir, id: persisted.header.id });
-    expect(JSON.stringify(resumed.items)).toContain("sig-");
-
-    const replay: Captured = { calls: 0 };
-    const replayModel = createAnthropicModel({ apiKey: "sk-test", fetch: anthropicFetch(ANTHROPIC_TOOL, replay) });
-    await collect(replayModel.stream({ ...anthropicSample(), items: [...anthropicSample().items, ...(resumed.items.filter((item) => item.type !== "compaction") as never[]).slice(-1)] }));
-    expect(JSON.stringify((replay.body as { messages: unknown }).messages)).toContain("sig-");
-  });
 });
 
 test("openai thinking metadata survives compaction and resume round trips", async () => {

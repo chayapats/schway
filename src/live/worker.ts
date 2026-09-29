@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 
-const providers: readonly string[] = ["anthropic", "openai-api-key", "compatible", "codex"];
+const providers: readonly string[] = ["openai-api-key", "compatible", "codex"];
 const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const safeOption = /^[^\x00-\x1f\x7f]{1,200}$/;
 const MAX_INPUT_BYTES = 8192;

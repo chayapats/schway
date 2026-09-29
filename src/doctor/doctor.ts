@@ -5,7 +5,7 @@ import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../auth/secrets.ts";
 import { platform } from "node:os";
 import { version } from "../../package.json";
 import { COMPATIBLE_API_KEY_ENV, credentialEnvironmentVariable } from "../auth/credentials.ts";
-import { codexSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, LEGACY_ANTHROPIC_ACCOUNT, LEGACY_ANTHROPIC_REMOVAL_COMMAND, type CredentialStore } from "../auth/store.ts";
 import { readConfigFile, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
 import { inspectPackages } from "../packages/packages.ts";
 import { discoverSkills } from "../skills/skills.ts";
@@ -218,6 +218,12 @@ export async function diagnose(input: {
       if (settings.provider === "openai" && sub === "unavailable") add("subscription", "warning", "Subscription status unavailable (OS secure store locked).", "Unlock the store to inspect subscription login.");
     }
   }
+
+  // Presence only: the removed route's key is never resolved, used or shown.
+  try {
+    const leftover = await (input.store ?? createNativeCredentialStore()).get({ account: LEGACY_ANTHROPIC_ACCOUNT, label: "anthropic" });
+    if (leftover?.trim()) add("credentials.anthropic", "warning", "A stored Anthropic API key is unused; the Anthropic provider was removed in 0.4.", `Delete it with: ${LEGACY_ANTHROPIC_REMOVAL_COMMAND}`);
+  } catch { /* An unreadable store is already reported by the selected route's auth check. */ }
 
   if (workspace) {
     try {

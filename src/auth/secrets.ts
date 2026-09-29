@@ -1,5 +1,3 @@
-/** Environment variable consulted when no runtime Anthropic key is supplied. */
-export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
 /** Environment variable consulted when no runtime OpenAI key is supplied. */
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
@@ -13,9 +11,6 @@ export const CREDENTIAL_HEADER_NAMES = new Set([
   "x-access-token",
 ]);
 
-/** Guidance returned when Anthropic credential resolution yields an empty key. */
-export const MISSING_ANTHROPIC_API_KEY =
-  "Missing Anthropic API key. Set ANTHROPIC_API_KEY or pass --api-key.";
 /** Guidance returned when OpenAI credential resolution yields an empty key. */
 export const MISSING_OPENAI_API_KEY =
   "Missing OpenAI API key. Set OPENAI_API_KEY or pass --api-key.";
@@ -27,18 +22,6 @@ export type CredentialSource = "runtime" | "env";
 export type ResolvedCredential =
   | { apiKey: string; source: CredentialSource }
   | { error: string };
-
-/** Resolve a trimmed Anthropic key from runtime override or environment; an empty override returns an error. */
-export function resolveAnthropicApiKey(input: {
-  runtimeApiKey?: string;
-  env: Record<string, string | undefined>;
-}): ResolvedCredential {
-  return resolveApiKey({
-    runtimeApiKey: input.runtimeApiKey,
-    envValue: input.env[ANTHROPIC_API_KEY_ENV],
-    missing: MISSING_ANTHROPIC_API_KEY,
-  });
-}
 
 /** Resolve a trimmed OpenAI key from runtime override or environment; an empty override returns an error. */
 export function resolveOpenAIApiKey(input: {

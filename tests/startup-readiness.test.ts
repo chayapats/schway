@@ -16,8 +16,8 @@ async function setup() {
   const session = createSession();
   const workspace = { root: "/isolated-workspace", launchCwd: "/isolated-workspace", extraRoots: [] };
   let requests = 0;
-  const model = createScriptedModel({ provider: "anthropic", responses: [() => { requests++; return { text: "ตอบแล้ว" }; }] });
-  const controller = new TuiController({ session, sessionId: "startup", workspace, provider: "anthropic", modelId: "fixture",
+  const model = createScriptedModel({ provider: "openai", responses: [() => { requests++; return { text: "ตอบแล้ว" }; }] });
+  const controller = new TuiController({ session, sessionId: "startup", workspace, provider: "openai", modelId: "fixture",
     contextManager: createContextManager(workspace), credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model }) } });
   const view = createConversationView(terminal.renderer, { controller, workspaceRoot: workspace.root, home: "/isolated-home", env: {}, secrets: [], quit() {},
     submit: (text, accepted) => dispatchEditorInput(text, controller, async () => false, accepted) });
@@ -47,7 +47,7 @@ test("contextual startup keeps Thai task and cursor through keyboard setup cance
     expect(ui.editor.cursorOffset).toBe(cursor);
     ui.mockInput.pressKey("l", { meta: true });
     await ui.settle();
-    for (let i = 0; i < 4; i++) ui.mockInput.pressArrow("down");
+    for (let i = 0; i < 3; i++) ui.mockInput.pressArrow("down");
     ui.mockInput.pressEnter();
     await ui.settle();
     expect(ui.controller.snapshot().credentialEntry).toBeDefined();
@@ -136,7 +136,7 @@ test("cancelled or disposed startup cannot publish a late adapter", async () => 
 test("real API adapters accept custom IDs offline and readiness does not claim provider validation", async () => {
   let network = 0;
   const store = fakeCredentialStore();
-  for (const provider of ["anthropic", "openai"] as const) {
+  for (const provider of ["openai"] as const) {
     const loaded = await loadInteractiveModel(provider, "custom-deployment-not-in-catalog", {
       openaiAuth: "api-key", runtimeApiKey: "fixture-api-key", env: {}, secrets: [], credentialStore: store,
       fetch: async () => { network++; throw new Error("No startup model probe is allowed"); },

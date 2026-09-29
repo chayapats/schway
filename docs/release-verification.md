@@ -104,7 +104,7 @@ in 123.63 seconds.
    with grader exit 0. Run `bun run live-smoke --provider all` without
    `--enable-live` to confirm the unrun live lanes remain explicit: this
    candidate returned aggregate `incomplete`, exit 2, and
-   `skipped/live_disabled` for Anthropic, OpenAI API key, compatible and Codex.
+   `skipped/live_disabled` for OpenAI API key, compatible and Codex (an Anthropic lane existed then and was removed in 0.4).
 3. For the outstanding installed daily-use check, use an isolated HOME and
    a freshly packed candidate outside the checkout. In a human terminal,
    connect each authorized auth route, choose a model, paste a Thai multiline
@@ -170,7 +170,7 @@ bun run live-smoke --provider all # no --enable-live: records skips, exits 2
 
 | Target | Status | Observable evidence or limit |
 | --- | --- | --- |
-| v0.1 base path | Passed offline | `tests/v01-coding-workflow.test.ts` checks all seven tools, mutation barriers, bounded results, bash exit, cancellation/retry tests, saved JSONL and compaction; package test runs installed text/JSON and controller. Provider protocol fixtures cover Anthropic, OpenAI and compatible, not live availability. |
+| v0.1 base path | Passed offline | `tests/v01-coding-workflow.test.ts` checks all seven tools, mutation barriers, bounded results, bash exit, cancellation/retry tests, saved JSONL and compaction; package test runs installed text/JSON and controller. Provider protocol fixtures covered Anthropic (removed in 0.4), OpenAI and compatible, not live availability. |
 | #33 process isolation, #34 exported contracts | Passed offline | CLI process tests use isolated user state; `bun run typecheck` plus `tests/architecture.test.ts` and public extension example typecheck in installed consumer. |
 | #35 skills, #36 activation | Passed offline | Installed packaged and attached skill activation; `tests/skills.test.ts` and `tests/skill-activation.test.ts` cover lifecycle. |
 | #37 extensions, #38 commands/observers, #39 request hooks, #40 tool hooks | Passed offline | Installed greeting tool/command, prompt changes in HTTP request, tool result rewrite and isolated failing observer; extension hook/observer tests cover cancellation and errors. |

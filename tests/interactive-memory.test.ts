@@ -46,12 +46,12 @@ test("explicit user, project, CLI and session values outrank memory and explain 
     const original = await launch(home, project);
     await original.controller.selectModel("openai/gpt-5.4"); await original.controller.thinkingCommand("high"); original.controller.dispose();
     for (const scope of ["user", "project", "cli"] as const) {
-      const overrides = { provider: "anthropic" as const };
+      const overrides = { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1/v1" };
       const path = join(scope === "user" ? home : project, ".schway/config.json");
       if (scope !== "cli") { await mkdir(join(scope === "user" ? home : project, ".schway"), { recursive: true }); await writeFile(path, JSON.stringify(overrides)); }
       const current = await launch(home, project, scope === "cli" ? overrides : {});
-      expect(current.editor.settings.provider).toBe("anthropic");
-      expect(current.editor.settings.model).toBe("claude-sonnet-4-6");
+      expect(current.editor.settings.provider).toBe("openai-compatible");
+      expect(current.editor.settings.model).toBe("gpt-4o");
       expect(current.editor.settings.thinking).toBeUndefined();
       expect(current.editor.memoryNotice).toContain("Shadowed");
       current.controller.dispose();
@@ -64,8 +64,8 @@ test("explicit user, project, CLI and session values outrank memory and explain 
     const session = await launch(home, project, { model: "gpt-4o" });
     expect(session.editor.settings.model).toBe("gpt-4o");
     expect(session.editor.settings.thinking).toBeUndefined();
-    expect(await session.controller.selectModel("anthropic/claude-haiku-4-5")).toBe(true);
-    expect(session.editor.settings.model).toBe("claude-haiku-4-5"); session.controller.dispose();
+    expect(await session.controller.selectModel("openai/gpt-4o")).toBe(true);
+    expect(session.editor.settings.model).toBe("gpt-4o"); session.controller.dispose();
   });
 });
 
@@ -76,14 +76,14 @@ test("canonical Git roots, subdirectories, symlink aliases and non-Git directori
     for (const path of [a, b]) expect(await Bun.spawn(["git", "init", "--quiet", path]).exited).toBe(0);
     await mkdir(join(a, "nested")); await symlink(a, join(root, "alias"));
     const first = await launch(home, a); await first.controller.selectModel("openai/gpt-4o"); first.controller.dispose();
-    const second = await launch(home, b); await second.controller.selectModel("anthropic/claude-haiku-4-5"); second.controller.dispose();
+    const second = await launch(home, b); await second.controller.selectModel("openai/gpt-4o"); second.controller.dispose();
     for (const path of [a, join(a, "nested"), join(root, "alias", "nested")]) {
       const reopened = await launch(home, path); expect(reopened.editor.settings.model).toBe("gpt-4o"); reopened.controller.dispose();
     }
-    const nonGit = await launch(home, plain); expect(nonGit.editor.settings.model).toBe("claude-sonnet-4-6");
-    await nonGit.controller.selectModel("openai/gpt-5.4"); nonGit.controller.dispose();
-    const reopened = await launch(home, plain); expect(reopened.editor.settings.model).toBe("gpt-5.4"); reopened.controller.dispose();
-    const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("claude-haiku-4-5"); unchanged.controller.dispose();
+    const nonGit = await launch(home, plain); expect(nonGit.editor.settings.model).toBe("gpt-5.4");
+    await nonGit.controller.selectModel("openai/gpt-5.4-mini"); nonGit.controller.dispose();
+    const reopened = await launch(home, plain); expect(reopened.editor.settings.model).toBe("gpt-5.4-mini"); reopened.controller.dispose();
+    const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
   });
 });
 
@@ -140,7 +140,7 @@ test("missing profiles are explained and forget exposes explicit config without 
     expect(await stale.controller.selectModel("forget")).toBe(true);
     expect(stale.controller.describeConfig()).toContain("maxTurns: 8 [user-global]");
     stale.controller.dispose();
-    const reset = await launch(home, a); expect(reset.editor.memoryProblem).toBeUndefined(); expect(reset.editor.settings.model).toBe("claude-sonnet-4-6"); reset.controller.dispose();
+    const reset = await launch(home, a); expect(reset.editor.memoryProblem).toBeUndefined(); expect(reset.editor.settings.model).toBe("gpt-5.4"); reset.controller.dispose();
     const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
   });
 });
@@ -182,7 +182,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
     const reopened = await run("reopen"); expect(reopened.requests).toHaveLength(1);
     expect(reopened.requests[0]).toMatchObject({ provider: "openai", model: "gpt-5.4", thinking: "high", apiKey: "stored" });
     expect(reopened.screen).toContain("interactive memory"); expect(reopened.screen).not.toContain("fixture-stored-key");
-    const override = await run("override"); expect(override.requests[0]?.provider).toBe("anthropic");
+    const override = await run("override"); expect(override.requests[0]?.provider).toBe("openai-compatible");
     expect(await readFile(join(stateDirectory, stateFile), "utf8")).toBe(saved);
     expect(await readdir(project)).toEqual([]);
   });
@@ -200,7 +200,7 @@ test("fresh headless dispatcher ignores memory and retains runtime credential pr
       return JSON.parse(out) as { code: number; requests: Array<{ auth: string; body: { model: string } }>; modules: string[] };
     };
     const before = await run();
-    const interactive = await launch(home, root); await interactive.controller.selectModel("anthropic/claude-haiku-4-5"); interactive.controller.dispose();
+    const interactive = await launch(home, root); await interactive.controller.selectModel("openai/gpt-4o"); interactive.controller.dispose();
     const after = await run();
     expect(after.code).toBe(0); expect(after.requests).toEqual(before.requests);
     expect(after.requests[0]).toMatchObject({ auth: "Bearer fixture-runtime", body: { model: "gpt-4o" } });
@@ -225,7 +225,7 @@ test("fresh startup explains removed credentials and subscription models without
     };
     await run("select");
     const missing = await run("missing-key"); expect(missing.requests).toEqual([]); expect(missing.screen).toContain("Missing OpenAI API key");
-    const repaired = await run("forget-missing-key"); expect(repaired.requests[0]?.provider).toBe("anthropic"); expect(repaired.screen).toContain("Forgot interactive memory");
+    const repaired = await run("forget-missing-key"); expect(repaired.requests[0]).toMatchObject({ provider: "openai", openaiAuth: "codex" }); expect(repaired.screen).toContain("Forgot interactive memory");
     const selected = await run("select-codex"); expect(selected.requests.at(-1)).toMatchObject({ provider: "openai", openaiAuth: "codex", model: "account-model", thinking: "max" });
     const restored = await run("reopen-codex"); expect(restored.requests[0]).toMatchObject({ openaiAuth: "codex", model: "account-model", thinking: "max" });
     const removed = await run("missing-model"); expect(removed.requests).toEqual([]); expect(removed.screen.replace(/\s+/g, " ")).toContain("no longer available");
@@ -261,13 +261,13 @@ test("resume into another workspace resolves its current memory and project sett
   await withTempDir(async root => {
     const home = join(root, "home"), a = join(root, "a"), b = join(root, "b"); await mkdir(a); await mkdir(b);
     const first = await launch(home, a); await first.controller.selectModel("openai/gpt-4o");
-    const second = await launch(home, b); await second.controller.selectModel("anthropic/claude-haiku-4-5"); second.controller.dispose();
+    const second = await launch(home, b); await second.controller.selectModel("openai/gpt-4o"); second.controller.dispose();
     const destination = await resolveWorkspace(b);
     expect(await first.controller.switchSession(createSession(), "saved-in-b", { workspace: destination, contextManager: createContextManager(destination) })).toBe(true);
-    expect(first.controller.snapshot().modelId).toBe("claude-haiku-4-5");
-    await mkdir(join(b, ".schway")); await writeFile(join(b, ".schway/config.json"), JSON.stringify({ model: "claude-opus-4-6" }));
+    expect(first.controller.snapshot().modelId).toBe("gpt-4o");
+    await mkdir(join(b, ".schway")); await writeFile(join(b, ".schway/config.json"), JSON.stringify({ model: "gpt-5.4-mini" }));
     expect(await first.controller.switchSession(createSession(), "older-saved-in-b", { workspace: destination, contextManager: createContextManager(destination) })).toBe(true);
-    expect(first.controller.snapshot().modelId).toBe("claude-opus-4-6"); first.controller.dispose();
+    expect(first.controller.snapshot().modelId).toBe("gpt-5.4-mini"); first.controller.dispose();
   });
 });
 
@@ -283,7 +283,7 @@ test("reselecting the unchanged startup model cannot remember an activation with
         signal, workspace: currentWorkspace!, model, home, env: {}, secrets: [], runtimeApiKey: undefined, credentialStore: fakeCredentialStore(), forceLoad: activate,
       }),
     });
-    expect(await controller.selectModel("anthropic/claude-sonnet-4-6")).toBe(false);
+    expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
     expect(await Bun.file(join(home, ".schway/interactive")).exists()).toBe(false);
     controller.dispose();
   });
@@ -322,7 +322,7 @@ test("resumed subscription capabilities support later reasoning edits even when 
 test("a live preference writer excludes contenders and SIGKILL releases ownership for selection and forget", async () => {
   await withTempDir(async root => {
     const home = join(root, "home");
-    const seed = await launch(home, root); await seed.controller.selectModel("anthropic/claude-haiku-4-5"); seed.controller.dispose();
+    const seed = await launch(home, root); await seed.controller.selectModel("openai/gpt-4o"); seed.controller.dispose();
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-lock-owner.ts"), root], {
       cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
     });
@@ -337,15 +337,15 @@ test("a live preference writer excludes contenders and SIGKILL releases ownershi
       const contender = await launch(home, root);
       expect(await contender.controller.selectModel("openai/gpt-5.4")).toBe(true);
       expect(contender.controller.snapshot().transcript.at(-1)?.text).toContain("not remembered");
-      const unchanged = await launch(home, root); expect(unchanged.editor.settings.model).toBe("claude-haiku-4-5"); unchanged.controller.dispose();
+      const unchanged = await launch(home, root); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
       child.kill("SIGKILL"); await child.exited;
       const recovered = await launch(home, root);
-      expect(await recovered.controller.selectModel("openai/gpt-5.4")).toBe(true);
+      expect(await recovered.controller.selectModel("openai/gpt-5.4-mini")).toBe(true);
       expect(recovered.controller.snapshot().transcript.at(-1)?.text).toContain("Choice remembered");
-      const reopened = await launch(home, root); expect(reopened.editor.settings.model).toBe("gpt-5.4"); reopened.controller.dispose();
+      const reopened = await launch(home, root); expect(reopened.editor.settings.model).toBe("gpt-5.4-mini"); reopened.controller.dispose();
       expect(await recovered.controller.selectModel("forget")).toBe(true);
       recovered.controller.dispose(); contender.controller.dispose();
-      const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe("claude-sonnet-4-6"); forgotten.controller.dispose();
+      const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe("gpt-5.4"); forgotten.controller.dispose();
     } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
   });
 }, 10000);

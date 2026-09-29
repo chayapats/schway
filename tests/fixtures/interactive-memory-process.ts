@@ -13,8 +13,7 @@ const workspace = process.argv[3]!;
 const home = process.env.HOME!;
 const store = fakeCredentialStore();
 if (mode !== "missing-key" && mode !== "forget-missing-key") await store.set(credentialIdentity({ provider: "openai" }), "fixture-stored-key");
-if (mode.includes("codex") || mode === "missing-model") await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-fixture", expiresAt: Date.now() + 600_000 }));
-await store.set(credentialIdentity({ provider: "anthropic" }), "fixture-anthropic-key");
+if (mode.includes("codex") || mode === "missing-model" || mode === "forget-missing-key") await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-fixture", expiresAt: Date.now() + 600_000 }));
 let terminal: Awaited<ReturnType<typeof createTestRenderer>>;
 let controller: import("../../src/tui/controller.ts").TuiController | undefined;
 let submission: Promise<unknown> | undefined;
@@ -86,11 +85,11 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
   },
 }) }));
 const { runCli } = await import("../../src/cli/main.ts");
-const args = mode === "override" ? ["--provider", "anthropic"] : mode === "override-full" ? ["--provider", "openai", "--model", "gpt-4o", "--openai-auth", "api-key"] : [];
+const args = mode === "override" ? ["--provider", "openai-compatible", "--base-url", "http://127.0.0.1:1/v1"] : mode === "override-full" ? ["--provider", "openai", "--model", "gpt-4o", "--openai-auth", "api-key"] : [];
 const code = await runCli(args, { cwd: workspace, env: { HOME: home, SCHWAY_MOTION: "off" }, credentialStore: store,
   fetch: async () => Response.json({ models: [{ slug: mode === "missing-model" ? "replacement-model" : "account-model", visibility: "list", supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }] }] }),
   createModel: async input => {
-    requests.push({ ...input, apiKey: input.apiKey === "fixture-stored-key" ? "stored" : input.apiKey ? "anthropic" : undefined });
+    requests.push({ ...input, apiKey: input.apiKey === "fixture-stored-key" ? "stored" : input.apiKey ? "openai" : undefined });
     return createScriptedModel({ provider: input.openaiAuth === "codex" ? "codex-subscription" : input.provider, id: input.model, text: "fixture reply" });
   }, stdout: { write() {} }, stderr: { write(text) { process.stderr.write(text); } },
 });

@@ -92,13 +92,12 @@ see [credentials](docs/credentials.md) and
 ## Headless usage
 
 ```bash
-export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
 schway -p "explain this repository"
 schway -p "explain this repository" --json
 schway -p "continue this work" --resume <session-id>
 schway -p "continue the alternate path" --resume <session-id> --branch <branch-id>
 
-export OPENAI_API_KEY=...
 schway -p "explain this repository" --provider openai
 schway -p "explain this repository" --provider openai --model my-custom-gpt
 
@@ -110,7 +109,7 @@ schway -p "explain this repository" --provider openai-compatible \
 
 `--json` streams normalized runtime events as JSONL on stdout. Errors/retries still appear on stderr. Opt in to local structured diagnostics with `--debug` or `--debug-file ./schway-debug.jsonl` (implies `--debug`); log writes never enter stdout or durable sessions. See [local diagnostics](docs/diagnostics.md) for redaction and retention defaults.
 
-`--provider` selects `anthropic` (default), `openai`, or `openai-compatible`. `--model` is passed through even if it is not in a catalog. Unknown IDs use conservative defaults of a 32768-token context window and 16384 maximum output tokens; known catalog models supply richer context-window metadata. Override either limit with `--context-window`, `--max-output`, or the same keys in config.
+`--provider` selects `openai` (default) or `openai-compatible`. `--model` is passed through even if it is not in a catalog. Unknown IDs use conservative defaults of a 32768-token context window and 16384 maximum output tokens; known catalog models supply richer context-window metadata. Override either limit with `--context-window`, `--max-output`, or the same keys in config.
 
 OpenAI-compatible endpoints use Schway's own Chat Completions fetch/SSE adapter. `--base-url` is required. `--header Name:Value` may be repeated, `--body` is a JSON object of extra request fields, and `--auth` is `required`, `optional` (default), or `none`. Compatible mode does not read `OPENAI_API_KEY`. Select named endpoint profiles with `--profile <name>` or `/config set profile <name>`;
 see [profiles](docs/configuration.md#named-openai-compatible-profiles).

@@ -102,8 +102,7 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
   let stopped = true;
   let timedOut = false;
   for (const provider of [...new Set(selection.providers)]) {
-    const model = selection.models?.[provider] ?? ({ anthropic: DEFAULT_MODEL_IDS.anthropic,
-      "openai-api-key": DEFAULT_MODEL_IDS.openai, compatible: DEFAULT_MODEL_IDS["openai-compatible"],
+    const model = selection.models?.[provider] ?? ({ "openai-api-key": DEFAULT_MODEL_IDS.openai, compatible: DEFAULT_MODEL_IDS["openai-compatible"],
       codex: DEFAULT_MODEL_IDS.openai } as const)[provider];
     if (!selection.enabled) { scenarios.push(scenario(provider, model, "skipped", "live_disabled")); continue; }
     // Bun cannot certify or kill a Windows descendant tree without a Job Object. Never spend a call on a best-effort stop.

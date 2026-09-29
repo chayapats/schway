@@ -22,8 +22,7 @@ Cases: `clamp-bounds`, `multi-file-refactor` (definition + caller), `locate-impl
 To explicitly opt into a paid call, select both provider and model:
 
 ```sh
-ANTHROPIC_API_KEY=... bun run eval --provider anthropic --model claude-sonnet-4-5 --allow-paid
-# Or: OPENAI_API_KEY=... bun run eval --provider openai --model gpt-5 --allow-paid
+OPENAI_API_KEY=... bun run eval --provider openai --model gpt-5 --allow-paid
 # Or: OPENAI_COMPATIBLE_API_KEY=... bun run eval --provider openai-compatible --model local-model --base-url https://example.test/v1 --allow-paid
 ```
 

@@ -87,8 +87,8 @@ test("selected-model context keeps unknowns, separates reported usage and follow
     controller.setModel(createScriptedModel(), "openai", "gpt-5.4");
     expect(controller.snapshot().context.capacity).toBe(256_000);
     expect(controller.snapshot().context.providerUsage).toBeNull();
-    controller.setModel(createScriptedModel(), "anthropic", "claude-sonnet-4-6");
-    expect(controller.snapshot().context.capacity).toBe(200_000);
+    controller.setModel(createScriptedModel(), "openai-compatible", "gpt-4o");
+    expect(controller.snapshot().context.capacity).toBe(128_000);
     controller.dispose();
   });
 });

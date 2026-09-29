@@ -8,7 +8,6 @@ import { boundedSmokeFetch, MAX_SMOKE_WIRE_BYTES } from "../src/live/transport.t
 import { sampleRequest } from "./fixtures/openai-compatible.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
 import { encodeChatCompletionsSse, TEXT_STREAM_CHUNKS } from "./fixtures/openai-compatible.ts";
-import { encodeSse as encodeAnthropicSse, TEXT_STREAM_EVENTS as ANTHROPIC_TEXT_EVENTS } from "./fixtures/anthropic.ts";
 import { encodeSse as encodeOpenAiSse, TEXT_STREAM_EVENTS as OPENAI_TEXT_EVENTS } from "./fixtures/openai.ts";
 
 const missingStore: CredentialStore = { get: async () => null, set: async () => {}, delete: async () => false };
@@ -26,7 +25,7 @@ const validModel = (requests: ModelRequest[]): Model => createScriptedModel({ re
 
 test("disabled mode does not discover credentials, create a store, or load a provider", async () => {
   let calls = 0;
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), enabled: false }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), enabled: false }, {
     createStore: () => { calls++; return missingStore; },
     createModel: async () => { calls++; throw Error("unexpected"); },
   });
@@ -38,18 +37,18 @@ test("disabled mode does not discover credentials, create a store, or load a pro
 test("each provider exercises a real read tool and final answer without leaking sentinel or credentials", async () => {
   const seen: string[] = [];
   const requests: ModelRequest[] = [];
-  const report = await runLiveSmoke({ ...selection(["anthropic", "openai-api-key", "compatible", "codex"]),
-    env: { ANTHROPIC_API_KEY: "ANTHROPIC_PRIVATE_VALUE", OPENAI_API_KEY: "OPENAI_PRIVATE_VALUE", OPENAI_COMPATIBLE_API_KEY: "COMPAT_PRIVATE_VALUE" },
+  const report = await runLiveSmoke({ ...selection(["openai-api-key", "compatible", "codex"]),
+    env: { OPENAI_API_KEY: "OPENAI_PRIVATE_VALUE", OPENAI_COMPATIBLE_API_KEY: "COMPAT_PRIVATE_VALUE" },
     compatible: { baseUrl: "https://localhost:1133/v1", auth: "required" },
   }, {
     createStore: () => ({ ...missingStore, get: async identity => identity.account === "codex-subscription:chatgpt" ? JSON.stringify({ accessToken: "stored-subscription-private" }) : null }),
     createModel: async input => { seen.push(input.provider + ":" + (input.openaiAuth ?? "api-key")); return validModel(requests); },
   });
-  expect(seen).toEqual(["anthropic:api-key", "openai:api-key", "openai-compatible:api-key", "openai:codex"]);
+  expect(seen).toEqual(["openai:api-key", "openai-compatible:api-key", "openai:codex"]);
   expect(report.aggregate).toBe("passed");
-  expect(report.scenarios.map(item => item.status)).toEqual(["passed", "passed", "passed", "passed"]);
-  expect(report.scenarios.map(item => item.authSource)).toEqual(["env", "env", "env", "stored-subscription"]);
-  expect(requests).toHaveLength(4);
+  expect(report.scenarios.map(item => item.status)).toEqual(["passed", "passed", "passed"]);
+  expect(report.scenarios.map(item => item.authSource)).toEqual(["env", "env", "stored-subscription"]);
+  expect(requests).toHaveLength(3);
   expect(requests.every(request => request.tools?.map(tool => tool.name).join(",") === "read")).toBe(true);
   expect(requests.every(request => request.items.some(item => item.type === "tool_result" && !item.isError && /1\|[a-f0-9]{40}/.test(item.content)))).toBe(true);
   expect(JSON.stringify(report)).not.toMatch(/PRIVATE_VALUE|stored-subscription-private|smoke-sentinel.txt|\/tmp\//);
@@ -68,16 +67,17 @@ test("only requested provider instantiates; missing required credentials are inc
 
 test("runtime override wins over environment and store-backed API credentials use production identity", async () => {
   const seen: string[] = [];
-  const report = await runLiveSmoke({ ...selection(["anthropic", "openai-api-key"]),
-    runtimeKeys: { anthropic: "runtime-secret" }, env: { ANTHROPIC_API_KEY: "environment-secret" },
+  const report = await runLiveSmoke({ ...selection(["openai-api-key", "compatible"]),
+    runtimeKeys: { "openai-api-key": "runtime-secret" }, env: { OPENAI_API_KEY: "environment-secret", OPENAI_COMPATIBLE_API_KEY: "compatible-env-secret" },
+    compatible: { baseUrl: "https://localhost:1133/v1", auth: "required" },
   }, {
-    createStore: () => ({ ...missingStore, get: async identity => identity.account === "api-key:openai" ? "stored-openai-secret" : null }),
+    createStore: () => ({ ...missingStore, get: async identity => identity.account.startsWith("api-key:openai-compatible") ? "stored-compatible-secret" : null }),
     createModel: async input => { seen.push(input.apiKey ?? ""); return validModel([]); },
   });
-  expect(seen).toEqual(["runtime-secret", "stored-openai-secret"]);
-  expect(report.scenarios.map(item => item.authSource)).toEqual(["runtime", "stored"]);
+  expect(seen).toEqual(["runtime-secret", "compatible-env-secret"]);
+  expect(report.scenarios.map(item => item.authSource)).toEqual(["runtime", "env"]);
   expect(report.aggregate).toBe("passed");
-  expect(JSON.stringify(report)).not.toMatch(/runtime-secret|stored-openai-secret|environment-secret/);
+  expect(JSON.stringify(report)).not.toMatch(/runtime-secret|stored-compatible-secret|environment-secret|compatible-env-secret/);
 });
 
 test("programmatic credentialed HTTP is rejected before secure-store or provider discovery", async () => {
@@ -107,12 +107,12 @@ test("no-auth compatible requires explicit selection and can use isolated endpoi
 });
 
 test("tool-free final statement and incorrect read never pass", async () => {
-  const noop = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "secret" } }, {
+  const noop = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "secret" } }, {
     createStore: () => missingStore,
     createModel: async () => createScriptedModel({ text: "success" }),
   });
   expect(noop.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "missing_tool_evidence" });
-  const wrong = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "secret" } }, {
+  const wrong = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "secret" } }, {
     createStore: () => missingStore,
     createModel: async () => createScriptedModel({ responses: [
       { toolCalls: [{ id: "bad", name: "read", arguments: { path: "wrong.txt" } }] },
@@ -121,7 +121,7 @@ test("tool-free final statement and incorrect read never pass", async () => {
   });
   expect(wrong.scenarios[0]?.status).toBe("failed_provider");
   let rejected = "";
-  const absolute = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "secret" } }, {
+  const absolute = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "secret" } }, {
     createStore: () => missingStore,
     createModel: async () => createScriptedModel({ responses: [
       { toolCalls: [{ id: "bad", name: "read", arguments: { path: "/etc/passwd" } }] },
@@ -136,7 +136,7 @@ test("unadvertised activate_skill call blocks every tool before execution, even 
   let readCalls = 0;
   let modelRounds = 0;
   let workspace = "";
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "fake" } }, {
     createStore: () => missingStore,
     onWorkspace: value => { workspace = value.root; },
     readSentinel: async () => { readCalls++; return { content: "must not execute" }; },
@@ -155,7 +155,7 @@ test("unadvertised activate_skill call blocks every tool before execution, even 
 });
 
 test("a padded answer is not the verbatim sentinel", async () => {
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "fake" } }, {
     createStore: () => missingStore,
     createModel: async () => createScriptedModel({ responses: [
       { toolCalls: [{ id: "read", name: "read", arguments: { path: "smoke-sentinel.txt" } }] },
@@ -173,13 +173,14 @@ test("non-cooperative stream reports a bounded unsettled timeout, retains worksp
   let release!: () => void;
   let dir = "";
   let models = 0;
-  const blocking: Model = { provider: "anthropic", id: "fake", async *stream() {
+  const blocking: Model = { provider: "openai", id: "fake", async *stream() {
     await new Promise<void>(resolve => { release = resolve; });
     yield { type: "message_complete", message: { type: "assistant", id: "late", content: [{ type: "text", text: "late" }] } };
   } };
   const started = performance.now();
-  const report = await runLiveSmoke({ ...selection(["anthropic", "openai-api-key"]), timeoutMs: 35,
-    env: { ANTHROPIC_API_KEY: "fake", OPENAI_API_KEY: "fake" } }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key", "compatible"]), timeoutMs: 35,
+    compatible: { baseUrl: "https://localhost:1133/v1", auth: "none" },
+    env: { OPENAI_API_KEY: "fake" } }, {
     createStore: () => missingStore,
     createModel: async () => { models++; return blocking; },
     onWorkspace: workspace => { dir = workspace.root; },
@@ -196,10 +197,10 @@ test("non-cooperative stream reports a bounded unsettled timeout, retains worksp
 
 test("oversized assembled tool-call arguments and tool result cannot reach another provider round", async () => {
   let rounds = 0;
-  const configured = { ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "fake" } };
+  const configured = { ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "fake" } };
   const args = await runLiveSmoke(configured, {
     createStore: () => missingStore,
-    createModel: async () => ({ provider: "anthropic", id: "fixture", async *stream() {
+    createModel: async () => ({ provider: "openai", id: "fixture", async *stream() {
       rounds++;
       yield { type: "message_complete", message: { type: "assistant", id: "arg", content: [
         { type: "tool_call", id: "a", name: "read", arguments: { path: "smoke-sentinel.txt", padding: "X".repeat(8192) } },
@@ -223,7 +224,7 @@ test("oversized assembled tool-call arguments and tool result cannot reach anoth
 
 test("transport error, timeout, and cancellation are distinguished and temp directory removed", async () => {
   let tempPath = "";
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "SECRET_IN_ERROR" } }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "SECRET_IN_ERROR" } }, {
     createStore: () => missingStore,
     createModel: async () => createScriptedModel({ error: "SECRET_IN_ERROR", status: 401 }),
     onWorkspace: workspace => { tempPath = workspace.root; },
@@ -231,14 +232,14 @@ test("transport error, timeout, and cancellation are distinguished and temp dire
   expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "provider_error" });
   expect(JSON.stringify(report)).not.toContain("SECRET_IN_ERROR");
   await expect(access(tempPath)).rejects.toThrow();
-  const timeout = await runLiveSmoke({ ...selection(["anthropic"]), timeoutMs: 25, env: { ANTHROPIC_API_KEY: "x" } }, {
+  const timeout = await runLiveSmoke({ ...selection(["openai-api-key"]), timeoutMs: 25, env: { OPENAI_API_KEY: "x" } }, {
     createStore: () => missingStore,
     createModel: async () => createScriptedModel({ waitForAbort: true }),
   });
   expect(timeout.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout" });
   const controller = new AbortController();
   controller.abort();
-  const cancelled = await runLiveSmoke({ ...selection(["anthropic"]), signal: controller.signal }, {
+  const cancelled = await runLiveSmoke({ ...selection(["openai-api-key"]), signal: controller.signal }, {
     createStore: () => missingStore,
     createModel: async () => { throw Error("should not instantiate"); },
   });
@@ -247,7 +248,7 @@ test("transport error, timeout, and cancellation are distinguished and temp dire
 
 test("credential-store wait is time-bounded before any provider can instantiate", async () => {
   let models = 0;
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), timeoutMs: 20 }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), timeoutMs: 20 }, {
     createStore: () => ({ ...missingStore, get: () => new Promise<string | null>(() => {}) }),
     createModel: async () => { models++; return validModel([]); },
   });
@@ -259,7 +260,7 @@ test("credential-store wait is time-bounded before any provider can instantiate"
 test("a late keychain resolution cannot change a published timeout report or start a model", async () => {
   let release!: (value: string | null) => void;
   let models = 0;
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), timeoutMs: 20 }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), timeoutMs: 20 }, {
     createStore: () => ({ ...missingStore, get: () => new Promise<string | null>(resolve => { release = resolve; }) }),
     createModel: async () => { models++; return validModel([]); },
   });
@@ -338,9 +339,8 @@ test("bounded fetch forwards request/options and charges the cumulative byte bud
   expect(cancelled).toBeGreaterThanOrEqual(1);
 });
 
-test("bounded fetch prevents four selected adapters from consuming an oversized undelimited SSE chunk", async () => {
+test("bounded fetch prevents three selected adapters from consuming an oversized undelimited SSE chunk", async () => {
   const lanes = [
-    { provider: "anthropic" as const, apiKey: "fake-anthropic" },
     { provider: "openai" as const, openaiAuth: "api-key" as const, apiKey: "fake-openai" },
     { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const },
     { provider: "openai" as const, openaiAuth: "codex" as const, codexTokens: { accessToken: "fake-codex", accountId: "account" } },
@@ -405,7 +405,6 @@ test("bounded fetch preserves valid streaming and message completion for all fou
   ];
   const codexSse = `${codexEvents.map(event => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
   const lanes = [
-    { input: { provider: "anthropic" as const, apiKey: "fixture" }, sse: encodeAnthropicSse(ANTHROPIC_TEXT_EVENTS) },
     { input: { provider: "openai" as const, openaiAuth: "api-key" as const, apiKey: "fixture" }, sse: encodeOpenAiSse(OPENAI_TEXT_EVENTS) },
     { input: { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const }, sse: encodeChatCompletionsSse(TEXT_STREAM_CHUNKS) },
     { input: { provider: "openai" as const, openaiAuth: "codex" as const, codexTokens: { accessToken: "fixture", accountId: "account" } }, sse: codexSse },
@@ -482,7 +481,7 @@ test("rejected subscription refresh asks for interactive re-login without starti
 
 test("runner setup failure is not misreported as a provider failure", async () => {
   let path = "";
-  const report = await runLiveSmoke({ ...selection(["anthropic"]), env: { ANTHROPIC_API_KEY: "secret" } }, {
+  const report = await runLiveSmoke({ ...selection(["openai-api-key"]), env: { OPENAI_API_KEY: "secret" } }, {
     createStore: () => missingStore, createModel: async () => validModel([]),
     onWorkspace: workspace => { path = workspace.root; throw Error("private setup error"); },
   });

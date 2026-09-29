@@ -81,10 +81,10 @@ test("slash commands include credential management and settings", () => {
 
 test("model args accept known, unknown, and provider-qualified ids", () => {
   expect(parseModelArgs("gpt-4o", "openai")).toEqual({ provider: "openai", modelId: "gpt-4o" });
-  expect(parseModelArgs("openai/gpt-4o", "anthropic")).toEqual({ provider: "openai", modelId: "gpt-4o" });
-  expect(parseModelArgs("openai gpt-4o", "anthropic")).toEqual({ provider: "openai", modelId: "gpt-4o" });
+  expect(parseModelArgs("openai/gpt-4o", "openai-compatible")).toEqual({ provider: "openai", modelId: "gpt-4o" });
+  expect(parseModelArgs("openai gpt-4o", "openai-compatible")).toEqual({ provider: "openai", modelId: "gpt-4o" });
   expect(parseModelArgs("my-custom-model", "openai")).toEqual({ provider: "openai", modelId: "my-custom-model" });
-  expect(parseModelArgs("openai/my-custom-model", "anthropic")).toEqual({
+  expect(parseModelArgs("openai/my-custom-model", "openai-compatible")).toEqual({
     provider: "openai",
     modelId: "my-custom-model",
   });
@@ -93,9 +93,9 @@ test("model args accept known, unknown, and provider-qualified ids", () => {
 });
 
 test("model picker lists known budgets and unknown-id usage", () => {
-  const text = formatModelPicker("anthropic", "claude-sonnet-4-6", listCatalog());
-  expect(text).toContain("Current: anthropic/claude-sonnet-4-6");
-  expect(text).toContain("claude-sonnet-4-6");
+  const text = formatModelPicker("openai", "gpt-5.4", listCatalog());
+  expect(text).toContain("Current: openai/gpt-5.4");
+  expect(text).toContain("gpt-5.4");
   expect(text).toContain("gpt-4o");
   expect(text).toContain("Unknown ids are allowed");
 });
@@ -189,8 +189,8 @@ test("model selection propagates to subsequent requests with matching budget", a
       contextManager: createContextManager(workspace),
       tools: createToolRegistry([readTool]),
       workspace,
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-6",
+      provider: "openai",
+      modelId: "gpt-5.4",
       sessionId: "sess-model-switch",
     });
     controller.setModel(createScriptedModel({ text: "from-second" }), "openai", "gpt-4o");
@@ -262,11 +262,11 @@ test("config shows effective settings with secrets redacted as session-only", as
     expect(text).toContain("session only");
     expect(text).not.toContain(secret);
     expect(text).toContain("***");
-    controller.setModel(createScriptedModel({ text: "ok" }), "anthropic", "claude-sonnet-4-6");
+    controller.setModel(createScriptedModel({ text: "ok" }), "openai", "gpt-5.4");
     const switched = controller.describeConfig();
-    expect(switched).toContain("Provider: anthropic");
-    expect(switched).toContain("claude-sonnet-4-6");
-    expect(switched).toContain(`${lookupModel("anthropic", "claude-sonnet-4-6").contextWindow}`);
+    expect(switched).toContain("Provider: openai");
+    expect(switched).toContain("gpt-5.4");
+    expect(switched).toContain(`${lookupModel("openai", "gpt-5.4").contextWindow}`);
   });
 });
 

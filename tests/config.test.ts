@@ -98,7 +98,7 @@ test("invalid types and non-positive limits fail with the setting name", () => {
 
 test("layers merge built-in, user, project, then CLI overrides", () => {
   const merged = mergeConfigLayers(
-    { provider: "anthropic", maxTurns: 32, model: "claude-sonnet-4-6" },
+    { provider: "openai-compatible", maxTurns: 32, model: "gpt-4o" },
     { provider: "openai", maxTurns: 16 },
     { model: "gpt-5.4", maxConcurrentTools: 4 },
     { maxTurns: 3 },
@@ -114,23 +114,23 @@ test("layers merge built-in, user, project, then CLI overrides", () => {
 test("changing provider without a model drops the inherited model", () => {
   const merged = mergeConfigLayers(
     { provider: "openai", model: "gpt-5.4" },
-    { provider: "anthropic" },
+    { provider: "openai-compatible" },
   );
-  expect(merged.provider).toBe("anthropic");
+  expect(merged.provider).toBe("openai-compatible");
   expect(merged.model).toBeUndefined();
 });
 
 test("a provider change without a model uses that provider's default model", () => {
   const resolved = resolveSettings({
     user: { provider: "openai", model: "gpt-5.4" },
-    cli: { provider: "anthropic" },
+    cli: { provider: "openai-compatible", baseUrl: "http://127.0.0.1:11434/v1" },
   });
   expect("error" in resolved).toBe(false);
   if ("error" in resolved) {
     throw new Error(resolved.error);
   }
-  expect(resolved.provider).toBe("anthropic");
-  expect(resolved.model).toBe(DEFAULT_MODEL_IDS.anthropic);
+  expect(resolved.provider).toBe("openai-compatible");
+  expect(resolved.model).toBe(DEFAULT_MODEL_IDS["openai-compatible"]);
 });
 
 test("credential headers are rejected in ordinary config", () => {
@@ -165,11 +165,11 @@ test("zero-config uses built-in defaults and does not create config files", asyn
     if ("error" in resolved) {
       throw new Error(resolved.error);
     }
-    expect(resolved.provider).toBe("anthropic");
-    expect(resolved.model).toBe(DEFAULT_MODEL_IDS.anthropic);
+    expect(resolved.provider).toBe("openai");
+    expect(resolved.model).toBe(DEFAULT_MODEL_IDS.openai);
     expect(resolved.maxTurns).toBe(DEFAULT_MAX_TURNS);
     expect(resolved.maxConcurrentTools).toBe(DEFAULT_MAX_CONCURRENT_TOOLS);
-    expect(resolved.catalog.contextWindow).toBe(200_000);
+    expect(resolved.catalog.contextWindow).toBe(256_000);
     expect(resolved.catalog.maxOutput).toBe(16_384);
 
     expect(await readdir(home)).toEqual([]);
@@ -334,14 +334,14 @@ test("parseEnvFile reads assignments and ignores comments", () => {
   const parsed = parseEnvFile(
     [
       "# comment",
-      "ANTHROPIC_API_KEY=sk-from-file",
+      "OPENAI_COMPATIBLE_API_KEY=sk-from-file",
       "export OPENAI_API_KEY=\"sk-quoted\"",
       "",
       "OTHER=plain value",
     ].join("\n"),
   );
   expect(parsed).toEqual({
-    ANTHROPIC_API_KEY: "sk-from-file",
+    OPENAI_COMPATIBLE_API_KEY: "sk-from-file",
     OPENAI_API_KEY: "sk-quoted",
     OTHER: "plain value",
   });

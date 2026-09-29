@@ -17,7 +17,7 @@ import type { Workspace } from "../workspace/workspace.ts";
 import { boundedSmokeFetch } from "./transport.ts";
 
 /** Independently selectable provider/auth lanes; API-key OpenAI never silently switches to subscription billing. */
-export type SmokeProvider = "anthropic" | "openai-api-key" | "compatible" | "codex";
+export type SmokeProvider = "openai-api-key" | "compatible" | "codex";
 /** Explicit opt-in selection and bounded execution settings, with no implicit credential discovery. */
 export interface SmokeSelection {
   enabled: boolean;
@@ -84,7 +84,6 @@ const MAX_TURNS = 2;
 const MAX_TOKENS = 256;
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const DEFAULT_MODELS: Record<SmokeProvider, string> = {
-  anthropic: DEFAULT_MODEL_IDS.anthropic,
   "openai-api-key": DEFAULT_MODEL_IDS.openai,
   compatible: DEFAULT_MODEL_IDS["openai-compatible"],
   codex: DEFAULT_MODEL_IDS.openai,
@@ -273,7 +272,7 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
     result.authSource = "stored-subscription";
     return { provider: "openai", openaiAuth: "codex", model, maxTokens: MAX_TOKENS, codexStore: store };
   }
-  const family = provider === "openai-api-key" ? "openai" : provider === "compatible" ? "openai-compatible" : "anthropic";
+  const family = provider === "compatible" ? "openai-compatible" : "openai";
   const credential = await resolveProviderCredential({
     provider: family, baseUrl: selection.compatible?.baseUrl, auth: selection.compatible?.auth,
     profile: selection.compatible?.profile, credentialEnv: selection.compatible?.credentialEnv,

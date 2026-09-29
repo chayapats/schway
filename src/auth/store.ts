@@ -18,7 +18,7 @@ export interface CredentialStore {
 
 /** Provider and endpoint used to select a credential without including its secret. */
 export interface CredentialTarget {
-  provider: "anthropic" | "openai" | "openai-compatible";
+  provider: "openai" | "openai-compatible";
   baseUrl?: string;
   /** Active compatible profile that scopes the stored identity alongside the endpoint. */
   profile?: string;
@@ -49,6 +49,12 @@ export function credentialIdentity(target: CredentialTarget): CredentialIdentity
     label: `openai-compatible${profileLabel}(${url.host}, identity ${digest.slice(0, 12)})`,
   };
 }
+
+/** Secure-store account once used by the removed Anthropic route; only doctor looks for it, to report it as unused. */
+export const LEGACY_ANTHROPIC_ACCOUNT = "api-key:anthropic";
+
+/** Command that deletes the leftover Anthropic credential from the OS secure store. */
+export const LEGACY_ANTHROPIC_REMOVAL_COMMAND = `bun -e 'await Bun.secrets.delete({ service: "schway", name: "${LEGACY_ANTHROPIC_ACCOUNT}" })'`;
 
 /** Stable secure-store account for the ChatGPT subscription (Codex OAuth) credential, separate from API-key identities. */
 export const CODEX_SUBSCRIPTION_ACCOUNT = "codex-subscription:chatgpt";

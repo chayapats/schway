@@ -1,4 +1,5 @@
 import { RESERVED_SKILL_NAMES, splitSlashCommand } from "../skills/skills.ts";
+import { removedProviderMessage } from "../config/removed-provider.ts";
 import type { ExtensionCommandInfo } from "../extensions/host.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 import type { TuiController } from "./controller.ts";
@@ -94,9 +95,9 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/config set <key> <value> [--scope user|project] - edit settings (session only by default)",
     "/config reset <key> [--scope user|project] - remove an override and inherit its fallback",
     "/login - choose a provider and sign-in method",
-    "/login <anthropic|openai|openai-compatible> - enter an API key in a masked prompt",
+    "/login <openai|openai-compatible> - enter an API key in a masked prompt",
     "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
-    "/logout <anthropic|openai|openai-compatible|codex> - remove the selected stored credential",
+    "/logout <openai|openai-compatible|codex> - remove the selected stored credential",
     "/help - show this help",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
@@ -166,7 +167,6 @@ export function parseSkillInvocation(input: string): { name: string; args: strin
 
 /** Provider families selectable from the interactive model picker. */
 export const MODEL_PICKER_PROVIDERS = [
-  "anthropic",
   "openai",
   "openai-compatible",
 ] as const;
@@ -201,7 +201,7 @@ export function parseModelArgs(
     const modelId = trimmed.slice(slash + 1).trim();
     if (!isPickerProvider(provider)) {
       return {
-        error: `Unknown provider: ${provider}. Valid providers: ${MODEL_PICKER_PROVIDERS.join(", ")}`,
+        error: removedProviderMessage(provider) ?? `Unknown provider: ${provider}. Valid providers: ${MODEL_PICKER_PROVIDERS.join(", ")}`,
       };
     }
     if (modelId.length === 0) {
@@ -212,6 +212,10 @@ export function parseModelArgs(
   const parts = trimmed.split(/\s+/);
   if (parts.length === 2 && isPickerProvider(parts[0]!.toLowerCase())) {
     return { provider: parts[0]!.toLowerCase(), modelId: parts[1]! };
+  }
+  const removed = parts.length === 2 ? removedProviderMessage(parts[0]) : undefined;
+  if (removed !== undefined) {
+    return { error: removed };
   }
   if (parts.length === 1) {
     return { provider: currentProvider, modelId: parts[0]! };
@@ -295,11 +299,11 @@ function isPickerProvider(value: string): value is ModelPickerProvider {
 
 /** Usage guidance for credential commands, keeping API keys out of slash arguments. */
 export const LOGIN_USAGE =
-  "Usage: /login to choose a method, /login <anthropic|openai|openai-compatible>, or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
+  "Usage: /login to choose a method, /login <openai|openai-compatible>, or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
 
 /** Requested credential action from /login or /logout arguments. */
 export type LoginTarget =
-  | { kind: "api-key"; provider: "anthropic" | "openai" | "openai-compatible" }
+  | { kind: "api-key"; provider: "openai" | "openai-compatible" }
   | { kind: "codex"; device: boolean; code?: string }
   | { error: string };
 
@@ -307,7 +311,7 @@ export type LoginTarget =
 export function parseLoginTarget(args: string): LoginTarget {
   const tokens = args.trim().split(/\s+/).filter((token) => token.length > 0);
   const name = tokens[0]?.toLowerCase() ?? "";
-  if (name === "anthropic" || name === "openai" || name === "openai-compatible") {
+  if (name === "openai" || name === "openai-compatible") {
     if (tokens.length > 1) {
       return { error: LOGIN_USAGE };
     }

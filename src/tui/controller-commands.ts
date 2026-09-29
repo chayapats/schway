@@ -98,8 +98,8 @@ export abstract class CommandsLayer extends CredentialsLayer {
       const subscription = this.openaiAuth === "codex" || this.model?.provider === "codex-subscription";
       const advertised = settings?.provider === this.provider && settings.model === this.modelId ? settings.supportedThinking : undefined;
       const levels = advertised ?? (subscription ? [] : getThinkingSupport(this.provider, this.modelId).supported);
-      const applicable = levels.filter(level => !validateThinking(this.provider, this.modelId, level, settings?.extraBody, settings?.provider === this.provider && settings.model === this.modelId ? settings.maxOutput : this.effectiveBudgets().maxOutput, subscription ? advertised ? { id: this.modelId, supportedThinking: advertised } : null : undefined));
-      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["anthropic", "openai", "openai-compatible", "codex"];
+      const applicable = levels.filter(level => !validateThinking(this.provider, this.modelId, level, settings?.extraBody, subscription ? advertised ? { id: this.modelId, supportedThinking: advertised } : null : undefined));
+      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "openai-compatible", "codex"];
       return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
     }
     if (!/^\/[^\s]*$/.test(input)) return [];

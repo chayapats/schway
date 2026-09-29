@@ -34,9 +34,9 @@ test("provider changes clear inherited model origins and cancelled writes create
     const home = join(dir, "home"), root = join(dir, "project");
     await mkdir(join(home, ".schway"), { recursive: true });
     await mkdir(root);
-    await writeFile(join(home, ".schway/config.json"), '{"model":"claude-opus-4-6","maxOutput":4000}');
-    const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai" } });
-    expect(editor.settings.model).toBe("gpt-5.4");
+    await writeFile(join(home, ".schway/config.json"), '{"model":"gpt-5.4-mini","maxOutput":4000}');
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai-compatible", baseUrl: "http://127.0.0.1:1/v1" } });
+    expect(editor.settings.model).toBe("gpt-4o");
     expect(editor.origins.model).toBe("built-in default");
     expect(editor.settings.maxOutput).toBe(4000);
     expect(editor.origins.maxOutput).toBe("user-global");

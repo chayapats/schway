@@ -33,9 +33,8 @@ test("API-key model choices keep the current provider together before other prov
 test("picker access follows credential precedence without exposing secrets", async () => {
   const store = fakeCredentialStore();
   await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret" }));
-  await store.set(credentialIdentity({ provider: "anthropic" }), "anthropic-secret");
   const saved = await loadModelPickerAccess({ store, env: {} });
-  expect(saved.providers).toMatchObject({ openai: "ChatGPT", anthropic: "API key" });
+  expect(saved.providers).toMatchObject({ openai: "ChatGPT" });
   expect(saved.openaiTransport).toBe("codex");
   expect(JSON.stringify(saved)).not.toContain("secret");
   const env = { OPENAI_API_KEY: "environment-secret" };
@@ -54,7 +53,7 @@ test("ready profiles precede missing credentials and a current model with no log
   await store.set(credentialIdentity({ provider: "openai-compatible", profile: "saved", baseUrl: profiles.saved.baseUrl }), "profile-secret");
   const access = await loadModelPickerAccess({ store, env: {}, profiles });
   expect(access.profiles).toEqual({ local: "No key required", saved: "API key", missing: "Login required" });
-  const entries = modelPickerEntries("", "anthropic", "claude-sonnet-4-6", {}, { profiles, access });
+  const entries = modelPickerEntries("", "openai", "gpt-5.4", {}, { profiles, access });
   expect(entries.slice(0, 2).map(entry => entry.profile)).toEqual(["local", "saved"]);
   expect(entries.find(entry => entry.active)?.access).toBe("Login required");
 });
@@ -66,7 +65,7 @@ test("opening the picker discovers a saved Codex login from another provider and
     const store = fakeCredentialStore();
     await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "saved-secret" }));
     const controller = new TuiController({ session: createSession(), sessionId: "picker-auth", workspace, configEditor,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace),
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: async () => ["account-first", "account-second"] },
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
     });
@@ -89,7 +88,7 @@ test("reopening the picker refreshes saved credentials and preserves search rank
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const store = fakeCredentialStore();
     const controller = new TuiController({ session: createSession(), sessionId: "picker-refresh", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace),
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }) },
     });
     try {

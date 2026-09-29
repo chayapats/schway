@@ -69,7 +69,7 @@ test("schway -p without credentials fails from a non-Git workspace", async () =>
       home: dirs.home,
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Missing Anthropic API key");
+    expect(result.stderr).toContain("Missing OpenAI API key");
     expect(result.stdout).toBe("");
     await assertIsolatedCliClean(dirs);
   });
@@ -129,13 +129,13 @@ test("schway -p --provider openai-compatible --auth required without --api-key f
 
 test("project .env files are not loaded automatically", async () => {
   await withIsolatedCliDirs(async (dirs) => {
-    await writeFile(join(dirs.work, ".env"), "ANTHROPIC_API_KEY=sk-from-dotenv\n");
+    await writeFile(join(dirs.work, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n");
     const result = await spawnSchway(["-p", "hello"], {
       cwd: dirs.work,
       home: dirs.home,
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Missing Anthropic API key");
+    expect(result.stderr).toContain("Missing OpenAI API key");
     expect(result.stderr.includes("sk-from-dotenv")).toBe(false);
     await assertIsolatedCliClean(dirs);
   });
@@ -143,7 +143,7 @@ test("project .env files are not loaded automatically", async () => {
 
 test("a missing --env-file path fails from the schway bin", async () => {
   await withIsolatedCliDirs(async (dirs) => {
-    await writeFile(join(dirs.work, ".env"), "ANTHROPIC_API_KEY=sk-from-dotenv\n");
+    await writeFile(join(dirs.work, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n");
     const result = await spawnSchway(
       ["-p", "hello", "--env-file", join(dirs.work, "missing.env")],
       { cwd: dirs.work, home: dirs.home },
@@ -189,11 +189,11 @@ test("a conflicting global compatible-provider fixture is honored without leakin
     expect(fixtureBaseUrl.stdout).toBe("");
 
     const cliOverridesGlobal = await spawnSchway(
-      ["-p", "hello", "--provider", "anthropic"],
+      ["-p", "hello", "--provider", "openai"],
       { cwd: dirs.work, home: dirs.home },
     );
     expect(cliOverridesGlobal.exitCode).toBe(1);
-    expect(cliOverridesGlobal.stderr).toContain("Missing Anthropic API key");
+    expect(cliOverridesGlobal.stderr).toContain("Missing OpenAI API key");
     expect(cliOverridesGlobal.stdout).toBe("");
 
     for (const result of [fromGlobal, fixtureBaseUrl, cliOverridesGlobal]) {

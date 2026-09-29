@@ -1,21 +1,10 @@
 import { expect, test } from "bun:test";
-import { createAnthropicModel } from "../src/model/providers/anthropic.ts";
 import { createOpenAIModel } from "../src/model/providers/openai.ts";
 import { createOpenAICompatibleModel } from "../src/model/providers/openai-compatible.ts";
 import { reportedTokens } from "../src/model/model.ts";
 import { collect } from "./helpers/scripted-model.ts";
-import { encodeSse as anthropicSse, sampleRequest as anthropicRequest, TEXT_STREAM_EVENTS as anthropicText } from "./fixtures/anthropic.ts";
 import { encodeSse as openaiSse, sampleRequest as openaiRequest, TEXT_STREAM_EVENTS as openaiText } from "./fixtures/openai.ts";
 import { encodeChatCompletionsSse, sampleRequest as compatibleRequest, TEXT_STREAM_CHUNKS } from "./fixtures/openai-compatible.ts";
-
-test("native Anthropic reports terminal totals separately from partial start counters", async () => {
-  const model = createAnthropicModel({ apiKey: "fixture", fetch: async () => new Response(anthropicSse(anthropicText), { headers: { "Content-Type": "text/event-stream" } }) });
-  const events = await collect(model.stream(anthropicRequest()));
-  expect(events.filter(event => event.type === "usage")).toEqual([
-    { type: "usage", usage: { inputTokens: 12, outputTokens: null } },
-    { type: "usage", usage: { inputTokens: 12, outputTokens: 2 } },
-  ]);
-});
 
 test("Responses records final usage and keeps missing dimensions unknown", async () => {
   const complete = openaiText.at(-1)!;

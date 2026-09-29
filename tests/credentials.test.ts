@@ -1,43 +1,7 @@
 import { expect, test } from "bun:test";
 import {
-  resolveAnthropicApiKey,
   resolveOpenAIApiKey,
 } from "../src/auth/secrets.ts";
-
-test("runtime credentials take precedence over environment credentials", () => {
-  const resolved = resolveAnthropicApiKey({
-    runtimeApiKey: "sk-runtime",
-    env: { ANTHROPIC_API_KEY: "sk-env" },
-  });
-  expect(resolved).toEqual({ apiKey: "sk-runtime", source: "runtime" });
-});
-
-test("environment credentials are used when no runtime override is provided", () => {
-  const resolved = resolveAnthropicApiKey({
-    env: { ANTHROPIC_API_KEY: "sk-env" },
-  });
-  expect(resolved).toEqual({ apiKey: "sk-env", source: "env" });
-});
-
-test("missing credentials return an actionable error", () => {
-  const resolved = resolveAnthropicApiKey({ env: {} });
-  expect(resolved).toEqual({
-    error:
-      "Missing Anthropic API key. Set ANTHROPIC_API_KEY or pass --api-key.",
-  });
-});
-
-test("blank credentials are treated as missing", () => {
-  expect(
-    resolveAnthropicApiKey({
-      runtimeApiKey: "  ",
-      env: { ANTHROPIC_API_KEY: "sk-env" },
-    }),
-  ).toMatchObject({ error: expect.any(String) });
-  expect(
-    resolveAnthropicApiKey({ env: { ANTHROPIC_API_KEY: "" } }),
-  ).toMatchObject({ error: expect.any(String) });
-});
 
 test("OpenAI runtime credentials take precedence over environment credentials", () => {
   const resolved = resolveOpenAIApiKey({
@@ -85,12 +49,12 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 
 test("provider resolution falls through runtime, environment and secure storage in order", async () => {
   const store = fakeCredentialStore();
-  await store.set(credentialIdentity({ provider: "anthropic" }), "stored-sentinel");
-  const input = { provider: "anthropic" as const, store, env: { ANTHROPIC_API_KEY: "environment-sentinel" } };
+  await store.set(credentialIdentity({ provider: "openai" }), "stored-sentinel");
+  const input = { provider: "openai" as const, store, env: { OPENAI_API_KEY: "environment-sentinel" } };
   expect(await resolveProviderCredential({ ...input, runtimeApiKey: "runtime-sentinel" })).toMatchObject({ apiKey: "runtime-sentinel", source: "runtime" });
   expect(await resolveProviderCredential(input)).toMatchObject({ apiKey: "environment-sentinel", source: "env" });
   expect(await resolveProviderCredential({ ...input, env: {} })).toMatchObject({ apiKey: "stored-sentinel", source: "stored" });
-  expect(await resolveProviderCredential({ ...input, env: {}, store: fakeCredentialStore() })).toMatchObject({ error: expect.stringContaining("Missing Anthropic API key") });
+  expect(await resolveProviderCredential({ ...input, env: {}, store: fakeCredentialStore() })).toMatchObject({ error: expect.stringContaining("Missing OpenAI API key") });
 });
 
 const unavailableStore: CredentialStore = {
@@ -100,8 +64,8 @@ const unavailableStore: CredentialStore = {
 };
 
 test("higher priority keys bypass locked storage and an explicit empty override never falls back", async () => {
-  for (const provider of ["anthropic", "openai", "openai-compatible"] as const) {
-    const input = { provider, baseUrl: "https://example.test/v1", store: unavailableStore, env: { ANTHROPIC_API_KEY: "env", OPENAI_API_KEY: "env", OPENAI_COMPATIBLE_API_KEY: "env" } };
+  for (const provider of ["openai", "openai-compatible"] as const) {
+    const input = { provider, baseUrl: "https://example.test/v1", store: unavailableStore, env: { OPENAI_API_KEY: "env", OPENAI_COMPATIBLE_API_KEY: "env" } };
     expect(await resolveProviderCredential({ ...input, runtimeApiKey: " runtime " })).toEqual({ apiKey: "runtime", source: "runtime" });
     expect(await resolveProviderCredential(input)).toEqual({ apiKey: "env", source: "env" });
     for (const auth of ["required", "optional", "none"] as const) {

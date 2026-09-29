@@ -10,7 +10,7 @@ import { DAILY_CASES } from "./cases.ts";
 import { estimateSpendUsd, formatUsd, FREE, resolvePrice, roundUsd, type TokenPrice } from "./spend.ts";
 
 const exec = promisify(execFile);
-const USAGE = "Usage: bun run eval (--provider scripted | --provider anthropic|openai|openai-compatible --model ID --allow-paid | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]";
+const USAGE = "Usage: bun run eval (--provider scripted | --provider openai|openai-compatible --model ID --allow-paid | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]";
 
 /** Exit code when the spend cap stopped the run before every case started. */
 export const SPEND_CAP_EXIT_CODE = 3;
@@ -39,7 +39,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   if (entries.length < 1 || entries.length > 8 || caseIds.some(id => id !== CODING_CASE.id && !DAILY_CASES.some(item => item.id === id)) ||
       (matrix !== undefined && (values.has("--provider") || values.has("--model"))) ||
       (!matrix && values.get("--provider") !== "scripted" && !values.has("--model")) ||
-      entries.some(entry => !["scripted", "anthropic", "openai", "openai-compatible"].includes(entry.provider) || !entry.model ||
+      entries.some(entry => !["scripted", "openai", "openai-compatible"].includes(entry.provider) || !entry.model ||
         (entry.provider === "scripted" ? (entry.model !== "offline-v1" || (allowPaid && !matrix)) : !allowPaid)) ||
       (entries.some(entry => entry.provider === "openai-compatible") !== values.has("--base-url")) ||
       (!matrix && !values.has("--provider"))) {
@@ -63,7 +63,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   const explicit: TokenPrice | undefined = inputPrice === undefined ? undefined : { inputPerMillion: inputPrice, outputPerMillion: outputPrice! };
   // Paid spend must never go uncounted, so a model that would really be called needs a price first.
   const baseUrl = values.get("--base-url");
-  const keyFor = (provider: string) => env[provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : "OPENAI_COMPATIBLE_API_KEY"]?.trim();
+  const keyFor = (provider: string) => env[provider === "openai" ? "OPENAI_API_KEY" : "OPENAI_COMPATIBLE_API_KEY"]?.trim();
   const prices = entries.map(entry => resolvePrice(entry.provider, entry.model, explicit));
   const unpriced = entries.find((entry, index) => !prices[index] && !!keyFor(entry.provider) && (entry.provider !== "openai-compatible" || validEndpoint(baseUrl)));
   if (unpriced) {
@@ -103,7 +103,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       } else {
         try {
           const model: Model = deps.model ? deps.model(provider, modelId, id) : provider === "scripted" ? offlineModel(id)
-            : await loadProviderModel({ provider: provider as "anthropic" | "openai" | "openai-compatible", model: modelId,
+            : await loadProviderModel({ provider: provider as "openai" | "openai-compatible", model: modelId,
               apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
           result = await runCodingEval({ model, sourceRevision, settings, caseId: id });
         } catch {

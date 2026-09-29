@@ -95,7 +95,7 @@ test("the same model activates the chosen subscription or API-key route atomical
     const requests: string[] = [];
     const outcomes: string[] = [];
     const controller = new TuiController({ session: createSession(), sessionId: "routes", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace), configEditor: editor,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace), configEditor: editor,
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => [{ id: "gpt-5.4", supportedThinking: [] }] },
       stageSettings: async settings => {
         const account = settings.openaiAuth === "codex";
@@ -146,7 +146,7 @@ test("connecting a missing route returns to its search and identity without sele
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("anthropic/claude-sonnet-4-6");
+      controller.searchModels("openai/gpt-5.4");
       const identity = controller.snapshot().modelPicker!.entries[0]!.identity;
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot().credentialEntry).toBeDefined();
@@ -156,18 +156,18 @@ test("connecting a missing route returns to its search and identity without sele
       expect(outcomes).toEqual([]);
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("anthropic/claude-sonnet-4-6");
+      controller.searchModels("openai/gpt-5.4");
       expect(await controller.selectPickerModel()).toBe(true);
       controller.enterCredentialText("isolated-secret");
       expect(await controller.submitCredential()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const picker = controller.snapshot().modelPicker!;
-      expect(picker.query).toBe("anthropic/claude-sonnet-4-6");
+      expect(picker.query).toBe("openai/gpt-5.4");
       expect(picker.entries[picker.selectedIndex]?.identity).toBe(identity);
       expect(picker.entries[picker.selectedIndex]?.access).toBe("API key");
       expect(outcomes).toEqual([]);
       expect(await controller.selectPickerModel()).toBe(true);
-      expect(outcomes).toEqual(["anthropic"]);
+      expect(outcomes).toEqual(["openai"]);
       expect(JSON.stringify(controller.snapshot())).not.toContain("isolated-secret");
     } finally { controller.dispose(); }
   });
@@ -184,7 +184,7 @@ test("two endpoint identities remain separate when catalog refresh changes row o
     await store.set(credentialIdentity({ provider: "openai-compatible", profile: "beta", baseUrl: profiles.beta.baseUrl, credentialIdentity: profiles.beta.credentialIdentity }), "beta-secret");
     let resolveCatalog!: (models: readonly ModelCapability[]) => void;
     const controller = new TuiController({ session: createSession(), sessionId: "profiles", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace), configEditor: editor,
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace), configEditor: editor,
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: async () => new Promise(resolve => { resolveCatalog = resolve; }) },
       stageSettings: async settings => {
         expect(settings.baseUrl).toBe(profiles.beta.baseUrl);
@@ -286,7 +286,7 @@ test("ChatGPT connection returns to account discovery without silently activatin
     const store = fakeCredentialStore();
     const outcomes: string[] = [];
     const controller = new TuiController({ session: createSession(), sessionId: "subscription-connect", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", model: createScriptedModel({ provider: "anthropic" }),
+      provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "openai" }),
       contextManager: createContextManager(workspace), configEditor: editor,
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
         codexLogin: async () => { await store.set(codexSubscriptionIdentity(), "new-account-token"); return { ok: true, status: "Saved" }; },
@@ -301,7 +301,7 @@ test("ChatGPT connection returns to account discovery without silently activatin
       expect(controller.snapshot().modelPicker?.entries[0]).toMatchObject({ connect: true, authRoute: "codex" });
       expect(await controller.selectPickerModel()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.snapshot().provider).toBe("openai");
       expect(controller.snapshot().modelPicker?.query).toBe("connect");
       expect(controller.snapshot().modelPicker?.entries.some(entry => entry.modelId === "account-model" && entry.verifiedCatalog)).toBe(true);
       expect(outcomes).toEqual([]);
@@ -320,7 +320,7 @@ test("a highlighted API row keeps its identity when the same subscription model 
     await store.set(credentialIdentity({ provider: "openai" }), "api-secret");
     let resolveCatalog!: (models: readonly ModelCapability[]) => void;
     const controller = new TuiController({ session: createSession(), sessionId: "same-id-refresh", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace),
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: () => new Promise(resolve => { resolveCatalog = resolve; }) },
     });
     try {
@@ -345,7 +345,7 @@ test("an unresponsive account catalog stops loading within the picker deadline",
     const store = fakeCredentialStore();
     await store.set(codexSubscriptionIdentity(), "account-token");
     const controller = new TuiController({ session: createSession(), sessionId: "slow-catalog", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace),
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionCatalog: () => new Promise(() => {}) },
     });
     try {
@@ -374,7 +374,7 @@ test("a credential-read timeout is labelled as access discovery, not catalog fai
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const store = { ...fakeCredentialStore(), get: async () => new Promise<null>(() => {}) };
     const controller = new TuiController({ session: createSession(), sessionId: "slow-access", workspace,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", contextManager: createContextManager(workspace),
+      provider: "openai", modelId: "gpt-5.4", contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }) },
     });
     try {
