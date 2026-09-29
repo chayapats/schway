@@ -122,3 +122,10 @@ test("a session recorded with Anthropic continues on OpenAI without Anthropic re
   expect(body).toContain("toolu_1");
   expect(body).not.toMatch(/anthropic|signature|msg_/i);
 });
+
+test("case variants and in-session model selection also get the notice", async () => {
+  expect(parseArgs(["--provider", "Anthropic"])).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
+  expect(parseConfigObject({ provider: "Anthropic" }, "user config")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
+  const { parseModelArgs } = await import("../src/tui/commands.ts");
+  expect(parseModelArgs("anthropic/claude-sonnet-4-6", "openai")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
+});

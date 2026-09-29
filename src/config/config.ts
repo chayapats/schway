@@ -618,7 +618,7 @@ export function resolveSettings(input: {
   };
 }
 
-/** Validate a requested thinking level against capability, extra-body single-source-of-truth rules. */
+/** Return an error when the requested thinking level is unsupported for the model or conflicts with extra-body reasoning controls, otherwise undefined. */
 export function validateThinking(
   provider: string,
   model: string,

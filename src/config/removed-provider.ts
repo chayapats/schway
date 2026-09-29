@@ -8,5 +8,5 @@ export const ANTHROPIC_REMOVED_MESSAGE = [
 
 /** Return the removal notice when the value names a removed provider, otherwise undefined. */
 export function removedProviderMessage(value: unknown): string | undefined {
-  return value === "anthropic" ? ANTHROPIC_REMOVED_MESSAGE : undefined;
+  return typeof value === "string" && value.trim().toLowerCase() === "anthropic" ? ANTHROPIC_REMOVED_MESSAGE : undefined;
 }

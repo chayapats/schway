@@ -1,4 +1,5 @@
 import { RESERVED_SKILL_NAMES, splitSlashCommand } from "../skills/skills.ts";
+import { removedProviderMessage } from "../config/removed-provider.ts";
 import type { ExtensionCommandInfo } from "../extensions/host.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 import type { TuiController } from "./controller.ts";
@@ -200,7 +201,7 @@ export function parseModelArgs(
     const modelId = trimmed.slice(slash + 1).trim();
     if (!isPickerProvider(provider)) {
       return {
-        error: `Unknown provider: ${provider}. Valid providers: ${MODEL_PICKER_PROVIDERS.join(", ")}`,
+        error: removedProviderMessage(provider) ?? `Unknown provider: ${provider}. Valid providers: ${MODEL_PICKER_PROVIDERS.join(", ")}`,
       };
     }
     if (modelId.length === 0) {
