@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import type { SmokeProvider, SmokeReport, SmokeScenario, SmokeSelection } from "./smoke.ts";
-import { parseSmokeDiagnostics, parseSmokeProgress, type SmokeProgress } from "./diagnostics.ts";
+import { isSmokeAuthSource, parseSmokeDiagnostics, parseSmokeProgress, type SmokeProgress } from "./diagnostics.ts";
 
 const MAX_REPLY_BYTES = 8192;
 const REAP_MS = 1500;
@@ -15,7 +15,6 @@ const reasons = new Set(["verified", "missing_credentials", "credential_store_un
   "output_limit", "provider_error", "runner_error", "turn_limit", "no_final_response", "missing_tool_evidence",
   "invalid_settings", "cancelled", "cleanup_failed", "disallowed_tool"]);
 const statuses = new Set(["passed", "skipped", "pending", "failed_provider", "failed_runner"]);
-const authSources = new Set(["runtime", "env", "stored", "stored-subscription", "none", "unavailable"]);
 
 /** Private fixture seam; installed execution uses the production worker and inherited environment. */
 export interface LiveProcessOptions {
@@ -35,13 +34,13 @@ function validReply(text: string, provider: SmokeProvider, model: string, timeou
     const diagnostics = data.diagnostics === undefined ? undefined : parseSmokeDiagnostics(data.diagnostics);
     if (Object.keys(data).some(key => !["provider", "model", "authSource", "status", "reason", "durationMs", "toolRoundTrip", "cleanup", "diagnostics"].includes(key))
       || data.provider !== provider || data.model !== model
-      || !authSources.has(data.authSource as string) || !statuses.has(data.status as string)
+      || !isSmokeAuthSource(data.authSource) || !statuses.has(data.status as string)
       || typeof data.reason !== "string" || !reasons.has(data.reason)
       || typeof data.durationMs !== "number" || !Number.isFinite(data.durationMs) || data.durationMs < 0 || data.durationMs > timeoutMs + REAP_MS
       || typeof data.toolRoundTrip !== "boolean" || (data.cleanup !== undefined && data.cleanup !== "deferred")
       || (data.diagnostics !== undefined && !diagnostics)
       || (data.status === "passed" && (data.reason !== "verified" || data.toolRoundTrip !== true || data.cleanup !== undefined))) return;
-    return { provider, model, authSource: data.authSource as SmokeScenario["authSource"], status: data.status as SmokeScenario["status"],
+    return { provider, model, authSource: data.authSource, status: data.status as SmokeScenario["status"],
       reason: data.reason, durationMs: data.durationMs, toolRoundTrip: data.toolRoundTrip,
       ...(data.cleanup === "deferred" ? { cleanup: "deferred" as const } : {}), ...(diagnostics ? { diagnostics } : {}) };
   } catch { return; }

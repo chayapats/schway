@@ -21,6 +21,11 @@ const counters = ["modelAttemptsStarted", "modelRoundsCompleted", "toolResultsCo
   "httpRequestsStarted", "httpResponsesReceived"] as const;
 const authSources = new Set(["runtime", "env", "stored", "stored-subscription", "none", "unavailable"]);
 
+/** Accept only authentication categories permitted in smoke replies and private progress checkpoints. */
+export function isSmokeAuthSource(value: unknown): value is SmokeScenario["authSource"] {
+  return typeof value === "string" && authSources.has(value);
+}
+
 /** Reject malformed or content-bearing progress and return a fresh allowlisted numeric snapshot. */
 export function parseSmokeDiagnostics(value: unknown): SmokeDiagnostics | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
@@ -43,8 +48,8 @@ export function parseSmokeProgress(value: unknown): SmokeProgress | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const data = value as Record<string, unknown>;
   if (Object.keys(data).length !== 2 || !Object.hasOwn(data, "authSource") || !Object.hasOwn(data, "diagnostics")
-    || !authSources.has(data.authSource as string)) return;
+    || !isSmokeAuthSource(data.authSource)) return;
   const diagnostics = parseSmokeDiagnostics(data.diagnostics);
   if (!diagnostics) return;
-  return { authSource: data.authSource as SmokeScenario["authSource"], diagnostics };
+  return { authSource: data.authSource, diagnostics };
 }
