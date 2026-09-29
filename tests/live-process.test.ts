@@ -23,6 +23,18 @@ const waitForPid = async (path: string) => {
   throw Error("fixture did not start");
 };
 
+/** Replay a sentinel read request, then return its actual tool result as compatible SSE. */
+async function sentinelSse(request: Request, id = "fixture"): Promise<string> {
+  const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
+  const marker = body.messages.find(message => message.role === "tool")?.content?.match(/1\|([a-f0-9]{40})/)?.[1];
+  const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: {
+    name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
+  const chunk = (payload: object, finish_reason: string | null) => ({ id, object: "chat.completion.chunk", created: 0,
+    model: "gpt-4o", choices: [{ index: 0, delta: payload, finish_reason }] });
+  return [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
+    .map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n";
+}
+
 test("worker rejects secrets, commands and oversize private instructions before credential lookup", async () => {
   const safe = { provider: "compatible", model: "gpt-4o", timeoutMs: 500, workspaceRoot: join(tmpdir(), "schway-live-fixture"),
     compatible: { baseUrl: "http://127.0.0.1:1234/v1", auth: "none" } };
@@ -301,14 +313,7 @@ test("installed command uses supervised child and local fake compatible HTTP tra
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     calls++;
     expect(request.headers.get("authorization")).toBeNull();
-    const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
-    const tool = body.messages.find(message => message.role === "tool")?.content;
-    const marker = tool?.match(/1\|([a-f0-9]{40})/)?.[1];
-    const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: { name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
-    const chunk = (payload: object, finish_reason: string | null) => ({ id: "fixture", object: "chat.completion.chunk", created: 0, model: "gpt-4o",
-      choices: [{ index: 0, delta: payload, finish_reason }] });
-    const sse = [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")].map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n";
-    return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+    return new Response(await sentinelSse(request), { headers: { "content-type": "text/event-stream" } });
   } });
   try {
     const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible", "--base-url",
@@ -329,16 +334,9 @@ test("supervised shared deadline preserves the completed tool round and second r
   let calls = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     calls++;
-    const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
-    const marker = body.messages.find(message => message.role === "tool")?.content?.match(/1\|([a-f0-9]{40})/)?.[1];
+    const sse = await sentinelSse(request, "private-generation-id");
     // Each response fits the lane budget independently, but their sum does not.
     await Bun.sleep(700);
-    const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: {
-      name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
-    const chunk = (payload: object, finish_reason: string | null) => ({ id: "private-generation-id", object: "chat.completion.chunk",
-      created: 0, model: "gpt-4o", choices: [{ index: 0, delta: payload, finish_reason }] });
-    const sse = [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
-      .map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n";
     return new Response(sse, { headers: { "content-type": "text/event-stream", "x-request-id": "PRIVATE_HEADER" } });
   } });
   try {
@@ -365,15 +363,7 @@ test("checkpoint write or rename failures do not change a verified supervised ro
   let calls = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     calls++;
-    const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
-    const marker = body.messages.find(message => message.role === "tool")?.content?.match(/1\|([a-f0-9]{40})/)?.[1];
-    const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: {
-      name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
-    const chunk = (payload: object, finish_reason: string | null) => ({ id: "fixture", object: "chat.completion.chunk", created: 0,
-      model: "gpt-4o", choices: [{ index: 0, delta: payload, finish_reason }] });
-    const sse = [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
-      .map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n";
-    return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+    return new Response(await sentinelSse(request), { headers: { "content-type": "text/event-stream" } });
   } });
   try {
     for (const blockedPath of [".smoke-progress.json.tmp", ".smoke-progress.json"]) {
