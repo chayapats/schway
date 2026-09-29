@@ -173,6 +173,8 @@ export interface TuiControllerOptions {
     store: CredentialStore;
     env: Record<string, string | undefined>;
     runtimeApiKey?: string;
+    /** Provider the process runtime key belongs to. Other routes must not receive it. */
+    runtimeProvider?: string;
     rememberSecret?: (key: string) => void;
     reload: (settings?: ResolvedSettings) => Promise<{ model: Model; notice?: string } | { error: string }>;
     /** Explicit subscription login runner; production wires the verified OAuth flow. */

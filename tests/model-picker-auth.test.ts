@@ -41,6 +41,12 @@ test("picker access follows credential precedence without exposing secrets", asy
   expect((await loadModelPickerAccess({ store, env })).providers.openai).toBe("API key");
   expect((await loadModelPickerAccess({ store, env, openaiAuth: "codex" })).providers.openai).toBe("ChatGPT");
   expect((await loadModelPickerAccess({ store, env: {}, openaiAuth: "api-key" })).providers.openai).toBe("Login required");
+  const openaiRuntime = await loadModelPickerAccess({ store, env: {}, runtimeApiKey: "sk-openai", runtimeProvider: "openai" });
+  expect(openaiRuntime.openaiApiKey).toBe("API key");
+  expect(openaiRuntime.xaiApiKey).toBe("Login required");
+  const xaiRuntime = await loadModelPickerAccess({ store, env: {}, runtimeApiKey: "xai-runtime", runtimeProvider: "xai" });
+  expect(xaiRuntime.xaiApiKey).toBe("API key");
+  expect(xaiRuntime.openaiApiKey).toBe("Login required");
 });
 
 test("ready profiles precede missing credentials and a current model with no login", async () => {

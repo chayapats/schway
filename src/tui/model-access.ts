@@ -23,6 +23,8 @@ export async function loadModelPickerAccess(input: {
   store: CredentialStore;
   env: Record<string, string | undefined>;
   runtimeApiKey?: string;
+  /** Provider the runtime key was supplied for. Other routes ignore that key. */
+  runtimeProvider?: string;
   openaiAuth?: OpenAIAuthPreference;
   baseUrl?: string;
   auth?: "required" | "optional" | "none";
@@ -32,15 +34,17 @@ export async function loadModelPickerAccess(input: {
   profiles?: Record<string, CompatibleProfile>;
 }): Promise<ModelPickerAccess> {
   const access: ModelPickerAccess = { providers: {}, profiles: {}, subscription: "Login required", openaiApiKey: "Login required", xaiApiKey: "Login required" };
+  const runtimeKeyFor = (provider: string) => input.runtimeProvider === undefined || input.runtimeProvider === provider ? input.runtimeApiKey : undefined;
   const resolve = async (target: CredentialTarget & { auth?: "required" | "optional" | "none"; credentialEnv?: string }): Promise<ModelAccess> => {
-    const result = await resolveProviderCredential({ ...target, store: input.store, env: input.env, runtimeApiKey: input.runtimeApiKey });
+    const result = await resolveProviderCredential({ ...target, store: input.store, env: input.env, runtimeApiKey: runtimeKeyFor(target.provider) });
     return "error" in result ? "Login required" : result.source === "none" ? "No key required" : "API key";
   };
   await Promise.all([
     (async () => {
+      const openaiKey = runtimeKeyFor("openai");
       const [transport, subscription, apiKey] = await Promise.all([
-        selectOpenAITransport(input),
-        selectOpenAITransport({ ...input, openaiAuth: "codex" }),
+        selectOpenAITransport({ ...input, runtimeApiKey: openaiKey }),
+        selectOpenAITransport({ ...input, openaiAuth: "codex", runtimeApiKey: openaiKey }),
         resolve({ provider: "openai" }),
       ]);
       access.subscription = "error" in subscription ? "Login required" : "ChatGPT";

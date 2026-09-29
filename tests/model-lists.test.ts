@@ -512,3 +512,67 @@ test("xAI API key sign-in activates grok-4.7 and restores it without openaiAuth"
     expect(memory.choice).toEqual({ provider: "xai", model: "grok-4.7" });
   });
 });
+
+test("xAI model discovery starts before a slow OpenAI list finishes", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai", model: "gpt-4o" } });
+    let releaseOpenAI: () => void = () => {};
+    const openaiHold = new Promise<void>(resolve => { releaseOpenAI = resolve; });
+    let xaiStarted = false;
+    const controller = new TuiController({
+      session: createSession(), sessionId: "parallel-lists", workspace, configEditor: editor, home,
+      provider: "openai", modelId: "gpt-4o", contextManager: createContextManager(workspace),
+      credentials: {
+        store: fakeCredentialStore(), env: { OPENAI_API_KEY: "openai", XAI_API_KEY: "xai" },
+        reload: async () => ({ error: "unused" }),
+        listRouteModels: async route => {
+          if (route === "xai") { xaiStarted = true; return [{ id: "grok-4.7" }]; }
+          if (route === "api-key") { await openaiHold; return [{ id: "gpt-4o" }]; }
+          return [];
+        },
+      },
+    });
+    try {
+      controller.openModelPicker();
+      const deadline = Date.now() + 2_000;
+      while (!xaiStarted && Date.now() < deadline) await Bun.sleep(5);
+      expect(xaiStarted).toBe(true);
+      releaseOpenAI();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(5);
+      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.provider === "xai" && entry.modelId === "grok-4.7")).toBe(true);
+    } finally { controller.dispose(); }
+  });
+});
+
+test("a failed xAI list drops capabilities installed by the previous list", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "xai", model: "grok-4.7" } });
+    let fail = false;
+    const controller = new TuiController({
+      session: createSession(), sessionId: "stale-xai", workspace, configEditor: editor, home,
+      provider: "xai", modelId: "grok-4.7", contextManager: createContextManager(workspace),
+      credentials: {
+        store: fakeCredentialStore(), env: { XAI_API_KEY: "xai" },
+        reload: async () => ({ error: "unused" }),
+        listRouteModels: async route => {
+          if (route !== "xai") return [];
+          if (fail) throw new Error("offline");
+          return [{ id: "grok-4.7", supportedThinking: ["low", "high"], defaultThinking: "high" }];
+        },
+      },
+    });
+    try {
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(5);
+      expect(editor.modelCapability("grok-4.7")?.supportedThinking).toEqual(["low", "high"]);
+      fail = true;
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(5);
+      expect(editor.modelCapability("grok-4.7")).toBeUndefined();
+    } finally { controller.dispose(); }
+  });
+});

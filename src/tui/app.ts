@@ -198,6 +198,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   try {
     const model = io.model;
     const startupError = configEditor.memoryActivationError;
+    const runtimeProvider = settings.provider;
+    const runtimeKeyFor = (provider: string) => provider === runtimeProvider ? io.args.apiKey : undefined;
     const initialize = async (signal: AbortSignal) => {
       const loaded = await loadInteractiveModel(settings.provider, settings.model, {
         signal,
@@ -212,7 +214,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         profile: settings.profile,
         credentialEnv: settings.credentialEnv,
         credentialIdentity: settings.credentialIdentity,
-        runtimeApiKey: io.args.apiKey,
+        runtimeApiKey: runtimeKeyFor(settings.provider),
         env,
         fetch: io.fetch,
         createModel: io.createModel,
@@ -234,13 +236,13 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     };
     const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => stageInteractiveSettings(next, settings, {
       forceLoad: activate, model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
-      signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
+      signal, home, runtimeApiKey: runtimeKeyFor(next.provider), env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
       ...(next.explicitContextWindow === undefined && budgets?.contextWindow ? { fetchedContextWindow: budgets.contextWindow } : {}),
       ...(next.explicitMaxOutput === undefined && budgets?.maxOutput ? { fetchedMaxOutput: budgets.maxOutput } : {}),
     });
     const codexLogin = createCodexLoginRunner({ store: credentialStore, fetch: io.fetch, secrets });
     const credentials = {
-      store: credentialStore, env, runtimeApiKey: io.args.apiKey,
+      store: credentialStore, env, runtimeApiKey: io.args.apiKey, runtimeProvider,
       rememberSecret: (key: string) => { if (!secrets.includes(key)) secrets.push(key); },
       reload: (override?: ResolvedSettings) => {
         const current = override ?? settings;
@@ -249,7 +251,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           extraBody: current.extraBody, auth: current.auth, openaiAuth: current.openaiAuth,
           thinking: current.thinking, profile: current.profile,
           credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
-          runtimeApiKey: io.args.apiKey,
+          runtimeApiKey: runtimeKeyFor(current.provider),
           env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
         });
       },
@@ -264,12 +266,12 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         const current = configEditor.settings;
         if (route === "xai") {
           const { XAI_MODELS_URL } = await import("../model/providers/xai.ts");
-          const credential = await resolveProviderCredential({ provider: "xai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
+          const credential = await resolveProviderCredential({ provider: "xai", runtimeApiKey: runtimeKeyFor("xai"), env, store: credentialStore });
           if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing xAI API key.");
           return requireXaiModels(await fetchProviderModelList({ url: XAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "xAI" }));
         }
         if (route === "api-key") {
-          const credential = await resolveProviderCredential({ provider: "openai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
+          const credential = await resolveProviderCredential({ provider: "openai", runtimeApiKey: runtimeKeyFor("openai"), env, store: credentialStore });
           if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing OpenAI API key.");
           return requireOpenAIApiKeyModels(await fetchProviderModelList({ url: OPENAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "OpenAI" }));
         }
@@ -278,7 +280,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         const credential = await resolveProviderCredential({
           provider: "openai-compatible", baseUrl, auth: current.auth, profile: current.profile,
           credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
-          runtimeApiKey: io.args.apiKey, env, store: credentialStore,
+          runtimeApiKey: runtimeKeyFor("openai-compatible"), env, store: credentialStore,
         });
         if ("error" in credential) throw new Error(credential.error);
         const url = new URL("models", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
