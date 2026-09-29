@@ -262,6 +262,12 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (this.recoveryRepair && this.recovery && !this.recoveryIdentityChanged(this.recovery)) this.recoveryRepair = false;
   }
 
+  /** Remember list budgets for the next staged activation; explicit config still outranks them. */
+  protected noteFetchedBudgets(selection: ModelPickerEntry): void {
+    if (selection.listUnavailable || selection.connect || !selection.contextWindow && !selection.maxOutput) return;
+    this.activationBudgets = { contextWindow: selection.contextWindow, maxOutput: selection.maxOutput };
+  }
+
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
     if (this.modelPicker?.accessLoading) { this.notice("Checking configured credentials. Try again shortly."); return false; }
@@ -280,9 +286,14 @@ export abstract class ModelsLayer extends CommandsLayer {
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
     } else if (selection.authRoute === "api-key") {
+      this.noteFetchedBudgets(selection);
       applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via OpenAI API key.`, undefined, true);
-    } else applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
+    } else {
+      this.noteFetchedBudgets(selection);
+      applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
+      if (!applied) this.activationBudgets = undefined;
+    }
     if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
   }

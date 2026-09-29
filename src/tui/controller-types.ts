@@ -185,7 +185,7 @@ export interface TuiControllerOptions {
     listRouteModels?: (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
-  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean) => Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: ModelCapability }>;
+  stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: ModelCapability }>;
   /** Publish renderer-owned context references after a successful settings commit. */
   onSettingsCommitted?: (settings: ResolvedSettings, manager: ContextManager) => void;
   /** Receive a choice only after its model and route are active. */

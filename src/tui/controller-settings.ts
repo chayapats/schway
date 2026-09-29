@@ -162,7 +162,9 @@ export abstract class SettingsLayer extends ChangesLayer {
           { ...this.configEditor!.settings, appearance: undefined },
           { ...transaction.settings, appearance: undefined },
         )) throw new Error("Other settings changed outside Schway. Reload before saving appearance.");
-        const staged = appearanceOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate);
+        const budgets = this.activationBudgets;
+        this.activationBudgets = undefined;
+        const staged = appearanceOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate, budgets);
         abort.signal.throwIfAborted();
         if (activate && !staged?.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
         if (this.disposed || this.activeAbort !== abort) return false;

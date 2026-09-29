@@ -24,6 +24,8 @@ export const DEVICE_LOGIN_INDEX = LOGIN_CHOICES.findIndex(choice => choice.actio
 
 /** Sign-in, credential entry, logout and subscription login actions. */
 export abstract class CredentialsLayer extends ControllerCore {
+  /** Fetched list budgets for the activation about to be staged; explicit config still wins. */
+  protected activationBudgets?: { contextWindow?: number; maxOutput?: number };
   /** Route login input and notify when an explicit subscription sign-in starts. */
   async login(args: string, accepted: () => void = () => {}): Promise<boolean> {
     if (!args.trim()) return this.openLoginChooser();
@@ -161,14 +163,19 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (!this.configEditor || !this.stageSettings || this.disposed) return false;
     const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : ROUTE_FALLBACK_MODELS.openai;
     let modelId: string = fallback;
+    let listed: { contextWindow?: number; maxOutput?: number } | undefined;
     try {
       const models = await this.credentials?.listRouteModels?.(route, AbortSignal.timeout(5_000), { baseUrl: target.baseUrl });
-      if (models?.length) modelId = recommendedListedModel(route, models);
+      if (models?.length) {
+        modelId = recommendedListedModel(route, models);
+        listed = models.find(model => model.id === modelId);
+      }
     } catch {
       modelId = fallback;
     }
+    this.activationBudgets = listed;
     const applied = await this.changeSettings(
-      () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId) : this.configEditor!.prepareModel(target.provider, modelId),
+      () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId) : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
       () => `Signed in. Using ${target.provider}/${this.modelId}.`,
       "Credential saved, but the recommended model could not be activated. Choose one with /model.",
     );

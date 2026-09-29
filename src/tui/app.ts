@@ -232,9 +232,11 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
     };
-    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean) => stageInteractiveSettings(next, settings, {
+    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => stageInteractiveSettings(next, settings, {
       forceLoad: activate, model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
       signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
+      ...(next.explicitContextWindow === undefined && budgets?.contextWindow ? { fetchedContextWindow: budgets.contextWindow } : {}),
+      ...(next.explicitMaxOutput === undefined && budgets?.maxOutput ? { fetchedMaxOutput: budgets.maxOutput } : {}),
     });
     const codexLogin = createCodexLoginRunner({ store: credentialStore, fetch: io.fetch, secrets });
     const credentials = {
@@ -409,7 +411,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 export async function stageInteractiveSettings(
   next: ResolvedSettings,
   previous: ResolvedSettings,
-  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
+  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal; fetchedContextWindow?: number; fetchedMaxOutput?: number },
 ): Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: import("../model/catalog.ts").ModelCapability }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
@@ -417,7 +419,7 @@ export async function stageInteractiveSettings(
   if ((options.forceLoad && !model) || (next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
-      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
+      maxTokens: next.explicitMaxOutput ?? options.fetchedMaxOutput ?? next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
       ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
@@ -427,7 +429,7 @@ export async function stageInteractiveSettings(
     modelCapability = loaded.capability;
   }
   options.signal.throwIfAborted();
-  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
+  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow ?? options.fetchedContextWindow)) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */

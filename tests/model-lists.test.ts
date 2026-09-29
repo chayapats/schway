@@ -9,6 +9,7 @@ import { loadConfigEditor } from "../src/config/editing.ts";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { lookupModel, ROUTE_FALLBACK_MODELS } from "../src/model/catalog.ts";
+import { stageInteractiveSettings } from "../src/tui/app.ts";
 import { parseModelList, recommendedListedModel } from "../src/model/model-list.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
@@ -164,5 +165,43 @@ test("sign-in activates the route fallback and restores it on the next launch", 
     expect(restored.origins.model).toBe("interactive memory");
     const memory = await InteractiveMemory.load(home, root);
     expect(memory.choice?.model).toBe(ROUTE_FALLBACK_MODELS.openai);
+  });
+});
+
+test("compatible sign-in keeps the selected profile", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const editor = await loadConfigEditor({
+      home, workspaceRoot: root,
+      cli: { profile: "local", profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", auth: "required" } } },
+    });
+    const transaction = await editor.prepareModel("openai-compatible", "listed-model", "local");
+    expect(transaction.settings.profile).toBe("local");
+    expect(transaction.settings.model).toBe("listed-model");
+    expect(transaction.settings.baseUrl).toBe("http://127.0.0.1:9/v1");
+  });
+});
+
+test("fetched model budgets outrank static lookup unless config sets an explicit limit", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai", model: "gpt-4o" } });
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    let maxTokens: number | undefined;
+    const staged = await stageInteractiveSettings(editor.settings, editor.settings, {
+      forceLoad: true, workspace, home, signal: AbortSignal.timeout(1_000), runtimeApiKey: "sk-test", env: {}, secrets: [],
+      fetchedMaxOutput: 4096, fetchedContextWindow: 111_000,
+      createModel: async input => { maxTokens = input.maxTokens; return createScriptedModel({ id: input.model }); },
+    });
+    expect(maxTokens).toBe(4096);
+    expect(staged.contextManager).toBeDefined();
+    const explicit = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai", model: "gpt-4o", maxOutput: 1024 } });
+    let explicitTokens: number | undefined;
+    await stageInteractiveSettings(explicit.settings, explicit.settings, {
+      forceLoad: true, workspace, home, signal: AbortSignal.timeout(1_000), runtimeApiKey: "sk-test", env: {}, secrets: [],
+      fetchedMaxOutput: 4096,
+      createModel: async input => { explicitTokens = input.maxTokens; return createScriptedModel({ id: input.model }); },
+    });
+    expect(explicitTokens).toBe(1024);
   });
 });
