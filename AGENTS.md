@@ -10,6 +10,8 @@
 - Tool-relative paths resolve from the primary workspace root (nearest Git root, otherwise launch cwd), canonicalized through real paths.
 - Exported functions and types get a one-line TSDoc that states the contract, not the identifier.
 
+- User-visible TUI changes must update screen-catalog goldens with `bun run screens:update` and commit them; see `docs/screen-catalog.md`.
+
 ## Agent skills
 
 ### Issue tracker

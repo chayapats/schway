@@ -1,0 +1,16 @@
+first-run
+sign-in-chooser
+subscription-sign-in
+model-picker
+command-palette
+thai-composer
+streaming-answer
+parallel-tools
+completed-turn
+failed-turn
+retry-countdown
+review-panel
+recent-work-resume
+compaction
+no-color
+narrow-layout
