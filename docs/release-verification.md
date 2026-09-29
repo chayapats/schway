@@ -161,7 +161,7 @@ revision attribution has that provenance limit.
 | OpenAI changes | Raw `git diff --stat`: 2 tracked files, 6 insertions, 1 deletion (`package.json`, `readme.md`); new untracked `edge-cases.test.js`, 28 lines, included in retained diff; full captured diff: 3 files, 34 insertions, 1 deletion |
 | OpenAI checks / outcome | `npm run test:edge`: 2 passed, 0 failed before and after resume; both exits 0; completed in Schway. Initial turn 34.411 s, resumed turn 4.236 s, no tool errors |
 | OpenAI session / resume | `2dad1603-9485-4738-8096-cd7e4eb501c0`; earlier session restored, further test turn completed; both `/quit` exits 0 |
-| OpenAI limits / friction | Exact task cost unknown because the TUI does not persist complete billable usage. Existing dependency-requiring `npm test` not run; tests cover installed Node only. README test section interrupts existing usage prose; no functional failure or escape from Schway |
+| OpenAI limits / friction | Exact task cost unknown because the TUI does not persist complete billable usage. Existing dependency-requiring `npm test` not run; tests cover installed Node only. README test section interrupts existing usage prose, tracked as documentation quality in [#179](https://github.com/chayapats/schway/issues/179); no functional failure or escape from Schway |
 | OpenRouter follow-up, 2026-09-29 | Installed compatible / `meta/muse-spark-1.3-contributor` / explicit medium request body; same repository and base commit, separate disposable clone; same bounded edge-test task |
 | OpenRouter changes | Raw `git diff --stat`: 2 tracked files, 12 insertions, 1 deletion (`package.json`, `readme.md`); new untracked `edge-cases.test.js`, 64 lines, included in retained diff; full captured diff: 3 files, 76 insertions, 1 deletion |
 | OpenRouter checks / outcome | `npm run test:edge`: 6 passed, 0 failed before and after resume; both exits 0; completed in Schway. Initial turn 61.803 s, resumed turn 11.951 s, no tool errors |
@@ -175,6 +175,7 @@ revision attribution has that provenance limit.
 | [#173](https://github.com/chayapats/schway/issues/173) | P2 | Eval discovery cases fail with gpt-6-luna when seed paths cannot be listed |
 | [#174](https://github.com/chayapats/schway/issues/174) | P2 | OpenRouter Muse Spark smoke and eval time out without usage |
 | [#176](https://github.com/chayapats/schway/issues/176) | P2 | Clamp eval instructs a bash command its own restricted tool rejects |
+| [#179](https://github.com/chayapats/schway/issues/179) | P2 | Luna coding task inserts README Tests heading inside Usage prose |
 
 The OpenAI artifact reports 12/13 failed tool calls for `locate-implementation`
 and 24/24 for `parallel-read`. A shared fixture-discovery gap is visible in the
