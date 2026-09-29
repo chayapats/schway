@@ -141,7 +141,7 @@ Schway must:
 
 1. work as a capable coding agent with no extensions installed;
 2. own a simple and inspectable agent loop;
-3. support Anthropic, OpenAI, and OpenAI-compatible models;
+3. support OpenAI, xAI, and OpenAI-compatible models by v1;
 4. support Codex / ChatGPT subscription authentication by v1;
 5. provide core file, shell, and search tools;
 6. persist resumable sessions;
@@ -162,7 +162,7 @@ The base harness does not need to include:
 - built-in subagents;
 - built-in MCP;
 - built-in browser control;
-- built-in permission framework;
+- a rule- or policy-based permission framework, per-path rules or command allowlists;
 - built-in sandbox;
 - built-in workflow engine;
 - built-in planner;
@@ -175,7 +175,9 @@ The base harness does not need to include:
 - server mode;
 - web UI.
 
-These may be implemented as extensions or later official packages.
+The three approval modes (`auto`, `ask`, `read-only`) are core toggles required for v1, not a policy framework.
+
+These non-goals may be implemented as extensions or later official packages.
 
 Schway is not intended to become an "everything is a plugin" framework.
 
@@ -231,7 +233,6 @@ src/
 │   ├── model.ts
 │   ├── catalog.ts
 │   └── providers/
-│       ├── anthropic.ts
 │       ├── openai.ts
 │       └── openai-compatible.ts
 │
@@ -271,7 +272,6 @@ src/
 │
 ├── auth/
 │   ├── secrets.ts
-│   ├── anthropic.ts
 │   ├── openai-api.ts
 │   └── codex.ts
 │
@@ -541,8 +541,8 @@ Project-specific instructions belong in `AGENTS.md`, not a project-local system-
 
 v1 provider families:
 
-1. Anthropic native;
-2. OpenAI native;
+1. OpenAI native;
+2. xAI: public xAI API over the Responses protocol, reusing the OpenAI Responses adapter;
 3. OpenAI-compatible.
 
 Provider adapters convert between provider wire formats and Schway-native request/event types.
@@ -563,11 +563,11 @@ SDKs own provider wire/protocol details.
 Use:
 
 ```text
-Anthropic
-→ official Anthropic TypeScript SDK
-
 OpenAI
 → official OpenAI TypeScript SDK
+
+xAI (v1 requires)
+→ reuse the OpenAI Responses adapter for the public xAI API
 
 OpenAI-compatible
 → Schway-owned fetch/SSE implementation
@@ -1695,21 +1695,15 @@ schway --env-file ~/.config/my-ai.env
 
 # 66. Authentication
 
-v1 target:
+v1 requires five auth routes:
 
-```text
-Anthropic
-✓ API key
+- ChatGPT subscription;
+- Grok subscription;
+- OpenAI API key;
+- xAI API key;
+- OpenAI-compatible endpoint (required, optional or no authentication).
 
-OpenAI
-✓ API key
-✓ Codex / ChatGPT subscription login
-
-OpenAI-compatible
-✓ required auth
-✓ optional auth
-✓ no auth
-```
+All five routes are release gates in section 92.
 
 ---
 
@@ -1803,6 +1797,18 @@ terminals, Thai/Unicode input, long output, draft preservation, credential maski
 and terminal cleanup with an offline scripted model. Controller tests alone do
 not establish visual quality. This usability gate applies before v1.0 alongside
 the release gates in section 92.
+
+### Design gate
+
+V1 requires the screen catalog (#135): named screens rendered through the real
+renderer with a scripted model, in dark and light at 120, 80 and 50 columns,
+plus no-color where relevant. Goldens store per-cell text, foreground, background
+and attributes in a line-diffable format. They change only through an explicit
+update command. Generate the HTML gallery from the goldens alone.
+
+The voice guide (#139) governs all user-visible text. Maintainer design sign-off
+from the gallery is a release gate at 0.5 and at the release candidate. Between
+sign-offs, reviewers check changes against the voice guide and the golden diffs.
 
 ---
 
@@ -1957,9 +1963,6 @@ interactive Schway
 headless Schway
 → do not load TUI
 
-Anthropic selected
-→ load Anthropic provider
-
 OpenAI selected
 → load OpenAI provider
 
@@ -2042,11 +2045,10 @@ Ensure provider-specific metadata survives required round trips.
 
 # 84. TUI tests
 
-Prefer controller/state tests.
+Controller and state tests stay the default.
 
-Use visual/snapshot tests only for stable major layouts.
-
-Do not create a fragile snapshot suite for every terminal cell.
+V1 requires the screen catalog (#135) as the one per-cell snapshot suite, limited
+to named screens. Review each golden change as a design change under section 70.
 
 ---
 
@@ -2062,10 +2064,13 @@ bun run test:providers
 
 Smoke-test:
 
-- Anthropic;
+- ChatGPT subscription;
+- Grok subscription;
 - OpenAI API key;
-- OpenAI-compatible;
-- Codex subscription.
+- xAI API key;
+- OpenAI-compatible endpoint.
+
+V1 requires smoke coverage for all five routes.
 
 These tests are not part of normal per-commit CI.
 
@@ -2141,7 +2146,7 @@ Required:
 
 - Bun/TypeScript runtime;
 - own agent loop;
-- Anthropic/OpenAI/OpenAI-compatible;
+- OpenAI/OpenAI-compatible (an Anthropic adapter shipped in v0.1 and was removed in 0.4; see [ADR 0003](docs/adr/0003-remove-anthropic-provider.md));
 - streaming;
 - core tools;
 - parallel scheduling;
@@ -2227,11 +2232,72 @@ evidence passes; implementation completion alone is not daily-driver readiness.
 
 Schway v1 is reached when Schway functions reliably as a daily-driver coding harness and its public seams are stable enough for extension authors.
 
-Required gates:
+## Milestones to v1.0
+
+Each minor milestone is published to npm as `schway`.
+
+### 0.4 — Foundation and truth
+
+- Run live smoke tests and evals on the existing routes first to find serious defects in real use.
+- Split the oversized TUI controller without changing behavior.
+- Remove the provider recorded in ADR 0003.
+- Replace the static default model with model lists fetched from providers. Choose no model until the user signs in.
+- Add Grok subscription sign-in and an xAI API-key route.
+- Build the screen catalog (#135): golden snapshots of text and style, plus an HTML gallery.
+- Update the specification and ADRs.
+- Publish 0.4 to npm as `schway`.
+
+### 0.5 — Design pass
+
+- Publish the voice guide (#139) and apply it across the TUI and CLI.
+- Redesign first launch, sign-in, the model picker and the command palette.
+- Add inline diffs, tool result summaries, a clear turn outcome line and a two-column review panel.
+- Show the full splash only on first run. Restructure `--help`, fix header path truncation and narrow-width rendering, and add a README demo GIF.
+- Obtain maintainer design sign-off from the gallery, publish 0.5 to npm as `schway`, then start dogfood round 1.
+
+### 0.6 — Trust
+
+- Add `/undo` for files changed by `edit` and `write` in recent accepted turns, with a preview and without overwriting later changes. See [ADR 0004](docs/adr/0004-undo-pre-image-store.md).
+- Add three approval modes (`auto`, `ask`, `read-only`) in core, in both the TUI and headless. See [ADR 0005](docs/adr/0005-approval-modes-in-core.md).
+- Publish 0.6 to npm as `schway`.
+
+### 1.0.0-rc → 1.0.0 — Freeze
+
+- Publish a semver and deprecation policy and a changelog.
+- Contract-test old session files.
+- Review the extension API.
+- Run full evals on all five supported auth routes at the release candidate and at 1.0.
+- Obtain maintainer design sign-off #2 from the gallery at the release candidate.
+- Complete dogfood round 2, then publish 1.0.0 as `schway` on npm.
+
+These are milestone requirements, not claims that every item has shipped.
+
+## Supported auth routes
+
+V1 requires all five routes as release gates:
+
+- ChatGPT subscription;
+- Grok subscription;
+- OpenAI API key;
+- xAI API key;
+- OpenAI-compatible endpoint.
+
+Grok is a hard gate. If xAI withdraws subscription access, the release waits.
 
 ## Dogfood
 
-Schway is used to develop Schway itself as a primary tool over an extended period.
+Use Schway to develop Schway in two three-day rounds: after 0.5 is published,
+and at the release candidate. Each round requires at least eight real sessions
+across at least two auth routes and a written friction log. A round closes only
+with no open P0 or P1.
+
+P0 means data loss or corruption, edits applied to the wrong file, or broken
+resume. P1 means the user has to leave Schway to finish the task.
+
+## Design
+
+Maintainer design sign-off from the gallery is required at 0.5 and at the release
+candidate. Both are release gates under section 70.
 
 ## Reliability
 
@@ -2245,7 +2311,15 @@ No known serious defects involving:
 
 ## Capability
 
-Coding evals remain consistently successful across supported providers.
+V1 requires consistently successful coding evals across supported providers.
+Run live smoke tests on all five auth routes for every minor release. Run full
+evals on all five routes at the release candidate and at 1.0.
+
+The release requirement is an eval runner that enforces a $10 spend cap per
+release and stops when reached. See [the cap mechanics](docs/evals.md): the
+current runner uses a per-run estimated soft cap checked between cases, so an
+in-flight case may exceed it. Release-wide accounting remains required before
+this gate can pass; separate runs must not each reset the release budget.
 
 ## Extensibility
 
@@ -2281,12 +2355,20 @@ v1 does not require built-in:
 - browser;
 - Elysia server;
 - sandbox;
-- permission framework;
+- a rule- or policy-based permission framework, per-path rules or command allowlists;
 - worktrees;
 - persistent memory;
-- workflow engine.
+- workflow engine;
+- automatic rollback, or undoing changes made by shell commands;
+- an extension-facing UI or confirm API (1.x candidate);
+- conversation rewind coupled with undo (1.x candidate).
 
-These remain optional.
+The three approval modes (`auto`, `ask`, `read-only`) are core toggles required
+for v1, not a policy framework. The 0.6 milestone adds user-invoked `/undo` for
+files changed by `edit` and `write` only. It never runs by itself and does not
+change conversation history.
+
+The listed non-requirements remain optional.
 
 ---
 

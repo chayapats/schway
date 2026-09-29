@@ -39,3 +39,15 @@ _Avoid_: Keystroke, attempted send.
 **Provisional answer**:
 Visible streamed output from a model attempt that has not become the committed assistant response. A failed or replaced attempt is not part of the final answer merely because it was displayed.
 _Avoid_: Final answer, committed response.
+
+**Approval mode**:
+One of `auto`, `ask` or `read-only`, deciding whether tools that can change state run, ask first or are refused.
+_Avoid_: Permission, policy, sandbox.
+
+**Turn undo**:
+A user-invoked revert of files changed by `edit` and `write` in one accepted turn. It does not change conversation history.
+_Avoid_: Rollback, rewind, checkpoint.
+
+**Screen catalog**:
+The named set of TUI states captured as golden span snapshots, from which the design gallery is built.
+_Avoid_: Screenshots, visual tests.
