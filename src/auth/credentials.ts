@@ -1,5 +1,5 @@
 import { MISSING_OPENAI_API_KEY, MISSING_XAI_API_KEY, XAI_API_KEY_ENV } from "./secrets.ts";
-import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialStore, type CredentialTarget } from "./store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialStore, type CredentialTarget } from "./store.ts";
 
 /** Dedicated environment override for the selected compatible endpoint, separate from native OpenAI. */
 export const COMPATIBLE_API_KEY_ENV = "OPENAI_COMPATIBLE_API_KEY";
@@ -133,4 +133,29 @@ export async function selectOpenAITransport(input: {
     error:
       `${MISSING_OPENAI_API_KEY} No stored subscription login was found either; sign in in interactive mode with /login codex, or stay on API-key billing.`,
   };
+}
+
+/** xAI billing preference, with automatic selection restricted to existing credentials. */
+export type XaiAuthPreference = "auto" | "grok" | "api-key";
+/** True when a value names one supported xAI billing preference. */
+export function isXaiAuthPreference(value: unknown): value is XaiAuthPreference { return value === "auto" || value === "grok" || value === "api-key"; }
+/** Headless-safe guidance when the selected subscription has not been connected. */
+export const MISSING_GROK_SUBSCRIPTION = "No Grok subscription login found. Sign in in interactive mode with /login grok (or /login grok --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
+/** Selected xAI billing transport or an actionable credential error. */
+export type XaiTransport = { transport: "grok" | "api-key" } | { error: string };
+/** Select only the requested billing identity without starting login or reading other credential caches. */
+export async function selectXaiTransport(input: { xaiAuth?: XaiAuthPreference; runtimeApiKey?: string; env: Record<string, string | undefined>; store: CredentialStore }): Promise<XaiTransport> {
+  const preference = input.xaiAuth ?? "auto";
+  if (!isXaiAuthPreference(preference)) return { error: `Unknown xAI auth preference: ${String(preference)}. Use auto, grok, or api-key.` };
+  if (preference === "api-key") return { transport: "api-key" };
+  if (preference === "grok") {
+    try { return (await input.store.get(grokSubscriptionIdentity()))?.trim() ? { transport: "grok" } : { error: MISSING_GROK_SUBSCRIPTION }; }
+    catch { return { error: credentialStoreError("read") }; }
+  }
+  if (input.runtimeApiKey !== undefined || input.env.XAI_API_KEY?.trim()) return { transport: "api-key" };
+  try {
+    if ((await input.store.get(grokSubscriptionIdentity()))?.trim()) return { transport: "grok" };
+    if ((await input.store.get(credentialIdentity({ provider: "xai" })))?.trim()) return { transport: "api-key" };
+  } catch { return { error: credentialStoreError("read") }; }
+  return { error: MISSING_XAI_API_KEY };
 }

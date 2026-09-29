@@ -40,7 +40,11 @@ function requiredModelId(model: string | undefined): string {
  * Encrypted reasoning is stored and replayed only under `providerMetadata.xai`.
  */
 export function createXaiModel(options: {
-  apiKey: string;
+  apiKey: string | (() => Promise<string>);
+  /** Renew a rejected subscription token once without entering the agent retry loop. */
+  refreshCredential?: (rejectedToken: string, signal?: AbortSignal) => Promise<string>;
+  /** Map subscription authorization failures without changing API-key transport errors. */
+  authError?: (status: number) => Error;
   model?: string;
   maxTokens?: number;
   thinking?: ThinkingLevel;
@@ -67,10 +71,19 @@ export function createXaiModel(options: {
     /** Stream Schway events; function-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest) {
       const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability);
-      const stream = await client.responses.create(
-        buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" }),
-        { signal: request.signal },
-      );
+      const body = buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" });
+      let token = typeof options.apiKey === "function" ? await options.apiKey() : options.apiKey;
+      const send = () => client.responses.create(body, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
+      let stream;
+      try { stream = await send(); }
+      catch (error) {
+        if (error instanceof OpenAI.APIError && error.status === 401 && options.refreshCredential) {
+          token = await options.refreshCredential(token, request.signal);
+          try { stream = await send(); }
+          catch (retryError) { if (retryError instanceof OpenAI.APIError && [401, 403].includes(retryError.status ?? 0) && options.authError) throw options.authError(retryError.status!); throw retryError; }
+        } else if (error instanceof OpenAI.APIError && error.status === 403 && options.authError) throw options.authError(403);
+        else throw error;
+      }
       yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI" });
     },
   };

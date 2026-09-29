@@ -24,6 +24,10 @@ export interface ProviderLoaderInput {
   thinking?: ThinkingLevel;
   /** OpenAI credential preference; codex loads the isolated subscription adapter. */
   openaiAuth?: CliOpenAIAuth;
+  /** Explicit xAI billing transport; Grok uses only its secure-store login. */
+  xaiAuth?: "auto" | "grok" | "api-key";
+  /** Secure-store renewal channel for the Grok transport. */
+  grokStore?: CredentialStore;
   /** Stored subscription tokens for the codex transport when no store-backed refresher is used. */
   codexTokens?: CodexTokens;
   /** Secure-store renewal channel for the codex transport; enables serialized pre-expiry refresh. */
@@ -56,6 +60,17 @@ export async function loadProviderModel(
   }
   if (input.provider === "xai") {
     const { createXaiModel } = await import("./providers/xai.ts");
+    if (input.xaiAuth === "grok") {
+      const grok = await import("./providers/grok-subscription.ts");
+      if (!input.grokStore) throw new Error("Grok subscription storage is unavailable.");
+      const refresher = grok.createSubscriptionTokenRefresher({ store: input.grokStore, fetch: fetchFn });
+      return createXaiModel({
+        apiKey: () => refresher.getValidAccessToken(),
+        refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
+        authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
+        model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, fetch: fetchFn,
+      });
+    }
     return createXaiModel({
       apiKey: input.apiKey ?? "",
       model: input.model,

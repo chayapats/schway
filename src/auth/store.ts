@@ -66,6 +66,11 @@ export function codexSubscriptionIdentity(): CredentialIdentity {
   return { account: CODEX_SUBSCRIPTION_ACCOUNT, label: CODEX_SUBSCRIPTION_LABEL };
 }
 
+/** Return the secure-store identity dedicated to Grok OAuth tokens. */
+export function grokSubscriptionIdentity(): CredentialIdentity {
+  return { account: "grok-subscription:xai", label: "Grok subscription (xAI OAuth)" };
+}
+
 /** Non-secret recovery guidance for an unavailable, locked or denied secure-store operation. */
 export function credentialStoreError(operation: "read" | "save" | "delete"): string {
   return `Cannot ${operation} credential in the OS secure store. Unlock or allow access to your OS credential store; on Linux install libsecret and start a Secret Service. Retry after restoring access. For reads, --api-key or the provider API-key environment variable bypasses the store. No plaintext fallback is used.`;
