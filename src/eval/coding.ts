@@ -39,8 +39,8 @@ const TEST_SOURCE = [
 /** One versioned coding task graded against a real isolated repository. */
 export const CODING_CASE = {
   id: "clamp-bounds",
-  version: 1,
-  task: "Fix src/math.ts so clamp returns the value inside the inclusive [min, max] range and respects both boundaries. Run bun test to verify the change.",
+  version: 2,
+  task: "Fix src/math.ts so clamp returns the value inside the inclusive [min, max] range and respects both boundaries. Run exactly bun test test/math.test.ts to verify the change. The eval permits only that exact bash command; omit cwd and timeout arguments.",
 } as const;
 
 /** Bounded settings captured without storing any credential or provider request body. */

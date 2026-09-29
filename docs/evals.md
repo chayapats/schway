@@ -1,6 +1,6 @@
 # Coding eval
 
-Run the original versioned `clamp-bounds@1` task from the Schway source checkout:
+Run the versioned `clamp-bounds@2` task from the Schway source checkout. Version 2 aligns the task with the restricted verification tool: run exactly `bun test test/math.test.ts`, omitting `cwd` and `timeout` arguments. Tool descriptions, schemas and rejection messages advertise the case's exact permitted command, prohibit `cwd`, and bound optional timeouts to 1–5000 ms (default 5000 ms). Cases without a verification command advertise bash as disabled.
 
 ```sh
 bun run eval --provider scripted
