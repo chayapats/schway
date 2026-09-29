@@ -42,11 +42,11 @@ test("price table covers known models and explicit prices override it", () => {
 
 test("spend comes from reported usage and flags incomplete usage as a lower bound", () => {
   const price = { inputPerMillion: 1.25, outputPerMillion: 10 };
-  const base = { inputTokens: 2_000_000, outputTokens: 100_000, unknownInputAttempts: 0, unknownOutputAttempts: 0 };
+  const base = { inputTokens: 2_000_000, outputTokens: 100_000, unknownInputAttempts: 0, unknownOutputAttempts: 0, incompleteAttempts: 0 };
   expect(estimateSpendUsd(base, price)).toEqual({ usd: 3.5, exact: true });
   expect(estimateSpendUsd({ ...base, unknownOutputAttempts: 1 }, price)).toEqual({ usd: 3.5, exact: false });
   expect(estimateSpendUsd({ ...base, outputTokens: null }, price)).toEqual({ usd: 2.5, exact: false });
-  expect(estimateSpendUsd({ inputTokens: null, outputTokens: null, unknownInputAttempts: 1, unknownOutputAttempts: 1 }, price)).toEqual({ usd: 0, exact: false });
+  expect(estimateSpendUsd({ inputTokens: null, outputTokens: null, unknownInputAttempts: 1, unknownOutputAttempts: 1, incompleteAttempts: 1 }, price)).toEqual({ usd: 0, exact: false });
 });
 
 test("cap reached stops before the next case, skips the rest and exits 3", async () => {

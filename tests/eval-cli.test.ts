@@ -90,7 +90,11 @@ test("mixed pass, fail and skip aggregates only observed outcomes", async () => 
   expect(skip.case.id).toBe("parallel-read");
 });
 
-test("timed-out paid usage stops later cases for accounting rather than claiming the money cap was reached", async () => {
+test.each([
+  { name: "missing usage", usage: undefined, totalUsd: 0, caseId: "all", exitCode: 3, stopReason: "usage_unknown" },
+  { name: "partial usage", usage: { inputTokens: 10, outputTokens: 5 }, totalUsd: 0.000002, caseId: "all", exitCode: 3, stopReason: "usage_unknown" },
+  { name: "last-case partial usage", usage: { inputTokens: 10, outputTokens: 5 }, totalUsd: 0.000002, caseId: "clamp-bounds", exitCode: 1, stopReason: null },
+])("timed-out paid $name preserves accounting guards and reports the actual stop reason", async ({ usage, totalUsd, caseId, exitCode, stopReason }) => {
   await withTempDir(async dir => {
     const output = join(dir, "timeout.json");
     let attempts = 0;
@@ -99,11 +103,12 @@ test("timed-out paid usage stops later cases for accounting rather than claiming
     try {
       const code = await runEvalCli([
         "--provider", "openai-compatible", "--model", "fixture", "--base-url", "https://fixture.invalid/v1",
-        "--allow-paid", "--case", "all", "--timeout-ms", "200", "--max-spend", "0.10",
+        "--allow-paid", "--case", caseId, "--timeout-ms", "200", "--max-spend", "0.10",
         "--input-price", "0.10", "--output-price", "0.20", "--output", output,
       ], { OPENAI_COMPATIBLE_API_KEY: "fixture-secret" }, { model: () => ({
         provider: "openai-compatible", id: "fixture", async *stream(request) {
           attempts++;
+          if (usage) yield { type: "usage", usage };
           await new Promise((_, reject) => {
             request.signal!.throwIfAborted();
             request.signal!.addEventListener("abort", () => reject(request.signal!.reason), { once: true });
@@ -111,11 +116,14 @@ test("timed-out paid usage stops later cases for accounting rather than claiming
         },
       }) });
       const artifact = JSON.parse(await readFile(output, "utf8"));
-      expect(code).toBe(3);
+      expect(code).toBe(exitCode);
       expect(attempts).toBe(1);
-      expect(artifact.summary).toMatchObject({ timeout: 1, skipped_spend_cap: 6 });
-      expect(artifact.spend).toMatchObject({ totalUsd: 0, capUsd: 0.10, exact: false, stopReason: "usage_unknown" });
-      expect(lines.join("\n")).toContain("usage incomplete");
+      if (caseId === "all") expect(artifact.summary).toMatchObject({ timeout: 1, skipped_spend_cap: 6 });
+      else expect(artifact.outcome).toBe("timeout");
+      expect(artifact.spend).toMatchObject({ totalUsd, capUsd: 0.10, exact: false, stopReason, stoppedBySpendCap: stopReason !== null });
+      expect((artifact.results?.[0] ?? artifact).metrics.incompleteAttempts).toBe(1);
+      if (stopReason) expect(lines.join("\n")).toContain("usage incomplete");
+      else expect(lines.some(line => line.startsWith("stopped:"))).toBe(false);
       expect(lines.join("\n")).not.toContain("spend cap reached");
       expect(await readFile(output, "utf8")).not.toContain("fixture-secret");
     } finally { log.mockRestore(); }
