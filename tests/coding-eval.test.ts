@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTempDir } from "./helpers.ts";
 import type { AgentClock } from "../src/agent/retry.ts";
-import { runCodingEval } from "../src/eval/coding.ts";
+import { CODING_CASE, runCodingEval } from "../src/eval/coding.ts";
 import { DAILY_CASES } from "../src/eval/cases.ts";
+import { createEvalTools } from "../src/eval/tools.ts";
+import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import type { Model, ModelRequest, ModelStreamEvent } from "../src/model/model.ts";
 import { createScriptedModel, type ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 
@@ -14,6 +16,84 @@ const edit = { path: "src/math.ts", edits: [{ oldText: "return Math.min(value, m
 function script(responses: ScriptedTurnFactory[]): Model {
   return createScriptedModel({ responses });
 }
+
+function prescribedCommand(task: string): string {
+  const command = task.match(/Run (?:exactly )?(.+?) to verify the change\./)?.[1];
+  if (!command) throw new Error("Task has no prescribed verification command");
+  return command;
+}
+
+test("the task's prescribed command executes through the restricted eval tool", async () => {
+  await withTempDir(async project => {
+    await mkdir(join(project, "test"));
+    await writeFile(join(project, "test/math.test.ts"), 'import { expect, test } from "bun:test"; test("fixture", () => expect(1).toBe(1));\n');
+    const bash = createEvalTools(project).get("bash")!;
+    const result = await bash.definition.execute({ command: prescribedCommand(CODING_CASE.task) }, { workspace: await resolveWorkspace(project) });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toContain("Exit code: 0");
+  });
+});
+
+test("a scripted agent verifies its clamp fix using the prescribed task command without tool errors", async () => {
+  let verification = "";
+  const result = await runCodingEval({ sourceRevision: revision, model: script([
+    { toolCalls: [{ id: "fix", name: "edit", arguments: edit }] },
+    request => {
+      const task = request.items.find(item => item.type === "user");
+      if (task?.type !== "user") throw new Error("Missing eval task");
+      const text = task.content.find(block => block.type === "text");
+      if (text?.type !== "text") throw new Error("Missing task text");
+      expect(text.text).toBe(CODING_CASE.task);
+      return { toolCalls: [{ id: "verify", name: "bash", arguments: { command: prescribedCommand(text.text) } }] };
+    },
+    request => {
+      const output = request.items.find(item => item.type === "tool_result" && item.toolCallId === "verify");
+      if (output?.type === "tool_result") verification = output.content;
+      return { text: "done" };
+    },
+  ]) });
+  expect(result.outcome).toBe("success");
+  expect(result.metrics.toolFailures).toBe(0);
+  expect(verification).toContain("Exit code: 0");
+  expect(result.grader).toEqual({ passed: true, exitCode: 0 });
+});
+
+test("bash restrictions are advertised and the agent can recover from rejected calls", async () => {
+  const command = prescribedCommand(CODING_CASE.task);
+  const bash = createEvalTools("/unused-eval-project").get("bash")!;
+  expect(bash.validate({ command }).ok).toBe(true);
+  expect(bash.validate({ command, timeout: 5000 }).ok).toBe(true);
+  for (const input of [{ command: "bun test" }, { command, cwd: "." }, { command, timeout: 5001 }, { command, timeout: 0 }, { command, timeout: 1.5 }]) {
+    expect(bash.validate(input).ok).toBe(false);
+  }
+  await expect(bash.definition.execute({ command: "bun test" }, { workspace: await resolveWorkspace("/tmp") })).rejects.toThrow(command);
+  let recovery = "";
+  let advertised = "";
+  const result = await runCodingEval({ sourceRevision: revision, model: script([
+    request => {
+      const tool = request.tools?.find(tool => tool.name === "bash");
+      advertised = tool?.description ?? "";
+      return { toolCalls: [{ id: "rejected", name: "bash", arguments: { command: "bun test", cwd: ".", timeout: 30_000 } }] };
+    },
+    request => {
+      const error = request.items.find(item => item.type === "tool_result" && item.toolCallId === "rejected");
+      if (error?.type === "tool_result") recovery = error.content;
+      const description = request.tools?.find(tool => tool.name === "bash")?.description ?? "";
+      const permitted = description.match(/exact command "([^"]+)"/)?.[1];
+      if (!permitted) throw new Error("Tool description did not state the permitted command");
+      return { toolCalls: [{ id: "fix", name: "edit", arguments: edit }, { id: "retry", name: "bash", arguments: { command: permitted } }] };
+    },
+    { text: "done" },
+  ]) });
+  expect(advertised).toContain(command);
+  expect(advertised).toContain("Omit cwd");
+  expect(advertised).toContain("5000 ms");
+  expect(recovery).toContain("Invalid arguments for tool bash");
+  expect(recovery).toContain("/command");
+  expect(recovery).toContain("/timeout");
+  expect(result.metrics.toolFailures).toBe(1);
+  expect(result.outcome).toBe("success");
+});
 
 test("unchanged code fails the real grader even when the model claims success", async () => {
   const result = await runCodingEval({ model: script([{ text: "Fixed and tests passed" }]), sourceRevision: revision });
@@ -37,7 +117,7 @@ test("real edits pass, source workspace stays isolated and temp repository is re
   expect(result.outcome).toBe("success");
   expect(result.grader).toEqual({ passed: true, exitCode: 0 });
   expect(result.metrics.toolCalls).toBe(2);
-  expect(result.case).toEqual({ id: "clamp-bounds", version: 1 });
+  expect(result.case).toEqual({ id: "clamp-bounds", version: 2 });
   expect(result.sourceRevision).toBe(revision);
   expect(workspace).toContain("schway-eval-");
   await expect(access(workspace)).rejects.toThrow();

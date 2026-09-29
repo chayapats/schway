@@ -1,4 +1,5 @@
 import { lstat } from "node:fs/promises";
+import { Type } from "@sinclair/typebox";
 import type { EvalCase } from "./cases.ts";
 import { join } from "node:path";
 import { bashTool } from "../tools/bash.ts";
@@ -13,6 +14,9 @@ export function createEvalTools(project: string, selected?: EvalCase): ToolRegis
   const allowed = new Set((selected ? Object.keys(selected.seed) : ["src/math.ts", "test/math.test.ts"]).map(path => join(project, path)));
   const writable = new Set((selected?.writable ?? ["src/math.ts"]).map(path => join(project, path)));
   const command = selected?.verifyCommand ?? (selected ? undefined : "bun test test/math.test.ts");
+  const bashRestriction = command
+    ? `Eval bash permits only the exact command ${JSON.stringify(command)}. Omit cwd; timeout is optional and must be an integer from 1 to 5000 ms (default 5000 ms).`
+    : "Eval bash is disabled for this case; use the seeded file tools and let the independent grader verify the result.";
   const verifyPath = async (path: string, write: boolean): Promise<void> => {
     const target = resolveToolPath(project, path);
     if (!allowed.has(target) || (write && !writable.has(target))) {
@@ -33,9 +37,15 @@ export function createEvalTools(project: string, selected?: EvalCase): ToolRegis
     await verifyPath(input.path, true);
     return writeTool.execute(input, ctx);
   } };
-  const restrictedBash: typeof bashTool = { ...bashTool, async execute(input, ctx) {
+  const restrictedBash: typeof bashTool = { ...bashTool,
+    description: `${bashRestriction} A non-zero exit code is ordinary result data, not a tool failure.`,
+    inputSchema: command ? Type.Object({
+      command: Type.Literal(command, { description: "The exact case verification command; other shell commands are forbidden." }),
+      timeout: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000, description: "Optional timeout in milliseconds; omit to use 5000 ms." })),
+    }, { additionalProperties: false }) : bashTool.inputSchema,
+    async execute(input, ctx) {
     if (!command || input.command !== command || input.cwd !== undefined || (input.timeout !== undefined && input.timeout > 5000)) {
-      throw new Error("Eval bash permits only the case verification command");
+      throw new Error(bashRestriction);
     }
     await verifyPath(selected?.verifyFile ?? "test/math.test.ts", false);
     return bashTool.execute({ command: input.command, timeout: input.timeout ?? 5000 }, ctx);
