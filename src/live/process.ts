@@ -1,9 +1,11 @@
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import type { SmokeProvider, SmokeReport, SmokeScenario, SmokeSelection } from "./smoke.ts";
+import { isSmokeAuthSource, parseSmokeDiagnostics, parseSmokeProgress, type SmokeProgress } from "./diagnostics.ts";
 
 const MAX_REPLY_BYTES = 8192;
 const REAP_MS = 1500;
@@ -13,7 +15,6 @@ const reasons = new Set(["verified", "missing_credentials", "credential_store_un
   "output_limit", "provider_error", "runner_error", "turn_limit", "no_final_response", "missing_tool_evidence",
   "invalid_settings", "cancelled", "cleanup_failed", "disallowed_tool"]);
 const statuses = new Set(["passed", "skipped", "pending", "failed_provider", "failed_runner"]);
-const authSources = new Set(["runtime", "env", "stored", "stored-subscription", "none", "unavailable"]);
 
 /** Private fixture seam; installed execution uses the production worker and inherited environment. */
 export interface LiveProcessOptions {
@@ -30,15 +31,33 @@ function validReply(text: string, provider: SmokeProvider, model: string, timeou
     const value: unknown = JSON.parse(text);
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const data = value as Record<string, unknown>;
-    if (Object.keys(data).some(key => !["provider", "model", "authSource", "status", "reason", "durationMs", "toolRoundTrip", "cleanup"].includes(key))
+    const diagnostics = data.diagnostics === undefined ? undefined : parseSmokeDiagnostics(data.diagnostics);
+    if (Object.keys(data).some(key => !["provider", "model", "authSource", "status", "reason", "durationMs", "toolRoundTrip", "cleanup", "diagnostics"].includes(key))
       || data.provider !== provider || data.model !== model
-      || !authSources.has(data.authSource as string) || !statuses.has(data.status as string)
+      || !isSmokeAuthSource(data.authSource) || !statuses.has(data.status as string)
       || typeof data.reason !== "string" || !reasons.has(data.reason)
       || typeof data.durationMs !== "number" || !Number.isFinite(data.durationMs) || data.durationMs < 0 || data.durationMs > timeoutMs + REAP_MS
       || typeof data.toolRoundTrip !== "boolean" || (data.cleanup !== undefined && data.cleanup !== "deferred")
+      || (data.diagnostics !== undefined && !diagnostics)
       || (data.status === "passed" && (data.reason !== "verified" || data.toolRoundTrip !== true || data.cleanup !== undefined))) return;
-    return data as unknown as SmokeScenario;
+    return { provider, model, authSource: data.authSource, status: data.status as SmokeScenario["status"],
+      reason: data.reason, durationMs: data.durationMs, toolRoundTrip: data.toolRoundTrip,
+      ...(data.cleanup === "deferred" ? { cleanup: "deferred" as const } : {}), ...(diagnostics ? { diagnostics } : {}) };
   } catch { return; }
+}
+
+async function readProgress(workspace: string): Promise<SmokeProgress | undefined> {
+  // Read only after proven process-group stop; never follow a worker-created symlink or allocate an unbounded file.
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    file = await open(join(workspace, ".smoke-progress.json"), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    if (!(await file.stat()).isFile()) return;
+    const bytes = new Uint8Array(1025);
+    const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+    if (bytesRead > 1024) return;
+    return parseSmokeProgress(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, bytesRead))));
+  } catch { return; }
+  finally { await file?.close(); }
 }
 
 async function boundedOutput(stdout: ReadableStream<Uint8Array>): Promise<string> {
@@ -192,6 +211,11 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         }
       }
       if (workspace && stopped && hardDeadline) {
+        const progress = await readProgress(workspace);
+        if (progress) {
+          result.authSource = progress.authSource;
+          result.diagnostics = progress.diagnostics;
+        }
         try { await access(join(workspace, ".model-started")); result.status = "failed_provider"; }
         catch { /* No stream-start evidence: a setup deadline is a runner failure. */ }
       }
