@@ -1,5 +1,115 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## 0.4 truth pass (#137, 2026-09-29)
+
+**Verdict: live verification recorded with failures; release approval remains pending.**
+The maintainer authorized these models and reduced the original $10 eval ceiling
+to $2 per API service ($4 combined). Smoke and eval used the runner's default
+thinking, with explicit consent because those commands expose no thinking option.
+The installed coding task used Codex `gpt-6-sol` with `medium` explicitly selected.
+No provider/model fallback was used and no defects were fixed in this pass.
+
+Tested revision: `d72f94a234a648dbfe63cf6162643e56418f8656`, clean `main`.
+`bun install --frozen-lockfile`, `bun run typecheck`, and `bun test` all exited 0;
+1,414 tests passed across 99 files, with 0 failures. Raw JSON, session records,
+logs and the reviewed task diff remain in private directory
+`~/schway-evidence/0.4/137-20260929T154041Z`, outside Git.
+
+### Live smoke
+
+Dates are UTC. Each run used the tested revision above; it is repeated below so
+individual rows retain their provenance. The compatible endpoint host is
+`openrouter.ai`. No endpoint path or credential is published.
+
+| Date (UTC) | Revision | Route | Model | Auth source | Status / reason | Tool round trip | Exit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-29T15:41:48.402Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | codex | `gpt-6-sol` | stored-subscription | passed / verified | true | 0 |
+| 2026-09-29T15:44:26.689Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | openai-api-key | `gpt-6-luna` | stored | passed / verified | true | 0 |
+| 2026-09-29T15:45:41.898Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible | `meta/muse-spark-1.3-contributor` | unavailable | failed_provider / timeout | false | 1 |
+| 2026-09-29T15:47:58.062Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (120 s retry) | `meta/muse-spark-1.3-contributor` | unavailable | failed_provider / timeout | false | 1 |
+
+Both compatible attempts timed out (30,004 ms and 120,022 ms). Its credential
+could separately be read from the secure store in 10 ms; the smoke parent's
+`unavailable` auth source does not by itself diagnose an authentication failure.
+These failures are tracked in [#174](https://github.com/chayapats/schway/issues/174).
+
+### Evals
+
+Prices in USD per million input/output tokens, checked 2026-09-29:
+[OpenAI Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) $0.10/$0.50;
+[OpenRouter Muse Spark](https://openrouter.ai/meta/muse-spark-1.3-contributor)
+$0.10/$0.20 (also checked against its public model catalog).
+The stock eval runner received the selected secure-store key through an in-memory
+environment mapping; keys were never written to files or command arguments.
+Each run had `maxTurns=8`, `timeoutMs=30000`, `maxOutputTokens=4096` and
+`--max-spend 1.99`, reserving $0.01 of each $2 service allowance for smoke.
+The runner's cap is a soft, between-case gate, not a provider billing hard limit.
+
+| Route | Model | Input/output price | Case / outcome | Cases passed/total | Spend USD | Grader exit | Run exit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `clamp-bounds` / success | 1/1 | 0.000564 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `multi-file-refactor` / success | 1/1 | 0.001148 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `locate-implementation` / model_failure | 0/1 | 0.001188 | not run | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `failing-tests` / success | 1/1 | 0.000839 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `long-context` / success | 1/1 | 0.001229 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `tool-error-recovery` / success | 1/1 | 0.000458 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `parallel-read` / model_failure | 0/1 | 0.001674 | not run | 1 |
+| OpenAI API key total | `gpt-6-luna` | 0.10 / 0.50 | 7/7 cases run | 5/7 | 0.0071 reported | 0 for five successes | 1 |
+| OpenAI-compatible | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | `clamp-bounds` / timeout | 0/1 | ≥0; usage missing | not run | 3 |
+| OpenAI-compatible | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | `multi-file-refactor`, `locate-implementation`, `failing-tests`, `long-context`, `tool-error-recovery`, `parallel-read` / skipped_spend_cap | 0/6; unrun | 0 additional calls | not run | 3 |
+| OpenAI-compatible total | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | 1/7 cases run | 0/7 | ≥0; lower bound | not run | 3 |
+| ChatGPT subscription | `gpt-6-sol` | subscription | not runnable (tracked in #167) | — | — | — | — |
+
+Runner summaries: `Spent $0.0071 of $1.99 · 7/7 cases run` (OpenAI) and
+`Spent $0.00 of $1.99 · 1/7 cases run` (compatible). Summed reported
+`spend.totalUsd` is **$0.0071, a lower bound**, against the authorized $4 total
+(and original $10 release ceiling). Compatible `spendExact=false` means actual
+spend is unknown; its six skips reflect missing usage, not measured exhaustion
+of $1.99. Exit 3 is not a pass. Smoke reports no token usage, so smoke charges
+are not included in this sum. Billing reconciliation is still required to certify
+the service caps; no further paid retries were made after the already-running
+120-second smoke attempt ended. Other release runs outside this recorded pass
+have not been audited. [#173](https://github.com/chayapats/schway/issues/173)
+tracks the two OpenAI failures; #174 tracks compatible timeout and unrun cases.
+
+### Installed coding task
+
+`npm pack` at the tested revision and `npm install --ignore-scripts` into a
+separate temporary prefix both exited 0. Only the installed executable was
+launched. This was a real live-model task in an agent-operated Linux PTY;
+it is not a human visual review of terminal layout.
+
+| Field | Recorded result |
+| --- | --- |
+| Schway revision | `d72f94a234a648dbfe63cf6162643e56418f8656` |
+| Route / model / thinking | ChatGPT subscription / `gpt-6-sol` / `medium` |
+| Repository | [sindresorhus/escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp), MIT, commit `a7f7dabaf336bda98d2166848af15d9168b10bcf`; clean disposable clone before the task |
+| Task | Add dependency-free `node:test` edge-case tests, a `test:edge` package script and README usage, preserving the existing API and test script |
+| Execution limits | Tested agent instructed to stay in the disposable repo; no dependency installation, network use, credential reads, commits or pushes |
+| Changes | New `edge-cases.test.js`; modified `package.json` and `readme.md`. `git diff --stat`: 2 tracked files, 6 insertions, 1 deletion; new untracked test file is captured separately in the private diff |
+| Checks through Schway bash | `npm run test:edge`: 11 passed, exit 0, both before exit and after resume; original `npm test` not run because its dev dependencies were not installed |
+| Session / exit | `/session` returned `8e7e2b5a-a0a0-4798-b32f-ee6f9e396a56`; `/quit` exited 0 |
+| Resume | Installed executable with `--resume` restored 20 saved records and displayed earlier turns; one further user turn completed and reran the tests successfully; second `/quit` exited 0 |
+| Outcome | completed in Schway |
+| Recovered friction | Model initially read `README.md` instead of `readme.md`; it discovered the correct file and recovered without intervention. No incorrect file was edited |
+| Evidence hygiene | Task diff checked for credential patterns before private storage; raw session retained outside Git |
+
+### Defects
+
+| Issue | Severity | Title |
+| --- | --- | --- |
+| [#173](https://github.com/chayapats/schway/issues/173) | P2 | Eval discovery cases fail with gpt-6-luna when seed paths cannot be listed |
+| [#174](https://github.com/chayapats/schway/issues/174) | P2 | OpenRouter Muse Spark smoke and eval time out without usage |
+
+The OpenAI artifact reports 12/13 failed tool calls for `locate-implementation`
+and 24/24 for `parallel-read`. A shared fixture-discovery gap is visible in the
+harness, but the exact failed arguments were not retained; #173 distinguishes
+that observation from a confirmed explanation of every tool failure. The
+compatible timeout root cause remains unconfirmed. Neither defect is assigned
+a release milestone. No P0/P1 condition was observed in this pass.
+The report PR and billing reconciliation remain outstanding for #137 completion.
+
+
 ## Complete installed daily-use gate (#106, 2026-09-28)
 
 **Verdict: pending.** The implementation is present and the offline checks below
