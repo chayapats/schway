@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -357,5 +357,39 @@ test("supervised shared deadline preserves the completed tool round and second r
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1, providerRetries: 0,
         httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200 } });
     expect(calls).toBe(4);
+  } finally { server.stop(true); }
+}, 10_000);
+
+test("checkpoint write or rename failures do not change a verified supervised round trip", async () => {
+  if (process.platform === "win32") return;
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    calls++;
+    const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
+    const marker = body.messages.find(message => message.role === "tool")?.content?.match(/1\|([a-f0-9]{40})/)?.[1];
+    const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: {
+      name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
+    const chunk = (payload: object, finish_reason: string | null) => ({ id: "fixture", object: "chat.completion.chunk", created: 0,
+      model: "gpt-4o", choices: [{ index: 0, delta: payload, finish_reason }] });
+    const sse = [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
+      .map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n";
+    return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    for (const blockedPath of [".smoke-progress.json.tmp", ".smoke-progress.json"]) {
+      let root = "";
+      const before = calls;
+      const report = await runLiveProcesses({ ...settings(["compatible"], 4000), models: { compatible: "gpt-4o" },
+        compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { onWorkspace: path => {
+        root = path;
+        // A directory deterministically rejects writing the temp file or renaming onto the destination.
+        mkdirSync(join(path, blockedPath));
+      } });
+      expect(report.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true, authSource: "none",
+        diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
+          httpRequestsStarted: 2, httpResponsesReceived: 2 } });
+      expect(calls - before).toBe(2);
+      await expect(access(root)).rejects.toThrow();
+    }
   } finally { server.stop(true); }
 }, 10_000);

@@ -56,8 +56,11 @@ export async function runWorker(input: ReadableStream<Uint8Array>, env: Record<s
   }, onProgress: progress => {
     // Atomic replacement keeps the final bounded checkpoint readable after SIGKILL.
     const path = join(selection.workspaceRoot!, ".smoke-progress.json");
-    writeFileSync(`${path}.tmp`, JSON.stringify(progress), { mode: 0o600 });
-    renameSync(`${path}.tmp`, path);
+    const checkpoint = JSON.stringify(progress);
+    try {
+      writeFileSync(`${path}.tmp`, checkpoint, { mode: 0o600 });
+      renameSync(`${path}.tmp`, path);
+    } catch { /* Best-effort diagnostics must not change the selected smoke outcome. */ }
   } });
   return JSON.stringify(report.scenarios[0]);
 }
