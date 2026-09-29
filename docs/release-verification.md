@@ -1,5 +1,200 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## 0.4 truth pass (#137, 2026-09-29)
+
+**Verdict: live verification recorded with failures; release approval remains pending.**
+The maintainer authorized these models and reduced the original $10 eval ceiling
+to $2 per API service ($4 combined). Smoke and eval used the runner's default
+thinking, with explicit consent because those commands expose no thinking option.
+The installed coding tasks used Codex `gpt-6-sol` with `medium`, OpenRouter
+`meta/muse-spark-1.3-contributor` with `reasoning.effort=medium` in its compatible
+request body, and OpenAI `gpt-6-luna` with provider-default thinking. Luna medium
+was unavailable through the thinking selector at this tested revision.
+No provider/model fallback was used and no defects were fixed in this pass.
+
+Tested revision: `d72f94a234a648dbfe63cf6162643e56418f8656`, clean `main`.
+`bun install --frozen-lockfile`, `bun run typecheck`, and `bun test` all exited 0;
+1,414 tests passed across 99 files, with 0 failures. Raw JSON, session records,
+logs and the reviewed task diffs remain in private directory
+`~/schway-evidence/0.4/137-20260929T154041Z`, outside Git.
+
+### Live smoke
+
+Dates are UTC. Each run used the tested revision above; it is repeated below so
+individual rows retain their provenance. The compatible endpoint host is
+`openrouter.ai`. No endpoint path or credential is published.
+
+| Date (UTC) | Revision | Route | Model | Auth source | Status / reason | Tool round trip | Exit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-29T15:41:48.402Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | codex | `gpt-6-sol` | stored-subscription | passed / verified | true | 0 |
+| 2026-09-29T15:44:26.689Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | openai-api-key | `gpt-6-luna` | stored | passed / verified | true | 0 |
+| 2026-09-29T15:45:41.898Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible | `meta/muse-spark-1.3-contributor` | unavailable | failed_provider / timeout | false | 1 |
+| 2026-09-29T15:47:58.062Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (120 s retry) | `meta/muse-spark-1.3-contributor` | unavailable | failed_provider / timeout | false | 1 |
+| 2026-09-29T16:04:57.438Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (diagnostic serial 1, 120 s) | `meta/muse-spark-1.3-contributor` | stored | passed / verified | true | 0 |
+| 2026-09-29T16:06:30.426Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (diagnostic serial 2, 120 s) | `meta/muse-spark-1.3-contributor` | stored | passed / verified | true | 0 |
+| 2026-09-29T16:07:52.662Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (diagnostic serial 3, 120 s) | `meta/muse-spark-1.3-contributor` | stored | passed / verified | true | 0 |
+| 2026-09-29T16:09:02.935Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (diagnostic parallel A, 120 s) | `meta/muse-spark-1.3-contributor` | stored | passed / verified | true | 0 |
+| 2026-09-29T16:08:56.919Z | `d72f94a234a648dbfe63cf6162643e56418f8656` | compatible (diagnostic parallel B, 120 s) | `meta/muse-spark-1.3-contributor` | stored | passed / verified | true | 0 |
+
+Both original compatible attempts timed out (30,004 ms and 120,022 ms). Its credential
+could separately be read from the secure store in 10 ms; the smoke parent's
+`unavailable` auth source does not by itself diagnose an authentication failure.
+These failures are tracked in [#174](https://github.com/chayapats/schway/issues/174).
+
+Maintainer-requested diagnostics confirmed authenticated account/model requests
+returned HTTP 200, a direct adapter tool call completed in 5.4 s, and an
+in-process smoke completed in 23.3 s without the bounded fetch wrapper. One
+bounded probe received HTTP 503; another reached the shared 30 s deadline
+during its second request. A closed synthetic HTTP 503 body produced the
+correct adapter error in 2 ms.
+
+The five subsequent instrumented OS-supervised workers in the table passed
+with a 120 s limit: 33.761, 43.464, 29.400, 17.769 and 11.757 seconds respectively.
+Their parent smoke reports include startup/IPC overhead and record 33.836,
+43.586, 29.525, 17.848 and 11.836 seconds. For the first run, OpenRouter generation
+metadata names Meta and reports provider-response latencies of 12.433 and
+19.967 seconds for its two HTTP 200 calls; the worker consumed SSE throughout.
+An offline replay through the production adapter, bounded transport and smoke
+runner scaled the request delays to 130/203 ms: a shared 300 ms deadline timed
+out, while changing only the deadline to 600 ms passed. Both outcomes repeated
+twice. This confirms a whole-lane deadline/latency interaction; successful
+parallel runs do not establish concurrency as a cause.
+
+These diagnostics do not erase the original failures. The original 120 s
+timeout lacks its request/generation ID, so its root cause remains unknown in
+[#174](https://github.com/chayapats/schway/issues/174). Neither a contributor
+queue nor a particular local bug is established for that historical failure.
+No production fix or model fallback was applied in the truth pass.
+
+### Evals
+
+Prices in USD per million input/output tokens, checked 2026-09-29:
+[OpenAI Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) $0.10/$0.50;
+[OpenRouter Muse Spark](https://openrouter.ai/meta/muse-spark-1.3-contributor)
+$0.10/$0.20 (also checked against its public model catalog).
+The stock eval runner received the selected secure-store key through an in-memory
+environment mapping; keys were never written to files or command arguments.
+Each original suite run had `maxTurns=8`, `timeoutMs=30000`, `maxOutputTokens=4096` and
+`--max-spend 1.99`, reserving $0.01 of each $2 service allowance for smoke.
+The runner's cap is a soft, between-case gate, not a provider billing hard limit.
+
+| Route | Model | Input/output price | Case / outcome | Cases passed/total | Spend USD | Grader exit | Run exit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `clamp-bounds` / success | 1/1 | 0.000564 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `multi-file-refactor` / success | 1/1 | 0.001148 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `locate-implementation` / model_failure | 0/1 | 0.001188 | not run | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `failing-tests` / success | 1/1 | 0.000839 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `long-context` / success | 1/1 | 0.001229 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `tool-error-recovery` / success | 1/1 | 0.000458 | 0 | 1 |
+| OpenAI API key | `gpt-6-luna` | 0.10 / 0.50 | `parallel-read` / model_failure | 0/1 | 0.001674 | not run | 1 |
+| OpenAI API key total | `gpt-6-luna` | 0.10 / 0.50 | 7/7 cases run | 5/7 | 0.0071 reported | 0 for five successes | 1 |
+| OpenAI-compatible | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | `clamp-bounds` / timeout | 0/1 | ≥0; usage missing | not run | 3 |
+| OpenAI-compatible | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | `multi-file-refactor`, `locate-implementation`, `failing-tests`, `long-context`, `tool-error-recovery`, `parallel-read` / skipped_spend_cap | 0/6; unrun | 0 additional calls | not run | 3 |
+| OpenAI-compatible total | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | 1/7 cases run | 0/7 | ≥0; lower bound | not run | 3 |
+| OpenAI-compatible diagnostic, original prompt | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | `clamp-bounds` / model_failure, 120 s limit | 0/1 | 0.002096 | not run | 1 |
+| OpenAI-compatible diagnostic, corrected prompt only | `meta/muse-spark-1.3-contributor` | 0.10 / 0.20 | `clamp-bounds` / success, 120 s limit | 1/1 | 0.000872 | 0 | 0 |
+| ChatGPT subscription | `gpt-6-sol` | subscription | not runnable (tracked in #167) | — | — | — | — |
+
+Original runner summaries: `Spent $0.0071 of $1.99 · 7/7 cases run` (OpenAI)
+and `Spent $0.00 of $1.99 · 1/7 cases run` (compatible). The two diagnostic
+summaries are `Spent $0.0021 of $0.10 · 1/1 cases run` and
+`Spent $0.00087 of $0.10 · 1/1 cases run`; the table uses their unrounded JSON
+amounts. Summing `spend.totalUsd` in the four retained live eval artifacts gives
+**$0.010068, a lower bound** ($0.0071 + $0 + $0.002096 + $0.000872), below the
+$4 authorized combined allowance and original $10 eval ceiling as a reported
+lower bound, not proof of an exact bill. The original compatible run has
+`spendExact=false`; its six skips reflect missing usage, not measured exhaustion
+of $1.99. Exit 3 is not a pass. Smoke and coding-task costs are not included in
+this eval sum, and other release runs outside this evidence set are not audited.
+
+The latest read-only provider key check at 2026-09-29T19:22:33.743Z reported a
+$2 limit, $0.007219806 cumulative usage and $1.992780194 remaining. The earlier
+post-Muse-task measurement was $0.006495026. These are key-level measurements
+including calls outside the eval artifacts; reporting delay or other calls can
+explain a later change. They are not per-run attribution and must not be added
+to the eval sum. The latest OpenRouter measurement is below its configured $2
+limit; exact OpenAI smoke/coding charges and release-wide billing remain
+unverified. Issue #137 permits a lower-bound report when usage is incomplete;
+this qualifier does not certify exact billing or release approval.
+
+The diagnostic original-prompt clamp run ended at 87.878 s with 8 tool calls,
+5 failures and 3 repeated calls; no grader ran. Its task prescribed `bun test`,
+but the restricted tool accepts only `bun test test/math.test.ts` without extra
+arguments. The same command mismatch reproduces offline. Changing only the
+diagnostic prompt to name the permitted command completed at 20.768 s with
+4 calls, zero tool failures and grader exit 0. Model nondeterminism prevents
+attributing the whole duration difference to that edit. Both diagnostics used
+8 turns and a 4,096-token output cap; neither replaces the official 30 s suite
+results. [#176](https://github.com/chayapats/schway/issues/176) tracks this
+confirmed harness defect; [#173](https://github.com/chayapats/schway/issues/173)
+tracks Luna's two discovery failures, and #174 retains the compatible failures
+and six unrun official cases. The official totals remain Luna **5/7** and
+compatible **0/7**, despite successful later coding tasks and diagnostics.
+
+### Installed coding tasks
+
+`npm pack` at the tested revision and `npm install --ignore-scripts` into a
+separate temporary prefix both exited 0. Only the installed executable was
+launched for the original task. The three real live-model tasks used disposable
+clones of the same repository and an agent-operated Linux PTY;
+this is not a human visual review of terminal layout. The Muse task plan pins
+the tested revision. The Luna follow-up was reported as using the retained
+installed build, but its saved outcome/session do not independently identify
+the executable revision and no separate launch artifact was retained; its
+revision attribution has that provenance limit.
+
+| Field | Recorded result |
+| --- | --- |
+| Schway revision | `d72f94a234a648dbfe63cf6162643e56418f8656` |
+| Route / model / thinking | ChatGPT subscription / `gpt-6-sol` / `medium` |
+| Repository | [sindresorhus/escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp), MIT, commit `a7f7dabaf336bda98d2166848af15d9168b10bcf`; clean disposable clone before the task |
+| Task | Add dependency-free `node:test` edge-case tests, a `test:edge` package script and README usage, preserving the existing API and test script |
+| Execution limits | Tested agent instructed to stay in the disposable repo; no dependency installation, network use, credential reads, commits or pushes |
+| Changes | New `edge-cases.test.js`; modified `package.json` and `readme.md`. `git diff --stat`: 2 tracked files, 6 insertions, 1 deletion; new untracked test file is captured separately in the private diff |
+| Checks through Schway bash | `npm run test:edge`: 11 passed, exit 0, both before exit and after resume; original `npm test` not run because its dev dependencies were not installed |
+| Session / exit | `/session` returned `8e7e2b5a-a0a0-4798-b32f-ee6f9e396a56`; `/quit` exited 0 |
+| Resume | Installed executable with `--resume` restored 20 saved records and displayed earlier turns; one further user turn completed and reran the tests successfully; second `/quit` exited 0 |
+| Outcome | completed in Schway |
+| Recovered friction | Model initially read `README.md` instead of `readme.md`; it discovered the correct file and recovered without intervention. No incorrect file was edited |
+| Evidence hygiene | Task diff checked for credential patterns before private storage; raw session retained outside Git |
+| OpenAI follow-up, 2026-09-29 | Installed OpenAI API-key / `gpt-6-luna` / provider default; same repository and base commit, separate disposable clone; add dependency-free edge tests, `test:edge` and README instructions |
+| OpenAI changes | Raw `git diff --stat`: 2 tracked files, 6 insertions, 1 deletion (`package.json`, `readme.md`); new untracked `edge-cases.test.js`, 28 lines, included in retained diff; full captured diff: 3 files, 34 insertions, 1 deletion |
+| OpenAI checks / outcome | `npm run test:edge`: 2 passed, 0 failed before and after resume; both exits 0; completed in Schway. Initial turn 34.411 s, resumed turn 4.236 s, no tool errors |
+| OpenAI session / resume | `2dad1603-9485-4738-8096-cd7e4eb501c0`; earlier session restored, further test turn completed; both `/quit` exits 0 |
+| OpenAI limits / friction | Exact task cost unknown because the TUI does not persist complete billable usage. Existing dependency-requiring `npm test` not run; tests cover installed Node only. README test section interrupts existing usage prose, tracked as documentation quality in [#179](https://github.com/chayapats/schway/issues/179); no functional failure or escape from Schway |
+| OpenRouter follow-up, 2026-09-29 | Installed compatible / `meta/muse-spark-1.3-contributor` / explicit medium request body; same repository and base commit, separate disposable clone; same bounded edge-test task |
+| OpenRouter changes | Raw `git diff --stat`: 2 tracked files, 12 insertions, 1 deletion (`package.json`, `readme.md`); new untracked `edge-cases.test.js`, 64 lines, included in retained diff; full captured diff: 3 files, 76 insertions, 1 deletion |
+| OpenRouter checks / outcome | `npm run test:edge`: 6 passed, 0 failed before and after resume; both exits 0; completed in Schway. Initial turn 61.803 s, resumed turn 11.951 s, no tool errors |
+| OpenRouter session / resume | `34daada1-3239-47bf-859c-5b1a8c6149e4`; earlier session restored, further test turn completed; both `/quit` exits 0 |
+| OpenRouter accounting / limits | Key usage rose from $0.00334299 to $0.006495026 around the task (observed delta $0.003152036); accounting can lag, so this is not an exact task bill. Existing dependency-requiring `npm test` not run; tests cover installed Node only |
+
+### Defects
+
+| Issue | Severity | Title |
+| --- | --- | --- |
+| [#173](https://github.com/chayapats/schway/issues/173) | P2 | Eval discovery cases fail with gpt-6-luna when seed paths cannot be listed |
+| [#174](https://github.com/chayapats/schway/issues/174) | P2 | OpenRouter Muse Spark smoke and eval time out without usage |
+| [#176](https://github.com/chayapats/schway/issues/176) | P2 | Clamp eval instructs a bash command its own restricted tool rejects |
+| [#179](https://github.com/chayapats/schway/issues/179) | P2 | Luna coding task inserts README Tests heading inside Usage prose |
+
+The OpenAI artifact reports 12/13 failed tool calls for `locate-implementation`
+and 24/24 for `parallel-read`. A shared fixture-discovery gap is visible in the
+harness, but the exact failed arguments were not retained; #173 distinguishes
+that observation from a confirmed explanation of every tool failure. The
+original 120 s compatible timeout root cause remains unconfirmed, distinct from
+the reproduced deadline interaction and confirmed #176 command mismatch. These
+P2 defects have no release milestone. No P0/P1 condition was observed in this pass.
+
+The thinking-control follow-up [#177](https://github.com/chayapats/schway/issues/177)
+was subsequently closed by [PR #178](https://github.com/chayapats/schway/pull/178);
+that implementation is separate from the unchanged historical tested revision
+and does not retroactively validate medium selection or rerun these evals.
+This evidence completes the #137 truth-pass record once the report PR is merged,
+with unresolved accounting explicitly reported as a lower bound. Release
+approval remains pending under [#138](https://github.com/chayapats/schway/issues/138);
+closing the truth pass does not mean all evals passed or approve publication.
+
+
 ## Complete installed daily-use gate (#106, 2026-09-28)
 
 **Verdict: pending.** The implementation is present and the offline checks below
