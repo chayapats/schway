@@ -297,11 +297,8 @@ export abstract class CredentialsLayer extends ControllerCore {
         ? { credentialIdentity: settings.credentialIdentity }
         : {}),
     });
-    if (identity.account !== active.account) return;
-    if (this.provider === "xai") {
-      this.clearXaiCapabilities("api-key");
-      if (this.grokSelected()) return;
-    }
+    if (identity.account === credentialIdentity({ provider: "xai" }).account) this.clearXaiCapabilities("api-key");
+    if (identity.account !== active.account || this.grokSelected()) return;
     // A removed/replaced saved key must never survive in a previously constructed adapter.
     this.model = undefined;
     try {

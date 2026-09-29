@@ -349,3 +349,40 @@ test("failed xAI sign-in model discovery clears only API-key reasoning evidence"
     } finally { controller.dispose(); }
   });
 });
+
+test("replacing an inactive xAI credential invalidates cached evidence and discovers the new account on selection", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const store = fakeCredentialStore();
+    await store.set(credentialIdentity({ provider: "xai" }), "old-fixture-key");
+    const editor = new ConfigEditor({ cli: { provider: "openai", model: "gpt-6-luna", xaiAuth: "api-key", thinking: "medium" } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") },
+      [{ id: "grok-shared", authRoute: "api-key", supportedThinking: ["low"] }]);
+    let reloads = 0;
+    const requests: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "inactive-api-key", workspace, configEditor: editor,
+      provider: "openai", modelId: "gpt-6-luna", model: createScriptedModel({ provider: "openai", id: "gpt-6-luna" }), contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => { reloads++; return { error: "must not reload OpenAI" }; } },
+      stageSettings: (next, signal, _workspace, model) => stageInteractiveSettings(next, editor.settings, {
+        forceLoad: true, model, signal, workspace, home: dir, runtimeApiKey: undefined, env: {}, secrets: [], credentialStore: store,
+        fetch: async (url, init) => {
+          requests.push(String(url));
+          expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer replacement-fixture-key");
+          return Response.json({ data: [{ id: "grok-shared", capabilities: { reasoning_effort: ["medium"] } }] });
+        },
+      }),
+    });
+    try {
+      expect(controller.beginLogin("xai")).toBe(true);
+      controller.enterCredentialText("replacement-fixture-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(reloads).toBe(0);
+      expect(editor.settings.provider).toBe("openai");
+      expect((await editor.prepareXaiModel("grok-shared")).settings.reasoningCapability).toBeUndefined();
+      expect(await controller.submit("continue on the unchanged OpenAI adapter")).toBe(true);
+      expect(await controller.selectModel("xai/grok-shared")).toBe(true);
+      expect(requests).toEqual(["https://api.x.ai/v1/models"]);
+      expect(editor.settings).toMatchObject({ provider: "xai", xaiAuth: "api-key", supportedThinking: ["medium"] });
+    } finally { controller.dispose(); }
+  });
+});
