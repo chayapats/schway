@@ -37,7 +37,7 @@ export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeS
     else if (flag === "--credential-identity" && SAFE_OPTION.test(value)) credentialIdentity = value;
     else return { error: "Invalid live smoke option or value." };
   }
-  if (selection.providers.length === 0) return { error: "Select --provider openai-api-key|xai-api-key|compatible|codex|all (or a comma-separated list)." };
+  if (selection.providers.length === 0) return { error: "Select --provider openai-api-key|xai-api-key|compatible|codex|grok|all (or a comma-separated list)." };
   if (selection.models && Object.keys(selection.models).some(p => !selection.providers.includes(p as SmokeProvider))) return { error: "Model override must target a selected provider." };
   if (selection.providers.includes("compatible") && !url && selection.enabled) return { error: "Select --base-url for the compatible endpoint." };
   if (url && !isSafeSmokeEndpoint(url, auth)) return { error: "Use HTTPS for compatible credentials; local HTTP requires explicit --auth none." };

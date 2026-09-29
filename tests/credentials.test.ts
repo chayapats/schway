@@ -113,3 +113,18 @@ test("xAI keys stay on their own identity and never read OpenAI credentials", as
     error: "Missing xAI API key. Set XAI_API_KEY or pass --api-key.",
   });
 });
+
+test("xAI auto selection prioritizes overrides, subscription, stored key and missing; explicit routes are isolated", async () => {
+  const { selectXaiTransport, MISSING_GROK_SUBSCRIPTION } = await import("../src/auth/credentials.ts");
+  const reads: string[] = [];
+  let subscription: string | null = "stored-subscription", key: string | null = "stored-key";
+  const store = { get: async (identity: { account: string }) => { reads.push(identity.account); return identity.account === "grok-subscription:xai" ? subscription : key; }, set: async () => {}, delete: async () => false };
+  expect(await selectXaiTransport({ env: {}, runtimeApiKey: "runtime", store })).toEqual({ transport: "api-key" }); expect(reads).toEqual([]);
+  expect(await selectXaiTransport({ env: { XAI_API_KEY: "env" }, store })).toEqual({ transport: "api-key" }); expect(reads).toEqual([]);
+  expect(await selectXaiTransport({ env: {}, store })).toEqual({ transport: "grok" }); expect(reads.splice(0)).toEqual(["grok-subscription:xai"]);
+  subscription = null; expect(await selectXaiTransport({ env: {}, store })).toEqual({ transport: "api-key" }); reads.length = 0;
+  key = null; expect(await selectXaiTransport({ env: {}, store })).toHaveProperty("error"); reads.length = 0;
+  expect(await selectXaiTransport({ xaiAuth: "api-key", env: {}, store })).toEqual({ transport: "api-key" }); expect(reads).toEqual([]);
+  const env = Object.defineProperty({}, "XAI_API_KEY", { get() { throw Error("must not inspect API key"); } });
+  expect(await selectXaiTransport({ xaiAuth: "grok", runtimeApiKey: "", env, store })).toEqual({ error: MISSING_GROK_SUBSCRIPTION }); expect(reads).toEqual(["grok-subscription:xai"]);
+});

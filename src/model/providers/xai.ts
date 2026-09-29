@@ -73,18 +73,25 @@ export function createXaiModel(options: {
       const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability);
       const body = buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" });
       let token = typeof options.apiKey === "function" ? await options.apiKey() : options.apiKey;
+      const tokens = [token];
+      const safeError = (error: unknown): unknown => {
+        if (!options.refreshCredential) return error;
+        const message = tokens.reduce((text, secret) => secret ? text.replaceAll(secret, "[redacted]") : text, error instanceof Error ? error.message : "Grok request failed.");
+        return Object.assign(new Error(message), error instanceof OpenAI.APIError ? { status: error.status, headers: error.headers } : {});
+      };
       const send = () => client.responses.create(body, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
       let stream;
       try { stream = await send(); }
       catch (error) {
         if (error instanceof OpenAI.APIError && error.status === 401 && options.refreshCredential) {
-          token = await options.refreshCredential(token, request.signal);
+          token = await options.refreshCredential(token, request.signal); tokens.push(token);
           try { stream = await send(); }
-          catch (retryError) { if (retryError instanceof OpenAI.APIError && [401, 403].includes(retryError.status ?? 0) && options.authError) throw options.authError(retryError.status!); throw retryError; }
+          catch (retryError) { if (retryError instanceof OpenAI.APIError && [401, 403].includes(retryError.status ?? 0) && options.authError) throw options.authError(retryError.status!); throw safeError(retryError); }
         } else if (error instanceof OpenAI.APIError && error.status === 403 && options.authError) throw options.authError(403);
-        else throw error;
+        else throw safeError(error);
       }
-      yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI" });
+      try { yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI" }); }
+      catch (error) { throw safeError(error); }
     },
   };
 }

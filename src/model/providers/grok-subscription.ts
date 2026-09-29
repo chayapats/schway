@@ -62,7 +62,7 @@ export function subscriptionAccessExpired(tokens: GrokTokens, now = Date.now()):
 async function formRequest(url: string, fields: Record<string, string>, options: { fetch?: GrokFetch; signal?: AbortSignal }): Promise<Response> {
   aborted(options.signal);
   try {
-    const response = await (options.fetch ?? fetch)(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: GROK_CLIENT_ID, ...fields }).toString(), signal: options.signal });
+    const response = await (options.fetch ?? fetch)(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: GROK_CLIENT_ID, ...fields }).toString(), redirect: "error", signal: options.signal });
     aborted(options.signal); return response;
   } catch { aborted(options.signal); throw new Error("The Grok sign-in endpoint could not be reached. Retry /login grok."); }
 }

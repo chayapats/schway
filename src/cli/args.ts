@@ -4,7 +4,7 @@ import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--debug] [--debug-file <path>] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--debug] [--debug-file <path>] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "openai" | "xai" | "openai-compatible";
@@ -37,6 +37,7 @@ export interface CliArgs {
   extraBody?: Record<string, unknown>;
   auth?: CliAuthMode;
   openaiAuth?: CliOpenAIAuth;
+  xaiAuth?: "auto" | "grok" | "api-key";
   maxTurns?: number;
   maxConcurrentTools?: number;
   contextWindow?: number;
@@ -293,6 +294,12 @@ export function parseArgs(
       args.openaiAuth = openaiAuth;
       continue;
     }
+    if (arg === "--xai-auth" || arg.startsWith("--xai-auth=")) {
+      const value = arg === "--xai-auth" ? argv[++i] : arg.slice("--xai-auth=".length);
+      if (value === undefined || value.startsWith("-")) return { error: "Missing value for --xai-auth" };
+      if (value !== "auto" && value !== "grok" && value !== "api-key") return { error: `Unknown xAI auth preference: ${value}. Use auto, grok, or api-key.` };
+      args.xaiAuth = value; continue;
+    }
     const intFlag = parseIntegerFlag(arg, argv, i);
     if (intFlag !== undefined) {
       if ("error" in intFlag) {
@@ -464,6 +471,7 @@ function validateConnectionOptions(
   if (args.openaiAuth !== undefined && args.provider !== undefined && args.provider !== "openai") {
     return { error: "OpenAI auth preference requires --provider openai" };
   }
+  if (args.xaiAuth !== undefined && args.provider !== undefined && args.provider !== "xai") return { error: "xAI auth preference requires --provider xai" };
   return { args };
 }
 
@@ -509,6 +517,7 @@ export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
   if (args.auth !== undefined) {
     layer.auth = args.auth;
   }
+  if (args.xaiAuth !== undefined) layer.xaiAuth = args.xaiAuth;
   if (args.openaiAuth !== undefined) {
     layer.openaiAuth = args.openaiAuth;
   }

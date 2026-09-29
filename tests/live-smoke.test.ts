@@ -542,3 +542,16 @@ test("expired subscription without refresh is pending and never starts login", a
   });
   expect(report.scenarios[0]).toMatchObject({ status: "pending", reason: "subscription_requires_login" });
 });
+
+test("Grok smoke lane is disabled without discovery and classifies login states using only its identity", async () => {
+  const disabled = await runLiveSmoke({ ...selection(["grok"]), enabled: false }, { createStore: () => { throw Error("disabled discovery"); } });
+  expect(disabled.scenarios[0]).toMatchObject({ status: "skipped", reason: "live_disabled" });
+  for (const state of ["missing", "malformed", "expired", "unreadable", "revoked"] as const) {
+    const reads: string[] = [];
+    const report = await runLiveSmoke({ ...selection(["grok"]), env: { XAI_API_KEY: "never-send" } }, { createStore: () => ({
+      get: async identity => { reads.push(identity.account); if (state === "unreadable") throw Error("locked"); return state === "missing" ? null : state === "malformed" ? "bad" : JSON.stringify({ accessToken: "expired", obtainedAt: 0, expiresAt: 0, ...(state === "revoked" ? { refreshToken: "refresh" } : {}) }); }, set: async () => {}, delete: async () => false,
+    }), createModel: input => loadProviderModel(input, async url => { expect(String(url)).toBe("https://auth.x.ai/oauth2/token"); return Response.json({}, { status: 401 }); }) });
+    expect(report.scenarios[0]).toMatchObject({ status: "pending", reason: state === "missing" ? "missing_subscription" : state === "unreadable" ? "credential_store_unavailable" : "subscription_requires_login" });
+    expect(reads.every(identity => identity === "grok-subscription:xai")).toBe(true);
+  }
+});

@@ -148,3 +148,15 @@ test("unrelated edits preserve existing URL values and resetting removes the sel
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ maxTurns: 9 });
   });
 });
+
+test("Grok and xAI API-key model staging commit explicit distinct billing routes", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), workspaceRoot = join(root, "project"); await mkdir(home); await mkdir(workspaceRoot);
+    const editor = await loadConfigEditor({ home, workspaceRoot, cli: { provider: "xai", model: "grok-4.7" } });
+    expect(editor.settings.xaiAuth).toBe("auto");
+    const grok = await editor.prepareGrokModel("grok-4.7"); expect(editor.settings.xaiAuth).toBe("auto"); await grok.commit(); expect(editor.settings.xaiAuth).toBe("grok");
+    await (await editor.prepareXaiModel("grok-4.7")).commit(); expect(editor.settings.xaiAuth).toBe("api-key");
+    await (await editor.prepare({ scope: "session", key: "xaiAuth", value: "grok" })).commit(); expect(editor.settings.xaiAuth).toBe("grok");
+    await expect(editor.prepare({ scope: "session", key: "xaiAuth", value: "bogus" })).rejects.toThrow("Unknown xAI auth preference: bogus. Use auto, grok, or api-key.");
+  });
+});

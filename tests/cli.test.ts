@@ -1071,3 +1071,26 @@ test("xAI headless runs with a key, refuses a missing model or key, and lists mo
   expect(unset.exitCode).toBe(0);
   expect(urls.filter(url => url.includes("/models"))).toHaveLength(0);
 });
+
+test("Grok headless uses stored OAuth, refreshes, and maps missing, revoked and plan failures", async () => {
+  const { grokSubscriptionIdentity } = await import("../src/auth/store.ts");
+  const { encodeXaiSse, XAI_TEXT_EVENTS } = await import("./fixtures/xai.ts");
+  const argv = ["--provider", "xai", "--xai-auth", "grok", "--model", "grok-4.7", "-p", "Hello"];
+  for (const scenario of ["success", "missing", "revoked", "plan"] as const) {
+    const store = fakeCredentialStore(); const urls: string[] = [];
+    if (scenario !== "missing") await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "old", refreshToken: "refresh", obtainedAt: 0, ...(scenario !== "plan" ? { expiresAt: 0 } : {}) }));
+    const result = await run(argv, { env: { XAI_API_KEY: "billing-sentinel" }, credentialStore: store, fetch: async (url, init) => {
+      urls.push(String(url));
+      if (String(url).startsWith("https://auth.x.ai/")) return Response.json(scenario === "revoked" ? { error: "invalid_grant" } : { access_token: "renewed", expires_in: 3600 }, { status: scenario === "revoked" ? 401 : 200 });
+      expect(new Headers(init!.headers).get("Authorization")).toBe(scenario === "plan" ? "Bearer old" : "Bearer renewed");
+      return scenario === "plan" ? Response.json({}, { status: 403 }) : new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+    } });
+    expect(result.exitCode).toBe(scenario === "success" ? 0 : 1);
+    if (scenario === "missing") { expect(result.stderr).toContain("No Grok subscription login found."); expect(urls).toEqual([]); }
+    if (scenario === "revoked") expect(result.stderr).toContain("session was revoked or rejected by xAI");
+    if (scenario === "plan") expect(result.stderr).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead.\n");
+    expect(result.stderr).not.toContain("Alt+L"); expect(result.stderr).not.toContain("billing-sentinel");
+  }
+  expect((await run(["--provider", "openai", "--xai-auth", "grok", "-p", "hello"])).stderr).toContain("xAI auth preference requires --provider xai");
+  expect((await run(["--xai-auth", "bogus", "-p", "hello"])).stderr).toContain("Unknown xAI auth preference: bogus. Use auto, grok, or api-key.");
+});
