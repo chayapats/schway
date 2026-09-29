@@ -129,3 +129,13 @@ test("case variants and in-session model selection also get the notice", async (
   const { parseModelArgs } = await import("../src/tui/commands.ts");
   expect(parseModelArgs("anthropic/claude-sonnet-4-6", "openai")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
 });
+
+test("the space-separated /model form and an invalid config still get the notice and the doctor warning", async () => {
+  const { parseModelArgs } = await import("../src/tui/commands.ts");
+  expect(parseModelArgs("anthropic claude-sonnet-4-6", "openai")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
+  const { workspace, home } = await fixture();
+  await writeFile(join(home, ".schway", "config.json"), JSON.stringify({ provider: "anthropic" }));
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { json: true, help: false }, store: legacyStore(true) });
+  expect(report.checks.find(item => item.id === "config.user")?.status).toBe("error");
+  expect(report.checks.find(item => item.id === "credentials.anthropic")?.status).toBe("warning");
+});

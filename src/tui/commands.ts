@@ -213,6 +213,10 @@ export function parseModelArgs(
   if (parts.length === 2 && isPickerProvider(parts[0]!.toLowerCase())) {
     return { provider: parts[0]!.toLowerCase(), modelId: parts[1]! };
   }
+  const removed = parts.length === 2 ? removedProviderMessage(parts[0]) : undefined;
+  if (removed !== undefined) {
+    return { error: removed };
+  }
   if (parts.length === 1) {
     return { provider: currentProvider, modelId: parts[0]! };
   }

@@ -419,6 +419,9 @@ function collectSecrets(
   if (runtimeApiKey) {
     secrets.push(runtimeApiKey);
   }
+  // The route is gone, but a leftover key can still reach tool output through the inherited environment.
+  const legacyAnthropicKey = env.ANTHROPIC_API_KEY;
+  if (legacyAnthropicKey) secrets.push(legacyAnthropicKey);
   const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
   if (compatibleKey) secrets.push(compatibleKey);
   const openaiKey = env.OPENAI_API_KEY;

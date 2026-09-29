@@ -220,19 +220,17 @@ export async function diagnose(input: {
   }
 
   // Presence only: the removed route's key is never resolved, used or shown.
-  if (!invalidConfig) {
-    try {
-      const leftover = await (input.store ?? createNativeCredentialStore()).get({ account: LEGACY_ANTHROPIC_ACCOUNT, label: "anthropic" });
-      if (leftover?.trim()) add("credentials.anthropic", "warning", "A stored Anthropic API key is unused; the Anthropic provider was removed in 0.4.", `Delete it with: ${LEGACY_ANTHROPIC_REMOVAL_COMMAND}`);
-    } catch { /* An unreadable store is already reported by the selected route's auth check. */ }
-  }
+  try {
+    const leftover = await (input.store ?? createNativeCredentialStore()).get({ account: LEGACY_ANTHROPIC_ACCOUNT, label: "anthropic" });
+    if (leftover?.trim()) add("credentials.anthropic", "warning", "A stored Anthropic API key is unused; the Anthropic provider was removed in 0.4.", `Delete it with: ${LEGACY_ANTHROPIC_REMOVAL_COMMAND}`);
+  } catch { /* An unreadable store is already reported by the selected route's auth check. */ }
 
   if (workspace) {
     try {
       const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal });
       add("packages", "ok", `${inspected.packages.length} enabled package manifest(s) valid.`);
       // Bound identifiers and redact only known credential sources: ordinary env/header values are not keys.
-      const credentialEnvNames = ["OPENAI_API_KEY", COMPATIBLE_API_KEY_ENV,
+      const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", COMPATIBLE_API_KEY_ENV,
         ...(!("error" in settings) && settings.credentialEnv ? [settings.credentialEnv] : [])];
       const credentialHeaders = Object.entries(input.args.headers ?? {})
         .filter(([name]) => CREDENTIAL_HEADER_NAMES.has(name.trim().toLowerCase()))
