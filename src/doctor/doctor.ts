@@ -230,7 +230,7 @@ export async function diagnose(input: {
       const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal });
       add("packages", "ok", `${inspected.packages.length} enabled package manifest(s) valid.`);
       // Bound identifiers and redact only known credential sources: ordinary env/header values are not keys.
-      const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", COMPATIBLE_API_KEY_ENV,
+      const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", COMPATIBLE_API_KEY_ENV,
         ...(!("error" in settings) && settings.credentialEnv ? [settings.credentialEnv] : [])];
       const credentialHeaders = Object.entries(input.args.headers ?? {})
         .filter(([name]) => CREDENTIAL_HEADER_NAMES.has(name.trim().toLowerCase()))

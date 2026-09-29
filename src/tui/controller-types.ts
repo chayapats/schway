@@ -173,6 +173,8 @@ export interface TuiControllerOptions {
     store: CredentialStore;
     env: Record<string, string | undefined>;
     runtimeApiKey?: string;
+    /** Provider the process runtime key belongs to. Other routes must not receive it. */
+    runtimeProvider?: string;
     rememberSecret?: (key: string) => void;
     reload: (settings?: ResolvedSettings) => Promise<{ model: Model; notice?: string } | { error: string }>;
     /** Explicit subscription login runner; production wires the verified OAuth flow. */
@@ -182,7 +184,7 @@ export interface TuiControllerOptions {
     /** Discover verified model budgets and reasoning levels for this subscription identity. */
     listSubscriptionCatalog?: (signal: AbortSignal) => Promise<readonly ModelCapability[]>;
     /** List models for a connected API-key or compatible route. Subscription discovery stays separate. */
-    listRouteModels?: (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
+    listRouteModels?: (route: "api-key" | "compatible" | "xai", signal: AbortSignal, endpoint?: { baseUrl?: string }) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: ModelCapability }>;

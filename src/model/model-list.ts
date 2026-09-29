@@ -1,4 +1,4 @@
-import { listCatalog, ROUTE_FALLBACK_MODELS } from "./catalog.ts";
+import { listCatalog, ROUTE_FALLBACK_MODELS, type ModelCapability } from "./catalog.ts";
 import type { ThinkingLevel } from "./model.ts";
 import { THINKING_LEVELS } from "./model.ts";
 
@@ -13,6 +13,8 @@ export interface ListedModel {
   /** True when the provider marked this id as its default or recommendation. */
   recommended?: boolean;
   supportedThinking?: readonly ThinkingLevel[];
+  /** Provider-reported default reasoning level, when the list names one. */
+  defaultThinking?: ThinkingLevel;
 }
 
 /** Platform model list for an OpenAI API key. Subscription discovery uses a different endpoint. */
@@ -25,6 +27,12 @@ export const OPENAI_CHAT_MODEL_PREFIXES = ["gpt-", "o1", "o3", "o4", "chatgpt-"]
 
 /** Segments that exclude an otherwise chat-prefixed OpenAI API-key ID. */
 export const OPENAI_NON_CHAT_SEGMENTS = ["embedding", "whisper", "tts", "transcribe", "audio", "realtime", "image", "dall-e", "moderation", "search", "instruct", "babbage", "davinci"] as const;
+
+/** Prefix required for an xAI ID to be offered as a chat model. */
+export const XAI_CHAT_MODEL_PREFIX = "grok-";
+
+/** Segments that exclude an otherwise chat-prefixed xAI ID. */
+export const XAI_EXCLUDED_MODEL_SEGMENTS = ["image", "imagine", "video", "vision-only", "embed"] as const;
 
 /** Maximum models kept from one parsed list; later entries are ignored rather than rejected. */
 const MAX_PARSED_MODELS = 5_000;
@@ -50,11 +58,36 @@ export function requireOpenAIApiKeyModels(models: readonly ListedModel[]): Liste
   return filtered;
 }
 
+/** Keep xAI IDs that start with the chat prefix and contain no excluded segment. */
+export function filterXaiModels(models: readonly ListedModel[]): ListedModel[] {
+  return models.filter(model => model.id.startsWith(XAI_CHAT_MODEL_PREFIX)
+    && !XAI_EXCLUDED_MODEL_SEGMENTS.some(segment => containsSegment(model.id, segment)));
+}
+
+/** Return the filtered xAI list, or fail the list when no chat model remains. */
+export function requireXaiModels(models: readonly ListedModel[]): ListedModel[] {
+  const filtered = filterXaiModels(models);
+  if (!filtered.length) throw new Error("xAI model list returned no selectable models.");
+  return filtered;
+}
+
+/** Turn a parsed xAI list into capabilities, offering only off when the list names no reasoning efforts. */
+export function xaiModelCapabilities(models: readonly ListedModel[]): ModelCapability[] {
+  return models.map(model => ({
+    id: model.id,
+    ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+    ...(model.maxOutput !== undefined ? { maxOutput: model.maxOutput } : {}),
+    ...(model.defaultThinking !== undefined ? { defaultThinking: model.defaultThinking } : {}),
+    supportedThinking: model.supportedThinking ?? ["off"],
+    ...(model.supportedThinking?.includes("off") ? { supportsDisabling: true } : {}),
+  }));
+}
+
 /** Choose a marked default, the route fallback, a catalog ID, then the first listed ID. */
-export function recommendedListedModel(route: "api-key" | "codex" | "compatible", models: readonly ListedModel[]): string {
+export function recommendedListedModel(route: "api-key" | "codex" | "compatible" | "xai", models: readonly ListedModel[]): string {
   const marked = models.find(model => model.recommended);
   if (marked) return marked.id;
-  const provider = route === "compatible" ? "openai-compatible" : "openai";
+  const provider = route === "compatible" ? "openai-compatible" : route === "xai" ? "xai" : "openai";
   const fallback = ROUTE_FALLBACK_MODELS[provider];
   if (models.some(model => model.id === fallback)) return fallback;
   const catalog = new Set(listCatalog().filter(entry => entry.provider === provider).map(entry => entry.id));
@@ -142,15 +175,17 @@ export function parseModelList(payload: unknown, label: string): ListedModel[] {
     const id = typeof row.id === "string" ? row.id : typeof row.slug === "string" ? row.slug : undefined;
     if (!id || !MODEL_ID.test(id) || models.has(id)) continue;
     if (row.visibility !== undefined && row.visibility !== "list") continue;
-    const contextWindow = positiveInt(row.context_window ?? row.contextWindow, 10_000_000);
+    const contextWindow = positiveInt(row.context_window ?? row.contextWindow ?? row.context_length, 10_000_000);
     const maxOutput = positiveInt(row.max_output_tokens ?? row.max_completion_tokens ?? row.maxOutput, 1_000_000);
-    const supportedThinking = thinkingLevels(row.supported_reasoning_levels ?? row.supportedThinking);
+    const supportedThinking = thinkingLevels(row.supported_reasoning_levels ?? row.supportedThinking ?? reasoningEfforts(row));
+    const defaultThinking = oneThinkingLevel(row.default_reasoning_effort);
     models.set(id, {
       id,
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...(maxOutput !== undefined ? { maxOutput } : {}),
       ...(row.default === true || row.recommended === true || row.is_default === true || id === marked ? { recommended: true } : {}),
       ...(supportedThinking ? { supportedThinking } : {}),
+      ...(defaultThinking ? { defaultThinking } : {}),
     });
   }
   if (!models.size) throw new Error(`${label} model list returned no selectable models.`);
@@ -188,4 +223,15 @@ function thinkingLevels(value: unknown): ThinkingLevel[] | undefined {
     return THINKING_LEVELS.includes(level as ThinkingLevel) ? level as ThinkingLevel : undefined;
   }).filter((level): level is ThinkingLevel => level !== undefined))];
   return levels.length ? levels : undefined;
+}
+
+function reasoningEfforts(row: Record<string, unknown>): unknown {
+  const capabilities = row.capabilities;
+  if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) return undefined;
+  return (capabilities as Record<string, unknown>).reasoning_effort;
+}
+
+function oneThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  const level = value === "none" ? "off" : value;
+  return THINKING_LEVELS.includes(level as ThinkingLevel) ? level as ThinkingLevel : undefined;
 }

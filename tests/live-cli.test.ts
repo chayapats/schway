@@ -15,6 +15,8 @@ test("CLI rejects implicit providers, invalid options and missing compatible URL
   expect(parseLiveArgs(["--enable-live", "--provider", "all", "--base-url", "http://localhost:1234/v1", "--auth", "required"])).toHaveProperty("error");
   expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://example.org/v1", "--auth", "none"])).toHaveProperty("error");
   expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "https://example.org/v1"])).toHaveProperty("selection");
+  expect(parseLiveArgs(["--provider", "xai-api-key", "--model", "xai-api-key=grok-4"])).toMatchObject({ selection: { models: { "xai-api-key": "grok-4" } } });
+  expect(parseLiveArgs([])).toMatchObject({ error: "Select --provider openai-api-key|xai-api-key|compatible|codex|all (or a comma-separated list)." });
   expect(parseLiveArgs(["--enable-live", "--provider", "compatible", "--base-url", "http://[::1]:1234/v1", "--auth", "none"])).toHaveProperty("selection");
 });
 
@@ -55,7 +57,9 @@ test("disabled CLI emits redacted, dated incomplete report and no credential dis
   expect(errors).toEqual([]);
   const report = JSON.parse(output.join(""));
   expect(report.aggregate).toBe("incomplete");
-  expect(report.scenarios.map((s: { reason: string }) => s.reason)).toEqual(Array(3).fill("live_disabled"));
+  expect(report.scenarios.map((s: { provider: string; reason: string }) => `${s.provider}:${s.reason}`)).toEqual([
+    "openai-api-key:live_disabled", "xai-api-key:live_disabled", "compatible:live_disabled", "codex:live_disabled",
+  ]);
   expect(output.join("")).not.toContain("PRIVATE_SECRET");
   expect(report.revision).toBe("0123456789012345678901234567890123456789");
   expect(report.testedAt).toMatch(/^\d{4}-\d\d-\d\dT/);
@@ -87,7 +91,7 @@ test("installed package includes the runnable live command and its documentation
 test("all lane parsing supports per-provider models and isolated compatible settings", () => {
   const result = parseLiveArgs(["--provider", "all", "--enable-live", "--base-url", "http://localhost:1234/v1", "--auth", "none", "--model", "codex=gpt-5.4"]);
   expect(result).toMatchObject({ selection: {
-    providers: ["openai-api-key", "compatible", "codex"], enabled: true,
+    providers: ["openai-api-key", "xai-api-key", "compatible", "codex"], enabled: true,
     compatible: { baseUrl: "http://localhost:1234/v1", auth: "none" }, models: { codex: "gpt-5.4" },
   } });
 });

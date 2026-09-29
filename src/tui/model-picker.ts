@@ -50,17 +50,18 @@ export function modelPickerIdentity(entry: Pick<ModelPickerEntry, "provider" | "
 }
 
 /** Build matching catalog and profile choices plus an explicit typed choice with fallback budgets. */
-export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess; apiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number }[]; apiModelsUnavailable?: boolean; compatibleModels?: readonly { id: string; contextWindow?: number; maxOutput?: number }[]; compatibleModelsUnavailable?: boolean; subscriptionUnavailable?: boolean }): ModelPickerEntry[] {
+export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess; apiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; apiModelsUnavailable?: boolean; compatibleModels?: readonly { id: string; contextWindow?: number; maxOutput?: number }[]; compatibleModelsUnavailable?: boolean; xaiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; xaiModelsUnavailable?: boolean; subscriptionUnavailable?: boolean }): ModelPickerEntry[] {
   const normalized = query.toLowerCase();
   const activeRoute = options?.activeRoute ?? (options?.subscriptionMode ? "codex" : "api-key");
   const matches = (family: string, id: string, route: string) => `${family}/${id} ${route}`.toLowerCase().includes(normalized);
-  const staticUnavailable = (entryProvider: string) => entryProvider === "openai" ? options?.apiModelsUnavailable : options?.compatibleModelsUnavailable;
+  const staticUnavailable = (entryProvider: string) => entryProvider === "openai" ? options?.apiModelsUnavailable : entryProvider === "xai" ? options?.xaiModelsUnavailable : options?.compatibleModelsUnavailable;
   const entries: ModelPickerEntry[] = listCatalog().filter(entry => {
     if (entry.provider === "openai" && options?.apiModels) return false;
+    if (entry.provider === "xai" && (options?.xaiModels || !options?.xaiModelsUnavailable)) return false;
     if (entry.provider === "openai-compatible" && options?.compatibleModels) return false;
-    return matches(entry.provider, entry.id, entry.provider === "openai" ? "API key" : "");
+    return matches(entry.provider, entry.id, entry.provider === "openai" || entry.provider === "xai" ? "API key" : "");
   }).map(entry => {
-      const authRoute = entry.provider === "openai" ? "api-key" as const : "provider" as const;
+      const authRoute = entry.provider === "openai" || entry.provider === "xai" ? "api-key" as const : "provider" as const;
       const unavailable = staticUnavailable(entry.provider);
       const row: ModelPickerEntry = {
         identity: modelPickerIdentity({ provider: entry.provider, authRoute, modelId: entry.id }, entry.provider === "openai-compatible" ? options?.baseUrl : undefined, entry.provider === "openai-compatible" ? options?.credentialIdentity : undefined),
@@ -76,6 +77,15 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
     entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "api-key", modelId: listed.id }), provider: "openai", modelId: listed.id, authRoute: "api-key",
       ...budgets("openai", listed.id, { contextWindow: listed.contextWindow ?? limits.contextWindow, maxOutput: listed.maxOutput ?? limits.maxOutput }),
       active: provider === "openai" && modelId === listed.id && activeRoute === "api-key" && options?.activeProfile === undefined, custom: false,
+      ...(options?.subscriptionMode ? { otherProvider: true } : {}) });
+  }
+  for (const listed of options?.xaiModels ?? []) {
+    if (!matches("xai", listed.id, "API key")) continue;
+    entries.push({ identity: modelPickerIdentity({ provider: "xai", authRoute: "api-key", modelId: listed.id }), provider: "xai", modelId: listed.id, authRoute: "api-key",
+      ...budgets("xai", listed.id, { contextWindow: listed.contextWindow ?? limits.contextWindow, maxOutput: listed.maxOutput ?? limits.maxOutput }),
+      active: provider === "xai" && modelId === listed.id && options?.activeProfile === undefined, custom: false,
+      ...(listed.defaultThinking !== undefined ? { defaultThinking: listed.defaultThinking } : {}),
+      ...(listed.supportedThinking !== undefined ? { supportedThinking: listed.supportedThinking } : {}),
       ...(options?.subscriptionMode ? { otherProvider: true } : {}) });
   }
   for (const listed of options?.compatibleModels ?? []) {
@@ -126,7 +136,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   }
   const selection = parseModelArgs(query || `${provider}/${modelId}`, provider);
   if ((!query || query.includes("/")) && !("error" in selection) && selection.profile === undefined && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined && entry.authRoute !== "codex")) {
-    const authRoute = selection.provider === "openai" ? "api-key" as const : "provider" as const;
+    const authRoute = selection.provider === "openai" || selection.provider === "xai" ? "api-key" as const : "provider" as const;
     entries.push({ ...selection, identity: modelPickerIdentity({ ...selection, authRoute }, selection.provider === "openai-compatible" ? options?.baseUrl : undefined, selection.provider === "openai-compatible" ? options?.credentialIdentity : undefined), authRoute,
       ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined && (selection.provider !== "openai" || activeRoute === "api-key"), custom: true,
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
@@ -135,6 +145,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   for (const entry of entries) {
     entry.access = entry.profile !== undefined ? options?.access?.profiles[entry.profile]
       : entry.authRoute === "codex" ? options?.access?.subscription ?? "ChatGPT"
+        : entry.authRoute === "api-key" && entry.provider === "xai" ? options?.access?.xaiApiKey ?? options?.access?.providers.xai
         : entry.authRoute === "api-key" ? options?.access?.openaiApiKey ?? options?.access?.providers.openai
           : options?.access?.providers[entry.provider];
   }

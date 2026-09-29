@@ -28,7 +28,7 @@ export interface ProviderLoaderInput {
   codexTokens?: CodexTokens;
   /** Secure-store renewal channel for the codex transport; enables serialized pre-expiry refresh. */
   codexStore?: CredentialStore;
-  /** Verified subscription model capabilities used only by the Codex transport. */
+  /** Verified list capabilities used by Codex and xAI, not by the OpenAI API-key transport. */
   modelCapability?: ModelCapability;
 }
 
@@ -51,6 +51,17 @@ export async function loadProviderModel(
       extraBody: input.extraBody,
       auth: input.auth,
       thinking: input.thinking,
+      fetch: fetchFn,
+    });
+  }
+  if (input.provider === "xai") {
+    const { createXaiModel } = await import("./providers/xai.ts");
+    return createXaiModel({
+      apiKey: input.apiKey ?? "",
+      model: input.model,
+      maxTokens: input.maxTokens,
+      thinking: input.thinking,
+      modelCapability: input.modelCapability,
       fetch: fetchFn,
     });
   }

@@ -1,8 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
-
-const providers: readonly string[] = ["openai-api-key", "compatible", "codex"];
+import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, SMOKE_PROVIDERS, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const safeOption = /^[^\x00-\x1f\x7f]{1,200}$/;
 const MAX_INPUT_BYTES = 8192;
@@ -12,7 +10,7 @@ export function parseWorkerInput(value: unknown): Omit<SmokeSelection, "env" | "
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("invalid instruction");
   const input = value as Record<string, unknown>;
   if (Object.keys(input).some(key => !["provider", "model", "timeoutMs", "compatible", "workspaceRoot"].includes(key))) throw Error("invalid instruction");
-  if (!providers.includes(input.provider as string) || typeof input.model !== "string" || !safeId.test(input.model)
+  if (!SMOKE_PROVIDERS.includes(input.provider as SmokeProvider) || typeof input.model !== "string" || !safeId.test(input.model)
     || !Number.isInteger(input.timeoutMs) || (input.timeoutMs as number) < 1 || (input.timeoutMs as number) > 120_000
     || typeof input.workspaceRoot !== "string" || !isAbsolute(input.workspaceRoot)
     || !/^schway-live-/.test(input.workspaceRoot.split(/[/\\]/).at(-1) ?? "")) throw Error("invalid instruction");

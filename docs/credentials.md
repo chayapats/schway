@@ -9,6 +9,7 @@ locked store does not stop these runs.
 | Provider | Environment override | Stored identity |
 | --- | --- | --- |
 | `openai` | `OPENAI_API_KEY` | Native OpenAI |
+| `xai` | `XAI_API_KEY` | `api-key:xai` |
 | `openai-compatible` | `OPENAI_COMPATIBLE_API_KEY` | Canonical configured endpoint |
 
 `OPENAI_COMPATIBLE_API_KEY` explicitly applies to the currently selected compatible
@@ -35,7 +36,9 @@ schway
 
 ```text
 /login openai
+/login xai
 /logout openai
+/logout xai
 ```
 
 `/login <provider>` opens a separate masked entry. Type or paste only the API key,

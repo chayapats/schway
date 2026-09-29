@@ -17,7 +17,10 @@ import type { Workspace } from "../workspace/workspace.ts";
 import { boundedSmokeFetch } from "./transport.ts";
 
 /** Independently selectable provider/auth lanes; API-key OpenAI never silently switches to subscription billing. */
-export type SmokeProvider = "openai-api-key" | "compatible" | "codex";
+export const SMOKE_PROVIDERS = ["openai-api-key", "xai-api-key", "compatible", "codex"] as const;
+
+/** One live-smoke lane. `xai-api-key` bills the xAI console account and never reads OpenAI credentials. */
+export type SmokeProvider = (typeof SMOKE_PROVIDERS)[number];
 /** Explicit opt-in selection and bounded execution settings, with no implicit credential discovery. */
 export interface SmokeSelection {
   enabled: boolean;
@@ -85,6 +88,7 @@ const MAX_TOKENS = 256;
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const DEFAULT_MODELS: Record<SmokeProvider, string> = {
   "openai-api-key": ROUTE_FALLBACK_MODELS.openai,
+  "xai-api-key": ROUTE_FALLBACK_MODELS.xai,
   compatible: ROUTE_FALLBACK_MODELS["openai-compatible"],
   codex: ROUTE_FALLBACK_MODELS.openai,
 };
@@ -272,7 +276,7 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
     result.authSource = "stored-subscription";
     return { provider: "openai", openaiAuth: "codex", model, maxTokens: MAX_TOKENS, codexStore: store };
   }
-  const family = provider === "compatible" ? "openai-compatible" : "openai";
+  const family = provider === "compatible" ? "openai-compatible" : provider === "xai-api-key" ? "xai" : "openai";
   const credential = await resolveProviderCredential({
     provider: family, baseUrl: selection.compatible?.baseUrl, auth: selection.compatible?.auth,
     profile: selection.compatible?.profile, credentialEnv: selection.compatible?.credentialEnv,

@@ -297,6 +297,26 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         settings = validated;
       }
     }
+    if (settings.provider === "xai" && settings.thinking !== undefined && !io.model) {
+      const store = io.credentialStore ?? createNativeCredentialStore();
+      const credential = await resolveProviderCredential({ provider: "xai", runtimeApiKey: parsed.args.apiKey, env, store });
+      if ("error" in credential) { io.stderr.write(`${credential.error}\n`); return 1; }
+      try {
+        const { XAI_MODELS_URL } = await import("../model/providers/xai.ts");
+        const { fetchProviderModelList, requireXaiModels, xaiModelCapabilities } = await import("../model/model-list.ts");
+        const models = requireXaiModels(await fetchProviderModelList({
+          url: XAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal: io.signal, label: "xAI",
+        }));
+        const chosen = await loadResolvedSettings({
+          home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: xaiModelCapabilities(models),
+        });
+        if ("error" in chosen) throw new Error(chosen.error);
+        settings = chosen;
+      } catch (error) {
+        io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`);
+        return 1;
+      }
+    }
     diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools, resumed: !!session });
 
     let model = io.model;
@@ -429,6 +449,8 @@ function collectSecrets(
   if (openaiKey) {
     secrets.push(openaiKey);
   }
+  const xaiKey = env.XAI_API_KEY;
+  if (xaiKey) secrets.push(xaiKey);
   if (credentialEnv && credentialEnv !== COMPATIBLE_API_KEY_ENV) {
     const profileKey = env[credentialEnv];
     if (profileKey) secrets.push(profileKey);
@@ -509,7 +531,7 @@ async function loadCliModel(
         model: settings.model,
         maxTokens: settings.maxOutput,
         ...(settings.thinking !== undefined ? { thinking: settings.thinking } : {}),
-        ...(settings.supportedThinking !== undefined ? { modelCapability: { id: settings.model, supportedThinking: settings.supportedThinking } } : {}),
+        ...(settings.supportedThinking !== undefined ? { modelCapability: { id: settings.model, supportedThinking: settings.supportedThinking, ...(settings.supportsDisabling ? { supportsDisabling: true } : {}) } } : {}),
         openaiAuth: "codex" as const,
       };
       try {
@@ -541,6 +563,10 @@ async function loadCliModel(
     model: settings.model,
     maxTokens: settings.maxOutput,
     ...(settings.thinking !== undefined ? { thinking: settings.thinking } : {}),
+    ...(settings.provider === "xai" && settings.supportedThinking !== undefined ? { modelCapability: {
+      id: settings.model, supportedThinking: settings.supportedThinking, ...(settings.supportsDisabling ? { supportsDisabling: true } : {}),
+      ...(settings.defaultThinking ? { defaultThinking: settings.defaultThinking } : {}),
+    } } : {}),
     ...(settings.provider === "openai-compatible" ? {
       baseUrl: settings.baseUrl,
       headers: settings.headers,

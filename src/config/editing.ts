@@ -119,8 +119,9 @@ export class ConfigEditor {
     this.layers = structuredClone(layers);
     this.modelCapabilities = capabilities === undefined ? undefined : structuredClone(capabilities);
     // A saved Codex effort can be resolved after login, without blocking interactive recovery.
+    const pendingLayers = mergeConfigLayers(BUILTIN_DEFAULTS, this.layers.memory, this.layers.user, this.layers.project, this.layers.cli, this.layers.session);
     const pendingCodexCatalog = this.modelCapabilities === undefined &&
-      mergeConfigLayers(BUILTIN_DEFAULTS, this.layers.memory, this.layers.user, this.layers.project, this.layers.cli, this.layers.session).openaiAuth === "codex";
+      (pendingLayers.openaiAuth === "codex" || (pendingLayers.provider === "xai" && pendingLayers.thinking != null));
     try { this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog); }
     catch (error) {
       if (!this.layers.memory) throw error;
@@ -129,6 +130,13 @@ export class ConfigEditor {
       this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog);
     }
     this.memoryProblem ??= memory?.problem;
+  }
+
+  /** Replace one route's capabilities without dropping another route's verified entries. */
+  replaceRouteCapabilities(previousIds: readonly string[], capabilities: readonly ModelCapability[]): void {
+    const drop = new Set(previousIds);
+    const kept = (this.modelCapabilities ?? []).filter(entry => !drop.has(entry.id));
+    this.setModelCapabilities([...kept, ...capabilities]);
   }
 
   /** Install verified account capabilities for future session edits without persisting them. */
@@ -281,6 +289,15 @@ export class ConfigEditor {
     return this.prepareChanges("session", [
       { key: "provider", value: "openai" }, { key: "openaiAuth", value: "codex" },
       { key: "model", value: model }, { key: "profile", value: null },
+      ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
+    ]);
+  }
+
+  /** Stage an xAI API-key model for this session, clearing a thinking level the list does not offer. */
+  async prepareXaiModel(model: string): Promise<ConfigTransaction> {
+    const capability = this.modelCapabilities?.find(entry => entry.id === model);
+    return this.prepareChanges("session", [
+      { key: "provider", value: "xai" }, { key: "model", value: model }, { key: "profile", value: null },
       ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }

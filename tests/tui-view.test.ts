@@ -675,6 +675,31 @@ test("login chooser and masked callback use real keyboard and paste input while 
   expect(ui.editor.plainText).not.toContain("callback-secret-sentinel");
 });
 
+test("xAI API key sits under OpenAI API key and Esc restores the draft at both sizes", async () => {
+  for (const [width, height] of [[80, 24], [36, 16]] as const) {
+    const ui = await setup(width, height);
+    await ui.mockInput.pasteBracketedText("keep this draft");
+    ui.editor.cursorOffset = 5;
+    expect(await ui.controller.login("")).toBe(true);
+    await settle(ui);
+    for (let step = 0; step < 4; step++) ui.mockInput.pressArrow("down");
+    await settle(ui);
+    const frame = ui.captureCharFrame();
+    const openai = frame.indexOf("OpenAI API key");
+    const xai = frame.indexOf("xAI API key");
+    expect(openai).toBeGreaterThanOrEqual(0);
+    expect(xai).toBeGreaterThan(openai);
+    ui.mockInput.pressEnter();
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("API key · xai");
+    ui.mockInput.pressEscape();
+    await settle(ui);
+    expect(ui.editor.plainText).toBe("keep this draft");
+    expect(ui.editor.cursorOffset).toBe(5);
+    expect(ui.controller.snapshot().credentialEntry).toBeUndefined();
+  }
+});
+
 test("/login without arguments reaches the chooser through editor dispatch", async () => {
   const ui = await setup();
   await ui.mockInput.typeText("/login");

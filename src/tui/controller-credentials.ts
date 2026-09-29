@@ -2,7 +2,7 @@ import { MaskedCredentialEntry, removeStoredCredential } from "../auth/managemen
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
-import { recommendedListedModel } from "../model/model-list.ts";
+import { filterXaiModels, recommendedListedModel, xaiModelCapabilities } from "../model/model-list.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
 import { ControllerCore } from "./controller-core.ts";
@@ -13,6 +13,7 @@ export const LOGIN_CHOICES = [
   { label: "ChatGPT · Device approval", action: { kind: "codex", device: true } },
   { label: "ChatGPT · Paste browser callback", action: { kind: "callback" } },
   { label: "OpenAI API key", action: { kind: "api-key", provider: "openai" } },
+  { label: "xAI API key", action: { kind: "api-key", provider: "xai" } },
   { label: "OpenAI-compatible API key", action: { kind: "api-key", provider: "openai-compatible" } },
 ] as const;
 
@@ -24,6 +25,8 @@ export const DEVICE_LOGIN_INDEX = LOGIN_CHOICES.findIndex(choice => choice.actio
 
 /** Sign-in, credential entry, logout and subscription login actions. */
 export abstract class CredentialsLayer extends ControllerCore {
+  /** xAI capability IDs installed by sign-in or a picker refresh, so a later failure can drop only those. */
+  protected xaiCapabilityIds: string[] = [];
   /** Route login input and notify when an explicit subscription sign-in starts. */
   async login(args: string, accepted: () => void = () => {}): Promise<boolean> {
     if (!args.trim()) return this.openLoginChooser();
@@ -151,46 +154,52 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
-    if (saved && !this.modelId.trim()) await this.activateSignedInModel(target.provider === "openai" ? "api-key" : "compatible", target);
+    if (saved && !this.modelId.trim()) await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target);
     if (saved) this.restorePickerAfterConnection();
     return saved;
   }
 
   /** Select the route's recommended model after sign-in and remember it for the next interactive launch. */
-  protected async activateSignedInModel(route: "api-key" | "compatible", target: CredentialTarget): Promise<boolean> {
+  protected async activateSignedInModel(route: "api-key" | "compatible" | "xai", target: CredentialTarget): Promise<boolean> {
     if (!this.configEditor || !this.stageSettings || this.disposed) return false;
     const generation = this.selectionGeneration;
     const provider = this.provider;
     const profile = this.profile;
     const listing = new AbortController();
     this.signInListAbort = listing;
-    const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : ROUTE_FALLBACK_MODELS.openai;
+    const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : route === "xai" ? ROUTE_FALLBACK_MODELS.xai : ROUTE_FALLBACK_MODELS.openai;
     let modelId: string = fallback;
     let listed: { contextWindow?: number; maxOutput?: number } | undefined;
     try {
-      const models = await this.credentials?.listRouteModels?.(route, AbortSignal.any([listing.signal, AbortSignal.timeout(5_000)]), { baseUrl: target.baseUrl });
+      const listedModels = await this.credentials?.listRouteModels?.(route, AbortSignal.any([listing.signal, AbortSignal.timeout(5_000)]), { baseUrl: target.baseUrl });
+      const models = route === "xai" && listedModels ? filterXaiModels(listedModels) : listedModels;
+      if (route === "xai" && listedModels && !models?.length) throw new Error("xAI model list returned no selectable models.");
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
       if (models?.length) {
+        if (route === "xai") this.installXaiCapabilities(models);
         modelId = recommendedListedModel(route, models);
         const chosen = models.find(model => model.id === modelId);
         if (chosen && (chosen.contextWindow || chosen.maxOutput)) listed = { contextWindow: chosen.contextWindow, maxOutput: chosen.maxOutput };
       }
     } catch {
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
+      if (route === "xai") this.clearXaiCapabilities();
       modelId = fallback;
     } finally {
       if (this.signInListAbort === listing) this.signInListAbort = undefined;
     }
     if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
     const applied = await this.changeSettings(
-      () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId) : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
+      () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId)
+        : route === "xai" ? this.configEditor!.prepareXaiModel(modelId)
+        : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
       () => `Signed in. Using ${target.provider}/${this.modelId}.`,
       "Credential saved, but the recommended model could not be activated. Choose one with /model.",
       false,
       false,
       listed,
     );
-    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "api-key" ? "api-key" : "provider" });
+    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "compatible" ? "provider" : "api-key" });
     return applied;
   }
 
@@ -244,7 +253,7 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   protected parseCredentialTarget(args: string): CredentialTarget | undefined {
     const provider = args.trim().toLowerCase();
-    if (!["openai", "openai-compatible"].includes(provider)) {
+    if (!["openai", "xai", "openai-compatible"].includes(provider)) {
       this.fail(LOGIN_USAGE);
       return;
     }
@@ -263,7 +272,7 @@ export abstract class CredentialsLayer extends ControllerCore {
   }
 
   protected credentialOverrideNotice(target: CredentialTarget): string | undefined {
-    if (this.credentials?.runtimeApiKey !== undefined) return "The runtime --api-key override still takes precedence over the saved key.";
+    if (this.credentials?.runtimeApiKey !== undefined && (this.credentials.runtimeProvider === undefined || this.credentials.runtimeProvider === target.provider)) return "The runtime --api-key override still takes precedence over the saved key.";
     const settings = this.configEditor?.settings;
     if (target.provider === "openai-compatible" && settings?.credentialEnv) {
       if (this.credentials?.env[settings.credentialEnv]?.trim()) return `${settings.credentialEnv} still takes precedence over the saved key.`;
@@ -286,6 +295,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         : {}),
     });
     if (identity.account !== active.account) return;
+    if (this.provider === "xai") this.clearXaiCapabilities();
     // A removed/replaced saved key must never survive in a previously constructed adapter.
     this.model = undefined;
     try {
@@ -300,6 +310,20 @@ export abstract class CredentialsLayer extends ControllerCore {
     } catch {
       this.fail("Credential storage changed, but the provider could not be refreshed. Retry /login or restart after checking provider settings.");
     }
+  }
+
+  /** Install xAI list capabilities without dropping another route's verified entries. */
+  protected installXaiCapabilities(models: readonly import("../model/model-list.ts").ListedModel[]): void {
+    const capabilities = xaiModelCapabilities(models);
+    this.configEditor?.replaceRouteCapabilities(this.xaiCapabilityIds, capabilities);
+    this.xaiCapabilityIds = capabilities.map(entry => entry.id);
+  }
+
+  /** Drop only xAI capabilities installed by this session's list or sign-in. */
+  protected clearXaiCapabilities(): void {
+    if (!this.xaiCapabilityIds.length) return;
+    this.configEditor?.replaceRouteCapabilities(this.xaiCapabilityIds, []);
+    this.xaiCapabilityIds = [];
   }
 
   /** Block an old subscription adapter and discard catalog data after a credential replacement. */

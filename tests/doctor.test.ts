@@ -36,6 +36,13 @@ test("independently diagnoses invalid configuration, storage and search availabi
   expect(doctorExitCode(report)).toBe(1);
 });
 
+test("xAI doctor names XAI_API_KEY in the auth remedy", async () => {
+  const { workspace, home } = await fixture();
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, provider: "xai" }, store: store(null) });
+  expect(report.provider).toBe("xai");
+  expect(check(report, "auth")?.remedy).toContain("XAI_API_KEY");
+});
+
 test("env-file HOME cannot replace the launch process HOME for storage or user config", async () => {
   const { workspace, home, root } = await fixture();
   const overlayHome = join(root, "overlay-home"); await mkdir(join(home, ".schway"), { recursive: true });

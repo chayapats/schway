@@ -117,7 +117,7 @@ export function createOpenAICompatibleModel(options: {
         }),
         signal: request.signal,
       });
-      const builder = createStreamBuilder();
+      const builder = createCompatibleStreamBuilder();
       for await (const chunk of readSseJson(response, secrets, request.signal)) {
         if (chunk.usage && typeof chunk.usage === "object" && !Array.isArray(chunk.usage)) {
           const usage = chunk.usage as Record<string, unknown>;
@@ -452,7 +452,7 @@ type PendingToolCall = {
 };
 
 /** Accumulate Chat Completions chunks into Schway deltas and a final message. */
-function createStreamBuilder() {
+function createCompatibleStreamBuilder() {
   const id = crypto.randomUUID();
   let text = "";
   const toolCalls: PendingToolCall[] = [];

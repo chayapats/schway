@@ -1,6 +1,9 @@
 /** Environment variable consulted when no runtime OpenAI key is supplied. */
 export const OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
+/** Environment variable consulted when no runtime xAI key is supplied. */
+export const XAI_API_KEY_ENV = "XAI_API_KEY";
+
 /** Header names whose values are treated as credentials. */
 export const CREDENTIAL_HEADER_NAMES = new Set([
   "authorization",
@@ -14,6 +17,10 @@ export const CREDENTIAL_HEADER_NAMES = new Set([
 /** Guidance returned when OpenAI credential resolution yields an empty key. */
 export const MISSING_OPENAI_API_KEY =
   "Missing OpenAI API key. Set OPENAI_API_KEY or pass --api-key.";
+
+/** Guidance returned when xAI credential resolution yields an empty key. */
+export const MISSING_XAI_API_KEY =
+  "Missing xAI API key. Set XAI_API_KEY or pass --api-key.";
 
 /** Origin of a resolved key: an explicit runtime override or the supplied environment map. */
 export type CredentialSource = "runtime" | "env";
