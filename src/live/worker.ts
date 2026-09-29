@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, SMOKE_PROVIDERS, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
@@ -53,6 +53,14 @@ export async function runWorker(input: ReadableStream<Uint8Array>, env: Record<s
     // Empty private evidence lets the supervisor classify a hard stream timeout after reaping.
     writeFileSync(join(selection.workspaceRoot!, ".model-started"), "", { flag: "wx", mode: 0o600 });
     modelStarted = true;
+  }, onProgress: progress => {
+    // Atomic replacement keeps the final bounded checkpoint readable after SIGKILL.
+    const path = join(selection.workspaceRoot!, ".smoke-progress.json");
+    const checkpoint = JSON.stringify(progress);
+    try {
+      writeFileSync(`${path}.tmp`, checkpoint, { mode: 0o600 });
+      renameSync(`${path}.tmp`, path);
+    } catch { /* Best-effort diagnostics must not change the selected smoke outcome. */ }
   } });
   return JSON.stringify(report.scenarios[0]);
 }

@@ -15,6 +15,7 @@ import { createToolRegistry } from "../tools/registry.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import { boundedSmokeFetch } from "./transport.ts";
+import type { SmokeDiagnostics, SmokeProgress } from "./diagnostics.ts";
 
 /** Independently selectable provider/auth lanes; API-key OpenAI never silently switches to subscription billing. */
 export const SMOKE_PROVIDERS = ["openai-api-key", "xai-api-key", "compatible", "codex", "grok"] as const;
@@ -49,6 +50,8 @@ export interface SmokeDependencies {
   onWorkspace?: (workspace: Workspace) => void;
   /** Record that the selected model stream has started, without exposing model content. */
   onModelStarted?: () => void;
+  /** Checkpoint only bounded counters and authentication category for OS-supervised timeouts. */
+  onProgress?: (progress: SmokeProgress) => void;
   /** Script a bounded sentinel read in offline tests without changing the only allowed path. */
   readSentinel?: ToolDefinition<ReadInput>["execute"];
 }
@@ -61,6 +64,8 @@ export interface SmokeScenario {
   reason: string;
   durationMs: number;
   toolRoundTrip: boolean;
+  /** Partial progress is diagnostic evidence, never proof of a verified tool round trip or measured spend. */
+  diagnostics?: SmokeDiagnostics;
   /** Deferred means an uncooperative stream still owns its temporary workspace. */
   cleanup?: "deferred";
 }
@@ -131,19 +136,31 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
   let unsettled = false;
   let outputLimit = false;
   let disallowedTool = false;
+  const diagnostics: SmokeDiagnostics = { modelAttemptsStarted: 0, modelRoundsCompleted: 0, toolResultsCompleted: 0,
+    providerRetries: 0, httpRequestsStarted: 0, httpResponsesReceived: 0 };
+  result.diagnostics = diagnostics;
+  let checkpointsActive = true;
+  const checkpoint = () => {
+    if (checkpointsActive) deps.onProgress?.({ authSource: result.authSource, diagnostics: { ...diagnostics } });
+  };
   try {
     // OS keychain reads are not cancellable; do not allow a late resolution
     // to mutate an already-published timeout report.
     const resolved: SmokeScenario = { ...result };
     const input = await awaitSetup(resolveInput(selection, provider, resolved, deps), signal);
     if (!signal.aborted) Object.assign(result, resolved);
+    checkpoint();
     if (!input || signal.aborted) {
       if (signal.aborted) { result.status = selection.signal?.aborted ? "pending" : "failed_runner"; result.reason = selection.signal?.aborted ? "cancelled" : "timeout"; }
       return;
     }
     // Bound selected production adapters' SSE response bytes before their parsers
     // can accumulate streamed arguments without emitting normalized model events.
-    const fetchFn = boundedSmokeFetch({ signal, onLimit: () => { outputLimit = true; controller.abort(); } });
+    const fetchFn = boundedSmokeFetch({ signal, onLimit: () => { outputLimit = true; controller.abort(); }, onProgress: event => {
+      if (event.type === "request") diagnostics.httpRequestsStarted++;
+      else { diagnostics.httpResponsesReceived++; diagnostics.lastHttpStatus = event.status; }
+      checkpoint();
+    } });
     const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input, fetchFn)))(input), signal);
     result.model = SAFE_ID.test(model.id) ? model.id : "invalid-model-id";
     // The loop registers activate_skill whenever it has a workspace. Do not
@@ -170,11 +187,15 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     stream = (async () => {
       for await (const event of runAgentLoop({ session, model: smokeModel, workspace, contextManager: createContextManager(workspace),
         tools: createToolRegistry([sentinelReadTool(deps.readSentinel ?? readTool.execute)]), signal, maxTurns: MAX_TURNS })) {
-        if (event.type === "model.started") { startedModel = true; deps.onModelStarted?.(); }
+        if (event.type === "model.started") {
+          startedModel = true; diagnostics.modelAttemptsStarted++; checkpoint(); deps.onModelStarted?.();
+        }
+        if (event.type === "model.retry") { diagnostics.providerRetries++; checkpoint(); }
         if (event.type === "model.delta") chars += event.content.text.length;
         // A completed model message is yielded before the loop schedules its tool calls.
         // This caps assembled arguments at the runner seam, not provider wire bytes.
         if (event.type === "model.finished") {
+          diagnostics.modelRoundsCompleted++; checkpoint();
           const last = session.items.at(-1);
           if (last?.type === "assistant") {
             chars += JSON.stringify(last).length;
@@ -183,7 +204,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
             if (last.content.some(block => block.type === "tool_call" && block.name !== "read")) disallowedTool = true;
           }
         }
-        if (event.type === "tool.finished") chars += event.content.length;
+        if (event.type === "tool.finished") { chars += event.content.length; diagnostics.toolResultsCompleted++; checkpoint(); }
         if (chars > MAX_OUTPUT_CHARS) { outputLimit = true; controller.abort(); break; }
         if (disallowedTool) { controller.abort(); break; }
         if (event.type === "error") {
@@ -230,6 +251,9 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     result.reason = selection.signal?.aborted ? "cancelled" : outputLimit ? "output_limit" : disallowedTool ? "disallowed_tool"
       : controller.signal.aborted ? (unsettled ? "timeout_unsettled" : "timeout") : "runner_error";
   } finally {
+    // A non-cooperative stream may continue after publication; freeze its report and stop writing checkpoints.
+    checkpointsActive = false;
+    result.diagnostics = { ...diagnostics };
     clearTimeout(timer);
     if (directory && !selection.workspaceRoot) {
       if (unsettled && stream) {
