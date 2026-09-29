@@ -73,7 +73,11 @@ export interface CodingEvalResult {
   provider: string;
   model: string;
   settings: EvalSettings;
-  outcome: "success" | "grader_failure" | "model_failure" | "harness_error" | "timeout" | "skipped_prerequisites";
+  outcome: "success" | "grader_failure" | "model_failure" | "harness_error" | "timeout" | "skipped_prerequisites" | "skipped_spend_cap";
+  /** Estimated USD spend for this case, set by the eval runner from recorded usage and the route price. */
+  spendUsd?: number;
+  /** False when some attempts reported no usage, making `spendUsd` a lower bound. */
+  spendExact?: boolean;
   durationMs: number;
   grader: { passed: boolean; exitCode: number | null; evidence?: string } | null;
   metrics: EvalMetrics;
@@ -284,13 +288,18 @@ export function skippedCodingEval(provider: string, model: string, sourceRevisio
   return unstartedEval(provider, model, sourceRevision, settings, "skipped_prerequisites", caseId);
 }
 
+/** Mark a case the spend cap kept the runner from starting. */
+export function spendCapSkippedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, caseId?: string): CodingEvalResult {
+  return unstartedEval(provider, model, sourceRevision, settings, "skipped_spend_cap", caseId);
+}
+
 /** Record a failed provider setup without leaking construction errors or losing the artifact. */
 export function failedCodingEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, caseId?: string): CodingEvalResult {
   return unstartedEval(provider, model, sourceRevision, settings, "harness_error", caseId);
 }
 
 /** Produce safe metadata for a run that never reached the coding workspace. */
-function unstartedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, outcome: "harness_error" | "skipped_prerequisites", caseId?: string): CodingEvalResult {
+function unstartedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, outcome: "harness_error" | "skipped_prerequisites" | "skipped_spend_cap", caseId?: string): CodingEvalResult {
   const selected = DAILY_CASES.find(item => item.id === caseId);
   return { runId: crypto.randomUUID(), case: { id: selected?.id ?? CODING_CASE.id, version: selected?.version ?? CODING_CASE.version },
     sourceRevision, provider, model, settings, outcome,
