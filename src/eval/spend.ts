@@ -19,7 +19,6 @@ export const FREE: TokenPrice = { inputPerMillion: 0, outputPerMillion: 0 };
 const PRICES: Record<string, TokenPrice> = {
   "openai:gpt-5": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "openai:gpt-5-mini": { inputPerMillion: 0.25, outputPerMillion: 2 },
-  "anthropic:claude-sonnet-4-5": { inputPerMillion: 3, outputPerMillion: 15 },
 };
 
 /** Resolve a route's price: explicit flags win, offline and subscription routes are free, unknown paid models are `undefined`. */

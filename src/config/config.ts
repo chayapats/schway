@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
-  ANTHROPIC_THINKING_BUDGETS,
   type ModelCapability,
   DEFAULT_MODEL_IDS,
   describeThinkingSupport,
@@ -14,6 +13,7 @@ import {
   type ModelInfo,
 } from "../model/catalog.ts";
 import type { ThinkingLevel } from "../model/model.ts";
+import { removedProviderMessage } from "./removed-provider.ts";
 import {
   DEFAULT_MAX_CONCURRENT_TOOLS,
   DEFAULT_MAX_TURNS,
@@ -54,7 +54,6 @@ export const CONFIG_SETTING_NAMES = [
 ] as const;
 
 const ProviderSchema = Type.Union([
-  Type.Literal("anthropic"),
   Type.Literal("openai"),
   Type.Literal("openai-compatible"),
 ]);
@@ -229,7 +228,6 @@ export const BUILTIN_DEFAULTS: ConfigLayer = {
 
 const SECRET_KEY_ALIASES = new Set([
   "apikey",
-  "anthropicapikey",
   "openaiapikey",
   "token",
   "secret",
@@ -277,6 +275,11 @@ export function parseConfigObject(
   const nestedSecret = findNestedProfileSecret(record, source);
   if (nestedSecret !== undefined) {
     return { error: nestedSecret };
+  }
+
+  const removedProvider = removedProviderMessage(record.provider);
+  if (removedProvider !== undefined) {
+    return { error: removedProvider };
   }
 
   if (!Value.Check(ConfigSchema, value)) {
@@ -560,7 +563,7 @@ export function resolveSettings(input: {
   const catalog = capability ? { ...metadata, supportsThinking: capability.supportedThinking.length > 0 } : metadata;
   const thinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
   const thinkingError = input.deferOpenAIThinking && provider === "openai" ? undefined
-    : validateThinking(provider, model, thinking, merged.extraBody, catalog.maxOutput, subscriptionSelected ? capability ?? null : undefined);
+    : validateThinking(provider, model, thinking, merged.extraBody, subscriptionSelected ? capability ?? null : undefined);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
@@ -615,13 +618,12 @@ export function resolveSettings(input: {
   };
 }
 
-/** Validate a requested thinking level against capability, extra-body single-source-of-truth, and Anthropic budget rules. */
+/** Validate a requested thinking level against capability, extra-body single-source-of-truth rules. */
 export function validateThinking(
   provider: string,
   model: string,
   thinking: ThinkingLevel | undefined,
   extraBody: Record<string, unknown> | undefined,
-  maxOutput?: number,
   accountCapability?: ModelCapability | null,
 ): string | undefined {
   if (thinking === undefined) {
@@ -640,12 +642,6 @@ export function validateThinking(
   if (support && !support.supported.includes(thinking)) {
     return `Thinking level "${thinking}" is not supported for ${provider}/${model}. ${describeThinkingSupport(provider, model)}`;
   }
-  if (provider === "anthropic" && thinking !== "off" && maxOutput !== undefined) {
-    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as "low" | "medium" | "high"];
-    if (budget >= maxOutput) {
-      return `Thinking level "${thinking}" needs budget ${budget} < max output ${maxOutput} for anthropic/${model}. Increase maxOutput or choose a lower level.`;
-    }
-  }
   return undefined;
 }
 
@@ -658,23 +654,16 @@ export function describeEffectiveThinking(provider: string, thinking: ThinkingLe
     if (modelId !== undefined && !getThinkingSupport(provider, modelId).supportsDisabling) {
       return "off (provider default, no reasoning controls sent)";
     }
-    if (modelId === undefined && (provider !== "anthropic" && provider !== "openai")) {
+    if (modelId === undefined && provider !== "openai") {
       return "off (provider default, no reasoning controls sent)";
-    }
-    if (provider === "anthropic" && modelId !== undefined) {
-      return "off (thinking disabled)";
     }
     if (provider === "openai" && modelId !== undefined) {
       return "off (reasoning effort none)";
     }
-    if (provider === "anthropic" || provider === "openai") {
+    if (provider === "openai") {
       return "off (disable control on reasoning-capable models; otherwise no reasoning controls sent)";
     }
     return "off (provider default, no reasoning controls sent)";
-  }
-  if (provider === "anthropic") {
-    const budget = ANTHROPIC_THINKING_BUDGETS[thinking as "low" | "medium" | "high"];
-    return `${thinking} (budget ${budget} tokens via thinking)`;
   }
   if (provider === "openai") {
     return `${thinking} (reasoning effort ${thinking})`;

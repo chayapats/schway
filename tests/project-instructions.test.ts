@@ -402,7 +402,7 @@ test("headless CLI loads HOME prompt files and workspace AGENTS.md", async () =>
     const exitCode = await runCli(["-p", "hello"], {
       stdout: sink,
       stderr: sink,
-      env: { HOME: home, ANTHROPIC_API_KEY: "sk-test" },
+      env: { HOME: home, OPENAI_API_KEY: "sk-test" },
       cwd: project,
       model: createScriptedModel({
         responses: [

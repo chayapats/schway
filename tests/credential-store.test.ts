@@ -8,16 +8,16 @@ test("native store round trips and deletes only the selected credential identity
     async set({ service, name, value }) { values.set(`${service}/${name}`, value); },
     async delete({ service, name }) { return values.delete(`${service}/${name}`); },
   });
-  const anthropic = credentialIdentity({ provider: "anthropic" });
+  const compatible = credentialIdentity({ provider: "openai-compatible", baseUrl: "https://example.test/v1" });
   const openai = credentialIdentity({ provider: "openai" });
-  await store.set(anthropic, "anthropic-sentinel");
+  await store.set(compatible, "compatible-sentinel");
   await store.set(openai, "openai-sentinel");
-  expect(await store.get(anthropic)).toBe("anthropic-sentinel");
-  await store.set(anthropic, "replacement");
-  expect(await store.get(anthropic)).toBe("replacement");
-  expect(await store.delete(anthropic)).toBe(true);
-  expect(await store.get(anthropic)).toBeNull();
-  expect(await store.delete(anthropic)).toBe(false);
+  expect(await store.get(compatible)).toBe("compatible-sentinel");
+  await store.set(compatible, "replacement");
+  expect(await store.get(compatible)).toBe("replacement");
+  expect(await store.delete(compatible)).toBe(true);
+  expect(await store.get(compatible)).toBeNull();
+  expect(await store.delete(compatible)).toBe(false);
   expect(await store.get(openai)).toBe("openai-sentinel");
 });
 

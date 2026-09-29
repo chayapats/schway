@@ -42,7 +42,7 @@ test("env-file HOME cannot replace the launch process HOME for storage or user c
   await mkdir(join(overlayHome, ".schway"), { recursive: true });
   await writeFile(join(home, ".schway", "config.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://localhost:11434/v1", auth: "none" }));
   await writeFile(join(overlayHome, ".schway", "config.json"), JSON.stringify({ provider: "openai" }));
-  await writeFile(join(workspace, ".diagnose.env"), `HOME=${overlayHome}\nANTHROPIC_API_KEY=from-file\n`);
+  await writeFile(join(workspace, ".diagnose.env"), `HOME=${overlayHome}\nOPENAI_API_KEY=from-file\n`);
   const options = { ...args, envFiles: [".diagnose.env"] };
   const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: options, store: store(null) });
   expect(report.provider).toBe("openai-compatible");
@@ -50,7 +50,7 @@ test("env-file HOME cannot replace the launch process HOME for storage or user c
   expect(check(report, "config.user")?.status).toBe("ok");
   const missing = await diagnose({ cwd: workspace, env: {}, args: options, store: store(null) });
   expect(check(missing, "sessions")?.status).toBe("error");
-  expect(missing.provider).toBe("anthropic");
+  expect(missing.provider).toBe("openai");
   expect(missing.authSource).toBe("environment");
 });
 
@@ -58,7 +58,7 @@ test("auth modes isolate selected credentials, locked store and subscription exp
   const { workspace, home } = await fixture();
   const run = (override: Record<string, string | undefined>, options: Parameters<typeof diagnose>[0]["args"], value: string | null | Error) =>
     diagnose({ cwd: workspace, env: { HOME: home, ...override }, args: options, store: store(value) });
-  expect(check(await run({ ANTHROPIC_API_KEY: "secret-do-not-print" }, args, null), "auth")?.status).toBe("ok");
+  expect(check(await run({ OPENAI_API_KEY: "secret-do-not-print" }, args, null), "auth")?.status).toBe("ok");
   const optional = await run({}, { ...args, provider: "openai-compatible", baseUrl: "https://localhost/v1" }, null);
   expect(check(optional, "auth")?.status).toBe("warning"); expect(doctorExitCode(optional)).toBe(0);
   expect(check(await run({}, { ...args, provider: "openai-compatible", baseUrl: "https://localhost/v1", auth: "none" }, new Error("secret")), "auth")?.status).toBe("ok");
@@ -74,10 +74,10 @@ test("auth modes isolate selected credentials, locked store and subscription exp
 test("doctor rejects inherited non-compatible connection flags like the normal CLI", async () => {
   const { workspace, home } = await fixture();
   await mkdir(join(workspace, ".schway"));
-  await writeFile(join(workspace, ".schway", "config.json"), JSON.stringify({ provider: "anthropic" }));
+  await writeFile(join(workspace, ".schway", "config.json"), JSON.stringify({ provider: "openai" }));
   let stdout = "";
   const status = await runCli(["doctor", "--json", "--base-url", "https://example.org/v1"], {
-    cwd: workspace, env: { HOME: home, ANTHROPIC_API_KEY: "secret" },
+    cwd: workspace, env: { HOME: home, OPENAI_API_KEY: "secret" },
     credentialStore: store(null), stdout: { write(chunk) { stdout += chunk; } }, stderr: { write() {} },
   });
   expect(status).toBe(1);
@@ -91,7 +91,7 @@ test("empty override rejects codex login without reading secure storage", async 
   const { workspace, home } = await fixture();
   let reads = 0;
   const login = JSON.stringify({ accessToken: "private-access" });
-  const guarded: CredentialStore = { ...store(login), get: async () => { reads++; return login; } };
+  const guarded: CredentialStore = { ...store(login), get: async identity => { if (identity.account !== "api-key:anthropic") reads++; return identity.account === "api-key:anthropic" ? null : login; } };
   const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, provider: "openai", openaiAuth: "codex", apiKey: "" }, store: guarded });
   expect(check(report, "auth")?.status).toBe("error");
   expect(report.authSource).toBe("runtime");
@@ -128,7 +128,7 @@ test("whitespace-only stored subscription allows auto fallback to stored OpenAI 
   const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, provider: "openai" }, store: splitStore });
   expect(report.authSource).toBe("secure-store");
   expect(check(report, "auth")?.status).toBe("ok");
-  expect(inspected).toEqual(["codex-subscription:chatgpt", "api-key:openai"]);
+  expect(inspected).toEqual(["codex-subscription:chatgpt", "api-key:openai", "api-key:anthropic"]);
   expect(JSON.stringify(report)).not.toContain("private-stored-api-key");
 });
 
@@ -154,7 +154,7 @@ test("skill duplicates, invalid metadata and attached roots are independently re
   await writeFile(join(workspace, ".agents", "skills", "repeat", "SKILL.md"), "---\nname: repeat\ndescription: first\n---\nFirst instruction.\n");
   await writeFile(join(attach, ".agents", "skills", "repeat", "SKILL.md"), "---\nname: repeat\ndescription: second\n---\nSecond instruction.\n");
   await writeFile(join(workspace, ".agents", "skills", "invalid", "SKILL.md"), "invalid frontmatter");
-  const report = await diagnose({ cwd: workspace, env: { HOME: home, ANTHROPIC_API_KEY: "key" }, args: { ...args, addDirs: [attach] }, store: store(null) });
+  const report = await diagnose({ cwd: workspace, env: { HOME: home, OPENAI_API_KEY: "key" }, args: { ...args, addDirs: [attach] }, store: store(null) });
   expect(check(report, "skill.duplicate.0")?.status).toBe("error");
   expect(check(report, "skill.invalid.0")?.status).toBe("error");
   expect(check(report, "skill.invalid.0")?.summary).toContain("invalid");
@@ -183,7 +183,7 @@ test("manifest errors are independent and extension code never executes", async 
     { scope: "project", name: "bad-one", kind: "manifest" },
     { scope: "project", name: "bad-two", kind: "entry", entry: "missing.ts" },
   ]);
-  const report = await diagnose({ cwd: workspace, env: { HOME: home, ANTHROPIC_API_KEY: "key" }, args: { ...args, extensions: ["node_modules/valid/extension.ts"] }, store: store(null) });
+  const report = await diagnose({ cwd: workspace, env: { HOME: home, OPENAI_API_KEY: "key" }, args: { ...args, extensions: ["node_modules/valid/extension.ts"] }, store: store(null) });
   expect(report.checks.filter(c => c.id.startsWith("package.") && c.status === "error")).toHaveLength(2);
   expect(report.checks.some(c => c.summary.includes("Duplicate enabled extension"))).toBe(true);
   expect(await Bun.file(marker).exists()).toBe(false);
@@ -244,15 +244,15 @@ test("doctor redacts credential sources but keeps ordinary env-number identifier
   await writeFile(join(workspace, ".schway", "config.json"), JSON.stringify({ profiles: { local: { baseUrl: "http://localhost:11434/v1", auth: "none", credentialEnv: "LOCAL_KEY" } } }));
   const report = await diagnose({
     cwd: workspace,
-    env: { HOME: home, C: "1", LOCAL_KEY: "profile-secret", ANTHROPIC_API_KEY: "anthropic-secret" },
+    env: { HOME: home, C: "1", LOCAL_KEY: "profile-secret", OPENAI_API_KEY: "openai-secret" },
     args: { ...args, profile: "local", apiKey: "runtime-secret", headers: { AUTHORIZATION: "Bearer header-secret", "X-API-KEY": "other-header-secret", "X-Other": "ordinary-identifier" },
-      extensions: ["plugin-v1.ts", "plugin-profile-secret.ts", "plugin-runtime-secret.ts", "plugin-header-secret.ts", "plugin-other-header-secret.ts", "plugin-anthropic-secret.ts", "plugin-ordinary-identifier.ts"] },
+      extensions: ["plugin-v1.ts", "plugin-profile-secret.ts", "plugin-runtime-secret.ts", "plugin-header-secret.ts", "plugin-other-header-secret.ts", "plugin-openai-secret.ts", "plugin-ordinary-identifier.ts"] },
     store: store(null),
   });
   expect(check(report, "extension.0")?.summary).toContain("plugin-v1.ts");
   expect(check(report, "extension.6")?.summary).toContain("plugin-ordinary-identifier.ts");
   const printed = JSON.stringify(report);
-  for (const secret of ["profile-secret", "runtime-secret", "header-secret", "other-header-secret", "anthropic-secret"]) expect(printed).not.toContain(secret);
+  for (const secret of ["profile-secret", "runtime-secret", "header-secret", "other-header-secret", "openai-secret"]) expect(printed).not.toContain(secret);
   expect(check(report, "extension.3")?.summary).toContain("plugin-***.ts");
 });
 

@@ -8,7 +8,7 @@ import { withTempDir } from "./helpers.ts";
 
 const fixture = join(import.meta.dir, "fixtures/live-process.ts");
 const revision = "0123456789012345678901234567890123456789";
-const settings = (providers: Array<"compatible" | "anthropic">, timeoutMs = 600) => ({
+const settings = (providers: Array<"compatible" | "openai-api-key">, timeoutMs = 600) => ({
   enabled: true, revision, timeoutMs, providers, env: {} as Record<string, string>,
 });
 const gone = (pid: number) => {
@@ -41,7 +41,7 @@ test("worker rejects secrets, commands and oversize private instructions before 
 });
 
 test("disabled supervision does not spawn or discover credentials", async () => {
-  const result = await runLiveProcesses({ ...settings(["anthropic"]), enabled: false, env: { ANTHROPIC_API_KEY: "PRIVATE_SECRET" } },
+  const result = await runLiveProcesses({ ...settings(["openai-api-key"]), enabled: false, env: { OPENAI_API_KEY: "PRIVATE_SECRET" } },
     { workerFile: "/invalid/nonexistent-worker.ts", onWorkspace: () => { throw Error("unexpected workspace"); } });
   expect(result.scenarios[0]).toMatchObject({ status: "skipped", reason: "live_disabled" });
   expect(JSON.stringify(result)).not.toContain("PRIVATE_SECRET");
@@ -58,8 +58,8 @@ test("cancelled or expired workspace setup never spawns a paid worker", async ()
       let report;
       let spawned = 0;
       try {
-        report = await runLiveProcesses({ ...settings(["anthropic"], mode === "cancelled" ? 600 : 30), signal: controller.signal,
-          env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath, ANTHROPIC_API_KEY: "PRIVATE_SECRET" } },
+        report = await runLiveProcesses({ ...settings(["openai-api-key"], mode === "cancelled" ? 600 : 30), signal: controller.signal,
+          env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET" } },
         { workerFile: fixture, onWorkspace: path => {
           root = path;
           if (mode === "cancelled") controller.abort();
@@ -82,8 +82,8 @@ test("real non-cooperative process and same-group descendant die, workspace remo
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     const roots: string[] = [];
-    const reportPromise = runLiveProcesses({ ...settings(["anthropic", "compatible"], 450), env: {
-      SCHWAY_FIXTURE_MODE: "hang-with-descendant", SCHWAY_FIXTURE_PID_FILE: pidPath, ANTHROPIC_API_KEY: "PRIVATE_SECRET",
+    const reportPromise = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 450), env: {
+      SCHWAY_FIXTURE_MODE: "hang-with-descendant", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET",
     } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
     const pid = await waitForPid(pidPath);
     const descendant = await waitForPid(`${pidPath}.descendant`);
@@ -103,7 +103,7 @@ test("started model process that ignores abort is classified as provider timeout
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     let root = "";
-    const pending = runLiveProcesses({ ...settings(["anthropic", "compatible"], 350), env: {
+    const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 350), env: {
       SCHWAY_FIXTURE_MODE: "hang-stream", SCHWAY_FIXTURE_PID_FILE: pidPath,
     } }, { workerFile: fixture, onWorkspace: path => { root = path; } });
     const pid = await waitForPid(pidPath);
@@ -120,7 +120,7 @@ test("a worker cannot report pass while its descendant remains alive", async () 
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     let root = "";
-    const report = await runLiveProcesses({ ...settings(["anthropic"]), env: {
+    const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "orphan", SCHWAY_FIXTURE_PID_FILE: pidPath,
     } }, { workerFile: fixture, onWorkspace: path => { root = path; } });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "process_group_leak" });
@@ -134,7 +134,7 @@ test("non-cooperative output-limit worker is hard stopped without changing provi
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     const roots: string[] = [];
-    const report = await runLiveProcesses({ ...settings(["anthropic"], 1200), env: {
+    const report = await runLiveProcesses({ ...settings(["openai-api-key"], 1200), env: {
       SCHWAY_FIXTURE_MODE: "deferred-output", SCHWAY_FIXTURE_PID_FILE: pidPath,
     } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
@@ -151,19 +151,19 @@ test("oversized stdout and malformed worker response are rejected without echo, 
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     let root = "";
-    const report = await runLiveProcesses({ ...settings(["anthropic"]), env: {
-      SCHWAY_FIXTURE_MODE: "oversized", SCHWAY_FIXTURE_PID_FILE: pidPath, ANTHROPIC_API_KEY: "PRIVATE_SECRET",
+    const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
+      SCHWAY_FIXTURE_MODE: "oversized", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET",
     } }, { workerFile: fixture, onWorkspace: path => { root = path; } });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
     expect(gone(Number(await readFile(pidPath, "utf8")))).toBe(true);
     await expect(access(root)).rejects.toThrow();
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
-    const forged = await runLiveProcesses({ ...settings(["anthropic"]), env: {
-      SCHWAY_FIXTURE_MODE: "forged", ANTHROPIC_API_KEY: "PRIVATE_SECRET",
+    const forged = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
+      SCHWAY_FIXTURE_MODE: "forged", OPENAI_API_KEY: "PRIVATE_SECRET",
     } }, { workerFile: fixture });
     expect(forged.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
     expect(JSON.stringify(forged)).not.toContain("PRIVATE_SECRET");
-    const fakeTimeout = await runLiveProcesses({ ...settings(["anthropic"]), env: {
+    const fakeTimeout = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "fake-timeout",
     } }, { workerFile: fixture });
     expect(fakeTimeout.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
@@ -176,7 +176,7 @@ test("cancellation kills the non-cooperative worker before cleanup or another pr
     const pidPath = join(temp, "worker.pid");
     const controller = new AbortController();
     const roots: string[] = [];
-    const pending = runLiveProcesses({ ...settings(["anthropic", "compatible"], 1500), signal: controller.signal,
+    const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 1500), signal: controller.signal,
       env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath } },
     { workerFile: fixture, onWorkspace: root => roots.push(root) });
     const pid = await waitForPid(pidPath);
@@ -193,11 +193,11 @@ test("selected worker fake succeeds without loading a sibling or printing an inj
   if (process.platform === "win32") return;
   await withTempDir(async temp => {
     const roots: string[] = [];
-    const report = await runLiveProcesses({ ...settings(["anthropic"]), env: {
-      SCHWAY_FIXTURE_PID_FILE: join(temp, "worker.pid"), ANTHROPIC_API_KEY: "PRIVATE_SECRET",
+    const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
+      SCHWAY_FIXTURE_PID_FILE: join(temp, "worker.pid"), OPENAI_API_KEY: "PRIVATE_SECRET",
     } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
     expect(report.aggregate).toBe("passed");
-    expect(report.scenarios).toMatchObject([{ status: "passed", provider: "anthropic", toolRoundTrip: true }]);
+    expect(report.scenarios).toMatchObject([{ status: "passed", provider: "openai-api-key", toolRoundTrip: true }]);
     expect(roots).toHaveLength(1);
     await expect(access(roots[0]!)).rejects.toThrow();
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");

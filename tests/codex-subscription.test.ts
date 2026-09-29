@@ -910,7 +910,7 @@ test("CLI exposes --openai-auth separately from compatible --auth", () => {
   expect(cliOverridesFromArgs({ json: false, help: false, openaiAuth: "codex" })).toEqual({ openaiAuth: "codex" });
   expect(parseArgs(["--openai-auth", "codex"])).toMatchObject({ args: { openaiAuth: "codex" } });
   expect(parseArgs(["--openai-auth=bogus"])).toMatchObject({ error: expect.stringContaining("Unknown OpenAI auth") });
-  expect(parseArgs(["--provider", "anthropic", "--openai-auth", "codex"])).toMatchObject({
+  expect(parseArgs(["--provider", "openai-compatible", "--openai-auth", "codex"])).toMatchObject({
     error: expect.stringContaining("--provider openai"),
   });
 });
@@ -1124,7 +1124,7 @@ test("browser opener failure can switch directly to device approval without comm
 test("controller browser callback saves a credential, discovers account models and activates without inference", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
-    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai-compatible", baseUrl: "http://127.0.0.1:1/v1" } });
     const values = new Map<string, string>();
     const openStore = (): CredentialStore => ({
       async get(identity) { return values.get(identity.account) ?? null; },
@@ -1150,8 +1150,8 @@ test("controller browser callback saves a credential, discovers account models a
     });
     const controller = new TuiController({
       session: createSession(), sessionId: "browser-journey", workspace, configEditor: editor,
-      provider: "anthropic", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace), secrets,
+      provider: "openai", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace), secrets,
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: runner,
         listSubscriptionCatalog: async () => [{ id: "account-model", contextWindow: 100000, supportedThinking: ["low"] }] },
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model,

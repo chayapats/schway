@@ -132,11 +132,11 @@ test("blank price operands are rejected", async () => {
 
 test("a route without prerequisites stays a prerequisite skip when the cap trips", async () => {
   await withTempDir(async dir => {
-    const { code, artifact } = await run(dir, ["--matrix", "openai:gpt-5,anthropic:claude-sonnet-4-5", "--allow-paid", "--case", "all", "--max-spend", "3"]);
+    const { code, artifact } = await run(dir, ["--matrix", "openai:gpt-5,openai-compatible:local-model", "--allow-paid", "--case", "all", "--max-spend", "3", "--base-url", "http://127.0.0.1:9/v1"]);
     expect(code).toBe(3);
-    const anthropic = artifact.results.filter((r: { provider: string }) => r.provider === "anthropic");
-    expect(anthropic.every((r: { outcome: string }) => r.outcome === "skipped_prerequisites")).toBe(true);
-    expect(anthropic.every((r: { spendExact: boolean }) => r.spendExact)).toBe(true);
+    const unstarted = artifact.results.filter((r: { provider: string }) => r.provider === "openai-compatible");
+    expect(unstarted.every((r: { outcome: string }) => r.outcome === "skipped_prerequisites")).toBe(true);
+    expect(unstarted.every((r: { spendExact: boolean }) => r.spendExact)).toBe(true);
   });
 });
 

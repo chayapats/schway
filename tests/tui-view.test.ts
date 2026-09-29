@@ -445,7 +445,7 @@ test("model picker renders credential labels and puts configured providers first
     expect(ui.controller.snapshot().modelPicker!.entries[0]).toMatchObject({ provider: "openai", access: "API key" });
     expect(ui.captureCharFrame()).toContain("API key");
     expect(ui.captureCharFrame()).not.toContain("picker-secret");
-    ui.controller.searchModels("claude");
+    ui.controller.searchModels("gpt-4o");
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("Login required");
   }
@@ -456,7 +456,7 @@ test("keyboard connection at 44×18 restores the picker search and ordinary draf
   await ui.mockInput.pasteBracketedText("ordinary draft");
   ui.mockInput.pressKey("m", { meta: true });
   await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.accessLoading, "model access discovery");
-  await ui.mockInput.typeText("anthropic/claude-sonnet-4-6");
+  await ui.mockInput.typeText("openai/gpt-5.4");
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("connect needed");
   ui.mockInput.pressEnter();
@@ -465,7 +465,7 @@ test("keyboard connection at 44×18 restores the picker search and ordinary draf
   ui.mockInput.pressEnter();
   await waitForUiState(ui, () => !!ui.controller.snapshot().modelPicker && !ui.controller.snapshot().modelPicker?.loading, "model picker reload");
   await settle(ui);
-  expect(ui.controller.snapshot().modelPicker?.query).toBe("anthropic/claude-sonnet-4-6");
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("openai/gpt-5.4");
   expect(ui.captureCharFrame()).toContain("API key");
   expect(ui.captureCharFrame()).not.toContain("masked-route-secret");
   ui.mockInput.pressEscape();
@@ -1091,11 +1091,12 @@ test("appearance edit rejects externally changed runtime settings", async () => 
     const ui = await preferenceFixture(root);
     const path = join(ui.workspaceRoot, ".schway/config.json");
     await mkdir(join(ui.workspaceRoot, ".schway"));
-    await writeFile(path, '{"provider":"openai"}');
+    const external = '{"provider":"openai-compatible","baseUrl":"http://127.0.0.1:1/v1"}';
+    await writeFile(path, external);
     expect(await ui.controller.configCommand("set appearance dark --scope project")).toBe(false);
-    expect(ui.configEditor.settings.provider).toBe("anthropic");
+    expect(ui.configEditor.settings.provider).toBe("openai");
     expect(ui.configEditor.settings.appearance).toBe("auto");
-    expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
+    expect(await readFile(path, "utf8")).toBe(external);
     expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Reload");
     ui.resize(24, 8);
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
@@ -1106,8 +1107,8 @@ test("appearance edit rejects externally changed runtime settings", async () => 
     await preferenceEnter(ui); await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.error).toContain("Reload");
     expect(ui.captureCharFrame()).toContain("! Not saved: dark");
-    expect(ui.configEditor.settings.provider).toBe("anthropic");
-    expect(await readFile(path, "utf8")).toBe('{"provider":"openai"}');
+    expect(ui.configEditor.settings.provider).toBe("openai");
+    expect(await readFile(path, "utf8")).toBe(external);
   });
 });
 
@@ -1261,13 +1262,13 @@ test("preferences inspect actual origins and lower memory while omitting connect
     await writeFile(join(home, ".schway/config.json"), JSON.stringify({ maxTurns: 11, maxConcurrentTools: 2 }));
     await writeFile(join(workspaceRoot, ".schway/config.json"), JSON.stringify({ maxTurns: 13 }));
     const memory = await InteractiveMemory.load(home, workspaceRoot);
-    await memory.write({ provider: "anthropic", model: "claude-opus-4-6", thinking: "low" });
+    await memory.write({ provider: "openai", openaiAuth: "api-key", model: "gpt-5.4", thinking: "low" });
     const ui = await preferenceFixture(root, {}, { maxTurns: 17, baseUrl: "https://fixture-user:fixture-password@example.com", headers: { Authorization: "Bearer header-secret" }, extraBody: { token: "body-secret" } });
     await ui.controller.configCommand("set maxTurns 19");
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
     const rows = ui.controller.snapshot().preferences!.rows;
     expect(rows.find(row => row.key === "maxTurns")).toMatchObject({ value: "19", origin: "current-session override", saved: "user config=11; project config=13; CLI=17; session=19" });
-    expect(rows.find(row => row.key === "model")).toMatchObject({ value: "claude-opus-4-6", origin: "interactive memory" });
+    expect(rows.find(row => row.key === "model")).toMatchObject({ value: "gpt-5.4", origin: "interactive memory" });
     expect(rows.find(row => row.key === "maxConcurrentTools")?.origin).toBe("user-global");
     const artifacts = JSON.stringify(ui.controller.snapshot().preferences) + ui.captureCharFrame();
     for (const secret of ["fixture-user", "fixture-password", "header-secret", "body-secret", "Authorization"]) expect(artifacts).not.toContain(secret);
@@ -1292,7 +1293,7 @@ test("preferences memory conflicts preserve the newer workspace choice and expos
     await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.error).toContain("changed in another process");
     expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice?.provider).toBe("openai");
-    expect(ui.configEditor.settings.provider).toBe("anthropic");
+    expect(ui.configEditor.settings.provider).toBe("openai");
   });
 });
 
@@ -1342,13 +1343,13 @@ test("preferences at narrow width scroll preview and Escape keeps pasted task an
 test("preferences reset inherits the latest remembered model and preserves unrelated saved configuration", async () => {
   await withTempDir(async root => {
     const ui = await preferenceFixture(root);
-    expect(await ui.controller.selectModel("anthropic/claude-opus-4-6")).toBe(true);
+    expect(await ui.controller.selectModel("openai/gpt-5.4-mini")).toBe(true);
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
-    expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "model")?.saved).toContain("workspace memory=claude-opus-4-6");
+    expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "model")?.saved).toContain("workspace memory=gpt-5.4-mini");
     // Model is row eight; reset current-session model using the bounded reset action.
     for (let n = 0; n < 7; n++) ui.mockInput.pressArrow("down");
     await preferenceEnter(ui); await preferenceEnter(ui);
-    expect(ui.configEditor.settings.model).toBe("claude-opus-4-6");
+    expect(ui.configEditor.settings.model).toBe("gpt-5.4-mini");
     expect(ui.configEditor.origins.model).toBe("interactive memory");
     ui.mockInput.pressTab(); ui.mockInput.pressTab();
     const path = join(ui.home, ".schway/config.json");
@@ -1457,10 +1458,10 @@ test("dynamic skill refresh cannot transfer an active completion selection to it
 });
 
 
-test("reasoning argument completion uses actual budget validation and never invents subscription levels", async () => {
+test("reasoning argument completion lists the model's supported levels and never invents subscription levels", async () => {
   await withTempDir(async root => {
-    const ui = await preferenceFixture(root, {}, { provider: "anthropic", model: "claude-sonnet-4-6", maxOutput: 2048 });
-    expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset", "thinking off", "thinking low"]);
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4", maxOutput: 2048 });
+    expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset", "thinking off", "thinking low", "thinking medium", "thinking high"]);
     ui.controller.setModel(createScriptedModel({ provider: "codex-subscription", id: "unknown" }), "openai", "unknown");
     expect(ui.controller.commandChoices("/thinking ").map(entry => entry.name)).toEqual(["thinking reset"]);
     await ui.mockInput.pasteBracketedText("/thinking "); await settle(ui);

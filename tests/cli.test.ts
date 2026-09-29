@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { encodeSse as encodeAnthropicSse, TEXT_STREAM_EVENTS as ANTHROPIC_TEXT } from "./fixtures/anthropic.ts";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
 import { runCli, type CliIo } from "../src/cli/main.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
@@ -57,7 +56,7 @@ async function run(
       stderr,
       env: {
         HOME: isolatedHome,
-        ...(options.env ?? { ANTHROPIC_API_KEY: "sk-test" }),
+        ...(options.env ?? { OPENAI_API_KEY: "sk-test" }),
       },
       cwd: options.cwd ?? process.cwd(),
       model: options.model,
@@ -132,14 +131,13 @@ test("missing credentials exit non-zero without interactive login", async () => 
   const result = await run(["-p", "hello"], { env: {} });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
-  expect(result.stderr).toContain("Missing Anthropic API key");
-  expect(result.stderr.toLowerCase().includes("login")).toBe(false);
+  expect(result.stderr).toContain("Missing OpenAI API key");
 });
 
 test("runtime --api-key takes precedence over the environment key", async () => {
   let usedKey: string | undefined;
   const result = await run(["-p", "hello", "--api-key", "sk-runtime"], {
-    env: { ANTHROPIC_API_KEY: "sk-env" },
+    env: { OPENAI_API_KEY: "sk-env" },
     createModel: async ({ apiKey }) => {
       usedKey = apiKey;
       return createScriptedModel({ text: "ok" });
@@ -150,9 +148,9 @@ test("runtime --api-key takes precedence over the environment key", async () => 
   expect(result.stdout).toContain("ok");
 });
 
-test("selecting OpenAI without OPENAI_API_KEY fails even when Anthropic is configured", async () => {
+test("selecting OpenAI without OPENAI_API_KEY fails even when a compatible key is configured", async () => {
   const result = await run(["-p", "hello", "--provider", "openai"], {
-    env: { ANTHROPIC_API_KEY: "sk-anthropic" },
+    env: { OPENAI_COMPATIBLE_API_KEY: "sk-compatible" },
   });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
@@ -163,7 +161,7 @@ test("selecting OpenAI without OPENAI_API_KEY fails even when Anthropic is confi
 test("selecting OpenAI uses OPENAI_API_KEY and records the provider", async () => {
   let used: { apiKey?: string; provider?: string; model?: string } = {};
   const result = await run(["-p", "hello", "--provider", "openai"], {
-    env: { OPENAI_API_KEY: "sk-openai", ANTHROPIC_API_KEY: "sk-anthropic" },
+    env: { OPENAI_API_KEY: "sk-openai", OPENAI_COMPATIBLE_API_KEY: "sk-compatible" },
     createModel: async ({ apiKey, provider, model }) => {
       used = { apiKey, provider, model };
       return createScriptedModel({
@@ -383,7 +381,7 @@ test("OpenAI-compatible provider requires --base-url", async () => {
 test("OpenAI-compatible connection flags are rejected for other providers", async () => {
   const result = await run(
     ["-p", "hello", "--base-url", "http://127.0.0.1:8080/v1"],
-    { env: { ANTHROPIC_API_KEY: "sk-test" } },
+    { env: { OPENAI_API_KEY: "sk-test" } },
   );
   expect(result.exitCode).toBe(1);
   expect(result.stderr).toContain(
@@ -842,7 +840,7 @@ test("--resume requires a session id", async () => {
 test("--resume of an unknown session exits with an actionable error", async () => {
   await withTempDir(async (dir) => {
     const result = await run(["-p", "hello", "--resume", "missing-id"], {
-      env: { HOME: dir, ANTHROPIC_API_KEY: "sk-test" },
+      env: { HOME: dir, OPENAI_API_KEY: "sk-test" },
       model: createScriptedModel({ text: "nope" }),
     });
     expect(result.exitCode).toBe(1);
@@ -862,7 +860,7 @@ test("headless -p saves a session that --resume continues with workspace identit
     await writeFile(join(project, "note.txt"), "from-saved-workspace\n");
 
     const first = await run(["-p", "read note", "--json"], {
-      env: { HOME: home, ANTHROPIC_API_KEY: "sk-test" },
+      env: { HOME: home, OPENAI_API_KEY: "sk-test" },
       cwd: project,
       model: createScriptedModel({
         responses: [
@@ -908,7 +906,7 @@ test("headless -p saves a session that --resume continues with workspace identit
     const second = await run(
       ["-p", "remind me", "--resume", sessionId, "--json"],
       {
-        env: { HOME: home, ANTHROPIC_API_KEY: "sk-test" },
+        env: { HOME: home, OPENAI_API_KEY: "sk-test" },
         cwd: other,
         model: createScriptedModel({
           responses: [
@@ -937,7 +935,7 @@ test("headless -p saves a session that --resume continues with workspace identit
 
 test("headless provider construction consumes only the selected saved credential", async () => {
   const store = fakeCredentialStore();
-  await store.set(credentialIdentity({ provider: "anthropic" }), "saved-anthropic-sentinel");
+  await store.set(credentialIdentity({ provider: "openai-compatible", baseUrl: "https://compatible.example.test/v1" }), "saved-compatible-sentinel");
   await store.set(credentialIdentity({ provider: "openai" }), "saved-openai-sentinel");
   let selected: { apiKey?: string; provider?: string } = {};
   const result = await run(["-p", "hello", "--provider", "openai"], {
@@ -949,7 +947,7 @@ test("headless provider construction consumes only the selected saved credential
   expect(JSON.stringify(result)).not.toContain("sentinel");
 });
 
-for (const provider of ["anthropic", "openai", "openai-compatible"] as const) {
+for (const provider of ["openai", "openai-compatible"] as const) {
   test(`saved ${provider} key reaches the real adapter without entering session JSONL or output`, async () => {
     await withTempDir(async (home) => {
       const store = fakeCredentialStore();
@@ -962,14 +960,13 @@ for (const provider of ["anthropic", "openai", "openai-compatible"] as const) {
         env: { HOME: home }, credentialStore: store,
         fetch: async (input, init) => {
           requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-          const body = provider === "anthropic" ? encodeAnthropicSse(ANTHROPIC_TEXT)
-            : provider === "openai" ? encodeOpenAISse(OPENAI_TEXT)
+          const body = provider === "openai" ? encodeOpenAISse(OPENAI_TEXT)
             : 'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n';
           return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
         },
       });
       expect(result.exitCode).toBe(0);
-      expect(requestHeaders?.get(provider === "anthropic" ? "x-api-key" : "authorization")).toBe(provider === "anthropic" ? key : `Bearer ${key}`);
+      expect(requestHeaders?.get("authorization")).toBe(`Bearer ${key}`);
       expect(JSON.stringify(result)).not.toContain(key);
       const records = join(home, ".schway", "sessions");
       for (const file of await readdir(records)) {

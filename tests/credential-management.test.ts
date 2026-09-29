@@ -23,7 +23,7 @@ test("masked login saves only after submission and cancellation leaves the selec
 
 test("empty, invalid and failed entry do not replace saved credentials or disclose secrets", async () => {
   const store = fakeCredentialStore();
-  const identity = credentialIdentity({ provider: "anthropic" });
+  const identity = credentialIdentity({ provider: "openai" });
   await store.set(identity, "original");
   for (const value of ["  ", "invalid\nembedded-secret", "🔒".repeat(4_097)]) {
     const entry = new MaskedCredentialEntry({ identity, store });

@@ -1,4 +1,4 @@
-import { MISSING_ANTHROPIC_API_KEY, MISSING_OPENAI_API_KEY } from "./secrets.ts";
+import { MISSING_OPENAI_API_KEY } from "./secrets.ts";
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialStore, type CredentialTarget } from "./store.ts";
 
 /** Dedicated environment override for the selected compatible endpoint, separate from native OpenAI. */
@@ -19,8 +19,7 @@ export async function resolveProviderCredential(input: CredentialTarget & {
   store: CredentialStore;
 }): Promise<ProviderCredential> {
   const profileSuffix = input.profile?.trim() ? ` for profile "${input.profile.trim()}"` : "";
-  const missing = input.provider === "anthropic" ? MISSING_ANTHROPIC_API_KEY
-    : input.provider === "openai" ? MISSING_OPENAI_API_KEY
+  const missing = input.provider === "openai" ? MISSING_OPENAI_API_KEY
     : `Missing API key for OpenAI-compatible endpoint${profileSuffix}. Pass --api-key${input.credentialEnv ? `, set ${input.credentialEnv}` : ", set OPENAI_COMPATIBLE_API_KEY"}, or save a key in interactive mode.`;
   if (input.runtimeApiKey !== undefined && !input.runtimeApiKey.trim()) {
     return { error: "Explicit API key is empty. Supply a nonempty --api-key or omit the override." };
@@ -53,7 +52,7 @@ export async function resolveProviderCredential(input: CredentialTarget & {
 
 /** Return the environment variable explicitly scoped to the selected provider family. */
 export function credentialEnvironmentVariable(provider: CredentialTarget["provider"]): string {
-  return provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : COMPATIBLE_API_KEY_ENV;
+  return provider === "openai" ? "OPENAI_API_KEY" : COMPATIBLE_API_KEY_ENV;
 }
 
 /** OpenAI credential preference: subscription login, API key, or automatic headless-safe selection. */

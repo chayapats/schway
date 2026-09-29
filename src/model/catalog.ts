@@ -2,7 +2,6 @@ import type { ThinkingLevel } from "./model.ts";
 
 /** Default model ID used when a provider is selected without an explicit model. */
 export const DEFAULT_MODEL_IDS = {
-  anthropic: "claude-sonnet-4-6",
   openai: "gpt-5.4",
   "openai-compatible": "gpt-4o",
 } as const;
@@ -41,30 +40,6 @@ export interface ModelLimitOverrides {
 }
 
 const CATALOG: readonly ModelInfo[] = [
-  {
-    id: DEFAULT_MODEL_IDS.anthropic,
-    provider: "anthropic",
-    contextWindow: 200_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: true,
-  },
-  {
-    id: "claude-opus-4-6",
-    provider: "anthropic",
-    contextWindow: 200_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: true,
-  },
-  {
-    id: "claude-haiku-4-5",
-    provider: "anthropic",
-    contextWindow: 200_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: true,
-  },
   {
     id: DEFAULT_MODEL_IDS.openai,
     provider: "openai",
@@ -135,29 +110,12 @@ export interface ThinkingSupport {
   supportsDisabling: boolean;
 }
 
-/** Anthropic thinking-capable IDs per extended-thinking docs (numeric budgets, disabled off). */
-const ANTHROPIC_THINKING_MODELS = new Set([
-  "claude-sonnet-4-6",
-  "claude-opus-4-6",
-  "claude-haiku-4-5",
-]);
-
-/** Numeric Anthropic thinking budgets per level per extended-thinking docs (must stay below max_tokens, minimum 1024). */
-export const ANTHROPIC_THINKING_BUDGETS: Record<"low" | "medium" | "high", number> = {
-  low: 1024,
-  medium: 4096,
-  high: 8192,
-};
-
 /** OpenAI reasoning-capable IDs per reasoning guide (named effort levels, none disables). */
 const OPENAI_THINKING_MODELS = new Set(["gpt-5.4"]);
 
 /** Return supported thinking levels; unknown IDs stay usable with off as a no-op that sends no controls. */
 export function getThinkingSupport(provider: string, modelId: string): ThinkingSupport {
   const known = CATALOG.some((entry) => entry.provider === provider && entry.id === modelId);
-  if (provider === "anthropic" && ANTHROPIC_THINKING_MODELS.has(modelId)) {
-    return { known: true, supported: ["off", "low", "medium", "high"], supportsDisabling: true };
-  }
   if (provider === "openai" && OPENAI_THINKING_MODELS.has(modelId)) {
     return { known: true, supported: ["off", "low", "medium", "high"], supportsDisabling: true };
   }

@@ -8,7 +8,7 @@ Textual commands remain available:
 
 ```text
 /model openai/gpt-4o
-/model anthropic claude-sonnet-4-6
+/model openai gpt-5.4
 /model my-custom-model
 /model forget
 /config
@@ -37,7 +37,7 @@ Thinking choices come from supported model capabilities (verified account metada
 
 Malformed files, unavailable models, cancellation, and changes made by another writer retain the previous working state. Confirmation commits the transaction prepared for that preview, so a file changed between preview and confirmation is not overwritten. A lower value saved beneath CLI/session overrides is labeled **saved but not effective** with its overriding source.
 
-Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`, plus `git` and `appearance`. Appearance accepts `auto`, `dark`, or `light`; the launch environment `SCHWAY_THEME=dark|light` wins over every config scope. Animation is an environment choice only: `SCHWAY_MOTION=full|reduced|off` (see [TUI motion](tui.md#motion-and-startup-splash)). Limits must be positive integers. Providers are `anthropic`, `openai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
+Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`, plus `git` and `appearance`. Appearance accepts `auto`, `dark`, or `light`; the launch environment `SCHWAY_THEME=dark|light` wins over every config scope. Animation is an environment choice only: `SCHWAY_MOTION=full|reduced|off` (see [TUI motion](tui.md#motion-and-startup-splash)). Limits must be positive integers. Providers are `openai` and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
 
 Saving `baseUrl` with `--scope user` or `--scope project` requires an absolute URL without userinfo (`user:password@`) or a query string. All query strings are runtime-only, including non-secret parameters. Use session scope for those URLs; errors do not echo the rejected value. For example, `/config set baseUrl https://example.test/v1 --scope project` is supported, while `/config set baseUrl https://example.test/v1?region=test` applies only to the current session. Existing files are not automatically migrated: edits to other keys preserve their existing URL. Use `/config reset baseUrl --scope project` (or `--scope user`) or save a safe replacement to remove that file's URL override.
 
@@ -57,6 +57,18 @@ Then `/config set maxTurns 12 --scope project` saves 12 but reports that CLI val
 
 The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider. These interfaces support deterministic controller/configuration tests without loading OpenTUI or using paid model APIs.
 
+## Upgrading from the Anthropic provider
+
+The Anthropic provider was removed in 0.4. Configuration or `--provider anthropic` that names it stops before the terminal opens, in interactive and headless runs, prints the notice below and exits non-zero. Remove `"provider": "anthropic"` from `~/.schway/config.json` or `.schway/config.json`.
+
+```text
+The Anthropic provider was removed in 0.4.
+Use Claude through an OpenAI-compatible endpoint:
+  schway --provider openai-compatible --base-url <url> --model <id>
+```
+
+Old sessions recorded with Anthropic resume under the route you select now. Anthropic-specific reasoning data in them is not sent to another provider. Schway never reads a stored Anthropic key; `schway doctor` reports one as unused and prints the command that deletes it from the OS secure store.
+
 ## Remembering and forgetting choices
 
 Preferences live in user-owned `~/.schway/interactive/<workspace-hash>.json`, separate from credentials, project configuration and conversation history. Git-root subdirectories and symlink aliases share the same canonical workspace preference; different roots and non-Git launch directories remain separate. Only the selection tuple is saved: never API keys, tokens, headers, endpoint URLs or conversation text. Compatible endpoints must remain configured explicitly, preferably as named profiles.
@@ -75,7 +87,6 @@ Select reasoning with config `"thinking": "medium"`, CLI `--thinking medium`, in
 
 Per-provider mapping follows current official docs without forcing identical wire semantics:
 
-- Anthropic extended thinking (`https://platform.claude.com/docs/en/build-with-claude/extended-thinking`): `off` on reasoning-capable models sends `thinking: { type: "disabled" }`, while `off` on unknown or known non-reasoning models sends no reasoning controls; `low`/`medium`/`high` send `thinking: { type: "enabled", budget_tokens: 1024/4096/8192 }`. Budgets require `budget_tokens >= 1024` and `< max_tokens`, so a level whose budget reaches `--max-output` fails before any request with the needed increase. Supported models are `claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5`; other Anthropic IDs expose only `off` as a no-op.
 - OpenAI Platform API-key reasoning (`https://developers.openai.com/api/docs/guides/reasoning`): `off` on reasoning-capable models sends `reasoning: { effort: "none" }`, while `off` on unknown or known non-reasoning models sends no reasoning controls; `low`/`medium`/`high` send their corresponding effort and `summary: "auto"`. Without verified account metadata, only `gpt-5.4` has those known capabilities; `gpt-4o` and unknown IDs expose only safe `off`. Extended levels are not assumed to work on Platform models.
 - Codex subscription: `/model` retrieves per-model `supported_reasoning_levels` and `default_reasoning_level` from the authenticated account. `/thinking` shows the advertised default and supported choices. Leaving thinking unset sends no reasoning controls so the backend applies its default; explicitly selected `low`/`medium`/`high`/`xhigh`/`max`/`ultra` (or `off` if advertised as `none`) map to their exact advertised efforts. Unsupported levels are rejected locally before inference. Saved Codex thinking can load provisionally before sign-in or catalog discovery so the session remains recoverable; no explicit reasoning control is sent without verified capabilities, and `/thinking` loads the catalog before showing or changing levels. When changing model, an inherited level that the new model does not support is shadowed by a session-only provider-default marker; saved configuration is untouched.
 - OpenAI-compatible Chat Completions has no standard reasoning field, so Schway never injects a vendor effort automatically. `off` (or unset) leaves provider defaults untouched and passes `extraBody` through unchanged. Explicit `low`/`medium`/`high` without a configured `extraBody` mapping fail before any request; configure reasoning directly via `--body '{"reasoning_effort":"medium"}'` or profile `extraBody` instead. Reasoning body keys are `reasoning`, `reasoning_effort`, `reasoningEffort`, `reasoning_budget`, `thinking`, `thinking_budget`, and `budget_tokens`. Bare `effort` is not treated as a reasoning control.
@@ -90,16 +101,15 @@ Truthful capability handling:
 Runnable example (no paid APIs; fixtures in `tests/reasoning.test.ts` inspect outgoing controls):
 
 ```sh
-# Anthropic budgets and OpenAI efforts via scripted fixtures
+# OpenAI efforts via scripted fixtures
 bun test tests/reasoning.test.ts
 # Live-equivalent CLI (needs a key; shows validation, not fixtures)
-schway --provider anthropic --model claude-sonnet-4-6 --thinking medium -p 'plan only'
 schway --provider openai --model gpt-5.4 --thinking low -p 'plan only'
 # Compatible: reasoning via extraBody, thinking stays unset
 schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body '{"reasoning_effort":"medium"}' -p 'hello'
 ```
 
-See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `src/model/providers/*` (`resolveAnthropicThinking`, `resolveOpenAIReasoning`, `resolveCompatibleThinking`, `resolveCodexReasoning`), and `src/config/config.ts` (`validateThinking`, `describeEffectiveThinking`) for the reasoning-mapping contract.
+See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `src/model/providers/*` (`resolveOpenAIReasoning`, `resolveCompatibleThinking`, `resolveCodexReasoning`), and `src/config/config.ts` (`validateThinking`, `describeEffectiveThinking`) for the reasoning-mapping contract.
 
 ## ChatGPT subscription (Codex OAuth)
 
@@ -145,7 +155,7 @@ The login survives restarts, but the provider selected by `/login codex` applies
 /config set openaiAuth codex --scope user
 ```
 
-Without a saved provider preference, Schway starts with its built-in Anthropic provider even when a Codex login exists. You can also use `schway --provider openai --openai-auth codex` without repeating login. Project settings and CLI flags still override user settings.
+Without a saved provider preference, Schway starts with its built-in OpenAI provider, where automatic auth uses a stored Codex login when no API key is supplied. You can also use `schway --provider openai --openai-auth codex` without repeating login. Project settings and CLI flags still override user settings.
 
 `/model` checks configured credentials whenever it opens. It groups the current model and active-auth choices first, followed by other configured providers/profiles, then choices that need login. Search keeps the same ordering. Rows show `ChatGPT`, `API key`, `No key required`, or `Login required`; these describe credential configuration, not a guarantee that a remote service will accept a key. In automatic auth mode, a saved Codex login exposes that account's models even when the session started with another provider. Selecting one activates Codex for the session. Explicit API-key preferences and runtime/environment key precedence remain in effect.
 

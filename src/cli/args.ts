@@ -1,4 +1,5 @@
 import type { ConfigLayer } from "../config/config.ts";
+import { removedProviderMessage } from "../config/removed-provider.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
@@ -6,7 +7,7 @@ export const USAGE =
   "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--debug] [--debug-file <path>] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
-export type CliProvider = "anthropic" | "openai" | "openai-compatible";
+export type CliProvider = "openai" | "openai-compatible";
 
 /** Authentication mode for OpenAI-compatible endpoints. */
 export type CliAuthMode = "required" | "optional" | "none";
@@ -345,13 +346,13 @@ export function parseArgs(
   return validateConnectionOptions(args);
 }
 
-/** Accept the v0.1 provider families, including OpenAI-compatible endpoints. */
+/** Accept the supported provider families; a removed provider fails with its migration notice. */
 function parseProvider(value: string): CliProvider | { error: string } {
-  if (
-    value === "anthropic" ||
-    value === "openai" ||
-    value === "openai-compatible"
-  ) {
+  const removed = removedProviderMessage(value);
+  if (removed !== undefined) {
+    return { error: removed };
+  }
+  if (value === "openai" || value === "openai-compatible") {
     return value;
   }
   return { error: `Unknown provider: ${value}` };

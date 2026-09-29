@@ -9,7 +9,6 @@ import type { Model } from "../src/model/model.ts";
 import { DEFAULT_MODEL_IDS } from "../src/model/catalog.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
-import { encodeSse as encodeAnthropicSse, TEXT_STREAM_EVENTS as ANTHROPIC_TEXT } from "./fixtures/anthropic.ts";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
 import {
   encodeChatCompletionsSse,
@@ -64,7 +63,7 @@ async function run(
       stderr,
       env: {
         HOME: isolatedHome,
-        ...(options.env ?? { ANTHROPIC_API_KEY: "sk-test" }),
+        ...(options.env ?? { OPENAI_API_KEY: "sk-test" }),
       },
       cwd: options.cwd ?? process.cwd(),
       model: options.model,
@@ -87,7 +86,7 @@ test("zero-config headless runs without creating config.json", async () => {
     await mkdir(home);
     await mkdir(project);
     const result = await run(["-p", "hello"], {
-      env: { HOME: home, ANTHROPIC_API_KEY: "sk-test" },
+      env: { HOME: home, OPENAI_API_KEY: "sk-test" },
       cwd: project,
       model: createScriptedModel({ text: "ok" }),
     });
@@ -130,9 +129,9 @@ test("project config selects provider and model; CLI flags override them", async
 
     let fromCli: CreateModelInput | undefined;
     const overridden = await run(
-      ["-p", "hello", "--provider", "anthropic", "--model", "from-cli"],
+      ["-p", "hello", "--provider", "openai-compatible", "--base-url", "http://127.0.0.1:8080/v1", "--model", "from-cli"],
       {
-        env: { ANTHROPIC_API_KEY: "sk-anthropic", OPENAI_API_KEY: "sk-openai" },
+        env: { OPENAI_COMPATIBLE_API_KEY: "sk-compatible", OPENAI_API_KEY: "sk-openai" },
         cwd: dir,
         createModel: async (input) => {
           fromCli = input;
@@ -142,14 +141,14 @@ test("project config selects provider and model; CLI flags override them", async
     );
     expect(overridden.exitCode).toBe(0);
     expect(fromCli).toMatchObject({
-      provider: "anthropic",
+      provider: "openai-compatible",
       model: "from-cli",
-      apiKey: "sk-anthropic",
+      apiKey: "sk-compatible",
     });
 
     let providerOnly: CreateModelInput | undefined;
-    const switched = await run(["-p", "hello", "--provider", "anthropic"], {
-      env: { ANTHROPIC_API_KEY: "sk-anthropic", OPENAI_API_KEY: "sk-openai" },
+    const switched = await run(["-p", "hello", "--provider", "openai-compatible", "--base-url", "http://127.0.0.1:8080/v1"], {
+      env: { OPENAI_COMPATIBLE_API_KEY: "sk-compatible", OPENAI_API_KEY: "sk-openai" },
       cwd: dir,
       createModel: async (input) => {
         providerOnly = input;
@@ -158,8 +157,8 @@ test("project config selects provider and model; CLI flags override them", async
     });
     expect(switched.exitCode).toBe(0);
     expect(providerOnly).toMatchObject({
-      provider: "anthropic",
-      model: DEFAULT_MODEL_IDS.anthropic,
+      provider: "openai-compatible",
+      model: DEFAULT_MODEL_IDS["openai-compatible"],
     });
   });
 });
@@ -240,7 +239,7 @@ test("API keys in config.json are rejected and not printed", async () => {
     );
     const result = await run(["-p", "hello"], {
       cwd: dir,
-      env: { ANTHROPIC_API_KEY: "sk-env" },
+      env: { OPENAI_API_KEY: "sk-env" },
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("API key");
@@ -337,7 +336,7 @@ test("invalid --max-turns and unknown options fail with actionable errors", asyn
 test("--env-file supplies credentials and is outranked by --api-key", async () => {
   await withTempDir(async (dir) => {
     const envFile = join(dir, "keys.env");
-    await writeFile(envFile, "ANTHROPIC_API_KEY=sk-from-file\n");
+    await writeFile(envFile, "OPENAI_API_KEY=sk-from-file\n");
 
     let fromFile: string | undefined;
     const loaded = await run(["-p", "hello", "--env-file", envFile], {
@@ -355,7 +354,7 @@ test("--env-file supplies credentials and is outranked by --api-key", async () =
     const overridden = await run(
       ["-p", "hello", "--env-file", envFile, "--api-key", "sk-runtime"],
       {
-        env: { ANTHROPIC_API_KEY: "sk-env" },
+        env: { OPENAI_API_KEY: "sk-env" },
         cwd: dir,
         createModel: async ({ apiKey }) => {
           fromFlag = apiKey;
@@ -371,10 +370,10 @@ test("--env-file supplies credentials and is outranked by --api-key", async () =
 test("--env-file overrides process environment keys", async () => {
   await withTempDir(async (dir) => {
     const envFile = join(dir, "keys.env");
-    await writeFile(envFile, "ANTHROPIC_API_KEY=sk-from-file\n");
+    await writeFile(envFile, "OPENAI_API_KEY=sk-from-file\n");
     let used: string | undefined;
     const result = await run(["-p", "hello", "--env-file", envFile], {
-      env: { ANTHROPIC_API_KEY: "sk-env" },
+      env: { OPENAI_API_KEY: "sk-env" },
       cwd: dir,
       createModel: async ({ apiKey }) => {
         used = apiKey;
@@ -388,7 +387,7 @@ test("--env-file overrides process environment keys", async () => {
 
 test("missing --env-file path fails without loading a project .env", async () => {
   await withTempDir(async (dir) => {
-    await writeFile(join(dir, ".env"), "ANTHROPIC_API_KEY=sk-from-dotenv\n");
+    await writeFile(join(dir, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n");
     const result = await run(["-p", "hello", "--env-file", join(dir, "missing.env")], {
       env: {},
       cwd: dir,
@@ -433,39 +432,6 @@ test("compatible connection options from config reach createModel", async () => 
       extraBody: { temperature: 0.2 },
       auth: "optional",
     });
-  });
-});
-
-test("Anthropic config overrides appear in the prepared provider request", async () => {
-  await withTempDir(async (dir) => {
-    await mkdir(join(dir, ".schway"));
-    await writeFile(
-      join(dir, ".schway", "config.json"),
-      JSON.stringify({
-        provider: "anthropic",
-        model: "claude-secret-lab",
-        maxOutput: 2048,
-      }),
-    );
-    const captured: { body?: unknown; calls: number } = { calls: 0 };
-    const result = await run(["-p", "hello"], {
-      cwd: dir,
-      env: { ANTHROPIC_API_KEY: "sk-anthropic" },
-      fetch: async (_input, init) => {
-        captured.calls += 1;
-        captured.body = init?.body ? JSON.parse(String(init.body)) : undefined;
-        return new Response(encodeAnthropicSse(ANTHROPIC_TEXT), {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        });
-      },
-    });
-    expect(result.exitCode).toBe(0);
-    expect(captured.calls).toBe(1);
-    const body = captured.body as { model: string; max_tokens: number };
-    expect(body.model).toBe("claude-secret-lab");
-    expect(body.max_tokens).toBe(2048);
-    expect(result.stdout).toContain("Hello");
   });
 });
 
@@ -571,20 +537,20 @@ test("unknown catalog models still run with conservative max output", async () =
   expect(body.max_output_tokens).toBe(16_384);
 });
 
-test("zero-config Anthropic request uses the catalog default model", async () => {
+test("zero-config OpenAI request uses the catalog default model", async () => {
   const captured: { body?: unknown } = {};
   const result = await run(["-p", "hello"], {
-    env: { ANTHROPIC_API_KEY: "sk-anthropic" },
+    env: { OPENAI_API_KEY: "sk-openai" },
     fetch: async (_input, init) => {
       captured.body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      return new Response(encodeAnthropicSse(ANTHROPIC_TEXT), {
+      return new Response(encodeOpenAISse(OPENAI_TEXT), {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
       });
     },
   });
   expect(result.exitCode).toBe(0);
-  const body = captured.body as { model: string; max_tokens: number };
-  expect(body.model).toBe(DEFAULT_MODEL_IDS.anthropic);
-  expect(body.max_tokens).toBe(16_384);
+  const body = captured.body as { model: string; max_output_tokens: number };
+  expect(body.model).toBe(DEFAULT_MODEL_IDS.openai);
+  expect(body.max_output_tokens).toBe(16_384);
 });

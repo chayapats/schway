@@ -7,16 +7,6 @@ import {
 } from "../src/model/catalog.ts";
 
 test("known default models expose context, output, tool, and thinking metadata", () => {
-  const anthropic = lookupModel("anthropic", DEFAULT_MODEL_IDS.anthropic);
-  expect(anthropic).toEqual({
-    id: DEFAULT_MODEL_IDS.anthropic,
-    provider: "anthropic",
-    contextWindow: 200_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: true,
-  });
-
   const openai = lookupModel("openai", DEFAULT_MODEL_IDS.openai);
   expect(openai.provider).toBe("openai");
   expect(openai.id).toBe(DEFAULT_MODEL_IDS.openai);
@@ -47,7 +37,7 @@ test("unknown model IDs use documented conservative defaults", () => {
 });
 
 test("explicit context and output overrides win over catalog and unknown defaults", () => {
-  const known = lookupModel("anthropic", DEFAULT_MODEL_IDS.anthropic, {
+  const known = lookupModel("openai", DEFAULT_MODEL_IDS.openai, {
     contextWindow: 50_000,
     maxOutput: 2_048,
   });
@@ -55,7 +45,7 @@ test("explicit context and output overrides win over catalog and unknown default
   expect(known.maxOutput).toBe(2_048);
   expect(known.supportsTools).toBe(true);
 
-  const unknown = lookupModel("anthropic", "claude-secret-lab", {
+  const unknown = lookupModel("openai", "secret-lab", {
     contextWindow: 8_000,
     maxOutput: 512,
   });
@@ -66,14 +56,9 @@ test("explicit context and output overrides win over catalog and unknown default
 
 test("the built-in catalog is a small static list of known models", () => {
   const models = listCatalog();
-  expect(models.length).toBeGreaterThanOrEqual(3);
+  expect(models.length).toBeGreaterThanOrEqual(2);
   expect(models.length).toBeLessThanOrEqual(12);
-  expect(
-    models.some(
-      (model) =>
-        model.provider === "anthropic" && model.id === DEFAULT_MODEL_IDS.anthropic,
-    ),
-  ).toBe(true);
+  expect(models.some((model) => model.provider === "anthropic")).toBe(false);
   expect(
     models.some(
       (model) => model.provider === "openai" && model.id === DEFAULT_MODEL_IDS.openai,

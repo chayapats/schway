@@ -11,7 +11,6 @@ export const LOGIN_CHOICES = [
   { label: "ChatGPT · Device approval", action: { kind: "codex", device: true } },
   { label: "ChatGPT · Paste browser callback", action: { kind: "callback" } },
   { label: "OpenAI API key", action: { kind: "api-key", provider: "openai" } },
-  { label: "Anthropic API key", action: { kind: "api-key", provider: "anthropic" } },
   { label: "OpenAI-compatible API key", action: { kind: "api-key", provider: "openai-compatible" } },
 ] as const;
 
@@ -199,7 +198,7 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   protected parseCredentialTarget(args: string): CredentialTarget | undefined {
     const provider = args.trim().toLowerCase();
-    if (!["anthropic", "openai", "openai-compatible"].includes(provider)) {
+    if (!["openai", "openai-compatible"].includes(provider)) {
       this.fail(LOGIN_USAGE);
       return;
     }

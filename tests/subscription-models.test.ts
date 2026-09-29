@@ -109,7 +109,7 @@ test("subscription activation preserves compatible thinking and shadows unsuppor
   await withTempDir(async root => {
     const home = join(root, "home");
     await mkdir(join(home, ".schway"), { recursive: true });
-    await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" }));
+    await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai", model: "gpt-5.4", thinking: "high" }));
     const editor = await loadConfigEditor({ home, workspaceRoot: root });
     editor.setModelCapabilities([{ id: "real-codex", defaultThinking: "low", supportedThinking: ["low"] }]);
     await (await editor.prepareSubscriptionModel("real-codex")).commit();
@@ -158,17 +158,17 @@ test("explicit Codex login activates the account model and reasoning only in thi
 test("denied login never switches provider or fetches subscription models", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
-    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
     let discovered = 0;
     const controller = new TuiController({ session: createSession(), sessionId: "denied-login", workspace,
-      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      configEditor: editor, provider: "openai", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
       credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: false as const, message: "Denied" }), listSubscriptionCatalog: async () => { discovered++; return []; } },
       stageSettings: async () => { throw Error("unexpected adapter change"); },
     });
     try {
       expect(await controller.login("codex")).toBe(false);
-      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.snapshot().provider).toBe("openai");
       expect(discovered).toBe(0);
     } finally { controller.dispose(); }
   });
@@ -177,12 +177,12 @@ test("denied login never switches provider or fetches subscription models", asyn
 test("cancelling post-login discovery leaves the previous provider active and retains sign-in", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
-    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
     let begin!: () => void;
     const requested = new Promise<void>(resolve => { begin = resolve; });
     const controller = new TuiController({ session: createSession(), sessionId: "cancel-discovery", workspace,
-      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      configEditor: editor, provider: "openai", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
       credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }),
         listSubscriptionCatalog: signal => { begin(); return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })); } },
       stageSettings: async () => { throw Error("unexpected adapter change"); },
@@ -193,7 +193,7 @@ test("cancelling post-login discovery leaves the previous provider active and re
       expect(controller.running).toBe(true);
       controller.cancel();
       expect(await pending).toBe(false);
-      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.snapshot().provider).toBe("openai");
     } finally { controller.dispose(); }
   });
 });
@@ -237,13 +237,13 @@ test("cancelling after secure-store commit reports saved credentials and blocks 
 test("a signed-in account can retry discovery in /model without repeating OAuth", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
-    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
     let attempts = 0;
     let oauthAttempts = 0;
     const store = fakeCredentialStore();
     const controller = new TuiController({ session: createSession(), sessionId: "retry-catalog", workspace,
-      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      configEditor: editor, provider: "openai", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: async ({ onSaved }) => {
         oauthAttempts++;
         await store.set(codexSubscriptionIdentity(), "saved-account-credential");
@@ -259,11 +259,11 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
     try {
       expect(await controller.login("codex")).toBe(false);
       expect(await store.get(codexSubscriptionIdentity())).toBe("saved-account-credential");
-      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.snapshot().provider).toBe("openai");
       expect(controller.openModelPicker()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).map(entry => entry.modelId)).toEqual(["real-codex"]);
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.provider === "anthropic" && entry.otherProvider)).toBe(true);
+      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.provider === "openai-compatible" && entry.otherProvider)).toBe(true);
       controller.searchModels("real-codex");
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
@@ -277,10 +277,10 @@ test("activation failure keeps saved credentials and gives a redacted model retr
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const store = fakeCredentialStore();
-    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "anthropic" } });
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
     const controller = new TuiController({ session: createSession(), sessionId: "activation-failure", workspace,
-      configEditor: editor, provider: "anthropic", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "anthropic" }), contextManager: createContextManager(workspace),
+      configEditor: editor, provider: "openai", modelId: editor.settings.model,
+      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
         codexLogin: async ({ onSaved }) => {
           await store.set(codexSubscriptionIdentity(), "saved-credential-secret");
@@ -292,7 +292,7 @@ test("activation failure keeps saved credentials and gives a redacted model retr
     try {
       expect(await controller.login("codex")).toBe(false);
       expect(await store.get(codexSubscriptionIdentity())).toBe("saved-credential-secret");
-      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.snapshot().provider).toBe("openai");
       const text = JSON.stringify(controller.snapshot());
       expect(text).toContain("Retry /model");
       expect(text).not.toContain("native-activation-secret-sentinel");
@@ -548,7 +548,7 @@ test("subscription picker distinguishes other provider choices from account mode
     subscriptionModels: ["real-codex"], profiles: { local: { baseUrl: "http://127.0.0.1:11434/v1", model: "local-model" } } });
   expect(entries.some(entry => entry.provider === "openai" && entry.modelId === "gpt-5.4" && entry.authRoute === "api-key")).toBe(true);
   expect(entries.find(entry => entry.provider === "openai" && entry.modelId === "real-codex")?.otherProvider).toBeFalsy();
-  expect(entries.find(entry => entry.provider === "anthropic")?.otherProvider).toBe(true);
+  expect(entries.find(entry => entry.provider === "openai-compatible" && !entry.profile)?.otherProvider).toBe(true);
   expect(entries.find(entry => entry.profile === "local")?.otherProvider).toBe(true);
 });
 
@@ -582,7 +582,7 @@ test("explicit Codex preference discovers models even before switching from anot
     const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root });
     const controller = new TuiController({
       session: createSession(), sessionId: "switch-provider", workspace, configEditor,
-      provider: "anthropic", modelId: "claude-sonnet-4-6", model: createScriptedModel({ provider: "anthropic" }),
+      provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "openai" }),
       contextManager: createContextManager(workspace),
       credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: async () => ["real-codex"] },
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
@@ -592,7 +592,7 @@ test("explicit Codex preference discovers models even before switching from anot
       await Bun.sleep(0);
       expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).map(entry => entry.modelId)).toEqual(["real-codex"]);
       expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
-      expect(controller.snapshot().provider).toBe("anthropic");
+      expect(controller.snapshot().provider).toBe("openai");
       expect(await controller.selectModel("openai/real-codex")).toBe(true);
       expect(controller.snapshot().modelId).toBe("real-codex");
     } finally { controller.dispose(); }

@@ -61,8 +61,8 @@ import { InteractiveMemory } from "./node_modules/schway/src/config/interactive-
 const scenario = process.env.STARTUP_SCENARIO;
 const values = new Map();
 if (scenario.startsWith("returning")) {
-  values.set("api-key:anthropic", "installed-fixture-key");
-  await (await InteractiveMemory.load(process.env.HOME!, process.cwd())).write({ provider: "anthropic", model: "claude-sonnet-4-6" });
+  values.set("api-key:openai", "installed-fixture-key");
+  await (await InteractiveMemory.load(process.env.HOME!, process.cwd())).write({ provider: "openai", openaiAuth: "api-key", model: "gpt-5.4" });
 }
 if (scenario.startsWith("invalid-model")) {
   values.set("codex-subscription:chatgpt", JSON.stringify({ accessToken: "fixture-subscription", expiresAt: Date.now() + 600_000 }));
@@ -120,7 +120,7 @@ void (async () => {
   assert(initial.includes(process.cwd().split("/").at(-1)), "workspace missing");
   assert(!initial.includes("Session ready.") && !initial.includes("Interactive memory:"), "recurring transcript guidance");
   if (scenario.startsWith("returning")) {
-    assert(initial.includes("claude-sonnet-4-6") && initial.includes("Type a task"), "remembered readiness missing");
+    assert(initial.includes("gpt-5.4") && initial.includes("Type a task"), "remembered readiness missing");
     assert(!initial.includes("Connect to get started"), "redundant setup");
     if (scenario.startsWith("returning-appearance")) {
       const expected = scenario.endsWith("-env") ? "#f7f7f4" : "#0e1117";
@@ -148,14 +148,14 @@ void (async () => {
     terminal.mockInput.pressArrow("left");
     const cursor = editor.cursorOffset;
     terminal.mockInput.pressKey("l", { meta: true });
-    await settle(() => screenIncludes("Anthropic API key"), "sign-in choices");
-    assert(terminal.captureCharFrame().includes("Anthropic API key"), "keyboard connect unavailable");
+    await settle(() => screenIncludes("OpenAI API key"), "sign-in choices");
+    assert(terminal.captureCharFrame().includes("OpenAI API key"), "keyboard connect unavailable");
     terminal.mockInput.pressEscape();
     await settle(() => editor.focused && editor.plainText === draft && editor.cursorOffset === cursor && !screenIncludes("Sign in ·"), "cancelled setup");
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "cancel lost draft/cursor");
     terminal.mockInput.pressKey("l", { meta: true });
-    await settle(() => screenIncludes("Anthropic API key"), "reopened sign-in choices");
-    for (let i = 0; i < 4; i++) terminal.mockInput.pressArrow("down");
+    await settle(() => screenIncludes("OpenAI API key"), "reopened sign-in choices");
+    for (let i = 0; i < 3; i++) terminal.mockInput.pressArrow("down");
     terminal.mockInput.pressEnter();
     await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");

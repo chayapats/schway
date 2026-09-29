@@ -76,12 +76,5 @@ export async function loadProviderModel(
       fetch: fetchFn,
     });
   }
-  const { createAnthropicModel } = await import("./providers/anthropic.ts");
-  return createAnthropicModel({
-    apiKey: input.apiKey ?? "",
-    model: input.model,
-    maxTokens: input.maxTokens,
-    thinking: input.thinking,
-    fetch: fetchFn,
-  });
+  throw new Error(`Unsupported provider: ${String(input.provider)}`);
 }

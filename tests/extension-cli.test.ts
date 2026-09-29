@@ -76,7 +76,7 @@ for (const mode of ["headless", "interactive"]) {
       let stderr = "";
       let modelLoads = 0;
       const code = await runCli([...(mode === "headless" ? ["-p", "hello"] : []), "--extension", "broken.ts"], {
-        cwd: work, env: { HOME: home, ANTHROPIC_API_KEY: "private-key" },
+        cwd: work, env: { HOME: home, OPENAI_API_KEY: "private-key" },
         stdout: { write() {} }, stderr: { write: (text) => { stderr += text; } },
         createModel: async () => { modelLoads++; return createScriptedModel(); },
       });
@@ -124,7 +124,7 @@ test("headless /skills reports a failed extension initializer without listing or
     let stderr = "";
     let modelLoads = 0;
     const code = await runCli(["--extension", "throwing.ts", "-p", "/skills"], {
-      cwd: work, env: { HOME: home, ANTHROPIC_API_KEY: "private-key" },
+      cwd: work, env: { HOME: home, OPENAI_API_KEY: "private-key" },
       stdout: { write: (text) => { stdout += text; } }, stderr: { write: (text) => { stderr += text; } },
       createModel: async () => { modelLoads++; return createScriptedModel(); },
     });

@@ -141,7 +141,7 @@ test("provider adapters load lazily through the shared loader", async () => {
     expect(source.includes('from "../model/providers/codex-subscription.ts"')).toBe(false);
   }
   const loader = await Bun.file("src/model/loader.ts").text();
-  expect(loader.includes('import("./providers/anthropic.ts")')).toBe(true);
+  expect(loader.includes("anthropic")).toBe(false);
   expect(loader.includes('import("./providers/openai.ts")')).toBe(true);
   expect(loader.includes('import("./providers/openai-compatible.ts")')).toBe(true);
   expect(loader.includes('import("./providers/codex-subscription.ts")')).toBe(true);

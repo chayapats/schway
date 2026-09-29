@@ -14,7 +14,7 @@ async function withHome(run: (home: string) => Promise<void>) {
 test("debug opt-in keeps runtime JSONL and durable semantic JSONL separate", async () => withHome(async home => {
   let stdout = "";
   const invoke = (flags: string[]) => runCli(["-p", "hello", "--json", ...flags], {
-    cwd: home, env: { HOME: home, ANTHROPIC_API_KEY: "secret-sentinel" },
+    cwd: home, env: { HOME: home, OPENAI_API_KEY: "secret-sentinel" },
     stdout: { write(chunk) { stdout += chunk; } }, stderr: { write() {} },
     model: createScriptedModel({ text: "hello" }),
   });
@@ -48,7 +48,7 @@ test("retries and errors log sanitized metadata without streamed prompt or tool 
 }));
 
 test("configuration and model-load failures log only safe categories", async () => withHome(async home => {
-  const io = { cwd: home, env: { HOME: home, ANTHROPIC_API_KEY: "key" }, stdout: { write() {} }, stderr: { write() {} } };
+  const io = { cwd: home, env: { HOME: home, OPENAI_API_KEY: "key" }, stdout: { write() {} }, stderr: { write() {} } };
   expect(await runCli(["-p", "hello", "--debug", "--provider", "openai-compatible"], io)).toBe(1);
   const sensitiveError = "unknown-provider-error-echoed-private-prompt";
   expect(await runCli(["-p", "hello", "--debug"], { ...io, createModel: async () => { throw new Error(sensitiveError); } })).toBe(1);

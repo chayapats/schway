@@ -37,6 +37,7 @@ import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
 import { loadProviderModel } from "../model/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
+import { ANTHROPIC_REMOVED_MESSAGE } from "../config/removed-provider.ts";
 import {
   cliOverridesFromArgs,
   hasCliConnectionOptions,
@@ -95,6 +96,10 @@ export interface CliIo {
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv[0] === "doctor") {
     const parsedDoctor = parseArgs(argv.slice(1));
+    if ("error" in parsedDoctor && parsedDoctor.error === ANTHROPIC_REMOVED_MESSAGE) {
+      io.stderr.write(`${parsedDoctor.error}\n`);
+      return 1;
+    }
     if ("error" in parsedDoctor || parsedDoctor.args.prompt || parsedDoctor.args.resume || parsedDoctor.args.branch) {
       io.stderr.write(`Invalid doctor options. ${"error" in parsedDoctor ? "Check doctor flags." : "Doctor does not accept prompts or session resume."}\n${USAGE}\n`);
       return 2;
@@ -114,7 +119,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
-    io.stderr.write(`${parsed.error}\n${USAGE}\n`);
+    io.stderr.write(parsed.error === ANTHROPIC_REMOVED_MESSAGE ? `${parsed.error}\n` : `${parsed.error}\n${USAGE}\n`);
     return 1;
   }
 
@@ -413,10 +418,6 @@ function collectSecrets(
   const secrets: string[] = [];
   if (runtimeApiKey) {
     secrets.push(runtimeApiKey);
-  }
-  const anthropicKey = env.ANTHROPIC_API_KEY;
-  if (anthropicKey) {
-    secrets.push(anthropicKey);
   }
   const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
   if (compatibleKey) secrets.push(compatibleKey);

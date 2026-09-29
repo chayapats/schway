@@ -65,19 +65,21 @@ test("headless and interactive entry points wire all seven core tools", async ()
   }
 });
 
-test("all three provider families are selectable with headless and interactive modes", async () => {
+test("both provider families are selectable with headless and interactive modes", async () => {
   const args = await source("src/cli/args.ts");
-  for (const provider of ["anthropic", "openai", "openai-compatible"]) {
+  for (const provider of ["openai", "openai-compatible"]) {
     expect(args).toContain(provider);
   }
+  expect(args).not.toContain('"anthropic"');
   // Headless prompt mode, runtime JSONL streaming, and session resume.
   for (const flag of ["-p", "--json", "--resume"]) {
     expect(args).toContain(flag);
   }
   const loader = await source("src/model/loader.ts");
-  for (const adapter of ["anthropic", "openai", "openai-compatible"]) {
+  for (const adapter of ["openai", "openai-compatible"]) {
     expect(loader).toContain(adapter);
   }
+  expect(loader).not.toContain("anthropic");
   // Interactive entry point exists alongside headless main.
   expect(await Bun.file("src/tui/app.ts").exists()).toBe(true);
   expect(await Bun.file("src/tui/controller.ts").exists()).toBe(true);
@@ -166,6 +168,12 @@ test("npm pack installs the public extension API and completes a headless tool r
     ]) {
       expect(entries.includes(required)).toBe(true);
     }
+    // The removed Anthropic route leaves neither its adapter nor its SDK in the artifact.
+    expect(entries.includes("package/src/model/providers/anthropic.ts")).toBe(false);
+    const packedManifest = Bun.spawn(["tar", "-xzOf", join(dir, tarball), "package/package.json"], { stdout: "pipe", stderr: "pipe" });
+    const manifestText = await new Response(packedManifest.stdout).text();
+    expect(await packedManifest.exited).toBe(0);
+    expect(manifestText.includes("@anthropic-ai/sdk")).toBe(false);
     // Tests, CI config, and repo docs stay out of the installed artifact.
     expect(entries.some((entry) => entry.startsWith("package/tests/"))).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/.github/"))).toBe(false);

@@ -771,10 +771,6 @@ function collectSecrets(
   if (runtimeApiKey) {
     secrets.push(runtimeApiKey);
   }
-  const anthropicKey = env.ANTHROPIC_API_KEY;
-  if (anthropicKey) {
-    secrets.push(anthropicKey);
-  }
   const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
   if (compatibleKey) secrets.push(compatibleKey);
   const openaiKey = env.OPENAI_API_KEY;

@@ -8,7 +8,6 @@ locked store does not stop these runs.
 
 | Provider | Environment override | Stored identity |
 | --- | --- | --- |
-| `anthropic` | `ANTHROPIC_API_KEY` | Native Anthropic |
 | `openai` | `OPENAI_API_KEY` | Native OpenAI |
 | `openai-compatible` | `OPENAI_COMPATIBLE_API_KEY` | Canonical configured endpoint |
 
@@ -35,7 +34,6 @@ schway
 ```
 
 ```text
-/login anthropic
 /login openai
 /logout openai
 ```
