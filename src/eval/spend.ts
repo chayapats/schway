@@ -24,15 +24,15 @@ const PRICES: Record<string, TokenPrice> = {
 
 /** Resolve a route's price: explicit flags win, offline and subscription routes are free, unknown paid models are `undefined`. */
 export function resolvePrice(provider: string, model: string, explicit?: TokenPrice): TokenPrice | undefined {
-  if (explicit) return explicit;
   if (provider === "scripted" || provider === "subscription") return FREE;
+  if (explicit) return explicit;
   return PRICES[`${provider}:${model}`];
 }
 
 /** Convert recorded token totals to USD without treating missing usage as proof of zero spend. */
 export function estimateSpendUsd(metrics: Pick<EvalMetrics, "inputTokens" | "outputTokens" | "unknownInputAttempts" | "unknownOutputAttempts">, price: TokenPrice): SpendEstimate {
   const usd = ((metrics.inputTokens ?? 0) * price.inputPerMillion + (metrics.outputTokens ?? 0) * price.outputPerMillion) / 1_000_000;
-  return { usd: roundUsd(usd), exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.inputTokens !== null };
+  return { usd: roundUsd(usd), exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.inputTokens !== null && metrics.outputTokens !== null };
 }
 
 /** Round to micro-dollars so float noise never shows up in reports. */
@@ -42,5 +42,5 @@ export function roundUsd(usd: number): number {
 
 /** Format a USD amount for reports. */
 export function formatUsd(usd: number): string {
-  return `$${usd.toFixed(2)}`;
+  return `$${usd > 0 && usd < 0.01 ? usd.toPrecision(2) : usd.toFixed(2)}`;
 }

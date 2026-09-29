@@ -80,23 +80,25 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   catch { console.error("Cannot reserve eval artifact path (it must be a new file in an existing directory)."); return 2; }
   try {
     const results: CodingEvalResult[] = [];
-    let spent = 0, capHit = false;
+    let spent = 0, capHit = false, spendUnknown = false;
     const highestCase = entries.map(() => 0);
     const total = entries.length * caseIds.length;
     for (const [entryIndex, entry] of entries.entries()) for (const id of caseIds) {
       const { provider, model: modelId } = entry;
-      // A paid case is assumed to cost as much as that route's costliest case so far; the first runs unless the cap is already spent. Free routes never spend, so they always run.
       const price = prices[entryIndex] ?? FREE;
       const paid = price.inputPerMillion > 0 || price.outputPerMillion > 0;
-      if (paid && (spent >= capUsd || spent + highestCase[entryIndex]! > capUsd)) {
+      const apiKey = keyFor(provider);
+      const startable = provider === "scripted" || (!!apiKey && (provider !== "openai-compatible" || validEndpoint(baseUrl)));
+      // Soft cap: a paid case is assumed to cost as much as that route's costliest case so far (the first runs unless the cap is spent),
+      // and unreported usage stops further paid cases. Free routes never spend, so they always run; unstartable routes stay prerequisite skips.
+      if (startable && paid && (spendUnknown || spent >= capUsd || spent + highestCase[entryIndex]! > capUsd)) {
         capHit = true;
         results.push({ ...spendCapSkippedEval(provider, modelId, sourceRevision, settings, id), spendUsd: 0, spendExact: true });
         console.log(`${id} ${provider}/${modelId}: skipped/spend_cap`);
         continue;
       }
-      const apiKey = keyFor(provider);
       let result: CodingEvalResult;
-      if (provider !== "scripted" && (!apiKey || (provider === "openai-compatible" && !validEndpoint(baseUrl)))) {
+      if (!startable) {
         result = skippedCodingEval(provider, modelId, sourceRevision, settings, id);
       } else {
         try {
@@ -108,7 +110,9 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
           result = failedCodingEval(provider, modelId, sourceRevision, settings, id);
         }
       }
-      const spend = estimateSpendUsd(result.metrics, prices[entryIndex] ?? FREE);
+      const started = result.outcome !== "skipped_prerequisites";
+      const spend = started ? estimateSpendUsd(result.metrics, price) : { usd: 0, exact: true };
+      if (started && paid && !spend.exact) spendUnknown = true;
       result.spendUsd = spend.usd;
       result.spendExact = spend.exact;
       spent += spend.usd;

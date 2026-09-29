@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runEvalCli } from "../src/eval/cli.ts";
-import { estimateSpendUsd, resolvePrice } from "../src/eval/spend.ts";
+import { estimateSpendUsd, formatUsd, resolvePrice } from "../src/eval/spend.ts";
 import type { Model } from "../src/model/model.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -15,6 +15,7 @@ function usageModel(provider: string, id: string): Model {
 }
 
 const ENV = { OPENAI_API_KEY: "fixture-secret" };
+const ENV_KEY = ENV;
 const deps = { model: (provider: string, id: string) => usageModel(provider, id) };
 
 async function run(dir: string, args: string[], env: Record<string, string> = ENV) {
@@ -33,6 +34,10 @@ test("price table covers known models and explicit prices override it", () => {
   expect(resolvePrice("openai", "unheard-of")).toBeUndefined();
   expect(resolvePrice("openai", "unheard-of", { inputPerMillion: 2, outputPerMillion: 4 })).toEqual({ inputPerMillion: 2, outputPerMillion: 4 });
   expect(resolvePrice("scripted", "offline-v1")).toEqual({ inputPerMillion: 0, outputPerMillion: 0 });
+  expect(resolvePrice("scripted", "offline-v1", { inputPerMillion: 9, outputPerMillion: 9 })).toEqual({ inputPerMillion: 0, outputPerMillion: 0 });
+  expect(formatUsd(0.004)).toBe("$0.0040");
+  expect(formatUsd(0)).toBe("$0.00");
+  expect(formatUsd(1.256)).toBe("$1.26");
 });
 
 test("spend comes from reported usage and flags incomplete usage as a lower bound", () => {
@@ -40,6 +45,7 @@ test("spend comes from reported usage and flags incomplete usage as a lower boun
   const base = { inputTokens: 2_000_000, outputTokens: 100_000, unknownInputAttempts: 0, unknownOutputAttempts: 0 };
   expect(estimateSpendUsd(base, price)).toEqual({ usd: 3.5, exact: true });
   expect(estimateSpendUsd({ ...base, unknownOutputAttempts: 1 }, price)).toEqual({ usd: 3.5, exact: false });
+  expect(estimateSpendUsd({ ...base, outputTokens: null }, price)).toEqual({ usd: 2.5, exact: false });
   expect(estimateSpendUsd({ inputTokens: null, outputTokens: null, unknownInputAttempts: 1, unknownOutputAttempts: 1 }, price)).toEqual({ usd: 0, exact: false });
 });
 
@@ -116,5 +122,33 @@ test("free routes keep running after the cap stops a paid route", async () => {
     const scripted = artifact.results.filter((r: { provider: string }) => r.provider === "scripted");
     expect(scripted).toHaveLength(7);
     expect(scripted.every((r: { outcome: string }) => r.outcome !== "skipped_spend_cap")).toBe(true);
+  });
+});
+
+test("blank price operands are rejected", async () => {
+  expect(await runEvalCli(["--provider", "openai", "--model", "x", "--allow-paid", "--input-price", "", "--output-price", ""], ENV_KEY)).toBe(2);
+});
+
+test("a route without prerequisites stays a prerequisite skip when the cap trips", async () => {
+  await withTempDir(async dir => {
+    const { code, artifact } = await run(dir, ["--matrix", "openai:gpt-5,anthropic:claude-sonnet-4-5", "--allow-paid", "--case", "all", "--max-spend", "3"]);
+    expect(code).toBe(3);
+    const anthropic = artifact.results.filter((r: { provider: string }) => r.provider === "anthropic");
+    expect(anthropic.every((r: { outcome: string }) => r.outcome === "skipped_prerequisites")).toBe(true);
+    expect(anthropic.every((r: { spendExact: boolean }) => r.spendExact)).toBe(true);
+  });
+});
+
+test("unreported usage on a paid route stops further paid cases", async () => {
+  await withTempDir(async dir => {
+    const silent: Model = { provider: "openai", id: "gpt-5", async *stream() {
+      yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "text", text: "Done" }] } };
+    } };
+    const output = join(dir, "silent.json");
+    const code = await runEvalCli(["--provider", "openai", "--model", "gpt-5", "--allow-paid", "--case", "all", "--output", output], ENV, { model: () => silent });
+    const artifact = JSON.parse(await readFile(output, "utf8"));
+    expect(code).toBe(3);
+    expect(artifact.results[0].outcome).not.toBe("skipped_spend_cap");
+    expect(artifact.results[1].outcome).toBe("skipped_spend_cap");
   });
 });
