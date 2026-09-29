@@ -7,6 +7,8 @@ export const MAX_SMOKE_WIRE_BYTES = 256 * 1024;
 export function boundedSmokeFetch(options: {
   signal: AbortSignal;
   onLimit: () => void;
+  /** Observe only request start and numeric response status, including retries/refresh. */
+  onProgress?: (event: { type: "request" } | { type: "response"; status: number }) => void;
   fetch?: FetchLike;
 }): FetchLike {
   let bytes = 0;
@@ -17,7 +19,9 @@ export function boundedSmokeFetch(options: {
     const signal = originalSignal ? AbortSignal.any([options.signal, originalSignal]) : options.signal;
     // Preserve request bodies/headers but never let an SDK or Request follow a redirect:
     // an HTTPS endpoint must not forward Bearer credentials to a plaintext target.
+    options.onProgress?.({ type: "request" });
     const response = await (options.fetch ?? fetch)(input, { ...init, signal, redirect: "error" });
+    options.onProgress?.({ type: "response", status: response.status });
     if (!response.body) return response;
     const reader = response.body.getReader();
     const body = new ReadableStream<Uint8Array>({

@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
-import { access, readFile } from "node:fs/promises";
+import { symlinkSync, writeFileSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLiveProcesses } from "../src/live/process.ts";
@@ -75,6 +76,76 @@ test("cancelled or expired workspace setup never spawns a paid worker", async ()
       await expect(access(root)).rejects.toThrow();
     }
   });
+}, 10_000);
+
+test("hard-stop progress rejects malformed, oversized and symlinked checkpoints without leaking content", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    const secretPath = join(temp, "private.json");
+    const diagnostics = { modelAttemptsStarted: 1, modelRoundsCompleted: 0, toolResultsCompleted: 0,
+      providerRetries: 0, httpRequestsStarted: 1, httpResponsesReceived: 1, lastHttpStatus: 503 };
+    const progress = { authSource: "env", diagnostics };
+    await writeFile(secretPath, JSON.stringify(progress));
+    const invalid = [
+      JSON.stringify({ ...progress, authSource: "PRIVATE_SECRET" }),
+      JSON.stringify({ ...progress, status: "passed", toolRoundTrip: true }),
+      JSON.stringify({ ...progress, diagnostics: { ...diagnostics, providerBody: "PRIVATE_SECRET" } }),
+      JSON.stringify({ ...progress, diagnostics: { ...diagnostics, lastHttpStatus: "PRIVATE_SECRET" } }),
+      JSON.stringify({ ...progress, diagnostics: { ...diagnostics, httpRequestsStarted: -1 } }),
+      JSON.stringify({ ...progress, diagnostics: { ...diagnostics, modelRoundsCompleted: 2 } }),
+      "PRIVATE_SECRET".repeat(100),
+      "symlink",
+    ];
+    for (const checkpoint of invalid) {
+      let root = "";
+      const report = await runLiveProcesses({ ...settings(["openai-api-key"], 200), env: { SCHWAY_FIXTURE_MODE: "hang-stream" } },
+        { workerFile: fixture, onWorkspace: path => {
+          root = path;
+          if (checkpoint === "symlink") symlinkSync(secretPath, join(path, ".smoke-progress.json"));
+          else writeFileSync(join(path, ".smoke-progress.json"), checkpoint);
+        } });
+      expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "unavailable", toolRoundTrip: false });
+      expect(report.scenarios[0]).not.toHaveProperty("diagnostics");
+      expect(JSON.stringify(report)).not.toMatch(/PRIVATE_SECRET|private\.json/);
+      await expect(access(root)).rejects.toThrow();
+    }
+    expect(await readFile(secretPath, "utf8")).toBe(JSON.stringify(progress));
+  });
+}, 10_000);
+
+test("framed replies reject malformed numeric diagnostics without publishing provider content", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    const workerFile = join(temp, "bad-diagnostics.ts");
+    await writeFile(workerFile, `let raw = "";
+for await (const chunk of Bun.stdin.stream()) raw += new TextDecoder().decode(chunk);
+const input = JSON.parse(raw);
+console.log(JSON.stringify({ provider: input.provider, model: input.model, authSource: "env", status: "passed", reason: "verified",
+  durationMs: 1, toolRoundTrip: true, diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
+    providerRetries: 0, httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200, providerBody: "PRIVATE_SECRET" } }));`);
+    const report = await runLiveProcesses(settings(["openai-api-key"]), { workerFile });
+    expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error", toolRoundTrip: false });
+    expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
+  });
+});
+
+test("supervised timeout retains HTTP 503 and Schway retry counts without retaining the error body", async () => {
+  if (process.platform === "win32") return;
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+    calls++;
+    return Response.json({ error: { message: "PRIVATE_PROVIDER_BODY", code: 503 } }, { status: 503 });
+  } });
+  try {
+    const report = await runLiveProcesses({ ...settings(["compatible", "openai-api-key"], 1700),
+      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } });
+    expect(calls).toBe(2);
+    expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "none", toolRoundTrip: false,
+      diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 0, toolResultsCompleted: 0,
+        providerRetries: 2, httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 503 } });
+    expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
+    expect(JSON.stringify(report)).not.toMatch(/PRIVATE_PROVIDER_BODY|127\.0\.0\.1/);
+  } finally { server.stop(true); }
 }, 10_000);
 
 test("real non-cooperative process and same-group descendant die, workspace removed, no later provider starts", async () => {
@@ -252,3 +323,39 @@ test("installed command uses supervised child and local fake compatible HTTP tra
     expect(JSON.parse(stdout)).toMatchObject({ aggregate: "passed", scenarios: [{ status: "passed", toolRoundTrip: true, authSource: "none" }] });
   } finally { server.stop(true); }
 }, 15_000);
+
+test("supervised shared deadline preserves the completed tool round and second request progress", async () => {
+  if (process.platform === "win32") return;
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    calls++;
+    const body = await request.json() as { messages: Array<{ role: string; content?: string }> };
+    const marker = body.messages.find(message => message.role === "tool")?.content?.match(/1\|([a-f0-9]{40})/)?.[1];
+    // Each response fits the lane budget independently, but their sum does not.
+    await Bun.sleep(700);
+    const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: {
+      name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
+    const chunk = (payload: object, finish_reason: string | null) => ({ id: "private-generation-id", object: "chat.completion.chunk",
+      created: 0, model: "gpt-4o", choices: [{ index: 0, delta: payload, finish_reason }] });
+    const sse = [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
+      .map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n";
+    return new Response(sse, { headers: { "content-type": "text/event-stream", "x-request-id": "PRIVATE_HEADER" } });
+  } });
+  try {
+    const selection = { ...settings(["compatible", "openai-api-key"], 1200),
+      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" as const },
+      models: { compatible: "gpt-4o" }, env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "PRIVATE_KEY" } };
+    const timed = await runLiveProcesses(selection);
+    expect(calls).toBe(2);
+    expect(timed.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "none", toolRoundTrip: false,
+      diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 1, toolResultsCompleted: 1, providerRetries: 0,
+        httpRequestsStarted: 2, httpResponsesReceived: 1, lastHttpStatus: 200 } });
+    expect(timed.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
+    expect(JSON.stringify(timed)).not.toMatch(/PRIVATE_KEY|PRIVATE_HEADER|private-generation-id|smoke-sentinel|127\.0\.0\.1|schway-live-/);
+    const passed = await runLiveProcesses({ ...selection, providers: ["compatible"], timeoutMs: 4000 });
+    expect(passed.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
+      diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1, providerRetries: 0,
+        httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200 } });
+    expect(calls).toBe(4);
+  } finally { server.stop(true); }
+}, 10_000);
