@@ -64,7 +64,7 @@ test("package exposes the schway command and development scripts", async () => {
 
 test("schway -p without credentials fails from a non-Git workspace", async () => {
   await withIsolatedCliDirs(async (dirs) => {
-    const result = await spawnSchway(["-p", "hello"], {
+    const result = await spawnSchway(["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"], {
       cwd: dirs.work,
       home: dirs.home,
     });
@@ -77,7 +77,7 @@ test("schway -p without credentials fails from a non-Git workspace", async () =>
 
 test("schway -p --provider openai without credentials fails headlessly", async () => {
   await withIsolatedCliDirs(async (dirs) => {
-    const result = await spawnSchway(["-p", "hello", "--provider", "openai"], {
+    const result = await spawnSchway(["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"], {
       cwd: dirs.work,
       home: dirs.home,
     });
@@ -114,6 +114,8 @@ test("schway -p --provider openai-compatible --auth required without --api-key f
         "http://127.0.0.1:9/v1",
         "--auth",
         "required",
+        "--model",
+        "gpt-4o",
       ],
       { cwd: dirs.work, home: dirs.home },
     );
@@ -130,7 +132,7 @@ test("schway -p --provider openai-compatible --auth required without --api-key f
 test("project .env files are not loaded automatically", async () => {
   await withIsolatedCliDirs(async (dirs) => {
     await writeFile(join(dirs.work, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n");
-    const result = await spawnSchway(["-p", "hello"], {
+    const result = await spawnSchway(["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"], {
       cwd: dirs.work,
       home: dirs.home,
     });
@@ -167,7 +169,7 @@ test("a conflicting global compatible-provider fixture is honored without leakin
     await writeFile(fixturePath, `${fixture}\n`);
     expect(dirs.home).not.toBe(process.env.HOME);
 
-    const fromGlobal = await spawnSchway(["-p", "hello"], {
+    const fromGlobal = await spawnSchway(["-p", "hello", "--model", "gpt-4o"], {
       cwd: dirs.work,
       home: dirs.home,
     });
@@ -178,7 +180,7 @@ test("a conflicting global compatible-provider fixture is honored without leakin
     expect(fromGlobal.stdout).toBe("");
 
     const fixtureBaseUrl = await spawnSchway(
-      ["-p", "hello", "--provider", "openai-compatible"],
+      ["-p", "hello", "--provider", "openai-compatible", "--model", "gpt-4o"],
       { cwd: dirs.work, home: dirs.home },
     );
     expect(fixtureBaseUrl.exitCode).toBe(1);
@@ -189,7 +191,7 @@ test("a conflicting global compatible-provider fixture is honored without leakin
     expect(fixtureBaseUrl.stdout).toBe("");
 
     const cliOverridesGlobal = await spawnSchway(
-      ["-p", "hello", "--provider", "openai"],
+      ["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"],
       { cwd: dirs.work, home: dirs.home },
     );
     expect(cliOverridesGlobal.exitCode).toBe(1);

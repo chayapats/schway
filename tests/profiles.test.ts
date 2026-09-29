@@ -779,7 +779,7 @@ test("selected profiles ignore direct file connection fields but keep file budge
   if ("error" in resolved) throw new Error(resolved.error);
   expect(resolved.profile).toBe("a");
   expect(resolved.baseUrl).toBe("https://a.example.test/v1");
-  expect(resolved.model).toBe("gpt-4o");
+  expect(resolved.model).toBe("");
   expect(resolved.headers).toBeUndefined();
   expect(resolved.extraBody).toBeUndefined();
   expect(resolved.auth).toBe("optional");
@@ -822,8 +822,8 @@ test("profile origins attribute connection fields to the profile and keep file b
     },
     { user: "user", project: "project" },
   );
-  expect(bare.settings.model).toBe("gpt-4o");
-  expect(bare.origins.model).toBe("built-in default");
+  expect(bare.settings.model).toBe("");
+  expect(bare.origins.model).toBeUndefined();
 });
 
 test("direct model selection clears profiles selected through CLI layers", async () => {

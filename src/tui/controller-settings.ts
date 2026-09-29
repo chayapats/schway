@@ -133,14 +133,16 @@ export abstract class SettingsLayer extends ChangesLayer {
     else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted config value."); return false; } }
     return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
       const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
-      const effective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : this.configEditor!.settings[key as keyof ResolvedSettings];
+      const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : this.configEditor!.settings[key as keyof ResolvedSettings];
+      const effective = key === "model" && !rawEffective ? "unset" : displaySetting(key!, rawEffective);
       const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
       const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
-      const shadowingSource = providerSource ? `${providerSource} provider selection` : origin;
-      const shadowed = action === "set" && source !== origin ? `; shadowed by ${shadowingSource}`
-        : action === "reset" && providerSource ? `; ${providerSource} provider selection uses its default model` : "";
-      return `${key} (${scope}): ${saved}. Effective: ${displaySetting(key!, effective)} [${origin}]${shadowed}.`;
+      const shownOrigin = origin ?? (key === "model" && !rawEffective ? "not configured" : origin);
+      const shadowingSource = providerSource ? `${providerSource} provider selection` : shownOrigin;
+      const shadowed = action === "set" && source !== shownOrigin ? `; shadowed by ${shadowingSource}`
+        : action === "reset" && providerSource ? `; ${providerSource} provider selection cleared the model` : "";
+      return `${key} (${scope}): ${saved}. Effective: ${effective} [${shownOrigin}]${shadowed}.`;
     }, undefined, false, key === "appearance");
   }
 

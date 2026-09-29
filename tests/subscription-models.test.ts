@@ -400,7 +400,7 @@ test("headless Codex discovers an available model and advertised thinking withou
     const requests: Array<{ url: string; model?: string; effort?: string }> = [];
     const stdout: string[] = [];
     const stderr: string[] = [];
-    const code = await runCli(["--provider", "openai", "--openai-auth", "codex", "--thinking", "max", "-p", "hi"], {
+    const code = await runCli(["--provider", "openai", "--model", "real-codex", "--openai-auth", "codex", "--thinking", "max", "-p", "hi"], {
       cwd: root, env: { HOME: join(root, "home"), OPENAI_API_KEY: "unused-api-key" }, credentialStore: store,
       stdout: { write: text => { stdout.push(text); } }, stderr: { write: text => { stderr.push(text); } },
       fetch: async (url, init) => {
@@ -567,7 +567,8 @@ test("catalog failure never falls back to static OpenAI choices", async () => {
       await Bun.sleep(0);
       const picker = controller.snapshot().modelPicker!;
       expect(picker.error).toContain("/login codex");
-      expect(picker.entries.some(entry => entry.authRoute === "codex" && !entry.connect)).toBe(false);
+      expect(picker.entries.some(entry => entry.authRoute === "codex" && entry.listUnavailable)).toBe(true);
+      expect(picker.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).every(entry => entry.listUnavailable)).toBe(true);
       expect(picker.entries.some(entry => entry.provider === "openai" && entry.authRoute === "api-key")).toBe(true);
       expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
     } finally { controller.dispose(); }

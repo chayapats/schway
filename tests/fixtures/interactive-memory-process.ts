@@ -48,7 +48,7 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
   createCliRenderer: async (options: CliRendererConfig) => {
     terminal = await createTestRenderer({ ...options, width: 80, height: 24, kittyKeyboard: true });
     inputTask = (async () => {
-      await until(() => !!controller && controller.snapshot().readiness !== "loading");
+      await until(() => !!controller && controller.snapshot().readiness !== "loading" && !!terminal.renderer.root.findDescendantById("prompt"));
       const command = async (text: string) => {
         await terminal.mockInput.pasteBracketedText(text);
         submission = undefined;
@@ -87,7 +87,9 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
 const { runCli } = await import("../../src/cli/main.ts");
 const args = mode === "override" ? ["--provider", "openai-compatible", "--base-url", "http://127.0.0.1:1/v1"] : mode === "override-full" ? ["--provider", "openai", "--model", "gpt-4o", "--openai-auth", "api-key"] : [];
 const code = await runCli(args, { cwd: workspace, env: { HOME: home, SCHWAY_MOTION: "off" }, credentialStore: store,
-  fetch: async () => Response.json({ models: [{ slug: mode === "missing-model" ? "replacement-model" : "account-model", visibility: "list", supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }] }] }),
+  fetch: async (url) => String(url).includes("api.openai.com")
+    ? Response.json({ data: [{ id: "gpt-5.4" }, { id: "gpt-4o" }] })
+    : Response.json({ models: [{ slug: mode === "missing-model" ? "replacement-model" : "account-model", visibility: "list", supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }] }] }),
   createModel: async input => {
     requests.push({ ...input, apiKey: input.apiKey === "fixture-stored-key" ? "stored" : input.apiKey ? "openai" : undefined });
     return createScriptedModel({ provider: input.openaiAuth === "codex" ? "codex-subscription" : input.provider, id: input.model, text: "fixture reply" });

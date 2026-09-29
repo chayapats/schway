@@ -638,7 +638,7 @@ test("headless unknown skills and missing bodies fail without a model turn", asy
     const skills = await projectSkillsDir(project);
     await writeSkill(skills, "review", REVIEW_FRONTMATTER, REVIEW_BODY);
 
-    const unknown = await runHeadless(["-p", "/nope"], { home, cwd: project });
+    const unknown = await runHeadless(["-p", "/nope", "--provider", "openai", "--model", "gpt-5.4"], { home, cwd: project });
     expect(unknown.exitCode).toBe(1);
     expect(unknown.stdout).toBe("");
     expect(unknown.stderr).toContain("Unknown skill 'nope'");

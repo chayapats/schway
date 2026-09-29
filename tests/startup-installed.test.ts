@@ -113,7 +113,7 @@ const screenIncludes = text => terminal.captureCharFrame().includes(text);
 void (async () => {
   const startupAction = scenario.startsWith("returning") ? "Type a task"
     : scenario === "denied" ? "Repair connection"
-    : scenario.startsWith("invalid-model") ? "Choose an available model" : "Connect to get started";
+    : scenario.startsWith("invalid-model") ? "Choose an available model" : "Sign in to choose one";
   await settle(() => terminal.renderer.root.findDescendantById("prompt") && screenIncludes(startupAction), "startup readiness");
   const editor = terminal.renderer.root.findDescendantById("prompt");
   const initial = terminal.captureCharFrame();
@@ -142,7 +142,8 @@ void (async () => {
     await settle(() => terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "failure details");
     assert(terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "actual failure unavailable");
   } else {
-    assert(initial.includes("Connect to get started"), "fresh connect action missing");
+    assert(initial.includes("No model yet") && initial.includes("Sign in to choose one"), "fresh connect action missing");
+    assert(!initial.includes("gpt-"), "fresh install named a model");
     const draft = "ตรวจงานนี้\\nอธิบายภาษาไทย";
     await terminal.mockInput.pasteBracketedText(draft);
     terminal.mockInput.pressArrow("left");
@@ -195,7 +196,8 @@ void (async () => {
         await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ appearance: "dark" }));
       }
       if (scenario === "invalid-model-config") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ provider: "openai", openaiAuth: "codex", model: "invalid-explicit-model" }));
-      const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"] : [];
+      const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"]
+        : scenario === "denied" ? ["--provider", "openai", "--model", "gpt-5.4"] : [];
       const output = await run([executable, ...args], work, env);
       expect(output.stderr).toMatch(/^(?:Latest completed draft checkpoint saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
       expect(output.exit).toBe(0);

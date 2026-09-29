@@ -51,7 +51,7 @@ test("explicit user, project, CLI and session values outrank memory and explain 
       if (scope !== "cli") { await mkdir(join(scope === "user" ? home : project, ".schway"), { recursive: true }); await writeFile(path, JSON.stringify(overrides)); }
       const current = await launch(home, project, scope === "cli" ? overrides : {});
       expect(current.editor.settings.provider).toBe("openai-compatible");
-      expect(current.editor.settings.model).toBe("gpt-4o");
+      expect(current.editor.settings.model).toBe("");
       expect(current.editor.settings.thinking).toBeUndefined();
       expect(current.editor.memoryNotice).toContain("Shadowed");
       current.controller.dispose();
@@ -80,7 +80,7 @@ test("canonical Git roots, subdirectories, symlink aliases and non-Git directori
     for (const path of [a, join(a, "nested"), join(root, "alias", "nested")]) {
       const reopened = await launch(home, path); expect(reopened.editor.settings.model).toBe("gpt-4o"); reopened.controller.dispose();
     }
-    const nonGit = await launch(home, plain); expect(nonGit.editor.settings.model).toBe("gpt-5.4");
+    const nonGit = await launch(home, plain); expect(nonGit.editor.settings.model).toBe("");
     await nonGit.controller.selectModel("openai/gpt-5.4-mini"); nonGit.controller.dispose();
     const reopened = await launch(home, plain); expect(reopened.editor.settings.model).toBe("gpt-5.4-mini"); reopened.controller.dispose();
     const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
@@ -140,7 +140,7 @@ test("missing profiles are explained and forget exposes explicit config without 
     expect(await stale.controller.selectModel("forget")).toBe(true);
     expect(stale.controller.describeConfig()).toContain("maxTurns: 8 [user-global]");
     stale.controller.dispose();
-    const reset = await launch(home, a); expect(reset.editor.memoryProblem).toBeUndefined(); expect(reset.editor.settings.model).toBe("gpt-5.4"); reset.controller.dispose();
+    const reset = await launch(home, a); expect(reset.editor.memoryProblem).toBeUndefined(); expect(reset.editor.settings.model).toBe(""); reset.controller.dispose();
     const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
   });
 });
@@ -182,7 +182,9 @@ test("fresh interactive processes restore the tuple through real picker keyboard
     const reopened = await run("reopen"); expect(reopened.requests).toHaveLength(1);
     expect(reopened.requests[0]).toMatchObject({ provider: "openai", model: "gpt-5.4", thinking: "high", apiKey: "stored" });
     expect(reopened.screen).toContain("interactive memory"); expect(reopened.screen).not.toContain("fixture-stored-key");
-    const override = await run("override"); expect(override.requests[0]?.provider).toBe("openai-compatible");
+    const override = await run("override");
+    expect(override.requests).toEqual([]);
+    expect(override.screen).toContain("No model yet");
     expect(await readFile(join(stateDirectory, stateFile), "utf8")).toBe(saved);
     expect(await readdir(project)).toEqual([]);
   });
@@ -242,7 +244,7 @@ test("individual explicit model, reasoning and profile fields resolve at every h
       for (const [override, expected] of [
         [{ model: "gpt-4o" }, { provider: "openai", model: "gpt-4o", thinking: undefined }],
         [{ thinking: "low" }, { provider: "openai", model: "gpt-5.4", thinking: "low" }],
-        [{ openaiAuth: "codex" }, { provider: "openai", model: "gpt-5.4", openaiAuth: "codex", thinking: undefined }],
+        [{ openaiAuth: "codex" }, { provider: "openai", model: "", openaiAuth: "codex", thinking: undefined }],
         [{ profiles: { local: { baseUrl: "http://localhost:1234", model: "local", auth: "none" } }, profile: "local" }, { provider: "openai-compatible", model: "local", profile: "local", thinking: undefined }],
       ] as const) {
         const path = join(scope === "user" ? home : project, ".schway/config.json");
@@ -345,7 +347,7 @@ test("a live preference writer excludes contenders and SIGKILL releases ownershi
       const reopened = await launch(home, root); expect(reopened.editor.settings.model).toBe("gpt-5.4-mini"); reopened.controller.dispose();
       expect(await recovered.controller.selectModel("forget")).toBe(true);
       recovered.controller.dispose(); contender.controller.dispose();
-      const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe("gpt-5.4"); forgotten.controller.dispose();
+      const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe(""); forgotten.controller.dispose();
     } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
   });
 }, 10000);

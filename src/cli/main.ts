@@ -204,6 +204,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     workspaceRoot: workspace.root,
     cli: cliLayer,
     deferOpenAIThinking: !io.model && !io.createModel,
+    requireExplicitModel: !io.model && !io.createModel && !/^\s*\/skills(?:\s|$)/i.test(parsed.args.prompt ?? ""),
   });
   if ("error" in settings) {
     diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");

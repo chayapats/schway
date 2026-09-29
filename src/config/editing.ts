@@ -96,7 +96,6 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
       modelFallbackSource = undefined;
     }
   }
-  origins.model ??= "built-in default";
   origins.contextWindow ??= "catalog";
   origins.maxOutput ??= "catalog";
   origins.auth ??= "built-in default";

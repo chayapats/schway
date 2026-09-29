@@ -1182,7 +1182,7 @@ test("preferences real keyboard scopes preview save reset and restart preserve t
 
 test("preferences workspace memory is an explicit complete choice, isolated and reset without clearing session", async () => {
   await withTempDir(async root => {
-    const ui = await preferenceFixture(root);
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4" });
     await ui.controller.configCommand("set thinking low");
     ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
     await preferenceEnter(ui);
@@ -1193,7 +1193,7 @@ test("preferences workspace memory is an explicit complete choice, isolated and 
     const other = join(root, "other"); await mkdir(other);
     expect((await InteractiveMemory.load(ui.home, other)).choice).toBeUndefined();
     expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot, interactiveMemory: true })).origins.model).toBe("interactive memory");
-    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).origins.model).toBe("built-in default");
+    expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).origins.model).toBeUndefined();
     ui.mockInput.pressArrow("right"); await preferenceEnter(ui); await preferenceEnter(ui);
     expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice).toBeUndefined();
     expect(await readdir(ui.workspaceRoot)).toEqual([]);
@@ -1284,7 +1284,7 @@ test("preferences inspect actual origins and lower memory while omitting connect
 
 test("preferences memory conflicts preserve the newer workspace choice and expose the specific failure", async () => {
   await withTempDir(async root => {
-    const ui = await preferenceFixture(root);
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-4o" });
     ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
     await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.preview).toContain(`${ui.configEditor.settings.provider}/${ui.configEditor.settings.model}`);

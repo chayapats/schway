@@ -12,10 +12,7 @@ import {
 import { parseEnvFile } from "../src/config/env-file.ts";
 import { DEFAULT_MAX_TURNS } from "../src/agent/loop.ts";
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../src/agent/scheduler.ts";
-import {
-  DEFAULT_MODEL_IDS,
-  UNKNOWN_MODEL_DEFAULTS,
-} from "../src/model/catalog.ts";
+import { UNKNOWN_MODEL_DEFAULTS } from "../src/model/catalog.ts";
 import { withTempDir } from "./helpers.ts";
 
 test("an empty object is a valid config layer", () => {
@@ -120,7 +117,7 @@ test("changing provider without a model drops the inherited model", () => {
   expect(merged.model).toBeUndefined();
 });
 
-test("a provider change without a model uses that provider's default model", () => {
+test("a provider change without a model leaves the model unset", () => {
   const resolved = resolveSettings({
     user: { provider: "openai", model: "gpt-5.4" },
     cli: { provider: "openai-compatible", baseUrl: "http://127.0.0.1:11434/v1" },
@@ -130,7 +127,8 @@ test("a provider change without a model uses that provider's default model", () 
     throw new Error(resolved.error);
   }
   expect(resolved.provider).toBe("openai-compatible");
-  expect(resolved.model).toBe(DEFAULT_MODEL_IDS["openai-compatible"]);
+  expect(resolved.model).toBe("");
+  expect(resolved.modelConfigured).toBe(false);
 });
 
 test("credential headers are rejected in ordinary config", () => {
@@ -166,11 +164,11 @@ test("zero-config uses built-in defaults and does not create config files", asyn
       throw new Error(resolved.error);
     }
     expect(resolved.provider).toBe("openai");
-    expect(resolved.model).toBe(DEFAULT_MODEL_IDS.openai);
+    expect(resolved.model).toBe("");
+    expect(resolved.modelConfigured).toBe(false);
     expect(resolved.maxTurns).toBe(DEFAULT_MAX_TURNS);
     expect(resolved.maxConcurrentTools).toBe(DEFAULT_MAX_CONCURRENT_TOOLS);
-    expect(resolved.catalog.contextWindow).toBe(256_000);
-    expect(resolved.catalog.maxOutput).toBe(16_384);
+    expect(resolved.catalog.id).toBe("");
 
     expect(await readdir(home)).toEqual([]);
     expect(await readdir(project)).toEqual([]);

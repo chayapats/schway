@@ -12,7 +12,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported } from "../catalog.ts";
+import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported, lookupModel } from "../catalog.ts";
 import { reportedTokens } from "../model.ts";
 import type {
   Model,
@@ -24,22 +24,24 @@ import type {
 
 /** Default OpenAI model when the caller does not specify one. */
 export const DEFAULT_OPENAI_MODEL = DEFAULT_MODEL_IDS.openai;
-/** Default max_output_tokens for OpenAI Responses requests. */
+/** Conservative output cap for model IDs absent from the catalog. Known models use their own maximum. */
 export const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 16_384;
 
-/** Named effort per level per reasoning guide (none disables; minimal/xhigh/max stay unmapped). */
-export const OPENAI_THINKING_EFFORTS: Record<"off" | "low" | "medium" | "high", "none" | "low" | "medium" | "high"> = {
+/** Named effort per level. `none` disables; `xhigh` and `max` match current reasoning-capable models. */
+export const OPENAI_THINKING_EFFORTS = {
   off: "none",
   low: "low",
   medium: "medium",
   high: "high",
-};
+  xhigh: "xhigh",
+  max: "max",
+} as const;
 
 /** Resolve a provider-independent level to an OpenAI reasoning param, leaving defaults untouched when unset or off without disabling support. */
 export function resolveOpenAIReasoning(
   level: ThinkingLevel | undefined,
   modelId: string,
-): { effort: "none" } | { effort: "low" | "medium" | "high"; summary: "auto" } | undefined {
+): { effort: "none" } | { effort: "low" | "medium" | "high" | "xhigh" | "max"; summary: "auto" } | undefined {
   if (level === undefined) {
     return undefined;
   }
@@ -54,7 +56,13 @@ export function resolveOpenAIReasoning(
     }
     return { effort: "none" };
   }
-  return { effort: OPENAI_THINKING_EFFORTS[level as "low" | "medium" | "high"], summary: "auto" };
+  const effort = OPENAI_THINKING_EFFORTS[level as Exclude<ThinkingLevel, "off" | "ultra">];
+  if (!effort) {
+    throw new Error(
+      `Thinking level "${level}" is not supported for openai/${modelId}. ${describeThinkingSupport("openai", modelId)}`,
+    );
+  }
+  return { effort, summary: "auto" };
 }
 
 /** Optional fetch override used by protocol tests. */
@@ -75,7 +83,7 @@ export function createOpenAIModel(options: {
   fetch?: FetchLike;
 }): Model {
   const modelId = options.model?.trim() || DEFAULT_OPENAI_MODEL;
-  const maxTokens = options.maxTokens ?? DEFAULT_OPENAI_MAX_OUTPUT_TOKENS;
+  const maxTokens = options.maxTokens ?? lookupModel("openai", modelId).maxOutput;
   const defaultThinking = options.thinking;
   const client = new OpenAI({
     apiKey: options.apiKey,

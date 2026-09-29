@@ -256,6 +256,26 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
         return fetchSubscriptionCatalog({ store: credentialStore, fetch: io.fetch, signal });
       },
+      listRouteModels: async (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => {
+        const { resolveProviderCredential } = await import("../auth/credentials.ts");
+        const { fetchProviderModelList, OPENAI_MODELS_URL } = await import("../model/model-list.ts");
+        const current = configEditor.settings;
+        if (route === "api-key") {
+          const credential = await resolveProviderCredential({ provider: "openai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
+          if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing OpenAI API key.");
+          return fetchProviderModelList({ url: OPENAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "OpenAI" });
+        }
+        const baseUrl = endpoint?.baseUrl ?? current.baseUrl;
+        if (!baseUrl) throw new Error("Select a compatible base URL before listing models.");
+        const credential = await resolveProviderCredential({
+          provider: "openai-compatible", baseUrl, auth: current.auth, profile: current.profile,
+          credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
+          runtimeApiKey: io.args.apiKey, env, store: credentialStore,
+        });
+        if ("error" in credential) throw new Error(credential.error);
+        const url = new URL("models", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+        return fetchProviderModelList({ url, apiKey: credential.apiKey, headers: current.headers, fetch: io.fetch, signal, label: "Compatible endpoint" });
+      },
     };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
       settings = next;
@@ -350,7 +370,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     try {
       await runTuiRenderer({
         controller,
-        initialize: !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
+        initialize: settings.model && !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
         home,
         workspaceRoot: workspace.root,
         skillScope,

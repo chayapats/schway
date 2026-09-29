@@ -234,15 +234,15 @@ test("catalog failure, empty result and retry never invent a subscription row", 
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       expect(controller.snapshot().modelPicker?.catalogState).toBe("offline");
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.authRoute === "codex" && !entry.connect)).toBe(false);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).every(entry => entry.listUnavailable)).toBe(true);
       expect(controller.retryModelPickerCatalog()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       expect(controller.snapshot().modelPicker?.catalogState).toBe("failed");
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.authRoute === "codex" && !entry.connect)).toBe(false);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).every(entry => entry.listUnavailable)).toBe(true);
       expect(controller.retryModelPickerCatalog()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       expect(controller.snapshot().modelPicker?.catalogState).toBe("empty");
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.authRoute === "codex" && !entry.connect)).toBe(false);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).every(entry => entry.listUnavailable)).toBe(true);
       expect(controller.retryModelPickerCatalog()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex").map(entry => entry.modelId)).toEqual(["account-only"]);
@@ -355,7 +355,7 @@ test("an unresponsive account catalog stops loading within the picker deadline",
       expect(controller.snapshot().modelPicker?.loading).toBe(false);
       expect(Date.now() - started).toBeLessThan(7_000);
       expect(controller.snapshot().modelPicker?.error).toContain("retry");
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.authRoute === "codex" && !entry.connect)).toBe(false);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).every(entry => entry.listUnavailable)).toBe(true);
     } finally { controller.dispose(); }
   });
 }, 8_000);

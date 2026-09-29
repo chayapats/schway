@@ -181,6 +181,8 @@ export interface TuiControllerOptions {
     listSubscriptionModels?: (signal: AbortSignal) => Promise<readonly string[]>;
     /** Discover verified model budgets and reasoning levels for this subscription identity. */
     listSubscriptionCatalog?: (signal: AbortSignal) => Promise<readonly ModelCapability[]>;
+    /** List models for a connected API-key or compatible route. Subscription discovery stays separate. */
+    listRouteModels?: (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean) => Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: ModelCapability }>;

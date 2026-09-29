@@ -557,8 +557,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
       footerParts = {
-        model: safe(`${snapshot.provider}/${snapshot.modelId}`), thinking: snapshot.thinking ? safe(snapshot.thinking) : undefined,
-        route: safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`),
+        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "No model yet", thinking: snapshot.modelId && snapshot.thinking ? safe(snapshot.thinking) : undefined,
+        route: snapshot.modelId ? safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`) : "",
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
         running: !!snapshot.activity || snapshot.status === "running",
       };
@@ -577,12 +577,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       preferencePanel.visible = !!snapshot.preferences;
       tree.visible = !!snapshot.branchTree;
       empty.visible = entries.length === 0;
-      const route = snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`);
+      const route = snapshot.modelId ? snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`) : "";
+      const connection = snapshot.modelId ? `${snapshot.provider}/${snapshot.modelId}` : "No model yet";
       returnContext.visible = !panelMode && (!!snapshot.recentSession || !!snapshot.restored);
       returnContext.content = (safe(snapshot.recentSession
         ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Preview incomplete · resume validates history" : "/sessions for all history"}`
-        : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${snapshot.provider}/${snapshot.modelId} · ${route}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
-      const action = snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
+        : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${connection}${route ? ` · ${route}` : ""}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
+      const action = !snapshot.modelId ? "Sign in to choose one · Alt+L"
+        : snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
         : snapshot.readiness === "ready" ? "Type a task · Enter sends"
         : snapshot.readiness === "connect" ? "Connect to get started · Alt+L"
         : snapshot.readiness === "choose-model" ? "Choose an available model · Alt+M"
@@ -591,8 +593,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // The top bar already names the workspace; repeat it only when that bar is hidden.
       empty.content = new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
-        bold(fg(theme.text)(safe(`${snapshot.provider}/${snapshot.modelId}`))),
-        fg(theme.muted)(safe(` · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n`)),
+        bold(fg(theme.text)(safe(snapshot.modelId ? connection : "No model yet · Sign in to choose one · Alt+L"))),
+        ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n`))] : [fg(theme.muted)("\n\n")]),
         ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(`${safe(snapshot.readinessDetail)}\n`)] : []),
         ...keyHintChunks(safe(action), hintColors(theme.background)),
         ...(snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I failure details · Your task stays in the editor", hintColors(theme.background))] : []),
@@ -744,7 +746,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             const index = start + offset;
             const route = entry.authRoute === "codex" ? "ChatGPT" : entry.authRoute === "api-key" ? "API key" : entry.access ?? "Provider";
             const name = entry.connect ? "Connect ChatGPT" : entry.profile ? `profile:${entry.profile}` : `${entry.provider}/${entry.modelId}`;
-            textRow(picker, fitLine(`${index === models.selectedIndex ? "›" : " "} ${route} · ${name}${entry.active ? " ✓ current" : ""}${entry.access === "Login required" ? " · Connect" : ""}${entry.custom ? " (typed)" : ""}`, width - 2), index === models.selectedIndex ? theme.accent : theme.text);
+            textRow(picker, fitLine(`${index === models.selectedIndex ? "›" : " "} ${route} · ${name}${entry.active ? " ✓ current" : ""}${entry.access === "Login required" ? " · Connect" : ""}${entry.listUnavailable ? " · list unavailable" : ""}${entry.custom ? " (typed)" : ""}`, width - 2), index === models.selectedIndex ? theme.accent : theme.text);
           });
           const selected = models.entries[models.selectedIndex];
           const routeDetail = selected?.connect ? "ChatGPT subscription · connect to discover models"
@@ -904,7 +906,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (value.trim() === "/session") {
         const workspace = controller.workspaceIdentity();
-        controller.notice(`Session: ${snapshot.sessionId}\nConversation branch: ${snapshot.branchId}\nModel: ${snapshot.provider}/${snapshot.modelId}\nPrimary: ${workspace?.root ?? options.workspaceRoot}\nAttached: ${workspace?.extraRoots.join(", ") || "none"}`);
+        controller.notice(`Session: ${snapshot.sessionId}\nConversation branch: ${snapshot.branchId}\nModel: ${snapshot.modelId ? `${snapshot.provider}/${snapshot.modelId}` : "No model yet"}\nPrimary: ${workspace?.root ?? options.workspaceRoot}\nAttached: ${workspace?.extraRoots.join(", ") || "none"}`);
         accept(); refresh(); return;
       }
       pendingAcceptance = true;
