@@ -1,3 +1,4 @@
+import { isGrokModel } from "../model/loader.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
 import type { PreferencesSnapshot } from "./preferences.ts";
 import type { AgentClock } from "../agent/retry.ts";
@@ -49,6 +50,12 @@ export abstract class ControllerCore {
   protected baseUrl?: string;
   protected auth?: string;
   protected openaiAuth?: string;
+  protected xaiAuth?: string;
+  protected grokModels?: readonly import("../model/model-list.ts").ListedModel[];
+  protected grokPending = false;
+  protected grokReactivationRequired = false;
+  protected grokModelsUnavailable = false;
+  protected grokSelected(): boolean { return isGrokModel(this.model) || (this.provider === "xai" && this.xaiAuth === "grok"); }
   protected profile?: string;
   protected thinking?: string;
   protected configEditor?: ConfigEditor;
@@ -101,7 +108,7 @@ export abstract class ControllerCore {
   protected modelAttemptStarted = false;
   protected retryNoticeId?: string;
   protected recovery?: TuiRecovery & { sessionId: string; branchId: string; userId?: string; details?: string; model?: Model;
-    provider: string; modelId: string; profile?: string; openaiAuth?: string };
+    provider: string; modelId: string; profile?: string; openaiAuth?: string; xaiAuth?: string };
   protected recoveryRepair = false;
   protected toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
   protected extensions?: ExtensionRuntime;
@@ -116,8 +123,9 @@ export abstract class ControllerCore {
   protected loginChooserIndex?: number;
   protected loginCallbackValue?: string;
   protected loginApproval?: string;
+  protected loginApprovalData?: import("./controller-types.ts").LoginApproval;
   /** Active subscription sign-in abort; unlike submitted OS writes, the OAuth wait stays cancellable. */
-  protected codexLoginAbort?: AbortController;
+  protected loginAbort?: AbortController;
   /** Abort for the post-sign-in model listing; Esc and dispose cancel it without blocking the picker. */
   protected signInListAbort?: AbortController;
   /** Advances when the active provider, model, or profile changes so a stale sign-in cannot overwrite it. */
@@ -150,6 +158,7 @@ export abstract class ControllerCore {
     this.baseUrl = options.baseUrl;
     this.auth = options.auth;
     this.openaiAuth = options.openaiAuth ?? options.configEditor?.settings.openaiAuth;
+    this.xaiAuth = options.xaiAuth ?? options.configEditor?.settings.xaiAuth;
     this.profile = options.profile ?? options.configEditor?.settings.profile;
     this.thinking = options.thinking ?? options.configEditor?.settings.thinking;
     this.secrets = options.secrets ?? [];
@@ -209,6 +218,7 @@ export abstract class ControllerCore {
   }
   /** Append an actionable error line and mark the status as error. */
   fail(text: string): void {
+    if (text === "Your Grok plan doesn't include API access. Use an xAI API key instead.") text = "Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L";
     this.transcript.push({
       id: this.nextId("err"),
       kind: "error",

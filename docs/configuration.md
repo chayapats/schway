@@ -297,3 +297,11 @@ bun test tests/git-changes.test.ts
 ```
 
 See `src/workspace/git.ts` (`inspectGitStatus`, `captureGitSnapshot`, `compareGitSnapshots`, `getGitDiffPreview`), `src/config/config.ts` (`git.changeTracking`, `DEFAULT_GIT_CHANGE_TRACKING`), and `src/tui/controller.ts` (`changesCommand`, `gitChangeTracking`) for the contract.
+
+## Grok subscription (xAI OAuth)
+
+A SuperGrok account can connect through `/login grok` for browser approval or `/login grok --device` for a remote machine. Approval saves tokens in the OS secure store, lists account models and activates the recommended xAI model. Some Grok plans do not include public API access; a plan-level 403 asks you to choose an xAI API key instead. The saved login remains available if you change plans.
+
+`xaiAuth` selects `auto` (the default), `grok` or `api-key`. Set it with `/config set xaiAuth grok` or `--provider xai --xai-auth grok`. Automatic selection prefers a supplied API key or `XAI_API_KEY`, then a saved Grok login, then a saved xAI API key. Explicit `grok` ignores API keys. Explicit `api-key` ignores Grok tokens. There is no automatic billing fallback.
+
+After interactive sign-in, headless runs can use `schway --provider xai --xai-auth grok --model <id> -p "…"`. They refresh stored tokens when needed and never open a browser. Missing or revoked logins require interactive sign-in. `/logout grok` removes only the Grok OAuth credential and blocks an active Grok account until sign-in and activation succeed again.

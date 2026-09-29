@@ -47,7 +47,7 @@ test("contextual startup keeps Thai task and cursor through keyboard setup cance
     expect(ui.editor.cursorOffset).toBe(cursor);
     ui.mockInput.pressKey("l", { meta: true });
     await ui.settle();
-    for (let i = 0; i < 3; i++) ui.mockInput.pressArrow("down");
+    for (let i = 0; i < 5; i++) ui.mockInput.pressArrow("down");
     ui.mockInput.pressEnter();
     await ui.settle();
     expect(ui.controller.snapshot().credentialEntry).toBeDefined();

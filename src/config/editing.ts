@@ -7,7 +7,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "git", "appearance"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "xaiAuth", "git", "appearance"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -100,6 +100,7 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
   origins.maxOutput ??= "catalog";
   origins.auth ??= "built-in default";
   origins.openaiAuth ??= "built-in default";
+  origins.xaiAuth ??= "built-in default";
   origins.profile ??= selectedName !== undefined ? origins.profile ?? "built-in default" : origins.profile;
   origins.appearance ??= "built-in default";
   return { origins, modelFallbackSource };
@@ -147,7 +148,7 @@ export class ConfigEditor {
     try { settings = resolved(this.layers, next); } catch {
       try {
         const recovered = resolved({ ...this.layers, session: { ...this.layers.session, thinking: null } }, next);
-        if (recovered.provider === this.current.provider && recovered.model === this.current.model && recovered.openaiAuth === this.current.openaiAuth) {
+        if (recovered.provider === this.current.provider && recovered.model === this.current.model && recovered.openaiAuth === this.current.openaiAuth && recovered.xaiAuth === this.current.xaiAuth) {
           settings = { ...recovered, thinking: this.current.thinking };
         }
       } catch { /* The next staged model edit validates against the new catalog. */ }
@@ -174,7 +175,7 @@ export class ConfigEditor {
     const result: Record<string, Record<string, unknown>> = {};
     for (const [name, layer] of Object.entries({ ...this.layers, memory: this.memory?.choice ?? this.layers.memory } as Layers)) {
       result[name] = {};
-      for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "appearance"] as const) {
+      for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "xaiAuth", "thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "appearance"] as const) {
         if (layer?.[key] !== undefined) result[name]![key] = structuredClone(layer[key]);
       }
       if (layer?.git?.changeTracking !== undefined) result[name]!.git = layer.git.changeTracking;
@@ -227,6 +228,7 @@ export class ConfigEditor {
     if (typeof explicit.profile === "string" && explicit.profile === this.current.profile) return undefined;
     if (explicit.provider !== this.current.provider || !explicit.model) return this.memoryProblem;
     if (explicit.provider === "openai" && explicit.openaiAuth !== "api-key" && explicit.openaiAuth !== "codex") return this.memoryProblem;
+    if (explicit.provider === "xai" && explicit.xaiAuth !== "api-key" && explicit.xaiAuth !== "grok") return this.memoryProblem;
     if (explicit.provider === "openai-compatible" && (!explicit.baseUrl || !explicit.auth)) return this.memoryProblem;
     return undefined;
   }
@@ -235,7 +237,7 @@ export class ConfigEditor {
   get memoryNotice(): string | undefined {
     if (this.memoryProblem) return this.memoryActivationError ?? `${this.memoryProblem} Explicit settings fully select the connection and take precedence; remembered state was left unchanged.`;
     if (!this.memory?.choice) return undefined;
-    const shadowed = ["provider", "model", "profile", "openaiAuth", "thinking"].filter(key => {
+    const shadowed = ["provider", "model", "profile", "openaiAuth", "xaiAuth", "thinking"].filter(key => {
       const origin = this.origins[key as keyof ConfigLayer];
       return origin && origin !== "interactive memory" && origin !== "built-in default";
     });
@@ -248,6 +250,7 @@ export class ConfigEditor {
     const current = this.current;
     const choice: InteractiveChoice = { provider: current.provider, model: current.model,
       ...(current.provider === "openai" ? { openaiAuth: authRoute === "codex" ? "codex" as const : "api-key" as const } : {}),
+      ...(current.provider === "xai" ? { xaiAuth: authRoute === "grok" ? "grok" as const : "api-key" as const } : {}),
       ...(current.profile ? { profile: current.profile } : {}),
       ...(current.thinking ? { thinking: current.thinking } : {}) };
     await this.memory.write(choice);
@@ -262,7 +265,7 @@ export class ConfigEditor {
     if (!this.memory) throw new Error("Interactive memory is unavailable in this session.");
     await this.memory.write();
     const session = { ...this.layers.session };
-    for (const key of ["provider", "model", "thinking", "profile", "openaiAuth"] as const) delete session[key];
+    for (const key of ["provider", "model", "thinking", "profile", "openaiAuth", "xaiAuth"] as const) delete session[key];
     return new ConfigEditor({ ...this.layers, memory: undefined, session }, this.paths, this.modelCapabilities, this.memory, this.home);
   }
 
@@ -297,7 +300,17 @@ export class ConfigEditor {
   async prepareXaiModel(model: string): Promise<ConfigTransaction> {
     const capability = this.modelCapabilities?.find(entry => entry.id === model);
     return this.prepareChanges("session", [
-      { key: "provider", value: "xai" }, { key: "model", value: model }, { key: "profile", value: null },
+      { key: "provider", value: "xai" }, { key: "xaiAuth", value: "api-key" }, { key: "model", value: model }, { key: "profile", value: null },
+      ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
+    ]);
+  }
+
+  /** Stage the Grok subscription model and billing route as one reversible session edit. */
+  async prepareGrokModel(model: string): Promise<ConfigTransaction> {
+    const capability = this.modelCapabilities?.find(entry => entry.id === model);
+    return this.prepareChanges("session", [
+      { key: "provider", value: "xai" }, { key: "xaiAuth", value: "grok" },
+      { key: "model", value: model }, { key: "profile", value: null },
       ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }

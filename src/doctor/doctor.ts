@@ -5,7 +5,7 @@ import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../auth/secrets.ts";
 import { platform } from "node:os";
 import { version } from "../../package.json";
 import { COMPATIBLE_API_KEY_ENV, credentialEnvironmentVariable } from "../auth/credentials.ts";
-import { codexSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, LEGACY_ANTHROPIC_ACCOUNT, LEGACY_ANTHROPIC_REMOVAL_COMMAND, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, LEGACY_ANTHROPIC_ACCOUNT, LEGACY_ANTHROPIC_REMOVAL_COMMAND, type CredentialStore } from "../auth/store.ts";
 import { readConfigFile, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
 import { inspectPackages } from "../packages/packages.ts";
 import { discoverSkills } from "../skills/skills.ts";
@@ -139,6 +139,8 @@ export async function diagnose(input: {
     add("provider", "error", "Provider or profile settings cannot be resolved (unknown profile, incompatible mode, or missing endpoint).", "Check --profile, --provider and --base-url against configured profiles.");
   } else if (hasCliConnectionOptions(input.args) && settings.provider !== "openai-compatible") {
     add("provider", "error", "OpenAI-compatible connection flags conflict with the selected provider.", "Select --provider openai-compatible or remove --base-url, --header, --body, --auth and --profile.");
+  } else if (input.args.xaiAuth !== undefined && settings.provider !== "xai") {
+    add("provider", "error", "xAI auth preference requires --provider xai", "Select --provider xai or remove --xai-auth.");
   } else if (input.args.openaiAuth !== undefined && settings.provider !== "openai") {
     add("provider", "error", "OpenAI auth preference conflicts with the selected provider.", "Select --provider openai or remove --openai-auth.");
   } else {
@@ -149,19 +151,23 @@ export async function diagnose(input: {
     const runtime = input.args.apiKey;
     const envName = settings.credentialEnv ?? credentialEnvironmentVariable(settings.provider);
     const environment = env[envName];
-    const preferred = settings.provider === "openai" ? settings.openaiAuth ?? "auto" : "api-key";
+    const grok = settings.provider === "xai";
+    const subscriptionRoute = grok ? "grok" : "codex";
+    const subscriptionLabel = grok ? "Grok" : "ChatGPT";
+    const preferred = grok ? settings.xaiAuth ?? "auto" : settings.provider === "openai" ? settings.openaiAuth ?? "auto" : "api-key";
     const optional = settings.provider === "openai-compatible" && (settings.auth ?? "optional") !== "required";
     const none = settings.provider === "openai-compatible" && settings.auth === "none";
     const subscription = async (): Promise<"present" | "missing" | "unavailable" | "refresh" | "expired" | "invalid"> => {
       try {
-        const raw = await store.get(codexSubscriptionIdentity());
+        const raw = await store.get(grok ? grokSubscriptionIdentity() : codexSubscriptionIdentity());
         if (!raw?.trim()) return "missing";
         let parsed: unknown;
         try { parsed = JSON.parse(raw); } catch { return "invalid"; }
         if (typeof parsed !== "object" || !parsed || !("accessToken" in parsed) || typeof parsed.accessToken !== "string" || !parsed.accessToken.trim()) return "invalid";
-        const token = parsed as { expiresAt?: unknown; refreshToken?: unknown };
+        const token = parsed as { expiresAt?: unknown; refreshToken?: unknown; obtainedAt?: unknown };
+        if (grok && (typeof token.obtainedAt !== "number" || !Number.isFinite(token.obtainedAt) || (token.expiresAt !== undefined && (typeof token.expiresAt !== "number" || !Number.isFinite(token.expiresAt))) || (token.refreshToken !== undefined && (typeof token.refreshToken !== "string" || !token.refreshToken.trim())))) return "invalid";
         // Match the provider's finite expiry/skew rule without importing its executable adapter.
-        if (typeof token.expiresAt === "number" && Number.isFinite(token.expiresAt) && token.expiresAt <= Date.now() + 60_000)
+        if (typeof token.expiresAt === "number" && Number.isFinite(token.expiresAt) && token.expiresAt <= Date.now() + (grok ? 120_000 : 60_000))
           return typeof token.refreshToken === "string" && token.refreshToken.trim() ? "refresh" : "expired";
         return "present";
       } catch { return "unavailable"; }
@@ -169,28 +175,28 @@ export async function diagnose(input: {
     let sub: Awaited<ReturnType<typeof subscription>> | undefined;
     let storedOpenAI: string | null | undefined;
     let storeUnavailable = false;
-    const emptyOverride = runtime !== undefined && !runtime.trim();
-    if (!emptyOverride && settings.provider === "openai" && preferred === "codex") sub = await subscription();
-    if (!emptyOverride && settings.provider === "openai" && preferred === "auto" && !runtime?.trim() && !environment?.trim()) {
+    const emptyOverride = preferred !== "grok" && runtime !== undefined && !runtime.trim();
+    if (!emptyOverride && (settings.provider === "openai" || grok) && preferred === subscriptionRoute) sub = await subscription();
+    if (!emptyOverride && (settings.provider === "openai" || grok) && preferred === "auto" && !runtime?.trim() && !environment?.trim()) {
       // Auto selection checks BOTH identities, even if the subscription is present.
       // A failure of either read prevents healthy fallback to the other billing mode.
       sub = await subscription();
       if (sub === "unavailable") storeUnavailable = true;
-      else try { storedOpenAI = await store.get(credentialIdentity({ provider: "openai" })); }
+      else if (!grok || sub === "missing") try { storedOpenAI = await store.get(credentialIdentity({ provider: grok ? "xai" : "openai" })); }
       catch { storeUnavailable = true; }
     }
-    const useSubscription = preferred === "codex" || (preferred === "auto" && !runtime?.trim() && !environment?.trim() && (sub === "present" || sub === "refresh" || sub === "expired" || sub === "invalid"));
+    const useSubscription = preferred === subscriptionRoute || (preferred === "auto" && !runtime?.trim() && !environment?.trim() && (sub === "present" || sub === "refresh" || sub === "expired" || sub === "invalid"));
     if (emptyOverride) {
       report.authSource = "runtime";
       add("auth", "error", "Explicit API key is empty.", "Supply a nonempty --api-key or remove it.");
     } else if (storeUnavailable) {
       report.authSource = "unknown";
-      add("auth", "error", "OS secure store unavailable or locked; OpenAI auto selection cannot inspect both identities.", "Unlock/allow access to the OS secure store or explicitly select --openai-auth api-key with a supplied --api-key / OPENAI_API_KEY.");
+      add("auth", "error", `OS secure store unavailable or locked; ${grok ? "xAI" : "OpenAI"} auto selection cannot inspect both identities.`, `Unlock/allow access to the OS secure store or explicitly select --${grok ? "xai" : "openai"}-auth api-key with a supplied --api-key / ${grok ? "XAI_API_KEY" : "OPENAI_API_KEY"}.`);
     } else if (useSubscription) {
       report.authSource = "subscription";
-      if (sub === "present") add("auth", "ok", "ChatGPT subscription login present; access-token status checked locally.");
-      else if (sub === "refresh") add("auth", "warning", "ChatGPT access token needs refresh; refresh token present (not tested).", "Refresh occurs during a future model request; sign in again if it fails.");
-      else add("auth", "error", sub === "expired" ? "ChatGPT access token expired without a refresh token." : sub === "unavailable" ? "OS secure store unavailable or locked." : sub === "invalid" ? "Stored subscription login is invalid." : "No ChatGPT subscription login found.", "Unlock the OS secure store or sign in interactively with /login codex; choose --openai-auth api-key to use an API key.");
+      if (sub === "present") add("auth", "ok", `${subscriptionLabel} subscription login present; access-token status checked locally.`);
+      else if (sub === "refresh") add("auth", "warning", `${subscriptionLabel} access token needs refresh; refresh token present (not tested).`, "Refresh occurs during a future model request; sign in again if it fails.");
+      else add("auth", "error", sub === "expired" ? `${subscriptionLabel} access token expired without a refresh token.` : sub === "unavailable" ? "OS secure store unavailable or locked." : sub === "invalid" ? "Stored subscription login is invalid." : `No ${subscriptionLabel} subscription login found.`, `Unlock the OS secure store or sign in interactively with /login ${subscriptionRoute}; choose --${grok ? "xai" : "openai"}-auth api-key to use an API key.`);
     } else if (runtime?.trim()) {
       report.authSource = "runtime";
       add("auth", "ok", "Runtime API key present.");

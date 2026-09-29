@@ -398,3 +398,19 @@ test("resume past corrupt memory requires a complete explicit connection and exp
     expect(await readFile(path, "utf8")).toBe("{corrupt"); explicit.controller.dispose();
   });
 });
+
+test("Grok memory retains its billing route and legacy xAI memories still load", async () => {
+  const { InteractiveMemory } = await import("../src/config/interactive-memory.ts");
+  await withTempDir(async root => {
+    const home = join(root, "home"), project = join(root, "project"); await mkdir(project);
+    const memory = await InteractiveMemory.load(home, project);
+    await memory.write({ provider: "xai", model: "grok-4.7" });
+    expect((await InteractiveMemory.load(home, project)).choice).toEqual({ provider: "xai", model: "grok-4.7" });
+    const editor = await loadConfigEditor({ home, workspaceRoot: project, interactiveMemory: true });
+    await (await editor.prepareGrokModel("grok-4.7")).commit(); await editor.rememberChoice("grok");
+    const restored = await loadConfigEditor({ home, workspaceRoot: project, interactiveMemory: true });
+    expect(restored.settings.xaiAuth).toBe("grok");
+    const override = await loadConfigEditor({ home, workspaceRoot: project, interactiveMemory: true, cli: { provider: "xai", xaiAuth: "api-key" } });
+    expect(override.settings.xaiAuth).toBe("api-key"); expect(override.settings.model).toBe("");
+  });
+});

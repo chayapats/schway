@@ -84,10 +84,10 @@ export function xaiModelCapabilities(models: readonly ListedModel[]): ModelCapab
 }
 
 /** Choose a marked default, the route fallback, a catalog ID, then the first listed ID. */
-export function recommendedListedModel(route: "api-key" | "codex" | "compatible" | "xai", models: readonly ListedModel[]): string {
+export function recommendedListedModel(route: "api-key" | "codex" | "compatible" | "xai" | "grok", models: readonly ListedModel[]): string {
   const marked = models.find(model => model.recommended);
   if (marked) return marked.id;
-  const provider = route === "compatible" ? "openai-compatible" : route === "xai" ? "xai" : "openai";
+  const provider = route === "compatible" ? "openai-compatible" : (route === "xai" || route === "grok") ? "xai" : "openai";
   const fallback = ROUTE_FALLBACK_MODELS[provider];
   if (models.some(model => model.id === fallback)) return fallback;
   const catalog = new Set(listCatalog().filter(entry => entry.provider === provider).map(entry => entry.id));

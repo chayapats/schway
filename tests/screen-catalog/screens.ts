@@ -6,6 +6,11 @@ export interface Screen { id: string; title: string; description: string; noColo
 /** A fresh terminal's final theme, dimensions and color policy. */
 export interface Variant { id: string; theme: "dark" | "light"; cols: number; rows: number; noColor: boolean }
 const enter = async (ui: ScreenHarness, text: string) => { await ui.mockInput.typeText(text); ui.mockInput.pressEnter(); };
+const grokLogin = async (ui: ScreenHarness, device = false) => {
+  ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+  for (let i = 0; i < (device ? 4 : 3); i++) ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter();
+};
 const failed = (s: TuiSnapshot) => !!s.recovery;
 const completed = (s: TuiSnapshot) => s.status === "idle" && !!s.outcome;
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
@@ -14,6 +19,9 @@ export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
   { id: "sign-in-chooser", title: "Sign-in chooser", description: "The connection chooser offers available sign-in routes.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); }, ready: s => !!s.loginChooser },
   { id: "subscription-sign-in", title: "Subscription sign-in", description: "Browser sign-in is waiting for authorization.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter(); }, ready: (s, ui) => s.status === "running" && ui.loginCalled() },
+  { id: "grok-browser-approval", title: "Grok browser approval", description: "Grok subscription sign-in waits for browser approval.", drive: ui => grokLogin(ui), ready: s => s.status === "running" && s.loginApprovalData?.kind === "browser" },
+  { id: "grok-device-approval", title: "Grok device approval", description: "The ephemeral Grok device code remains in the approval panel.", drive: ui => grokLogin(ui, true), ready: s => s.status === "running" && s.loginApprovalData?.kind === "device" },
+  { id: "grok-plan-error", title: "Grok plan restriction", description: "A plan restriction retains the saved login and offers another connection.", drive: ui => grokLogin(ui), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.includes("Your Grok plan doesn't include API access")) },
   { id: "model-picker", title: "Model picker", description: "Connected models show their context and output budgets.", drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
   { id: "command-palette", title: "Command palette", description: "Typing a slash opens command suggestions.", drive: async ui => { await ui.mockInput.typeText("/"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.controller.commandChoices("/").length > 0 && !!ui.renderer.root.findDescendantById("picker")?.visible },
   { id: "thai-composer", title: "Thai composer", description: "A multiline Thai draft remains in the composer.", drive: async ui => { await ui.mockInput.pasteBracketedText(thai); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === thai },

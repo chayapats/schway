@@ -1,6 +1,9 @@
 first-run
 sign-in-chooser
 subscription-sign-in
+grok-browser-approval
+grok-device-approval
+grok-plan-error
 model-picker
 command-palette
 thai-composer

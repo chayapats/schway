@@ -145,3 +145,9 @@ Record the actual OS, Bun version and result. A fake-store test is not evidence
 that any native store, all supported platforms, live providers or human terminal
 interaction passed. Native smoke and human terminal dogfood remain pending until
 performed explicitly.
+
+## Grok subscription
+
+`/login grok` opens browser approval; `/login grok --device` shows a temporary verification address and code. OAuth tokens live only at `grok-subscription:xai` in the OS secure store, separate from `api-key:xai`. Schway does not read another CLI's credentials. Device codes stay in the approval panel and never enter session history or saved drafts.
+
+`--provider xai --xai-auth grok` uses only the saved Grok login. Access refresh is shared across simultaneous requests; a 401 gets one refresh and resend. Revocation and plan-level 403 errors never fall back to API-key billing. `/logout grok` removes only this login. See [route configuration](configuration.md#grok-subscription-xai-oauth).

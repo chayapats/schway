@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import { resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
-import { codexSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { createContextManager } from "../context/manager.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { loadProviderModel, type ProviderLoaderInput } from "../model/loader.ts";
@@ -17,7 +17,7 @@ import type { Workspace } from "../workspace/workspace.ts";
 import { boundedSmokeFetch } from "./transport.ts";
 
 /** Independently selectable provider/auth lanes; API-key OpenAI never silently switches to subscription billing. */
-export const SMOKE_PROVIDERS = ["openai-api-key", "xai-api-key", "compatible", "codex"] as const;
+export const SMOKE_PROVIDERS = ["openai-api-key", "xai-api-key", "compatible", "codex", "grok"] as const;
 
 /** One live-smoke lane. `xai-api-key` bills the xAI console account and never reads OpenAI credentials. */
 export type SmokeProvider = (typeof SMOKE_PROVIDERS)[number];
@@ -91,6 +91,7 @@ const DEFAULT_MODELS: Record<SmokeProvider, string> = {
   "xai-api-key": ROUTE_FALLBACK_MODELS.xai,
   compatible: ROUTE_FALLBACK_MODELS["openai-compatible"],
   codex: ROUTE_FALLBACK_MODELS.openai,
+  grok: ROUTE_FALLBACK_MODELS.xai,
 };
 
 /** Execute only explicitly enabled lanes through Schway's real streaming loop and isolated read tool. */
@@ -187,7 +188,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
         if (disallowedTool) { controller.abort(); break; }
         if (event.type === "error") {
           error = true;
-          needsLogin = provider === "codex" && /Sign in again in interactive mode|subscription session (expired|was revoked)/i.test(event.message);
+          needsLogin = (provider === "codex" || provider === "grok") && /Sign in again in interactive mode|subscription session (expired|was revoked)/i.test(event.message);
         }
         if (event.type === "agent.finished") finished = event.reason;
       }
@@ -257,6 +258,19 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
   }
   const store = provider === "compatible" && selection.compatible?.auth === "none"
     ? undefined : (deps.createStore ?? createNativeCredentialStore)();
+  if (provider === "grok") {
+    let raw: string | null;
+    try { raw = await store!.get(grokSubscriptionIdentity()); }
+    catch { result.status = "pending"; result.reason = "credential_store_unavailable"; return; }
+    if (!raw?.trim()) { result.status = "pending"; result.reason = "missing_subscription"; return; }
+    const integration = await import("../model/providers/grok-subscription.ts");
+    try {
+      const tokens = integration.parseSubscriptionTokens(raw);
+      if (integration.subscriptionAccessExpired(tokens) && !tokens.refreshToken) throw new Error("login required");
+    } catch { result.status = "pending"; result.reason = "subscription_requires_login"; return; }
+    result.authSource = "stored-subscription";
+    return { provider: "xai", xaiAuth: "grok", model, maxTokens: MAX_TOKENS, grokStore: store };
+  }
   if (provider === "codex") {
     const selected = await selectOpenAITransport({ openaiAuth: "codex", env: selection.env, store: store! });
     if ("error" in selected) { result.status = "pending"; result.reason = selected.error.startsWith("No ChatGPT") ? "missing_subscription" : "credential_store_unavailable"; return; }

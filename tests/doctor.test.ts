@@ -276,3 +276,17 @@ test("missing extensions and malformed skills expose bounded, redacted source id
   expect(check(report, "extension.1")?.summary).toContain("missing-other.ts");
   expect(summary.length).toBeLessThan(10000);
 });
+
+test("doctor reports Grok subscription states without contacting auth or consulting billing credentials", async () => {
+  const { workspace, home } = await fixture();
+  for (const state of ["present", "refresh", "expired", "invalid", "missing"] as const) {
+    const report = await diagnose({ cwd: workspace, env: { HOME: home, XAI_API_KEY: "billing" }, args: { ...args, provider: "xai", xaiAuth: "grok" }, store: { ...store(null), get: async identity => {
+      if (identity.account === "api-key:anthropic") return null;
+      expect(identity.account).toBe("grok-subscription:xai");
+      return state === "missing" ? null : state === "invalid" ? "malformed" : JSON.stringify({ accessToken: "private", obtainedAt: 0, ...(state !== "present" ? { expiresAt: Date.now() + 90_000 } : {}), ...(state === "refresh" ? { refreshToken: "refresh" } : {}) });
+    } } });
+    expect(report.authSource).toBe("subscription");
+    expect(check(report, "auth")?.status).toBe(state === "present" ? "ok" : state === "refresh" ? "warning" : "error");
+    expect(JSON.stringify(report)).not.toContain("private");
+  }
+});

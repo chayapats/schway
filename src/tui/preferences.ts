@@ -44,16 +44,16 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
     git: [undefined, "off", "on-demand", "snapshot"],
     appearance: [undefined, "auto", "dark", "light"],
   };
-  if (scope === "memory") return [{ key: "workspace choice", value: safe(`${settings.provider}/${settings.model} (${settings.openaiAuth ?? settings.auth})`), origin: editor.origins.model ?? "built-in default",
-    saved: layers.memory?.model ? safe(`${layers.memory.provider}/${layers.memory.model} (${layers.memory.openaiAuth ?? "provider auth"}); thinking ${layers.memory.thinking ?? "default"}; profile ${layers.memory.profile ?? "none"}`) : "unset",
+  if (scope === "memory") return [{ key: "workspace choice", value: safe(`${settings.provider}/${settings.model} (${settings.provider === "xai" ? settings.xaiAuth : settings.openaiAuth ?? settings.auth})`), origin: editor.origins.model ?? "built-in default",
+    saved: layers.memory?.model ? safe(`${layers.memory.provider}/${layers.memory.model} (${(layers.memory.provider === "xai" ? layers.memory.xaiAuth : layers.memory.openaiAuth) ?? "provider auth"}); thinking ${layers.memory.thinking ?? "default"}; profile ${layers.memory.profile ?? "none"}`) : "unset",
     reset: "Reset removes only workspace memory; explicit config and session overrides remain.", choices: ["remember active choice", "reset workspace memory"] }];
-  return ["thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "git", "provider", "model", "profile", "auth", "openaiAuth", "appearance"].map(key => {
+  return ["thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "git", "provider", "model", "profile", "auth", "openaiAuth", "xaiAuth", "appearance"].map(key => {
     const origin = safe(editor.origins[key as keyof typeof editor.origins] ?? "built-in default");
     const originScope = origin === "CLI" ? undefined : origin === "interactive memory" ? "memory" : origin === "user-global" ? "user" : origin === "project" ? "project" : origin === "current-session override" ? "session" : undefined;
     const memoryConflict = ["session", "cli", "project", "user"].flatMap(name => {
       const layer = layers[name], memory = layers.memory;
-      if (!layer || !memory || !["model", "thinking", "profile", "provider", "openaiAuth"].includes(key)) return [];
-      const conflict = ["provider", "profile", "openaiAuth"].find(field => layer[field] !== undefined && (layer[field] ?? undefined) !== memory[field]);
+      if (!layer || !memory || !["model", "thinking", "profile", "provider", "openaiAuth", "xaiAuth"].includes(key)) return [];
+      const conflict = ["provider", "profile", "openaiAuth", "xaiAuth"].find(field => layer[field] !== undefined && (layer[field] ?? undefined) !== memory[field]);
       return conflict ? [`${labels[name]} ${conflict} selection shadows workspace memory; reset that ${labels[name]} override to restore it.`] : [];
     })[0];
     return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(settings.effectiveThinking)})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,

@@ -46,6 +46,7 @@ export const CONFIG_SETTING_NAMES = [
   "extraBody",
   "auth",
   "openaiAuth",
+  "xaiAuth",
   "packages",
   "profiles",
   "profile",
@@ -144,6 +145,7 @@ export const ConfigSchema = Type.Object(
     extraBody: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
     auth: Type.Optional(AuthSchema),
     openaiAuth: Type.Optional(OpenAIAuthSchema),
+    xaiAuth: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("grok"), Type.Literal("api-key")])),
     packages: Type.Optional(Type.Array(Type.String({ pattern: "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$" }), { uniqueItems: true })),
     profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
@@ -215,6 +217,7 @@ export interface ResolvedSettings {
   auth?: AuthMode;
   /** OpenAI credential preference; auto prefers explicit/runtime/environment API keys over a stored subscription. */
   openaiAuth?: OpenAIAuthMode;
+  xaiAuth?: "auto" | "grok" | "api-key";
   /** Active named compatible profile, when a selection resolved successfully. */
   profile?: string;
   /** Environment-variable name referenced by the active profile, never a secret value. */
@@ -290,6 +293,8 @@ export function parseConfigObject(
   if (removedProvider !== undefined) {
     return { error: removedProvider };
   }
+
+  if (record.xaiAuth !== undefined && !["auto", "grok", "api-key"].includes(String(record.xaiAuth))) return { error: `Unknown xAI auth preference: ${String(record.xaiAuth)}. Use auto, grok, or api-key.` };
 
   if (!Value.Check(ConfigSchema, value)) {
     const errors = [...Value.Errors(ConfigSchema, value)]
@@ -479,6 +484,7 @@ export function effectiveInteractiveMemory(input: { memory?: ConfigLayer; user?:
     if (layer.provider !== undefined && layer.provider !== input.memory.provider ||
         layer.profile !== undefined && (layer.profile ?? undefined) !== input.memory.profile) return undefined;
     if (layer.openaiAuth !== undefined && layer.openaiAuth !== input.memory.openaiAuth) { delete memory.model; delete memory.thinking; delete memory.openaiAuth; }
+    if (layer.xaiAuth !== undefined && layer.xaiAuth !== input.memory.xaiAuth) { delete memory.model; delete memory.thinking; delete memory.xaiAuth; }
     if (layer.model !== undefined && layer.model !== memory.model) delete memory.thinking;
   }
   return memory;
@@ -661,6 +667,7 @@ function finishResolvedSettings(input: {
     gitChangeTracking: input.merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
     appearance: input.merged.appearance ?? "auto",
     openaiAuth: input.merged.openaiAuth ?? "auto",
+    xaiAuth: input.merged.xaiAuth ?? "auto",
     ...(input.merged.contextWindow !== undefined ? { explicitContextWindow: input.merged.contextWindow } : {}),
     ...(input.merged.maxOutput !== undefined ? { explicitMaxOutput: input.merged.maxOutput } : {}),
     ...(input.selectedName !== undefined ? { profile: input.selectedName } : {}),

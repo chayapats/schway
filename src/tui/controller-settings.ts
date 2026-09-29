@@ -84,6 +84,7 @@ export abstract class SettingsLayer extends ChangesLayer {
           const settings = this.configEditor!.settings;
           if (panel.choiceIndex === 0 && !this.model) throw new Error("Activate a model successfully before remembering its choice.");
           const choice = panel.choiceIndex === 0 ? { provider: settings.provider, model: settings.model,
+            ...(settings.provider === "xai" ? { xaiAuth: this.grokSelected() ? "grok" as const : "api-key" as const } : {}),
             ...(settings.provider === "openai" ? { openaiAuth: this.model?.provider === "codex-subscription" ? "codex" as const : "api-key" as const } : {}),
             ...(settings.profile ? { profile: settings.profile } : {}), ...(settings.thinking ? { thinking: settings.thinking } : {}) } : undefined;
           transaction = await this.configEditor!.prepareMemory(choice);
@@ -97,7 +98,7 @@ export abstract class SettingsLayer extends ChangesLayer {
         if (this.disposed || this.preferences !== panel || generation !== this.preferenceGeneration) return false;
         this.preferenceTransaction = transaction;
         const origin = row.key === "appearance" && this.appearanceEnvironment ? "environment" : transaction.origins[row.key as keyof ConfigLayer] ?? transaction.origins.model;
-        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : transaction.settings[row.key as keyof ResolvedSettings];
+        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : transaction.settings[row.key as keyof ResolvedSettings];
         const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin ? ` Saved but not effective: shadowed by ${origin}.` : "";
         panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.key}: ${choice === undefined ? "reset override" : String(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
@@ -197,9 +198,11 @@ export abstract class SettingsLayer extends ChangesLayer {
     this.provider = next.provider; this.modelId = next.model;
     this.maxTurns = next.maxTurns; this.maxConcurrentTools = next.maxConcurrentTools;
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
-    this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.profile = next.profile;
+    this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.xaiAuth = next.xaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
     this.subscriptionReactivationRequired = false;
+    this.grokReactivationRequired = false;
+    this.grokPending = false;
     if (next.openaiAuth !== "codex" || staged.model?.provider === "codex-subscription") this.subscriptionPending = false;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }

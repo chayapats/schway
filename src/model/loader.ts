@@ -4,6 +4,12 @@ import type { CredentialStore } from "../auth/store.ts";
 import type { CodexTokens } from "./providers/codex-subscription.ts";
 import type { ModelCapability } from "./catalog.ts";
 
+const grokModels = new WeakSet<Model>();
+/** Mark an activated model as subscription-backed without changing its xAI conversation namespace. */
+export function bindGrokModel(model: Model): Model { grokModels.add(model); return model; }
+/** Identify an active Grok billing route even when the configured preference is automatic. */
+export function isGrokModel(model: Model | undefined): boolean { return model !== undefined && grokModels.has(model); }
+
 /** Optional fetch override used by protocol fixture tests. */
 export type FetchLike = (
   input: string | URL | Request,
@@ -24,6 +30,10 @@ export interface ProviderLoaderInput {
   thinking?: ThinkingLevel;
   /** OpenAI credential preference; codex loads the isolated subscription adapter. */
   openaiAuth?: CliOpenAIAuth;
+  /** Explicit xAI billing transport; Grok uses only its secure-store login. */
+  xaiAuth?: "auto" | "grok" | "api-key";
+  /** Secure-store renewal channel for the Grok transport. */
+  grokStore?: CredentialStore;
   /** Stored subscription tokens for the codex transport when no store-backed refresher is used. */
   codexTokens?: CodexTokens;
   /** Secure-store renewal channel for the codex transport; enables serialized pre-expiry refresh. */
@@ -56,6 +66,17 @@ export async function loadProviderModel(
   }
   if (input.provider === "xai") {
     const { createXaiModel } = await import("./providers/xai.ts");
+    if (input.xaiAuth === "grok") {
+      const grok = await import("./providers/grok-subscription.ts");
+      if (!input.grokStore) throw new Error("Grok subscription storage is unavailable.");
+      const refresher = grok.createSubscriptionTokenRefresher({ store: input.grokStore, fetch: fetchFn });
+      return bindGrokModel(createXaiModel({
+        apiKey: signal => refresher.getValidAccessToken(signal),
+        refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
+        authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
+        model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, fetch: fetchFn,
+      }));
+    }
     return createXaiModel({
       apiKey: input.apiKey ?? "",
       model: input.model,

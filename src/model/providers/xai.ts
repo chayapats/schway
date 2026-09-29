@@ -35,12 +35,13 @@ function requiredModelId(model: string | undefined): string {
   return modelId;
 }
 
-/**
- * Create an xAI Responses adapter that reuses OpenAI Responses assembly and never retries inside the SDK.
- * Encrypted reasoning is stored and replayed only under `providerMetadata.xai`.
- */
+/** Create an xAI Responses adapter with per-request credentials, namespaced reasoning and no SDK retries. */
 export function createXaiModel(options: {
-  apiKey: string;
+  apiKey: string | ((signal?: AbortSignal) => Promise<string>);
+  /** Renew a rejected subscription token once without entering the agent retry loop. */
+  refreshCredential?: (rejectedToken: string, signal?: AbortSignal) => Promise<string>;
+  /** Map subscription authorization failures without changing API-key transport errors. */
+  authError?: (status: number) => Error;
   model?: string;
   maxTokens?: number;
   thinking?: ThinkingLevel;
@@ -53,8 +54,8 @@ export function createXaiModel(options: {
   const maxTokens = options.maxTokens ?? lookupModel("xai", modelId).maxOutput;
   const defaultThinking = options.thinking;
   const capability = options.modelCapability;
-  const client = new OpenAI({
-    apiKey: options.apiKey,
+  const clientFor = (token: string) => new OpenAI({
+    apiKey: token,
     baseURL: options.baseUrl ?? XAI_BASE_URL,
     maxRetries: 0,
     logLevel: "off",
@@ -67,11 +68,27 @@ export function createXaiModel(options: {
     /** Stream Schway events; function-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest) {
       const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability);
-      const stream = await client.responses.create(
-        buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" }),
-        { signal: request.signal },
-      );
-      yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI" });
+      const body = buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" });
+      let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal) : options.apiKey;
+      const tokens = [token];
+      const safeError = (error: unknown): unknown => {
+        if (!options.refreshCredential) return error;
+        const message = tokens.reduce((text, secret) => secret ? text.replaceAll(secret, "[redacted]") : text, error instanceof Error ? error.message : "Grok request failed.");
+        return Object.assign(new Error(message), error instanceof OpenAI.APIError ? { status: error.status, headers: error.headers } : {});
+      };
+      const send = () => clientFor(token).responses.create(body, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
+      let stream;
+      try { stream = await send(); }
+      catch (error) {
+        if (error instanceof OpenAI.APIError && error.status === 401 && options.refreshCredential) {
+          token = await options.refreshCredential(token, request.signal); tokens.push(token);
+          try { stream = await send(); }
+          catch (retryError) { if (retryError instanceof OpenAI.APIError && [401, 403].includes(retryError.status ?? 0) && options.authError) throw options.authError(retryError.status!); throw safeError(retryError); }
+        } else if (error instanceof OpenAI.APIError && error.status === 403 && options.authError) throw options.authError(403);
+        else throw safeError(error);
+      }
+      try { yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI" }); }
+      catch (error) { throw safeError(error); }
     },
   };
 }

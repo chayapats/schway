@@ -4,7 +4,7 @@ import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
-import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
+import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { loadResolvedSettings, type ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
@@ -84,6 +84,7 @@ export interface CliIo {
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
     openaiAuth?: CliOpenAIAuth;
+    xaiAuth?: "auto" | "grok" | "api-key";
     thinking?: CliThinking;
   }) => Promise<Model>;
 }
@@ -221,6 +222,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     return 1;
   }
+  if (parsed.args.xaiAuth !== undefined && settings.provider !== "xai") { io.stderr.write("xAI auth preference requires --provider xai\n"); return 1; }
   if (parsed.args.openaiAuth !== undefined && settings.provider !== "openai") {
     diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write(
@@ -299,14 +301,16 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (settings.provider === "xai" && settings.thinking !== undefined && !io.model) {
       const store = io.credentialStore ?? createNativeCredentialStore();
-      const credential = await resolveProviderCredential({ provider: "xai", runtimeApiKey: parsed.args.apiKey, env, store });
-      if ("error" in credential) { io.stderr.write(`${credential.error}\n`); return 1; }
+      const selected = await selectXaiTransport({ xaiAuth: settings.xaiAuth, runtimeApiKey: parsed.args.apiKey, env, store });
+      if ("error" in selected) { io.stderr.write(`${selected.error}\n`); return 1; }
       try {
         const { XAI_MODELS_URL } = await import("../model/providers/xai.ts");
         const { fetchProviderModelList, requireXaiModels, xaiModelCapabilities } = await import("../model/model-list.ts");
-        const models = requireXaiModels(await fetchProviderModelList({
-          url: XAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal: io.signal, label: "xAI",
-        }));
+        const credential = selected.transport === "grok" ? undefined : await resolveProviderCredential({ provider: "xai", runtimeApiKey: parsed.args.apiKey, env, store });
+        if (credential && "error" in credential) throw new Error(credential.error);
+        const models = selected.transport === "grok"
+          ? await (await import("../model/providers/grok-subscription.ts")).fetchSubscriptionModels({ store, fetch: io.fetch, signal: io.signal })
+          : requireXaiModels(await fetchProviderModelList({ url: XAI_MODELS_URL, apiKey: credential?.apiKey, fetch: io.fetch, signal: io.signal, label: "xAI" }));
         const chosen = await loadResolvedSettings({
           home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: xaiModelCapabilities(models),
         });
@@ -542,6 +546,16 @@ async function loadCliModel(
       } catch (error) {
         return { error: redactSecrets(errorMessage(error), secrets) };
       }
+    }
+  }
+  if (settings.provider === "xai") {
+    const selection = await selectXaiTransport({ xaiAuth: settings.xaiAuth, runtimeApiKey, env: io.env, store: credentialStore });
+    if ("error" in selection) return selection;
+    if (selection.transport === "grok") {
+      const input = { provider: "xai" as const, xaiAuth: "grok" as const, model: settings.model, maxTokens: settings.maxOutput, thinking: settings.thinking,
+        ...(settings.supportedThinking !== undefined ? { modelCapability: { id: settings.model, supportedThinking: settings.supportedThinking, supportsDisabling: settings.supportsDisabling } } : {}) };
+      try { return { model: io.createModel ? await io.createModel(input) : await loadProviderModel({ ...input, grokStore: credentialStore }, io.fetch) }; }
+      catch (error) { return { error: redactSecrets(errorMessage(error), secrets) }; }
     }
   }
   const credential = await resolveProviderCredential({

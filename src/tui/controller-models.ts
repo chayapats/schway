@@ -108,10 +108,10 @@ export abstract class ModelsLayer extends CommandsLayer {
   /** Fill connected routes together so one slow list cannot consume another's deadline. */
   protected async loadRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
     const load = this.credentials?.listRouteModels;
-    if (!load || !current()) return;
+    if (!current()) return;
     const settings = this.configEditor?.settings;
     const tasks: Promise<void>[] = [];
-    if (this.modelPickerAccess?.openaiApiKey === "API key") {
+    if (load && this.modelPickerAccess?.openaiApiKey === "API key") {
       tasks.push((async () => {
         try {
           this.apiModels = await this.boundedPickerTask(signal, load("api-key", signal));
@@ -123,7 +123,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     const baseUrl = settings?.baseUrl ?? this.baseUrl;
     const compatibleAccess = settings?.profile ? this.modelPickerAccess?.profiles[settings.profile] : this.modelPickerAccess?.providers["openai-compatible"];
-    if (baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
+    if (load && baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
       tasks.push((async () => {
         try {
           this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl }));
@@ -133,7 +133,7 @@ export abstract class ModelsLayer extends CommandsLayer {
         }
       })());
     }
-    if (this.modelPickerAccess?.xaiApiKey === "API key") {
+    if (load && this.modelPickerAccess?.xaiApiKey === "API key") {
       tasks.push((async () => {
         try {
           const listed = filterXaiModels(await this.boundedPickerTask(signal, load("xai", signal)));
@@ -141,14 +141,20 @@ export abstract class ModelsLayer extends CommandsLayer {
           if (!current()) return;
           this.xaiModels = listed;
           this.xaiModelsUnavailable = false;
-          this.installXaiCapabilities(listed);
+          if (!this.grokSelected()) this.installXaiCapabilities(listed);
         } catch {
           if (current()) {
             this.xaiModels = undefined;
             this.xaiModelsUnavailable = true;
-            this.clearXaiCapabilities();
+            if (!this.grokSelected()) this.clearXaiCapabilities();
           }
         }
+      })());
+    }
+    if (this.modelPickerAccess?.grok === "Grok" && this.credentials?.listGrokModels) {
+      tasks.push((async () => {
+        try { const models = filterXaiModels(await this.boundedPickerTask(signal, this.credentials!.listGrokModels!(signal))); if (current()) { this.grokModels = models; this.grokModelsUnavailable = false; } }
+        catch (error) { if (current()) { this.grokModels = undefined; this.grokModelsUnavailable = true; if (error instanceof Error && error.message.startsWith("Your Grok plan")) this.fail(error.message); } }
       })());
     }
     await Promise.all(tasks);
@@ -218,11 +224,12 @@ export abstract class ModelsLayer extends CommandsLayer {
     const settings = this.configEditor?.settings;
     picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, {
       profiles: this.configEditor?.profiles, activeProfile: settings?.profile ?? this.profile,
-      activeRoute: this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
+      activeRoute: this.grokSelected() ? "grok" : this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
       baseUrl: settings?.baseUrl ?? this.baseUrl, credentialIdentity: settings?.credentialIdentity,
       subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess,
       apiModels: this.apiModels, apiModelsUnavailable: this.apiModelsUnavailable, compatibleModels: this.compatibleModels,
       compatibleModelsUnavailable: this.compatibleModelsUnavailable, subscriptionUnavailable: this.subscriptionListUnavailable,
+      grokModels: this.grokModels, grokModelsUnavailable: this.grokModelsUnavailable,
       xaiModels: this.xaiModels, xaiModelsUnavailable: this.xaiModelsUnavailable,
     });
     if (this.modelPickerAccess?.subscription === "Login required" && !this.subscriptionModels?.length &&
@@ -249,6 +256,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (!picker || !this.credentials) { this.fail("Sign-in is unavailable in this session."); return false; }
     this.pickerReturn = { query: picker.query, identity: selection.identity };
     let started: boolean;
+    if (selection.authRoute === "grok") return this.login("grok");
     if (selection.authRoute === "codex") {
       started = await this.login("codex");
       if (!started) this.pickerReturn = undefined;
@@ -285,6 +293,8 @@ export abstract class ModelsLayer extends CommandsLayer {
     this.compatibleModelsUnavailable = false;
     this.xaiModels = undefined;
     this.xaiModelsUnavailable = false;
+    this.grokModels = undefined;
+    this.grokModelsUnavailable = false;
     this.subscriptionListUnavailable = false;
     this.modelPicker = undefined;
     this.pickerPreferredIdentity = undefined;
@@ -315,6 +325,9 @@ export abstract class ModelsLayer extends CommandsLayer {
       }
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
+    } else if (selection.authRoute === "grok") {
+      this.installXaiCapabilities(this.grokModels ?? []);
+      applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(selection.modelId), () => `Switched to xai/${this.modelId} via Grok subscription.`, undefined, true, false, this.listedBudgets(selection));
     } else if (selection.provider === "xai") {
       applied = await this.changeSettings(() => this.configEditor!.prepareXaiModel(selection.modelId),
         () => `Switched to xai/${this.modelId} via xAI API key.`, undefined, true, false, this.listedBudgets(selection));
@@ -324,7 +337,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     } else {
       applied = await this.selectModel(`${selection.provider}/${selection.modelId}`, this.listedBudgets(selection));
     }
-    if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
+    if (applied && (selection.authRoute === "codex" || selection.authRoute === "grok" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
   }
 
@@ -394,11 +407,11 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     const applied = await this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
       ? this.configEditor!.prepareSubscriptionModel(selection.modelId)
-      : selection.provider === "xai" ? this.configEditor!.prepareXaiModel(selection.modelId)
+      : selection.provider === "xai" ? this.grokSelected() ? this.configEditor!.prepareGrokModel(selection.modelId) : this.configEditor!.prepareXaiModel(selection.modelId)
       : this.configEditor!.prepareModel(selection.provider, selection.modelId),
       () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}).`, undefined, true, false, budgets);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
-      authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" || this.provider === "xai" ? "api-key" : "provider" });
+      authRoute: this.grokSelected() ? "grok" : this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" || this.provider === "xai" ? "api-key" : "provider" });
     return applied;
   }
 
@@ -406,9 +419,9 @@ export abstract class ModelsLayer extends CommandsLayer {
   async thinkingCommand(args: string): Promise<boolean> {
     const selection = parseThinkingArgs(args);
     if (typeof selection === "object") { this.fail(selection.error); return false; }
-    if (this.provider === "xai" && selection !== "show" && selection !== "reset" && this.configEditor?.modelCapability(this.modelId) === undefined && this.credentials?.listRouteModels) {
+    if (this.provider === "xai" && selection !== "show" && selection !== "reset" && this.configEditor?.modelCapability(this.modelId) === undefined && (this.grokSelected() ? this.credentials?.listGrokModels : this.credentials?.listRouteModels)) {
       try {
-        const models = filterXaiModels(await this.credentials.listRouteModels("xai", AbortSignal.timeout(5_000)));
+        const models = filterXaiModels(await (this.grokSelected() ? this.credentials!.listGrokModels!(AbortSignal.timeout(5_000)) : this.credentials!.listRouteModels!("xai", AbortSignal.timeout(5_000))));
         if (!models.length) throw new Error("xAI model list returned no selectable models.");
         this.installXaiCapabilities(models);
       } catch (error) {
@@ -439,7 +452,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: this.codexThinkingSelected() ? null : undefined }), () => `Thinking reset. ${this.describeThinking()}.`);
     }
     else applied = await this.changeSettings(() => this.configEditor!.prepare({ scope: "session", key: "thinking", value: selection }), () => `Thinking ${selection}. ${this.describeThinking()}.`, undefined, true);
-    if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" || this.provider === "xai" ? "api-key" : "provider" });
+    if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: this.grokSelected() ? "grok" : this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" || this.provider === "xai" ? "api-key" : "provider" });
     return applied;
   }
 

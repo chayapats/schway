@@ -10,7 +10,7 @@ import { createDiagnosticSink, type DiagnosticSink } from "../diagnostics/sink.t
 import {
   redactSecrets,
 } from "../auth/secrets.ts";
-import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
+import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
 import { loadCredentialSafeTui } from "./credential-input.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
@@ -52,7 +52,7 @@ import {
   formatSkillsListing,
   prepareSkillInvocation,
 } from "../skills/skills.ts";
-import { loadProviderModel } from "../model/loader.ts";
+import { loadProviderModel, bindGrokModel } from "../model/loader.ts";
 
 /** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
 export interface TuiWriter {
@@ -89,6 +89,7 @@ export interface InteractiveIo {
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
     openaiAuth?: CliOpenAIAuth;
+    xaiAuth?: "auto" | "grok" | "api-key";
     thinking?: CliThinking;
   }) => Promise<Model>;
 }
@@ -166,6 +167,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     );
     return 1;
   }
+  if (io.args.xaiAuth !== undefined && settings.provider !== "xai") { io.stderr.write("xAI auth preference requires --provider xai\n"); return 1; }
   if (io.args.openaiAuth !== undefined && settings.provider !== "openai") {
     diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write("OpenAI auth preference requires --provider openai\n");
@@ -209,7 +211,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         headers: settings.headers,
         extraBody: settings.extraBody,
         auth: settings.auth,
-        openaiAuth: settings.openaiAuth,
+        openaiAuth: settings.openaiAuth, xaiAuth: settings.xaiAuth,
         thinking: settings.thinking,
         profile: settings.profile,
         credentialEnv: settings.credentialEnv,
@@ -248,7 +250,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         const current = override ?? settings;
         return loadInteractiveModel(current.provider, current.model, {
           maxTokens: current.maxOutput, baseUrl: current.baseUrl, headers: current.headers,
-          extraBody: current.extraBody, auth: current.auth, openaiAuth: current.openaiAuth,
+          extraBody: current.extraBody, auth: current.auth, openaiAuth: current.openaiAuth, xaiAuth: current.xaiAuth,
           thinking: current.thinking, profile: current.profile,
           credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
           runtimeApiKey: runtimeKeyFor(current.provider),
@@ -256,6 +258,8 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         });
       },
       codexLogin,
+      grokLogin: createGrokLoginRunner({ store: credentialStore, fetch: io.fetch, secrets }),
+      listGrokModels: async (signal: AbortSignal) => (await import("../model/providers/grok-subscription.ts")).fetchSubscriptionModels({ store: credentialStore, fetch: io.fetch, signal }),
       listSubscriptionCatalog: async (signal: AbortSignal) => {
         const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
         return fetchSubscriptionCatalog({ store: credentialStore, fetch: io.fetch, signal });
@@ -320,7 +324,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
-          openaiAuth: settings.openaiAuth,
+          openaiAuth: settings.openaiAuth, xaiAuth: settings.xaiAuth,
           thinking: settings.thinking,
           profile: settings.profile,
           startupError,
@@ -359,7 +363,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           explicitMaxOutput: settings.explicitMaxOutput,
           baseUrl: settings.baseUrl,
           auth: settings.auth,
-          openaiAuth: settings.openaiAuth,
+          openaiAuth: settings.openaiAuth, xaiAuth: settings.xaiAuth,
           thinking: settings.thinking,
           profile: settings.profile,
           startupError,
@@ -421,13 +425,13 @@ export async function stageInteractiveSettings(
   previous: ResolvedSettings,
   options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal; fetchedContextWindow?: number; fetchedMaxOutput?: number },
 ): Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: import("../model/catalog.ts").ModelCapability }> {
-  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
+  const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "xaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
   let modelCapability: import("../model/catalog.ts").ModelCapability | undefined;
   if ((options.forceLoad && !model) || (next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
-      maxTokens: next.explicitMaxOutput ?? options.fetchedMaxOutput ?? next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
+      maxTokens: next.explicitMaxOutput ?? options.fetchedMaxOutput ?? next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, xaiAuth: next.xaiAuth, thinking: next.thinking,
       ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking, ...(next.supportsDisabling ? { supportsDisabling: true } : {}), ...(next.defaultThinking ? { defaultThinking: next.defaultThinking } : {}) } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
@@ -819,7 +823,23 @@ function collectSecrets(
   return secrets;
 }
 
-/** Build the explicit subscription login runner, lazily loading the isolated Codex adapter only on use. */
+/** Build the explicit Grok OAuth runner with secure storage and ephemeral approval progress. */
+export function createGrokLoginRunner(options: { store: CredentialStore; fetch?: FetchLike; secrets: string[]; openBrowser?: (url: string) => Promise<void> | void }): import("./controller-types.ts").GrokLoginRunner {
+  return async ({ device, signal, onProgress, onApproval, onSaved }) => {
+    const grok = await import("../model/providers/grok-subscription.ts");
+    try {
+      const deps = { fetch: options.fetch, onProgress, onApproval, onSaved, saveTokens: (tokens: import("../model/providers/grok-subscription.ts").GrokTokens) => grok.saveSubscriptionTokens(options.store, tokens) };
+      const tokens = device ? await grok.loginWithDeviceFlow({ signal, deps }) : await grok.loginWithBrowserFlow({ signal, deps: { ...deps, openBrowser: options.openBrowser ?? openBrowserUrl } });
+      for (const token of [tokens.accessToken, tokens.refreshToken]) if (token && !options.secrets.includes(token)) options.secrets.push(token);
+      signal.throwIfAborted(); return { ok: true, status: "Grok subscription login saved." };
+    } catch (error) {
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+      return { ok: false, message: redactSecrets(messageOf(error), options.secrets) };
+    }
+  };
+}
+
+/** Create the explicit ChatGPT OAuth runner with secure storage and safe progress callbacks. */
 export function createCodexLoginRunner(options: {
   store: CredentialStore;
   fetch?: FetchLike;
@@ -897,6 +917,7 @@ export async function loadInteractiveModel(
     extraBody?: Record<string, unknown>;
     auth?: CliAuthMode;
     openaiAuth?: CliOpenAIAuth;
+    xaiAuth?: "auto" | "grok" | "api-key";
     thinking?: CliThinking;
     modelCapability?: import("../model/catalog.ts").ModelCapability;
     /** Validate an account selection without fallback; true retains remembered-choice diagnostics. */
@@ -948,6 +969,24 @@ export async function loadInteractiveModel(
       } catch (error) {
         return { error: redactSecrets(messageOf(error), options.secrets) };
       }
+    }
+  }
+  if (provider === "xai") {
+    const selection = await selectXaiTransport({ xaiAuth: options.xaiAuth, runtimeApiKey: options.runtimeApiKey, env: options.env, store });
+    if ("error" in selection) return selection;
+    if (selection.transport === "grok") {
+      try {
+        let capability = options.modelCapability;
+        if (options.thinking !== undefined && !capability) {
+          const grok = await import("../model/providers/grok-subscription.ts");
+          const { xaiModelCapabilities } = await import("../model/model-list.ts");
+          capability = xaiModelCapabilities(await grok.fetchSubscriptionModels({ store, fetch: options.fetch, signal: options.signal })).find(entry => entry.id === modelId);
+          if (!capability?.supportedThinking.includes(options.thinking)) return { error: `Thinking level "${options.thinking}" is not listed for xai/${modelId}.` };
+        }
+        const input = { provider, xaiAuth: "grok" as const, model: modelId, maxTokens: options.maxTokens, thinking: options.thinking, modelCapability: capability };
+        const model = options.createModel ? bindGrokModel(await options.createModel(input)) : await loadProviderModel({ ...input, grokStore: store }, options.fetch);
+        return { model, ...(capability ? { capability } : {}) };
+      } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
     }
   }
   const credential = await resolveProviderCredential({

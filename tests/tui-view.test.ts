@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { beforeAll, afterAll, afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { BoxRenderable, RGBA, TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView, type ConversationViewOptions } from "../src/tui/view.ts";
@@ -682,7 +682,7 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     ui.editor.cursorOffset = 5;
     expect(await ui.controller.login("")).toBe(true);
     await settle(ui);
-    for (let step = 0; step < 4; step++) ui.mockInput.pressArrow("down");
+    for (let step = 0; step < 6; step++) ui.mockInput.pressArrow("down");
     await settle(ui);
     const frame = ui.captureCharFrame();
     const openai = frame.indexOf("OpenAI API key");
@@ -1844,3 +1844,61 @@ test("short branch windows always display the exact highlighted existing path an
   }
   expect(session.activeBranchId).toBe(branch);
 });
+
+test("Grok chooser, browser and device panels preserve drafts and show codes at 80x24 and 24x8", async () => {
+  for (const device of [false, true]) {
+    const store = fakeCredentialStore();
+    const ui = await setup(80, 24, {}, undefined, { credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ signal, onApproval }) => {
+      onApproval(device ? { kind: "device", verificationUri: "https://x.ai/device", userCode: "ABCD-EFGH" } : { kind: "browser" });
+      await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return { ok: false, message: "Cancelled" };
+    } } });
+    await ui.mockInput.pasteBracketedText("Keep my Thai ไทย draft"); ui.editor.cursorOffset = 5;
+    ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
+    const choices = ui.controller.snapshot().loginChooser!.choices;
+    const browserIndex = choices.indexOf("Grok · Browser approval"); expect(browserIndex).toBe(choices.indexOf("ChatGPT · Paste browser callback") + 1);
+    expect(choices[browserIndex + 1]).toBe("Grok · Device approval");
+    for (let index = 0; index < browserIndex + Number(device); index++) ui.mockInput.pressArrow("down");
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.captureCharFrame()).toContain(device ? "Open x.ai/device and enter ABCD-EFGH · Esc cancel" : "Waiting for approval in your browser… · Esc cancel");
+    if (device) { ui.resize(24, 8); await settle(ui); expect(ui.captureCharFrame()).toContain("x.ai/device"); expect(ui.captureCharFrame()).toContain("ABCD-EFGH"); }
+    expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
+    ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.editor.plainText).toBe("Keep my Thai ไทย draft"); expect(ui.editor.cursorOffset).toBe(5); expect(ui.session.items).toHaveLength(0);
+  }
+});
+test("Grok success and failure restore the composer, and plan rejection opens the chooser with Alt+L", async () => {
+  const { grokSubscriptionIdentity } = await import("../src/auth/store.ts");
+  for (const outcome of ["success", "failure", "plan"] as const) await withTempDir(async root => {
+    const store = fakeCredentialStore(), workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", model: "gpt-6-astra" } });
+    let finish!: () => void;
+    const ui = await setup(80, 24, {}, undefined, { configEditor: editor, workspace, provider: "openai", modelId: "gpt-6-astra", credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved, onApproval }) => {
+      onApproval({ kind: "browser" }); await new Promise<void>(resolve => { finish = resolve; });
+      if (outcome === "failure") return { ok: false, message: "Grok sign-in was denied." };
+      await store.set(grokSubscriptionIdentity(), "saved-grok-token"); onSaved?.(); return { ok: true, status: "Saved" };
+    }, listGrokModels: async () => { if (outcome === "plan") throw Error("Your Grok plan doesn't include API access. Use an xAI API key instead."); return [{ id: "grok-4.7", recommended: true }]; } }, stageSettings: async next => ({ model: createScriptedModel({ provider: "xai", id: next.model }), contextManager: createContextManager(workspace) }) });
+    await ui.mockInput.pasteBracketedText("My pending task"); ui.editor.cursorOffset = 4;
+    ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
+    const index = ui.controller.snapshot().loginChooser!.choices.indexOf("Grok · Browser approval"); for (let i = 0; i < index; i++) ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await settle(ui);
+    finish(); await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.editor.plainText).toBe("My pending task"); expect(ui.editor.cursorOffset).toBe(4); expect(ui.session.items).toHaveLength(0);
+    if (outcome === "plan") {
+      // The exact instruction wraps naturally at 80 columns; compare visible text without cell padding.
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L");
+      expect(ui.captureCharFrame()).toContain("Your Grok plan doesn't include API access.");
+      expect(ui.captureCharFrame()).toContain("Alt+L"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved-grok-token");
+      ui.mockInput.pressKey("l", { meta: true }); await settle(ui); expect(ui.controller.snapshot().loginChooser).toBeDefined();
+    }
+    if (outcome === "success") expect(ui.captureCharFrame()).toContain("Signed in. Using xai/grok-4.7.");
+  });
+});
+
+const unguardedGrokFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = Object.assign((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost" && url.hostname !== "[::1]") throw new Error("Rendered Grok fixtures must not use external network");
+    return unguardedGrokFetch(input, init);
+  }, { preconnect: unguardedGrokFetch.preconnect }) as typeof fetch;
+});
+afterAll(() => { globalThis.fetch = unguardedGrokFetch; });

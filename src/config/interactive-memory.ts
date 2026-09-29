@@ -11,6 +11,7 @@ export interface InteractiveChoice {
   provider: ResolvedSettings["provider"];
   model: string;
   openaiAuth?: "codex" | "api-key";
+  xaiAuth?: "grok" | "api-key";
   profile?: string;
   thinking?: ResolvedSettings["thinking"];
 }
@@ -76,9 +77,10 @@ export class InteractiveMemory {
 function validateChoice(value: unknown): InteractiveChoice {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid choice");
   const choice = value as InteractiveChoice;
-  if (Object.keys(choice).some(key => !["provider", "model", "openaiAuth", "profile", "thinking"].includes(key))) throw new Error("Invalid choice fields");
+  if (Object.keys(choice).some(key => !["provider", "model", "openaiAuth", "xaiAuth", "profile", "thinking"].includes(key))) throw new Error("Invalid choice fields");
   const parsed = parseConfigObject(choice, "interactive memory");
   if ("error" in parsed || !choice.provider || !choice.model || choice.provider === "openai" && !["codex", "api-key"].includes(choice.openaiAuth ?? "") || choice.provider !== "openai" && choice.openaiAuth !== undefined || choice.profile !== undefined && choice.provider !== "openai-compatible") throw new Error("Invalid choice");
+  if (choice.xaiAuth !== undefined && (choice.provider !== "xai" || !["grok", "api-key"].includes(choice.xaiAuth))) throw new Error("Invalid xAI choice");
   return structuredClone(choice);
 }
 

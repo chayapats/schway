@@ -97,7 +97,8 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/login - choose a provider and sign-in method",
     "/login <openai|xai|openai-compatible> - enter an API key in a masked prompt",
     "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
-    "/logout <openai|xai|openai-compatible|codex> - remove the selected stored credential",
+    "/login grok [--device] - sign in with a Grok subscription",
+    "/logout <openai|xai|openai-compatible|codex|grok> - remove the selected stored credential",
     "/help - show this help",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
@@ -125,7 +126,7 @@ export async function dispatchEditorInput(
   const accept = () => { if (!notified) { notified = true; accepted(); } };
   const slash = parseSlashCommand(text);
   const invocation = splitSlashCommand(text);
-  if (controller.running) { controller.notice(invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Busy: /${invocation.name} was not run. Press Esc to cancel the active operation, then retry.` : "Already running. Press Esc to cancel first, then retry the retained command."); return false; }
+  if (controller.running) { controller.notice(invocation?.name === "login" || invocation?.name === "logout" ? "Busy: credential changes require an idle session." : invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Busy: /${invocation.name} was not run. Press Esc to cancel the active operation, then retry.` : "Already running. Press Esc to cancel first, then retry the retained command."); return false; }
   if (invocation && await controller.commandCollision(invocation.name)) return false;
   if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
     const executed = await controller.runExtensionCommand(invocation.name, invocation.args, accept);
@@ -300,15 +301,16 @@ function isPickerProvider(value: string): value is ModelPickerProvider {
 
 /** Usage guidance for credential commands, keeping API keys out of slash arguments. */
 export const LOGIN_USAGE =
-  "Usage: /login to choose a method, /login <openai|xai|openai-compatible>, or /login codex [--device] [--code <callback-url-or-code>]. Enter API keys only in the masked prompt.";
+  "Usage: /login to choose a method, /login <openai|xai|openai-compatible>, /login codex [--device] [--code <callback-url-or-code>], or /login grok [--device]. Enter API keys only in the masked prompt.";
 
 /** Requested credential action from /login or /logout arguments. */
 export type LoginTarget =
   | { kind: "api-key"; provider: "openai" | "xai" | "openai-compatible" }
   | { kind: "codex"; device: boolean; code?: string }
+  | { kind: "grok"; device: boolean }
   | { error: string };
 
-/** Parse /login and /logout arguments into an API-key provider or the ChatGPT subscription flow. */
+/** Parse credential commands into explicit API-key, ChatGPT or Grok routes. */
 export function parseLoginTarget(args: string): LoginTarget {
   const tokens = args.trim().split(/\s+/).filter((token) => token.length > 0);
   const name = tokens[0]?.toLowerCase() ?? "";
@@ -318,6 +320,7 @@ export function parseLoginTarget(args: string): LoginTarget {
     }
     return { kind: "api-key", provider: name };
   }
+  if (name === "grok") return tokens.length === 1 || (tokens.length === 2 && tokens[1] === "--device") ? { kind: "grok", device: tokens.length === 2 } : { error: LOGIN_USAGE };
   if (name === "codex") {
     let device = false;
     let code: string | undefined;
