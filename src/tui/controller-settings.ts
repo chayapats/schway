@@ -146,7 +146,7 @@ export abstract class SettingsLayer extends ChangesLayer {
     }, undefined, false, key === "appearance");
   }
 
-  protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate = false, appearanceOnly = false): Promise<boolean> {
+  protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate = false, appearanceOnly = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
     if (!this.configEditor || (!appearanceOnly && !this.stageSettings)) { this.fail("Interactive settings are unavailable in this session."); return false; }
@@ -162,8 +162,6 @@ export abstract class SettingsLayer extends ChangesLayer {
           { ...this.configEditor!.settings, appearance: undefined },
           { ...transaction.settings, appearance: undefined },
         )) throw new Error("Other settings changed outside Schway. Reload before saving appearance.");
-        const budgets = this.activationBudgets;
-        this.activationBudgets = undefined;
         const staged = appearanceOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate, budgets);
         abort.signal.throwIfAborted();
         if (activate && !staged?.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
@@ -192,6 +190,7 @@ export abstract class SettingsLayer extends ChangesLayer {
   }
 
   protected publishSettings(next: ResolvedSettings, staged: { model?: Model; contextManager: ContextManager }): void {
+    if (this.provider !== next.provider || this.modelId !== next.model || this.profile !== next.profile) this.selectionGeneration += 1;
     this.model = staged.model;
     this.contextManager.clearActiveSkill();
     this.contextManager = staged.contextManager;

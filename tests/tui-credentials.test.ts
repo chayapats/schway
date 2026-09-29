@@ -17,7 +17,7 @@ test("interactive login and overwrite refresh the active real provider and logou
     const home = join(root, "home");
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const store = fakeCredentialStore();
-    const configEditor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai" } });
+    const configEditor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai", model: "gpt-6-astra" } });
     const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace });
     const settings = configEditor.settings;
     const secrets: string[] = [];

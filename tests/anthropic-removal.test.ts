@@ -96,6 +96,7 @@ test("doctor reports a stored Anthropic credential as unused with removal steps 
 test("a session recorded with Anthropic continues on OpenAI without Anthropic reasoning data", async () => {
   let body = "";
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: async (_input, init) => {
       body = String(init?.body);

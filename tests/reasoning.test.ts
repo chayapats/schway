@@ -249,7 +249,8 @@ test("openai off/low/medium/high map to documented reasoning efforts", async () 
 
 test("openai unset reasoning leaves outgoing controls untouched", async () => {
   const captured: Captured = { calls: 0 };
-  const model = createOpenAIModel({ apiKey: "sk-test", fetch: openaiFetch(OPENAI_TEXT, captured) });
+  const model = createOpenAIModel({
+    model: "gpt-6-astra", apiKey: "sk-test", fetch: openaiFetch(OPENAI_TEXT, captured) });
   await collect(model.stream(openaiSample()));
   expect("reasoning" in ((captured.body as Record<string, unknown>) ?? {})).toBe(false);
 });
@@ -275,7 +276,8 @@ test("openai reasoning and tool metadata survive round trips", async () => {
   expect((captured.body as { reasoning: unknown }).reasoning).toEqual({ effort: "medium", summary: "auto" });
 
   const replay: Captured = { calls: 0 };
-  const replayModel = createOpenAIModel({ apiKey: "sk-test", fetch: openaiFetch(OPENAI_TOOL, replay) });
+  const replayModel = createOpenAIModel({
+    model: "gpt-6-astra", apiKey: "sk-test", fetch: openaiFetch(OPENAI_TOOL, replay) });
   const toolEvents = await collect(replayModel.stream({ ...openaiSample(), items: [...openaiSample().items, complete.message] }));
   const toolComplete = toolEvents.at(-1);
   if (toolComplete?.type !== "message_complete") throw new Error("expected tool complete");
@@ -289,6 +291,7 @@ test("openai reasoning and tool metadata survive round trips", async () => {
 test("compatible unset thinking passes extraBody through as configured mapping", async () => {
   const captured: Captured = { calls: 0 };
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:11434/v1",
     extraBody: { reasoning_effort: "medium", temperature: 0.2 },
     fetch: compatibleFetch(COMPATIBLE_TEXT, captured),
@@ -302,17 +305,20 @@ test("compatible unset thinking passes extraBody through as configured mapping",
 
 test("compatible off leaves defaults untouched while low/medium/high fail clearly", async () => {
   const plain: Captured = { calls: 0 };
-  await collect(createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:11434/v1", fetch: compatibleFetch(COMPATIBLE_TEXT, plain) }).stream(compatibleSample()));
+  await collect(createOpenAICompatibleModel({
+    model: "gpt-4o", baseUrl: "http://127.0.0.1:11434/v1", fetch: compatibleFetch(COMPATIBLE_TEXT, plain) }).stream(compatibleSample()));
   expect("reasoning" in ((plain.body as Record<string, unknown>) ?? {})).toBe(false);
   expect("reasoning_effort" in ((plain.body as Record<string, unknown>) ?? {})).toBe(false);
 
   const off: Captured = { calls: 0 };
-  await collect(createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:11434/v1", thinking: "off", fetch: compatibleFetch(COMPATIBLE_TEXT, off) }).stream(compatibleSample()));
+  await collect(createOpenAICompatibleModel({
+    model: "gpt-4o", baseUrl: "http://127.0.0.1:11434/v1", thinking: "off", fetch: compatibleFetch(COMPATIBLE_TEXT, off) }).stream(compatibleSample()));
   expect(off.calls).toBe(1);
 
   for (const level of ["low", "medium", "high"] as const) {
     const captured: Captured = { calls: 0 };
-    const model = createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:11434/v1", thinking: level, fetch: compatibleFetch(COMPATIBLE_TEXT, captured) });
+    const model = createOpenAICompatibleModel({
+    model: "gpt-4o", baseUrl: "http://127.0.0.1:11434/v1", thinking: level, fetch: compatibleFetch(COMPATIBLE_TEXT, captured) });
     await expect(collect(model.stream(compatibleSample()))).rejects.toThrow(/not mapped|not supported/);
     expect(captured.calls).toBe(0);
   }
@@ -329,7 +335,8 @@ test("compatible thinking conflicts with reasoning body keys instead of silently
 
 test("compatible tool conversations preserve metadata with thinking unset", async () => {
   const captured: Captured = { calls: 0 };
-  const model = createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:8080/v1", fetch: compatibleFetch(COMPATIBLE_TOOL, captured) });
+  const model = createOpenAICompatibleModel({
+    model: "gpt-4o", baseUrl: "http://127.0.0.1:8080/v1", fetch: compatibleFetch(COMPATIBLE_TOOL, captured) });
   const events = await collect(model.stream({ ...compatibleSample(), tools: [{ name: readTool.name, description: readTool.description, inputSchema: toPlainJsonSchema(readTool.inputSchema) }] }));
   const complete = events.at(-1);
   if (complete?.type !== "message_complete") throw new Error("expected complete");
@@ -608,7 +615,8 @@ test("openai thinking metadata survives compaction and resume round trips", asyn
     expect(JSON.stringify(resumed.items)).toContain("enc-abc");
 
     const replay: Captured = { calls: 0 };
-    const replayModel = createOpenAIModel({ apiKey: "sk-test", fetch: openaiFetch(OPENAI_TOOL, replay) });
+    const replayModel = createOpenAIModel({
+    model: "gpt-6-astra", apiKey: "sk-test", fetch: openaiFetch(OPENAI_TOOL, replay) });
     await collect(replayModel.stream({ ...openaiSample(), items: [...openaiSample().items, ...(resumed.items.filter((item) => item.type !== "compaction") as never[]).slice(-1)] }));
     expect(JSON.stringify((replay.body as { input: unknown }).input)).toContain("enc-abc");
   });
@@ -629,7 +637,8 @@ test("openai thinking adapter forwards cancellation without pretending success",
 });
 
 test("compatible adapter forwards cancellation without pretending success", async () => {
-  const model = createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:11434/v1", fetch: async (_input, init) => {
+  const model = createOpenAICompatibleModel({
+    model: "gpt-4o", baseUrl: "http://127.0.0.1:11434/v1", fetch: async (_input, init) => {
     if (init?.signal?.aborted) {
       const error = new Error("aborted");
       error.name = "AbortError";

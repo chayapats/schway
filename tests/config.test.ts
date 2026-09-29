@@ -19,6 +19,40 @@ test("an empty object is a valid config layer", () => {
   expect(parseConfigObject({}, "test")).toEqual({});
 });
 
+test("an unset model keeps profile, connection, appearance, git tracking, and explicit limits", () => {
+  const resolved = resolveSettings({
+    user: {
+      profile: "local",
+      profiles: {
+        local: {
+          baseUrl: "http://127.0.0.1:9/v1",
+          auth: "required",
+          credentialEnv: "LOCAL_KEY",
+          credentialIdentity: "desk",
+          headers: { "X-Org": "a" },
+        },
+      },
+      appearance: "dark",
+      git: { changeTracking: "snapshot" },
+      contextWindow: 64_000,
+      maxOutput: 2_048,
+    },
+  });
+  expect(resolved).toMatchObject({
+    model: "",
+    modelConfigured: false,
+    profile: "local",
+    credentialEnv: "LOCAL_KEY",
+    credentialIdentity: "desk",
+    baseUrl: "http://127.0.0.1:9/v1",
+    headers: { "X-Org": "a" },
+    appearance: "dark",
+    gitChangeTracking: "snapshot",
+    explicitContextWindow: 64_000,
+    explicitMaxOutput: 2_048,
+  });
+});
+
 test("a valid partial config parses known settings", () => {
   expect(
     parseConfigObject(

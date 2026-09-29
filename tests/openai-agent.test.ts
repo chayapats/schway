@@ -21,6 +21,7 @@ test("headless OpenAI loop completes a read-tool conversation without a paid API
     await writeFile(join(dir, "note.txt"), "hello from workspace\n");
     const bodies: unknown[] = [];
     const model = createOpenAIModel({
+      model: "gpt-6-astra",
       apiKey: "sk-test",
       fetch: async (_input, init) => {
         bodies.push(init?.body ? JSON.parse(String(init.body)) : undefined);

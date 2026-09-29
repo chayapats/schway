@@ -12,7 +12,7 @@ import type {
   ConversationItem,
   ProviderMetadata,
 } from "../../conversation/types.ts";
-import { DEFAULT_MODEL_IDS, describeThinkingSupport, getThinkingSupport, isThinkingSupported, lookupModel } from "../catalog.ts";
+import { describeThinkingSupport, getThinkingSupport, isThinkingSupported, lookupModel } from "../catalog.ts";
 import { reportedTokens } from "../model.ts";
 import type {
   Model,
@@ -21,11 +21,6 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-
-/** Default OpenAI model when the caller does not specify one. */
-export const DEFAULT_OPENAI_MODEL = DEFAULT_MODEL_IDS.openai;
-/** Conservative output cap for model IDs absent from the catalog. Known models use their own maximum. */
-export const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 16_384;
 
 /** Named effort per level. `none` disables; `xhigh` and `max` match current reasoning-capable models. */
 export const OPENAI_THINKING_EFFORTS = {
@@ -71,6 +66,12 @@ type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+function requiredModelId(model: string | undefined): string {
+  const modelId = model?.trim() ?? "";
+  if (!modelId) throw new Error("A model ID is required.");
+  return modelId;
+}
+
 /**
  * Create an OpenAI Responses adapter with SDK retries disabled and Schway-owned conversation records.
  * Streaming forwards request cancellation and provider failures, and assembles function-call JSON before exposing a call.
@@ -82,7 +83,7 @@ export function createOpenAIModel(options: {
   thinking?: ThinkingLevel;
   fetch?: FetchLike;
 }): Model {
-  const modelId = options.model?.trim() || DEFAULT_OPENAI_MODEL;
+  const modelId = requiredModelId(options.model);
   const maxTokens = options.maxTokens ?? lookupModel("openai", modelId).maxOutput;
   const defaultThinking = options.thinking;
   const client = new OpenAI({

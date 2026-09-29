@@ -118,6 +118,10 @@ export abstract class ControllerCore {
   protected loginApproval?: string;
   /** Active subscription sign-in abort; unlike submitted OS writes, the OAuth wait stays cancellable. */
   protected codexLoginAbort?: AbortController;
+  /** Abort for the post-sign-in model listing; Esc and dispose cancel it without blocking the picker. */
+  protected signInListAbort?: AbortController;
+  /** Advances when the active provider, model, or profile changes so a stale sign-in cannot overwrite it. */
+  protected selectionGeneration = 0;
   protected explicitChangeTracking?: GitChangeTrackingMode;
   protected outcome?: TurnOutcome;
   protected outcomeIdentity?: string;
@@ -224,7 +228,7 @@ export abstract class ControllerCore {
   protected abstract abortActiveTurn(): void;
   abstract applyEvent(event: RuntimeEvent, operationId?: number): void;
   abstract cancel(): void;
-  protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate?: boolean, appearanceOnly?: boolean): Promise<boolean>;
+  protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate?: boolean, appearanceOnly?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean>;
   abstract closeModelPicker(): void;
   abstract describeThinking(): string;
   abstract effectiveBudgets(): { contextWindow: number; maxOutput: number };

@@ -22,6 +22,7 @@ export abstract class ModelsLayer extends CommandsLayer {
   setModel(model: Model | undefined, provider: string, modelId: string, profile?: string): void {
     if (!this.recoveryRepair && (this.model !== model || this.provider !== provider || this.modelId !== modelId ||
       profile !== undefined && this.profile !== profile)) this.recovery = undefined;
+    if (this.provider !== provider || this.modelId !== modelId || (profile !== undefined && this.profile !== profile)) this.selectionGeneration += 1;
     this.model = model;
     this.provider = provider;
     this.modelId = modelId;
@@ -262,10 +263,10 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (this.recoveryRepair && this.recovery && !this.recoveryIdentityChanged(this.recovery)) this.recoveryRepair = false;
   }
 
-  /** Remember list budgets for the next staged activation; explicit config still outranks them. */
-  protected noteFetchedBudgets(selection: ModelPickerEntry): void {
-    if (selection.listUnavailable || selection.connect || !selection.contextWindow && !selection.maxOutput) return;
-    this.activationBudgets = { contextWindow: selection.contextWindow, maxOutput: selection.maxOutput };
+  /** Return fetched list budgets for this activation; explicit config still outranks them. */
+  protected listedBudgets(selection: ModelPickerEntry): { contextWindow?: number; maxOutput?: number } | undefined {
+    if (selection.listUnavailable || selection.connect || !selection.contextWindow && !selection.maxOutput) return undefined;
+    return { contextWindow: selection.contextWindow, maxOutput: selection.maxOutput };
   }
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
@@ -286,13 +287,10 @@ export abstract class ModelsLayer extends CommandsLayer {
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
     } else if (selection.authRoute === "api-key") {
-      this.noteFetchedBudgets(selection);
       applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via OpenAI API key.`, undefined, true);
+        () => `Switched to openai/${this.modelId} via OpenAI API key.`, undefined, true, false, this.listedBudgets(selection));
     } else {
-      this.noteFetchedBudgets(selection);
-      applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
-      if (!applied) this.activationBudgets = undefined;
+      applied = await this.selectModel(`${selection.provider}/${selection.modelId}`, this.listedBudgets(selection));
     }
     if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
@@ -342,7 +340,7 @@ export abstract class ModelsLayer extends CommandsLayer {
   }
 
   /** Apply the textual model or profile form through the same atomic session settings path as the picker. */
-  async selectModel(args: string): Promise<boolean> {
+  async selectModel(args: string, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
     if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
     if (["forget", "reset"].includes(args.trim())) return this.forgetModelChoice();
     const selection = parseModelArgs(args, this.provider);
@@ -365,7 +363,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     const applied = await this.changeSettings(() => selection.provider === "openai" && this.subscriptionSelected()
       ? this.configEditor!.prepareSubscriptionModel(selection.modelId)
       : this.configEditor!.prepareModel(selection.provider, selection.modelId),
-      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}).`, undefined, true);
+      () => `Switched to ${this.provider}/${this.modelId} (${this.effectiveBudgets().contextWindow} ctx, ${this.describeThinking()}).`, undefined, true, false, budgets);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
       authRoute: this.model?.provider === "codex-subscription" ? "codex" : this.provider === "openai" ? "api-key" : "provider" });
     return applied;

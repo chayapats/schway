@@ -260,12 +260,12 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       },
       listRouteModels: async (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => {
         const { resolveProviderCredential } = await import("../auth/credentials.ts");
-        const { fetchProviderModelList, OPENAI_MODELS_URL } = await import("../model/model-list.ts");
+        const { fetchProviderModelList, OPENAI_MODELS_URL, requireOpenAIApiKeyModels } = await import("../model/model-list.ts");
         const current = configEditor.settings;
         if (route === "api-key") {
           const credential = await resolveProviderCredential({ provider: "openai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
           if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing OpenAI API key.");
-          return fetchProviderModelList({ url: OPENAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "OpenAI" });
+          return requireOpenAIApiKeyModels(await fetchProviderModelList({ url: OPENAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "OpenAI" }));
         }
         const baseUrl = endpoint?.baseUrl ?? current.baseUrl;
         if (!baseUrl) throw new Error("Select a compatible base URL before listing models.");
@@ -372,7 +372,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     try {
       await runTuiRenderer({
         controller,
-        initialize: settings.model && !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
+        initialize: settings.model.length > 0 && !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
         home,
         workspaceRoot: workspace.root,
         skillScope,

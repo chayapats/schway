@@ -1,9 +1,6 @@
 import { expect, test } from "bun:test";
 import { STABLE_SYSTEM_PROMPT } from "../src/context/prompt.ts";
-import {
-  createOpenAIModel,
-  DEFAULT_OPENAI_MODEL,
-} from "../src/model/providers/openai.ts";
+import { createOpenAIModel } from "../src/model/providers/openai.ts";
 import { collect } from "./helpers/scripted-model.ts";
 import { readTool } from "../src/tools/read.ts";
 import { toPlainJsonSchema } from "../src/tools/schema.ts";
@@ -32,9 +29,15 @@ function sseFetch(events: readonly object[], captured: CapturedRequest) {
   };
 }
 
+test("createOpenAIModel rejects a missing or blank model ID", () => {
+  expect(() => createOpenAIModel({ apiKey: "sk-test" })).toThrow("A model ID is required.");
+  expect(() => createOpenAIModel({ apiKey: "sk-test", model: "  " })).toThrow("A model ID is required.");
+});
+
 test("converts a Schway request into an OpenAI Responses request", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TEXT_STREAM_EVENTS, captured),
   });
@@ -51,7 +54,7 @@ test("converts a Schway request into an OpenAI Responses request", async () => {
     include: string[];
     max_output_tokens: number;
   };
-  expect(body.model).toBe(DEFAULT_OPENAI_MODEL);
+  expect(body.model).toBe("gpt-6-astra");
   expect(body.stream).toBe(true);
   expect(body.store).toBe(false);
   expect(body.max_output_tokens).toBeGreaterThan(0);
@@ -84,6 +87,7 @@ test("a user-supplied model ID is sent even when absent from a catalog", async (
 test("converts chunked text stream events into Schway deltas and metadata", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TEXT_STREAM_EVENTS, captured),
   });
@@ -112,6 +116,7 @@ test("converts chunked text stream events into Schway deltas and metadata", asyn
 test("thinking chunks keep opaque provider metadata and survive request round-trip", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(THINKING_STREAM_EVENTS, captured),
   });
@@ -143,6 +148,7 @@ test("thinking chunks keep opaque provider metadata and survive request round-tr
 
   const replay: CapturedRequest = { calls: 0 };
   const replayModel = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TEXT_STREAM_EVENTS, replay),
   });
@@ -169,6 +175,7 @@ test("thinking chunks keep opaque provider metadata and survive request round-tr
 test("SDK automatic retries are disabled", async () => {
   let calls = 0;
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: async () => {
       calls += 1;
@@ -187,6 +194,7 @@ test("SDK automatic retries are disabled", async () => {
 
 test("stream failure surfaces an actionable error without OpenAI wire types as the result", async () => {
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: async () => {
       throw new Error("network reset");
@@ -201,6 +209,7 @@ test("stream failure surfaces an actionable error without OpenAI wire types as t
 
 test("failed Responses events become actionable errors", async () => {
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(FAILED_STREAM_EVENTS, { calls: 0 }),
   });
@@ -217,6 +226,7 @@ test("the shared AbortSignal reaches provider operations", async () => {
     seenSignal = resolve;
   });
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: async (_input, init) => {
       captured.calls += 1;
@@ -245,6 +255,7 @@ test("the shared AbortSignal reaches provider operations", async () => {
 test("includes tool definitions on the OpenAI request", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TEXT_STREAM_EVENTS, captured),
   });
@@ -284,6 +295,7 @@ test("includes tool definitions on the OpenAI request", async () => {
 test("assembles streamed tool arguments before exposing a complete tool call", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TOOL_USE_STREAM_EVENTS, captured),
   });
@@ -315,6 +327,7 @@ test("assembles streamed tool arguments before exposing a complete tool call", a
 
 test("assembles interleaved chunked tool calls without mixing identifiers", async () => {
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(INTERLEAVED_TOOL_STREAM_EVENTS, { calls: 0 }),
   });
@@ -344,6 +357,7 @@ test("assembles interleaved chunked tool calls without mixing identifiers", asyn
 test("round-trips tool calls and tool results on the next OpenAI request", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TEXT_STREAM_EVENTS, captured),
   });
@@ -405,6 +419,7 @@ test("round-trips tool calls and tool results on the next OpenAI request", async
 test("tool errors round-trip with the same call identifier", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAIModel({
+    model: "gpt-6-astra",
     apiKey: "sk-test",
     fetch: sseFetch(TEXT_STREAM_EVENTS, captured),
   });

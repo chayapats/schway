@@ -1,9 +1,6 @@
 import { expect, test } from "bun:test";
 import { STABLE_SYSTEM_PROMPT } from "../src/context/prompt.ts";
-import {
-  createOpenAICompatibleModel,
-  DEFAULT_OPENAI_COMPATIBLE_MODEL,
-} from "../src/model/providers/openai-compatible.ts";
+import { createOpenAICompatibleModel } from "../src/model/providers/openai-compatible.ts";
 import { collect } from "./helpers/scripted-model.ts";
 import { readTool } from "../src/tools/read.ts";
 import { toPlainJsonSchema } from "../src/tools/schema.ts";
@@ -40,9 +37,15 @@ function sseFetch(chunks: readonly object[], captured: CapturedRequest) {
   };
 }
 
+test("createOpenAICompatibleModel rejects a missing or blank model ID", () => {
+  expect(() => createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:9/v1" })).toThrow("A model ID is required.");
+  expect(() => createOpenAICompatibleModel({ baseUrl: "http://127.0.0.1:9/v1", model: " " })).toThrow("A model ID is required.");
+});
+
 test("converts a Schway request into a Chat Completions request at the custom base URL", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:11434/v1",
     fetch: sseFetch(TEXT_STREAM_CHUNKS, captured),
   });
@@ -50,7 +53,7 @@ test("converts a Schway request into a Chat Completions request at the custom ba
   await collect(model.stream(sampleRequest()));
 
   expect(model.provider).toBe("openai-compatible");
-  expect(model.id).toBe(DEFAULT_OPENAI_COMPATIBLE_MODEL);
+  expect(model.id).toBe("gpt-4o");
   expect(captured.calls).toBe(1);
   expect(captured.url).toBe("http://127.0.0.1:11434/v1/chat/completions");
   expect(captured.method).toBe("POST");
@@ -59,7 +62,7 @@ test("converts a Schway request into a Chat Completions request at the custom ba
     stream: boolean;
     messages: unknown[];
   };
-  expect(body.model).toBe(DEFAULT_OPENAI_COMPATIBLE_MODEL);
+  expect(body.model).toBe("gpt-4o");
   expect(body.stream).toBe(true);
   expect(body.messages).toEqual([
     {
@@ -89,6 +92,7 @@ test("a user-supplied model ID is sent even when absent from a catalog", async (
 
 test("converts chunked text stream events into Schway deltas", async () => {
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: sseFetch(TEXT_STREAM_CHUNKS, { calls: 0 }),
   });
@@ -110,6 +114,7 @@ test("converts chunked text stream events into Schway deltas", async () => {
 test("includes tool definitions on the Chat Completions request", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: sseFetch(TEXT_STREAM_CHUNKS, captured),
   });
@@ -150,6 +155,7 @@ test("includes tool definitions on the Chat Completions request", async () => {
 
 test("assembles streamed tool arguments before exposing a complete tool call", async () => {
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: sseFetch(TOOL_USE_STREAM_CHUNKS, { calls: 0 }),
   });
@@ -174,6 +180,7 @@ test("assembles streamed tool arguments before exposing a complete tool call", a
 
 test("assembles interleaved chunked tool calls without mixing identifiers", async () => {
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: sseFetch(INTERLEAVED_TOOL_STREAM_CHUNKS, { calls: 0 }),
   });
@@ -201,6 +208,7 @@ test("assembles interleaved chunked tool calls without mixing identifiers", asyn
 test("round-trips tool calls and tool results on the next Chat Completions request", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: sseFetch(TEXT_STREAM_CHUNKS, captured),
   });
@@ -257,6 +265,7 @@ test("round-trips tool calls and tool results on the next Chat Completions reque
 test("sends custom headers and extra request-body parameters", async () => {
   const captured: CapturedRequest = { calls: 0 };
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1/",
     headers: { "X-Test-Header": "ok" },
     extraBody: { temperature: 0.2, stream: false },
@@ -279,6 +288,7 @@ test("optional auth sends a bearer token only when an API key is present", async
   const withoutKey: CapturedRequest = { calls: 0 };
   await collect(
     createOpenAICompatibleModel({
+      model: "gpt-4o",
       baseUrl: "http://127.0.0.1:8080/v1",
       auth: "optional",
       fetch: sseFetch(TEXT_STREAM_CHUNKS, withoutKey),
@@ -289,6 +299,7 @@ test("optional auth sends a bearer token only when an API key is present", async
   const withKey: CapturedRequest = { calls: 0 };
   await collect(
     createOpenAICompatibleModel({
+      model: "gpt-4o",
       baseUrl: "http://127.0.0.1:8080/v1",
       auth: "optional",
       apiKey: "sk-local",
@@ -302,6 +313,7 @@ test("absent auth never sends Authorization even when an API key is provided", a
   const captured: CapturedRequest = { calls: 0 };
   await collect(
     createOpenAICompatibleModel({
+      model: "gpt-4o",
       baseUrl: "http://127.0.0.1:8080/v1",
       auth: "none",
       apiKey: "sk-local",
@@ -315,6 +327,7 @@ test("required auth sends a bearer token and fails without a key", async () => {
   const captured: CapturedRequest = { calls: 0 };
   await collect(
     createOpenAICompatibleModel({
+      model: "gpt-4o",
       baseUrl: "http://127.0.0.1:8080/v1",
       auth: "required",
       apiKey: "sk-required",
@@ -324,6 +337,7 @@ test("required auth sends a bearer token and fails without a key", async () => {
   expect(captured.headers?.get("Authorization")).toBe("Bearer sk-required");
 
   const missing = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     auth: "required",
     fetch: sseFetch(TEXT_STREAM_CHUNKS, { calls: 0 }),
@@ -341,6 +355,7 @@ test("AbortSignal cancels the request and stream consumption", async () => {
     seenSignal = resolve;
   });
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async (input, init) => {
       captured.calls += 1;
@@ -370,6 +385,7 @@ test("AbortSignal stops consuming an in-flight SSE body", async () => {
   const controller = new AbortController();
   let released = false;
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () => {
       const stream = new ReadableStream({
@@ -399,6 +415,7 @@ test("AbortSignal stops consuming an in-flight SSE body", async () => {
 
 test("429 responses expose status and Retry-After for the agent retry policy", async () => {
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () =>
       new Response(JSON.stringify({ error: { message: "slow down" } }), {
@@ -424,6 +441,7 @@ test("429 responses expose status and Retry-After for the agent retry policy", a
 test("transport failures are not retried by the adapter", async () => {
   let calls = 0;
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () => {
       calls += 1;
@@ -440,6 +458,7 @@ test("transport failures are not retried by the adapter", async () => {
 test("authentication failures are actionable and do not reveal credentials", async () => {
   const secret = "sk-secret-credential";
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     apiKey: secret,
     fetch: async () =>
@@ -463,6 +482,7 @@ test("authentication failures are actionable and do not reveal credentials", asy
 test("endpoint errors redact credential header values", async () => {
   const secret = "hdr-secret-credential";
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     auth: "none",
     headers: { "X-Api-Key": secret },
@@ -488,6 +508,7 @@ test("completing on [DONE] cancels the remaining SSE body", async () => {
   let released = false;
   const payload = encodeChatCompletionsSse(TEXT_STREAM_CHUNKS);
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () => {
       const stream = new ReadableStream({
@@ -511,6 +532,7 @@ test("completing on [DONE] cancels the remaining SSE body", async () => {
 
 test("malformed SSE produces an actionable error", async () => {
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () =>
       new Response("data: {not-json\n\n", {
@@ -525,6 +547,7 @@ test("malformed SSE produces an actionable error", async () => {
 
 test("truncated SSE produces an actionable error", async () => {
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () =>
       new Response("data: {\"id\":\"chatcmpl-1\"", {
@@ -541,6 +564,7 @@ test("assembles text across split SSE frames", async () => {
   const payload = encodeChatCompletionsSse(TEXT_STREAM_CHUNKS);
   const bytes = new TextEncoder().encode(payload);
   const model = createOpenAICompatibleModel({
+    model: "gpt-4o",
     baseUrl: "http://127.0.0.1:8080/v1",
     fetch: async () => {
       let offset = 0;

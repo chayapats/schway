@@ -107,6 +107,13 @@ export class TuiController extends TurnLayer {
     }
   }
 
+  /** Abort a post-sign-in model listing. Esc uses this when no other panel owns the key. */
+  cancelPendingSignInListing(): boolean {
+    if (!this.signInListAbort || this.signInListAbort.signal.aborted) return false;
+    this.signInListAbort.abort();
+    return true;
+  }
+
   /**
    * Clear active cancellation state and abort the active operation without awaiting it.
    * Applies to both submitted turns and manual compaction during terminal cleanup.
@@ -114,6 +121,7 @@ export class TuiController extends TurnLayer {
   dispose(): void {
     this.closeSessionPicker();
     this.startupAbort?.abort();
+    this.signInListAbort?.abort();
     this.disposed = true;
     this.closeModelPicker();
     if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; }

@@ -341,9 +341,9 @@ test("bounded fetch forwards request/options and charges the cumulative byte bud
 
 test("bounded fetch prevents three selected adapters from consuming an oversized undelimited SSE chunk", async () => {
   const lanes = [
-    { provider: "openai" as const, openaiAuth: "api-key" as const, apiKey: "fake-openai" },
-    { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const },
-    { provider: "openai" as const, openaiAuth: "codex" as const, codexTokens: { accessToken: "fake-codex", accountId: "account" } },
+    { provider: "openai" as const, model: "gpt-6-astra", openaiAuth: "api-key" as const, apiKey: "fake-openai" },
+    { provider: "openai-compatible" as const, model: "gpt-4o", baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const },
+    { provider: "openai" as const, model: "gpt-6-astra", openaiAuth: "codex" as const, codexTokens: { accessToken: "fake-codex", accountId: "account" } },
   ];
   for (const lane of lanes) {
     const controller = new AbortController();
@@ -405,9 +405,9 @@ test("bounded fetch preserves valid streaming and message completion for all fou
   ];
   const codexSse = `${codexEvents.map(event => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
   const lanes = [
-    { input: { provider: "openai" as const, openaiAuth: "api-key" as const, apiKey: "fixture" }, sse: encodeOpenAiSse(OPENAI_TEXT_EVENTS) },
-    { input: { provider: "openai-compatible" as const, baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const }, sse: encodeChatCompletionsSse(TEXT_STREAM_CHUNKS) },
-    { input: { provider: "openai" as const, openaiAuth: "codex" as const, codexTokens: { accessToken: "fixture", accountId: "account" } }, sse: codexSse },
+    { input: { provider: "openai" as const, model: "gpt-6-astra", openaiAuth: "api-key" as const, apiKey: "fixture" }, sse: encodeOpenAiSse(OPENAI_TEXT_EVENTS) },
+    { input: { provider: "openai-compatible" as const, model: "gpt-4o", baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const }, sse: encodeChatCompletionsSse(TEXT_STREAM_CHUNKS) },
+    { input: { provider: "openai" as const, model: "gpt-6-astra", openaiAuth: "codex" as const, codexTokens: { accessToken: "fixture", accountId: "account" } }, sse: codexSse },
   ];
   for (const lane of lanes) {
     const controller = new AbortController();

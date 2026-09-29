@@ -73,6 +73,7 @@ test("real-loop headless conversation completes a read-tool round trip against a
         sseResponse(index === 1 ? TOOL_USE_STREAM_CHUNKS : TEXT_STREAM_CHUNKS),
       async ({ baseUrl, recorded }) => {
         const model = createOpenAICompatibleModel({
+          model: "gpt-4o",
           baseUrl,
           auth: "none",
         });
@@ -138,6 +139,7 @@ test("each auth mode is honored by a real-loop local conversation", async () => 
       recorded,
     }) => {
       const model = createOpenAICompatibleModel({
+        model: "gpt-4o",
         baseUrl,
         auth: scenario.auth,
         apiKey: scenario.apiKey,
@@ -175,6 +177,7 @@ test("custom request options reach the local compatible endpoint", async () => {
     recorded,
   }) => {
     const model = createOpenAICompatibleModel({
+      model: "gpt-4o",
       baseUrl,
       auth: "none",
       headers: { "X-Test-Header": "ok" },
@@ -272,6 +275,7 @@ test("local-server endpoint errors surface without credentials or retries", asyn
     },
     async ({ baseUrl }) => {
       const model = createOpenAICompatibleModel({
+        model: "gpt-4o",
         baseUrl,
         auth: "required",
         apiKey: "sk-secret",
@@ -328,6 +332,7 @@ test("cancelling a local-server stream ends the loop without another attempt", a
     },
     async ({ baseUrl }) => {
       const model = createOpenAICompatibleModel({
+        model: "gpt-4o",
         baseUrl,
         auth: "none",
       });

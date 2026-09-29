@@ -1099,6 +1099,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else if (snapshot.modelPicker) controller.closeModelPicker();
       else if (snapshot.branchTree) controller.closeBranchTree();
       else if (discoveryOpen) dismissedQuery = editor.plainText;
+      else if (controller.cancelPendingSignInListing()) { /* Esc cancels the sign-in listing without changing the saved credential. */ }
       else if (controller.running) controller.cancel();
       handled(); return;
     }

@@ -1,4 +1,4 @@
-import { ROUTE_FALLBACK_MODELS } from "./catalog.ts";
+import { listCatalog, ROUTE_FALLBACK_MODELS } from "./catalog.ts";
 import type { ThinkingLevel } from "./model.ts";
 import { THINKING_LEVELS } from "./model.ts";
 
@@ -20,12 +20,46 @@ export const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
-/** Choose the provider's marked default, otherwise the documented per-route fallback when it was listed. */
+/** Prefixes that mark an OpenAI API-key ID as a chat model. */
+export const OPENAI_CHAT_MODEL_PREFIXES = ["gpt-", "o1", "o3", "o4", "chatgpt-"] as const;
+
+/** Segments that exclude an otherwise chat-prefixed OpenAI API-key ID. */
+export const OPENAI_NON_CHAT_SEGMENTS = ["embedding", "whisper", "tts", "transcribe", "audio", "realtime", "image", "dall-e", "moderation", "search", "instruct", "babbage", "davinci"] as const;
+
+/** Maximum models kept from one parsed list; later entries are ignored rather than rejected. */
+const MAX_PARSED_MODELS = 5_000;
+
+/** Thrown when a model-list response exceeds the 1 MiB read cap. */
+export class ModelListTooLargeError extends Error {
+  constructor(label: string) {
+    super(`${label} model list exceeds the 1 MiB limit.`);
+    this.name = "ModelListTooLargeError";
+  }
+}
+
+/** Keep OpenAI API-key IDs that match the chat rule or appear in the static OpenAI catalog. */
+export function filterOpenAIApiKeyModels(models: readonly ListedModel[]): ListedModel[] {
+  const catalog = new Set(listCatalog().filter(entry => entry.provider === "openai").map(entry => entry.id));
+  return models.filter(model => catalog.has(model.id) || isOpenAIChatModelId(model.id));
+}
+
+/** Return the filtered API-key list, or fail the list when no chat model remains. */
+export function requireOpenAIApiKeyModels(models: readonly ListedModel[]): ListedModel[] {
+  const filtered = filterOpenAIApiKeyModels(models);
+  if (!filtered.length) throw new Error("OpenAI model list returned no selectable models.");
+  return filtered;
+}
+
+/** Choose a marked default, the route fallback, a catalog ID, then the first listed ID. */
 export function recommendedListedModel(route: "api-key" | "codex" | "compatible", models: readonly ListedModel[]): string {
   const marked = models.find(model => model.recommended);
   if (marked) return marked.id;
-  const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : ROUTE_FALLBACK_MODELS.openai;
+  const provider = route === "compatible" ? "openai-compatible" : "openai";
+  const fallback = ROUTE_FALLBACK_MODELS[provider];
   if (models.some(model => model.id === fallback)) return fallback;
+  const catalog = new Set(listCatalog().filter(entry => entry.provider === provider).map(entry => entry.id));
+  const known = models.find(model => catalog.has(model.id));
+  if (known) return known.id;
   return models[0]?.id ?? fallback;
 }
 
@@ -46,8 +80,8 @@ export async function fetchProviderModelList(input: {
       method: "GET",
       headers: {
         Accept: "application/json",
-        ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {}),
         ...input.headers,
+        ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {}),
       },
       redirect: "error",
       signal,
@@ -70,12 +104,12 @@ export async function fetchProviderModelList(input: {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 1_048_576) throw new Error(`${input.label} model list exceeds the 1 MiB limit.`);
+      if (size > 1_048_576) throw new ModelListTooLargeError(input.label);
       chunks.push(value);
     }
   } catch (error) {
     void reader.cancel().catch(() => {});
-    if (error instanceof Error && error.message.includes("1 MiB")) throw error;
+    if (error instanceof ModelListTooLargeError) throw error;
     throw new Error(`Could not read the ${input.label} model list.`);
   }
   let payload: unknown;
@@ -95,13 +129,14 @@ export function parseModelList(payload: unknown, label: string): ListedModel[] {
   if (!payload || typeof payload !== "object") throw new Error(`${label} model list returned an invalid model list.`);
   const record = payload as Record<string, unknown>;
   const raw = Array.isArray(record.data) ? record.data : Array.isArray(record.models) ? record.models : undefined;
-  if (!raw || raw.length > 256) throw new Error(`${label} model list returned an invalid model list.`);
+  if (!raw) throw new Error(`${label} model list returned an invalid model list.`);
   const marked = typeof record.default === "string" ? record.default
     : typeof record.default_model === "string" ? record.default_model
       : typeof record.recommended === "string" ? record.recommended
         : undefined;
   const models = new Map<string, ListedModel>();
   for (const item of raw) {
+    if (models.size >= MAX_PARSED_MODELS) break;
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
     const id = typeof row.id === "string" ? row.id : typeof row.slug === "string" ? row.slug : undefined;
@@ -120,6 +155,25 @@ export function parseModelList(payload: unknown, label: string): ListedModel[] {
   }
   if (!models.size) throw new Error(`${label} model list returned no selectable models.`);
   return [...models.values()];
+}
+
+function isOpenAIChatModelId(id: string): boolean {
+  if (!OPENAI_CHAT_MODEL_PREFIXES.some(prefix => id.startsWith(prefix))) return false;
+  return !OPENAI_NON_CHAT_SEGMENTS.some(segment => containsSegment(id, segment));
+}
+
+function containsSegment(id: string, segment: string): boolean {
+  let from = 0;
+  while (from <= id.length - segment.length) {
+    const at = id.indexOf(segment, from);
+    if (at < 0) return false;
+    const before = at === 0 || /[^A-Za-z0-9]/.test(id[at - 1] ?? "");
+    const afterIndex = at + segment.length;
+    const after = afterIndex === id.length || /[^A-Za-z0-9]/.test(id[afterIndex] ?? "");
+    if (before && after) return true;
+    from = at + 1;
+  }
+  return false;
 }
 
 function positiveInt(value: unknown, max: number): number | undefined {

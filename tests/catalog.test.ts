@@ -1,15 +1,14 @@
 import { expect, test } from "bun:test";
 import {
-  DEFAULT_MODEL_IDS,
   UNKNOWN_MODEL_DEFAULTS,
   listCatalog,
   lookupModel,
 } from "../src/model/catalog.ts";
 
-test("known default models expose context, output, tool, and thinking metadata", () => {
-  const openai = lookupModel("openai", DEFAULT_MODEL_IDS.openai);
+test("known catalog models expose context, output, tool, and thinking metadata", () => {
+  const openai = lookupModel("openai", "gpt-6-astra");
   expect(openai.provider).toBe("openai");
-  expect(openai.id).toBe(DEFAULT_MODEL_IDS.openai);
+  expect(openai.id).toBe("gpt-6-astra");
   expect(openai.contextWindow).toBeGreaterThan(UNKNOWN_MODEL_DEFAULTS.contextWindow);
   expect(openai.maxOutput).toBe(128_000);
   expect(openai.supportsTools).toBe(true);
@@ -17,10 +16,10 @@ test("known default models expose context, output, tool, and thinking metadata",
 
   const compatible = lookupModel(
     "openai-compatible",
-    DEFAULT_MODEL_IDS["openai-compatible"],
+    "gpt-4o",
   );
   expect(compatible.provider).toBe("openai-compatible");
-  expect(compatible.id).toBe(DEFAULT_MODEL_IDS["openai-compatible"]);
+  expect(compatible.id).toBe("gpt-4o");
   expect(compatible.contextWindow).toBeGreaterThan(
     UNKNOWN_MODEL_DEFAULTS.contextWindow,
   );
@@ -37,7 +36,7 @@ test("unknown model IDs use documented conservative defaults", () => {
 });
 
 test("explicit context and output overrides win over catalog and unknown defaults", () => {
-  const known = lookupModel("openai", DEFAULT_MODEL_IDS.openai, {
+  const known = lookupModel("openai", "gpt-6-astra", {
     contextWindow: 50_000,
     maxOutput: 2_048,
   });
@@ -61,14 +60,14 @@ test("the built-in catalog is a small static list of known models", () => {
   expect(models.some((model) => model.provider === "anthropic")).toBe(false);
   expect(
     models.some(
-      (model) => model.provider === "openai" && model.id === DEFAULT_MODEL_IDS.openai,
+      (model) => model.provider === "openai" && model.id === "gpt-6-astra",
     ),
   ).toBe(true);
   expect(
     models.some(
       (model) =>
         model.provider === "openai-compatible" &&
-        model.id === DEFAULT_MODEL_IDS["openai-compatible"],
+        model.id === "gpt-4o",
     ),
   ).toBe(true);
 });

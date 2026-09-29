@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { runCli } from "../src/cli/main.ts";
+import { NO_MODEL_CONFIGURED_MESSAGE } from "../src/config/config.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import {
   ACTIVE_SKILL_SECTION_NAME,
@@ -585,6 +586,18 @@ test("headless /skills lists without calling a model or creating a session", asy
     expect(result.stdout.includes("REVIEW_BODY_MARKER")).toBe(false);
     expect(result.stderr).toBe("");
     expect(await listSessions(sessionsDirectory(home))).toEqual([]);
+  });
+});
+
+test("headless /skills succeeds with no config and /skillsx still requires a model", async () => {
+  await withTempDir(async (dir) => {
+    const home = join(dir, "home");
+    await mkdir(home, { recursive: true });
+    const listed = await runHeadless(["-p", "/skills"], { home, cwd: dir });
+    expect(listed.exitCode).toBe(0);
+    const missing = await runHeadless(["-p", "/skillsx"], { home, cwd: dir });
+    expect(missing.exitCode).not.toBe(0);
+    expect(missing.stderr.trim()).toBe(NO_MODEL_CONFIGURED_MESSAGE);
   });
 });
 
