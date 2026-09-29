@@ -2,7 +2,7 @@
 
 Users need a way to inspect work before a tool can change state, including when no extensions are installed. The 0.6 milestone will add three fixed approval modes in core: `auto` (the default, preserving today's behavior), `ask`, and `read-only`. This is an accepted decision that is not yet implemented.
 
-Each tool declares whether it reads only or can change state. Built-ins `read`, `grep`, `find` and `ls` read only; `edit`, `write` and `bash` can change state. An extension tool without a declaration counts as able to change state. This declaration is part of the public extension API and freezes with it.
+Each tool declares whether it reads only or can change state. Built-ins `read`, `grep`, `find` and `ls` read only; `edit`, `write` and `bash` can change state. An extension tool without a declaration counts as able to change state. This declaration is part of the public extension API and freezes with it. Effect declarations from extensions are trusted. Read-only mode does not isolate arbitrary side effects from extension code, including hooks. The existing `execution` declaration controls scheduling (parallel or exclusive); it is separate from the effect declaration used for approval.
 
 Read-only tools run in all three modes. For tools that can change state, `auto` runs them, `ask` requests approval, and `read-only` refuses them. Extension before-tool hooks run first and may rewrite arguments or deny execution. The approval decision applies to the final validated arguments, then the tool runs if allowed. A denial becomes an error tool result carrying the user's reason.
 
