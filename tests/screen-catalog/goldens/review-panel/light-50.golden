@@ -9,16 +9,16 @@ cursor 1 1 hidden
  ⚡ schway  ~/demo on main
 
  Turn completed. 3 tool results; 0 failed tools.█
- Commands: 1 exit 0 / 0 nonzero / 0 unknown (   █
- entire turn).                                  █
- Command results (latest 50; exit codes, not a  █
- test-suite guarantee):                         █
- check-clamp: printf 'ok\n' → exit 0 (success)  █
-                                                █
- Current working tree: 1 changed paths.         █
- Current working-tree content is unattributed;  █
- external edits may be included.                █
- Snapshot attribution unavailable (on-demand).  ▀
+ Commands: 1 exit 0 / 0 nonzero / 0 unknown (   ▀
+ entire turn).
+ Command results (latest 50; exit codes, not a
+ test-suite guarantee):
+ check-clamp: printf 'ok\n' → exit 0 (success)
+
+ Current working tree: 1 changed paths.
+ Current working-tree content is unattributed;
+ external edits may be included.
+ Snapshot attribution unavailable (on-demand).
  Review is read-only. Files remain changed after
  failure/cancellation; conversation branching
  does not restore files.
@@ -57,45 +57,45 @@ cursor 1 1 hidden
 04 0-1 #ffffff #f7f7f4 -
 04 1-14 #1d232c #f7f7f4 -
 04 14-48 #ffffff #f7f7f4 -
-04 48-49 #9a9ea3 #252527 -
+04 48-49 #ffffff #252527 -
 04 49-50 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
 05 1-47 #1d232c #f7f7f4 -
 05 47-48 #ffffff #f7f7f4 -
-05 48-49 #9a9ea3 #252527 -
+05 48-49 #ffffff #252527 -
 05 49-50 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-23 #1d232c #f7f7f4 -
 06 23-48 #ffffff #f7f7f4 -
-06 48-49 #9a9ea3 #252527 -
+06 48-49 #ffffff #252527 -
 06 49-50 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
 07 1-46 #1d232c #f7f7f4 -
 07 46-48 #ffffff #f7f7f4 -
-07 48-49 #9a9ea3 #252527 -
+07 48-49 #ffffff #252527 -
 07 49-50 #ffffff #f7f7f4 -
 08 0-48 #ffffff #f7f7f4 -
-08 48-49 #9a9ea3 #252527 -
+08 48-49 #ffffff #252527 -
 08 49-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
 09 1-39 #1d232c #f7f7f4 -
 09 39-48 #ffffff #f7f7f4 -
-09 48-49 #9a9ea3 #252527 -
+09 48-49 #ffffff #252527 -
 09 49-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-47 #1d232c #f7f7f4 -
 10 47-48 #ffffff #f7f7f4 -
-10 48-49 #9a9ea3 #252527 -
+10 48-49 #ffffff #252527 -
 10 49-50 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
 11 1-32 #1d232c #f7f7f4 -
 11 32-48 #ffffff #f7f7f4 -
-11 48-49 #9a9ea3 #252527 -
+11 48-49 #ffffff #252527 -
 11 49-50 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
 12 1-46 #1d232c #f7f7f4 -
 12 46-48 #ffffff #f7f7f4 -
-12 48-49 #9a9ea3 #252527 -
+12 48-49 #ffffff #252527 -
 12 49-50 #ffffff #f7f7f4 -
 13 0-1 #ffffff #f7f7f4 -
 13 1-48 #1d232c #f7f7f4 -

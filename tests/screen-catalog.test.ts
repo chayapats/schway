@@ -14,6 +14,8 @@ const fixedTime = "2026-01-15T09:30:00.000Z";
 const expected = new Set(SCREENS.flatMap(screen => variantsFor(screen).map(variant => `${screen.id}/${variant.id}.golden`)));
 const index = SCREENS.map(screen => screen.id).join("\n") + "\n";
 let originalFetch: typeof fetch;
+const gitEnvironment = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"] as const;
+const originalGitEnvironment = new Map<string, string | undefined>();
 async function files(root: string): Promise<string[]> {
   try { return (await Promise.all((await readdir(root, { withFileTypes: true })).map(async entry => entry.isDirectory() ? (await files(join(root, entry.name))).map(file => `${entry.name}/${file}`) : [entry.name]))).flat(); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
@@ -28,11 +30,15 @@ async function prune(root: string, prefix = ""): Promise<void> {
   }
 }
 beforeAll(async () => {
+  for (const key of gitEnvironment) { originalGitEnvironment.set(key, process.env[key]); process.env[key] = "/dev/null"; }
   originalFetch = globalThis.fetch;
   globalThis.fetch = Object.assign(() => { throw new Error("screen catalog must not use the network"); }, { preconnect: originalFetch.preconnect }) as typeof fetch;
   if (update) { await mkdir(directory, { recursive: true }); await prune(directory); await writeFile(join(directory, "index.txt"), index); }
 });
-afterAll(() => { globalThis.fetch = originalFetch; setSystemTime(); });
+afterAll(() => {
+  globalThis.fetch = originalFetch; setSystemTime();
+  for (const key of gitEnvironment) { const value = originalGitEnvironment.get(key); if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+});
 
 // Longest-common-subsequence diff keeps insertions from turning every following row into noise.
 function diff(expected: string, actual: string): string {
@@ -64,7 +70,7 @@ test("catalog screen order and golden inventory are explicit", async () => {
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);
 });
 test("catalog repeated renders are byte-identical", async () => {
-  for (const id of ["first-run", "streaming-answer", "completed-turn"]) {
+  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel"]) {
     const screen = SCREENS.find(s => s.id === id)!, variant = variantsFor(screen).find(v => v.id === "dark-80")!;
     setSystemTime(new Date(fixedTime)); const first = await renderScreen(screen, variant);
     setSystemTime(new Date(fixedTime)); expect(await renderScreen(screen, variant)).toBe(first);
@@ -114,3 +120,16 @@ test("gallery and format stay independent of application code and screen recipes
     expect(imports.join("\n")).not.toMatch(/src\/|screens\.ts/);
   }
 });
+
+test("catalog ignores conflicting host Git diff configuration", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "catalog-git-config-"));
+  try {
+    const config = join(temp, "gitconfig");
+    await writeFile(config, "[diff]\n\tnoPrefix = true\n\tmnemonicPrefix = true\n");
+    const child = Bun.spawn([process.execPath, "test", "tests/screen-catalog.test.ts", "-t", "^screen review-panel dark-120$"], {
+      cwd: join(import.meta.dir, ".."), env: { ...process.env, SCHWAY_UPDATE_SCREENS: "0", GIT_CONFIG_GLOBAL: config, GIT_CONFIG_SYSTEM: "/dev/null" }, stdout: "pipe", stderr: "pipe",
+    });
+    const [exit, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    if (exit !== 0) throw new Error(`Host Git configuration changed catalog output:\n${stdout}${stderr}`);
+  } finally { await rm(temp, { recursive: true, force: true }); }
+}, 15_000);

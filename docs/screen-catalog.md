@@ -46,6 +46,6 @@ In a pull request, inspect the text-section diff for content/layout changes and 
 
 ## Determinism
 
-The harness freezes wall time at `2026-01-15T09:30:00.000Z`, injects fixed animation and activity clocks, disables decorative motion, gates long-running operations until disposal, and isolates theme input from the host environment. Git fixtures use a fixed author, date and `main` branch in a temporary `~/demo` workspace. A fetch guard rejects network access for the entire catalog run.
+The harness freezes wall time at `2026-01-15T09:30:00.000Z`, injects fixed animation and activity clocks, disables decorative motion, gates long-running operations until disposal, and isolates theme input from the host environment. Git fixtures use a fixed author, date and `main` branch in a temporary `~/demo` workspace. The complete catalog run ignores global and system Git configuration, including diff prefixes. The review recipe renders its loading panel before awaiting Git, keeping the renderer’s existing scrollbar layout independent of subprocess timing. A fetch guard rejects network access for the entire catalog run.
 
 Future bash-duration (#144) and turn-elapsed (#145) displays must use injectable clocks so catalog goldens remain deterministic. The catalog intentionally records current rendering behavior; rendering fixes should update their affected goldens.

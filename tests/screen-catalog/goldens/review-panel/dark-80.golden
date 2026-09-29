@@ -10,15 +10,15 @@ cursor 1 1 hidden
 
   Turn completed. 3 tool results; 0 failed tools.                            █
   Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).                  █
-  Command results (latest 50; exit codes, not a test-suite guarantee):       █
-  check-clamp: printf 'ok\n' → exit 0 (success)                              █
-                                                                             █
-  Current working tree: 1 changed paths.                                     █
-  Current working-tree content is unattributed; external edits may be        █
-  included.                                                                  █
-  Snapshot attribution unavailable (on-demand).                              █
-  Review is read-only. Files remain changed after failure/cancellation;      █
-  conversation branching does not restore files.                             █
+  Command results (latest 50; exit codes, not a test-suite guarantee):       ▀
+  check-clamp: printf 'ok\n' → exit 0 (success)
+
+  Current working tree: 1 changed paths.
+  Current working-tree content is unattributed; external edits may be
+  included.
+  Snapshot attribution unavailable (on-demand).
+  Review is read-only. Files remain changed after failure/cancellation;
+  conversation branching does not restore files.
 
   › .M clamp.ts
 
@@ -27,7 +27,7 @@ cursor 1 1 hidden
    clamp.ts | 2 +-
    1 file changed, 1 insertion(+), 1 deletion(-)
 
-  diff --git i/clamp.ts w/clamp.ts
+  diff --git a/clamp.ts b/clamp.ts
   index 46ffc67..6f30e92 100644
 
   ✓ Turn completed · commands: 1 exit 0 / 0 nonzero / 0 unknown · Alt+R review
@@ -63,40 +63,40 @@ cursor 1 1 hidden
 05 0-2 #ffffff #0e1117 -
 05 2-47 #e6eaf0 #0e1117 -
 05 47-77 #ffffff #0e1117 -
-05 77-78 #9a9ea3 #252527 -
+05 77-78 #ffffff #252527 -
 05 78-80 #ffffff #0e1117 -
 06 0-77 #ffffff #0e1117 -
-06 77-78 #9a9ea3 #252527 -
+06 77-78 #ffffff #252527 -
 06 78-80 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
 07 2-40 #e6eaf0 #0e1117 -
 07 40-77 #ffffff #0e1117 -
-07 77-78 #9a9ea3 #252527 -
+07 77-78 #ffffff #252527 -
 07 78-80 #ffffff #0e1117 -
 08 0-2 #ffffff #0e1117 -
 08 2-70 #e6eaf0 #0e1117 -
 08 70-77 #ffffff #0e1117 -
-08 77-78 #9a9ea3 #252527 -
+08 77-78 #ffffff #252527 -
 08 78-80 #ffffff #0e1117 -
 09 0-2 #ffffff #0e1117 -
 09 2-11 #e6eaf0 #0e1117 -
 09 11-77 #ffffff #0e1117 -
-09 77-78 #9a9ea3 #252527 -
+09 77-78 #ffffff #252527 -
 09 78-80 #ffffff #0e1117 -
 10 0-2 #ffffff #0e1117 -
 10 2-47 #e6eaf0 #0e1117 -
 10 47-77 #ffffff #0e1117 -
-10 77-78 #9a9ea3 #252527 -
+10 77-78 #ffffff #252527 -
 10 78-80 #ffffff #0e1117 -
 11 0-2 #ffffff #0e1117 -
 11 2-72 #e6eaf0 #0e1117 -
 11 72-77 #ffffff #0e1117 -
-11 77-78 #9a9ea3 #252527 -
+11 77-78 #ffffff #252527 -
 11 78-80 #ffffff #0e1117 -
 12 0-2 #ffffff #0e1117 -
 12 2-48 #e6eaf0 #0e1117 -
 12 48-77 #ffffff #0e1117 -
-12 77-78 #9a9ea3 #252527 -
+12 77-78 #ffffff #252527 -
 12 78-80 #ffffff #0e1117 -
 13 0-77 #ffffff #0e1117 -
 13 77-78 #ffffff #252527 -

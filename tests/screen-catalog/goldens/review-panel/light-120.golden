@@ -11,24 +11,24 @@ cursor 1 1 hidden
   Turn completed. 3 tool results; 0 failed tools.                                                                    █
   Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).                                                          █
   Command results (latest 50; exit codes, not a test-suite guarantee):                                               █
-  check-clamp: printf 'ok\n' → exit 0 (success)                                                                      █
-                                                                                                                     █
-  Current working tree: 1 changed paths.                                                                             █
-  Current working-tree content is unattributed; external edits may be included.                                      █
-  Snapshot attribution unavailable (on-demand).                                                                      █
-  Review is read-only. Files remain changed after failure/cancellation; conversation branching does not restore files█
-                                                                                                                     █
-  › .M clamp.ts                                                                                                      █
+  check-clamp: printf 'ok\n' → exit 0 (success)
+
+  Current working tree: 1 changed paths.
+  Current working-tree content is unattributed; external edits may be included.
+  Snapshot attribution unavailable (on-demand).
+  Review is read-only. Files remain changed after failure/cancellation; conversation branching does not restore files
+
+  › .M clamp.ts
 
   Diff for clamp.ts:
   Unstaged:
    clamp.ts | 2 +-
    1 file changed, 1 insertion(+), 1 deletion(-)
 
-  diff --git i/clamp.ts w/clamp.ts
+  diff --git a/clamp.ts b/clamp.ts
   index 46ffc67..6f30e92 100644
-  --- i/clamp.ts
-  +++ w/clamp.ts
+  --- a/clamp.ts
+  +++ b/clamp.ts
 
   ✓ Turn completed · commands: 1 exit 0 / 0 nonzero / 0 unknown · Alt+R review
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -63,37 +63,37 @@ cursor 1 1 hidden
 05 0-2 #ffffff #f7f7f4 -
 05 2-47 #1d232c #f7f7f4 -
 05 47-117 #ffffff #f7f7f4 -
-05 117-118 #9a9ea3 #252527 -
+05 117-118 #ffffff #252527 -
 05 118-120 #ffffff #f7f7f4 -
 06 0-117 #ffffff #f7f7f4 -
-06 117-118 #9a9ea3 #252527 -
+06 117-118 #ffffff #252527 -
 06 118-120 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-40 #1d232c #f7f7f4 -
 07 40-117 #ffffff #f7f7f4 -
-07 117-118 #9a9ea3 #252527 -
+07 117-118 #ffffff #252527 -
 07 118-120 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
 08 2-79 #1d232c #f7f7f4 -
 08 79-117 #ffffff #f7f7f4 -
-08 117-118 #9a9ea3 #252527 -
+08 117-118 #ffffff #252527 -
 08 118-120 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
 09 2-47 #1d232c #f7f7f4 -
 09 47-117 #ffffff #f7f7f4 -
-09 117-118 #9a9ea3 #252527 -
+09 117-118 #ffffff #252527 -
 09 118-120 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
 10 2-117 #1d232c #f7f7f4 -
-10 117-118 #9a9ea3 #252527 -
+10 117-118 #ffffff #252527 -
 10 118-120 #ffffff #f7f7f4 -
 11 0-117 #ffffff #f7f7f4 -
-11 117-118 #9a9ea3 #252527 -
+11 117-118 #ffffff #252527 -
 11 118-120 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
 12 2-15 #1d232c #f7f7f4 -
 12 15-117 #ffffff #f7f7f4 -
-12 117-118 #9a9ea3 #252527 -
+12 117-118 #ffffff #252527 -
 12 118-120 #ffffff #f7f7f4 -
 13 0-117 #ffffff #f7f7f4 -
 13 117-118 #ffffff #252527 -
