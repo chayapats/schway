@@ -33,6 +33,17 @@ could separately be read from the secure store in 10 ms; the smoke parent's
 `unavailable` auth source does not by itself diagnose an authentication failure.
 These failures are tracked in [#174](https://github.com/chayapats/schway/issues/174).
 
+A maintainer-requested follow-up found authenticated account/model requests
+returning HTTP 200, a direct adapter tool call completing in 5.4 s, and an
+instrumented in-process smoke completing the tool round trip in 23.3 s without
+the bounded fetch wrapper. These diagnostic probes do not replace the failed
+OS-supervised results. With the stock bounded wrapper, one probe received HTTP
+503; another received HTTP 200 after 10.1 s, model data after 20.2 s, then reached
+the shared 30 s deadline during the second request. A closed synthetic HTTP 503
+body produces the correct adapter error in 2 ms. Remote latency and intermittent
+503 responses are observed; the cause of every earlier timeout, including the
+120 s failure, remains unproved. No production fix or model fallback was applied.
+
 ### Evals
 
 Prices in USD per million input/output tokens, checked 2026-09-29:
@@ -66,10 +77,14 @@ Runner summaries: `Spent $0.0071 of $1.99 · 7/7 cases run` (OpenAI) and
 (and original $10 release ceiling). Compatible `spendExact=false` means actual
 spend is unknown; its six skips reflect missing usage, not measured exhaustion
 of $1.99. Exit 3 is not a pass. Smoke reports no token usage, so smoke charges
-are not included in this sum. Billing reconciliation is still required to certify
-the service caps; no further paid retries were made after the already-running
-120-second smoke attempt ended. Other release runs outside this recorded pass
-have not been audited. [#173](https://github.com/chayapats/schway/issues/173)
+are not included in this sum. After the maintainer requested diagnosis, four bounded probes were run against
+the same compatible model, separately from evals. Before those probes, the
+provider key endpoint reported a $2 limit and $0.000172252 cumulative usage.
+Afterward (2026-09-29 15:55:38 UTC), it reported $0.00044883 cumulative key usage,
+$1.99955117 remaining and the same $2 limit. This supports the service budget
+check at that time, subject to reporting delay; it is not per-run attribution or
+a repair of missing eval token usage. Other release runs outside this recorded
+pass have not been audited; complete release spend reconciliation remains pending. [#173](https://github.com/chayapats/schway/issues/173)
 tracks the two OpenAI failures; #174 tracks compatible timeout and unrun cases.
 
 ### Installed coding task
