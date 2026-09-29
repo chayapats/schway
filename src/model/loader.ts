@@ -4,6 +4,12 @@ import type { CredentialStore } from "../auth/store.ts";
 import type { CodexTokens } from "./providers/codex-subscription.ts";
 import type { ModelCapability } from "./catalog.ts";
 
+const grokModels = new WeakSet<Model>();
+/** Mark an activated model as subscription-backed without changing its xAI conversation namespace. */
+export function bindGrokModel(model: Model): Model { grokModels.add(model); return model; }
+/** Identify an active Grok billing route even when the configured preference is automatic. */
+export function isGrokModel(model: Model | undefined): boolean { return model !== undefined && grokModels.has(model); }
+
 /** Optional fetch override used by protocol fixture tests. */
 export type FetchLike = (
   input: string | URL | Request,
@@ -64,12 +70,12 @@ export async function loadProviderModel(
       const grok = await import("./providers/grok-subscription.ts");
       if (!input.grokStore) throw new Error("Grok subscription storage is unavailable.");
       const refresher = grok.createSubscriptionTokenRefresher({ store: input.grokStore, fetch: fetchFn });
-      return createXaiModel({
+      return bindGrokModel(createXaiModel({
         apiKey: () => refresher.getValidAccessToken(),
         refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
         authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
         model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, fetch: fetchFn,
-      });
+      }));
     }
     return createXaiModel({
       apiKey: input.apiKey ?? "",

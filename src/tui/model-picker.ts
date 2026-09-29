@@ -10,7 +10,7 @@ export interface ModelPickerEntry {
   identity: string;
   provider: string;
   modelId: string;
-  authRoute: "codex" | "api-key" | "provider";
+  authRoute: "codex" | "grok" | "api-key" | "provider";
   contextWindow: number;
   maxOutput: number;
   active: boolean;
@@ -50,7 +50,7 @@ export function modelPickerIdentity(entry: Pick<ModelPickerEntry, "provider" | "
 }
 
 /** Build matching catalog and profile choices plus an explicit typed choice with fallback budgets. */
-export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess; apiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; apiModelsUnavailable?: boolean; compatibleModels?: readonly { id: string; contextWindow?: number; maxOutput?: number }[]; compatibleModelsUnavailable?: boolean; xaiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; xaiModelsUnavailable?: boolean; subscriptionUnavailable?: boolean }): ModelPickerEntry[] {
+export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "grok" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess; apiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; apiModelsUnavailable?: boolean; compatibleModels?: readonly { id: string; contextWindow?: number; maxOutput?: number }[]; compatibleModelsUnavailable?: boolean; xaiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; xaiModelsUnavailable?: boolean; subscriptionUnavailable?: boolean; grokModels?: readonly import("../model/model-list.ts").ListedModel[]; grokModelsUnavailable?: boolean }): ModelPickerEntry[] {
   const normalized = query.toLowerCase();
   const activeRoute = options?.activeRoute ?? (options?.subscriptionMode ? "codex" : "api-key");
   const matches = (family: string, id: string, route: string) => `${family}/${id} ${route}`.toLowerCase().includes(normalized);
@@ -83,7 +83,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
     if (!matches("xai", listed.id, "API key")) continue;
     entries.push({ identity: modelPickerIdentity({ provider: "xai", authRoute: "api-key", modelId: listed.id }), provider: "xai", modelId: listed.id, authRoute: "api-key",
       ...budgets("xai", listed.id, { contextWindow: listed.contextWindow ?? limits.contextWindow, maxOutput: listed.maxOutput ?? limits.maxOutput }),
-      active: provider === "xai" && modelId === listed.id && options?.activeProfile === undefined, custom: false,
+      active: provider === "xai" && activeRoute === "api-key" && modelId === listed.id && options?.activeProfile === undefined, custom: false,
       ...(listed.defaultThinking !== undefined ? { defaultThinking: listed.defaultThinking } : {}),
       ...(listed.supportedThinking !== undefined ? { supportedThinking: listed.supportedThinking } : {}),
       ...(options?.subscriptionMode ? { otherProvider: true } : {}) });
@@ -134,8 +134,16 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
   }
+  const grok: readonly import("../model/model-list.ts").ListedModel[] = options?.grokModels ?? (options?.grokModelsUnavailable ? [] : listCatalog().filter(entry => entry.provider === "xai").map(entry => ({ id: entry.id })));
+  for (const listed of grok) {
+    if (!matches("xai", listed.id, "Grok subscription")) continue;
+    entries.push({ identity: modelPickerIdentity({ provider: "xai", authRoute: "grok", modelId: listed.id }), provider: "xai", modelId: listed.id, authRoute: "grok",
+      ...budgets("xai", listed.id, limits), active: provider === "xai" && modelId === listed.id && activeRoute === "grok", custom: false,
+      ...(listed.supportedThinking ? { supportedThinking: listed.supportedThinking } : {}),
+    });
+  }
   const selection = parseModelArgs(query || `${provider}/${modelId}`, provider);
-  if ((!query || query.includes("/")) && !("error" in selection) && selection.profile === undefined && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined && entry.authRoute !== "codex")) {
+  if ((!query || query.includes("/")) && !("error" in selection) && selection.profile === undefined && !entries.some(entry => entry.provider === selection.provider && entry.modelId === selection.modelId && entry.profile === undefined && entry.authRoute !== "codex" && entry.authRoute !== "grok")) {
     const authRoute = selection.provider === "openai" || selection.provider === "xai" ? "api-key" as const : "provider" as const;
     entries.push({ ...selection, identity: modelPickerIdentity({ ...selection, authRoute }, selection.provider === "openai-compatible" ? options?.baseUrl : undefined, selection.provider === "openai-compatible" ? options?.credentialIdentity : undefined), authRoute,
       ...budgets(selection.provider, selection.modelId, limits), active: selection.provider === provider && selection.modelId === modelId && options?.activeProfile === undefined && (selection.provider !== "openai" || activeRoute === "api-key"), custom: true,
@@ -144,6 +152,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   }
   for (const entry of entries) {
     entry.access = entry.profile !== undefined ? options?.access?.profiles[entry.profile]
+      : entry.authRoute === "grok" ? options?.access?.grok ?? "Login required"
       : entry.authRoute === "codex" ? options?.access?.subscription ?? "ChatGPT"
         : entry.authRoute === "api-key" && entry.provider === "xai" ? options?.access?.xaiApiKey ?? options?.access?.providers.xai
         : entry.authRoute === "api-key" ? options?.access?.openaiApiKey ?? options?.access?.providers.openai

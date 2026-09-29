@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, afterAll, expect, test } from "bun:test";
 import { access } from "node:fs/promises";
 import type { Model, ModelRequest } from "../src/model/model.ts";
 import type { CredentialStore } from "../src/auth/store.ts";
@@ -555,3 +555,13 @@ test("Grok smoke lane is disabled without discovery and classifies login states 
     expect(reads.every(identity => identity === "grok-subscription:xai")).toBe(true);
   }
 });
+
+const unguardedFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = Object.assign((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost" && url.hostname !== "[::1]") throw new Error("Grok fixtures must not use external network");
+    return unguardedFetch(input, init);
+  }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
+});
+afterAll(() => { globalThis.fetch = unguardedFetch; });

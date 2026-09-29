@@ -105,6 +105,7 @@ export interface TuiSnapshot {
   profile?: string;
   /** OpenAI credential preference shown with provider/model; auto prefers explicit keys over stored subscription. */
   openaiAuth?: string;
+  xaiAuth?: string;
   /** Route bound to the active adapter, regardless of the saved automatic preference. */
   activeRoute?: string;
   /** Requested thinking level shown with provider/model; undefined leaves provider defaults untouched. */
@@ -124,6 +125,8 @@ export interface TuiSnapshot {
   loginCallbackEntry?: { masked: string };
   /** Ephemeral approval instruction; user codes never enter transcript notices. */
   loginApproval?: string;
+  /** Structured device address and code kept only in the ephemeral sign-in panel. */
+  loginApprovalData?: LoginApproval;
   /** Interactive branch-tree browser state; undefined while the tree is closed. */
   branchTree?: BranchTreeSnapshot;
   /** Renderer-free branch-tree build failure shown instead of a tree. */
@@ -156,6 +159,7 @@ export interface TuiControllerOptions {
   profile?: string;
   /** OpenAI credential preference shown in status and /config. */
   openaiAuth?: string;
+  xaiAuth?: string;
   /** Requested thinking level shown in status and /config; undefined leaves provider defaults untouched. */
   thinking?: string;
   startupError?: string;
@@ -179,6 +183,10 @@ export interface TuiControllerOptions {
     reload: (settings?: ResolvedSettings) => Promise<{ model: Model; notice?: string } | { error: string }>;
     /** Explicit subscription login runner; production wires the verified OAuth flow. */
     codexLogin?: CodexLoginRunner;
+    /** Explicit Grok approval runner; it never handles API keys. */
+    grokLogin?: GrokLoginRunner;
+    /** Discover only the saved Grok account models. */
+    listGrokModels?: (signal: AbortSignal) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
     /** Resolve account-scoped model IDs using only the ChatGPT subscription transport. */
     listSubscriptionModels?: (signal: AbortSignal) => Promise<readonly string[]>;
     /** Discover verified model budgets and reasoning levels for this subscription identity. */
@@ -210,3 +218,8 @@ export type CodexLoginRunner = (input: {
   onProgress: (message: string) => void;
   onSaved?: () => void;
 }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
+
+/** Browser or device approval data that stays outside conversation and draft persistence. */
+export type LoginApproval = { kind: "browser" } | { kind: "device"; verificationUri: string; userCode: string };
+/** Explicit Grok OAuth runner with separate panel progress and secure-store commit notification. */
+export type GrokLoginRunner = (input: { device: boolean; signal: AbortSignal; onProgress: (message: string) => void; onApproval: (approval: LoginApproval) => void; onSaved?: () => void }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;

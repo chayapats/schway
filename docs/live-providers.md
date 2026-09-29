@@ -36,3 +36,9 @@ Report: JSON on stdout with UTC `testedAt`, checked-out Git `revision` (or `unkn
 | ChatGPT subscription | `gpt-5.4` | **Pending** | No operator sign-in/paid call authorized. |
 
 Offline scripted/local HTTP fixtures exercise the runner only, not live compatibility.
+
+## Grok subscription lane
+
+Select `--provider grok` and optionally `--model grok=<id>`. `--provider all` includes this lane. It uses the saved `grok-subscription:xai` login and the xAI fallback model unless overridden. It never starts sign-in or reads an API key.
+
+Without `--enable-live`, the lane reports `skipped/live_disabled` and exits 2 without opening the secure store. An absent login reports `pending/missing_subscription`; malformed, expired without refresh, or revoked logins report `pending/subscription_requires_login`. Unavailable secure storage reports `pending/credential_store_unavailable`. Sign in interactively with `/login grok` or `/login grok --device` before enabling a live run.

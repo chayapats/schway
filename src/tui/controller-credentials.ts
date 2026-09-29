@@ -1,5 +1,5 @@
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
-import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { filterXaiModels, recommendedListedModel, xaiModelCapabilities } from "../model/model-list.ts";
@@ -12,6 +12,8 @@ export const LOGIN_CHOICES = [
   { label: "ChatGPT · Browser approval", action: { kind: "codex", device: false } },
   { label: "ChatGPT · Device approval", action: { kind: "codex", device: true } },
   { label: "ChatGPT · Paste browser callback", action: { kind: "callback" } },
+  { label: "Grok · Browser approval", action: { kind: "grok", device: false } },
+  { label: "Grok · Device approval", action: { kind: "grok", device: true } },
   { label: "OpenAI API key", action: { kind: "api-key", provider: "openai" } },
   { label: "xAI API key", action: { kind: "api-key", provider: "xai" } },
   { label: "OpenAI-compatible API key", action: { kind: "api-key", provider: "openai-compatible" } },
@@ -35,6 +37,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.fail(routed.error);
       return false;
     }
+    if (routed.kind === "grok") return this.runGrokLogin(routed, accepted);
     if (routed.kind === "codex") {
       return this.runCodexLogin(routed, accepted);
     }
@@ -63,11 +66,12 @@ export abstract class CredentialsLayer extends ControllerCore {
     const choice = LOGIN_CHOICES[index];
     if (!choice) return false;
     this.loginChooserIndex = undefined;
-    if (this.codexLoginAbort) {
-      this.codexLoginAbort.abort();
+    if (this.loginAbort) {
+      this.loginAbort.abort();
       await this.activeTurn;
     }
     if (choice.action.kind === "callback") { this.loginCallbackValue = ""; return true; }
+    if (choice.action.kind === "grok") return this.runGrokLogin({ device: choice.action.device });
     if (choice.action.kind === "codex") return this.runCodexLogin({ device: choice.action.device });
     return this.beginLogin(choice.action.provider);
   }
@@ -216,6 +220,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.fail(routed.error);
       return false;
     }
+    if (routed.kind === "grok") { if (routed.device) { this.fail(LOGIN_USAGE); return false; } return this.runGrokLogout(); }
     if (routed.kind === "codex") {
       if (routed.device || routed.code !== undefined) {
         this.fail("Usage: /logout codex takes no flags.");
@@ -338,6 +343,67 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.subscriptionPending = true;
   }
 
+  /** Save an explicit Grok login, discover its models and atomically activate its billing route. */
+  protected async runGrokLogin(target: { device: boolean }, accepted: () => void = () => {}): Promise<boolean> {
+    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    const runner = this.credentials?.grokLogin;
+    if (!runner) { this.fail("Grok sign-in is unavailable in this session."); return false; }
+    this.closeModelPicker(); this.loginChooserIndex = undefined;
+    const abort = new AbortController(); let saved = false;
+    this.activeAbort = abort; this.loginAbort = abort; this.credentialMutation = true; this.status = "running";
+    this.loginApproval = target.device ? "Starting Grok device approval… · Esc cancel" : "Waiting for approval in your browser… · Esc cancel";
+    try { accepted(); } catch { /* Presentation cannot cancel an accepted operation. */ }
+    const task = (async () => {
+      try {
+        const result = await runner({ device: target.device, signal: abort.signal,
+          onSaved: () => { saved = true; this.grokModels = undefined; this.grokPending = true; if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; } },
+          onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Waiting for approval in your browser… · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
+          onProgress: message => { this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserIndex = LOGIN_CHOICES.findIndex(choice => choice.action.kind === "grok" && choice.action.device); },
+        });
+        abort.signal.throwIfAborted(); if (this.disposed) return false;
+        if (!result.ok) { this.fail(result.message); return false; }
+        saved = true; this.grokPending = true;
+        if (!this.credentials?.listGrokModels || !this.configEditor || !this.stageSettings) { this.notice(result.status); return true; }
+        const models = filterXaiModels(await this.credentials.listGrokModels(AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)])));
+        abort.signal.throwIfAborted(); if (this.disposed) return false;
+        this.grokModels = models; this.installXaiCapabilities(models);
+        const preferred = recommendedListedModel("grok", models) || ROUTE_FALLBACK_MODELS.xai;
+        // Settings staging requires an idle controller; the abort still guards the preceding sign-in and list.
+        this.activeAbort = undefined; this.loginAbort = undefined; this.credentialMutation = false; this.status = "idle";
+        const applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(preferred), () => `Signed in. Using xai/${this.modelId}.`, undefined, true);
+        if (applied) { this.grokPending = false; this.grokReactivationRequired = false; await this.emitModelActivated({ provider: "xai", modelId: this.modelId, authRoute: "grok" }); }
+        return applied;
+      } catch (error) {
+        if (abort.signal.aborted) this.notice(saved ? "Grok sign-in cancelled after credential saving; the login remains saved." : "Grok sign-in cancelled before credential saving; nothing was saved.");
+        else this.fail(redactSecrets(error instanceof Error ? error.message : "Grok sign-in failed.", this.secrets));
+        return false;
+      }
+    })();
+    const tracked = task.then(() => {}); this.activeTurn = tracked;
+    try { return await task; }
+    finally {
+      this.credentialMutation = false; if (this.activeAbort === abort) this.activeAbort = undefined;
+      if (this.loginAbort === abort) this.loginAbort = undefined; if (this.activeTurn === tracked) this.activeTurn = undefined;
+      if (this.status === "running") this.status = "idle";
+      this.loginApproval = undefined; this.loginApprovalData = undefined;
+      if (this.pickerReturn && !this.disposed) this.restorePickerAfterConnection();
+    }
+  }
+
+  /** Remove only Grok OAuth credentials and block the removed active account without billing fallback. */
+  protected async runGrokLogout(): Promise<boolean> {
+    if (!this.credentials) return false;
+    this.credentialMutation = true;
+    try {
+      const removed = await this.credentials.store.delete(grokSubscriptionIdentity());
+      this.notice(removed ? "Removed the Grok subscription (xAI OAuth) credential. The selected account can no longer run until sign-in and activation succeed again." : "No Grok subscription login found; nothing was removed.");
+      this.grokModels = undefined; this.grokPending = false;
+      if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("The removed active Grok account is blocked; Schway will not switch this conversation to xAI API-key billing."); }
+      return true;
+    } catch { this.fail(credentialStoreError("delete")); return false; }
+    finally { this.credentialMutation = false; }
+  }
+
   /** Run the explicit ChatGPT subscription sign-in, persisting only the subscription identity on success. */
   protected async runCodexLogin(target: { device: boolean; code?: string }, accepted: () => void = () => {}): Promise<boolean> {
     if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
@@ -349,7 +415,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     const abort = new AbortController();
     let credentialSaved = false;
     this.activeAbort = abort;
-    this.codexLoginAbort = abort;
+    this.loginAbort = abort;
     this.credentialMutation = true;
     this.status = "running";
     this.notice(target.device ? "Starting ChatGPT subscription device sign-in. Press Esc to cancel." : "Starting ChatGPT subscription browser sign-in. Press Esc to cancel.");
@@ -426,7 +492,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     let signedIn: boolean;
     try { signedIn = await task; } finally {
       this.credentialMutation = false;
-      if (this.codexLoginAbort === abort) this.codexLoginAbort = undefined;
+      if (this.loginAbort === abort) this.loginAbort = undefined;
       if (this.activeAbort === abort) this.activeAbort = undefined;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
       this.loginApproval = undefined;

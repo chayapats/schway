@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, afterAll, expect, test } from "bun:test";
 import { startLoopbackCallback, loginWithBrowserFlow, GROK_SCOPE } from "../src/model/providers/grok-subscription.ts";
 
 const origin = { Origin: "https://accounts.x.ai" };
@@ -56,3 +56,13 @@ test("browser cancellation and browser-launch failure do not save credentials", 
   const task = loginWithBrowserFlow({ signal: abort.signal, deps: { openBrowser: () => { throw Error("launcher missing"); }, onProgress: message => { notices.push(message); abort.abort(); }, saveTokens: async () => { saves++; } } });
   await expect(task).rejects.toThrow("Aborted"); expect(saves).toBe(0); expect(notices[0]).toContain("https://auth.x.ai/oauth2/authorize");
 });
+
+const unguardedFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = Object.assign((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost" && url.hostname !== "[::1]") throw new Error("Grok fixtures must not use external network");
+    return unguardedFetch(input, init);
+  }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
+});
+afterAll(() => { globalThis.fetch = unguardedFetch; });

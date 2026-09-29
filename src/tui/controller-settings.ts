@@ -84,6 +84,7 @@ export abstract class SettingsLayer extends ChangesLayer {
           const settings = this.configEditor!.settings;
           if (panel.choiceIndex === 0 && !this.model) throw new Error("Activate a model successfully before remembering its choice.");
           const choice = panel.choiceIndex === 0 ? { provider: settings.provider, model: settings.model,
+            ...(settings.provider === "xai" ? { xaiAuth: this.grokSelected() ? "grok" as const : "api-key" as const } : {}),
             ...(settings.provider === "openai" ? { openaiAuth: this.model?.provider === "codex-subscription" ? "codex" as const : "api-key" as const } : {}),
             ...(settings.profile ? { profile: settings.profile } : {}), ...(settings.thinking ? { thinking: settings.thinking } : {}) } : undefined;
           transaction = await this.configEditor!.prepareMemory(choice);
@@ -197,9 +198,11 @@ export abstract class SettingsLayer extends ChangesLayer {
     this.provider = next.provider; this.modelId = next.model;
     this.maxTurns = next.maxTurns; this.maxConcurrentTools = next.maxConcurrentTools;
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
-    this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.profile = next.profile;
+    this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.xaiAuth = next.xaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
     this.subscriptionReactivationRequired = false;
+    this.grokReactivationRequired = false;
+    this.grokPending = false;
     if (next.openaiAuth !== "codex" || staged.model?.provider === "codex-subscription") this.subscriptionPending = false;
     this.onSettingsCommitted?.(next, staged.contextManager);
   }

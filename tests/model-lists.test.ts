@@ -509,7 +509,7 @@ test("xAI API key sign-in activates grok-4.7 and restores it without openaiAuth"
     expect(restored.settings).toMatchObject({ provider: "xai", model: "grok-4.7" });
     expect(restored.origins.model).toBe("interactive memory");
     const memory = await InteractiveMemory.load(home, root);
-    expect(memory.choice).toEqual({ provider: "xai", model: "grok-4.7" });
+    expect(memory.choice).toEqual({ provider: "xai", model: "grok-4.7", xaiAuth: "api-key" });
   });
 });
 

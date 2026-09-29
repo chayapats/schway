@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1094,3 +1094,13 @@ test("Grok headless uses stored OAuth, refreshes, and maps missing, revoked and 
   expect((await run(["--provider", "openai", "--xai-auth", "grok", "-p", "hello"])).stderr).toContain("xAI auth preference requires --provider xai");
   expect((await run(["--xai-auth", "bogus", "-p", "hello"])).stderr).toContain("Unknown xAI auth preference: bogus. Use auto, grok, or api-key.");
 });
+
+const unguardedFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = Object.assign((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost" && url.hostname !== "[::1]") throw new Error("Grok fixtures must not use external network");
+    return unguardedFetch(input, init);
+  }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
+});
+afterAll(() => { globalThis.fetch = unguardedFetch; });

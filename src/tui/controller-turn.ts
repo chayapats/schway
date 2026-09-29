@@ -19,7 +19,7 @@ export abstract class TurnLayer extends CompactionLayer {
     this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
     if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.notice("Callback entry cancelled; no credential was changed."); return; }
-    if (this.codexLoginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.codexLoginAbort.abort(); return; }
+    if (this.loginAbort) { this.loginChooserIndex = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.loginAbort.abort(); return; }
     if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; this.recoveryRepair = false; return; }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.credentialEntry) {
@@ -64,7 +64,7 @@ export abstract class TurnLayer extends CompactionLayer {
       return false;
     }
     if (!this.model) {
-      const category = this.subscriptionReactivationRequired ? "model" : this.startupRecoveryCategory;
+      const category = (this.subscriptionReactivationRequired || this.grokReactivationRequired) ? "model" : this.startupRecoveryCategory;
       this.offerRecovery(category, false,
         startupRecoveryMessage(category), this.startupDiagnostic);
       return false;
@@ -426,6 +426,7 @@ export abstract class TurnLayer extends CompactionLayer {
         return;
       }
       case "error": {
+        if (event.message === "Your Grok plan doesn't include API access. Use an xAI API key instead.") { this.fail(event.message); return; }
         this.markProvisionalIncomplete();
         this.clearRetryNotice();
         if (event.origin === "harness" && event.category !== "session-write") {
@@ -519,7 +520,7 @@ export abstract class TurnLayer extends CompactionLayer {
       recovery.provider = this.provider;
       recovery.modelId = this.modelId;
       recovery.profile = this.profile;
-      recovery.openaiAuth = this.openaiAuth;
+      recovery.openaiAuth = this.openaiAuth; recovery.xaiAuth = this.xaiAuth;
       if (recovery.accepted && (recovery.category === "auth" || recovery.category === "model")) {
         recovery.actions = ["continue", ...(recovery.details ? ["details" as const] : []), "keep-editing"];
         const entry = this.transcript.find(item => item.id === recovery.entryId);
@@ -531,13 +532,13 @@ export abstract class TurnLayer extends CompactionLayer {
       recovery.userId !== this.session.items.findLast(item => item.type === "user")?.id ||
       (!this.recoveryRepair && this.recoveryIdentityChanged(recovery))) return undefined;
     const { sessionId: _sessionId, branchId: _branchId, userId: _userId, details: _details, model: _model,
-      provider: _provider, modelId: _modelId, profile: _profile, openaiAuth: _openaiAuth, ...publicRecovery } = recovery;
+      provider: _provider, modelId: _modelId, profile: _profile, openaiAuth: _openaiAuth, xaiAuth: _xaiAuth, ...publicRecovery } = recovery;
     return publicRecovery;
   }
 
   protected recoveryIdentityChanged(recovery: NonNullable<typeof this.recovery>): boolean {
     return recovery.model !== this.model || recovery.provider !== this.provider || recovery.modelId !== this.modelId ||
-      recovery.profile !== this.profile || recovery.openaiAuth !== this.openaiAuth;
+      recovery.profile !== this.profile || recovery.openaiAuth !== this.openaiAuth || recovery.xaiAuth !== this.xaiAuth;
   }
 
   protected offerRecovery(category: TuiRecovery["category"], accepted: boolean, message: string, details?: string, operationId = this.operationSequence, markError = true): void {
@@ -565,7 +566,7 @@ export abstract class TurnLayer extends CompactionLayer {
       sessionId: this.sessionId, branchId: this.session.activeBranchId,
       userId: this.session.items.findLast(item => item.type === "user")?.id,
       details: details ? redactRecoveryDetails(details, this.secrets) : undefined, model: this.model,
-      provider: this.provider, modelId: this.modelId, profile: this.profile, openaiAuth: this.openaiAuth };
+      provider: this.provider, modelId: this.modelId, profile: this.profile, openaiAuth: this.openaiAuth, xaiAuth: this.xaiAuth };
   }
 
   /** Label completed effects whose result could not be found after their latest durable call. */

@@ -1,9 +1,9 @@
-import { resolveProviderCredential, selectOpenAITransport, type OpenAIAuthPreference } from "../auth/credentials.ts";
+import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport, type OpenAIAuthPreference } from "../auth/credentials.ts";
 import type { CredentialStore, CredentialTarget } from "../auth/store.ts";
 import type { CompatibleProfile } from "../config/config.ts";
 
 /** Credential configuration for a picker row, without claiming remote authorization was verified. */
-export type ModelAccess = "ChatGPT" | "API key" | "No key required" | "Login required";
+export type ModelAccess = "ChatGPT" | "Grok" | "API key" | "No key required" | "Login required";
 
 /** Secret-free access metadata for native providers, endpoints, and named profiles. */
 export interface ModelPickerAccess {
@@ -16,6 +16,8 @@ export interface ModelPickerAccess {
   openaiApiKey: ModelAccess;
   /** Independently configured xAI API-key route. */
   xaiApiKey: ModelAccess;
+  /** Independently configured Grok subscription route. */
+  grok?: ModelAccess;
 }
 
 /** Resolve picker access using the same credential precedence as model creation without contacting providers. */
@@ -56,6 +58,8 @@ export async function loadModelPickerAccess(input: {
     (async () => {
       access.providers.xai = await resolve({ provider: "xai" });
       access.xaiApiKey = access.providers.xai;
+      const selected = await selectXaiTransport({ xaiAuth: "grok", env: {}, store: input.store });
+      access.grok = "error" in selected ? "Login required" : "Grok";
     })(),
     (async () => {
       access.providers["openai-compatible"] = input.baseUrl && !input.activeProfile

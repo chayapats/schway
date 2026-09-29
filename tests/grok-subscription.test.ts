@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, afterAll, expect, test } from "bun:test";
 import { GROK_CLIENT_ID, GROK_SCOPE, GROK_REFERRER, GROK_TOKEN_URL, GROK_DEVICE_AUTHORIZATION_URL, createBrowserAttempt, createAuthorizeUrl, exchangeCodeForTokens, refreshSubscriptionTokens, parseSubscriptionTokens, subscriptionAccessExpired, requestDeviceAuthorization, pollDeviceAuthorization, loginWithDeviceFlow, type GrokFetch } from "../src/model/providers/grok-subscription.ts";
 
 const json = (value: unknown, status = 200) => Response.json(value, { status });
@@ -126,4 +126,48 @@ test("subscription storage writes one identity and hides secure-store failures",
   await saveSubscriptionTokens({ ...store, set: async (id, value) => { identities.push(id.account); await store.set(id, value); } }, { accessToken: "approved", obtainedAt: 1000 });
   expect(identities).toEqual(["grok-subscription:xai"]); expect(grokSubscriptionIdentity().label).toBe("Grok subscription (xAI OAuth)");
   await expect(saveSubscriptionTokens({ ...store, set: async () => { throw Error("private-secret"); } }, { accessToken: "approved", obtainedAt: 1000 })).rejects.toThrow(credentialStoreError("save"));
+});
+
+const unguardedFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = Object.assign((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost" && url.hostname !== "[::1]") throw new Error("Grok fixtures must not use external network");
+    return unguardedFetch(input, init);
+  }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
+});
+afterAll(() => { globalThis.fetch = unguardedFetch; });
+
+test("browser, device, headless, doctor and smoke never consume or alter another CLI's cache", async () => {
+  const { withTempDir } = await import("./helpers.ts"), { mkdir, writeFile, readFile, stat } = await import("node:fs/promises"), { join } = await import("node:path");
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts"), { runCli } = await import("../src/cli/main.ts"), { diagnose } = await import("../src/doctor/doctor.ts"), { runLiveSmoke } = await import("../src/live/smoke.ts");
+  const { loginWithBrowserFlow } = await import("../src/model/providers/grok-subscription.ts");
+  await withTempDir(async home => {
+    const cache = join(home, ".grok", "auth.json"), sentinel = "OTHER_CLI_SENTINEL_SECRET";
+    await mkdir(join(home, ".grok")); await writeFile(cache, JSON.stringify({ access_token: sentinel })); const before = await stat(cache), bytes = await readFile(cache);
+    const oldHome = process.env.HOME; process.env.HOME = home;
+    const requests: string[] = [];
+    const transport: GrokFetch = async (url, init) => { requests.push(String(url) + " " + String(init?.body)); return String(url) === GROK_DEVICE_AUTHORIZATION_URL ? json({ device_code: "fixture-device", user_code: "ABCD-EFGH", verification_uri: "https://x.ai/device" }) : json({ access_token: "fixture-access", refresh_token: "fixture-refresh" }); };
+    try {
+      await loginWithBrowserFlow({ signal: new AbortController().signal, deps: { fetch: transport, saveTokens: async () => {}, openBrowser: async value => { const url = new URL(value); await (await fetch(`${url.searchParams.get("redirect_uri")}?state=${url.searchParams.get("state")}&code=fixture-code`)).text(); } } });
+      let now = 0;
+      await loginWithDeviceFlow({ signal: new AbortController().signal, deps: { fetch: transport, saveTokens: async () => {}, now: () => now, sleep: async ms => { now += ms; } } });
+      let stderr = "";
+      expect(await runCli(["--provider", "xai", "--xai-auth", "grok", "--model", "grok-4.7", "-p", "Hello"], { cwd: home, env: { HOME: home }, credentialStore: fakeCredentialStore(), fetch: transport, stdout: { write() {} }, stderr: { write(value) { stderr += value; } } })).toBe(1);
+      expect(stderr).toContain("No Grok subscription login found.");
+      const report = await diagnose({ cwd: home, env: { HOME: home }, args: { provider: "xai", xaiAuth: "grok", help: false, json: false }, store: fakeCredentialStore() });
+      expect(report.checks.find(check => check.id === "auth")?.status).toBe("error");
+      const smoke = await runLiveSmoke({ enabled: true, providers: ["grok"], timeoutMs: 1000, revision: "fixture", env: { HOME: home } }, { createStore: fakeCredentialStore, createModel: async () => { throw Error("must not load"); } });
+      expect(smoke.scenarios[0]?.reason).toBe("missing_subscription");
+      expect(await readFile(cache)).toEqual(bytes); expect((await stat(cache)).mtimeMs).toBe(before.mtimeMs); expect(requests.join("\n")).not.toContain(sentinel);
+      expect(requests.every(request => request.startsWith("https://auth.x.ai/"))).toBe(true);
+    } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; }
+  });
+});
+test("approved browser store failure returns the standard secure-store error", async () => {
+  const { createGrokLoginRunner } = await import("../src/tui/app.ts"), { fakeCredentialStore } = await import("./helpers/credential-store.ts"), { credentialStoreError } = await import("../src/auth/store.ts");
+  let saves = 0;
+  const runner = createGrokLoginRunner({ store: { ...fakeCredentialStore(), set: async () => { saves++; throw Error("private-token"); } }, secrets: [], openBrowser: async value => { const url = new URL(value); await (await fetch(`${url.searchParams.get("redirect_uri")}?state=${url.searchParams.get("state")}&code=approved`)).text(); }, fetch: async () => json({ access_token: "private-token" }) });
+  const result = await runner({ device: false, signal: new AbortController().signal, onProgress() {}, onApproval() {} });
+  expect(result).toEqual({ ok: false, message: credentialStoreError("save") }); expect(saves).toBe(1);
 });
