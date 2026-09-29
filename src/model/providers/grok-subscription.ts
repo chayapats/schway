@@ -211,34 +211,65 @@ export async function loadSubscriptionTokens(store: CredentialStore): Promise<Gr
   try { raw = await store.get(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("read")); }
   return raw?.trim() ? parseSubscriptionTokens(raw) : null;
 }
-/** Persist only OAuth tokens at the dedicated secure-store identity without plaintext fallback. */
-export async function saveSubscriptionTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
+type CredentialLifecycle = { generation: number; writes: Promise<void>; refresh?: { generation: number; promise: Promise<GrokTokens> } };
+const credentialLifecycles = new WeakMap<CredentialStore, CredentialLifecycle>();
+function credentialLifecycle(store: CredentialStore): CredentialLifecycle {
+  let state = credentialLifecycles.get(store);
+  if (!state) { state = { generation: 0, writes: Promise.resolve() }; credentialLifecycles.set(store, state); }
+  return state;
+}
+function serializeCredentialWrite<T>(state: CredentialLifecycle, operation: () => Promise<T>): Promise<T> {
+  const next = state.writes.then(operation);
+  state.writes = next.then(() => {}, () => {});
+  return next;
+}
+async function writeTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
   try { await store.set(grokSubscriptionIdentity(), JSON.stringify(tokens)); } catch { throw new Error(credentialStoreError("save")); }
 }
-/** Share one store-backed renewal between concurrent callers, including rejected-token refreshes. */
+/** Replace the dedicated login and invalidate older refreshes before serializing its secure-store write. */
+export async function saveSubscriptionTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
+  const state = credentialLifecycle(store); state.generation++;
+  await serializeCredentialWrite(state, () => writeTokens(store, tokens));
+}
+/** Invalidate pending refreshes and delete the login after earlier credential writes finish. */
+export async function deleteSubscriptionTokens(store: CredentialStore): Promise<boolean> {
+  const state = credentialLifecycle(store); state.generation++;
+  return serializeCredentialWrite(state, async () => {
+    try { return await store.delete(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("delete")); }
+  });
+}
+/** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
 export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
-  let inFlight: Promise<GrokTokens> | undefined;
-  let generation = 0;
+  const state = credentialLifecycle(input.store);
   const getValidAccessToken = async (signal?: AbortSignal, rejectedToken?: string): Promise<string> => {
     aborted(signal);
-    const observedGeneration = generation;
-    const tokens = await loadSubscriptionTokens(input.store);
-    aborted(signal);
+    const pendingWrites = state.writes;
+    await raceAbort(pendingWrites, signal);
+    if (pendingWrites !== state.writes) return getValidAccessToken(signal, rejectedToken);
+    const observedGeneration = state.generation;
+    const tokens = await raceAbort(loadSubscriptionTokens(input.store), signal);
+    if (observedGeneration !== state.generation) return getValidAccessToken(signal, rejectedToken);
     if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
-    if (inFlight) return (await raceAbort(inFlight, signal)).accessToken;
-    // A slow store read may have observed the old value just before a concurrent save completed.
-    if (observedGeneration !== generation) return getValidAccessToken(signal, rejectedToken);
+    if (state.refresh?.generation === observedGeneration) return (await raceAbort(state.refresh.promise, signal)).accessToken;
     if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens, (input.now ?? Date.now)())) return tokens.accessToken;
     if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
     const refreshToken = tokens.refreshToken;
-    inFlight = (async () => {
+    const promise = (async () => {
       let renewed: GrokTokens;
       try { renewed = await refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, now: input.now, signal: AbortSignal.timeout(30_000) }); }
       catch (error) { if (error instanceof DOMException && error.name === "AbortError") throw new Error(grokRefreshFailedError("timed out")); throw error; }
       const merged = { ...renewed, refreshToken: renewed.refreshToken ?? refreshToken };
-      await saveSubscriptionTokens(input.store, merged); generation++; return merged;
-    })().finally(() => { inFlight = undefined; });
-    return (await raceAbort(inFlight, signal)).accessToken;
+      await serializeCredentialWrite(state, async () => {
+        if (state.generation !== observedGeneration) throw new Error(grokRevokedSessionError());
+        await writeTokens(input.store, merged);
+        // A queued logout or sign-in owns the final credential and this old turn cannot proceed.
+        if (state.generation !== observedGeneration) throw new Error(grokRevokedSessionError());
+        state.generation++;
+      });
+      return merged;
+    })().finally(() => { if (state.refresh?.promise === promise) state.refresh = undefined; });
+    state.refresh = { generation: observedGeneration, promise };
+    return (await raceAbort(promise, signal)).accessToken;
   };
   return { getValidAccessToken };
 }

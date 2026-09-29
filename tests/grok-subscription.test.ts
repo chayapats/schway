@@ -171,3 +171,81 @@ test("approved browser store failure returns the standard secure-store error", a
   const result = await runner({ device: false, signal: new AbortController().signal, onProgress() {}, onApproval() {} });
   expect(result).toEqual({ ok: false, message: credentialStoreError("save") }); expect(saves).toBe(1);
 });
+
+test("aborting a Grok turn stops waiting for shared refresh while another turn completes it", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { saveSubscriptionTokens } = await import("../src/model/providers/grok-subscription.ts");
+  const { loadProviderModel } = await import("../src/model/loader.ts");
+  const { sampleRequest } = await import("./fixtures/openai.ts");
+  const { collect } = await import("./helpers/scripted-model.ts");
+  const { encodeXaiSse, XAI_TEXT_EVENTS } = await import("./fixtures/xai.ts");
+  const saved = fakeCredentialStore();
+  await saveSubscriptionTokens(saved, { accessToken: "expired", refreshToken: "refresh", obtainedAt: 0, expiresAt: 0 });
+  let reads = 0, refreshes = 0, sends = 0;
+  const store = { ...saved, get: async (...args: Parameters<typeof saved.get>) => { reads++; return saved.get(...args); } };
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const model = await loadProviderModel({ provider: "xai", model: "grok-4.7", xaiAuth: "grok", grokStore: store }, async (url, init) => {
+    if (String(url) === GROK_TOKEN_URL) { refreshes++; started.resolve(); await release.promise; return json({ access_token: "renewed", expires_in: 3600 }); }
+    sends++; expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer renewed");
+    return new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+  });
+  const abort = new AbortController();
+  const cancelled = collect(model.stream({ ...sampleRequest(), signal: abort.signal })).then(() => "completed", error => error instanceof Error ? error.name : "unknown");
+  await started.promise;
+  const continuing = collect(model.stream(sampleRequest()));
+  try {
+    abort.abort();
+    expect(await Promise.race([cancelled, Bun.sleep(100).then(() => "still waiting")])).toBe("AbortError");
+    expect(refreshes).toBe(1); expect(sends).toBe(0);
+  } finally { release.resolve(); await cancelled; await continuing; }
+  expect(refreshes).toBe(1); expect(sends).toBe(1);
+  expect(reads).toBe(2); // Each turn resolves credentials once; the SDK never asks again.
+});
+
+test("late Grok refresh cannot recreate a logged-out login or overwrite a replacement account", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { saveSubscriptionTokens, loadSubscriptionTokens, deleteSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  for (const mutation of ["logout", "replacement"] as const) {
+    const store = fakeCredentialStore();
+    await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "old-refresh", expiresAt: 0, obtainedAt: 0 });
+    const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    let refreshes = 0;
+    const transport: GrokFetch = async () => { refreshes++; started.resolve(); await release.promise; return json({ access_token: "stale-renewal", refresh_token: "stale-rotation", expires_in: 3600 }); };
+    const one = createSubscriptionTokenRefresher({ store, fetch: transport });
+    const two = createSubscriptionTokenRefresher({ store, fetch: transport });
+    const abort = new AbortController();
+    const cancelled = one.getValidAccessToken(abort.signal).catch(error => error.name);
+    await started.promise;
+    const outstanding = two.getValidAccessToken().catch(error => error.message);
+    await Bun.sleep(0); abort.abort(); expect(await cancelled).toBe("AbortError");
+    if (mutation === "logout") expect(await deleteSubscriptionTokens(store)).toBe(true);
+    else await saveSubscriptionTokens(store, { accessToken: "new-account", obtainedAt: 123 });
+    release.resolve(); expect(await outstanding).toContain("session was revoked");
+    const tokens = await loadSubscriptionTokens(store);
+    expect(tokens?.accessToken ?? null).toBe(mutation === "logout" ? null : "new-account");
+    expect(refreshes).toBe(1);
+  }
+});
+
+test("Grok logout and account replacement serialize behind an already-started refresh store write", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { saveSubscriptionTokens, loadSubscriptionTokens, deleteSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  for (const mutation of ["logout", "replacement"] as const) {
+    const saved = fakeCredentialStore();
+    const writing = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const store = { ...saved, set: async (identity: Parameters<typeof saved.set>[0], value: string) => {
+      if (JSON.parse(value).accessToken === "stale-renewal") { writing.resolve(); await release.promise; }
+      await saved.set(identity, value);
+    } };
+    await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh", expiresAt: 0, obtainedAt: 0 });
+    const refresher = createSubscriptionTokenRefresher({ store, fetch: async () => json({ access_token: "stale-renewal", expires_in: 3600 }) });
+    const refresh = refresher.getValidAccessToken().catch(error => error.message);
+    await writing.promise;
+    let mutated = false;
+    const change = (mutation === "logout" ? deleteSubscriptionTokens(store) : saveSubscriptionTokens(store, { accessToken: "new-account", obtainedAt: 123 })).then(() => { mutated = true; });
+    try { await Bun.sleep(0); expect(mutated).toBe(false); }
+    finally { release.resolve(); await change; }
+    expect(await refresh).toContain("session was revoked");
+    expect((await loadSubscriptionTokens(store))?.accessToken ?? null).toBe(mutation === "logout" ? null : "new-account");
+  }
+});

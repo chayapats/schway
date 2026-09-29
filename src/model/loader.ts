@@ -71,7 +71,7 @@ export async function loadProviderModel(
       if (!input.grokStore) throw new Error("Grok subscription storage is unavailable.");
       const refresher = grok.createSubscriptionTokenRefresher({ store: input.grokStore, fetch: fetchFn });
       return bindGrokModel(createXaiModel({
-        apiKey: () => refresher.getValidAccessToken(),
+        apiKey: signal => refresher.getValidAccessToken(signal),
         refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
         authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
         model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, fetch: fetchFn,

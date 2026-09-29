@@ -1,5 +1,5 @@
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
+import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { filterXaiModels, recommendedListedModel, xaiModelCapabilities } from "../model/model-list.ts";
@@ -396,7 +396,8 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (!this.credentials) return false;
     this.credentialMutation = true;
     try {
-      const removed = await this.credentials.store.delete(grokSubscriptionIdentity());
+      const { deleteSubscriptionTokens } = await import("../model/providers/grok-subscription.ts");
+      const removed = await deleteSubscriptionTokens(this.credentials.store);
       this.notice(removed ? "Removed the Grok subscription (xAI OAuth) credential. The selected account can no longer run until sign-in and activation succeed again." : "No Grok subscription login found; nothing was removed.");
       this.grokModels = undefined; this.grokPending = false;
       if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("The removed active Grok account is blocked; Schway will not switch this conversation to xAI API-key billing."); }
