@@ -389,7 +389,7 @@ undo side effects from work that ignores cancellation.
 
 ## Configuration
 
-Schway is zero-config-first. Valid credentials are enough to run `schway -p "..."`. Config files are never created automatically.
+Schway does not select a model before you configure or sign in. Interactive launch with no config shows no model and will not send until one is usable. Headless runs need `--provider` and `--model`, or the same fields in config. Config files are never created automatically.
 
 Precedence, later wins:
 

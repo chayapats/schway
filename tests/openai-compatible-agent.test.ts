@@ -240,6 +240,8 @@ test("local-server split SSE frames still complete a headless conversation", asy
             baseUrl,
             "--auth",
             "none",
+            "--model",
+            "gpt-4o",
           ],
           {
             stdout,

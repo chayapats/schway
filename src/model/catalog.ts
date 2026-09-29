@@ -1,10 +1,18 @@
 import type { ThinkingLevel } from "./model.ts";
 
-/** Default model ID used when a provider is selected without an explicit model. */
-export const DEFAULT_MODEL_IDS = {
-  openai: "gpt-5.4",
+/**
+ * Documented per-route fallback used after sign-in when the provider list names no default.
+ * These are not selected before sign-in and are not a headless default.
+ * OpenAI's published starting model is `gpt-6-astra` (the models list has no default field).
+ * Compatible endpoints vary; `gpt-4o` is the documented fallback.
+ */
+export const ROUTE_FALLBACK_MODELS = {
+  openai: "gpt-6-astra",
   "openai-compatible": "gpt-4o",
 } as const;
+
+/** Alias of the documented per-route fallbacks. Not applied when no model is configured. */
+export const DEFAULT_MODEL_IDS = ROUTE_FALLBACK_MODELS;
 
 /** Conservative metadata applied to model IDs absent from the built-in catalog. */
 export const UNKNOWN_MODEL_DEFAULTS = {
@@ -31,6 +39,8 @@ export interface ModelCapability {
   maxOutput?: number;
   defaultThinking?: ThinkingLevel;
   supportedThinking: readonly ThinkingLevel[];
+  /** True when the account catalog marked this model as its default. */
+  recommended?: boolean;
 }
 
 /** Optional user-supplied limits that outrank catalog and unknown defaults. */
@@ -40,38 +50,14 @@ export interface ModelLimitOverrides {
 }
 
 const CATALOG: readonly ModelInfo[] = [
-  {
-    id: DEFAULT_MODEL_IDS.openai,
-    provider: "openai",
-    contextWindow: 256_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: true,
-  },
-  {
-    id: "gpt-4o",
-    provider: "openai",
-    contextWindow: 128_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: false,
-  },
-  {
-    id: DEFAULT_MODEL_IDS["openai-compatible"],
-    provider: "openai-compatible",
-    contextWindow: 128_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: false,
-  },
-  {
-    id: "gpt-4o-mini",
-    provider: "openai-compatible",
-    contextWindow: 128_000,
-    maxOutput: 16_384,
-    supportsTools: true,
-    supportsThinking: false,
-  },
+  { id: "gpt-6-astra", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
+  { id: "gpt-5.6-terra", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
+  { id: "gpt-5.6-luna", provider: "openai", contextWindow: 1_050_000, maxOutput: 128_000, supportsTools: true, supportsThinking: true },
+  { id: "gpt-5.4", provider: "openai", contextWindow: 256_000, maxOutput: 16_384, supportsTools: true, supportsThinking: true },
+  { id: "gpt-4.1", provider: "openai", contextWindow: 1_047_576, maxOutput: 32_768, supportsTools: true, supportsThinking: false },
+  { id: "gpt-4o", provider: "openai", contextWindow: 128_000, maxOutput: 16_384, supportsTools: true, supportsThinking: false },
+  { id: "gpt-4o", provider: "openai-compatible", contextWindow: 128_000, maxOutput: 16_384, supportsTools: true, supportsThinking: false },
+  { id: "gpt-4o-mini", provider: "openai-compatible", contextWindow: 128_000, maxOutput: 16_384, supportsTools: true, supportsThinking: false },
 ];
 
 /** Return the static known-model list. Unknown IDs are still usable via lookup. */
@@ -110,18 +96,20 @@ export interface ThinkingSupport {
   supportsDisabling: boolean;
 }
 
-/** OpenAI reasoning-capable IDs per reasoning guide (named effort levels, none disables). */
-const OPENAI_THINKING_MODELS = new Set(["gpt-5.4"]);
+/** Static reasoning metadata refreshed from provider docs; account catalogs still override subscription models. */
+const OPENAI_THINKING: Record<string, { supported: readonly ThinkingLevel[]; supportsDisabling: boolean }> = {
+  "gpt-6-astra": { supported: ["low", "medium", "high", "xhigh", "max"], supportsDisabling: false },
+  "gpt-5.6-terra": { supported: ["off", "low", "medium", "high", "xhigh", "max"], supportsDisabling: true },
+  "gpt-5.6-luna": { supported: ["off", "low", "medium", "high", "xhigh", "max"], supportsDisabling: true },
+  "gpt-5.4": { supported: ["off", "low", "medium", "high"], supportsDisabling: true },
+};
 
 /** Return supported thinking levels; unknown IDs stay usable with off as a no-op that sends no controls. */
 export function getThinkingSupport(provider: string, modelId: string): ThinkingSupport {
   const known = CATALOG.some((entry) => entry.provider === provider && entry.id === modelId);
-  if (provider === "openai" && OPENAI_THINKING_MODELS.has(modelId)) {
-    return { known: true, supported: ["off", "low", "medium", "high"], supportsDisabling: true };
-  }
-  if (known) {
-    return { known: true, supported: ["off"], supportsDisabling: false };
-  }
+  const thinking = provider === "openai" ? OPENAI_THINKING[modelId] : undefined;
+  if (thinking) return { known: true, supported: thinking.supported, supportsDisabling: thinking.supportsDisabling };
+  if (known) return { known: true, supported: ["off"], supportsDisabling: false };
   return { known: false, supported: ["off"], supportsDisabling: false };
 }
 
@@ -139,7 +127,10 @@ export function describeThinkingSupport(provider: string, modelId: string): stri
   if (support.supported.length === 1) {
     return `${provider}/${modelId} does not support reasoning; only thinking "off" (provider default, no reasoning controls) is supported.`;
   }
-  return `${provider}/${modelId} supports thinking off/low/medium/high. Explicit off sends the provider's documented disable control.`;
+  const levels = support.supported.join("/");
+  return support.supportsDisabling
+    ? `${provider}/${modelId} supports thinking ${levels}. Explicit off sends the provider's documented disable control.`
+    : `${provider}/${modelId} supports thinking ${levels}. Off is not a supported level.`;
 }
 
 /** Extra-body keys treated as reasoning controls for compatible single-source-of-truth checks. */

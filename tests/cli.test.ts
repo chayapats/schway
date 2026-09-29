@@ -128,7 +128,7 @@ test("--json streams normalized runtime events as JSONL on stdout", async () => 
 });
 
 test("missing credentials exit non-zero without interactive login", async () => {
-  const result = await run(["-p", "hello"], { env: {} });
+  const result = await run(["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"], { env: {} });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toContain("Missing OpenAI API key");
@@ -149,7 +149,7 @@ test("runtime --api-key takes precedence over the environment key", async () => 
 });
 
 test("selecting OpenAI without OPENAI_API_KEY fails even when a compatible key is configured", async () => {
-  const result = await run(["-p", "hello", "--provider", "openai"], {
+  const result = await run(["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"], {
     env: { OPENAI_COMPATIBLE_API_KEY: "sk-compatible" },
   });
   expect(result.exitCode).toBe(1);
@@ -294,7 +294,7 @@ test("OpenAI-compatible optional auth works without a key and ignores OPENAI_API
 
 test("headless compatible default auth reaches the endpoint without a key when storage is locked", async () => {
   let requestHeaders: Headers | undefined;
-  const result = await run(["-p", "hello", "--provider", "openai-compatible", "--base-url", "https://compatible.example.test/v1"], {
+  const result = await run(["-p", "hello", "--provider", "openai-compatible", "--model", "gpt-4o", "--base-url", "https://compatible.example.test/v1"], {
     env: {},
     credentialStore: unavailableCredentialStore(),
     fetch: async (input, init) => {
@@ -329,6 +329,8 @@ test("OpenAI-compatible required auth fails headlessly without --api-key", async
       "http://127.0.0.1:8080/v1",
       "--auth",
       "required",
+      "--model",
+      "gpt-4o",
     ],
     { env: { OPENAI_API_KEY: "sk-openai" } },
   );
@@ -380,7 +382,7 @@ test("OpenAI-compatible provider requires --base-url", async () => {
 
 test("OpenAI-compatible connection flags are rejected for other providers", async () => {
   const result = await run(
-    ["-p", "hello", "--base-url", "http://127.0.0.1:8080/v1"],
+    ["-p", "hello", "--provider", "openai", "--model", "gpt-5.4", "--base-url", "http://127.0.0.1:8080/v1"],
     { env: { OPENAI_API_KEY: "sk-test" } },
   );
   expect(result.exitCode).toBe(1);
@@ -955,7 +957,7 @@ for (const provider of ["openai", "openai-compatible"] as const) {
       const key = `saved-${provider}-secret-sentinel`;
       await store.set(credentialIdentity({ provider, baseUrl }), key);
       let requestHeaders: Headers | undefined;
-      const result = await run(["-p", "hello", "--json", "--provider", provider,
+      const result = await run(["-p", "hello", "--json", "--provider", provider, "--model", provider === "openai" ? "gpt-5.4" : "gpt-4o",
         ...(provider === "openai-compatible" ? ["--base-url", baseUrl, "--auth", "required"] : [])], {
         env: { HOME: home }, credentialStore: store,
         fetch: async (input, init) => {

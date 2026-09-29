@@ -230,7 +230,7 @@ test("catalog reports per-model thinking support without changing lookup default
 // OpenAI mapping
 
 test("openai off/low/medium/high map to documented reasoning efforts", async () => {
-  expect(OPENAI_THINKING_EFFORTS).toEqual({ off: "none", low: "low", medium: "medium", high: "high" });
+  expect(OPENAI_THINKING_EFFORTS).toEqual({ off: "none", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" });
   expect(resolveOpenAIReasoning(undefined, "gpt-5.4")).toBeUndefined();
   expect(resolveOpenAIReasoning("off", "gpt-5.4")).toEqual({ effort: "none" });
   expect(resolveOpenAIReasoning("medium", "gpt-5.4")).toEqual({ effort: "medium", summary: "auto" });

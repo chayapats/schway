@@ -96,7 +96,6 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
       modelFallbackSource = undefined;
     }
   }
-  origins.model ??= "built-in default";
   origins.contextWindow ??= "catalog";
   origins.maxOutput ??= "catalog";
   origins.auth ??= "built-in default";
@@ -265,13 +264,13 @@ export class ConfigEditor {
   }
 
   /** Stage provider and model together as one session override, clearing any profile selection. */
-  async prepareModel(provider: string, model: string): Promise<ConfigTransaction> {
+  async prepareModel(provider: string, model: string, profile?: string): Promise<ConfigTransaction> {
     const capability = provider === "openai" && this.current.openaiAuth === "codex" ? this.modelCapabilities?.find(entry => entry.id === model) : undefined;
     return this.prepareChanges("session", [
       { key: "provider", value: provider },
       { key: "model", value: model },
-      // Session-only null clears profile selections from user, project, and CLI layers.
-      { key: "profile", value: null },
+      // Omit the profile to clear one; pass it to keep a compatible endpoint's identity.
+      { key: "profile", value: profile ?? null },
       ...(capability && this.current.thinking && !capability.supportedThinking.includes(this.current.thinking) ? [{ key: "thinking", value: null }] : []),
     ]);
   }

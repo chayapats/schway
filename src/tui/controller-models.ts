@@ -5,6 +5,7 @@ import type { ModelCapability } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import { describeEffectiveThinking } from "../config/config.ts";
 import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
+import type { ListedModel } from "../model/model-list.ts";
 import { modelPickerEntries, modelPickerIdentity, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
 import { loadModelPickerAccess } from "./model-access.ts";
 import { CommandsLayer } from "./controller-commands.ts";
@@ -12,6 +13,11 @@ import { CommandsLayer } from "./controller-commands.ts";
 
 /** Model picker, auth-route selection, profiles and thinking-level actions. */
 export abstract class ModelsLayer extends CommandsLayer {
+  protected apiModels?: readonly ListedModel[];
+  protected apiModelsUnavailable = false;
+  protected compatibleModels?: readonly ListedModel[];
+  protected compatibleModelsUnavailable = false;
+  protected subscriptionListUnavailable = false;
   /** Replace the adapter and displayed provider/model ids without changing session history. */
   setModel(model: Model | undefined, provider: string, modelId: string, profile?: string): void {
     if (!this.recoveryRepair && (this.model !== model || this.provider !== provider || this.modelId !== modelId ||
@@ -72,22 +78,51 @@ export abstract class ModelsLayer extends CommandsLayer {
         const models = await this.boundedPickerTask(signal, this.loadAccountCatalog(signal));
         if (!current()) return;
         this.subscriptionModels = models.map(model => model.id);
+        this.subscriptionListUnavailable = false;
         picker.catalogState = models.length ? "ready" : "empty";
         if (!models.length) picker.error = "No ChatGPT models were returned for this account. Press Ctrl+R to retry or Esc to cancel.";
       } else {
         picker.catalogState = "empty";
       }
+      await this.loadRouteModelLists(signal, current);
     } catch (error) {
       if (current()) {
         picker.accessLoading = false;
+        if (discoveryStage === "catalog") this.subscriptionListUnavailable = true;
         const message = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350);
         picker.catalogState = /offline|network|fetch|timeout|aborted/i.test(message) ? "offline" : "failed";
         picker.error = `${discoveryStage === "access" ? "Model access discovery" : "ChatGPT catalog"} ${picker.catalogState}: ${message}. Press Ctrl+R to retry or Esc to cancel.`;
+        if (discoveryStage === "catalog") await this.loadRouteModelLists(signal, current);
       }
     } finally {
       if (current()) {
         picker.loading = false;
         this.searchModels(picker.query, true);
+      }
+    }
+  }
+
+  /** Fill connected API and compatible rows from their model-list endpoints, marking static fallback on failure. */
+  protected async loadRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
+    const load = this.credentials?.listRouteModels;
+    if (!load || !current()) return;
+    const settings = this.configEditor?.settings;
+    if (this.modelPickerAccess?.openaiApiKey === "API key") {
+      try {
+        this.apiModels = await this.boundedPickerTask(signal, load("api-key", signal));
+        this.apiModelsUnavailable = false;
+      } catch {
+        if (current()) { this.apiModels = undefined; this.apiModelsUnavailable = true; }
+      }
+    }
+    const baseUrl = settings?.baseUrl ?? this.baseUrl;
+    const compatibleAccess = settings?.profile ? this.modelPickerAccess?.profiles[settings.profile] : this.modelPickerAccess?.providers["openai-compatible"];
+    if (baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
+      try {
+        this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl }));
+        this.compatibleModelsUnavailable = false;
+      } catch {
+        if (current()) { this.compatibleModels = undefined; this.compatibleModelsUnavailable = true; }
       }
     }
   }
@@ -159,6 +194,8 @@ export abstract class ModelsLayer extends CommandsLayer {
       activeRoute: this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
       baseUrl: settings?.baseUrl ?? this.baseUrl, credentialIdentity: settings?.credentialIdentity,
       subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess,
+      apiModels: this.apiModels, apiModelsUnavailable: this.apiModelsUnavailable, compatibleModels: this.compatibleModels,
+      compatibleModelsUnavailable: this.compatibleModelsUnavailable, subscriptionUnavailable: this.subscriptionListUnavailable,
     });
     if (this.modelPickerAccess?.subscription === "Login required" && !this.subscriptionModels?.length &&
       "openai ChatGPT subscription connect".toLowerCase().includes(query.toLowerCase())) {
@@ -214,10 +251,21 @@ export abstract class ModelsLayer extends CommandsLayer {
     this.modelCatalogAbort = undefined;
     this.modelPickerAccess = undefined;
     this.subscriptionModels = undefined;
+    this.apiModels = undefined;
+    this.apiModelsUnavailable = false;
+    this.compatibleModels = undefined;
+    this.compatibleModelsUnavailable = false;
+    this.subscriptionListUnavailable = false;
     this.modelPicker = undefined;
     this.pickerPreferredIdentity = undefined;
     this.pickerSelectionTouched = false;
     if (this.recoveryRepair && this.recovery && !this.recoveryIdentityChanged(this.recovery)) this.recoveryRepair = false;
+  }
+
+  /** Remember list budgets for the next staged activation; explicit config still outranks them. */
+  protected noteFetchedBudgets(selection: ModelPickerEntry): void {
+    if (selection.listUnavailable || selection.connect || !selection.contextWindow && !selection.maxOutput) return;
+    this.activationBudgets = { contextWindow: selection.contextWindow, maxOutput: selection.maxOutput };
   }
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
@@ -231,16 +279,21 @@ export abstract class ModelsLayer extends CommandsLayer {
     let applied: boolean;
     if (selection.profile !== undefined) applied = await this.selectProfile(selection.profile);
     else if (selection.authRoute === "codex") {
-      if (!this.subscriptionModels?.includes(selection.modelId)) {
+      if (!selection.listUnavailable && !this.subscriptionModels?.includes(selection.modelId)) {
         this.fail("This ChatGPT model is not in the current account catalog. Press Ctrl+R to retry discovery.");
         return false;
       }
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
     } else if (selection.authRoute === "api-key") {
+      this.noteFetchedBudgets(selection);
       applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
         () => `Switched to openai/${this.modelId} via OpenAI API key.`, undefined, true);
-    } else applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
+    } else {
+      this.noteFetchedBudgets(selection);
+      applied = await this.selectModel(`${selection.provider}/${selection.modelId}`);
+      if (!applied) this.activationBudgets = undefined;
+    }
     if (applied && (selection.authRoute === "codex" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
   }

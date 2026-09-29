@@ -232,9 +232,11 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
     };
-    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean) => stageInteractiveSettings(next, settings, {
+    const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => stageInteractiveSettings(next, settings, {
       forceLoad: activate, model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
       signal, home, runtimeApiKey: io.args.apiKey, env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
+      ...(next.explicitContextWindow === undefined && budgets?.contextWindow ? { fetchedContextWindow: budgets.contextWindow } : {}),
+      ...(next.explicitMaxOutput === undefined && budgets?.maxOutput ? { fetchedMaxOutput: budgets.maxOutput } : {}),
     });
     const codexLogin = createCodexLoginRunner({ store: credentialStore, fetch: io.fetch, secrets });
     const credentials = {
@@ -255,6 +257,26 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       listSubscriptionCatalog: async (signal: AbortSignal) => {
         const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
         return fetchSubscriptionCatalog({ store: credentialStore, fetch: io.fetch, signal });
+      },
+      listRouteModels: async (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => {
+        const { resolveProviderCredential } = await import("../auth/credentials.ts");
+        const { fetchProviderModelList, OPENAI_MODELS_URL } = await import("../model/model-list.ts");
+        const current = configEditor.settings;
+        if (route === "api-key") {
+          const credential = await resolveProviderCredential({ provider: "openai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
+          if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing OpenAI API key.");
+          return fetchProviderModelList({ url: OPENAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "OpenAI" });
+        }
+        const baseUrl = endpoint?.baseUrl ?? current.baseUrl;
+        if (!baseUrl) throw new Error("Select a compatible base URL before listing models.");
+        const credential = await resolveProviderCredential({
+          provider: "openai-compatible", baseUrl, auth: current.auth, profile: current.profile,
+          credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
+          runtimeApiKey: io.args.apiKey, env, store: credentialStore,
+        });
+        if ("error" in credential) throw new Error(credential.error);
+        const url = new URL("models", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+        return fetchProviderModelList({ url, apiKey: credential.apiKey, headers: current.headers, fetch: io.fetch, signal, label: "Compatible endpoint" });
       },
     };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
@@ -350,7 +372,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     try {
       await runTuiRenderer({
         controller,
-        initialize: !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
+        initialize: settings.model && !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
         home,
         workspaceRoot: workspace.root,
         skillScope,
@@ -389,7 +411,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 export async function stageInteractiveSettings(
   next: ResolvedSettings,
   previous: ResolvedSettings,
-  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal },
+  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal; fetchedContextWindow?: number; fetchedMaxOutput?: number },
 ): Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: import("../model/catalog.ts").ModelCapability }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
@@ -397,7 +419,7 @@ export async function stageInteractiveSettings(
   if ((options.forceLoad && !model) || (next.provider === "openai" && next.openaiAuth === "codex" && !model) || adapterKeys.some(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]))) {
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
-      maxTokens: next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
+      maxTokens: next.explicitMaxOutput ?? options.fetchedMaxOutput ?? next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
       ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
@@ -407,7 +429,7 @@ export async function stageInteractiveSettings(
     modelCapability = loaded.capability;
   }
   options.signal.throwIfAborted();
-  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow)) };
+  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow ?? options.fetchedContextWindow)) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */

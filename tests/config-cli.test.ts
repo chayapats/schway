@@ -6,7 +6,6 @@ import { $ } from "bun";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { runCli } from "../src/cli/main.ts";
 import type { Model } from "../src/model/model.ts";
-import { DEFAULT_MODEL_IDS } from "../src/model/catalog.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
@@ -156,10 +155,7 @@ test("project config selects provider and model; CLI flags override them", async
       },
     });
     expect(switched.exitCode).toBe(0);
-    expect(providerOnly).toMatchObject({
-      provider: "openai-compatible",
-      model: DEFAULT_MODEL_IDS["openai-compatible"],
-    });
+    expect(providerOnly).toMatchObject({ provider: "openai-compatible", model: "" });
   });
 });
 
@@ -537,20 +533,14 @@ test("unknown catalog models still run with conservative max output", async () =
   expect(body.max_output_tokens).toBe(16_384);
 });
 
-test("zero-config OpenAI request uses the catalog default model", async () => {
-  const captured: { body?: unknown } = {};
+test("zero-config OpenAI request does not invent a model", async () => {
   const result = await run(["-p", "hello"], {
     env: { OPENAI_API_KEY: "sk-openai" },
-    fetch: async (_input, init) => {
-      captured.body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      return new Response(encodeOpenAISse(OPENAI_TEXT), {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-      });
-    },
+    fetch: async () => new Response(encodeOpenAISse(OPENAI_TEXT), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }),
   });
-  expect(result.exitCode).toBe(0);
-  const body = captured.body as { model: string; max_output_tokens: number };
-  expect(body.model).toBe(DEFAULT_MODEL_IDS.openai);
-  expect(body.max_output_tokens).toBe(16_384);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain("No model configured. Pass --provider and --model, or set them in config.");
 });

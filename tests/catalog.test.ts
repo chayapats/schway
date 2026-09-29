@@ -11,7 +11,7 @@ test("known default models expose context, output, tool, and thinking metadata",
   expect(openai.provider).toBe("openai");
   expect(openai.id).toBe(DEFAULT_MODEL_IDS.openai);
   expect(openai.contextWindow).toBeGreaterThan(UNKNOWN_MODEL_DEFAULTS.contextWindow);
-  expect(openai.maxOutput).toBe(16_384);
+  expect(openai.maxOutput).toBe(128_000);
   expect(openai.supportsTools).toBe(true);
   expect(openai.supportsThinking).toBe(true);
 

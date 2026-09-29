@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
   type ModelCapability,
-  DEFAULT_MODEL_IDS,
   describeThinkingSupport,
   findCompatibleReasoningBodyKey,
   getThinkingSupport,
   lookupModel,
+  UNKNOWN_MODEL_DEFAULTS,
   type ModelInfo,
 } from "../model/catalog.ts";
 import type { ThinkingLevel } from "../model/model.ts";
@@ -179,10 +179,16 @@ export type GitConfig = Static<typeof GitConfigSchema>;
 /** Default change-tracking mode that reads Git only on explicit inspection. */
 export { DEFAULT_GIT_CHANGE_TRACKING };
 
+/** Headless exit text when neither config nor the CLI names a provider and model. */
+export const NO_MODEL_CONFIGURED_MESSAGE =
+  "No model configured. Pass --provider and --model, or set them in config.";
+
 /** Fully resolved runtime settings after precedence and catalog lookup. */
 export interface ResolvedSettings {
   provider: ProviderFamily;
   model: string;
+  /** False when no layer named a model. Interactive must not display or send with a built-in model. */
+  modelConfigured: boolean;
   /** Requested provider-independent reasoning level; undefined leaves provider defaults untouched. */
   thinking?: ThinkingLevel;
   /** Effective reasoning level after capability checks; undefined means provider defaults. */
@@ -547,11 +553,54 @@ export function resolveSettings(input: {
     merged.profiles = mergedProfiles;
   }
   const provider = merged.provider ?? DEFAULT_PROVIDER;
-  const model = merged.model?.trim() || DEFAULT_MODEL_IDS[provider];
+  const model = merged.model?.trim() ?? "";
   if (selectedName !== undefined && provider !== "openai-compatible") {
     return {
       error: `Profile "${selectedName}" requires provider openai-compatible. Remove the conflicting provider override.`,
     };
+  }
+  if (!model) {
+    if (provider === "openai-compatible" && !(merged.baseUrl?.trim())) {
+      return {
+        error: "Missing --base-url for OpenAI-compatible provider. Set baseUrl in config or pass --base-url.",
+      };
+    }
+    const unsetThinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
+    const unsetThinkingError = unsetThinking === undefined ? undefined
+      : validateThinking(provider, model, unsetThinking, merged.extraBody);
+    if (unsetThinkingError !== undefined) return { error: unsetThinkingError };
+    const empty: ResolvedSettings = {
+      provider,
+      model: "",
+      modelConfigured: false,
+      ...(unsetThinking !== undefined ? { thinking: unsetThinking, effectiveThinking: unsetThinking } : {}),
+      maxTurns: merged.maxTurns ?? DEFAULT_MAX_TURNS,
+      maxConcurrentTools: merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
+      contextWindow: merged.contextWindow ?? UNKNOWN_MODEL_DEFAULTS.contextWindow,
+      maxOutput: merged.maxOutput ?? UNKNOWN_MODEL_DEFAULTS.maxOutput,
+      catalog: {
+        id: "",
+        provider,
+        ...UNKNOWN_MODEL_DEFAULTS,
+        contextWindow: merged.contextWindow ?? UNKNOWN_MODEL_DEFAULTS.contextWindow,
+        maxOutput: merged.maxOutput ?? UNKNOWN_MODEL_DEFAULTS.maxOutput,
+      },
+      gitChangeTracking: merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
+      appearance: merged.appearance ?? "auto",
+      openaiAuth: merged.openaiAuth ?? "auto",
+      ...(merged.contextWindow !== undefined ? { explicitContextWindow: merged.contextWindow } : {}),
+      ...(merged.maxOutput !== undefined ? { explicitMaxOutput: merged.maxOutput } : {}),
+      ...(selectedName !== undefined ? { profile: selectedName } : {}),
+      ...(selectedName !== undefined && activeProfile?.credentialEnv !== undefined ? { credentialEnv: activeProfile.credentialEnv } : {}),
+      ...(selectedName !== undefined && activeProfile?.credentialIdentity !== undefined ? { credentialIdentity: activeProfile.credentialIdentity } : {}),
+      ...(provider === "openai-compatible" ? {
+        baseUrl: merged.baseUrl?.trim(),
+        headers: merged.headers,
+        extraBody: merged.extraBody,
+        auth: merged.auth ?? "optional",
+      } : {}),
+    };
+    return empty;
   }
   const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
   const subscriptionCatalog = subscriptionSelected ? input.modelCapabilities : undefined;
@@ -571,6 +620,7 @@ export function resolveSettings(input: {
   const resolved: ResolvedSettings = {
     provider,
     model,
+    modelConfigured: true,
     ...(thinking !== undefined ? { thinking, effectiveThinking: thinking } : {}),
     ...(capability?.defaultThinking !== undefined ? { defaultThinking: capability.defaultThinking } : {}),
     ...(capability !== undefined ? { supportedThinking: capability.supportedThinking } : {}),
@@ -701,6 +751,8 @@ export async function loadResolvedSettings(input: {
   cli?: ConfigLayer;
   modelCapabilities?: readonly ModelCapability[];
   deferOpenAIThinking?: boolean;
+  /** Headless runs must name a provider and model in config or CLI flags. */
+  requireExplicitModel?: boolean;
 }): Promise<ResolvedSettings | { error: string }> {
   const user = await readConfigFile(userConfigPath(input.home));
   if (user && "error" in user) {
@@ -710,13 +762,18 @@ export async function loadResolvedSettings(input: {
   if (project && "error" in project) {
     return project;
   }
-  return resolveSettings({
+  const resolved = resolveSettings({
     user,
     project,
     cli: input.cli,
     modelCapabilities: input.modelCapabilities,
     deferOpenAIThinking: input.deferOpenAIThinking,
   });
+  if ("error" in resolved) return resolved;
+  if (input.requireExplicitModel && !resolved.modelConfigured) {
+    return { error: NO_MODEL_CONFIGURED_MESSAGE };
+  }
+  return resolved;
 }
 
 /** Read one config.json. Missing files are skipped; invalid files are errors. */

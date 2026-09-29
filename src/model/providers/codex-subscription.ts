@@ -547,6 +547,7 @@ export async function fetchSubscriptionCatalog(input: {
     const defaultThinking = item.default_reasoning_level === "none" ? "off" : item.default_reasoning_level;
     models.set(item.slug, {
       id: item.slug,
+      ...(item.default === true || item.is_default === true ? { recommended: true } : {}),
       ...(typeof item.context_window === "number" && Number.isSafeInteger(item.context_window) && item.context_window > 0 && item.context_window <= 10_000_000 ? { contextWindow: item.context_window } : {}),
       ...(typeof item.max_output_tokens === "number" && Number.isSafeInteger(item.max_output_tokens) && item.max_output_tokens > 0 && item.max_output_tokens <= 1_000_000 ? { maxOutput: item.max_output_tokens } : {}),
       ...(supportedThinking.includes(defaultThinking as ThinkingLevel) ? { defaultThinking: defaultThinking as ThinkingLevel } : {}),

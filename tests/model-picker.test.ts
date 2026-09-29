@@ -51,10 +51,10 @@ test("a saved model suppressed by CLI provider selection explains the actual sha
     const controller = await fixture(root, undefined, { provider: "openai-compatible", baseUrl: "http://127.0.0.1:1/v1" });
     expect(await controller.configCommand("set model gpt-5.4 --scope project")).toBe(true);
     expect(JSON.parse(await readFile(join(root, ".schway/config.json"), "utf8"))).toEqual({ model: "gpt-5.4" });
-    expect(controller.snapshot().modelId).toBe("gpt-4o");
+    expect(controller.snapshot().modelId).toBe("");
     const notice = controller.snapshot().transcript.at(-1)?.text;
     expect(notice).toContain("saved gpt-5.4");
-    expect(notice).toContain("Effective: gpt-4o [built-in default]");
+    expect(notice).toContain("Effective: unset [not configured]");
     expect(notice).toContain("shadowed by CLI provider selection");
     expect(await controller.configCommand("reset model --scope project")).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("CLI provider selection");
@@ -124,7 +124,7 @@ test("selected model and explicit output budget reach the next provider request 
 
 test("model picker cancellation leaves selection intact and turns reject edits", async () => {
   await withTempDir(async root => {
-    const controller = await fixture(root);
+    const controller = await fixture(root, undefined, { provider: "openai", model: "gpt-5.4" });
     controller.openModelPicker();
     controller.searchModels("openai/gpt-4o");
     controller.closeModelPicker();
