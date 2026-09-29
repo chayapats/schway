@@ -2,7 +2,7 @@ import { MaskedCredentialEntry, removeStoredCredential } from "../auth/managemen
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
-import { recommendedListedModel } from "../model/model-list.ts";
+import { filterXaiModels, recommendedListedModel, xaiModelCapabilities } from "../model/model-list.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
 import { ControllerCore } from "./controller-core.ts";
@@ -13,6 +13,7 @@ export const LOGIN_CHOICES = [
   { label: "ChatGPT · Device approval", action: { kind: "codex", device: true } },
   { label: "ChatGPT · Paste browser callback", action: { kind: "callback" } },
   { label: "OpenAI API key", action: { kind: "api-key", provider: "openai" } },
+  { label: "xAI API key", action: { kind: "api-key", provider: "xai" } },
   { label: "OpenAI-compatible API key", action: { kind: "api-key", provider: "openai-compatible" } },
 ] as const;
 
@@ -151,26 +152,29 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
-    if (saved && !this.modelId.trim()) await this.activateSignedInModel(target.provider === "openai" ? "api-key" : "compatible", target);
+    if (saved && !this.modelId.trim()) await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target);
     if (saved) this.restorePickerAfterConnection();
     return saved;
   }
 
   /** Select the route's recommended model after sign-in and remember it for the next interactive launch. */
-  protected async activateSignedInModel(route: "api-key" | "compatible", target: CredentialTarget): Promise<boolean> {
+  protected async activateSignedInModel(route: "api-key" | "compatible" | "xai", target: CredentialTarget): Promise<boolean> {
     if (!this.configEditor || !this.stageSettings || this.disposed) return false;
     const generation = this.selectionGeneration;
     const provider = this.provider;
     const profile = this.profile;
     const listing = new AbortController();
     this.signInListAbort = listing;
-    const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : ROUTE_FALLBACK_MODELS.openai;
+    const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : route === "xai" ? ROUTE_FALLBACK_MODELS.xai : ROUTE_FALLBACK_MODELS.openai;
     let modelId: string = fallback;
     let listed: { contextWindow?: number; maxOutput?: number } | undefined;
     try {
-      const models = await this.credentials?.listRouteModels?.(route, AbortSignal.any([listing.signal, AbortSignal.timeout(5_000)]), { baseUrl: target.baseUrl });
+      const listedModels = await this.credentials?.listRouteModels?.(route, AbortSignal.any([listing.signal, AbortSignal.timeout(5_000)]), { baseUrl: target.baseUrl });
+      const models = route === "xai" && listedModels ? filterXaiModels(listedModels) : listedModels;
+      if (route === "xai" && listedModels && !models?.length) throw new Error("xAI model list returned no selectable models.");
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
       if (models?.length) {
+        if (route === "xai") this.configEditor.setModelCapabilities(xaiModelCapabilities(models));
         modelId = recommendedListedModel(route, models);
         const chosen = models.find(model => model.id === modelId);
         if (chosen && (chosen.contextWindow || chosen.maxOutput)) listed = { contextWindow: chosen.contextWindow, maxOutput: chosen.maxOutput };
@@ -183,14 +187,16 @@ export abstract class CredentialsLayer extends ControllerCore {
     }
     if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
     const applied = await this.changeSettings(
-      () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId) : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
+      () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId)
+        : route === "xai" ? this.configEditor!.prepareXaiModel(modelId)
+        : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
       () => `Signed in. Using ${target.provider}/${this.modelId}.`,
       "Credential saved, but the recommended model could not be activated. Choose one with /model.",
       false,
       false,
       listed,
     );
-    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "api-key" ? "api-key" : "provider" });
+    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "compatible" ? "provider" : "api-key" });
     return applied;
   }
 
@@ -244,7 +250,7 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   protected parseCredentialTarget(args: string): CredentialTarget | undefined {
     const provider = args.trim().toLowerCase();
-    if (!["openai", "openai-compatible"].includes(provider)) {
+    if (!["openai", "xai", "openai-compatible"].includes(provider)) {
       this.fail(LOGIN_USAGE);
       return;
     }

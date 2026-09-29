@@ -97,9 +97,10 @@ export abstract class CommandsLayer extends CredentialsLayer {
       const settings = this.configEditor?.settings;
       const subscription = this.openaiAuth === "codex" || this.model?.provider === "codex-subscription";
       const advertised = settings?.provider === this.provider && settings.model === this.modelId ? settings.supportedThinking : undefined;
-      const levels = advertised ?? (subscription ? [] : getThinkingSupport(this.provider, this.modelId).supported);
-      const applicable = levels.filter(level => !validateThinking(this.provider, this.modelId, level, settings?.extraBody, subscription ? advertised ? { id: this.modelId, supportedThinking: advertised } : null : undefined));
-      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "openai-compatible", "codex"];
+      const listedRoute = subscription || this.provider === "xai";
+      const capability = listedRoute ? advertised ? { id: this.modelId, supportedThinking: advertised, ...(settings?.supportsDisabling ? { supportsDisabling: true } : {}) } : null : undefined;
+      const applicable = (advertised ?? (listedRoute && this.provider === "xai" ? ["off" as const] : subscription ? [] : getThinkingSupport(this.provider, this.modelId).supported)).filter(level => !validateThinking(this.provider, this.modelId, level, settings?.extraBody, capability));
+      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "xai", "openai-compatible", "codex"];
       return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
     }
     if (!/^\/[^\s]*$/.test(input)) return [];

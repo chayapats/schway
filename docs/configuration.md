@@ -43,7 +43,7 @@ Thinking choices come from supported model capabilities (verified account metada
 
 Malformed files, unavailable models, cancellation, and changes made by another writer retain the previous working state. Confirmation commits the transaction prepared for that preview, so a file changed between preview and confirmation is not overwritten. A lower value saved beneath CLI/session overrides is labeled **saved but not effective** with its overriding source.
 
-Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`, plus `git` and `appearance`. Appearance accepts `auto`, `dark`, or `light`; the launch environment `SCHWAY_THEME=dark|light` wins over every config scope. Animation is an environment choice only: `SCHWAY_MOTION=full|reduced|off` (see [TUI motion](tui.md#motion-and-startup-splash)). Limits must be positive integers. Providers are `openai` and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
+Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`, plus `git` and `appearance`. Appearance accepts `auto`, `dark`, or `light`; the launch environment `SCHWAY_THEME=dark|light` wins over every config scope. Animation is an environment choice only: `SCHWAY_MOTION=full|reduced|off` (see [TUI motion](tui.md#motion-and-startup-splash)). Limits must be positive integers. Providers are `openai`, `xai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
 
 Saving `baseUrl` with `--scope user` or `--scope project` requires an absolute URL without userinfo (`user:password@`) or a query string. All query strings are runtime-only, including non-secret parameters. Use session scope for those URLs; errors do not echo the rejected value. For example, `/config set baseUrl https://example.test/v1 --scope project` is supported, while `/config set baseUrl https://example.test/v1?region=test` applies only to the current session. Existing files are not automatically migrated: edits to other keys preserve their existing URL. Use `/config reset baseUrl --scope project` (or `--scope user`) or save a safe replacement to remove that file's URL override.
 
@@ -116,6 +116,26 @@ schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body 
 ```
 
 See `src/model/catalog.ts` (`getThinkingSupport`, `describeThinkingSupport`), `src/model/providers/*` (`resolveOpenAIReasoning`, `resolveCompatibleThinking`, `resolveCodexReasoning`), and `src/config/config.ts` (`validateThinking`, `describeEffectiveThinking`) for the reasoning-mapping contract.
+
+## xAI API key
+
+An xAI API key bills the xAI console account. It is not the Grok subscription route: that sign-in, its OAuth flow, and any selector between the subscription and this key are a separate route. This route talks to the public xAI Responses API at `https://api.x.ai/v1` and does not read `OPENAI_API_KEY`.
+
+Set the key in the environment, pass it for one process, or save it interactively:
+
+```sh
+export XAI_API_KEY=...
+schway --provider xai --model grok-4.7 -p "explain this repository"
+```
+
+```text
+/login xai
+/logout xai
+```
+
+`/login xai` asks for the key in the masked prompt and stores it at the `api-key:xai` identity. Headless runs never open that prompt. With no model named, headless exits with `No model configured. Pass --provider and --model, or set them in config.` and does not invent `grok-4.7`. After an interactive sign-in with no model set, Schway selects the recommended listed model, falling back to `grok-4.7` when the list names no default.
+
+Reasoning levels come from that model's `capabilities.reasoning_effort` in `GET https://api.x.ai/v1/models`. `none` is offered as `off` and is the only level that sends `reasoning.effort: none`. A model whose efforts omit `none` offers no `off`. A model with no reasoning capability offers only `off`, which sends no `reasoning` field. An unlisted level is rejected. With thinking unset, Schway does not fetch the model list and sends no reasoning control. With thinking set, headless fetches the list once and validates the level before the turn.
 
 ## ChatGPT subscription (Codex OAuth)
 

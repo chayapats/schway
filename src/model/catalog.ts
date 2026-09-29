@@ -5,10 +5,12 @@ import type { ThinkingLevel } from "./model.ts";
  * These are not selected before sign-in and are not a headless default.
  * OpenAI's published starting model is `gpt-6-astra` (the models list has no default field).
  * Compatible endpoints vary; `gpt-4o` is the documented fallback.
+ * xAI's docs recommend `grok-4.7` for code.
  */
 export const ROUTE_FALLBACK_MODELS = {
   openai: "gpt-6-astra",
   "openai-compatible": "gpt-4o",
+  xai: "grok-4.7",
 } as const;
 
 /** Conservative metadata applied to model IDs absent from the built-in catalog. */
@@ -38,6 +40,8 @@ export interface ModelCapability {
   supportedThinking: readonly ThinkingLevel[];
   /** True when the account catalog marked this model as its default. */
   recommended?: boolean;
+  /** True when listed off sends the provider disable effort; absent means off sends no reasoning field. */
+  supportsDisabling?: boolean;
 }
 
 /** Optional user-supplied limits that outrank catalog and unknown defaults. */

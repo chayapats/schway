@@ -12,6 +12,17 @@ test("paid selection requires both model and explicit opt-in, without calling a 
   expect(await runEvalCli(["--provider", "scripted", "--model", "unknown"], {})).toBe(2);
 });
 
+test("xAI eval skips without a key and refuses an unpriced model when a key is present", async () => {
+  await withTempDir(async dir => {
+    const output = join(dir, "skip.json");
+    const skipped = await runEvalCli(["--provider", "xai", "--model", "grok-4.7", "--allow-paid", "--output", output], {});
+    expect(skipped).toBe(1);
+    expect((JSON.parse(await readFile(output, "utf8")) as { outcome: string }).outcome).toBe("skipped_prerequisites");
+  });
+  const priced = await runEvalCli(["--provider", "xai", "--model", "grok-4.7", "--allow-paid"], { XAI_API_KEY: "fixture-not-real" });
+  expect(priced).toBe(2);
+});
+
 test("missing paid prerequisite emits a structured skip and no model call", async () => {
   await withTempDir(async dir => {
     const output = join(dir, "skip.json");

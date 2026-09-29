@@ -85,3 +85,15 @@ test("overwrite and logout affect only the explicitly selected identity and expl
   expect(denied.message).toContain("Cannot delete");
   expect(denied.message).not.toContain("sentinel");
 });
+
+test("/logout xai removes only the xAI API key and reports a remaining environment override", async () => {
+  const store = fakeCredentialStore();
+  await store.set(credentialIdentity({ provider: "xai" }), "stored-xai");
+  await store.set(credentialIdentity({ provider: "openai" }), "stored-openai");
+  const removed = await removeStoredCredential({ provider: "xai", store, env: { XAI_API_KEY: "env-xai" } });
+  expect(removed.message).toBe("Removed stored API key for xai. XAI_API_KEY is still set; restart without these overrides to stop using them.");
+  expect(await store.get(credentialIdentity({ provider: "xai" }))).toBeNull();
+  expect(await store.get(credentialIdentity({ provider: "openai" }))).toBe("stored-openai");
+  const missing = await removeStoredCredential({ provider: "xai", store, env: {} });
+  expect(missing.message).toBe("No stored API key found for xai.");
+});

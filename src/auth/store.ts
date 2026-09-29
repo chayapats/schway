@@ -18,7 +18,7 @@ export interface CredentialStore {
 
 /** Provider and endpoint used to select a credential without including its secret. */
 export interface CredentialTarget {
-  provider: "openai" | "openai-compatible";
+  provider: "openai" | "xai" | "openai-compatible";
   baseUrl?: string;
   /** Active compatible profile that scopes the stored identity alongside the endpoint. */
   profile?: string;

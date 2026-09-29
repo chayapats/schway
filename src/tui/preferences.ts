@@ -37,7 +37,7 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
   const layers = editor.preferenceLayers;
   const labels: Record<string, string> = { memory: "workspace memory", user: "user config", project: "project config", cli: "CLI", session: "session" };
   const choices: Record<string, readonly unknown[]> = {
-    thinking: [undefined, ...(settings.supportedThinking ?? (settings.provider === "openai" && settings.openaiAuth === "codex" ? [] : getThinkingSupport(settings.provider, settings.model).supported))],
+    thinking: [undefined, ...(settings.supportedThinking ?? (settings.provider === "xai" ? ["off"] : settings.provider === "openai" && settings.openaiAuth === "codex" ? [] : getThinkingSupport(settings.provider, settings.model).supported))],
     maxTurns: [undefined, 8, 16, 32, 64, 128], maxConcurrentTools: [undefined, 1, 2, 5, 10, 20],
     contextWindow: [undefined, 8192, 32768, 65536, 131072, 200000],
     maxOutput: [undefined, 1024, 4096, 8192, 16384, 32768],

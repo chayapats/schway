@@ -4,17 +4,19 @@ import { join } from "node:path";
 import { createTestRenderer } from "@opentui/core/testing";
 import { credentialIdentity } from "../src/auth/store.ts";
 import { runCli } from "../src/cli/main.ts";
-import { NO_MODEL_CONFIGURED_MESSAGE, loadResolvedSettings } from "../src/config/config.ts";
+import { NO_MODEL_CONFIGURED_MESSAGE, loadResolvedSettings, validateThinking } from "../src/config/config.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { lookupModel, ROUTE_FALLBACK_MODELS } from "../src/model/catalog.ts";
 import { stageInteractiveSettings } from "../src/tui/app.ts";
-import { fetchProviderModelList, ModelListTooLargeError, parseModelList, recommendedListedModel, requireOpenAIApiKeyModels } from "../src/model/model-list.ts";
+import { fetchProviderModelList, filterXaiModels, ModelListTooLargeError, parseModelList, recommendedListedModel, requireOpenAIApiKeyModels, requireXaiModels, xaiModelCapabilities } from "../src/model/model-list.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createConversationView } from "../src/tui/view.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
+import { modelPickerEntries } from "../src/tui/model-picker.ts";
+import { preferenceRows } from "../src/tui/preferences.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
@@ -436,5 +438,77 @@ test("Esc during a pending sign-in listing does not activate a model", async () 
       expect(controller.snapshot().transcript.some(entry => entry.text.includes("Signed in. Using"))).toBe(false);
       expect((await InteractiveMemory.load(home, root)).choice).toBeUndefined();
     } finally { controller.dispose(); }
+  });
+});
+
+import { XAI_MODELS_PAYLOAD } from "./fixtures/xai.ts";
+
+test("xAI model list fields become context, thinking levels and the listed default", () => {
+  const models = parseModelList(XAI_MODELS_PAYLOAD, "xAI");
+  expect(models.find(model => model.id === "grok-4.7")).toMatchObject({
+    contextWindow: 256_000,
+    supportedThinking: ["low", "medium", "high", "xhigh"],
+    defaultThinking: "high",
+  });
+  expect(models.find(model => model.id === "grok-4.5")?.supportedThinking).toEqual(["off", "low", "medium", "high"]);
+  expect(models.find(model => model.id === "grok-3")?.supportedThinking).toBeUndefined();
+  expect(validateThinking("xai", "grok-4.7", "off", undefined, { id: "grok-4.7", supportedThinking: ["low", "medium", "high", "xhigh"] })).toBe(
+    'Thinking level "off" is not listed for xai/grok-4.7 in the xAI model list. Leave thinking unset or select a listed level.',
+  );
+});
+
+test("xAI thinking offers only the listed efforts", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "xai", model: "grok-4.7" } });
+    editor.setModelCapabilities(xaiModelCapabilities(parseModelList(XAI_MODELS_PAYLOAD, "xAI")));
+    const thinking = preferenceRows(editor, "session", []).find(row => row.key === "thinking");
+    expect(thinking?.choices).toEqual([undefined, "low", "medium", "high", "xhigh"]);
+    const noReasoning = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "xai", model: "grok-3" } });
+    noReasoning.setModelCapabilities(xaiModelCapabilities(parseModelList(XAI_MODELS_PAYLOAD, "xAI")));
+    expect(preferenceRows(noReasoning, "session", []).find(row => row.key === "thinking")?.choices).toEqual([undefined, "off"]);
+  });
+});
+
+test("xAI chat filter keeps grok-4.7 and treats an excluded-only list as a failed list", () => {
+  const listed = parseModelList({ data: ["grok-4.7", "grok-imagine-1", "grok-2-image", "grok-video-1", "grok-embed-1", "other-model"].map(id => ({ id })) }, "xAI");
+  expect(filterXaiModels(listed).map(model => model.id)).toEqual(["grok-4.7"]);
+  const rows = modelPickerEntries("", "xai", "", {}, { xaiModels: filterXaiModels(listed), access: { providers: { xai: "API key" }, profiles: {}, subscription: "Login required", openaiApiKey: "Login required", xaiApiKey: "API key" } });
+  expect(rows.filter(row => row.provider === "xai").map(row => row.modelId)).toEqual(["grok-4.7"]);
+  expect(rows.find(row => row.modelId === "grok-4.7")).toMatchObject({ provider: "xai", authRoute: "api-key", access: "API key" });
+  expect(() => requireXaiModels(filterXaiModels(parseModelList({ data: [{ id: "grok-imagine-1" }, { id: "other-model" }] }, "xAI")))).toThrow(/no selectable models/);
+});
+
+test("xAI API key sign-in activates grok-4.7 and restores it without openaiAuth", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+    const store = fakeCredentialStore();
+    let activated: { provider: string; authRoute: string } | undefined;
+    const controller = new TuiController({
+      session: createSession(), sessionId: "xai-sign-in", workspace, configEditor: editor, home,
+      provider: editor.settings.provider, modelId: editor.settings.model, contextManager: createContextManager(workspace),
+      credentials: {
+        store, env: { XAI_API_KEY: "env-xai" }, rememberSecret: () => {}, reload: async () => ({ error: "unused" }),
+        listRouteModels: async route => route === "xai" ? [{ id: "grok-4.7" }, { id: "grok-imagine-1" }] : [],
+      },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) }),
+      onModelActivated: choice => { activated = choice; },
+    });
+    try {
+      expect(controller.beginLogin("xai")).toBe(true);
+      controller.enterCredentialText("saved-xai-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(controller.snapshot().modelId).toBe("grok-4.7");
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Signed in. Using xai/grok-4.7."))).toBe(true);
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("XAI_API_KEY still takes precedence over the saved key."))).toBe(true);
+      expect(activated).toMatchObject({ provider: "xai", authRoute: "api-key" });
+    } finally { controller.dispose(); }
+    const restored = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+    expect(restored.settings).toMatchObject({ provider: "xai", model: "grok-4.7" });
+    expect(restored.origins.model).toBe("interactive memory");
+    const memory = await InteractiveMemory.load(home, root);
+    expect(memory.choice).toEqual({ provider: "xai", model: "grok-4.7" });
   });
 });

@@ -32,6 +32,23 @@ test("disabled mode does not discover credentials, create a store, or load a pro
   expect(calls).toBe(0);
   expect(report.aggregate).toBe("incomplete");
   expect(report.scenarios[0]?.status).toBe("skipped");
+  let xaiCalls = 0;
+  const disabled = await runLiveSmoke({ ...selection(["xai-api-key"]), enabled: false }, {
+    createStore: () => { xaiCalls++; return missingStore; },
+    createModel: async () => { xaiCalls++; throw Error("unexpected"); },
+  });
+  expect(xaiCalls).toBe(0);
+  expect(disabled.scenarios[0]).toMatchObject({ provider: "xai-api-key", status: "skipped", reason: "live_disabled" });
+});
+
+test("xai-api-key skips missing credentials without loading an adapter", async () => {
+  let constructed = false;
+  const report = await runLiveSmoke(selection(["xai-api-key"]), {
+    createStore: () => missingStore,
+    createModel: async () => { constructed = true; throw Error("loaded"); },
+  });
+  expect(report.scenarios[0]).toMatchObject({ provider: "xai-api-key", status: "skipped", reason: "missing_credentials", model: "grok-4.7" });
+  expect(constructed).toBe(false);
 });
 
 test("each provider exercises a real read tool and final answer without leaking sentinel or credentials", async () => {
@@ -408,6 +425,7 @@ test("bounded fetch preserves valid streaming and message completion for all fou
     { input: { provider: "openai" as const, model: "gpt-6-astra", openaiAuth: "api-key" as const, apiKey: "fixture" }, sse: encodeOpenAiSse(OPENAI_TEXT_EVENTS) },
     { input: { provider: "openai-compatible" as const, model: "gpt-4o", baseUrl: "http://127.0.0.1:1234/v1", auth: "none" as const }, sse: encodeChatCompletionsSse(TEXT_STREAM_CHUNKS) },
     { input: { provider: "openai" as const, model: "gpt-6-astra", openaiAuth: "codex" as const, codexTokens: { accessToken: "fixture", accountId: "account" } }, sse: codexSse },
+    { input: { provider: "xai" as const, model: "grok-4.7", apiKey: "fixture" }, sse: encodeOpenAiSse(OPENAI_TEXT_EVENTS) },
   ];
   for (const lane of lanes) {
     const controller = new AbortController();

@@ -258,10 +258,16 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
         return fetchSubscriptionCatalog({ store: credentialStore, fetch: io.fetch, signal });
       },
-      listRouteModels: async (route: "api-key" | "compatible", signal: AbortSignal, endpoint?: { baseUrl?: string }) => {
+      listRouteModels: async (route: "api-key" | "compatible" | "xai", signal: AbortSignal, endpoint?: { baseUrl?: string }) => {
         const { resolveProviderCredential } = await import("../auth/credentials.ts");
-        const { fetchProviderModelList, OPENAI_MODELS_URL, requireOpenAIApiKeyModels } = await import("../model/model-list.ts");
+        const { fetchProviderModelList, OPENAI_MODELS_URL, requireOpenAIApiKeyModels, requireXaiModels } = await import("../model/model-list.ts");
         const current = configEditor.settings;
+        if (route === "xai") {
+          const { XAI_MODELS_URL } = await import("../model/providers/xai.ts");
+          const credential = await resolveProviderCredential({ provider: "xai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
+          if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing xAI API key.");
+          return requireXaiModels(await fetchProviderModelList({ url: XAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "xAI" }));
+        }
         if (route === "api-key") {
           const credential = await resolveProviderCredential({ provider: "openai", runtimeApiKey: io.args.apiKey, env, store: credentialStore });
           if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing OpenAI API key.");
@@ -420,7 +426,7 @@ export async function stageInteractiveSettings(
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
       maxTokens: next.explicitMaxOutput ?? options.fetchedMaxOutput ?? next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, thinking: next.thinking,
-      ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking } } : {}),
+      ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking, ...(next.supportsDisabling ? { supportsDisabling: true } : {}), ...(next.defaultThinking ? { defaultThinking: next.defaultThinking } : {}) } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
     options.signal.throwIfAborted();
@@ -802,6 +808,8 @@ function collectSecrets(
   if (openaiKey) {
     secrets.push(openaiKey);
   }
+  const xaiKey = env.XAI_API_KEY;
+  if (xaiKey) secrets.push(xaiKey);
   if (credentialEnv && credentialEnv !== COMPATIBLE_API_KEY_ENV) {
     const profileKey = env[credentialEnv];
     if (profileKey) secrets.push(profileKey);
@@ -949,9 +957,25 @@ export async function loadInteractiveModel(
   options.signal?.throwIfAborted();
   if ("error" in credential) return credential;
   if (credential.apiKey) options.secrets.push(credential.apiKey);
+  let xaiCapability = options.modelCapability;
+  if (provider === "xai" && options.thinking !== undefined && xaiCapability === undefined) {
+    try {
+      const { XAI_MODELS_URL } = await import("../model/providers/xai.ts");
+      const { fetchProviderModelList, requireXaiModels, xaiModelCapabilities } = await import("../model/model-list.ts");
+      const models = requireXaiModels(await fetchProviderModelList({
+        url: XAI_MODELS_URL, apiKey: credential.apiKey, fetch: options.fetch, signal: options.signal, label: "xAI",
+      }));
+      xaiCapability = xaiModelCapabilities(models).find(entry => entry.id === modelId)
+        ?? { id: modelId ?? "", supportedThinking: [] };
+      if (options.thinking && !xaiCapability.supportedThinking.includes(options.thinking)) {
+        return { error: `Thinking level "${options.thinking}" is not listed for xai/${modelId} in the xAI model list. Leave thinking unset or select a listed level.` };
+      }
+    } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
+  }
   const input = {
     provider, model: modelId, apiKey: credential.apiKey, maxTokens: options.maxTokens,
     ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
+    ...(provider === "xai" && xaiCapability !== undefined ? { modelCapability: xaiCapability } : {}),
     ...(provider === "openai-compatible" ? {
       baseUrl: options.baseUrl, headers: options.headers, extraBody: options.extraBody, auth: options.auth ?? "optional",
     } : {}),

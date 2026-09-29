@@ -998,3 +998,76 @@ test("saved keys are redacted from model-construction diagnostics and unavailabl
   expect(locked.stderr).not.toContain("sentinel");
   expect(locked.stderr).not.toContain("SHOULD_NOT_CONSTRUCT");
 });
+
+test("xAI headless runs with a key, refuses a missing model or key, and lists models only when thinking is set", async () => {
+  const success = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7"], {
+    env: { XAI_API_KEY: "xai-env-key" },
+    createModel: async () => createScriptedModel({ provider: "xai", id: "grok-4.7", responses: [{ text: "ok" }] }),
+  });
+  expect(success.exitCode).toBe(0);
+  const stored = fakeCredentialStore();
+  await stored.set(credentialIdentity({ provider: "xai" }), "stored-xai-key");
+  const fromStore = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7"], {
+    env: {}, credentialStore: stored,
+    createModel: async ({ apiKey }) => {
+      expect(apiKey).toBe("stored-xai-key");
+      return createScriptedModel({ provider: "xai", id: "grok-4.7", responses: [{ text: "ok" }] });
+    },
+  });
+  expect(fromStore.exitCode).toBe(0);
+  const flagged = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7", "--api-key", "flag-xai"], {
+    env: {},
+    createModel: async ({ apiKey }) => {
+      expect(apiKey).toBe("flag-xai");
+      return createScriptedModel({ provider: "xai", id: "grok-4.7", responses: [{ text: "ok" }] });
+    },
+  });
+  expect(flagged.exitCode).toBe(0);
+  let requests = 0;
+  const missingModel = await run(["-p", "hello", "--provider", "xai"], {
+    env: { XAI_API_KEY: "xai-env-key" },
+    fetch: async () => { requests += 1; return new Response("no"); },
+  });
+  expect(missingModel.exitCode).toBe(1);
+  expect(missingModel.stderr.trim()).toBe("No model configured. Pass --provider and --model, or set them in config.");
+  expect(missingModel.stderr).not.toContain("grok-4.7");
+  expect(requests).toBe(0);
+  const missingKey = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7"], {
+    env: { OPENAI_API_KEY: "openai-only" },
+    fetch: async () => { requests += 1; return new Response("no"); },
+    createModel: async () => { throw new Error("SHOULD_NOT_CONSTRUCT"); },
+  });
+  expect(missingKey.exitCode).toBe(1);
+  expect(missingKey.stderr).toContain("Missing xAI API key. Set XAI_API_KEY or pass --api-key.");
+  expect(missingKey.stderr).not.toContain("SHOULD_NOT_CONSTRUCT");
+  expect(requests).toBe(0);
+  const authConflict = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7", "--openai-auth", "api-key"], {
+    env: { XAI_API_KEY: "xai-env-key" },
+  });
+  expect(authConflict.exitCode).toBe(1);
+  expect(authConflict.stderr).toContain("OpenAI auth preference requires --provider openai");
+  const connectionConflict = await run(["-p", "hello", "--provider", "xai", "--base-url", "https://example.test/v1"], {
+    env: { XAI_API_KEY: "xai-env-key" },
+  });
+  expect(connectionConflict.exitCode).toBe(1);
+  expect(connectionConflict.stderr).toContain("OpenAI-compatible connection options require --provider openai-compatible");
+  const unknown = await run(["-p", "hello", "--provider", "grok"], { env: {} });
+  expect(unknown.exitCode).toBe(1);
+  expect(unknown.stderr).toContain("Unknown provider: grok");
+  const urls: string[] = [];
+  const fetch = async (input: string | URL | Request) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({ data: [{ id: "grok-4.7", context_length: 256000, capabilities: { reasoning_effort: ["low", "high"] }, default_reasoning_effort: "high" }] }), { headers: { "content-type": "application/json" } });
+  };
+  const thinking = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7", "--thinking", "high"], {
+    env: { XAI_API_KEY: "xai-env-key" }, fetch, createModel: async () => createScriptedModel({ provider: "xai", id: "grok-4.7", responses: [{ text: "ok" }] }),
+  });
+  expect(thinking.exitCode).toBe(0);
+  expect(urls.filter(url => url.includes("/models"))).toHaveLength(1);
+  urls.length = 0;
+  const unset = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7"], {
+    env: { XAI_API_KEY: "xai-env-key" }, fetch, createModel: async () => createScriptedModel({ provider: "xai", id: "grok-4.7", responses: [{ text: "ok" }] }),
+  });
+  expect(unset.exitCode).toBe(0);
+  expect(urls.filter(url => url.includes("/models"))).toHaveLength(0);
+});

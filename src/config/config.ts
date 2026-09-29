@@ -55,6 +55,7 @@ export const CONFIG_SETTING_NAMES = [
 
 const ProviderSchema = Type.Union([
   Type.Literal("openai"),
+  Type.Literal("xai"),
   Type.Literal("openai-compatible"),
 ]);
 
@@ -195,8 +196,10 @@ export interface ResolvedSettings {
   effectiveThinking?: ThinkingLevel;
   /** Account-advertised default when thinking is unset. */
   defaultThinking?: ThinkingLevel;
-  /** Account-advertised reasoning levels for a selected subscription model. */
+  /** Account-advertised reasoning levels for a selected subscription or xAI model. */
   supportedThinking?: readonly ThinkingLevel[];
+  /** True when xAI off sends reasoning effort none; absent means off sends no reasoning field. */
+  supportsDisabling?: boolean;
   maxTurns: number;
   maxConcurrentTools: number;
   contextWindow: number;
@@ -589,16 +592,17 @@ export function resolveSettings(input: {
     });
   }
   const subscriptionSelected = provider === "openai" && merged.openaiAuth === "codex";
-  const subscriptionCatalog = subscriptionSelected ? input.modelCapabilities : undefined;
-  const capability = subscriptionCatalog?.find(entry => entry.id === model);
+  const listedSelected = subscriptionSelected || provider === "xai";
+  const listedCatalog = listedSelected ? input.modelCapabilities : undefined;
+  const capability = listedCatalog?.find(entry => entry.id === model);
   const metadata = lookupModel(provider, model, {
     contextWindow: merged.contextWindow ?? capability?.contextWindow,
     maxOutput: merged.maxOutput ?? capability?.maxOutput,
   });
   const catalog = capability ? { ...metadata, supportsThinking: capability.supportedThinking.length > 0 } : metadata;
   const thinking = merged.thinking === null ? undefined : merged.thinking as ThinkingLevel | undefined;
-  const thinkingError = input.deferOpenAIThinking && provider === "openai" ? undefined
-    : validateThinking(provider, model, thinking, merged.extraBody, subscriptionSelected ? capability ?? null : undefined);
+  const thinkingError = (input.deferOpenAIThinking && provider === "openai") || (provider === "xai" && input.modelCapabilities === undefined) ? undefined
+    : validateThinking(provider, model, thinking, merged.extraBody, listedSelected ? capability ?? null : undefined);
   if (thinkingError !== undefined) {
     return { error: thinkingError };
   }
@@ -619,6 +623,7 @@ export function resolveSettings(input: {
     thinking,
     defaultThinking: capability?.defaultThinking,
     supportedThinking: capability?.supportedThinking,
+    supportsDisabling: capability?.supportsDisabling,
     contextWindow: catalog.contextWindow,
     maxOutput: catalog.maxOutput,
     catalog,
@@ -635,6 +640,7 @@ function finishResolvedSettings(input: {
   thinking?: ThinkingLevel;
   defaultThinking?: ThinkingLevel;
   supportedThinking?: readonly ThinkingLevel[];
+  supportsDisabling?: boolean;
   contextWindow: number;
   maxOutput: number;
   catalog: ModelInfo;
@@ -646,6 +652,7 @@ function finishResolvedSettings(input: {
     ...(input.thinking !== undefined ? { thinking: input.thinking, effectiveThinking: input.thinking } : {}),
     ...(input.defaultThinking !== undefined ? { defaultThinking: input.defaultThinking } : {}),
     ...(input.supportedThinking !== undefined ? { supportedThinking: input.supportedThinking } : {}),
+    ...(input.supportsDisabling ? { supportsDisabling: true } : {}),
     maxTurns: input.merged.maxTurns ?? DEFAULT_MAX_TURNS,
     maxConcurrentTools: input.merged.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS,
     contextWindow: input.contextWindow,
@@ -687,6 +694,9 @@ export function validateThinking(
   }
   const support = accountCapability === undefined ? getThinkingSupport(provider, model) : undefined;
   if (accountCapability !== undefined && !accountCapability?.supportedThinking.includes(thinking)) {
+    if (provider === "xai") {
+      return `Thinking level "${thinking}" is not listed for xai/${model} in the xAI model list. Leave thinking unset or select a listed level.`;
+    }
     return `Thinking level "${thinking}" is not listed for ${provider}/${model} in this account's subscription catalog. Leave thinking unset or select an advertised level.`;
   }
   if (support && !support.supported.includes(thinking)) {
@@ -715,7 +725,7 @@ export function describeEffectiveThinking(provider: string, thinking: ThinkingLe
     }
     return "off (provider default, no reasoning controls sent)";
   }
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "xai") {
     return `${thinking} (reasoning effort ${thinking})`;
   }
   return `${thinking} (via extraBody when configured; no automatic mapping)`;

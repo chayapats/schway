@@ -43,7 +43,8 @@ test("blank OpenAI credentials are treated as missing", () => {
   ).toMatchObject({ error: expect.any(String) });
 });
 
-import { resolveProviderCredential } from "../src/auth/credentials.ts";
+import { credentialEnvironmentVariable, resolveProviderCredential } from "../src/auth/credentials.ts";
+import { XAI_API_KEY_ENV } from "../src/auth/secrets.ts";
 import { credentialIdentity, type CredentialStore } from "../src/auth/store.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 
@@ -96,4 +97,19 @@ test("compatible endpoint keys stay separate from native providers and other end
   expect(await resolveProviderCredential({ ...b, store, env, auth: "required" })).toMatchObject({ error: expect.stringContaining("Missing API key") });
   expect(await resolveProviderCredential({ ...b, store, env: { OPENAI_COMPATIBLE_API_KEY: "explicit-compatible-env" } })).toEqual({ apiKey: "explicit-compatible-env", source: "env" });
   expect(await resolveProviderCredential({ ...a, store: unavailableStore, env: {}, auth: "none" })).toEqual({ source: "none" });
+});
+
+test("xAI keys stay on their own identity and never read OpenAI credentials", async () => {
+  expect(credentialEnvironmentVariable("xai")).toBe(XAI_API_KEY_ENV);
+  expect(credentialIdentity({ provider: "xai" })).toEqual({ account: "api-key:xai", label: "xai" });
+  const store = fakeCredentialStore();
+  await store.set(credentialIdentity({ provider: "xai" }), "stored-xai");
+  await store.set(credentialIdentity({ provider: "openai" }), "stored-openai");
+  expect(await resolveProviderCredential({ provider: "xai", store, env: { XAI_API_KEY: "env-xai", OPENAI_API_KEY: "env-openai" }, runtimeApiKey: "runtime-xai" })).toEqual({ apiKey: "runtime-xai", source: "runtime" });
+  expect(await resolveProviderCredential({ provider: "xai", store, env: { XAI_API_KEY: "env-xai", OPENAI_API_KEY: "env-openai" } })).toEqual({ apiKey: "env-xai", source: "env" });
+  expect(await resolveProviderCredential({ provider: "xai", store, env: { OPENAI_API_KEY: "env-openai" } })).toEqual({ apiKey: "stored-xai", source: "stored" });
+  expect(await resolveProviderCredential({ provider: "openai", store, env: { XAI_API_KEY: "env-xai" } })).toEqual({ apiKey: "stored-openai", source: "stored" });
+  expect(await resolveProviderCredential({ provider: "xai", store: fakeCredentialStore(), env: { OPENAI_API_KEY: "env-openai" } })).toEqual({
+    error: "Missing xAI API key. Set XAI_API_KEY or pass --api-key.",
+  });
 });

@@ -63,6 +63,8 @@ test("core modules do not import provider SDKs", async () => {
     expect(source.includes("providers/anthropic")).toBe(false);
     expect(source.includes("providers/openai")).toBe(false);
     expect(source.includes("providers/openai-compatible")).toBe(false);
+    expect(source.includes("providers/xai")).toBe(false);
+    expect(source.includes("providers/responses-stream")).toBe(false);
   }
 });
 
@@ -139,12 +141,14 @@ test("provider adapters load lazily through the shared loader", async () => {
     expect(source.includes('from "../model/providers/openai.ts"')).toBe(false);
     expect(source.includes('from "../model/providers/openai-compatible.ts"')).toBe(false);
     expect(source.includes('from "../model/providers/codex-subscription.ts"')).toBe(false);
+    expect(source.includes('from "../model/providers/xai.ts"')).toBe(false);
   }
   const loader = await Bun.file("src/model/loader.ts").text();
   expect(loader.includes("anthropic")).toBe(false);
   expect(loader.includes('import("./providers/openai.ts")')).toBe(true);
   expect(loader.includes('import("./providers/openai-compatible.ts")')).toBe(true);
   expect(loader.includes('import("./providers/codex-subscription.ts")')).toBe(true);
+  expect(loader.includes('import("./providers/xai.ts")')).toBe(true);
 });
 
 test("subscription adapter stays headless-safe without TUI or provider SDK imports", async () => {
