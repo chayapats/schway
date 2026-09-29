@@ -249,3 +249,38 @@ test("Grok logout and account replacement serialize behind an already-started re
     expect((await loadSubscriptionTokens(store))?.accessToken ?? null).toBe(mutation === "logout" ? null : "new-account");
   }
 });
+
+test("Grok model-list 401 preserves missing-login and missing-refresh guidance", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { MISSING_GROK_SUBSCRIPTION } = await import("../src/auth/credentials.ts");
+  const { saveSubscriptionTokens, deleteSubscriptionTokens, fetchSubscriptionModels } = await import("../src/model/providers/grok-subscription.ts");
+  for (const removed of [false, true]) {
+    const store = fakeCredentialStore();
+    await saveSubscriptionTokens(store, { accessToken: "private-access", expiresAt: Date.now() + 3600_000, obtainedAt: Date.now() });
+    let requests = 0;
+    const result = fetchSubscriptionModels({ store, fetch: async url => {
+      requests++; expect(String(url)).toBe("https://api.x.ai/v1/models");
+      if (removed) await deleteSubscriptionTokens(store);
+      return json({}, 401);
+    } });
+    await expect(result).rejects.toThrow(removed ? MISSING_GROK_SUBSCRIPTION : "The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
+    expect(requests).toBe(1);
+  }
+});
+
+test("Grok model-list transport failures stay sanitized and cancellation wins over auth failures", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { saveSubscriptionTokens, fetchSubscriptionModels } = await import("../src/model/providers/grok-subscription.ts");
+  const store = fakeCredentialStore(); await saveSubscriptionTokens(store, { accessToken: "private-access", obtainedAt: 0 });
+  for (const raw of ["private-access", "Cannot private-access", "Refreshing the Grok private-access"]) {
+    const error = await fetchSubscriptionModels({ store, fetch: async () => { throw Error(raw); } }).catch(error => error);
+    expect(error.message).not.toContain("private-access"); expect(error.message).toBe("Could not reach the Grok model list.");
+  }
+  const abort = new AbortController(); let resolutions = 0;
+  const result = fetchSubscriptionModels({ store, signal: abort.signal, refresher: { getValidAccessToken: async () => {
+    if (++resolutions === 1) return "private-access";
+    queueMicrotask(() => queueMicrotask(() => abort.abort()));
+    throw Error("Controlled refresh failure");
+  } }, fetch: async () => json({}, 401) });
+  await expect(result).rejects.toMatchObject({ name: "AbortError" });
+});

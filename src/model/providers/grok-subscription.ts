@@ -285,17 +285,24 @@ async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
 export async function fetchSubscriptionModels(input: { store: CredentialStore; fetch?: GrokFetch; signal?: AbortSignal; refresher?: ReturnType<typeof createSubscriptionTokenRefresher> }): Promise<ListedModel[]> {
   const refresher = input.refresher ?? createSubscriptionTokenRefresher(input);
   let accessToken = await refresher.getValidAccessToken(input.signal);
+  // Only token resolution and our own authorization statuses cross the generic transport sanitizer.
+  let authError: Error | undefined;
   const authorizedFetch: GrokFetch = async (url, init) => {
     const send = () => (input.fetch ?? fetch)(url, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Authorization: `Bearer ${accessToken}` } });
     let response = await send();
-    if (response.status === 401) { await response.body?.cancel(); accessToken = await refresher.getValidAccessToken(input.signal, accessToken); response = await send(); }
-    if (response.status === 401 || response.status === 403) { await response.body?.cancel(); throw new Error(response.status === 401 ? grokRevokedSessionError() : GROK_PLAN_ERROR); }
+    if (response.status === 401) {
+      await response.body?.cancel();
+      try { accessToken = await refresher.getValidAccessToken(input.signal, accessToken); }
+      catch (error) { aborted(input.signal); if (error instanceof Error) authError = error; throw error; }
+      response = await send();
+    }
+    if (response.status === 401 || response.status === 403) {
+      await response.body?.cancel();
+      authError = new Error(response.status === 401 ? grokRevokedSessionError() : GROK_PLAN_ERROR);
+      throw authError;
+    }
     return response;
   };
-  // The generic list loader deliberately hides fetch errors, so retain only our controlled auth messages.
-  let authError: Error | undefined;
-  try { return requireXaiModels(await fetchProviderModelList({ url: "https://api.x.ai/v1/models", signal: input.signal, label: "Grok", fetch: async (url, init) => {
-    try { return await authorizedFetch(url, init); } catch (error) { if (error instanceof Error && (error.message === GROK_PLAN_ERROR || error.message === grokRevokedSessionError() || error.message.startsWith("Refreshing the Grok") || error.message.startsWith("Cannot "))) authError = error; throw error; }
-  } })); }
-  catch (error) { throw authError ?? error; }
+  try { return requireXaiModels(await fetchProviderModelList({ url: "https://api.x.ai/v1/models", signal: input.signal, label: "Grok", fetch: authorizedFetch })); }
+  catch (error) { aborted(input.signal); throw authError ?? error; }
 }
