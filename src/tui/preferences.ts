@@ -1,5 +1,5 @@
 import type { ConfigEditor, ConfigScope } from "../config/editing.ts";
-import { getThinkingSupport } from "../model/catalog.ts";
+import { resolveThinkingPolicy, describeEffectiveThinking, isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 
 /** A bounded ordinary preference or an explicitly separate complete model-choice action. */
@@ -36,8 +36,11 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
   const safe = (value: unknown) => redactSecrets(value === undefined ? "unset" : String(value), secrets).replace(/https?:\/\/[^\s]+/g, "[URL hidden]").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
   const layers = editor.preferenceLayers;
   const labels: Record<string, string> = { memory: "workspace memory", user: "user config", project: "project config", cli: "CLI", session: "session" };
+  const listed = settings.provider === "xai" || settings.openaiAuth === "codex" || (settings.provider === "openai-compatible" && isOpenRouterEndpoint(settings.baseUrl));
+  const context = { baseUrl: settings.baseUrl, extraBody: settings.extraBody, ...(listed ? { capability: settings.reasoningCapability ?? null } : {}) };
+  const policy = resolveThinkingPolicy({ provider: settings.provider, model: settings.model, ...context });
   const choices: Record<string, readonly unknown[]> = {
-    thinking: [undefined, ...(settings.supportedThinking ?? (settings.provider === "xai" ? ["off"] : settings.provider === "openai" && settings.openaiAuth === "codex" ? [] : getThinkingSupport(settings.provider, settings.model).supported))],
+    thinking: [undefined, ...policy.supported.filter(level => !validateThinking(settings.provider, settings.model, level, settings.extraBody, context.capability, settings.baseUrl))],
     maxTurns: [undefined, 8, 16, 32, 64, 128], maxConcurrentTools: [undefined, 1, 2, 5, 10, 20],
     contextWindow: [undefined, 8192, 32768, 65536, 131072, 200000],
     maxOutput: [undefined, 1024, 4096, 8192, 16384, 32768],
@@ -56,7 +59,7 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
       const conflict = ["provider", "profile", "openaiAuth", "xaiAuth"].find(field => layer[field] !== undefined && (layer[field] ?? undefined) !== memory[field]);
       return conflict ? [`${labels[name]} ${conflict} selection shadows workspace memory; reset that ${labels[name]} override to restore it.`] : [];
     })[0];
-    return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(settings.effectiveThinking)})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,
+    return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(describeEffectiveThinking(settings.provider, settings.thinking, settings.model, context))})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,
       saved: Object.entries(layers).filter(([, layer]) => layer[key] !== undefined).map(([name, layer]) => `${labels[name]}=${safe(layer[key])}`).join("; ") || "No saved override",
       reset: key === "appearance" && appearanceEnvironment ? "SCHWAY_THEME overrides saved appearance. Remove it to use the saved preference; reset a scope to inherit auto." : memoryConflict ?? (origin.startsWith("profile ") ? "The selected profile supplies this value; reset its selection on the profile row or edit the named profile configuration." : origin === "CLI" ? "CLI shadows lower values: remove the launch flag to inherit." : originScope ? `Reset in ${labels[originScope]} to inherit lower values.` : "Inherited default; reset the selected scope to inherit."),
       choices: choices[key] ?? [undefined, "open model + route picker (activates and remembers)"] };

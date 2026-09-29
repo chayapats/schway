@@ -1,3 +1,4 @@
+import { assertThinking } from "../thinking.ts";
 import type {
   AssistantContent,
   AssistantMessage,
@@ -907,14 +908,8 @@ export function resolveCodexReasoning(
   | { effort: "none" }
   | { effort: Exclude<ThinkingLevel, "off">; summary: "auto" }
   | undefined {
-  if (level === undefined) {
-    return undefined;
-  }
-  if (!capability) throw new Error(`Thinking level "${level}" requires verified subscription catalog capabilities for openai/${modelId}. Open /model or reset thinking.`);
-  if (capability.id !== modelId) throw new Error("Subscription capability does not match the selected model.");
-  if (!capability.supportedThinking.includes(level)) {
-    throw new Error(`Thinking level "${level}" is not listed for openai/${modelId} in this account's subscription catalog.`);
-  }
+  assertThinking({ provider: "openai", model: modelId, capability: capability ?? null }, level);
+  if (level === undefined) return undefined;
   if (level === "off") return { effort: "none" };
   return { effort: level, summary: "auto" };
 }

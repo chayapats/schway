@@ -1,3 +1,4 @@
+import { isOpenRouterEndpoint } from "../model/thinking.ts";
 import { resolve } from "node:path";
 import { createDiagnosticSink } from "../diagnostics/sink.ts";
 import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
@@ -321,6 +322,21 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return 1;
       }
     }
+    if (settings.provider === "openai-compatible" && isOpenRouterEndpoint(settings.baseUrl) && !io.model && settings.thinking !== undefined) {
+      try {
+        const store = io.credentialStore ?? createNativeCredentialStore();
+        const credential = await resolveProviderCredential({ provider: settings.provider, baseUrl: settings.baseUrl, auth: settings.auth,
+          profile: settings.profile, credentialEnv: settings.credentialEnv, credentialIdentity: settings.credentialIdentity,
+          runtimeApiKey: parsed.args.apiKey, env, store });
+        if ("error" in credential) throw new Error(credential.error);
+        const { fetchProviderModelList, openRouterModelCapabilities } = await import("../model/model-list.ts");
+        const models = await fetchProviderModelList({ url: "https://openrouter.ai/api/v1/models", apiKey: credential.apiKey,
+          headers: settings.headers, fetch: io.fetch, signal: io.signal, label: "OpenRouter" });
+        const chosen = await loadResolvedSettings({ home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: openRouterModelCapabilities(models) });
+        if ("error" in chosen) throw new Error(chosen.error);
+        settings = chosen;
+      } catch (error) { io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`); return 1; }
+    }
     diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools, resumed: !!session });
 
     let model = io.model;
@@ -581,6 +597,7 @@ async function loadCliModel(
       id: settings.model, supportedThinking: settings.supportedThinking, ...(settings.supportsDisabling ? { supportsDisabling: true } : {}),
       ...(settings.defaultThinking ? { defaultThinking: settings.defaultThinking } : {}),
     } } : {}),
+    ...(settings.reasoningCapability ? { modelCapability: settings.reasoningCapability } : {}),
     ...(settings.provider === "openai-compatible" ? {
       baseUrl: settings.baseUrl,
       headers: settings.headers,

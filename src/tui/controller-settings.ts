@@ -170,7 +170,12 @@ export abstract class SettingsLayer extends ChangesLayer {
         await transaction.commit(abort.signal);
         // Once the transaction commits, publish the matching runtime even if cancellation arrives at that boundary.
         if (appearanceOnly) this.onSettingsCommitted?.(transaction.settings, this.contextManager);
-        else this.publishSettings(transaction.settings, staged!);
+        else {
+          if (staged?.modelCapability) {
+            this.configEditor!.setModelCapability(staged.modelCapability);
+          }
+          this.publishSettings(staged?.modelCapability ? this.configEditor!.settings : transaction.settings, staged!);
+        }
         this.closeModelPicker();
         this.status = "idle";
         this.notice(redactSecrets(message(), this.secrets));
@@ -227,7 +232,7 @@ export abstract class SettingsLayer extends ChangesLayer {
         }
         if (key === "thinking") {
           const requested = (settings as unknown as Record<string, unknown>)[key];
-          const effective = this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, requested as never, settings.model);
+          const effective = this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, requested as never, settings.model, this.thinkingContext());
           return `${key}: ${displaySetting(key, requested)} [${origins[key as keyof ConfigLayer]}] (effective: ${effective})`;
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
@@ -238,7 +243,7 @@ export abstract class SettingsLayer extends ChangesLayer {
         lines.push(`git: {"changeTracking":"${gitMode}"}${gitOrigin}`);
       }
       if (settings.thinking === undefined) {
-        lines.push(`thinking: unset (effective: ${this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, undefined)})`);
+        lines.push(`thinking: unset (effective: ${this.codexThinkingSelected() ? this.describeThinking() : describeEffectiveThinking(this.provider, undefined, this.modelId, this.thinkingContext())})`);
       }
       if (settings.headers) lines.push(`headers: configured (values hidden) [${origins.headers}]`);
       if (settings.extraBody) lines.push(`extraBody: configured (values hidden) [${origins.extraBody}]`);
@@ -247,7 +252,7 @@ export abstract class SettingsLayer extends ChangesLayer {
     }
     if (!this.configEditor) {
       const thinking = this.thinking;
-      lines.push(thinking !== undefined ? `Thinking: ${thinking} (effective: ${describeEffectiveThinking(this.provider, thinking as never, this.modelId)})` : `Thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined)})`);
+      lines.push(thinking !== undefined ? `Thinking: ${thinking} (effective: ${describeEffectiveThinking(this.provider, thinking as never, this.modelId, this.thinkingContext())})` : `Thinking: unset (effective: ${describeEffectiveThinking(this.provider, undefined, this.modelId, this.thinkingContext())})`);
       lines.push(`git: {"changeTracking":"${this.gitChangeTracking()}"}`);
     }
     if (!this.configEditor && this.maxTurns !== undefined) {

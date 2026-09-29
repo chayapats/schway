@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import { describeThinkingSupport, getThinkingSupport, isThinkingSupported, lookupModel } from "../catalog.ts";
+import { lookupModel } from "../catalog.ts";
+import { assertThinking } from "../thinking.ts";
 import type { Model, ModelRequest, ThinkingLevel } from "../model.ts";
 import { assembleResponsesStream, buildResponsesRequest } from "./responses-stream.ts";
 
@@ -18,23 +19,11 @@ export function resolveOpenAIReasoning(
   level: ThinkingLevel | undefined,
   modelId: string,
 ): { effort: "none" } | { effort: "low" | "medium" | "high" | "xhigh" | "max"; summary: "auto" } | undefined {
-  if (level === undefined) return undefined;
-  if (!isThinkingSupported("openai", modelId, level)) {
-    throw new Error(
-      `Thinking level "${level}" is not supported for openai/${modelId}. ${describeThinkingSupport("openai", modelId)}`,
-    );
-  }
-  if (level === "off") {
-    if (!getThinkingSupport("openai", modelId).supportsDisabling) return undefined;
-    return { effort: "none" };
-  }
-  const effort = OPENAI_THINKING_EFFORTS[level as Exclude<ThinkingLevel, "off" | "ultra">];
-  if (!effort) {
-    throw new Error(
-      `Thinking level "${level}" is not supported for openai/${modelId}. ${describeThinkingSupport("openai", modelId)}`,
-    );
-  }
-  return { effort, summary: "auto" };
+  const policy = assertThinking({ provider: "openai", model: modelId }, level);
+  if (level === undefined || (level === "off" && !policy.supportsDisabling)) return undefined;
+  if (level === "off") return { effort: "none" };
+  // The policy only admits documented API levels; wire types stay inside this adapter.
+  return { effort: level as "low" | "medium" | "high" | "xhigh" | "max", summary: "auto" };
 }
 
 /** Optional fetch override used by protocol tests. */

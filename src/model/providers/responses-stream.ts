@@ -24,13 +24,13 @@ export type ResponsesNamespace = "openai" | "xai";
 /** Reasoning control already resolved by the calling adapter. */
 export type ResponsesReasoning =
   | { effort: "none"; summary?: "auto" }
-  | { effort: "low" | "medium" | "high" | "xhigh" | "max"; summary: "auto" };
+  | { effort: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"; summary: "auto" };
 
 /** Build one Responses request that stores nothing and asks for encrypted reasoning. */
-export function buildResponsesRequest(input: {
+export function buildResponsesRequest<Reasoning extends ResponsesReasoning | undefined>(input: {
   model: string;
   maxOutputTokens: number;
-  reasoning?: ResponsesReasoning;
+  reasoning?: Reasoning;
   request: ModelRequest;
   namespace: ResponsesNamespace;
 }) {

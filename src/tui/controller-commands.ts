@@ -1,6 +1,6 @@
 import { redactSecrets } from "../auth/secrets.ts";
 import { commandCatalog, type CommandChoice } from "./command-catalog.ts";
-import { getThinkingSupport } from "../model/catalog.ts";
+import { resolveThinkingPolicy } from "../model/thinking.ts";
 import type { Session } from "../session/session.ts";
 import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import { discoverSkills } from "../skills/skills.ts";
@@ -94,12 +94,9 @@ export abstract class CommandsLayer extends CredentialsLayer {
     if (match) {
       const name = match[1]!;
       if (commands.some(entry => entry.name === name && !entry.available)) return commands.filter(entry => entry.name === name);
-      const settings = this.configEditor?.settings;
-      const subscription = this.openaiAuth === "codex" || this.model?.provider === "codex-subscription";
-      const advertised = settings?.provider === this.provider && settings.model === this.modelId ? settings.supportedThinking : undefined;
-      const listedRoute = subscription || this.provider === "xai";
-      const capability = listedRoute ? advertised ? { id: this.modelId, supportedThinking: advertised, ...(settings?.supportsDisabling ? { supportsDisabling: true } : {}) } : null : undefined;
-      const applicable = (advertised ?? (listedRoute && this.provider === "xai" ? ["off" as const] : subscription ? [] : getThinkingSupport(this.provider, this.modelId).supported)).filter(level => !validateThinking(this.provider, this.modelId, level, settings?.extraBody, capability));
+      const context = this.thinkingContext();
+      const policy = resolveThinkingPolicy({ provider: this.provider, model: this.modelId, ...context });
+      const applicable = policy.supported.filter(level => !validateThinking(this.provider, this.modelId, level, context.extraBody, context.capability, context.baseUrl));
       const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "xai", "openai-compatible", "codex", "grok"];
       return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
     }

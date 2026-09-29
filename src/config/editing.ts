@@ -140,6 +140,16 @@ export class ConfigEditor {
     this.setModelCapabilities([...kept, ...capabilities]);
   }
 
+  /** Install one activated model without discarding discoveries for other models or routes. */
+  setModelCapability(capability: ModelCapability): void {
+    this.setModelCapabilities([...(this.modelCapabilities ?? []).filter(entry => entry.id !== capability.id || entry.baseUrl !== capability.baseUrl), capability]);
+  }
+
+  /** Replace endpoint-scoped model evidence while preserving account catalogs for other routes. */
+  setEndpointCapabilities(baseUrl: string, capabilities: readonly ModelCapability[]): void {
+    this.setModelCapabilities([...(this.modelCapabilities ?? []).filter(entry => entry.baseUrl !== baseUrl), ...capabilities]);
+  }
+
   /** Install verified account capabilities for future session edits without persisting them. */
   setModelCapabilities(capabilities: readonly ModelCapability[]): void {
     const next = structuredClone(capabilities);
@@ -160,7 +170,7 @@ export class ConfigEditor {
 
   /** Return verified account metadata for a model without exposing mutable editor state. */
   modelCapability(id: string): ModelCapability | undefined {
-    const capability = this.modelCapabilities?.find(model => model.id === id);
+    const capability = this.modelCapabilities?.find(model => model.id === id && (this.current.provider === "openai-compatible" ? model.baseUrl === this.current.baseUrl?.replace(/\/+$/, "") : model.baseUrl === undefined));
     return capability ? structuredClone(capability) : undefined;
   }
 

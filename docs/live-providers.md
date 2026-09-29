@@ -42,3 +42,18 @@ Offline scripted/local HTTP fixtures exercise the runner only, not live compatib
 Select `--provider grok` and optionally `--model grok=<id>`. `--provider all` includes this lane. It uses the saved `grok-subscription:xai` login and the xAI fallback model unless overridden. It never starts sign-in or reads an API key.
 
 Without `--enable-live`, the lane reports `skipped/live_disabled` and exits 2 without opening the secure store. An absent login reports `pending/missing_subscription`; malformed, expired without refresh, or revoked logins report `pending/subscription_requires_login`. Unavailable secure storage reports `pending/credential_store_unavailable`. Sign in interactively with `/login grok` or `/login grok --device` before enabling a live run.
+
+## Reasoning controls and deterministic verification
+
+Normal Schway CLI/TUI requests share the reasoning policy described in
+[configuration](configuration.md#reasoning-levels). OpenAI Luna and Sol use
+documented Responses efforts. Codex, Grok and xAI use route model metadata;
+OpenRouter uses its endpoint-scoped reasoning catalog. Other compatible endpoints
+retain explicit `extraBody` configuration. Unset thinking leaves provider defaults
+untouched, and unadvertised choices fail before inference.
+
+`bun test tests/thinking-policy.test.ts tests/reasoning.test.ts` verifies actual
+request bodies, unsupported-level rejection, configuration and interactive
+selection using protocol fixtures. These are deterministic checks, not new live
+provider results. The opt-in smoke/eval runners retain their existing default
+reasoning behavior and do not add a thinking flag in this change.

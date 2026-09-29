@@ -3,7 +3,8 @@ import type {
   AssistantContent,
   AssistantMessage,
 } from "../../conversation/types.ts";
-import { describeThinkingSupport, isThinkingSupported, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../catalog.ts";
+import type { ModelCapability } from "../catalog.ts";
+import { assertThinking, isOpenRouterEndpoint, COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey } from "../thinking.ts";
 import { reportedTokens } from "../model.ts";
 import type {
   Model,
@@ -19,31 +20,17 @@ export type OpenAICompatibleAuth = "required" | "optional" | "none";
 /** Extra-body reasoning keys and conflict scanner; single source lives in the catalog for config validation. */
 export { COMPATIBLE_REASONING_BODY_KEYS, findCompatibleReasoningBodyKey };
 
-/** Validate compatible thinking without injecting a vendor field; off is a no-op, others need explicit extraBody. */
+/** Resolve verified OpenRouter efforts; arbitrary compatible services retain explicit extraBody controls. */
 export function resolveCompatibleThinking(
   level: ThinkingLevel | undefined,
   modelId: string,
   extraBody: Record<string, unknown> | undefined,
-): void {
-  const bodyKey = findCompatibleReasoningBodyKey(extraBody);
-  if (level !== undefined && bodyKey !== undefined) {
-    throw new Error(
-      `thinking "${level}" conflicts with extraBody.${bodyKey}; remove one to define a single source of truth for reasoning.`,
-    );
-  }
-  if (level === undefined) {
-    return;
-  }
-  if (!isThinkingSupported("openai-compatible", modelId, level)) {
-    throw new Error(
-      `Thinking level "${level}" is not supported for openai-compatible/${modelId}. ${describeThinkingSupport("openai-compatible", modelId)} Configure reasoning via extraBody instead or leave thinking unset.`,
-    );
-  }
-  if (level !== "off") {
-    throw new Error(
-      `Thinking level "${level}" is not mapped for openai-compatible/${modelId}. Configure reasoning via extraBody instead or leave thinking unset; no vendor effort field is injected automatically.`,
-    );
-  }
+  baseUrl?: string,
+  capability?: ModelCapability,
+): { effort: string } | undefined {
+  const router = isOpenRouterEndpoint(baseUrl);
+  assertThinking({ provider: "openai-compatible", model: modelId, baseUrl, capability: router ? capability ?? null : undefined }, level, extraBody);
+  return router && level !== undefined ? { effort: level === "off" ? "none" : level } : undefined;
 }
 
 /** Optional fetch override used by protocol tests. */
@@ -71,6 +58,7 @@ export function createOpenAICompatibleModel(options: {
   extraBody?: Record<string, unknown>;
   maxTokens?: number;
   thinking?: ThinkingLevel;
+  modelCapability?: ModelCapability;
   fetch?: FetchLike;
 }): Model {
   const modelId = requiredModelId(options.model);
@@ -83,7 +71,7 @@ export function createOpenAICompatibleModel(options: {
     id: modelId,
     /** Stream Schway events; tool-call JSON is assembled before message_complete. */
     async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
-      resolveCompatibleThinking(request.thinking ?? defaultThinking, modelId, options.extraBody);
+      const reasoning = resolveCompatibleThinking(request.thinking ?? defaultThinking, modelId, options.extraBody, options.baseUrl, options.modelCapability);
       const apiKey = options.apiKey?.trim() ?? "";
       if (auth === "required" && apiKey.length === 0) {
         throw new Error(
@@ -104,6 +92,7 @@ export function createOpenAICompatibleModel(options: {
         headers,
         body: JSON.stringify({
           ...(options.extraBody ?? {}),
+          ...(reasoning ? { reasoning } : {}),
           model: modelId,
           stream: true,
           stream_options: { include_usage: true },

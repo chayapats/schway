@@ -5,6 +5,7 @@ grok-browser-approval
 grok-device-approval
 grok-plan-error
 model-picker
+thinking-controls
 command-palette
 thai-composer
 streaming-answer

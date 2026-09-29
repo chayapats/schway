@@ -61,6 +61,7 @@ export async function loadProviderModel(
       extraBody: input.extraBody,
       auth: input.auth,
       thinking: input.thinking,
+      modelCapability: input.modelCapability,
       fetch: fetchFn,
     });
   }
