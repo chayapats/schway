@@ -145,7 +145,7 @@ export abstract class CompactionLayer extends SettingsLayer {
       const nextRuntime = nextSettings && this.stageSettings ? await this.stageSettings(nextSettings, abort.signal, options.workspace, this.model) : undefined;
       abort.signal.throwIfAborted();
       if (editor && nextRuntime?.modelCapability) {
-        editor.setModelCapabilities([nextRuntime.modelCapability]);
+        editor.setModelCapability(nextRuntime.modelCapability);
         nextSettings = editor.settings;
       }
       staged = await this.loadWorkspaceExtensions?.(options.workspace, abort.signal);

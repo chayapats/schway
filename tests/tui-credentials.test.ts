@@ -137,7 +137,7 @@ test("Grok sign-in activates its recommended model, emits billing route, and log
     } finally { controller.dispose(); }
   });
 });
-test("Grok plan rejection after saving preserves the previous model and saved login", async () => {
+test("Grok plan rejection preserves the saved login and other routes but blocks the replaced account", async () => {
   const { grokSubscriptionIdentity } = await import("../src/auth/store.ts");
   for (const previous of ["openai", "xai"] as const) await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] }, store = fakeCredentialStore();
@@ -145,7 +145,7 @@ test("Grok plan rejection after saving preserves the previous model and saved lo
     const controller = new TuiController({ session: createSession(), sessionId: "grok", workspace, configEditor: editor, provider: previous, xaiAuth: previous === "xai" ? "grok" : "auto", modelId: "previous-model", model: createScriptedModel({ provider: previous, id: "previous-model" }), contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved }) => { await store.set(grokSubscriptionIdentity(), "saved"); onSaved?.(); return { ok: true, status: "Saved" }; }, listGrokModels: async () => { throw Error("Your Grok plan doesn't include API access. Use an xAI API key instead."); } }, stageSettings: async () => { throw Error("must not activate"); },
     });
-    try { expect(await controller.login("grok")).toBe(false); expect(controller.snapshot().modelId).toBe("previous-model"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved"); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L"); expect(await controller.submit("Previous model remains usable")).toBe(true); }
+    try { expect(await controller.login("grok")).toBe(false); expect(controller.snapshot().modelId).toBe("previous-model"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved"); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L"); expect(await controller.submit("Use the retained route if its credentials are unchanged")).toBe(previous !== "xai"); }
     finally { controller.dispose(); }
   });
 });

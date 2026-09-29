@@ -440,7 +440,12 @@ highlighted choice clears its selection: press an arrow before completing again.
 
 Use Up/Down to select, Tab to insert, and Escape to dismiss. Completion never
 executes an action. `/thinking ` suggests only validated current model levels
-(and `reset`); subscription levels require advertised account metadata.
+(and `reset`); subscription levels require advertised account metadata. OpenRouter
+uses endpoint-scoped model metadata for the same choices in `/thinking` and
+preferences, including `minimal` when supported. `/thinking` and `/config`
+distinguish an advertised provider default from an explicit effort or `off`;
+mandatory reasoning models never offer `off`. An unavailable catalog leaves the
+provider default usable, but an explicit effort requires verified support.
 `/theme ` offers appearance choices; `/login ` and `/logout ` offer public
 connection names, never keys or callback payloads. Enter explicitly submits;
 rejected or busy commands remain in the editor for correction.

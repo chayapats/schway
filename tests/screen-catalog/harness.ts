@@ -1,3 +1,5 @@
+import { ConfigEditor } from "../../src/config/editing.ts";
+import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -89,6 +91,15 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
+  if (screen.id === "thinking-controls") {
+    const baseUrl = "https://openrouter.ai/api/v1", model = "meta/muse-spark-1.3-contributor";
+    const capabilities = openRouterModelCapabilities(parseModelList({ data: [{ id: model, reasoning: {
+      mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low", "minimal"], default_effort: "medium",
+    } }] }, "OpenRouter", baseUrl));
+    options.configEditor = new ConfigEditor({ cli: { provider: "openai-compatible", model, baseUrl } },
+      { user: join(home, "config.json"), project: join(root, "config.json") }, capabilities);
+    options.provider = "openai-compatible"; options.modelId = model; options.baseUrl = baseUrl;
+  }
   const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: true });
   const controller = new TuiController(options);
   const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: false, now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : Promise.resolve(false), accepted) });

@@ -38,7 +38,7 @@ export interface ProviderLoaderInput {
   codexTokens?: CodexTokens;
   /** Secure-store renewal channel for the codex transport; enables serialized pre-expiry refresh. */
   codexStore?: CredentialStore;
-  /** Verified list capabilities used by Codex and xAI, not by the OpenAI API-key transport. */
+  /** Verified route capabilities used by Codex, xAI/Grok and OpenRouter. */
   modelCapability?: ModelCapability;
 }
 
@@ -61,6 +61,7 @@ export async function loadProviderModel(
       extraBody: input.extraBody,
       auth: input.auth,
       thinking: input.thinking,
+      modelCapability: input.modelCapability,
       fetch: fetchFn,
     });
   }
@@ -74,7 +75,7 @@ export async function loadProviderModel(
         apiKey: signal => refresher.getValidAccessToken(signal),
         refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
         authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
-        model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, fetch: fetchFn,
+        model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, authRoute: "grok", fetch: fetchFn,
       }));
     }
     return createXaiModel({

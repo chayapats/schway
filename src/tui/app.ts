@@ -1,3 +1,4 @@
+import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
 import { version } from "../../package.json";
 import { resolveMotion } from "./motion-policy.ts";
@@ -227,7 +228,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         return loaded;
       }
       return { model: loaded.model, activate: () => {
-        if (loaded.capability) { configEditor.setModelCapabilities([loaded.capability]); settings = configEditor.settings; }
+        if (loaded.capability) { configEditor.setModelCapability(loaded.capability); settings = configEditor.settings; }
       } };
     };
 
@@ -432,7 +433,7 @@ export async function stageInteractiveSettings(
     const loaded = await loadInteractiveModel(next.provider, next.model, { ...options,
       verifySubscriptionChoice: next.openaiAuth === "codex" && next.supportedThinking === undefined,
       maxTokens: next.explicitMaxOutput ?? options.fetchedMaxOutput ?? next.maxOutput, baseUrl: next.baseUrl, headers: next.headers, extraBody: next.extraBody, auth: next.auth, openaiAuth: next.openaiAuth, xaiAuth: next.xaiAuth, thinking: next.thinking,
-      ...(next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking, ...(next.supportsDisabling ? { supportsDisabling: true } : {}), ...(next.defaultThinking ? { defaultThinking: next.defaultThinking } : {}) } } : {}),
+      ...((next.provider === "xai" && previous.xaiAuth !== next.xaiAuth) ? { modelCapability: undefined } : next.reasoningCapability ? { modelCapability: next.reasoningCapability } : next.provider !== "xai" && next.openaiAuth !== "codex" ? {} : next.supportedThinking !== undefined ? { modelCapability: { id: next.model, supportedThinking: next.supportedThinking, ...(next.supportsDisabling ? { supportsDisabling: true } : {}), ...(next.defaultThinking ? { defaultThinking: next.defaultThinking } : {}) } } : {}),
       profile: next.profile, credentialEnv: next.credentialEnv, credentialIdentity: next.credentialIdentity,
     });
     options.signal.throwIfAborted();
@@ -976,13 +977,15 @@ export async function loadInteractiveModel(
     if ("error" in selection) return selection;
     if (selection.transport === "grok") {
       try {
-        let capability = options.modelCapability;
+        let capability = options.modelCapability?.authRoute && options.modelCapability.authRoute !== "grok" ? undefined : options.modelCapability;
         if (options.thinking !== undefined && !capability) {
           const grok = await import("../model/providers/grok-subscription.ts");
           const { xaiModelCapabilities } = await import("../model/model-list.ts");
-          capability = xaiModelCapabilities(await grok.fetchSubscriptionModels({ store, fetch: options.fetch, signal: options.signal })).find(entry => entry.id === modelId);
+          capability = xaiModelCapabilities(await grok.fetchSubscriptionModels({ store, fetch: options.fetch, signal: options.signal }), "grok").find(entry => entry.id === modelId);
           if (!capability?.supportedThinking.includes(options.thinking)) return { error: `Thinking level "${options.thinking}" is not listed for xai/${modelId}.` };
         }
+        const thinkingError = validateThinking(provider, modelId ?? "", options.thinking, undefined, capability ?? null, undefined, "grok");
+        if (thinkingError) return { error: thinkingError };
         const input = { provider, xaiAuth: "grok" as const, model: modelId, maxTokens: options.maxTokens, thinking: options.thinking, modelCapability: capability };
         const model = options.createModel ? bindGrokModel(await options.createModel(input)) : await loadProviderModel({ ...input, grokStore: store }, options.fetch);
         return { model, ...(capability ? { capability } : {}) };
@@ -998,31 +1001,51 @@ export async function loadInteractiveModel(
   options.signal?.throwIfAborted();
   if ("error" in credential) return credential;
   if (credential.apiKey) options.secrets.push(credential.apiKey);
-  let xaiCapability = options.modelCapability;
-  if (provider === "xai" && options.thinking !== undefined && xaiCapability === undefined) {
+  let routeCapability = provider === "xai" && options.modelCapability?.authRoute && options.modelCapability.authRoute !== "api-key" ? undefined : options.modelCapability;
+  if (provider === "xai" && options.thinking !== undefined && routeCapability === undefined) {
     try {
       const { XAI_MODELS_URL } = await import("../model/providers/xai.ts");
       const { fetchProviderModelList, requireXaiModels, xaiModelCapabilities } = await import("../model/model-list.ts");
       const models = requireXaiModels(await fetchProviderModelList({
         url: XAI_MODELS_URL, apiKey: credential.apiKey, fetch: options.fetch, signal: options.signal, label: "xAI",
       }));
-      xaiCapability = xaiModelCapabilities(models).find(entry => entry.id === modelId)
+      routeCapability = xaiModelCapabilities(models).find(entry => entry.id === modelId)
         ?? { id: modelId ?? "", supportedThinking: [] };
-      if (options.thinking && !xaiCapability.supportedThinking.includes(options.thinking)) {
+      if (options.thinking && !routeCapability.supportedThinking.includes(options.thinking)) {
         return { error: `Thinking level "${options.thinking}" is not listed for xai/${modelId} in the xAI model list. Leave thinking unset or select a listed level.` };
       }
     } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
   }
+  if (provider === "xai") {
+    const error = validateThinking(provider, modelId ?? "", options.thinking, undefined, routeCapability ?? null, undefined, "api-key");
+    if (error) return { error };
+  }
+  if (provider === "openai-compatible" && isOpenRouterEndpoint(options.baseUrl)) {
+    try {
+      routeCapability = options.modelCapability?.baseUrl === "https://openrouter.ai/api/v1" && options.modelCapability.id === modelId ? options.modelCapability : undefined;
+      if (!routeCapability) {
+        const { fetchProviderModelList, openRouterModelCapabilities } = await import("../model/model-list.ts");
+        const models = await fetchProviderModelList({ url: "https://openrouter.ai/api/v1/models", apiKey: credential.apiKey,
+          headers: options.headers, fetch: options.fetch, signal: options.signal, label: "OpenRouter" });
+        routeCapability = openRouterModelCapabilities(models).find(entry => entry.id === modelId);
+      }
+      const error = validateThinking(provider, modelId ?? "", options.thinking, options.extraBody, routeCapability ?? null, options.baseUrl);
+      if (error) return { error };
+    } catch (error) {
+      if (options.thinking !== undefined) return { error: redactSecrets(messageOf(error), options.secrets) };
+      // Provider defaults remain usable when optional discovery is unavailable.
+    }
+  }
   const input = {
     provider, model: modelId, apiKey: credential.apiKey, maxTokens: options.maxTokens,
     ...(options.thinking !== undefined ? { thinking: options.thinking } : {}),
-    ...(provider === "xai" && xaiCapability !== undefined ? { modelCapability: xaiCapability } : {}),
+    ...((provider === "xai" || isOpenRouterEndpoint(options.baseUrl)) && routeCapability !== undefined ? { modelCapability: routeCapability } : {}),
     ...(provider === "openai-compatible" ? {
       baseUrl: options.baseUrl, headers: options.headers, extraBody: options.extraBody, auth: options.auth ?? "optional",
     } : {}),
   };
   try {
-    return { model: options.createModel ? await options.createModel(input) : await loadProviderModel(input, options.fetch) };
+    return { model: options.createModel ? await options.createModel(input) : await loadProviderModel(input, options.fetch), ...(routeCapability ? { capability: routeCapability } : {}) };
   } catch (error) {
     return { error: redactSecrets(messageOf(error), options.secrets) };
   }

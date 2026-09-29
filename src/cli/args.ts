@@ -1,10 +1,11 @@
+import { isThinkingLevel, type ThinkingLevel } from "../model/model.ts";
 import type { ConfigLayer } from "../config/config.ts";
 import { removedProviderMessage } from "../config/removed-provider.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 
 /** Usage synopsis printed for help and invalid command-line arguments. */
 export const USAGE =
-  "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--debug] [--debug-file <path>] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+  "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|minimal|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--debug] [--debug-file <path>] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|minimal|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
 export type CliProvider = "openai" | "xai" | "openai-compatible";
@@ -16,7 +17,7 @@ export type CliAuthMode = "required" | "optional" | "none";
 export type CliOpenAIAuth = "auto" | "codex" | "api-key";
 
 /** Provider-independent reasoning level selectable from config and the CLI. */
-export type CliThinking = "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export type CliThinking = ThinkingLevel;
 
 /** Parsed CLI options for headless or interactive runs, with `resume` identifying a session rather than a path. */
 export interface CliArgs {
@@ -424,11 +425,11 @@ function parseOpenAIAuth(value: string): CliOpenAIAuth | { error: string } {
 /** Validate a provider-independent thinking level without assuming identical wire semantics. */
 function parseThinking(value: string): CliThinking | { error: string } {
   const level = value.trim().toLowerCase();
-  if (level === "off" || level === "low" || level === "medium" || level === "high" || level === "xhigh" || level === "max" || level === "ultra") {
+  if (isThinkingLevel(level)) {
     return level;
   }
   return {
-    error: `Unknown thinking level: ${value}. Use off, low, medium, high, xhigh, max, or ultra.`,
+    error: `Unknown thinking level: ${value}. Use off, minimal, low, medium, high, xhigh, max, or ultra.`,
   };
 }
 
