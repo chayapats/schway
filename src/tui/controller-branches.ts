@@ -187,8 +187,10 @@ export abstract class BranchesLayer extends SessionsLayer {
   moveBranchTreeAction(delta: number): boolean {
     if (!this.branchTreeOpen || !Number.isFinite(delta)) return false;
     if (!this.branchTreeSelectedBranchId) return this.focusBranchTreeForkPoint(delta < 0 ? -1 : 1);
-    const branches = this.session.listBranches();
-    const index = branches.findIndex(branch => branch.id === this.branchTreeSelectedBranchId);
+    let branches;
+    try { branches = this.session.listBranches(); } catch { return false; }
+    if (!branches.length) return false;
+    const index = Math.max(0, branches.findIndex(branch => branch.id === this.branchTreeSelectedBranchId));
     const next = Math.max(0, Math.min(branches.length - 1, index + Math.trunc(delta)));
     return this.focusBranchTreeBranch(branches[next]!.id);
   }
