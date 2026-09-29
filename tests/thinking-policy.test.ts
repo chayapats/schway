@@ -16,7 +16,7 @@ import { stageInteractiveSettings, loadInteractiveModel } from "../src/tui/app.t
 import { preferenceRows } from "../src/tui/preferences.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
-import { grokSubscriptionIdentity } from "../src/auth/store.ts";
+import { credentialIdentity, grokSubscriptionIdentity } from "../src/auth/store.ts";
 import { bindGrokModel } from "../src/model/loader.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { sampleRequest, encodeSse, TEXT_STREAM_EVENTS } from "./fixtures/openai.ts";
@@ -289,5 +289,63 @@ test("catalog updates preserve opposite billing-route evidence for the same mode
     editor.setModelCapability({ id: "grok-shared", authRoute: "grok", supportedThinking: ["high"] });
     expect(editor.settings.supportedThinking).toEqual(["high"]);
     expect((await editor.prepare({ scope: "session", key: "xaiAuth", value: "api-key" })).settings.supportedThinking).toEqual(["low"]);
+  });
+});
+
+test("replacing an xAI API key preserves the active Grok adapter and its reasoning evidence", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const editor = new ConfigEditor({ cli: { provider: "xai", xaiAuth: "grok", model: "grok-shared" } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") }, [
+        { id: "grok-shared", authRoute: "grok", supportedThinking: ["medium"] },
+        { id: "grok-shared", authRoute: "api-key", supportedThinking: ["low"] },
+      ]);
+    const store = fakeCredentialStore();
+    await store.set(credentialIdentity({ provider: "xai" }), "old-fixture-key");
+    let reloads = 0;
+    const activated: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "api-key-replacement", workspace, configEditor: editor,
+      provider: "xai", xaiAuth: "grok", modelId: "grok-shared", model: bindGrokModel(createScriptedModel({ provider: "xai", id: "grok-shared" })), contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => { reloads++; return { error: "must not reload Grok" }; } },
+      onModelActivated: choice => { activated.push(choice.authRoute); },
+    });
+    try {
+      expect(controller.beginLogin("xai")).toBe(true);
+      controller.enterCredentialText("replacement-fixture-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(await store.get(credentialIdentity({ provider: "xai" }))).toBe("replacement-fixture-key");
+      expect(reloads).toBe(0);
+      expect(activated).toEqual([]);
+      expect(editor.settings).toMatchObject({ xaiAuth: "grok", supportedThinking: ["medium"], reasoningCapability: { authRoute: "grok" } });
+      expect((await editor.prepareXaiModel("grok-shared")).settings.reasoningCapability).toBeUndefined();
+      expect(await controller.submit("continue on the unchanged Grok account")).toBe(true);
+    } finally { controller.dispose(); }
+  });
+});
+
+test("failed xAI sign-in model discovery clears only API-key reasoning evidence", async () => {
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const editor = new ConfigEditor({ cli: { provider: "xai", xaiAuth: "api-key", model: "" } },
+      { user: join(dir, "user.json"), project: join(dir, "project.json") }, [
+        { id: "grok-shared", authRoute: "grok", supportedThinking: ["medium"] },
+        { id: "grok-shared", authRoute: "api-key", supportedThinking: ["low"] },
+      ]);
+    let listings = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "api-key-list-failure", workspace, configEditor: editor,
+      provider: "xai", xaiAuth: "api-key", modelId: "", contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "not activated" }),
+        listRouteModels: async () => { listings++; throw Error("Catalog unavailable"); },
+      },
+      stageSettings: async () => { throw Error("Fallback unavailable"); },
+    });
+    try {
+      expect(controller.beginLogin("xai")).toBe(true);
+      controller.enterCredentialText("fixture-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(listings).toBe(1);
+      expect((await editor.prepareGrokModel("grok-shared")).settings.supportedThinking).toEqual(["medium"]);
+      expect((await editor.prepareXaiModel("grok-shared")).settings.reasoningCapability).toBeUndefined();
+    } finally { controller.dispose(); }
   });
 });

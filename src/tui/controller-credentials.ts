@@ -185,7 +185,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       }
     } catch {
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile)) return false;
-      if (route === "xai") this.clearXaiCapabilities();
+      if (route === "xai") this.clearXaiCapabilities("api-key");
       modelId = fallback;
     } finally {
       if (this.signInListAbort === listing) this.signInListAbort = undefined;
@@ -298,7 +298,10 @@ export abstract class CredentialsLayer extends ControllerCore {
         : {}),
     });
     if (identity.account !== active.account) return;
-    if (this.provider === "xai") this.clearXaiCapabilities();
+    if (this.provider === "xai") {
+      this.clearXaiCapabilities("api-key");
+      if (this.grokSelected()) return;
+    }
     // A removed/replaced saved key must never survive in a previously constructed adapter.
     this.model = undefined;
     try {
@@ -322,8 +325,8 @@ export abstract class CredentialsLayer extends ControllerCore {
   }
 
   /** Drop xAI route evidence after credential changes, including capabilities loaded at startup. */
-  protected clearXaiCapabilities(authRoute?: "api-key" | "grok"): void {
-    for (const route of authRoute ? [authRoute] : ["api-key", "grok"] as const) this.configEditor?.replaceRouteCapabilities([], [], route);
+  protected clearXaiCapabilities(authRoute: "api-key" | "grok"): void {
+    this.configEditor?.replaceRouteCapabilities([], [], authRoute);
   }
 
   /** Prevent an old Grok model from applying its capability after account credentials change. */
