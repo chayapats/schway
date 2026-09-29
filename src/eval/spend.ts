@@ -6,7 +6,7 @@ export interface TokenPrice {
   outputPerMillion: number;
 }
 
-/** Spend estimated from reported usage; `exact` is false when some attempts reported no usage. */
+/** Spend estimated from reported usage; missing or interrupted attempts make it a lower bound. */
 export interface SpendEstimate {
   usd: number;
   exact: boolean;
@@ -28,10 +28,10 @@ export function resolvePrice(provider: string, model: string, explicit?: TokenPr
   return PRICES[`${provider}:${model}`];
 }
 
-/** Convert recorded token totals to USD without treating missing usage as proof of zero spend. */
-export function estimateSpendUsd(metrics: Pick<EvalMetrics, "inputTokens" | "outputTokens" | "unknownInputAttempts" | "unknownOutputAttempts">, price: TokenPrice): SpendEstimate {
+/** Convert reported token totals to USD, marking missing or interrupted usage as a lower bound. */
+export function estimateSpendUsd(metrics: Pick<EvalMetrics, "inputTokens" | "outputTokens" | "unknownInputAttempts" | "unknownOutputAttempts" | "incompleteAttempts">, price: TokenPrice): SpendEstimate {
   const usd = ((metrics.inputTokens ?? 0) * price.inputPerMillion + (metrics.outputTokens ?? 0) * price.outputPerMillion) / 1_000_000;
-  return { usd: roundUsd(usd), exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.inputTokens !== null && metrics.outputTokens !== null };
+  return { usd: roundUsd(usd), exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.incompleteAttempts === 0 && metrics.inputTokens !== null && metrics.outputTokens !== null };
 }
 
 /** Round to micro-dollars so float noise never shows up in reports. */
