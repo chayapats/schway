@@ -286,6 +286,34 @@ for (const provider of ["chatgpt", "grok"] as const) for (const device of [false
   } finally { controller.dispose(); }
 });
 
+for (const provider of ["chatgpt", "grok"] as const) test(`${provider} deferred device cancellation traverses both chooser levels before the runner settles`, async () => {
+  let finish!: () => void;
+  let signal!: AbortSignal;
+  const wait = async (options: { signal: AbortSignal }) => {
+    signal = options.signal;
+    await new Promise<void>(resolve => { finish = resolve; });
+    return { ok: false as const, message: "Cancelled" };
+  };
+  const controller = chooserController({ credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: wait, grokLogin: wait } });
+  let pending: Promise<boolean> | undefined;
+  try {
+    controller.openLoginChooser(); chooseLoginRow(controller, provider); controller.openLoginMoreOptions();
+    pending = controller.selectLoginChoice();
+    expect(controller.running).toBe(true);
+    controller.cancel();
+    expect(signal.aborted).toBe(true);
+    expect(controller.snapshot().loginChooser).toMatchObject({ level: provider, selectedId: `${provider}-device` });
+    controller.cancel();
+    expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: provider });
+    controller.cancel();
+    expect(controller.snapshot().loginChooser).toBeUndefined();
+    expect(controller.running).toBe(true);
+    finish(); await pending;
+    expect(controller.running).toBe(false);
+    expect(controller.snapshot().loginChooser).toBeUndefined();
+  } finally { finish?.(); await pending; controller.dispose(); }
+});
+
 for (const [value, error] of [
   ["", "Enter the endpoint URL, for example http://localhost:8787/v1."],
   ["localhost:8787", "Enter a full URL that starts with http:// or https://."],

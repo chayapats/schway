@@ -23,7 +23,7 @@ export abstract class TurnLayer extends CompactionLayer {
       this.restoreLoginOrigin();
       this.notice("Callback entry cancelled; no credential was changed."); return;
     }
-    if (this.loginAbort) {
+    if (this.loginAbort && !this.loginAbort.signal.aborted) {
       if (!this.loginApprovalData) this.pickerReturn = undefined;
       this.recoveryRepair = false;
       this.restoreLoginOrigin();

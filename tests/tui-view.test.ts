@@ -2020,6 +2020,37 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
 });
 
 
+for (const provider of ["chatgpt", "grok"] as const) test(`${provider} pending cancellation allows three Esc presses and restores the Thai draft after settlement`, async () => {
+  let finish!: () => void;
+  const wait = async () => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    return { ok: false as const, message: "Cancelled" };
+  };
+  const ui = await setup(80, 30, {}, wait, {
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: wait, grokLogin: wait },
+  });
+  try {
+    const draft = "ช่วยอ่านไฟล์นี้\nอธิบายเป็นภาษาไทย\nอย่าเพิ่งส่ง";
+    await ui.mockInput.pasteBracketedText(draft); ui.mockInput.pressArrow("left"); const cursor = ui.editor.cursorOffset;
+    ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
+    await selectRenderedLoginRow(ui, provider); ui.mockInput.pressTab(); await settle(ui);
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.controller.running).toBe(true);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: provider, selectedId: `${provider}-device` });
+    expect(ui.captureCharFrame()).toContain(`${provider === "chatgpt" ? "ChatGPT" : "Grok"} · more options`);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: provider });
+    expect(ui.captureCharFrame()).toContain("Custom endpoint");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+    expect(ui.controller.running).toBe(true);
+    finish(); await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+    expect(ui.editor.plainText).toBe(draft); expect(ui.editor.cursorOffset).toBe(cursor); expect(ui.session.items).toEqual([]);
+  } finally { finish?.(); await ui.controller.waitForIdle(); }
+});
+
 test("ephemeral endpoint URL never enters a durable draft checkpoint or deferred session file", async () => {
   await withTempDir(async root => {
     const { createJsonlSession, sessionsDirectory } = await import("../src/session/jsonl.ts");
