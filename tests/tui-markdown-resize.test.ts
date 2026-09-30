@@ -24,6 +24,7 @@ const answer = chunks.join("");
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
+/** Build an isolated real renderer and scripted controller at the requested terminal dimensions. */
 async function setup(width = 110, height = 60, model: Model = createScriptedModel({ text: answer }), session = createSession()) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
@@ -40,14 +41,17 @@ async function setup(width = 110, height = 60, model: Model = createScriptedMode
   return { ...terminal, controller, view, session, transcript };
 }
 
+/** Paint pending controller and layout changes before observing terminal output. */
 async function settle(ui: TestRendererSetup & { view: ReturnType<typeof createConversationView> }) {
   await Bun.sleep(5);
   ui.view.refresh();
   await ui.flush();
 }
 
+/** Ignore display wrapping whitespace while preserving every visible content character. */
 function compact(text: string) { return text.replace(/\s+/g, ""); }
 
+/** Capture the settled screen and optionally retain diagnostic evidence for one named scenario. */
 async function frame(ui: Awaited<ReturnType<typeof setup>>, scenario: string) {
   await settle(ui);
   const text = ui.captureCharFrame();
@@ -58,19 +62,23 @@ async function frame(ui: Awaited<ReturnType<typeof setup>>, scenario: string) {
   return text;
 }
 
+/** Require all short-fixture cells, code lines and copy controls in captured terminal text. */
 function expectAnswer(text: string) {
   for (const value of [...cells, ...codeLines, "End of answer"]) expect(compact(text), `Missing ${value}\n${text}`).toContain(compact(value));
   expect(text).toContain("Alt+I copy");
   expect(text.split("\n").filter(line => line.trim()).length).toBeGreaterThan(10);
 }
 
+/** Pause the scripted model after each delivered text delta so resizes occur between chunks. */
 function gatedModel(pieces: readonly string[] = chunks, completion?: string) {
   const scripted = createScriptedModel({ chunks: [...pieces], ...(completion === undefined ? {} : { message: {
     type: "assistant" as const, id: "canonical-completion", content: [{ type: "text" as const, text: completion }],
   } }) });
   const gates = pieces.map(() => Promise.withResolvers<void>());
   const delivered = pieces.map(() => Promise.withResolvers<void>());
-  const model: Model = { ...scripted, async *stream(request) {
+  const model: Model = { ...scripted,
+    /** Forward the real scripted events, waiting for the corresponding gate after each text delta. */
+    async *stream(request) {
     let index = 0;
     for await (const event of scripted.stream(request)) {
       yield event;
@@ -182,6 +190,7 @@ test("notice between streamed table and code deltas does not permanently split M
   } finally { gated.gates.forEach(gate => gate.resolve()); await turn; }
 });
 
+/** Crop captured terminal output to the latest assistant row for fresh-versus-resized comparisons. */
 function answerRegion(ui: Awaited<ReturnType<typeof setup>>) {
   const entry = ui.controller.snapshot().transcript.findLast(entry => entry.kind === "assistant")!;
   const row = ui.renderer.root.findDescendantById(`message-${entry.id}`)!;
@@ -189,6 +198,7 @@ function answerRegion(ui: Awaited<ReturnType<typeof setup>>) {
     .map(line => line.slice(row.x, row.x + row.width).trimEnd()).join("\n").trimEnd();
 }
 
+/** Verify aligned table cells, lossless wrapped text and render bounds within the transcript. */
 function expectWrapping(ui: Awaited<ReturnType<typeof setup>>, hasCode = true) {
   const text = ui.captureCharFrame();
   const lines = text.split("\n");
@@ -215,6 +225,7 @@ function expectWrapping(ui: Awaited<ReturnType<typeof setup>>, hasCode = true) {
   }
   const entry = ui.controller.snapshot().transcript.findLast(entry => entry.kind === "assistant")!;
   const root = ui.renderer.root.findDescendantById(`message-${entry.id}`)!;
+  /** Require every rendered descendant to remain inside the transcript's horizontal viewport. */
   const checkBounds = (node: typeof root) => {
     expect(node.x).toBeGreaterThanOrEqual(ui.transcript.x);
     expect(node.x + node.width).toBeLessThanOrEqual(ui.transcript.x + ui.transcript.viewport.width);
@@ -336,4 +347,20 @@ test("searching a tall table after resize lands on the matching cell", async () 
   expect(ui.captureCharFrame()).toContain("resize-cell-target");
   expect(ui.captureCharFrame()).toContain("row-43");
   expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
+});
+
+test("empty abandoned deltas do not leave an active preview or a stale streaming caret", async () => {
+  for (const event of [
+    { type: "agent.finished", reason: "cancelled" },
+    { type: "agent.finished", reason: "error" },
+    { type: "compaction.started", reason: "overflow" },
+    { type: "model.retry", attempt: 1, maxAttempts: 2, delayMs: 1, message: "retry" },
+  ] satisfies RuntimeEvent[]) {
+    const ui = await setup();
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "" } });
+    ui.controller.applyEvent(event);
+    expect(ui.controller.snapshot().streamingAssistantId).toBeUndefined();
+    await settle(ui);
+    expect(ui.captureCharFrame()).not.toContain("▍");
+  }
 });

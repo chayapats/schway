@@ -105,7 +105,7 @@ export interface TuiSnapshot {
   /** Live phase and elapsed time while an operation is owned; absent once settled. */
   activity?: TuiActivity;
   transcript: readonly TuiTranscriptEntry[];
-  /** Identify the assistant preview still accepting deltas, excluding completed or abandoned attempts. */
+  /** Identify the nonempty assistant preview still accepting deltas, excluding completed or abandoned attempts. */
   streamingAssistantId?: string;
   sessionId: string;
   branchId: string;

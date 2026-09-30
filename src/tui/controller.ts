@@ -23,7 +23,7 @@ export class TuiController extends TurnLayer {
     const context = this.contextSnapshot();
     return {
       status: this.status,
-      streamingAssistantId: this.transcript.find(entry => entry.id === this.currentAssistantId && !entry.incomplete)?.id,
+      streamingAssistantId: this.transcript.find(entry => entry.id === this.currentAssistantId && entry.text.length > 0 && !entry.incomplete)?.id,
       context,
       compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
