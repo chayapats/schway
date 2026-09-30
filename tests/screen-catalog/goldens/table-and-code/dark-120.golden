@@ -1,0 +1,192 @@
+schway-screen 1
+screen table-and-code
+title Table and code wrapping
+description Wide table cells and long code lines wrap without losing their text.
+variant dark-120
+size 120x40
+cursor 7 37 visible
+== text
+ ⚡ schway  /project
+
+  ▌ You
+  ▌ Show wrapping
+
+
+  Wrapping report
+
+   Name                                                                         State      Count      Owner
+   A pneumonoultramicroscopicsilicovolcanoconiosis-with-an-extra-long-suffix    B ready    C seven    D Ada
+   E Beta                                                                       F done     G nine     H Lin
+
+    ts                                                                                                    Alt+I copy
+   const message =
+   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
+   yz0123456789";
+   console.log(message);
+  End of wrapping report
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ✓ Done · 0.0s · Alt+R review
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › Ask Schway…
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ● READY   scripted/scripted-model                                                                            ctx ~109
+  Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-120 #ffffff #161b24 -
+01 0-120 #ffffff #0e1117 -
+02 0-2 #ffffff #0e1117 -
+02 2-3 #7cc4ff #161b24 -
+02 3-4 #ffffff #161b24 -
+02 4-7 #7cc4ff #161b24 b
+02 7-117 #ffffff #161b24 -
+02 117-120 #ffffff #0e1117 -
+03 0-2 #ffffff #0e1117 -
+03 2-3 #7cc4ff #161b24 -
+03 3-4 #ffffff #161b24 -
+03 4-17 #e6eaf0 #161b24 -
+03 17-117 #ffffff #161b24 -
+03 117-120 #ffffff #0e1117 -
+04 0-120 #ffffff #0e1117 -
+05 0-120 #ffffff #0e1117 -
+06 0-2 #ffffff #0e1117 -
+06 2-17 #e6eaf0 #0e1117 -
+06 17-120 #ffffff #0e1117 -
+07 0-120 #ffffff #0e1117 -
+08 0-3 #ffffff #0e1117 -
+08 3-7 #e6eaf0 #0e1117 b
+08 7-80 #ffffff #0e1117 -
+08 80-85 #e6eaf0 #0e1117 b
+08 85-91 #ffffff #0e1117 -
+08 91-96 #e6eaf0 #0e1117 b
+08 96-102 #ffffff #0e1117 -
+08 102-107 #e6eaf0 #0e1117 b
+08 107-120 #ffffff #0e1117 -
+09 0-3 #ffffff #0e1117 -
+09 3-76 #e6eaf0 #0e1117 -
+09 76-80 #ffffff #0e1117 -
+09 80-87 #e6eaf0 #0e1117 -
+09 87-91 #ffffff #0e1117 -
+09 91-98 #e6eaf0 #0e1117 -
+09 98-102 #ffffff #0e1117 -
+09 102-107 #e6eaf0 #0e1117 -
+09 107-120 #ffffff #0e1117 -
+10 0-3 #ffffff #0e1117 -
+10 3-9 #e6eaf0 #0e1117 -
+10 9-80 #ffffff #0e1117 -
+10 80-86 #e6eaf0 #0e1117 -
+10 86-91 #ffffff #0e1117 -
+10 91-97 #e6eaf0 #0e1117 -
+10 97-102 #ffffff #0e1117 -
+10 102-107 #e6eaf0 #0e1117 -
+10 107-120 #ffffff #0e1117 -
+11 0-120 #ffffff #0e1117 -
+12 0-2 #ffffff #0e1117 -
+12 2-3 #ffffff #1e2430 -
+12 3-7 #7cc4ff #33475e b
+12 7-106 #ffffff #1e2430 -
+12 106-116 #8b95a7 #1e2430 -
+12 116-117 #ffffff #1e2430 -
+12 117-120 #ffffff #0e1117 -
+13 0-2 #ffffff #0e1117 -
+13 2-3 #ffffff #161b24 -
+13 3-9 #c0acff #161b24 -
+13 9-16 #e6eaf0 #161b24 -
+13 16-19 #c0acff #161b24 -
+13 19-117 #ffffff #161b24 -
+13 117-120 #ffffff #0e1117 -
+14 0-2 #ffffff #0e1117 -
+14 2-3 #ffffff #161b24 -
+14 3-116 #8fd19e #161b24 -
+14 116-117 #ffffff #161b24 -
+14 117-120 #ffffff #0e1117 -
+15 0-2 #ffffff #0e1117 -
+15 2-3 #ffffff #161b24 -
+15 3-16 #8fd19e #161b24 -
+15 16-17 #c0acff #161b24 -
+15 17-117 #ffffff #161b24 -
+15 117-120 #ffffff #0e1117 -
+16 0-2 #ffffff #0e1117 -
+16 2-3 #ffffff #161b24 -
+16 3-10 #e6eaf0 #161b24 -
+16 10-11 #c0acff #161b24 -
+16 11-14 #7cc4ff #161b24 -
+16 14-22 #e6eaf0 #161b24 -
+16 22-24 #c0acff #161b24 -
+16 24-117 #ffffff #161b24 -
+16 117-120 #ffffff #0e1117 -
+17 0-2 #ffffff #0e1117 -
+17 2-24 #e6eaf0 #0e1117 -
+17 24-120 #ffffff #0e1117 -
+18 0-120 #ffffff #0e1117 -
+19 0-120 #ffffff #0e1117 -
+20 0-120 #ffffff #0e1117 -
+21 0-120 #ffffff #0e1117 -
+22 0-120 #ffffff #0e1117 -
+23 0-120 #ffffff #0e1117 -
+24 0-120 #ffffff #0e1117 -
+25 0-120 #ffffff #0e1117 -
+26 0-120 #ffffff #0e1117 -
+27 0-120 #ffffff #0e1117 -
+28 0-120 #ffffff #0e1117 -
+29 0-120 #ffffff #0e1117 -
+30 0-120 #ffffff #0e1117 -
+31 0-120 #ffffff #0e1117 -
+32 0-120 #ffffff #0e1117 -
+33 0-120 #ffffff #0e1117 -
+34 0-2 #ffffff #0e1117 -
+34 2-3 #8fd19e #0e1117 b
+34 3-4 #8b95a7 #0e1117 -
+34 4-8 #8fd19e #0e1117 b
+34 8-18 #8b95a7 #0e1117 -
+34 18-23 #e6eaf0 #293140 b
+34 23-30 #8b95a7 #0e1117 -
+34 30-120 #ffffff #0e1117 -
+35 0-2 #ffffff #0e1117 -
+35 2-118 #161b24 #0e1117 -
+35 118-120 #ffffff #0e1117 -
+36 0-2 #ffffff #0e1117 -
+36 2-6 #7cc4ff #161b24 -
+36 6-17 #8b95a7 #161b24 -
+36 17-118 #ffffff #161b24 -
+36 118-120 #ffffff #0e1117 -
+37 0-2 #ffffff #0e1117 -
+37 2-118 #161b24 #0e1117 -
+37 118-120 #ffffff #0e1117 -
+38 0-1 #8b95a7 #161b24 -
+38 1-10 #8fd19e #31433f b
+38 10-11 #8b95a7 #161b24 -
+38 11-36 #e6eaf0 #1e2430 -
+38 36-119 #8b95a7 #161b24 -
+38 119-120 #ffffff #0e1117 -
+39 0-2 #ffffff #0e1117 -
+39 2-7 #e6eaf0 #293140 b
+39 7-15 #8b95a7 #0e1117 -
+39 15-21 #e6eaf0 #293140 b
+39 21-29 #8b95a7 #0e1117 -
+39 29-34 #e6eaf0 #293140 b
+39 34-45 #8b95a7 #0e1117 -
+39 45-51 #e6eaf0 #293140 b
+39 51-60 #8b95a7 #0e1117 -
+39 60-61 #e6eaf0 #293140 b
+39 61-70 #8b95a7 #0e1117 -
+39 70-120 #ffffff #0e1117 -

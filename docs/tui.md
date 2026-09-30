@@ -397,6 +397,10 @@ that mode clears individual toggles and restores expanded failures. Cancelled to
 retain their bounded preview. Expansion keeps the existing output limits. Markdown blocks
 use the local parser and native terminal widgets; fenced code is presented in a
 distinct surface and color without downloading syntax parsers.
+Wide tables wrap cell text within the terminal width, breaking words when needed
+without truncating them. Code blocks also wrap long lines. Resizing changes only
+their display layout; copying keeps the original unwrapped code text, without fences.
+Notices arriving during an answer do not finalize its still-streaming Markdown.
 
 Inspection highlights one tool result or fenced code block and keeps the draft
 and cursor in place. C copies the selected result or code body through OSC 52,

@@ -46,6 +46,7 @@ export const SCREENS: readonly Screen[] = [
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "narrow-layout", title: "Narrow layout", description: "A table and code block fit the narrow conversation layout.", drive: ui => enter(ui, "Compare the options"), ready: completed },
+  { id: "table-and-code", title: "Table and code wrapping", description: "Wide table cells and long code lines wrap without losing their text.", rows: 40, noColorWidths: true, drive: ui => enter(ui, "Show wrapping"), ready: completed },
 ];
 /** Enumerate six standard variants and the screen's explicit color or narrow extras. */
 export function variantsFor(screen: Screen): Variant[] {
