@@ -2,77 +2,97 @@
 
 ## 0.4.0 release (2026-09-30)
 
-**Verdict: release preparation in progress; not published.**
+**Verdict: 0.4.0 not published; release stopped at live smoke.**
 
-The release candidate is being prepared from
-`e624d1171fe37789408a4efa194f098379bd4344` in an owned issue #138 worktree.
-The actual merged release commit `R`, `v0.4.0` tag and registry version remain
-pending. Raw precondition evidence is private at
-`~/schway-release-evidence/0.4.0/preconditions-20260930T0515Z.json`.
+Release commit `R = 273dfd9526d057f557d3788f198d17e1e83b20e6` was merged to
+`main` through [PR #186](https://github.com/chayapats/schway/pull/186).
+Version and example peer ranges are 0.4.0, the changelog is shipped, and the
+generic checklist is in [releasing.md](releasing.md). Raw JSON and logs remain
+private at `~/schway-release-evidence/0.4.0`, outside Git.
 
-### Preconditions
+### Preconditions and offline verification
 
-On 2026-09-30, all ten native blockers (#129–#137 and #166) were closed.
-The initial 0.4 milestone query listed only #138. Severity labels P0, P1 and P2 were updated
-idempotently; every truth-pass defect (#173, #174, #176 and #179) carried P2.
-The open P0 and P1 queries both returned empty lists.
+On 2026-09-30, #129–#137 and #166 were closed. The initial milestone query listed
+only #138. P0/P1/P2 labels were updated idempotently; all truth-pass defects
+(#173, #174, #176 and #179) carried P2. Immediately before smoke, the milestone
+again listed only #138 and both open P0/P1 queries returned empty lists.
 
-An initial `npm whoami` exited 1 with `ENEEDAUTH`. After maintainer login,
-the repeated check exited 0 and identified `chayapats`.
-`npm view schway --json` exited 1 with E404 and reported the package unpublished
-on 2022-04-24; this is not proof of publish permission.
-`npm profile get --json` initially exited 0 with `tfa: false`. The operator
-then enabled 2FA; a repeated read confirmed `pending: null` and
-`mode: "auth-and-writes"`. Private profile responses are retained outside Git.
+An initial `npm whoami` failed with `ENEEDAUTH`; after maintainer login it exited
+0 as `chayapats`. The operator enabled npm 2FA, and a repeated profile read
+confirmed `pending: null`, `mode: "auth-and-writes"`. The registry preflight
+reported E404 for the unpublished package; publish permission was not exercised.
 
-### Offline preparation
+The operator required explicit smoke thinking support. It was implemented in
+#185 and merged through [PR #187](https://github.com/chayapats/schway/pull/187)
+as `9b488d1900622df0f87be5affdc4b9493bbdb404`. Protocol fixtures and both CI checks
+passed; the live catalog-size failures below were not covered by those fixtures.
 
-`bun install --frozen-lockfile` and `bun run typecheck` exited 0 in the candidate
-worktree. The focused package/packaging suite passed 57 tests with 0 failures,
-including installing the packed harness and greeting package and exercising
-their tool round trips. `bun test` exited 0: 1,450 tests passed across 100 files,
-with 0 failures. All three checks on the actual merge commit remain pending.
+On a clean checkout of `R`, `bun install --frozen-lockfile`, `bun run typecheck`
+and `bun test` all exited 0. **1,461 tests passed across 100 files, 0 failures.**
+The suite includes installation of the packed harness/example package and their
+tool round trips. Preparation's focused package suite passed 57 tests.
+Both PRs received Standards/Spec review; CodeRabbit completed without actionable
+comments. At this report, release PR #186's Travis checks were still pending;
+the local merge-commit checks above passed.
+
+Machine: Linux; Bun 1.4.2; npm 11.19.1.
+Private offline log: `R-bun-test.log`.
 
 ### Live smoke
 
-No live inference has run for this release. The operator selected OpenAI Luna
-with high thinking, Codex Sol with medium thinking, and compatible Muse Spark
-with medium thinking, with a ceiling of USD 1.50 per API key for all release
-calls. Model discovery confirmed `gpt-6-luna` and `gpt-6-sol`; the operator
-confirmed OpenRouter and `meta/muse-spark-1.3-contributor`. The operator required
-explicit thinking support before release, now tracked as prerequisite
-[#185](https://github.com/chayapats/schway/issues/185). It was added to milestone
-0.4 and as a native blocker of #138 after the initial precondition check.
-Its implementation was merged through
-[PR #187](https://github.com/chayapats/schway/pull/187), implementation commit
-`c8a11e44a145d2f1184198b8dc23f3595d536ff7`; typecheck and 1,461 deterministic
-tests passed. The main merge commit is
-`9b488d1900622df0f87be5affdc4b9493bbdb404`; both CI checks and CodeRabbit
-passed, and #185 is closed. Actual live verification remains pending.
+The maintainer authorized these exact models/thinking and a **USD 1.50 maximum
+per API key for all release calls**. All five credentials were ready. API keys
+were read from the OS store into a temporary child environment, never written
+to files or command arguments. No model, thinking, auth or billing fallback
+was used. The compatible endpoint host is `openrouter.ai`.
 
-Initial secure-store presence checks found OpenAI and OpenRouter API keys and
-a Codex login; xAI API-key and Grok subscription identities were absent.
-The operator subsequently completed Grok login and saved an xAI API key.
-Both account catalogs advertised `grok-4.7` with medium thinking, which the
-operator selected for both routes. Credential presence and model discovery do
-not verify live inference. No stored credential value was printed.
+The clean `R` invocation selected `--provider all`, a 120,000 ms per-lane
+timeout, and explicit model/thinking overrides for all five lanes.
+**Exit 1; aggregate `failed`.** Dates below are UTC and are copied from
+`live-smoke.json`; each revision equals `R`.
 
-| Route | Provider | Model | Auth source | Status | Reason | Tested at | Revision |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| ChatGPT subscription | — | — | — | not run | awaiting release commit and smoke settings | — | — |
-| Grok subscription | — | — | — | not run | awaiting release commit and thinking support | — | — |
-| OpenAI API key | — | — | — | not run | awaiting release commit and smoke settings | — | — |
-| xAI API key | — | — | — | not run | awaiting release commit and thinking support | — | — |
-| Compatible endpoint | — | — | — | not run | awaiting release commit and smoke settings | — | — |
+| Route | Provider | Model | Thinking | Auth source | Status | Reason | Tested at (UTC) | Revision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI API key | `openai-api-key` | `gpt-6-luna` | high | env | passed | verified | 2026-09-30T06:14:34.965Z | `273dfd9526d057f557d3788f198d17e1e83b20e6` |
+| xAI API key | `xai-api-key` | `grok-4.7` | medium | env | failed_provider | missing_tool_evidence | 2026-09-30T06:14:34.965Z | `273dfd9526d057f557d3788f198d17e1e83b20e6` |
+| Compatible (OpenRouter) | `compatible` | `meta/muse-spark-1.3-contributor` | medium | env | failed_provider | output_limit | 2026-09-30T06:14:34.965Z | `273dfd9526d057f557d3788f198d17e1e83b20e6` |
+| ChatGPT subscription | `codex` | `gpt-6-sol` | medium | stored-subscription | failed_provider | output_limit | 2026-09-30T06:14:34.965Z | `273dfd9526d057f557d3788f198d17e1e83b20e6` |
+| Grok subscription | `grok` | `grok-4.7` | medium | stored-subscription | passed | verified | 2026-09-30T06:14:34.965Z | `273dfd9526d057f557d3788f198d17e1e83b20e6` |
 
-These are pending gates, not smoke-report results. No lane has passed at `R`.
-Full live evals are outside #138's minor-release scope.
+OpenAI API key and Grok subscription verified the actual sentinel tool round
+trip. OpenRouter and Codex failed before inference: each recorded
+`modelAttemptsStarted: 0`, one HTTP request/response and HTTP 200.
+Read-only probes measured catalogs of **762,009 bytes** (OpenRouter) and
+**522,290 bytes** (Codex), above the shared **262,144-byte** smoke response
+budget. Explicit thinking discovery exhausts that budget on metadata alone.
+
+The xAI API-key lane completed two model rounds and one tool-result event, with
+no retries, three HTTP requests/responses and HTTP 200, but did not verify the
+permitted sentinel read. One tool-result event is not proof of successful
+sentinel access; its exact missing-evidence cause remains unconfirmed.
+
+| Defect | Severity | Affected routes | Status |
+| --- | --- | --- | --- |
+| [#188](https://github.com/chayapats/schway/issues/188): real reasoning catalogs exceed smoke byte budget | P1 | OpenRouter, Codex | open; native blocker of #138 |
+| [#189](https://github.com/chayapats/schway/issues/189): xAI sentinel verification failure | P1 | xAI API key | open; native blocker of #138; root cause needs triage |
+
+After filing these defects, the open P0 query remained empty; the open P1 query
+listed #188 and #189. No further paid smoke or full eval was run. Smoke reports
+do not contain token usage or a spend total, so no exact billing amount is
+claimed. The private spend plan records the operator's per-key ceiling and
+current model prices.
+
+Private artifacts: `live-smoke.json`, `live-smoke-command.json`,
+`compatible-catalog-size.json`, `codex-catalog-size.json`, `spend-plan.json`
+and the precondition/profile records. None of their raw contents is committed.
 
 ### Publish and clean-HOME install
 
-Publish, tag, registry installation and its help/doctor/no-model/compatible-turn/
-Anthropic-removal checks have not run. OS/tool versions and install exits will
-be recorded with those results. Issue #138 remains open.
+The failed smoke stopped the ordered release checklist. `npm publish`, the
+`v0.4.0` tag/push and registry clean-HOME installation were **not run**.
+Help/doctor/no-model/compatible-turn/Anthropic-removal registry-install checks
+therefore have no results or exit codes. Issue #138 remains open; fixes are
+tracked separately and are outside this release attempt.
 
 ## 0.4 truth pass (#137, 2026-09-29)
 
