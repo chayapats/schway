@@ -12,6 +12,7 @@ import { createContextManager } from "../../src/context/manager.ts";
 import { createSession } from "../../src/session/session.ts";
 import { createJsonlSession, sessionsDirectory } from "../../src/session/jsonl.ts";
 import { createToolRegistry } from "../../src/tools/registry.ts";
+import { loadExtensions } from "../../src/extensions/loader.ts";
 import { readTool } from "../../src/tools/read.ts";
 import { editTool } from "../../src/tools/edit.ts";
 import { bashTool } from "../../src/tools/bash.ts";
@@ -32,11 +33,12 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let temp: string | undefined;
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
-  const disk = ["completed-turn", "review-panel", "recent-work-resume"].includes(screen.id);
+  const palette = screen.id.startsWith("command-palette");
+  const disk = palette || ["completed-turn", "review-panel", "recent-work-resume"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
-    if (screen.id !== "recent-work-resume") {
+    if (["completed-turn", "review-panel"].includes(screen.id)) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
       for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
@@ -91,6 +93,15 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
+  if (palette) {
+    await Bun.write(join(root, ".agents/skills/grill-me/SKILL.md"), "---\nname: grill-me\ndescription: Stress-test a plan\n---\nTask");
+    await Bun.write(join(root, "node_modules/greeting-pkg/package.json"), JSON.stringify({ name: "greeting-pkg", schway: { extensions: ["main.ts"] } }));
+    await Bun.write(join(root, "node_modules/greeting-pkg/main.ts"), "export default ctx => ctx.registerCommand({ name: 'greet', description: 'Say hello', execute() {} });");
+    await Bun.write(join(root, ".schway/config.json"), JSON.stringify({ packages: ["greeting-pkg"] }));
+    await Bun.write(join(root, "local.ts"), "export default ctx => ctx.registerCommand({ name: 'local', description: 'Local action', execute() {} });");
+    const loaded = await loadExtensions({ modules: ["local.ts"], workspace, home, tools });
+    options.tools = loaded.tools; options.extensions = loaded.runtime;
+  }
   if (screen.id.startsWith("endpoint-url")) {
     options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
     options.stageSettings = async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) });

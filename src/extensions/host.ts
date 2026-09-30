@@ -16,6 +16,8 @@ export interface ExtensionCommandInfo {
   readonly description: string;
   readonly arguments?: string;
   readonly source: string;
+  /** Owning enabled npm package name; explicit CLI modules leave this absent. */
+  readonly packageName?: string;
 }
 
 interface Observer {
@@ -60,8 +62,8 @@ export class ExtensionRuntime {
     };
   }
 
-  /** Register one validated command without letting declaration order resolve conflicting owners. */
-  registerCommand(source: string, command: ExtensionCommand, skills?: SkillDiscovery): void {
+  /** Register validated metadata with its canonical source and optional package owner, rejecting conflicting owners. */
+  registerCommand(source: string, command: ExtensionCommand, skills?: SkillDiscovery, packageName?: string): void {
     this.signal.throwIfAborted();
     if (!command || typeof command !== "object") throw new Error("Expected a command definition object");
     const { name, description, arguments: usage, execute } = command;
@@ -74,7 +76,7 @@ export class ExtensionRuntime {
     if (typeof description !== "string" || !description.trim() || typeof execute !== "function" || (usage !== undefined && typeof usage !== "string")) {
       throw new Error(`Command /${name} requires a description, execute function, and optional arguments string`);
     }
-    const info = Object.freeze({ name, description, ...(usage !== undefined ? { arguments: usage } : {}), source });
+    const info = Object.freeze({ name, description, ...(usage !== undefined ? { arguments: usage } : {}), source, ...(packageName !== undefined ? { packageName } : {}) });
     if (skills) this.assertNoSkillCollision(info, skills);
     this.commands.set(name, { info, execute });
   }

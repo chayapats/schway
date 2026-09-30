@@ -49,6 +49,27 @@ function extension(name: string): string {
 /** Bind an isolated workspace fixture to one primary root without attachments. */
 function workspace(root: string): Workspace { return { root, launchCwd: root, extraRoots: [] }; }
 
+test("global and project package commands retain owning enabled names independently of module paths", async () => {
+  await withIsolatedCliDirs(async ({ work, home }) => {
+    const globalDir = await installed(join(home, ".schway"), "@team/greeting-pkg", { schway: { extensions: ["nested/arbitrary.ts"] } }, {
+      "nested/arbitrary.ts": "export default ctx => ctx.registerCommand({ name: 'global-greet', description: 'Say hello globally', execute() {} });",
+    });
+    const projectDir = await installed(work, "greeting-pkg", { schway: { extensions: ["nested/arbitrary.ts"] } }, {
+      "nested/arbitrary.ts": "export default ctx => ctx.registerCommand({ name: 'greet', description: 'Say hello', execute() {} });",
+    });
+    await configure(home, ["@team/greeting-pkg"]);
+    await configure(work, ["greeting-pkg"]);
+    const loaded = await loadExtensions({ modules: [], workspace: workspace(work), home, tools: createToolRegistry() });
+    try {
+      expect(loaded.runtime.commandList()).toEqual([
+        { name: "global-greet", description: "Say hello globally", source: await realpath(join(globalDir, "nested/arbitrary.ts")), packageName: "@team/greeting-pkg" },
+        { name: "greet", description: "Say hello", source: await realpath(join(projectDir, "nested/arbitrary.ts")), packageName: "greeting-pkg" },
+      ]);
+      expect(loaded.runtime.commandList().every(command => Object.isFrozen(command))).toBe(true);
+    } finally { loaded.runtime.dispose(); }
+  });
+});
+
 test("package enablement config accepts npm names and rejects executable specifiers, duplicates, and invalid types", () => {
   expect(parseConfigObject({ packages: ["@scope/skills", "my-tools"] }, "config")).toEqual({ packages: ["@scope/skills", "my-tools"] });
   for (const packages of ["pkg", [1], ["pkg", "pkg"], ["../pkg"], ["pkg@latest"], ["https://example.test/p.tgz"], ["file:pkg"], [""], ["@scope/../other"]]) {

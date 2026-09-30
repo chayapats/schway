@@ -11,6 +11,8 @@ grok-plan-error
 model-picker
 thinking-controls
 command-palette
+command-palette-groups
+command-palette-query
 thai-composer
 streaming-answer
 parallel-tools
