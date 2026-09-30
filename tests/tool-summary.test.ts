@@ -162,6 +162,12 @@ test("bounded diff rows clip at three hundred characters without clipping the sh
   expect(formatNumberedEditDiff([{ startLine: 1, oldText: "", newText: text }])).toBe(`1 │+${"x".repeat(296)}`);
 });
 
+test("diff text transformations happen after trimming and before row clipping", () => {
+  const transform = (text: string) => text.replaceAll("old-secret", "***").replaceAll("new-secret", "***");
+  expect(formatNumberedEditDiff([{ startLine: 1, oldText: "old-secret", newText: "new-secret" }], "", transform)).toBe("1 │-***\n1 │+***");
+  expect(formatNumberedEditDiff([{ startLine: 1, oldText: "old", newText: `${"x".repeat(290)}new-secret` }], "", transform)).toEndWith(`1 │+${"x".repeat(290)}***`);
+});
+
 test("bounded diff side limits apply after large common prefix and suffix contexts are trimmed", () => {
   const prefix = Array.from({ length: 100 }, (_, index) => `prefix-${index}\n`).join("");
   const suffix = Array.from({ length: 100 }, (_, index) => `suffix-${index}\n`).join("");

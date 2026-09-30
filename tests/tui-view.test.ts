@@ -23,6 +23,10 @@ import { loadExtensions } from "../src/extensions/loader.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { BUILT_IN_COMMAND_ORDER } from "../src/tui/command-catalog.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
+import { readTool } from "../src/tools/read.ts";
+import { editTool } from "../src/tools/edit.ts";
+import { writeTool } from "../src/tools/write.ts";
+import { bashTool } from "../src/tools/bash.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
@@ -423,7 +427,7 @@ test("tool success collapses, errors stay visible, and expanded diffs preserve c
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "read", name: "read" });
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: "read", name: "read", status: "success", content: "file.ts\nHIDDEN OUTPUT secret-sentinel" });
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "edit", name: "edit" });
-  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "edit", name: "edit", status: "success", content: "Edited file.ts", details: { path: "file.ts", hunks: [{ startLine: 1, oldText: "before", newText: "after" }] } });
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "edit", name: "edit", status: "success", content: "Edited file.ts", details: { path: "file.ts", hunks: [{ startLine: 1, oldText: "before", newText: "after secret-sentinel" }] } });
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "bad", name: "bash" });
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: "bad", name: "bash", status: "error", content: "Command failed\nexit code: 1\nFix the missing file" });
   await settle(ui);
@@ -433,13 +437,200 @@ test("tool success collapses, errors stay visible, and expanded diffs preserve c
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("HIDDEN OUTPUT");
   expect(ui.captureCharFrame()).not.toContain("secret-sentinel");
-  expect(ui.captureCharFrame()).toContain("+ after");
-  expect(ui.captureCharFrame()).toContain("- before");
+  expect(ui.captureCharFrame()).toContain("1 │+after ***");
+  expect(ui.captureCharFrame()).toContain("1 │-before");
+  const editEntry = ui.controller.snapshot().transcript.find(entry => entry.toolCallId === "edit")!;
+  expect(JSON.stringify(editEntry)).not.toContain("secret-sentinel");
+  const diffBody = ui.renderer.root.findDescendantById(`message-${editEntry.id}`)!.getChildren()[1]!.getChildren()[0] as TextRenderable;
+  expect(diffBody.chunks.find(chunk => chunk.text.includes("+after"))?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.success));
   const readRow = ui.transcript.getChildren().find(row => row.id === `message-${ui.controller.snapshot().transcript[0]!.id}`)!;
   await ui.mockMouse.click(readRow.x + 1, readRow.y);
   await settle(ui);
   expect(ui.captureCharFrame()).not.toContain("HIDDEN OUTPUT");
-  expect(ui.captureCharFrame()).toContain("+ after");
+  expect(ui.captureCharFrame()).toContain("1 │+after ***");
+});
+
+test("real read, edit, write and bash results render summaries with deterministic durations and inline limits", async () => {
+  await withTempDir(async root => {
+    for (const limit of [12, 0]) {
+      const workspace = { root, launchCwd: root, extraRoots: [] };
+      await writeFile(join(root, "clamp.ts"), "before\nold\nafter\n");
+      const path = `created-${limit}.txt`;
+      const content = Array.from({ length: 42 }, (_, i) => `created line ${i + 1}`).join("\n") + "\n";
+      let clock = 1000;
+      const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { ui: { inlineDiffLines: limit } } });
+      const ui = await setup(120, 40, {}, undefined, {
+        workspace, contextManager: createContextManager(workspace), configEditor,
+        tools: createToolRegistry([readTool, editTool, writeTool, bashTool]), activityClock: () => clock,
+        onRuntimeEvent: event => { if (event.type === "tool.finished") clock += 1200; },
+        model: createScriptedModel({ responses: [
+          { toolCalls: [{ id: "read", name: "read", arguments: { path: "clamp.ts" } }] },
+          { toolCalls: [{ id: "edit", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "old", newText: "new" }] } }] },
+          { toolCalls: [{ id: "write", name: "write", arguments: { path, content } }] },
+          { toolCalls: [{ id: "bash", name: "bash", arguments: { command: "printf 'checked\\n'" } }] },
+          { text: "Finished." },
+        ] }),
+      });
+      await ui.controller.submit("Update the file"); await settle(ui);
+      const frame = ui.captureCharFrame();
+      for (const summary of ["3 lines", "+1 −1", "new · 42 lines", "exit 0 · 1.2s"]) expect(frame).toContain(summary);
+      expect(frame.includes("2 │-old")).toBe(limit > 0);
+      expect(frame.includes("2 │+new")).toBe(limit > 0);
+      expect(frame).not.toContain("created line 1");
+      ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui);
+      expect(ui.captureCharFrame()).toContain("2 │-old");
+      expect(ui.captureCharFrame()).toContain("2 │+new");
+      expect(ui.captureCharFrame()).toContain("1 │+created line 1");
+      expect(ui.session.items.filter(item => item.type === "tool_result").some(item => item.type === "tool_result" && item.content.includes("│"))).toBe(false);
+    }
+  });
+});
+
+test("inline edit and created-write rows ignore mouse, inspection Enter and Ctrl+O toggles", async () => {
+  const session = createSession();
+  const ui = await setup(80, 30, {}, undefined, { session });
+  session.append({ type: "assistant", id: "calls", content: [{ type: "tool_call", id: "write", name: "write", arguments: { path: "new.ts", content: "created secret-sentinel\n" } }] });
+  for (const [id, name, details] of [
+    ["edit", "edit", { path: "file.ts", hunks: [{ startLine: 2, oldText: "old", newText: "new secret-sentinel" }] }],
+    ["write", "write", { created: true, lineCount: 1 }],
+  ] as const) {
+    ui.controller.applyEvent({ type: "tool.started", toolCallId: id, name });
+    await settle(ui);
+    ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name, status: "success", content: "Applied", details });
+  }
+  await settle(ui);
+  const entries = ui.controller.snapshot().transcript.filter(entry => entry.kind === "tool");
+  const assertInline = () => {
+    for (const entry of entries) {
+      const label = ui.renderer.root.findDescendantById(`message-${entry.id}`)!.getChildren()[0] as TextRenderable;
+      expect(label.plainText).not.toMatch(/[▸▾]/);
+    }
+    expect(ui.captureCharFrame()).toContain("2 │+new ***");
+    expect(ui.captureCharFrame()).toContain("1 │+created ***");
+    expect(ui.captureCharFrame()).not.toContain("secret-sentinel");
+  };
+  assertInline();
+  for (const entry of entries) {
+    const row = ui.renderer.root.findDescendantById(`message-${entry.id}`)!;
+    await ui.mockMouse.click(row.x + 1, row.y); await settle(ui); assertInline();
+  }
+  ui.mockInput.pressKey("i", { meta: true }); await settle(ui);
+  ui.mockInput.pressEnter(); await settle(ui); assertInline();
+  ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await settle(ui); assertInline();
+  ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui); assertInline();
+  ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui); assertInline();
+});
+
+test("write overwrites and rewritten-content count mismatches never display a diff", async () => {
+  const session = createSession();
+  const ui = await setup(80, 28, {}, undefined, { session });
+  session.append({ type: "assistant", id: "writes", content: [
+    { type: "tool_call", id: "overwrite", name: "write", arguments: { path: "old.ts", content: "must stay hidden\n" } },
+    { type: "tool_call", id: "mismatch", name: "write", arguments: { path: "new.ts", content: "must stay hidden\n" } },
+  ] });
+  for (const [toolCallId, created, lineCount] of [["overwrite", false, 1], ["mismatch", true, 2]] as const) {
+    ui.controller.applyEvent({ type: "tool.started", toolCallId, name: "write" });
+    ui.controller.applyEvent({ type: "tool.finished", toolCallId, name: "write", status: "success", content: "Wrote file", details: { created, lineCount } });
+  }
+  await settle(ui);
+  expect(ui.captureCharFrame()).toContain("overwritten · 1 line");
+  expect(ui.captureCharFrame()).toContain("new · 2 lines");
+  expect(ui.controller.snapshot().transcript.filter(entry => entry.kind === "tool").every(entry => entry.diffRows === undefined)).toBe(true);
+  ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui);
+  expect(ui.captureCharFrame()).not.toContain("│+");
+  expect(ui.captureCharFrame()).not.toContain("must stay hidden");
+});
+
+test("failed bash starts expanded, toggles to six lines, and Ctrl+O restores its default", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const ui = await setup(100, 38, {}, undefined, { workspace, contextManager: createContextManager(workspace), tools: createToolRegistry([bashTool]),
+      model: createScriptedModel({ responses: [
+        { toolCalls: [{ id: "timeout", name: "bash", arguments: { command: "printf 'line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6\\nline 7\\nline 8\\n'; sleep 2", timeout: 100 } }] },
+        { text: "Inspect the failure." },
+      ] }),
+    });
+    await ui.controller.submit("Run the command"); await settle(ui);
+    const entry = ui.controller.snapshot().transcript.find(entry => entry.toolCallId === "timeout")!;
+    const label = ui.renderer.root.findDescendantById(`message-${entry.id}`)!.getChildren()[0] as TextRenderable;
+    const body = ui.renderer.root.findDescendantById(`message-${entry.id}`)!.getChildren()[1]!.getChildren()[0] as TextRenderable;
+    expect(label.plainText).toContain("▾");
+    expect(ui.captureCharFrame()).toContain("line 8");
+    expect(ui.captureCharFrame()).toContain("Tool failed. Inspect this result before continuing.");
+    ui.mockInput.pressKey("i", { meta: true }); ui.mockInput.pressEnter(); await settle(ui);
+    expect(label.plainText).toContain("▸");
+    expect(body.plainText.split("\n")).toHaveLength(7);
+    expect(body.plainText).toContain("line 2");
+    expect(body.plainText).not.toContain("line 7");
+    expect(ui.captureCharFrame()).toContain("… Ctrl+O to expand output");
+    ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("line 8");
+    ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui);
+    expect(label.plainText).toContain("▾");
+    expect(ui.captureCharFrame()).toContain("line 8");
+  });
+});
+
+test("result summaries drop before long targets clip and return after resize", async () => {
+  const ui = await setup(120, 30);
+  const path = "src/components/long-directory/example-file.ts";
+  ui.session.append({ type: "assistant", id: "long-target", content: [{ type: "tool_call", id: "read-long", name: "read", arguments: { path } }] });
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "read-long", name: "read" });
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "read-long", name: "read", status: "success", content: "Read file", details: { lineCount: 3, startLine: 1, endLine: 3, truncated: false } });
+  for (const width of [120, 80, 50, 120]) {
+    ui.resize(width, 30); await settle(ui);
+    const frame = ui.captureCharFrame();
+    expect(frame.includes("3 lines")).toBe(width > 50);
+    if (width > 50) expect(frame).toContain(path);
+    else expect(frame).toContain("…");
+  }
+});
+
+test("resumed successful edits show argument counts while writes have no result summary or diff", async () => {
+  const session = createSession();
+  session.append({ type: "assistant", id: "saved-calls", content: [
+    { type: "tool_call", id: "saved-edit", name: "edit", arguments: { path: "file.ts", edits: [{ oldText: "old", newText: "new" }] } },
+    { type: "tool_call", id: "saved-write", name: "write", arguments: { path: "new.ts", content: "created\n" } },
+  ] }, { type: "tool_result", id: "edit-result", toolCallId: "saved-edit", content: "Edited file.ts", isError: false }, { type: "tool_result", id: "write-result", toolCallId: "saved-write", content: "Wrote new.ts", isError: false });
+  const ui = await setup(80, 28, {}, undefined, { session });
+  await settle(ui);
+  const entries = buildTranscriptFromSession(session.items);
+  expect(entries.find(entry => entry.toolCallId === "saved-edit")?.resultSummary).toBe("+1 −1");
+  expect(entries.find(entry => entry.toolCallId === "saved-write")?.resultSummary).toBeUndefined();
+  expect(entries.every(entry => entry.diffRows === undefined)).toBe(true);
+  expect(ui.captureCharFrame()).toContain("+1 −1");
+  expect(ui.captureCharFrame()).not.toContain("│+");
+  expect(ui.captureCharFrame()).not.toContain("new ·");
+});
+
+test("effective inline limit changes redraw existing rows and secrets are redacted before expanded clipping", async () => {
+  await withTempDir(async root => {
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root });
+    const settings = editor.settings;
+    let limit = 12;
+    Object.defineProperty(editor, "settings", { get: () => ({ ...settings, inlineDiffLines: limit }) });
+    const ui = await setup(80, 38, {}, undefined, { configEditor: editor });
+    const oldText = "old secret-sentinel";
+    const newText = `${"x".repeat(290)}secret-sentinel tail`;
+    ui.controller.applyEvent({ type: "tool.started", toolCallId: "clipped-secret", name: "edit" });
+    ui.controller.applyEvent({ type: "tool.finished", toolCallId: "clipped-secret", name: "edit", status: "success", content: "Edited file.ts", details: { path: "file.ts", hunks: [{ startLine: 2, oldText, newText }] } });
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("2 │-old ***");
+    const entry = ui.controller.snapshot().transcript.find(item => item.toolCallId === "clipped-secret")!;
+    expect(entry.resultSummary).toBe("+1 −1");
+    expect(entry.text).toContain("*** ta");
+    expect(JSON.stringify(entry)).not.toContain("secret-sentinel");
+    expect(entry.text).not.toContain("secret-");
+    limit = 0; await settle(ui);
+    expect(ui.captureCharFrame()).not.toContain("2 │-old ***");
+    ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("2 │-old ***");
+    expect(ui.captureCharFrame()).toContain("*** ta");
+    limit = 12; await settle(ui);
+    const row = ui.renderer.root.findDescendantById(`message-${entry.id}`)!;
+    expect((row.getChildren()[0] as TextRenderable).plainText).not.toMatch(/[▸▾]/);
+    expect(ui.captureCharFrame()).toContain("2 │-old ***");
+  });
 });
 
 test("model picker preserves draft, owns navigation, and closes before cancelling a turn", async () => {

@@ -6,6 +6,8 @@ import { easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./mot
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 import { mixColor, tint, type TuiTheme } from "./theme.ts";
 import { browserUrl, linkify } from "./links.ts";
+import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
+import { DEFAULT_INLINE_DIFF_LINES } from "../config/config.ts";
 
 /** Left-edge bar used by user and error blocks; only the vertical glyph is ever drawn. */
 const BAR: BorderCharacters = { topLeft: "▌", topRight: " ", bottomLeft: "▌", bottomRight: " ", horizontal: " ", vertical: "▌", topT: " ", bottomT: " ", leftT: "▌", rightT: " ", cross: " " };
@@ -109,7 +111,7 @@ export interface TranscriptItemView {
   searchSegments(): readonly { text: string; target: Renderable; visualLine: number; lineInfo?: { lineSources: readonly number[]; lineStartCols: readonly number[] } }[];
   /** Mark the selected search row without changing its rendered content. */
   setSearchMatch(selected: boolean): void;
-  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean): void;
+  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean, inlineDiffLines?: number): void;
   /** Advance spinners and completion flashes; returns whether this row still animates. */
   tick(): boolean;
 }
@@ -266,28 +268,36 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       if (flashStart !== undefined && applyBackground()) animating = true;
       return animating;
     },
-    update(entry, expanded, streaming, width, focusedCode, focusedTool) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool]);
+    update(entry, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines = DEFAULT_INLINE_DIFF_LINES) {
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines]);
       if (next === fingerprint) return;
       fingerprint = next;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
+        const inline = hasInlineDiff(entry, inlineDiffLines);
+        const detail = inline ? displayText(formatDiffRows(entry.diffRows!)) : tool.detail;
         if (status === "running" && entry.toolStatus === "success" && motion.mode === "full") flashStart = motion.now();
         status = entry.toolStatus;
         focusedRow = !!focusedTool;
         applyBackground();
-        // Tray row: status glyph, tool-family pill, target, non-success state, and the disclosure marker at the right edge.
+        // Keep the target intact by dropping result summaries before clipping the target.
         const inner = Math.max(8, width - 2);
         const color = toolColor(entry.toolName, theme);
         const pillBg = tint(theme, color);
         const focus = focusedTool ? "› " : "";
         const kind = ` ${fitLine((entry.toolName ?? "tool").toUpperCase(), Math.max(1, Math.min(12, inner - 10)))} `;
         const state = tool.state === "done" ? "" : tool.state === "running" ? "running…" : tool.state;
-        const fixed = Bun.stringWidth(`${focus}● ${kind}`) + 2;
-        const stateWidth = state ? Bun.stringWidth(state) + 2 : 0;
-        const targetWidth = inner - fixed - stateWidth - 1;
+        const disclosure = inline ? "" : `${expanded ? "▾" : "▸"} `;
+        const fixed = Bun.stringWidth(` ${focus}● ${kind}`);
+        const fullTarget = tool.target ? ` ${fitLine(tool.target, Number.MAX_SAFE_INTEGER)}` : "";
+        const candidate = entry.toolStatus === "success" ? displayText(entry.resultSummary ?? "") : "";
+        const result = candidate && fixed + Bun.stringWidth(fullTarget) + Bun.stringWidth(candidate) + Bun.stringWidth(disclosure) + (disclosure ? 1 : 0) + 1 <= inner ? candidate : "";
+        const right = state || result;
+        const rightWidth = Bun.stringWidth(right);
+        const trailerWidth = Bun.stringWidth(disclosure) + (right && disclosure ? 1 : 0);
+        const targetWidth = inner - fixed - rightWidth - trailerWidth - 1;
         const target = targetWidth > 1 && tool.target ? ` ${fitLine(tool.target, targetWidth - 1)}` : "";
-        const gap = " ".repeat(Math.max(1, inner - fixed - Bun.stringWidth(target) - stateWidth));
+        const gap = " ".repeat(Math.max(1, inner - fixed - Bun.stringWidth(target) - rightWidth - trailerWidth));
         paintLabel = () => {
           const glyph = status === "running" ? spinnerFrame(motion.now(), motion.mode) : tool.marker;
           label.content = new StyledText([
@@ -296,24 +306,26 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
             fg(theme.text)(" "),
             bold(bg(pillBg)(fg(color)(kind))),
             fg(theme.text)(target),
-            ...(state ? [fg(theme.text)("  "), ...(status === "running" ? shimmer(state, motion.now(), theme.muted, theme.text, motion.mode) : [fg(theme[tool.tone])(state)])] : []),
-            fg(theme.muted)(`${gap}${expanded ? "▾" : "▸"} `),
+            fg(theme.muted)(gap),
+            ...(right ? status === "running" ? shimmer(right, motion.now(), theme.muted, theme.text, motion.mode) : [fg(state ? theme[tool.tone] : theme.muted)(right)] : []),
+            fg(theme.muted)(`${right && disclosure ? " " : ""}${disclosure}`),
           ]);
         };
         paintLabel();
-        body.visible = tool.detail.length > 0;
-        root.marginBottom = tool.detail ? 1 : 0;
+        body.visible = detail.length > 0;
+        root.marginBottom = detail ? 1 : 0;
         // Diffs keep explicit +/- markers on full-width tinted rows; ordinary output stays neutral.
         const isDiff = entry.toolName === "edit" || entry.toolName === "write";
         const bodyWidth = Math.max(1, width - 4);
         if (body instanceof TextRenderable) body.wrapMode = isDiff ? "char" : "word";
-        body.content = linkify(tool.detail.split("\n").flatMap((line, index) => {
-          const sign = isDiff && line.startsWith("+") ? theme.success : isDiff && line.startsWith("-") ? theme.error : undefined;
+        body.content = linkify(detail.split("\n").flatMap((line, index) => {
+          const numbered = isDiff ? line.match(/^(\s*\d+ │)([+-])(.*)$/) : null;
+          const sign = numbered?.[2] === "+" ? theme.success : numbered?.[2] === "-" ? theme.error : undefined;
           const prefix = index ? "\n" : "";
           if (!sign) return [fg(theme.muted)(`${prefix}${line}`)];
           const used = Bun.stringWidth(line);
           const padded = line + " ".repeat(Math.max(0, Math.ceil(Math.max(1, used) / bodyWidth) * bodyWidth - used));
-          return [fg(theme.muted)(prefix), bg(tint(theme, sign))(fg(sign)(padded))];
+          return [fg(theme.muted)(prefix), bg(tint(theme, sign))(fg(theme.muted)(numbered![1]!)), bg(tint(theme, sign))(fg(sign)(padded.slice(numbered![1]!.length)))];
         }));
       } else {
         if (entry.kind === "assistant") {

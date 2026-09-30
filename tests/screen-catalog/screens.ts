@@ -37,6 +37,7 @@ export const SCREENS: readonly Screen[] = [
   { id: "streaming-answer", title: "Streaming answer", description: "An incomplete Markdown answer streams into the transcript.", elapsed: 4000, drive: ui => enter(ui, "Explain the config loader"), ready: s => s.activity?.phase === "streaming" && s.transcript.some(e => e.text.includes("- Then")) },
   { id: "parallel-tools", title: "Parallel tools", description: "Three independent tool calls are running together.", elapsed: 7000, drive: ui => enter(ui, "Inspect the project"), ready: s => s.activity?.activeTools === 3 },
   { id: "completed-turn", title: "Completed turn", description: "A completed fix records a file edit and successful command.", noColor: true, drive: ui => enter(ui, "Fix the clamp upper bound"), ready: completed },
+  { id: "large-edit", title: "Large edit", description: "An edit above the inline limit keeps its summary and disclosure marker.", noColor: true, drive: ui => enter(ui, "Update the clamp implementation"), ready: completed },
   { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColor: true, drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "retry-countdown", title: "Retry countdown", description: "A transient failure waits before the next attempt.", elapsed: 1200, drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.phase === "retry" },
   // Render the loading panel before yielding to Git so scrollbar initialization has a fixed order.

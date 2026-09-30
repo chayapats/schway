@@ -80,14 +80,14 @@ export function formatDiffRows(rows: readonly DiffRow[]): string {
   return rows.map(row => `${String(row.line).padStart(width)} │${row.sign}${row.text}`).join("\n");
 }
 
-/** Format numbered changes from eight sorted hunks, capped at twelve changed rows per side and three hundred characters per row. */
-export function formatNumberedEditDiff(hunks: readonly EditHunkDisplay[], summary = ""): string {
+/** Format eight sorted hunks with twelve changed rows per side, transforming changed text before the three-hundred-character row cap. */
+export function formatNumberedEditDiff(hunks: readonly EditHunkDisplay[], summary = "", transformText: (text: string) => string = text => text): string {
   const shown = [...hunks].sort((a, b) => a.startLine - b.startLine).slice(0, 8);
   const rows: DiffRow[] = [];
   for (const hunk of buildEditDiffHunks(shown)) {
     const count = { "+": 0, "-": 0 };
     for (const row of hunk.rows) {
-      if (count[row.sign]++ < 12) rows.push(row);
+      if (count[row.sign]++ < 12) rows.push({ ...row, text: transformText(row.text) });
     }
   }
   const lines = summary ? [summary] : [];
@@ -96,6 +96,12 @@ export function formatNumberedEditDiff(hunks: readonly EditHunkDisplay[], summar
     lines.push(`… ${formatCount(hunks.length - shown.length, "more replacement")}. Full diff is in the session file.`);
   }
   return lines.join("\n");
+}
+
+/** Identify successful runtime diffs that fit the effective inline limit and cannot be toggled. */
+export function hasInlineDiff(entry: TuiTranscriptEntry, limit: number): boolean {
+  return entry.toolStatus === "success" && (entry.toolName === "edit" || entry.toolName === "write")
+    && !!entry.diffRows?.length && entry.diffRows.length <= limit;
 }
 
 /** Accept finite nonnegative integers for result counts and original line positions. */
@@ -107,6 +113,7 @@ function isCount(value: unknown): value is number {
 export function buildTranscriptFromSession(items: readonly SessionRecord[]): TuiTranscriptEntry[] {
   const transcript: TuiTranscriptEntry[] = [];
   const pending = new Map<string, TuiTranscriptEntry>();
+  const argumentsByCall = new Map<string, unknown>();
   let counter = 0;
   const nextId = (prefix: string): string => {
     counter += 1;
@@ -136,6 +143,7 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
             toolSummary: toolTarget(block.name, block.arguments),
           };
           pending.set(block.id, entry);
+          argumentsByCall.set(block.id, block.arguments);
           transcript.push(entry);
         }
       }
@@ -148,7 +156,9 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
       if (entry) {
         entry.text = boundDisplay(item.content);
         entry.toolStatus = item.isError ? "error" : "success";
+        entry.resultSummary = summarizeResumedToolResult(entry.toolName ?? "", entry.toolStatus, argumentsByCall.get(item.toolCallId));
         pending.delete(item.toolCallId);
+        argumentsByCall.delete(item.toolCallId);
       }
     } else if (item.type === "compaction") {
       transcript.push({
@@ -202,6 +212,7 @@ export function formatToolFinishedText(
   content: string,
   details: unknown,
   status: "success" | "error" | "cancelled",
+  transformText: (text: string) => string = text => text,
 ): string {
   if (status === "cancelled") {
     return boundDisplay(content);
@@ -209,7 +220,7 @@ export function formatToolFinishedText(
   if (name === "edit") {
     const edit = asEditDetails(details);
     if (edit && status === "success" && edit.hunks && edit.hunks.length > 0) {
-      return boundDisplay(formatEditDiff(edit.path, edit.hunks, content));
+      return boundDisplay(formatEditDiff(edit.path, edit.hunks, content, transformText));
     }
     if (edit && status === "error") {
       return boundDisplay(`Edit failed for ${edit.path}: ${content}`);
@@ -221,23 +232,9 @@ export function formatToolFinishedText(
   return boundDisplay(content);
 }
 
-/** Format applied edit hunks as a bounded unified-style diff for the transcript. */
-export function formatEditDiff(path: string, hunks: readonly EditHunkDisplay[], summary: string): string {
-  const lines = [summary];
-  const shown = hunks.slice(0, 8);
-  for (const hunk of shown) {
-    lines.push(`--- ${path}:${hunk.startLine}`);
-    for (const line of hunk.oldText.split("\n").slice(0, 12)) {
-      lines.push(`- ${line}`.slice(0, 300));
-    }
-    for (const line of hunk.newText.split("\n").slice(0, 12)) {
-      lines.push(`+ ${line}`.slice(0, 300));
-    }
-  }
-  if (hunks.length > shown.length) {
-    lines.push(`… ${hunks.length - shown.length} more replacements. Full diff is in the session file.`);
-  }
-  return lines.join("\n");
+/** Format applied edit hunks as bounded numbered changes beneath the supplied completion text. */
+export function formatEditDiff(_path: string, hunks: readonly EditHunkDisplay[], summary: string, transformText: (text: string) => string = text => text): string {
+  return formatNumberedEditDiff(hunks, summary, transformText);
 }
 
 /** Narrow unknown tool details to the edit shape without coupling to tool internals. */

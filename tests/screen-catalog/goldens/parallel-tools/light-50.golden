@@ -11,9 +11,9 @@ cursor 6 27 visible
  ▌ You
  ▌ Inspect the project
 
-  ⠋  READ   running…                         ▸
-  ⠋  GREP   running…                         ▸
-  ⠋  BASH   running…                         ▸
+  ⠋  READ  clamp.ts                running… ▸
+  ⠋  GREP  clamp                   running… ▸
+  ⠋  BASH  bun test                running… ▸
 
 
 
@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ TOOLS 3 7s   scripted/…    Esc stops  ctx ~11
+  ⠋ TOOLS 3 7s   scripted/…    Esc stops  ctx ~24
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -62,27 +62,27 @@ cursor 6 27 visible
 05 2-3 #0a5894 #e1e3df b
 05 3-4 #1d232c #e1e3df -
 05 4-10 #0a5894 #c7d2d6 b
-05 10-12 #1d232c #e1e3df -
-05 12-47 #545e6c #e1e3df -
-05 47-48 #ffffff #e1e3df -
+05 10-19 #1d232c #e1e3df -
+05 19-46 #545e6c #e1e3df -
+05 46-48 #ffffff #e1e3df -
 05 48-50 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-2 #0a5894 #e1e3df -
 06 2-3 #0a5894 #e1e3df b
 06 3-4 #1d232c #e1e3df -
 06 4-10 #0a5894 #c7d2d6 b
-06 10-12 #1d232c #e1e3df -
-06 12-47 #545e6c #e1e3df -
-06 47-48 #ffffff #e1e3df -
+06 10-16 #1d232c #e1e3df -
+06 16-46 #545e6c #e1e3df -
+06 46-48 #ffffff #e1e3df -
 06 48-50 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
 07 1-2 #0a5894 #e1e3df -
 07 2-3 #0a5894 #e1e3df b
 07 3-4 #1d232c #e1e3df -
 07 4-10 #6a3fb0 #d3cfd9 b
-07 10-12 #1d232c #e1e3df -
-07 12-47 #545e6c #e1e3df -
-07 47-48 #ffffff #e1e3df -
+07 10-19 #1d232c #e1e3df -
+07 19-46 #545e6c #e1e3df -
+07 46-48 #ffffff #e1e3df -
 07 48-50 #ffffff #f7f7f4 -
 08 0-50 #ffffff #f7f7f4 -
 09 0-50 #ffffff #f7f7f4 -

@@ -129,14 +129,14 @@ test("edit success renders a diff from details while session content stays bound
     const tool = snapshot.transcript.find((entry) => entry.toolCallId === "call-1");
     expect(tool?.toolStatus).toBe("success");
     expect(tool?.text).toContain("note.txt");
-    expect(tool?.text).toContain("- world");
-    expect(tool?.text).toContain("+ there");
+    expect(tool?.text).toContain("2 │-world");
+    expect(tool?.text).toContain("2 │+there");
     const stored = session.items.find((item) => item.type === "tool_result");
     expect(stored?.type).toBe("tool_result");
     if (stored?.type === "tool_result") {
       expect(stored.content).toContain("Edited note.txt");
       expect(stored.content.length).toBeLessThanOrEqual(2000);
-      expect(stored.content).not.toContain("- world");
+      expect(stored.content).not.toContain("│-world");
     }
     expect(snapshot.status).toBe("idle");
   });

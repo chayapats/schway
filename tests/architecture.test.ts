@@ -17,6 +17,8 @@ test("headless CLI startup has no TUI dependency", async () => {
 
 test("core modules do not import provider SDKs", async () => {
   const files = [
+    "src/text/format.ts",
+    "src/text/diff.ts",
     "src/agent/loop.ts",
     "src/agent/scheduler.ts",
     "src/agent/events.ts",
@@ -70,6 +72,8 @@ test("core modules do not import provider SDKs", async () => {
 
 test("core modules never import the renderer", async () => {
   const files = [
+    "src/text/format.ts",
+    "src/text/diff.ts",
     "src/agent/loop.ts",
     "src/agent/scheduler.ts",
     "src/agent/events.ts",

@@ -16,6 +16,7 @@ import type { ConfigEditor } from "../config/editing.ts";
 import type { GitFileChange } from "../workspace/git.ts";
 import type { ModelPickerSnapshot } from "./model-picker.ts";
 import type { BranchTreeSnapshot } from "./branch-tree.ts";
+import type { DiffRow } from "../text/diff.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -61,6 +62,10 @@ export interface TuiTranscriptEntry {
   incomplete?: boolean;
   /** Short path, search pattern, or command identifying this call. */
   toolSummary?: string;
+  /** Short observed result summary, separate from the call target. */
+  resultSummary?: string;
+  /** Original deletion and edited addition rows derived from successful runtime details. */
+  diffRows?: DiffRow[];
 }
 
 /** Observed completion and command evidence for the latest accepted turn in this conversation. */

@@ -206,9 +206,9 @@ choice beneath it. Schway does not edit terminal, shell or window-manager settin
 | Preferences | `/config` or Alt+P; Up/Down field, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
 | Model picker | `/model` or Alt+M; Up/Down skips headers, Enter uses a model or starts sign-in, Ctrl+R retries a failed account catalog, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
-| Tool details | Ctrl+O toggles all; click a heading to toggle one |
+| Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
-| Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one tool result; C copies the selected item; Esc returns to the draft |
+| Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one expandable tool result; C copies the selected item; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
@@ -353,10 +353,24 @@ use separate masked entries that intercept keyboard and paste events; neither
 enters the ordinary draft, prompt recall or conversation. Device approval codes
 appear only while the approval panel is open.
 
-Successful tools show a compact target/status summary. Running tools show a short
-tail; errors and cancellations retain a bounded preview even when collapsed.
-Expansion reveals the controller's bounded output, including edit hunks with both
-signs and colors. It does not remove the existing output limits. Markdown blocks
+Successful built-in tools show a result summary beside their target: line, match
+or entry counts, edit additions and removals, write creation or replacement counts,
+and shell exit code with duration. Partial reads show their range; truncated search
+and listing results show a `+` count and `truncated`. Summaries give way to long
+targets at narrow widths.
+
+Small successful edits and newly created files show numbered diff rows beneath the
+heading, with explicit `+` and `-` signs and success/error colors. The default limit
+is 12 changed rows; [ui.inlineDiffLines](configuration.md#inline-file-diffs) controls
+it, and `0` disables inline diffs. Inline diffs have no disclosure marker and stay
+visible when clicked or when Enter or Ctrl+O is pressed. Larger diffs expand to the
+same numbered format with existing output bounds. Overwritten files show their line
+count without a diff. Resumed edits show counts from saved arguments but no diff rows.
+
+Running tools show a short tail. Failed tools start expanded; toggling one collapses
+it to a six-line preview with an expansion hint. Ctrl+O expands all results; leaving
+that mode clears individual toggles and restores expanded failures. Cancelled tools
+retain their bounded preview. Expansion keeps the existing output limits. Markdown blocks
 use the local parser and native terminal widgets; fenced code is presented in a
 distinct surface and color without downloading syntax parsers.
 

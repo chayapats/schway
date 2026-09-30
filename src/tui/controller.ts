@@ -9,13 +9,9 @@ export type * from "./controller-types.ts";
 export * from "./branch-tree.ts";
 export * from "./transcript-format.ts";
 
-/**
- * Own interactive transcript state around the shared agent loop.
- * The renderer stays thin: it renders snapshots and forwards input.
- * No OpenTUI import here; this module is unit-testable with a scripted model.
- */
+/** Own interactive transcript state around the shared agent loop without loading the renderer. */
 export class TuiController extends TurnLayer {
-  /** Return current state with a new transcript array, masking supplied known secrets in entry text. */
+  /** Return current state with a new transcript array, masking known secrets in displayed targets, results, and diff rows. */
   snapshot(): TuiSnapshot {
     const thinking = this.configEditor ? this.configEditor.settings.thinking : this.thinking;
     const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId, this.thinkingContext());
@@ -43,7 +39,10 @@ export class TuiController extends TurnLayer {
         : [entry]).map((entry) =>
         this.secrets.length === 0
           ? entry
-          : { ...entry, text: redactSecrets(entry.text, this.secrets), toolSummary: entry.toolSummary ? redactSecrets(entry.toolSummary, this.secrets) : undefined },
+          : { ...entry, text: redactSecrets(entry.text, this.secrets), toolSummary: entry.toolSummary ? redactSecrets(entry.toolSummary, this.secrets) : undefined,
+              resultSummary: entry.resultSummary ? redactSecrets(entry.resultSummary, this.secrets) : undefined,
+              diffRows: entry.diffRows?.map(row => ({ ...row, text: redactSecrets(row.text, this.secrets) })),
+            },
       ),
       sessionId: this.sessionId,
       branchId: this.session.activeBranchId,
