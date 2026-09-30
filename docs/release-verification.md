@@ -21,6 +21,9 @@ An initial `npm whoami` exited 1 with `ENEEDAUTH`. After maintainer login,
 the repeated check exited 0 and identified `chayapats`.
 `npm view schway --json` exited 1 with E404 and reported the package unpublished
 on 2022-04-24; this is not proof of publish permission.
+`npm profile get --json` subsequently exited 0 with `tfa: false`;
+publish 2FA readiness remains pending. The private profile response is retained
+in `npm-profile-preflight.json` outside Git.
 
 ### Offline preparation
 
