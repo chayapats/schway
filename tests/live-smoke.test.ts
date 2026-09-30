@@ -594,7 +594,7 @@ test("shared public policy refuses unsupported OpenAI and generic compatible thi
   expect(JSON.stringify(report)).not.toContain("PRIVATE_KEY");
 });
 
-test("reasoning catalog discovery shares the lane byte budget and deadline without starting inference", async () => {
+test("reasoning catalog discovery retains its separate byte budget and deadline without starting inference", async () => {
   const { smokeProtocolFixture } = await import("./fixtures/live-process.ts");
   for (const catalogMode of ["oversized", "hang"]) {
     const fixture = smokeProtocolFixture({ catalogMode });
@@ -609,4 +609,36 @@ test("reasoning catalog discovery shares the lane byte budget and deadline witho
       diagnostics: { modelAttemptsStarted: 0, httpRequestsStarted: 1, httpResponsesReceived: catalogMode === "oversized" ? 1 : 0 } });
     expect(JSON.stringify(report)).not.toMatch(/PRIVATE_|api\.x\.ai|schway-live-/);
   }
+});
+
+
+test("production-size Codex and OpenRouter discovery leaves both inference rounds their own byte budget", async () => {
+  const { smokeProtocolFixture } = await import("./fixtures/live-process.ts");
+  for (const [provider, catalogBytes, model] of [
+    ["codex", 522_290, "gpt-6-sol"],
+    ["compatible", 762_009, "meta/muse-spark-1.3-contributor"],
+  ] as const) {
+    const fixture = smokeProtocolFixture({ catalogBytes, inferenceBytes: 100_000 });
+    const report = await runLiveSmoke({ ...selection([provider]), timeoutMs: 2000,
+      models: { [provider]: model }, thinking: { [provider]: "medium" },
+      compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
+    }, { createStore: () => fixture.store, fetch: fixture.fetch });
+    expect(report.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
+      diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
+        httpRequestsStarted: 3, httpResponsesReceived: 3 } });
+    expect(fixture.requests).toHaveLength(3);
+  }
+});
+
+
+test("large discovery preserves cumulative inference limits across rounds", async () => {
+  const { smokeProtocolFixture } = await import("./fixtures/live-process.ts");
+  const fixture = smokeProtocolFixture({ catalogBytes: 762_009, inferenceBytes: 150_000 });
+  const report = await runLiveSmoke({ ...selection(["compatible"]), timeoutMs: 2000,
+    models: { compatible: "meta/muse-spark-1.3-contributor" }, thinking: { compatible: "medium" },
+    compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
+  }, { fetch: fixture.fetch });
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit", toolRoundTrip: false,
+    diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 1, toolResultsCompleted: 1,
+      httpRequestsStarted: 3, httpResponsesReceived: 3 } });
 });

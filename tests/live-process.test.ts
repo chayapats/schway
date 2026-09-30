@@ -510,3 +510,27 @@ test("installed thinking option reaches the production worker and unsupported co
     }
   } finally { server.stop(true); }
 }, 15_000);
+
+
+test("supervised discovery accepts production-size catalogs before both inference rounds", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    for (const [provider, catalogBytes, model] of [
+      ["codex", 522_290, "gpt-6-sol"],
+      ["compatible", 762_009, "meta/muse-spark-1.3-contributor"],
+    ] as const) {
+      const requestFile = join(temp, `${provider}.json`);
+      const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: 4000,
+        models: { [provider]: model }, thinking: { [provider]: "medium" },
+        compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
+        env: { SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
+          SCHWAY_FIXTURE_CATALOG_BYTES: String(catalogBytes) },
+      }, { workerFile: fixture });
+      expect(report.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
+        diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
+          httpRequestsStarted: 3, httpResponsesReceived: 3 } });
+      const requests = JSON.parse(await readFile(requestFile, "utf8")) as Array<{ body?: Record<string, unknown> }>;
+      expect(requests.filter(request => request.body).map(request => request.body?.model)).toEqual([model, model]);
+    }
+  });
+});

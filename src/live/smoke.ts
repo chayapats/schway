@@ -14,7 +14,7 @@ import { readTool, type ReadInput } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
-import { boundedSmokeFetch } from "./transport.ts";
+import { boundedSmokeFetch, MAX_SMOKE_DISCOVERY_BYTES } from "./transport.ts";
 import type { SmokeDiagnostics, SmokeProgress } from "./diagnostics.ts";
 import { prepareSmokeThinking } from "./thinking.ts";
 
@@ -165,13 +165,17 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     }
     // Bound selected production adapters' SSE response bytes before their parsers
     // can accumulate streamed arguments without emitting normalized model events.
-    const fetchFn = boundedSmokeFetch({ signal, fetch: deps.fetch, onLimit: () => { outputLimit = true; controller.abort(); }, onProgress: event => {
-      if (event.type === "request") diagnostics.httpRequestsStarted++;
-      else { diagnostics.httpResponsesReceived++; diagnostics.lastHttpStatus = event.status; }
-      checkpoint();
-    } });
+    const transportOptions = { signal, fetch: deps.fetch, onLimit: () => { outputLimit = true; controller.abort(); },
+      onProgress: (event: { type: "request" } | { type: "response"; status: number }) => {
+        if (event.type === "request") diagnostics.httpRequestsStarted++;
+        else { diagnostics.httpResponsesReceived++; diagnostics.lastHttpStatus = event.status; }
+        checkpoint();
+      } };
+    const fetchFn = boundedSmokeFetch(transportOptions);
+    // Catalog metadata must not consume the two inference rounds' cumulative SSE budget.
+    const discoveryFetch = boundedSmokeFetch({ ...transportOptions, maxBytes: MAX_SMOKE_DISCOVERY_BYTES });
     input.thinking = result.thinking;
-    const thinkingError = await awaitSetup(prepareSmokeThinking(input, fetchFn, signal), signal);
+    const thinkingError = await awaitSetup(prepareSmokeThinking(input, discoveryFetch, signal), signal);
     if (signal.aborted) throw Error("setup aborted");
     if (thinkingError) { result.status = "failed_runner"; result.reason = thinkingError; return; }
     const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input, fetchFn)))(input), signal);
