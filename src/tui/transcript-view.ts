@@ -6,7 +6,7 @@ import { easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./mot
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 import { mixColor, tint, type TuiTheme } from "./theme.ts";
 import { browserUrl, linkify } from "./links.ts";
-import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
+import { boundDisplay, formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { DEFAULT_INLINE_DIFF_LINES } from "../config/config.ts";
 
 /** Left-edge bar used by user and error blocks; only the vertical glyph is ever drawn. */
@@ -276,7 +276,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const inline = hasInlineDiff(entry, inlineDiffLines);
-        const detail = inline ? displayText(formatDiffRows(entry.diffRows!)) : tool.detail;
+        const detail = inline ? boundDisplay(displayText(formatDiffRows(entry.diffRows!)).split("\n").map(line => line.slice(0, 300)).join("\n")) : tool.detail;
         if (status === "running" && entry.toolStatus === "success" && motion.mode === "full") flashStart = motion.now();
         status = entry.toolStatus;
         focusedRow = !!focusedTool;

@@ -2,7 +2,7 @@ import { beforeAll, afterAll, afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { BoxRenderable, RGBA, TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView, type ConversationViewOptions } from "../src/tui/view.ts";
-import { TuiController, buildTranscriptFromSession, type CodexLoginRunner, type TuiControllerOptions } from "../src/tui/controller.ts";
+import { TuiController, buildTranscriptFromSession, MAX_TOOL_DISPLAY_CHARS, type CodexLoginRunner, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -630,6 +630,46 @@ test("effective inline limit changes redraw existing rows and secrets are redact
     const row = ui.renderer.root.findDescendantById(`message-${entry.id}`)!;
     expect((row.getChildren()[0] as TextRenderable).plainText).not.toMatch(/[▸▾]/);
     expect(ui.captureCharFrame()).toContain("2 │-old ***");
+  });
+});
+
+test("inline edits and created writes bound rendered text without changing raw counts or toggle eligibility", async () => {
+  await withTempDir(async root => {
+    const longLine = `${"x".repeat(290)}secret-sentinel${"x".repeat(5000)}RAWTAIL`;
+    for (const variant of ["edit", "write", "high-limit"] as const) {
+      const highLimit = variant === "high-limit";
+      const content = highLimit ? Array.from({ length: 30 }, (_, i) => `${String(i + 1).padStart(2, "0")}:${"x".repeat(100)}`).join("\n") : longLine;
+      const editor = await loadConfigEditor({ home: join(root, variant), workspaceRoot: root, cli: { ui: { inlineDiffLines: highLimit ? 100 : 12 } } });
+      const ui = await setup(80, 30, {}, undefined, { configEditor: editor });
+      const name = variant === "edit" ? "edit" : "write";
+      ui.session.append({ type: "assistant", id: variant, content: [{ type: "tool_call", id: variant, name, arguments: { path: "file.ts", content } }] });
+      ui.controller.applyEvent({ type: "tool.started", toolCallId: variant, name });
+      ui.controller.applyEvent({ type: "tool.finished", toolCallId: variant, name, status: "success", content: "Changed file.ts", details: name === "edit"
+        ? { path: "file.ts", hunks: [{ startLine: 1, oldText: "old", newText: content }] }
+        : { created: true, lineCount: highLimit ? 30 : 1 } });
+      await settle(ui);
+      const entry = ui.controller.snapshot().transcript.find(item => item.toolCallId === variant)!;
+      expect(entry.resultSummary).toBe(name === "edit" ? "+1 −1" : highLimit ? "new · 30 lines" : "new · 1 line");
+      expect(entry.diffRows).toHaveLength(name === "edit" ? 2 : highLimit ? 30 : 1);
+      const row = ui.renderer.root.findDescendantById(`message-${entry.id}`)!;
+      const body = row.getChildren()[1]!.getChildren()[0] as TextRenderable;
+      const shown = body.plainText.split("\n").map(line => line.trimEnd()).join("\n");
+      expect((row.getChildren()[0] as TextRenderable).plainText).not.toMatch(/[▸▾]/);
+      expect(shown).not.toContain("RAWTAIL");
+      expect(shown).not.toContain("secret-");
+      if (highLimit) {
+        expect(shown).toContain("… truncated. Full output is in the session file.");
+        expect(shown.length).toBeLessThanOrEqual(MAX_TOOL_DISPLAY_CHARS + "\n… truncated. Full output is in the session file.".length);
+        expect(shown).not.toContain("30 │+");
+      } else {
+        expect(shown).toContain("***");
+        expect(shown.split("\n").every(line => line.length <= 300)).toBe(true);
+        expect(entry.diffRows!.at(-1)!.text).toContain("RAWTAIL");
+      }
+      ui.mockInput.pressKey("o", { ctrl: true }); await settle(ui);
+      expect(body.plainText.split("\n").map(line => line.trimEnd()).join("\n")).toBe(shown);
+      expect((row.getChildren()[0] as TextRenderable).plainText).not.toMatch(/[▸▾]/);
+    }
   });
 });
 
