@@ -147,7 +147,7 @@ export abstract class SettingsLayer extends ChangesLayer {
     }, undefined, false, key === "appearance");
   }
 
-  /** Publish staged settings only after commit, optionally emitting the success notice. */
+  /** Commit staged settings before publishing the runtime and optional success notice. */
   protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate = false, appearanceOnly = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }

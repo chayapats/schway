@@ -336,6 +336,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     refresh();
   }
 
+  /** Resolve theme background and foreground colors for each status tone. */
   function pillColors(tone: StatusTone): { bg: string; fg: string } {
     if (tone === "active") return { bg: theme.accent, fg: theme.onFill };
     if (tone === "stopping") return { bg: theme.warning, fg: theme.onFill };
@@ -355,7 +356,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
   }
 
-  /** Status bar: the state pill is the loudest block; model chips follow and the context meter sits at the right. */
+  /** Render the status pill within terminal width, adding model details only after connection. */
   function paintFooter(at: number) {
     const columns = Math.max(1, renderer.width);
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(` ${fitLine(footerParts.override, columns - 2)}`)]); return; }
