@@ -2,6 +2,130 @@
 
 ## 0.4.0 release (2026-09-30)
 
+**Verdict: 0.4.0 published.**
+
+Published release commit **`R = bcb437781398ddf4ec98e0541042ab353a46029c`**,
+annotated tag **`v0.4.0`**, npm version **`schway@0.4.0`**, and stable dist-tag
+**`latest: 0.4.0`**. Release preparation was merged through
+[PR #186](https://github.com/chayapats/schway/pull/186); the release includes the
+subsequent smoke fixes in [PR #191](https://github.com/chayapats/schway/pull/191)
+and [PR #192](https://github.com/chayapats/schway/pull/192). `R` is the actual
+main merge commit of #192, after both original release blockers were resolved.
+
+The earlier stopped attempt is retained below. Raw evidence for this successful
+attempt is private, outside Git, in
+`~/schway-release-evidence/0.4.0/release-resumed-1/`.
+
+### Preconditions and offline verification
+
+On 2026-09-30, all native blockers of #138 were closed, including #129–#137,
+#166, #185, #188 and #189; their required changes were present in `R`.
+The milestone query listed only #138. Severity labels were updated idempotently
+with the checklist descriptions, and the truth-pass defects #173, #174, #176
+and #179 each carried P2. Open P0/P1 queries returned empty lists at
+**07:29:19 UTC** and again at **07:39:47 UTC**.
+
+`npm whoami` exited 0 as the maintainer account. Publish 2FA was confirmed as
+`pending: null`, `mode: "auth-and-writes"`. Registry preflight confirmed that
+0.4.0 was unused. The existing 0.4.0 version, example/README `^0.4.0` peer
+ranges, dynamic version tests, shipped changelog and generic
+[release checklist](releasing.md) were retained.
+
+On the clean `R` checkout, **`bun install --frozen-lockfile`,
+`bun run typecheck` and `bun test` all exited 0**.
+**1,466 tests passed across 100 files; 0 failures**, in 110.25 seconds.
+Both #192 Travis checks and its CodeRabbit review passed.
+No full live evals were required for this ordinary minor release.
+
+Machine: **Linux 7.2.5-3-omarchy; Bun 1.4.2; npm 11.19.1**.
+
+### Live smoke on the published commit
+
+After the offline checks, the actual CLI ran all five lanes on clean `R`,
+using the maintainer-selected models and thinking levels, a 120,000 ms
+per-lane timeout, and the compatible endpoint host `openrouter.ai`.
+**Exit 0; aggregate `passed`.** Every lane verified the actual sentinel tool
+round trip, completed two model rounds and one tool result, and recorded zero
+provider retries. No lane was skipped or pending.
+
+API keys were read from the OS secure store into a temporary child environment;
+keys were not written to files or command arguments. Dates below are UTC and
+come from this attempt's `live-smoke.json`; every revision equals `R`.
+
+| Route | Provider | Model | Thinking | Auth source | Status | Reason | Tested at (UTC) | Revision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI API key | `openai-api-key` | `gpt-6-luna` | high | env | passed | verified | 2026-09-30T07:28:45.445Z | `bcb437781398ddf4ec98e0541042ab353a46029c` |
+| xAI API key | `xai-api-key` | `grok-4.7` | medium | env | passed | verified | 2026-09-30T07:28:45.445Z | `bcb437781398ddf4ec98e0541042ab353a46029c` |
+| Compatible (OpenRouter) | `compatible` | `meta/muse-spark-1.3-contributor` | medium | env | passed | verified | 2026-09-30T07:28:45.445Z | `bcb437781398ddf4ec98e0541042ab353a46029c` |
+| ChatGPT subscription | `codex` | `gpt-6-sol` | medium | stored-subscription | passed | verified | 2026-09-30T07:28:45.445Z | `bcb437781398ddf4ec98e0541042ab353a46029c` |
+| Grok subscription | `grok` | `grok-4.7` | medium | stored-subscription | passed | verified | 2026-09-30T07:28:45.445Z | `bcb437781398ddf4ec98e0541042ab353a46029c` |
+
+The **USD 1.50 cumulative limit per API key** was retained across prior calls
+and this attempt; no fresh allowance was assumed. The private spend plan
+records current published prices and conservative planning estimates.
+This attempt made one all-lane smoke run and one bounded compatible install
+turn, with no further paid probes or full evals. Smoke reports do not establish
+exact billed cost; no exact spend is claimed.
+
+### Publish, registry and tag
+
+From clean `R`, `npm pack --dry-run` exited 0 and listed 144 files, including
+`bin/schway`, `src/`, examples, declared docs, README, LICENSE and CHANGELOG.
+It excluded `tests/`, `.scratch/`, `docs/releasing.md` and this report.
+
+`npm publish --access public` exited **0** after the maintainer completed npm's
+web 2FA. npm normalized the metadata's `./bin/schway` to `bin/schway`;
+the executable mapping remained present and the installed CLI worked.
+The publish request returned HTTP 202; initial registry reads returned E404
+and showed a temporary `0.0.0-stage` placeholder. The registry subsequently
+exposed 0.4.0 (publication timestamp **2026-09-30T07:33:26.145Z**);
+repeated `npm view` checks then exited 0 and confirmed version 0.4.0 and
+`latest: 0.4.0`.
+
+**Process deviation:** the annotated tag was created and pushed before the
+registry availability check completed. The tag was retained, then verified
+locally and on the remote to point to `R`. Registry installation was held
+until version/latest verification succeeded.
+
+The registry did not supply `gitHead`. Instead, every one of the **144 published
+files matched the clean release tree byte for byte**, and the registry tarball
+integrity matched `npm pack --dry-run`. This confirms the installed artifact
+matches `R` without asserting an unavailable registry SHA.
+
+### Registry installation with a clean HOME
+
+The exact public registry version was installed outside the checkout using
+`npm install -g --prefix <temporary-prefix> --no-audit --no-fund schway@0.4.0`.
+Checks used an empty temporary HOME and a separate initialized Git workspace.
+No production login/logout or credential changes were made.
+
+| Check | Exit | Verified result |
+| --- | --- | --- |
+| Registry install | 0 | `schway@0.4.0` installed |
+| `--help` | 0 | Installed executable works |
+| `doctor --json` | 0 | `.version` is `0.4.0` |
+| `-p "hello"`, no configured model | 1 | Exact `No model configured. Pass --provider and --model, or set them in config.` message |
+| Compatible `Reply with the word OK.` turn | 0 | `agent.finished.reason: completed`; exactly one session JSONL |
+| Removed Anthropic configuration | 1 | Exact `ANTHROPIC_REMOVED_MESSAGE` |
+
+The compatible turn used the selected OpenRouter model with medium thinking,
+`--max-output 256` and `--max-turns 1`. The initial verification helper
+unnecessarily required doctor exit 0 while stripping the DBus environment;
+it reported the correct version but an unavailable secure store. That helper
+result was preserved, and the doctor check was repeated with the inherited
+environment and temporary HOME specified by the checklist, before any paid
+install turn. The final results above passed.
+
+Private artifacts include `preconditions.json`, `offline-results.json`,
+`install.log`, `typecheck.log`, `test.log`, `live-smoke.json`,
+`live-smoke-command.json`, `spend-plan.json`, `npm-pack-dry-run.json`,
+`npm-registry.json`, `registry-install-results.json`,
+`registry-install-initial-runner.json`, `registry-source-comparison.json`,
+`final-severity-check.json` and the installed CLI stdout/stderr records.
+
+
+## 0.4.0 stopped release attempt (2026-09-30)
+
 **Verdict: 0.4.0 not published; release stopped at live smoke.**
 
 Release commit `R = 273dfd9526d057f557d3788f198d17e1e83b20e6` was merged to
