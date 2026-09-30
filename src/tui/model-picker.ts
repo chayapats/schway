@@ -4,6 +4,22 @@ import { parseModelArgs } from "./commands.ts";
 import type { ModelAccess, ModelPickerAccess } from "./model-access.ts";
 import { createHash } from "node:crypto";
 
+/** Order real auth-route groups independently of connection state and the active model. */
+export const MODEL_PICKER_ROUTE_GROUPS = [
+  { provider: "openai", authRoute: "codex", label: "ChatGPT subscription" },
+  { provider: "xai", authRoute: "grok", label: "Grok subscription" },
+  { provider: "openai", authRoute: "api-key", label: "OpenAI API key" },
+  { provider: "xai", authRoute: "api-key", label: "xAI API key" },
+  { provider: "openai-compatible", authRoute: "provider", label: "OpenAI-compatible" },
+] as const;
+
+/** Format floored token counts with k or M suffixes and at most two decimal places for millions. */
+export function formatContextWindow(tokens: number): string {
+  if (tokens < 1_000) return String(tokens);
+  if (tokens < 1_000_000) return `${Math.floor(tokens / 1_000)}k`;
+  return `${Math.floor(tokens / 10_000) / 100}M`;
+}
+
 /** One selectable known or typed model with effective budgets and active state. */
 export interface ModelPickerEntry {
   /** Stable route, endpoint/profile and model identity across sorting and refreshes. */
