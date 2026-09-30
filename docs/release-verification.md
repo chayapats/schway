@@ -21,9 +21,9 @@ An initial `npm whoami` exited 1 with `ENEEDAUTH`. After maintainer login,
 the repeated check exited 0 and identified `chayapats`.
 `npm view schway --json` exited 1 with E404 and reported the package unpublished
 on 2022-04-24; this is not proof of publish permission.
-`npm profile get --json` subsequently exited 0 with `tfa: false`;
-publish 2FA readiness remains pending. The private profile response is retained
-in `npm-profile-preflight.json` outside Git.
+`npm profile get --json` initially exited 0 with `tfa: false`. The operator
+then enabled 2FA; a repeated read confirmed `pending: null` and
+`mode: "auth-and-writes"`. Private profile responses are retained outside Git.
 
 ### Offline preparation
 
@@ -50,17 +50,17 @@ tests passed. Integration and actual live verification remain pending.
 
 Initial secure-store presence checks found OpenAI and OpenRouter API keys and
 a Codex login; xAI API-key and Grok subscription identities were absent.
-The operator subsequently completed Grok login. Its account catalog advertised
-`grok-4.7` with medium thinking, which the operator selected. xAI API-key access
-remains pending. Credential presence and model discovery do not verify live
-inference. No stored credential value was printed.
+The operator subsequently completed Grok login and saved an xAI API key.
+Both account catalogs advertised `grok-4.7` with medium thinking, which the
+operator selected for both routes. Credential presence and model discovery do
+not verify live inference. No stored credential value was printed.
 
 | Route | Provider | Model | Auth source | Status | Reason | Tested at | Revision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ChatGPT subscription | — | — | — | not run | awaiting release commit and smoke settings | — | — |
 | Grok subscription | — | — | — | not run | awaiting release commit and thinking support | — | — |
 | OpenAI API key | — | — | — | not run | awaiting release commit and smoke settings | — | — |
-| xAI API key | — | — | — | not run | missing local API key | — | — |
+| xAI API key | — | — | — | not run | awaiting release commit and thinking support | — | — |
 | Compatible endpoint | — | — | — | not run | awaiting release commit and smoke settings | — | — |
 
 These are pending gates, not smoke-report results. No lane has passed at `R`.
