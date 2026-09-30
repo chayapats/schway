@@ -165,11 +165,11 @@ test("notice between streamed table and code deltas does not permanently split M
     ui.controller.notice("Busy: /x was not run.");
     expect(ui.controller.snapshot().streamingAssistantId).toBe(active);
     ui.resize(60, 60);
-    await frame(ui, "notice-appended-110");
+    await frame(ui, "notice-appended-60");
     for (let index = 1; index < pieces.length; index++) {
       gated.gates[index - 1]!.resolve();
       await gated.delivered[index]!.promise;
-      await frame(ui, `notice-delta-${index}-110`);
+      await frame(ui, `notice-delta-${index}-60`);
     }
     gated.gates.at(-1)!.resolve();
     await turn;
@@ -320,4 +320,20 @@ test("cancelled, failed and overflow-abandoned code previews stay finalized acro
       expect(ui.controller.snapshot().streamingAssistantId).toBeUndefined();
     }
   }
+});
+
+test("searching a tall table after resize lands on the matching cell", async () => {
+  const table = ["| Item | Detail |", "| --- | --- |", ...Array.from({ length: 55 }, (_, index) =>
+    `| row-${index} | ${index === 43 ? "resize-cell-target" : `ordinary-${index} words in a wrapped cell`} |`)].join("\n");
+  const ui = await setup(110, 18, createScriptedModel({ text: table }));
+  await ui.controller.submit("Show table");
+  await settle(ui);
+  ui.resize(50, 18); await settle(ui);
+  expect(ui.captureCharFrame()).not.toContain("resize-cell-target");
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("resize-cell-target");
+  ui.mockInput.pressEnter(); await settle(ui);
+  expect(ui.captureCharFrame()).toContain("resize-cell-target");
+  expect(ui.captureCharFrame()).toContain("row-43");
+  expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
 });
