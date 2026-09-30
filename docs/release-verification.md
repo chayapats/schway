@@ -25,7 +25,8 @@ reported E404 for the unpublished package; publish permission was not exercised.
 The operator required explicit smoke thinking support. It was implemented in
 #185 and merged through [PR #187](https://github.com/chayapats/schway/pull/187)
 as `9b488d1900622df0f87be5affdc4b9493bbdb404`. Protocol fixtures and both CI checks
-passed; the live catalog-size failures below were not covered by those fixtures.
+passed; they did not establish successful discovery with the real production
+catalog sizes measured below.
 
 On a clean checkout of `R`, `bun install --frozen-lockfile`, `bun run typecheck`
 and `bun test` all exited 0. **1,461 tests passed across 100 files, 0 failures.**
