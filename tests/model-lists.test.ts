@@ -234,11 +234,11 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
       await settle();
       for (let i = 0; i < 20; i++) {
         const chooser = controller.snapshot().loginChooser;
-        if (chooser?.choices[chooser.selectedIndex] === "OpenAI API key") break;
+        if (chooser?.selectedId === "openai") break;
         terminal.mockInput.pressArrow("down");
       }
       const chooser = controller.snapshot().loginChooser!;
-      expect(chooser.choices[chooser.selectedIndex]).toBe("OpenAI API key");
+      expect(chooser.selectedId).toBe("openai");
       terminal.mockInput.pressEnter();
       await settle();
       expect(controller.snapshot().credentialEntry).toBeDefined();

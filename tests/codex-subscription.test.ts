@@ -1097,11 +1097,9 @@ test("interactive sign-in chooser offers browser, device, callback and API-key a
       },
     });
     expect(await controller.login("")).toBe(true);
-    expect(controller.snapshot().loginChooser?.choices).toEqual(expect.arrayContaining([
-      expect.stringContaining("Browser"), expect.stringContaining("Device"),
-      expect.stringContaining("callback"), expect.stringContaining("OpenAI API key"),
-    ]));
-    controller.moveLoginChooser(1);
+    expect(controller.snapshot().loginChooser?.rows.filter(row => row.kind === "choice").map(row => row.label)).toEqual(["ChatGPT", "Grok", "OpenAI", "xAI", "OpenAI-compatible"]);
+    controller.openLoginMoreOptions();
+    expect(controller.snapshot().loginChooser?.rows.map(row => row.label)).toEqual(["Device approval", "Paste browser callback"]);
     expect(await controller.selectLoginChoice()).toBe(false);
     expect(methods).toEqual(["device"]);
     controller.dispose();
@@ -1127,7 +1125,7 @@ test("browser opener failure can switch directly to device approval without comm
     try {
       const browser = controller.login("codex");
       await Bun.sleep(0);
-      expect(controller.snapshot().loginChooser?.choices[controller.snapshot().loginChooser!.selectedIndex]).toContain("Device");
+      expect(controller.snapshot().loginChooser).toMatchObject({ level: "chatgpt", selectedId: "chatgpt-device" });
       expect(await controller.selectLoginChoice()).toBe(false);
       expect(await browser).toBe(false);
       expect(calls).toEqual(["browser", "device"]);

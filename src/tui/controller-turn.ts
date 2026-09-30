@@ -18,16 +18,36 @@ export abstract class TurnLayer extends CompactionLayer {
   cancel(): void {
     this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
-    if (this.loginCallbackValue !== undefined) { this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false; this.notice("Callback entry cancelled; no credential was changed."); return; }
-    if (this.loginAbort) { this.loginChooserIndex = undefined; if (!this.loginApprovalData) this.pickerReturn = undefined; this.recoveryRepair = false; this.loginAbort.abort(); return; }
-    if (this.loginChooserIndex !== undefined) { this.loginChooserIndex = undefined; this.recoveryRepair = false; return; }
+    if (this.loginCallbackValue !== undefined) {
+      this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false;
+      this.restoreLoginOrigin();
+      this.notice("Callback entry cancelled; no credential was changed."); return;
+    }
+    if (this.loginAbort && !this.loginAbort.signal.aborted) {
+      if (!this.loginApprovalData) this.pickerReturn = undefined;
+      this.recoveryRepair = false;
+      this.restoreLoginOrigin();
+      this.loginAbort.abort(); return;
+    }
+    if (this.loginChooserState) {
+      this.loginChooserState = this.loginChooserState.level === "main" ? undefined : { level: "main", selectedId: this.loginChooserState.level };
+      this.recoveryRepair = false; return;
+    }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
+    if (this.endpointUrlEntry) {
+      this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined;
+      this.restoreLoginOrigin(); this.recoveryRepair = false; return;
+    }
     if (this.credentialEntry) {
       this.credentialEntry.cancel();
       this.credentialEntry = undefined;
       this.credentialTarget = undefined;
       this.pickerReturn = undefined;
       this.recoveryRepair = false;
+      if (this.endpointInputUrl !== undefined) {
+        this.endpointUrlEntry = { value: this.endpointInputUrl };
+        this.endpointInputUrl = undefined;
+      } else this.restoreLoginOrigin();
       this.notice("Credential entry cancelled; nothing saved.");
       return;
     }
@@ -516,7 +536,7 @@ export abstract class TurnLayer extends CompactionLayer {
   protected currentRecovery(): TuiRecovery | undefined {
     const recovery = this.recovery;
     if (recovery && this.recoveryRepair && this.recoveryIdentityChanged(recovery) && this.model &&
-      !this.modelPicker && this.loginChooserIndex === undefined && !this.credentialMutation) {
+      !this.modelPicker && this.loginChooserState === undefined && !this.credentialMutation) {
       recovery.model = this.model;
       recovery.provider = this.provider;
       recovery.modelId = this.modelId;

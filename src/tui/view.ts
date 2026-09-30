@@ -507,7 +507,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         latest();
         if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; }
       }
-      const externalPanel = snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.changeReview ? "review" : "";
+      const externalPanel = snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.changeReview ? "review" : "";
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : "");
@@ -528,16 +528,21 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (sessionChanged && !nextPanel) { setDraft(savedDraft); editor.cursorOffset = savedDraftCursor; }
       if (!sessionChanged && recoveredText !== undefined && !nextPanel) setDraft(recoveredText);
-      const secretSurface = !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser;
+      const secretSurface = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser;
       observeDraft(panelMode ? savedDraft : editor.plainText, secretSurface);
       draftStatus.visible = !!durableDraft?.notice;
       draftStatus.content = fitLine(durableDraft?.notice ?? "", width);
-      editor.visible = !snapshot.changeReview && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
-      credential.visible = !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
+      editor.visible = !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
+      credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
       if (snapshot.changeReview) { editor.blur(); }
-      else if (snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
+      else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
         editor.blur();
-        credential.content = snapshot.credentialEntry
+        credential.content = snapshot.endpointUrlEntry
+          ? new StyledText([
+            fg(snapshot.endpointUrlEntry.value ? theme.text : theme.muted)(safe(`Endpoint URL · ${snapshot.endpointUrlEntry.value || "http://localhost:8787/v1"}`)),
+            ...(snapshot.endpointUrlEntry.error ? [fg(theme.error)(safe(`\n${snapshot.endpointUrlEntry.error}`))] : []),
+          ])
+          : snapshot.credentialEntry
           ? safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter saves · Esc cancels`)
           : snapshot.loginCallbackEntry
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
@@ -671,7 +676,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else if (completionId) completionIndex = available.findIndex(entry => entry.id === completionId && entry.available);
       else completionIndex = -1;
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
-      const maxRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 3) - 2));
+      const maxRows = Math.max(1, Math.min(snapshot.loginChooser ? 8 : 6, Math.floor(renderer.height / 3) - 2));
       const legacyDevice = snapshot.loginApproval && !snapshot.loginApprovalData ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
       const deviceApproval = snapshot.loginApprovalData?.kind === "device"
         ? { address: snapshot.loginApprovalData.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, ""), code: snapshot.loginApprovalData.userCode }
@@ -681,7 +686,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ? (!snapshot.loginApprovalData && renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval!.code)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval!.address)/(width - 2))
         : snapshot.loginApprovalData ? Math.max(1, Math.ceil(Bun.stringWidth(snapshot.loginApproval ?? "")/(width - 2))) : 2;
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
-      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.choices.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
+      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
       const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
@@ -722,13 +727,25 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           if ((panel.preview || panel.error) && !compact) preferenceScrollToEnd = true;
           else { preferenceScrollToEnd = false; preferencePanel.scrollTo(0); }
         } else if (snapshot.loginChooser) {
-          textRow(picker, fitLine("Sign in · ↑/↓ select · Enter continue · Esc back", width - 2), theme.accent);
-          const choices = snapshot.loginChooser.choices;
-          const start = Math.max(0, Math.min(snapshot.loginChooser.selectedIndex - Math.floor(maxRows / 2), choices.length - maxRows));
-          choices.slice(start, start + maxRows).forEach((choice, offset) => {
-            const index = start + offset;
-            textRow(picker, fitLine(`${index === snapshot.loginChooser!.selectedIndex ? "›" : " "} ${choice}`, width - 2), index === snapshot.loginChooser!.selectedIndex ? theme.accent : theme.text);
-          });
+          const panel = snapshot.loginChooser;
+          const title = panel.level === "main" ? "Sign in" : `${panel.level === "chatgpt" ? "ChatGPT" : "Grok"} · more options`;
+          textRow(picker, fitLine(title, width - 2), theme.accent);
+          const selectedIndex = panel.rows.findIndex(row => row.kind === "choice" && row.id === panel.selectedId);
+          const start = Math.max(0, Math.min(selectedIndex - Math.floor(maxRows / 2), panel.rows.length - maxRows));
+          const labelWidth = Math.max(...panel.rows.map(row => row.kind === "choice" ? row.label.length : 0));
+          const room = width - 2;
+          // Hide the details column together when its widest entry cannot fit the current level.
+          const detailsFit = panel.rows.every(row => row.kind !== "choice" || !row.detail || 4 + 2 + labelWidth + 2 + row.detail.length <= room);
+          for (const row of panel.rows.slice(start, start + maxRows)) {
+            if (row.kind === "group") { textRow(picker, `  ${fitLine(row.label, room - 2)}`, theme.muted); continue; }
+            const selected = row.id === panel.selectedId;
+            const prefix = `    ${selected ? "› " : "  "}`;
+            const chunks = [fg(selected ? theme.accent : theme.text)(`${prefix}${fitLine(row.label, room - prefix.length)}`)];
+            if (detailsFit && row.detail) chunks.push(fg(theme.muted)(`${" ".repeat(labelWidth - row.label.length + 2)}${row.detail}`));
+            const item = textRow(picker, "");
+            item.content = new StyledText(chunks);
+            if (selected) item.bg = tint(theme, theme.accent);
+          }
         } else if (snapshot.loginApproval) {
           if (!snapshot.loginApprovalData && renderer.height >= 12) textRow(picker, "Complete ChatGPT approval · Esc cancels", theme.accent);
           if (splitApproval) {
@@ -819,7 +836,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.content = fittedHints(panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+      hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
       pickerWasVisible = picker.visible;
@@ -843,7 +860,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     const snapshot = controller.snapshot();
     if (snapshot.changeReview) return;
-    if (snapshot.readiness === "loading" || snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
+    if (snapshot.readiness === "loading" || snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
       void controller.selectLoginChoice().then(refresh, fail);
       return;
@@ -947,7 +964,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     // Any key skips the splash and still reaches the editor or the active panel.
     if (splash) { endSplash(); refresh(); }
     if (draftFrozen) { key.preventDefault(); key.stopPropagation(); return; }
-    if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().credentialEntry || controller.snapshot().loginCallbackEntry) return;
+    if (key.defaultPrevented || key.eventType === "release" || controller.snapshot().endpointUrlEntry || controller.snapshot().credentialEntry || controller.snapshot().loginCallbackEntry) return;
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
@@ -1134,6 +1151,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         handled(); return;
       }
     }
+    if (snapshot.loginChooser && name === "tab") { controller.openLoginMoreOptions(); handled(); return; }
     if (snapshot.branchTree && name === "tab") { controller.toggleBranchTreeAction(); setDraft(""); handled(); return; }
     if (name === "tab" && !key.shift) {
       const selected = completions()[completionIndex];
@@ -1215,7 +1233,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */
     freezeDraftForExit(): { task?: ExitDraftCheckpoint; saved: boolean; failed: boolean } {
       const snapshot = controller.snapshot();
-      observeDraft(panelMode ? savedDraft : editor.plainText, ["credential", "callback", "approval", "login"].includes(panelMode) || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser);
+      observeDraft(panelMode ? savedDraft : editor.plainText, ["endpoint", "credential", "callback", "approval", "login"].includes(panelMode) || !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser);
       draftFrozen = true;
       for (const state of durableDrafts.values()) { clearTimeout(state.timer); state.timer = undefined; }
       const state = durableDraft;
@@ -1229,7 +1247,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     /** Attempt one bounded-size synchronous checkpoint without waiting for model/tool settlement. */
     flushDraft() {
       const snapshot = controller.snapshot();
-      observeDraft(panelMode ? savedDraft : editor.plainText, ["credential", "callback", "approval", "login"].includes(panelMode) || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser);
+      observeDraft(panelMode ? savedDraft : editor.plainText, ["endpoint", "credential", "callback", "approval", "login"].includes(panelMode) || !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser);
       checkpointDraft();
       return { failed: !!durableDraft?.notice.match(/NOT saved|failed|unavailable/), saved: !!durableDraft?.store?.checkpoint && !durableDraft.dirty };
     },

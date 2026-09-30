@@ -20,7 +20,7 @@ export abstract class SettingsLayer extends ChangesLayer {
 
   /** Open bounded preferences without changing the composer or any configuration layer. */
   openPreferences(): boolean {
-    if (this.running || this.disposed || !this.configEditor || this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserIndex !== undefined || this.loginApproval !== undefined) return false;
+    if (this.running || this.disposed || !this.configEditor || this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserState !== undefined || this.loginApproval !== undefined) return false;
     this.closeModelPicker();
     this.preferences = { scope: "session", selectedIndex: 0, choiceIndex: 0, rows: preferenceRows(this.configEditor, "session", this.secrets, this.appearanceEnvironment) };
     return true;

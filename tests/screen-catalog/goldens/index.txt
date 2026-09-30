@@ -1,5 +1,9 @@
 first-run
 sign-in-chooser
+chatgpt-more-options
+grok-more-options
+endpoint-url-empty
+endpoint-url-error
 subscription-sign-in
 grok-browser-approval
 grok-device-approval

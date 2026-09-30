@@ -149,14 +149,14 @@ void (async () => {
     terminal.mockInput.pressArrow("left");
     const cursor = editor.cursorOffset;
     terminal.mockInput.pressKey("l", { meta: true });
-    await settle(() => screenIncludes("OpenAI API key"), "sign-in choices");
-    assert(terminal.captureCharFrame().includes("OpenAI API key"), "keyboard connect unavailable");
+    await settle(() => screenIncludes("Subscription"), "sign-in choices");
+    assert(terminal.captureCharFrame().includes("Subscription"), "keyboard connect unavailable");
     terminal.mockInput.pressEscape();
-    await settle(() => editor.focused && editor.plainText === draft && editor.cursorOffset === cursor && !screenIncludes("Sign in ·"), "cancelled setup");
+    await settle(() => editor.focused && editor.plainText === draft && editor.cursorOffset === cursor && !screenIncludes("Subscription"), "cancelled setup");
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "cancel lost draft/cursor");
     terminal.mockInput.pressKey("l", { meta: true });
-    await settle(() => screenIncludes("OpenAI API key"), "reopened sign-in choices");
-    for (let i = 0; i < 5; i++) terminal.mockInput.pressArrow("down");
+    await settle(() => screenIncludes("Subscription"), "reopened sign-in choices");
+    while (!/^\\s*› OpenAI\\s*$/m.test(terminal.captureCharFrame())) { terminal.mockInput.pressArrow("down"); await terminal.flush(); }
     terminal.mockInput.pressEnter();
     await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");

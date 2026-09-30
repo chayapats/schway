@@ -88,10 +88,14 @@ test("credential surfaces suppress ordinary pending text, masked keys and callba
     expect(await artifacts(home)).toBe("");
     ui.controller.cancel(); ui.view.refresh();
     await ui.controller.login(""); ui.view.refresh();
-    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter();
+    ui.mockInput.pressTab();
+    while (ui.controller.snapshot().loginChooser!.selectedId !== "chatgpt-callback") ui.mockInput.pressArrow("down");
+    ui.mockInput.pressEnter();
     await ui.mockInput.pasteBracketedText("callback-masked-sentinel"); await idle(ui);
     expect(ui.controller.snapshot().loginCallbackEntry).toBeDefined();
     expect(await artifacts(home)).not.toContain("sentinel");
+    ui.controller.cancel(); ui.view.refresh();
+    ui.controller.cancel(); ui.view.refresh();
     ui.controller.cancel(); ui.view.refresh();
     ui.editor.setText("/login codex --code http://localhost/auth/callback?code=callback-sentinel&state=nonce"); await idle(ui);
     ui.view.flushDraft();
