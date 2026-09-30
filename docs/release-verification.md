@@ -863,6 +863,10 @@ No real macOS filesystem run is claimed by the Linux fixtures.
 
 Moved from `configuration.md`; the section names below identify each passage’s original location.
 
+#### Interactive models and configuration
+
+The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider. These interfaces support deterministic controller/configuration tests without loading OpenTUI or using paid model APIs.
+
 #### Remembering and forgetting choices
 
 Deterministic coverage uses isolated credentials, scripted/protocol transports, fresh interactive/headless processes, and real renderer keyboard, paste and resize input (`bun test tests/interactive-memory.test.ts`). These checks do not establish live OAuth, provider service access or human terminal success; those remain part of the installed-journey verification gate.
