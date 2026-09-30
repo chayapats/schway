@@ -11,23 +11,28 @@ import { createSession } from "../src/session/session.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
-test("all account-visible Codex models precede other providers, including during search", () => {
+test("account model order stays fixed when the active model is in the middle, including search", () => {
   for (const query of ["", "model"]) {
     const entries = modelPickerEntries(query, "openai", "current-model", {}, {
-      subscriptionMode: true,
-      subscriptionModels: ["second-model", "current-model", "third-model"],
+      activeRoute: "codex", subscriptionModels: ["second-model", "current-model", "third-model"],
       profiles: { local: { baseUrl: "http://localhost:11434/v1", model: "local-model" } },
     });
-    expect(entries.slice(0, 3).map(entry => entry.modelId)).toEqual(["current-model", "second-model", "third-model"]);
-    expect(entries.slice(3).every(entry => entry.otherProvider)).toBe(true);
+    expect(entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex").map(entry => entry.modelId))
+      .toEqual(["second-model", "current-model", "third-model"]);
+    expect(entries.find(entry => entry.active)?.modelId).toBe("current-model");
   }
 });
 
-test("API-key model choices keep the current provider together before other providers", () => {
-  const entries = modelPickerEntries("", "openai", "gpt-5.4", {});
-  const firstOther = entries.findIndex(entry => entry.provider !== "openai");
-  expect(firstOther).toBeGreaterThan(1);
-  expect(entries.slice(firstOther).some(entry => entry.provider === "openai")).toBe(false);
+test("all five auth groups and compatible profiles keep fixed order regardless of active state", () => {
+  const entries = modelPickerEntries("", "xai", "api", {}, { activeRoute: "api-key", baseUrl: "http://localhost:8787/v1",
+    subscriptionModels: ["account"], grokModels: [{ id: "grok" }], apiModels: [{ id: "openai" }], xaiModels: [{ id: "api" }], compatibleModels: [{ id: "local" }],
+    profiles: { second: { baseUrl: "https://b.example/path?hidden=1", model: "b" }, first: { baseUrl: "https://user:password@a.example:8443/v1", model: "a" } },
+    access: { providers: { "openai-compatible": "No key required" }, profiles: { second: "No key required", first: "No key required" }, subscription: "ChatGPT", grok: "Grok", openaiApiKey: "API key", xaiApiKey: "API key" },
+  });
+  expect(entries.filter(entry => entry.kind === "header").map(entry => entry.groupLabel)).toEqual([
+    "ChatGPT subscription", "Grok subscription", "OpenAI API key", "xAI API key", "OpenAI-compatible · localhost:8787", "second · b.example", "first · a.example:8443",
+  ]);
+  expect(entries.find(entry => entry.active)?.modelId).toBe("api");
 });
 
 test("picker access follows credential precedence without exposing secrets", async () => {
@@ -49,7 +54,7 @@ test("picker access follows credential precedence without exposing secrets", asy
   expect(xaiRuntime.openaiApiKey).toBe("Login required");
 });
 
-test("ready profiles precede missing credentials and a current model with no login", async () => {
+test("unconnected routes have one sign-in row and profiles stay in config order", async () => {
   const store = fakeCredentialStore();
   const profiles = {
     local: { baseUrl: "http://localhost:11434/v1", auth: "none" as const },
@@ -60,8 +65,10 @@ test("ready profiles precede missing credentials and a current model with no log
   const access = await loadModelPickerAccess({ store, env: {}, profiles });
   expect(access.profiles).toEqual({ local: "No key required", saved: "API key", missing: "Login required" });
   const entries = modelPickerEntries("", "openai", "gpt-5.4", {}, { profiles, access });
-  expect(entries.slice(0, 2).map(entry => entry.profile)).toEqual(["local", "saved"]);
-  expect(entries.find(entry => entry.active)?.access).toBe("Login required");
+  expect(entries.filter(entry => entry.kind === "model").map(entry => entry.profile)).toEqual(["local", "saved"]);
+  expect(entries.filter(entry => entry.kind === "sign-in").map(entry => entry.groupLabel)).toEqual(["ChatGPT subscription", "Grok subscription", "OpenAI API key", "xAI API key", "missing · example.test"]);
+  expect(entries.filter(entry => entry.access === "Login required").every(entry => entry.kind === "sign-in")).toBe(true);
+  expect(entries.some(entry => entry.active)).toBe(false);
 });
 
 test("opening the picker discovers a saved Codex login from another provider and selects its transport", async () => {
@@ -80,8 +87,8 @@ test("opening the picker discovers a saved Codex login from another provider and
       expect(await controller.selectPickerModel()).toBe(false);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const entries = controller.snapshot().modelPicker!.entries;
-      expect(entries.slice(0, 2).map(entry => [entry.modelId, entry.access])).toEqual([["account-first", "ChatGPT"], ["account-second", "ChatGPT"]]);
-      expect(entries.filter(entry => entry.authRoute === "codex")).toHaveLength(2);
+      expect(entries.filter(entry => entry.kind === "model").slice(0, 2).map(entry => [entry.modelId, entry.access])).toEqual([["account-first", "ChatGPT"], ["account-second", "ChatGPT"]]);
+      expect(entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex")).toHaveLength(2);
       expect(entries.some(entry => entry.provider === "openai" && entry.authRoute === "api-key")).toBe(true);
       expect(await controller.selectPickerModel()).toBe(true);
       expect(configEditor.settings).toMatchObject({ provider: "openai", openaiAuth: "codex", model: "account-first" });
@@ -105,9 +112,9 @@ test("reopening the picker refreshes saved credentials and preserves search rank
       await store.set(credentialIdentity({ provider: "openai" }), "new-key");
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(controller.snapshot().modelPicker!.entries[0]).toMatchObject({ provider: "openai", access: "API key" });
+      expect(controller.snapshot().modelPicker!.entries.find(entry => entry.kind === "model" && entry.authRoute === "api-key" && entry.provider === "openai")).toMatchObject({ provider: "openai", access: "API key" });
       controller.searchModels("gpt");
-      expect(controller.snapshot().modelPicker!.entries[0]).toMatchObject({ provider: "openai", access: "API key" });
+      expect(controller.snapshot().modelPicker!.entries.find(entry => entry.kind === "model" && entry.authRoute === "api-key" && entry.provider === "openai")).toMatchObject({ provider: "openai", access: "API key" });
       expect(JSON.stringify(controller.snapshot())).not.toContain("new-key");
     } finally { controller.dispose(); }
   });
@@ -125,6 +132,6 @@ test("Grok picker models retain independent subscription access and active billi
   const access = await loadModelPickerAccess({ store, env: { XAI_API_KEY: "api-key" } }); expect(access.grok).toBe("Grok");
   const entries = modelPickerEntries("grok-4.7", "xai", "grok-4.7", {}, { access, activeRoute: "grok", xaiModels: [{ id: "grok-4.7" }], grokModels: [{ id: "grok-4.7", contextWindow: 777777, maxOutput: 12345 }] });
   expect(entries.filter(entry => entry.active).map(entry => entry.authRoute)).toEqual(["grok"]);
-  expect(entries.find(entry => entry.authRoute === "grok")).toMatchObject({ access: "Grok", contextWindow: 777777, maxOutput: 12345 });
+  expect(entries.find(entry => entry.kind === "model" && entry.authRoute === "grok")).toMatchObject({ access: "Grok", contextWindow: 777777, maxOutput: 12345 });
   expect(entries.find(entry => entry.authRoute === "api-key")?.access).toBe("API key");
 });

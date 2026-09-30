@@ -8,7 +8,7 @@ import type { Model } from "../model/model.ts";
 import { describeEffectiveThinking } from "../config/config.ts";
 import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
 import { filterXaiModels, type ListedModel } from "../model/model-list.ts";
-import { modelPickerEntries, modelPickerIdentity, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
+import { modelPickerEntries, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
 import { loadModelPickerAccess } from "./model-access.ts";
 import { CommandsLayer } from "./controller-commands.ts";
 
@@ -68,6 +68,7 @@ export abstract class ModelsLayer extends CommandsLayer {
           openaiAuth: isOpenAIAuthPreference(preference) ? preference : undefined,
           baseUrl: settings?.baseUrl ?? this.baseUrl, auth: auth === "none" || auth === "optional" || auth === "required" ? auth : undefined,
           credentialEnv: settings?.credentialEnv, credentialIdentity: settings?.credentialIdentity,
+          standaloneEndpoint: this.configEditor?.standaloneEndpoint,
           activeProfile: settings?.profile ?? this.profile, profiles: this.configEditor?.profiles,
         }));
         if (!current()) return;
@@ -111,7 +112,6 @@ export abstract class ModelsLayer extends CommandsLayer {
   protected async loadRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
     const load = this.credentials?.listRouteModels;
     if (!current()) return;
-    const settings = this.configEditor?.settings;
     const tasks: Promise<void>[] = [];
     if (load && this.modelPickerAccess?.openaiApiKey === "API key") {
       tasks.push((async () => {
@@ -123,12 +123,12 @@ export abstract class ModelsLayer extends CommandsLayer {
         }
       })());
     }
-    const baseUrl = settings?.baseUrl ?? this.baseUrl;
-    const compatibleAccess = settings?.profile ? this.modelPickerAccess?.profiles[settings.profile] : this.modelPickerAccess?.providers["openai-compatible"];
+    const baseUrl = this.configEditor ? this.configEditor.standaloneEndpoint.baseUrl : this.baseUrl;
+    const compatibleAccess = this.modelPickerAccess?.providers["openai-compatible"];
     if (load && baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
       tasks.push((async () => {
         try {
-          this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl }));
+          this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl, standalone: true }));
           if (current()) {
             this.compatibleModelsUnavailable = false;
             if (isOpenRouterEndpoint(baseUrl)) this.configEditor?.setEndpointCapabilities("https://openrouter.ai/api/v1", openRouterModelCapabilities(this.compatibleModels));
@@ -223,66 +223,81 @@ export abstract class ModelsLayer extends CommandsLayer {
   searchModels(query: string, refresh = false): void {
     if (!this.modelPicker || this.running) return;
     const picker = this.modelPicker;
-    const selectedIdentity = this.pickerPreferredIdentity ?? (this.pickerSelectionTouched ? picker.entries[picker.selectedIndex]?.identity : undefined);
+    const selectedIdentity = this.pickerPreferredIdentity ?? (!refresh || this.pickerSelectionTouched ? picker.entries[picker.selectedIndex]?.identity : undefined);
     if (!refresh && picker.query !== query) this.pickerSelectionTouched = true;
     picker.query = query;
     const settings = this.configEditor?.settings;
+    const endpoint = this.configEditor?.standaloneEndpoint;
     picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, {
       profiles: this.configEditor?.profiles, activeProfile: settings?.profile ?? this.profile,
       activeRoute: this.grokSelected() ? "grok" : this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
-      baseUrl: settings?.baseUrl ?? this.baseUrl, credentialIdentity: settings?.credentialIdentity,
+      baseUrl: endpoint ? endpoint.baseUrl : this.baseUrl, credentialIdentity: endpoint?.credentialIdentity,
       subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess,
       apiModels: this.apiModels, apiModelsUnavailable: this.apiModelsUnavailable, compatibleModels: this.compatibleModels,
       compatibleModelsUnavailable: this.compatibleModelsUnavailable, subscriptionUnavailable: this.subscriptionListUnavailable,
       grokModels: this.grokModels, grokModelsUnavailable: this.grokModelsUnavailable,
       xaiModels: this.xaiModels, xaiModelsUnavailable: this.xaiModelsUnavailable,
     });
-    if (this.modelPickerAccess?.subscription === "Login required" && !this.subscriptionModels?.length &&
-      "openai ChatGPT subscription connect".toLowerCase().includes(query.toLowerCase())) {
-      picker.entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "codex", modelId: "" }), provider: "openai", modelId: "", authRoute: "codex",
-        contextWindow: 0, maxOutput: 0, active: false, custom: false, access: "Login required", connect: true });
+    const preferred = this.pickerPreferredRoute;
+    const connectedIndex = preferred ? picker.entries.findIndex(entry => entry.kind === "model" &&
+      entry.provider === preferred.provider && entry.authRoute === preferred.authRoute && entry.profile === preferred.profile) : -1;
+    const identityIndex = selectedIdentity ? picker.entries.findIndex(entry => entry.kind !== "header" && entry.identity === selectedIdentity) : -1;
+    const activeIndex = !this.pickerSelectionTouched ? picker.entries.findIndex(entry => entry.kind === "model" && entry.active) : -1;
+    const firstIndex = picker.entries.findIndex(entry => entry.kind !== "header");
+    picker.selectedIndex = connectedIndex >= 0 ? connectedIndex : identityIndex >= 0 ? identityIndex : activeIndex >= 0 ? activeIndex : Math.max(0, firstIndex);
+    if (connectedIndex >= 0 && !picker.loading) {
+      this.pickerPreferredRoute = undefined;
+      this.pickerSelectionTouched = true;
     }
-    picker.selectedIndex = selectedIdentity ? Math.max(0, picker.entries.findIndex(entry => entry.identity === selectedIdentity)) : 0;
-    if (this.pickerPreferredIdentity && picker.entries.some(entry => entry.identity === this.pickerPreferredIdentity)) this.pickerPreferredIdentity = undefined;
+    if (this.pickerPreferredIdentity && identityIndex >= 0) this.pickerPreferredIdentity = undefined;
   }
 
-  /** Move the highlighted model with wraparound over the filtered choices. */
+  /** Move the highlighted choice with wraparound, skipping informational route headers. */
   moveModelPicker(delta: number): void {
-    if (!this.modelPicker || this.running || !this.modelPicker.entries.length) return;
+    const picker = this.modelPicker;
+    if (!picker || this.running || !picker.entries.length || !delta) return;
     this.pickerPreferredIdentity = undefined;
+    this.pickerPreferredRoute = undefined;
     this.pickerSelectionTouched = true;
-    const count = this.modelPicker.entries.length;
-    this.modelPicker.selectedIndex = ((this.modelPicker.selectedIndex + delta) % count + count) % count;
+    const count = picker.entries.length;
+    let index = ((picker.selectedIndex + delta) % count + count) % count;
+    while (picker.entries[index]?.kind === "header") index = (index + (delta > 0 ? 1 : -1) + count) % count;
+    picker.selectedIndex = index;
   }
 
   /** Start the selected route's sign-in while retaining its query and identity. */
   protected async connectPickerRoute(selection: ModelPickerEntry): Promise<boolean> {
     const picker = this.modelPicker;
     if (!picker || !this.credentials) { this.fail("Sign-in is unavailable in this session."); return false; }
-    this.pickerReturn = { query: picker.query, identity: selection.identity };
+    const returning = { query: picker.query, identity: selection.identity, route: { provider: selection.provider, authRoute: selection.authRoute, profile: selection.profile }, access: this.modelPickerAccess };
+    this.pickerReturn = returning;
     let started: boolean;
-    if (selection.authRoute === "grok") return this.login("grok");
-    if (selection.authRoute === "codex") {
-      started = await this.login("codex");
-      if (!started) this.pickerReturn = undefined;
+    if (selection.authRoute === "grok" || selection.authRoute === "codex") {
+      started = await this.login(selection.authRoute);
+      if (!started && this.pickerReturn === returning && !this.running && !this.loginChooserState) this.restorePickerAfterConnection(false);
       return started;
     }
     if (selection.profile) {
       const profile = this.configEditor?.profiles[selection.profile];
       started = !!profile && this.beginCredentialTarget({ provider: "openai-compatible", profile: selection.profile,
         baseUrl: profile.baseUrl, credentialIdentity: profile.credentialIdentity });
+    } else if (selection.provider === "openai-compatible") {
+      const endpoint = this.configEditor?.standaloneEndpoint ?? { baseUrl: this.baseUrl };
+      started = endpoint.baseUrl ? this.beginCredentialTarget({ provider: "openai-compatible", baseUrl: endpoint.baseUrl, credentialIdentity: endpoint.credentialIdentity }) : this.beginEndpointLogin();
     } else started = this.beginLogin(selection.provider);
     if (!started) this.pickerReturn = undefined;
     return started;
   }
 
   /** Reopen search after a saved credential without activating a model. */
-  protected restorePickerAfterConnection(): void {
+  protected restorePickerAfterConnection(connected = true): void {
     const returning = this.pickerReturn;
     this.pickerReturn = undefined;
     if (!returning || this.disposed) return;
+    this.loginChooserState = undefined;
     this.openModelPicker();
-    this.pickerPreferredIdentity = returning.identity;
+    if (connected) this.pickerPreferredRoute = returning.route;
+    else { this.pickerPreferredIdentity = returning.identity; this.modelPickerAccess = returning.access; }
     this.searchModels(returning.query);
   }
 
@@ -303,13 +318,14 @@ export abstract class ModelsLayer extends CommandsLayer {
     this.subscriptionListUnavailable = false;
     this.modelPicker = undefined;
     this.pickerPreferredIdentity = undefined;
+    this.pickerPreferredRoute = undefined;
     this.pickerSelectionTouched = false;
     if (this.recoveryRepair && this.recovery && !this.recoveryIdentityChanged(this.recovery)) this.recoveryRepair = false;
   }
 
   /** Return fetched list budgets for this activation; explicit config still outranks them. */
   protected listedBudgets(selection: ModelPickerEntry): { contextWindow?: number; maxOutput?: number } | undefined {
-    if (selection.listUnavailable || selection.connect || !selection.contextWindow && !selection.maxOutput) return undefined;
+    if (selection.listUnavailable || selection.kind !== "model" || !selection.contextWindow && !selection.maxOutput) return undefined;
     return { contextWindow: selection.contextWindow, maxOutput: selection.maxOutput };
   }
 
@@ -317,8 +333,8 @@ export abstract class ModelsLayer extends CommandsLayer {
   async selectPickerModel(): Promise<boolean> {
     if (this.modelPicker?.accessLoading) { this.notice("Checking configured credentials. Try again shortly."); return false; }
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
-    if (!selection) return false;
-    if (selection.access === "Login required" || selection.connect) {
+    if (!selection || selection.kind === "header") return false;
+    if (selection.kind === "sign-in") {
       return this.connectPickerRoute(selection);
     }
     let applied: boolean;

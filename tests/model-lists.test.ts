@@ -145,8 +145,10 @@ test("picker rows come from the model list, and a failed list stays selectable",
       failed.openModelPicker();
       while (failed.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const frameEntries = failed.snapshot().modelPicker?.entries ?? [];
+      expect(frameEntries.filter(entry => entry.kind === "header" && entry.listUnavailable)).toHaveLength(1);
+      expect(frameEntries.find(entry => entry.kind === "header" && entry.listUnavailable)?.groupLabel).toBe("OpenAI API key");
       const fallback = frameEntries.find(entry => entry.listUnavailable && entry.modelId === "gpt-5.4");
-      expect(fallback).toBeDefined();
+      expect(fallback?.kind).toBe("model");
       const index = frameEntries.findIndex(entry => entry.identity === fallback?.identity);
       failed.moveModelPicker(index - (failed.snapshot().modelPicker?.selectedIndex ?? 0));
       expect(await failed.selectPickerModel()).toBe(true);
@@ -368,7 +370,7 @@ test("OpenAI API-key picker rows keep chat models and drop non-chat IDs", async 
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      const rows = controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "api-key" && !entry.custom) ?? [];
+      const rows = controller.snapshot().modelPicker?.entries.filter(entry => entry.kind === "model" && entry.authRoute === "api-key" && !entry.custom) ?? [];
       expect(rows.map(entry => entry.modelId)).toEqual(["gpt-6-astra"]);
     } finally { controller.dispose(); }
 
@@ -385,7 +387,7 @@ test("OpenAI API-key picker rows keep chat models and drop non-chat IDs", async 
     try {
       failed.openModelPicker();
       while (failed.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      const rows = failed.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "api-key" && !entry.custom) ?? [];
+      const rows = failed.snapshot().modelPicker?.entries.filter(entry => entry.kind === "model" && entry.authRoute === "api-key" && !entry.custom) ?? [];
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.every(entry => entry.listUnavailable)).toBe(true);
     } finally { failed.dispose(); }
@@ -600,7 +602,7 @@ test("xAI chat filter keeps grok-4.7 and treats an excluded-only list as a faile
   const listed = parseModelList({ data: ["grok-4.7", "grok-imagine-1", "grok-2-image", "grok-video-1", "grok-embed-1", "other-model"].map(id => ({ id })) }, "xAI");
   expect(filterXaiModels(listed).map(model => model.id)).toEqual(["grok-4.7"]);
   const rows = modelPickerEntries("", "xai", "", {}, { xaiModels: filterXaiModels(listed), access: { providers: { xai: "API key" }, profiles: {}, subscription: "Login required", openaiApiKey: "Login required", xaiApiKey: "API key" } });
-  expect(rows.filter(row => row.provider === "xai" && row.authRoute === "api-key").map(row => row.modelId)).toEqual(["grok-4.7"]);
+  expect(rows.filter(row => row.kind === "model" && row.provider === "xai" && row.authRoute === "api-key").map(row => row.modelId)).toEqual(["grok-4.7"]);
   expect(rows.find(row => row.modelId === "grok-4.7")).toMatchObject({ provider: "xai", authRoute: "api-key", access: "API key" });
   expect(() => requireXaiModels(filterXaiModels(parseModelList({ data: [{ id: "grok-imagine-1" }, { id: "other-model" }] }, "xAI")))).toThrow(/no selectable models/);
 });

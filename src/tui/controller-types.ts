@@ -193,8 +193,8 @@ export interface TuiControllerOptions {
     listSubscriptionModels?: (signal: AbortSignal) => Promise<readonly string[]>;
     /** Discover verified model budgets and reasoning levels for this subscription identity. */
     listSubscriptionCatalog?: (signal: AbortSignal) => Promise<readonly ModelCapability[]>;
-    /** List models for a connected API-key or compatible route. Subscription discovery stays separate. */
-    listRouteModels?: (route: "api-key" | "compatible" | "xai", signal: AbortSignal, endpoint?: { baseUrl?: string }) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
+    /** List connected OpenAI, xAI or compatible models; standalone=true uses the independently configured primary connection instead of a selected profile. */
+    listRouteModels?: (route: "api-key" | "compatible" | "xai", signal: AbortSignal, endpoint?: { baseUrl?: string; standalone?: boolean }) => Promise<readonly import("../model/model-list.ts").ListedModel[]>;
   };
   /** Construct the next adapter and matching context budget before committing any edit. */
   stageSettings?: (settings: ResolvedSettings, signal: AbortSignal, workspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: ModelCapability }>;
@@ -212,19 +212,29 @@ export interface TuiControllerOptions {
   changeTracking?: GitChangeTrackingMode;
 }
 
-/** Explicit subscription login runner injected for tests; production wires the verified browser/device OAuth flow. */
+/** Run explicit ChatGPT browser/device approval with secure-store write-start and commit notifications. */
 export type CodexLoginRunner = (input: {
   device: boolean;
   code?: string;
   signal: AbortSignal;
   onProgress: (message: string) => void;
+  /** Mark the start of a secure-store write that must settle before another credential mutation. */
+  onSaving?: () => void;
   onSaved?: () => void;
 }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
 
 /** Browser or device approval data that stays outside conversation and draft persistence. */
 export type LoginApproval = { kind: "browser" } | { kind: "device"; verificationUri: string; userCode: string };
-/** Explicit Grok OAuth runner with separate panel progress and secure-store commit notification. */
-export type GrokLoginRunner = (input: { device: boolean; signal: AbortSignal; onProgress: (message: string) => void; onApproval: (approval: LoginApproval) => void; onSaved?: () => void }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
+/** Run explicit Grok approval with separate panel progress and secure-store write-start and commit notifications. */
+export type GrokLoginRunner = (input: {
+  device: boolean;
+  signal: AbortSignal;
+  onProgress: (message: string) => void;
+  onApproval: (approval: LoginApproval) => void;
+  /** Mark the start of a secure-store write that must settle before another credential mutation. */
+  onSaving?: () => void;
+  onSaved?: () => void;
+}) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
 
 /** Chooser levels distinguish primary routes from a subscription's alternate sign-in methods. */
 export type LoginChooserLevel = "main" | "chatgpt" | "grok";

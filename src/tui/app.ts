@@ -265,7 +265,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         const { fetchSubscriptionCatalog } = await import("../model/providers/codex-subscription.ts");
         return fetchSubscriptionCatalog({ store: credentialStore, fetch: io.fetch, signal });
       },
-      listRouteModels: async (route: "api-key" | "compatible" | "xai", signal: AbortSignal, endpoint?: { baseUrl?: string }) => {
+      listRouteModels: async (route: "api-key" | "compatible" | "xai", signal: AbortSignal, endpoint?: { baseUrl?: string; standalone?: boolean }) => {
         const { resolveProviderCredential } = await import("../auth/credentials.ts");
         const { fetchProviderModelList, OPENAI_MODELS_URL, requireOpenAIApiKeyModels, requireXaiModels } = await import("../model/model-list.ts");
         const current = configEditor.settings;
@@ -280,16 +280,17 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
           if ("error" in credential || !credential.apiKey) throw new Error("error" in credential ? credential.error : "Missing OpenAI API key.");
           return requireOpenAIApiKeyModels(await fetchProviderModelList({ url: OPENAI_MODELS_URL, apiKey: credential.apiKey, fetch: io.fetch, signal, label: "OpenAI" }));
         }
-        const baseUrl = endpoint?.baseUrl ?? current.baseUrl;
+        const connection = endpoint?.standalone ? configEditor.standaloneEndpoint : current;
+        const baseUrl = endpoint?.baseUrl ?? connection.baseUrl;
         if (!baseUrl) throw new Error("Select a compatible base URL before listing models.");
         const credential = await resolveProviderCredential({
-          provider: "openai-compatible", baseUrl, auth: current.auth, profile: current.profile,
-          credentialEnv: current.credentialEnv, credentialIdentity: current.credentialIdentity,
+          provider: "openai-compatible", baseUrl, auth: connection.auth, profile: endpoint?.standalone ? undefined : current.profile,
+          credentialEnv: connection.credentialEnv, credentialIdentity: connection.credentialIdentity,
           runtimeApiKey: runtimeKeyFor("openai-compatible"), env, store: credentialStore,
         });
         if ("error" in credential) throw new Error(credential.error);
         const url = new URL("models", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
-        return fetchProviderModelList({ url, apiKey: credential.apiKey, headers: current.headers, fetch: io.fetch, signal, label: "Compatible endpoint" });
+        return fetchProviderModelList({ url, apiKey: credential.apiKey, headers: connection.headers, fetch: io.fetch, signal, label: "Compatible endpoint" });
       },
     };
     const onSettingsCommitted = (next: ResolvedSettings, manager: ContextManager) => {
@@ -826,10 +827,12 @@ function collectSecrets(
 
 /** Build the explicit Grok OAuth runner with secure storage and ephemeral approval progress. */
 export function createGrokLoginRunner(options: { store: CredentialStore; fetch?: FetchLike; secrets: string[]; openBrowser?: (url: string) => Promise<void> | void }): import("./controller-types.ts").GrokLoginRunner {
-  return async ({ device, signal, onProgress, onApproval, onSaved }) => {
+  return async ({ device, signal, onProgress, onApproval, onSaving, onSaved }) => {
     const grok = await import("../model/providers/grok-subscription.ts");
     try {
-      const deps = { fetch: options.fetch, onProgress, onApproval, onSaved, saveTokens: (tokens: import("../model/providers/grok-subscription.ts").GrokTokens) => grok.saveSubscriptionTokens(options.store, tokens) };
+      const deps = { fetch: options.fetch, onProgress, onApproval, onSaved, saveTokens: (tokens: import("../model/providers/grok-subscription.ts").GrokTokens) => {
+        onSaving?.(); return grok.saveSubscriptionTokens(options.store, tokens);
+      } };
       const tokens = device ? await grok.loginWithDeviceFlow({ signal, deps }) : await grok.loginWithBrowserFlow({ signal, deps: { ...deps, openBrowser: options.openBrowser ?? openBrowserUrl } });
       for (const token of [tokens.accessToken, tokens.refreshToken]) if (token && !options.secrets.includes(token)) options.secrets.push(token);
       signal.throwIfAborted(); return { ok: true, status: "Grok subscription login saved." };
@@ -847,14 +850,14 @@ export function createCodexLoginRunner(options: {
   secrets: string[];
   openBrowser?: (url: string) => Promise<void> | void;
 }): CodexLoginRunner {
-  return async ({ device, code, signal, onProgress, onSaved }) => {
+  return async ({ device, code, signal, onProgress, onSaving, onSaved }) => {
     const codex = await import("../model/providers/codex-subscription.ts");
     try {
       const tokens = device
         ? await codex.loginWithDeviceFlow({
           store: options.store,
           signal,
-          deps: { fetch: options.fetch, onProgress, onSaved },
+          deps: { fetch: options.fetch, onProgress, onSaving, onSaved },
         })
         : await codex.loginWithBrowserFlow({
           store: options.store,
@@ -864,7 +867,7 @@ export function createCodexLoginRunner(options: {
             fetch: options.fetch,
             openBrowser: options.openBrowser ?? openBrowserUrl,
             waitForCallbackCode: (attempt) => codex.waitForLocalhostCallback(attempt),
-            onProgress, onSaved,
+            onProgress, onSaving, onSaved,
           },
         });
       if (!options.secrets.includes(tokens.accessToken)) {

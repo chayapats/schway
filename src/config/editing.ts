@@ -32,6 +32,9 @@ export interface ConfigTransaction {
 
 type Layers = { memory?: ConfigLayer; user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer };
 
+/** Describe an independently configured compatible endpoint using policies and credential references, never secret values. */
+export type StandaloneEndpointConnection = Pick<ResolvedSettings, "baseUrl" | "auth" | "headers" | "credentialEnv" | "credentialIdentity">;
+
 /** Resolve effective origins with the same provider-change model inheritance rules as settings. */
 export function configOrigins(layers: Layers): ConfigOrigins {
   return traceOrigins(layers).origins;
@@ -176,6 +179,17 @@ export class ConfigEditor {
 
   /** Return a copy of effective settings so callers cannot alter committed layers. */
   get settings(): ResolvedSettings { return structuredClone(this.current); }
+
+  /** Return the primary endpoint under ordinary layer precedence without applying a selected profile or its credential references. */
+  get standaloneEndpoint(): StandaloneEndpointConnection {
+    const configured = mergeConfigLayers(BUILTIN_DEFAULTS, effectiveInteractiveMemory(this.layers),
+      this.layers.user, this.layers.project, this.layers.cli, this.layers.session);
+    return {
+      ...(configured.baseUrl !== undefined ? { baseUrl: configured.baseUrl.trim() } : {}),
+      ...(configured.auth !== undefined ? { auth: configured.auth } : {}),
+      ...(configured.headers !== undefined ? { headers: structuredClone(configured.headers) } : {}),
+    };
+  }
 
   /** Return the source of each currently effective setting. */
   get origins(): ConfigOrigins { return configOrigins(this.layers); }

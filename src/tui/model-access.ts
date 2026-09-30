@@ -1,6 +1,7 @@
 import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport, type OpenAIAuthPreference } from "../auth/credentials.ts";
 import type { CredentialStore, CredentialTarget } from "../auth/store.ts";
 import type { CompatibleProfile } from "../config/config.ts";
+import type { StandaloneEndpointConnection } from "../config/editing.ts";
 
 /** Credential configuration for a picker row, without claiming remote authorization was verified. */
 export type ModelAccess = "ChatGPT" | "Grok" | "API key" | "No key required" | "Login required";
@@ -34,6 +35,8 @@ export async function loadModelPickerAccess(input: {
   credentialIdentity?: string;
   activeProfile?: string;
   profiles?: Record<string, CompatibleProfile>;
+  /** Resolve this primary endpoint independently of the active profile; an empty object means none is configured. */
+  standaloneEndpoint?: StandaloneEndpointConnection;
 }): Promise<ModelPickerAccess> {
   const access: ModelPickerAccess = { providers: {}, profiles: {}, subscription: "Login required", openaiApiKey: "Login required", xaiApiKey: "Login required" };
   const runtimeKeyFor = (provider: string) => input.runtimeProvider === undefined || input.runtimeProvider === provider ? input.runtimeApiKey : undefined;
@@ -62,8 +65,11 @@ export async function loadModelPickerAccess(input: {
       access.grok = "error" in selected ? "Login required" : "Grok";
     })(),
     (async () => {
-      access.providers["openai-compatible"] = input.baseUrl && !input.activeProfile
-        ? await resolve({ provider: "openai-compatible", baseUrl: input.baseUrl, auth: input.auth, credentialEnv: input.credentialEnv, credentialIdentity: input.credentialIdentity })
+      const endpoint = input.standaloneEndpoint ?? (!input.activeProfile ? {
+        baseUrl: input.baseUrl, auth: input.auth, credentialEnv: input.credentialEnv, credentialIdentity: input.credentialIdentity,
+      } : undefined);
+      access.providers["openai-compatible"] = endpoint?.baseUrl
+        ? await resolve({ provider: "openai-compatible", ...endpoint })
         : "Login required";
     })(),
     ...Object.entries(input.profiles ?? {}).map(async ([name, profile]) => {

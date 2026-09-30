@@ -5,6 +5,7 @@ import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
+import { formatContextWindow } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
@@ -709,7 +710,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else completionIndex = -1;
       const commandRows = paletteRows(available);
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
-      const maxRows = Math.max(1, Math.min(snapshot.loginChooser ? 8 : 6, Math.floor(renderer.height / 3) - 2));
+      const maxRows = snapshot.modelPicker ? Math.max(1, Math.min(12, renderer.height - 10))
+        : Math.max(1, Math.min(snapshot.loginChooser ? 8 : 6, Math.floor(renderer.height / 3) - 2));
       const legacyDevice = snapshot.loginApproval && !snapshot.loginApprovalData ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
       const deviceApproval = snapshot.loginApprovalData?.kind === "device"
         ? { address: snapshot.loginApprovalData.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, ""), code: snapshot.loginApprovalData.userCode }
@@ -801,20 +803,37 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           textRow(picker, fitLine(width < 60 ? "↑↓ Enter Esc ^W ^L" : `↑↓ preview · PgUp/PgDn page · Enter resume · Esc restore · ${sessions.total ? sessions.offset + sessions.selectedIndex + 1 : 0}/${sessions.total}`, width - 2), theme.muted);
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
-          textRow(picker, fitLine("Choose model + route · ↑/↓ select · Enter apply/connect · Ctrl+R retry · Esc back", width - 2), theme.accent);
+          const retry = !!models.error && ["empty", "offline", "failed"].includes(models.catalogState ?? "");
+          textRow(picker, fitLine(`Choose model · ↑↓ select · Enter use · Esc back${retry ? " · Ctrl+R retry" : ""}`, width - 2), theme.accent);
+          const room = Math.max(1, width - 2);
+          const choices = models.entries.filter(entry => entry.kind !== "header");
+          const modelRows = choices.filter(entry => entry.kind === "model");
+          const contextWidth = Math.max(0, ...modelRows.map(entry => formatContextWindow(entry.contextWindow).length));
+          const modelWidth = Math.max(0, ...modelRows.map(entry => Bun.stringWidth(entry.modelId + (entry.custom ? " (typed)" : ""))));
+          const reasoningWidth = 12;
+          const showReasoning = modelRows.some(entry => entry.reasoning) && modelWidth + contextWidth + reasoningWidth + 7 <= room;
+          const showContext = modelWidth + contextWidth + (showReasoning ? reasoningWidth : 0) + 7 <= room;
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
           models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
             const index = start + offset;
-            const route = entry.authRoute === "codex" ? "ChatGPT" : entry.authRoute === "api-key" ? "API key" : entry.access ?? "Provider";
-            const name = entry.connect ? "Connect ChatGPT" : entry.profile ? `profile:${entry.profile}` : `${entry.provider}/${entry.modelId}`;
-            textRow(picker, fitLine(`${index === models.selectedIndex ? "›" : " "} ${route} · ${name}${entry.active ? " ✓ current" : ""}${entry.access === "Login required" ? " · Connect" : ""}${entry.listUnavailable ? " · list unavailable" : ""}${entry.custom ? " (typed)" : ""}`, width - 2), index === models.selectedIndex ? theme.accent : theme.text);
+            const selected = index === models.selectedIndex && entry.kind !== "header";
+            const prefix = entry.kind === "header" ? "  " : `${selected ? "›" : " "} `;
+            let line: string;
+            if (entry.kind !== "model") {
+              const detail = entry.kind === "sign-in" ? "Sign in · Enter" : entry.listUnavailable ? "list unavailable" : "";
+              const label = fitLine(entry.groupLabel, room - 2);
+              const gap = room - 2 - Bun.stringWidth(label) - Bun.stringWidth(detail);
+              line = `${prefix}${label}${detail && gap >= 2 ? " ".repeat(gap) + detail : ""}`;
+            } else {
+              const metadata = `${showContext ? "  " + formatContextWindow(entry.contextWindow).padStart(contextWidth) : ""}${showReasoning ? entry.reasoning ? " · reasoning" : " ".repeat(reasoningWidth) : ""}  ${entry.active ? "✓" : " "}`;
+              const label = fitLine(entry.modelId + (entry.custom ? " (typed)" : ""), room - 2 - metadata.length);
+              line = `${prefix}${label}${" ".repeat(Math.max(0, room - 2 - Bun.stringWidth(label) - metadata.length))}${metadata}`;
+            }
+            textRow(picker, line, selected ? theme.accent : entry.kind === "header" ? theme.muted : theme.text);
           });
           const selected = models.entries[models.selectedIndex];
-          const routeDetail = selected?.connect ? "ChatGPT subscription · connect to discover models"
-            : selected?.authRoute === "grok" ? "Grok subscription · account models"
-            : selected?.authRoute === "codex" ? `ChatGPT subscription · ${selected.verifiedCatalog ? "account catalog" : "catalog pending"}`
-              : `${selected?.authRoute === "api-key" ? "OpenAI API key" : selected?.access ?? "Provider"} · ${selected?.access === "Login required" ? "connect needed" : selected?.access === "No key required" ? "no key required" : "configured, unverified"}`;
-          const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`}` : "No matches. Try provider/model-id.";
+          const ordinal = selected ? choices.findIndex(entry => entry.identity === selected.identity) + 1 : 0;
+          const detail = selected ? `${ordinal}/${choices.length}${selected.kind === "model" ? ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output` : ""}` : "No matches. Try provider/model-id.";
           textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
         } else if (browsing) {
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
@@ -1191,6 +1210,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (historyIndex === history.length) historyIndex = -1;
         handled(); return;
       }
+    }
+    if (snapshot.loginChooser && (name === "return" || name === "kpenter")) {
+      void controller.selectLoginChoice().then(refresh, fail); handled(); return;
     }
     if (snapshot.loginChooser && name === "tab") { controller.openLoginMoreOptions(); handled(); return; }
     if (snapshot.branchTree && name === "tab") { controller.toggleBranchTreeAction(); setDraft(""); handled(); return; }

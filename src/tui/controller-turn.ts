@@ -18,36 +18,43 @@ export abstract class TurnLayer extends CompactionLayer {
   cancel(): void {
     this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
+    if (this.loginSaving) { this.loginAbort?.abort(); this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.loginCallbackValue !== undefined) {
-      this.loginCallbackValue = undefined; this.pickerReturn = undefined; this.recoveryRepair = false;
+      this.loginCallbackValue = undefined; this.recoveryRepair = false;
       this.restoreLoginOrigin();
+      if (this.pickerReturn) this.restorePickerAfterConnection(false);
       this.notice("Callback entry cancelled; no credential was changed."); return;
     }
     if (this.loginAbort && !this.loginAbort.signal.aborted) {
-      if (!this.loginApprovalData) this.pickerReturn = undefined;
+      const abort = this.loginAbort;
+      if (!this.pickerReturn) { this.recoveryRepair = false; this.restoreLoginOrigin(); abort.abort(); return; }
+      this.abortPickerLogin();
       this.recoveryRepair = false;
       this.restoreLoginOrigin();
-      this.loginAbort.abort(); return;
+      if (this.pickerReturn) this.restorePickerAfterConnection(false);
+      return;
     }
     if (this.loginChooserState) {
+      if (this.pickerReturn) { this.loginChooserState = undefined; this.restorePickerAfterConnection(false); return; }
       this.loginChooserState = this.loginChooserState.level === "main" ? undefined : { level: "main", selectedId: this.loginChooserState.level };
       this.recoveryRepair = false; return;
     }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.endpointUrlEntry) {
       this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined;
-      this.restoreLoginOrigin(); this.recoveryRepair = false; return;
+      this.restoreLoginOrigin(); this.recoveryRepair = false;
+      if (this.pickerReturn) this.restorePickerAfterConnection(false);
+      return;
     }
     if (this.credentialEntry) {
       this.credentialEntry.cancel();
       this.credentialEntry = undefined;
       this.credentialTarget = undefined;
-      this.pickerReturn = undefined;
       this.recoveryRepair = false;
       if (this.endpointInputUrl !== undefined) {
         this.endpointUrlEntry = { value: this.endpointInputUrl };
         this.endpointInputUrl = undefined;
-      } else this.restoreLoginOrigin();
+      } else { this.restoreLoginOrigin(); if (this.pickerReturn) this.restorePickerAfterConnection(false); }
       this.notice("Credential entry cancelled; nothing saved.");
       return;
     }

@@ -458,17 +458,17 @@ test("model picker preserves draft, owns navigation, and closes before cancellin
   expect(ui.editor.plainText).toBe("my draft\nsecond line");
 });
 
-test("model picker renders credential labels and puts configured providers first at narrow widths", async () => {
+test("model picker shows fixed route order and sign-in actions at narrow widths", async () => {
   for (const width of [80, 44]) {
     const ui = await setup(width, 28, { OPENAI_API_KEY: "picker-secret" });
     ui.controller.openModelPicker();
     await settle(ui);
-    expect(ui.controller.snapshot().modelPicker!.entries[0]).toMatchObject({ provider: "openai", access: "API key" });
+    expect(ui.controller.snapshot().modelPicker!.entries[0]).toMatchObject({ groupLabel: "ChatGPT subscription", kind: "sign-in" });
     expect(ui.captureCharFrame()).toContain("API key");
     expect(ui.captureCharFrame()).not.toContain("picker-secret");
     ui.controller.searchModels("gpt-4o");
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("Login required");
+    expect(ui.captureCharFrame()).toContain("gpt-4o");
   }
 });
 
@@ -477,16 +477,16 @@ test("keyboard connection at 44×18 restores the picker search and ordinary draf
   await ui.mockInput.pasteBracketedText("ordinary draft");
   ui.mockInput.pressKey("m", { meta: true });
   await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.accessLoading, "model access discovery");
-  await ui.mockInput.typeText("openai/gpt-5.4");
+  await ui.mockInput.typeText("OpenAI API key");
   await settle(ui);
-  expect(ui.captureCharFrame()).toContain("connect needed");
+  expect(ui.captureCharFrame()).toContain("Sign in");
   ui.mockInput.pressEnter();
   await waitForUiState(ui, () => !!ui.controller.snapshot().credentialEntry, "credential entry");
   await ui.mockInput.pasteBracketedText("masked-route-secret");
   ui.mockInput.pressEnter();
   await waitForUiState(ui, () => !!ui.controller.snapshot().modelPicker && !ui.controller.snapshot().modelPicker?.loading, "model picker reload");
   await settle(ui);
-  expect(ui.controller.snapshot().modelPicker?.query).toBe("openai/gpt-5.4");
+  expect(ui.controller.snapshot().modelPicker?.query).toBe("OpenAI API key");
   expect(ui.captureCharFrame()).toContain("API key");
   expect(ui.captureCharFrame()).not.toContain("masked-route-secret");
   ui.mockInput.pressEscape();
@@ -533,7 +533,7 @@ test("explicit API preference changes only through keyboard route selection at b
     expect(configEditor.settings.openaiAuth).toBe("api-key");
     expect(ui.captureCharFrame()).toContain("API key");
     expect(ui.captureCharFrame()).toContain("ChatGPT");
-    ui.mockInput.pressArrow("down");
+    ui.mockInput.pressArrow("up");
     ui.mockInput.pressEnter();
     await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker, "model picker close");
     expect(ui.controller.snapshot().activeRoute).toBe("ChatGPT subscription");
@@ -2135,6 +2135,59 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
 });
 
 
+for (const route of ["codex", "grok"] as const) for (const browserSettled of [true, false]) test(`${route} picker browser failure (${browserSettled ? "settled" : "deferred"}) then device retry Esc restores the rendered picker and fences late OAuth callbacks`, async () => {
+  let attempts = 0;
+  const deferred: Array<{ options: Parameters<CodexLoginRunner>[0]; resolve: (result: Awaited<ReturnType<CodexLoginRunner>>) => void }> = [];
+  const runner: CodexLoginRunner = async options => {
+    if (++attempts === 1) {
+      options.onProgress("The browser could not be opened automatically");
+      if (browserSettled) return { ok: false, message: "Browser approval unavailable" };
+    }
+    return new Promise(resolve => deferred.push({ options, resolve }));
+  };
+  const ui = await setup(80, 30, {}, runner, { provider: "openai", modelId: "gpt-5.4",
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: runner, grokLogin: runner } });
+  const label = route === "codex" ? "ChatGPT" : "Grok subscription", chooser = route === "codex" ? "chatgpt" : "grok";
+  const retryIndex = browserSettled ? 0 : 1;
+  try {
+    ui.mockInput.pressKey("m", { meta: true }); await settle(ui);
+    while (ui.controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+    ui.controller.searchModels(label); await settle(ui);
+    const picker = ui.controller.snapshot().modelPicker!;
+    const identity = picker.entries[picker.selectedIndex]!.identity;
+    ui.mockInput.pressEnter(); if (browserSettled) await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: chooser, selectedId: `${chooser}-device` });
+    expect(ui.captureCharFrame()).toContain(`${route === "codex" ? "ChatGPT" : "Grok"} · more options`);
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(deferred).toHaveLength(retryIndex + 1); expect(deferred[retryIndex]!.options.device).toBe(true);
+    if (!browserSettled) expect(deferred[0]!.options.signal.aborted).toBe(true);
+    expect(ui.controller.running).toBe(true);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(deferred[retryIndex]!.options.signal.aborted).toBe(true);
+    expect(ui.controller.running).toBe(false); expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+    expect(ui.controller.snapshot().modelPicker?.query).toBe(label);
+    const restored = ui.controller.snapshot().modelPicker!;
+    expect(restored.entries[restored.selectedIndex]!.identity).toBe(identity);
+    expect(ui.captureCharFrame()).toContain("Choose model");
+    expect(ui.captureCharFrame()).not.toContain("· more options");
+    expect(ui.controller.snapshot().modelId).toBe("gpt-5.4"); expect(ui.controller.snapshot().provider).toBe("openai");
+    while (ui.controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+    ui.mockInput.pressEnter(); await settle(ui); expect(deferred).toHaveLength(retryIndex + 2);
+    const approval = ui.controller.snapshot().loginApproval;
+    for (const old of deferred.slice(0, retryIndex + 1)) {
+      old.options.onProgress("The browser could not be opened automatically"); old.options.onSaved?.();
+      old.resolve({ ok: true, status: "Old saved result" });
+    }
+    await settle(ui);
+    expect(ui.controller.running).toBe(true); expect(ui.controller.snapshot().loginApproval).toBe(approval);
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined(); expect(ui.controller.snapshot().modelPicker).toBeUndefined();
+    ui.mockInput.pressEscape(); await settle(ui);
+    deferred[retryIndex + 1]!.resolve({ ok: true, status: "Late retry result" }); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined(); expect(ui.controller.snapshot().modelPicker?.query).toBe(label);
+    expect(ui.captureCharFrame()).toContain("Choose model"); expect(ui.controller.snapshot().modelId).toBe("gpt-5.4");
+  } finally { for (const call of deferred) call.resolve({ ok: true, status: "Stopped" }); await ui.controller.waitForIdle(); }
+});
+
 for (const provider of ["chatgpt", "grok"] as const) test(`${provider} pending cancellation allows three Esc presses and restores the Thai draft after settlement`, async () => {
   let finish!: () => void;
   const wait = async () => {
@@ -2203,4 +2256,48 @@ test("ephemeral endpoint URL never enters a durable draft checkpoint or deferred
       expect(savedSession).not.toContain("http://localhost:8787/v1"); expect(savedSession).not.toContain("ephemeral-private-key");
     } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
   });
+});
+
+
+for (const width of [120, 80, 50, 24]) test(`grouped model picker preserves model IDs, metadata and viewport at ${width} columns`, async () => {
+  await withTempDir(async root => {
+    const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
+    const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: {
+      provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787/v1", auth: "none",
+    } });
+    const store = fakeCredentialStore(); await store.set(codexSubscriptionIdentity(), "fixture-token");
+    const ui = await setup(width, width === 24 ? 8 : 30, {}, undefined, {
+      configEditor, provider: "openai", modelId: "gpt-6-astra", model: createScriptedModel({ provider: "codex-subscription", id: "gpt-6-astra" }),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+        listSubscriptionCatalog: async () => [{ id: "gpt-6-astra", contextWindow: 1050000, maxOutput: 128000, supportedThinking: ["off", "high"] }],
+        listRouteModels: async () => [{ id: "fake-coder", contextWindow: 32768 }] },
+      contextManager: createContextManager(workspace),
+    });
+    ui.controller.openModelPicker(); await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "grouped picker"); await settle(ui);
+    const frame = ui.captureCharFrame();
+    if (width >= 50) {
+      expect(frame).toContain("OpenAI-compatible · localhost:8787"); expect(frame).toContain("gpt-6-astra"); expect(frame).toContain("fake-coder");
+      expect(frame).toContain("32k");
+      if (width >= 80) expect(frame).toMatch(/gpt-6-astra +1\.05M · reasoning +✓/);
+      expect(frame).not.toContain("✓ current");
+      expect(frame).not.toContain("Ctrl+R retry");
+    } else {
+      expect(frame).toContain("Choose model"); expect(frame).toContain("gpt-6-astra"); expect(frame).toContain("✓");
+      expect(frame).toContain("READY"); expect(frame.split("\n").filter(line => line.trim()).length).toBeLessThanOrEqual(8);
+    }
+    ui.controller.searchModels("coder"); await settle(ui);
+    const picker = ui.controller.snapshot().modelPicker!;
+    expect(picker.entries.map(entry => [entry.kind, entry.modelId])).toEqual([["header", ""], ["model", "fake-coder"]]);
+    expect(ui.captureCharFrame()).toContain("fake-coder"); expect(ui.captureCharFrame().split("Choose model")[1]!.split("▄")[0]).not.toContain("gpt-6-astra");
+  });
+});
+
+test("failed route list status renders once on its header and route-free details count only choices", async () => {
+  const ui = await setup(120, 30, {}, undefined, { provider: "openai", modelId: "gpt-5.4",
+    credentials: { store: fakeCredentialStore(), env: { OPENAI_API_KEY: "fixture-key" }, reload: async () => ({ error: "unused" }), listRouteModels: async () => { throw Error("offline"); } } });
+  ui.controller.openModelPicker(); await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "failed list");
+  ui.controller.searchModels("gpt-5.4"); await settle(ui);
+  const frame = ui.captureCharFrame(); expect(frame.match(/list unavailable/g)).toHaveLength(1);
+  expect(frame).toContain("1/1 · 256,000 context · 16,384 output");
+  expect(ui.controller.snapshot().modelPicker!.entries.filter(entry => entry.kind === "model")).toHaveLength(1);
 });
