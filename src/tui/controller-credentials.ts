@@ -137,8 +137,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     const entry = this.credentialEntry;
     const target = this.credentialTarget;
     if (!entry || !target || this.credentialMutation) return false;
-    const initialConnection = !this.startupAbort && !this.model && !this.modelId.trim() && !this.startupDiagnostic;
-    const priorEntries = new Set(this.transcript.map(entry => entry.id));
+    const initialConnection = this.isNotConnected();
     let savedNotice: string | undefined;
     this.credentialMutation = true;
     const task = (async () => {
@@ -161,23 +160,16 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
     if (saved && !this.modelId.trim()) {
-      const activated = await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target);
-      if (activated && initialConnection) {
-        // The ready empty state confirms setup; retain earlier history and credential override warnings.
-        const setupMessages = new Set([
-          `Signed in. Using ${target.provider}/${this.modelId}.`,
-          "Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.",
-        ]);
-        this.transcript = this.transcript.filter(entry => priorEntries.has(entry.id) || entry.kind !== "system" ||
-          entry.id !== savedNotice && !setupMessages.has(entry.text));
-      }
+      const activated = await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target, initialConnection);
+      // The ready empty state confirms setup; retain earlier history and credential override warnings.
+      if (activated && initialConnection) this.transcript = this.transcript.filter(entry => entry.id !== savedNotice);
     }
     if (saved) this.restorePickerAfterConnection();
     return saved;
   }
 
   /** Select the route's recommended model after sign-in and remember it for the next interactive launch. */
-  protected async activateSignedInModel(route: "api-key" | "compatible" | "xai", target: CredentialTarget): Promise<boolean> {
+  protected async activateSignedInModel(route: "api-key" | "compatible" | "xai", target: CredentialTarget, suppressSuccessNotice = false): Promise<boolean> {
     if (!this.configEditor || !this.stageSettings || this.disposed) return false;
     const generation = this.selectionGeneration;
     const provider = this.provider;
@@ -210,13 +202,13 @@ export abstract class CredentialsLayer extends ControllerCore {
       () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId)
         : route === "xai" ? this.configEditor!.prepareXaiModel(modelId)
         : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
-      () => `Signed in. Using ${target.provider}/${this.modelId}.`,
+      () => suppressSuccessNotice ? undefined : `Signed in. Using ${target.provider}/${this.modelId}.`,
       "Credential saved, but the recommended model could not be activated. Choose one with /model.",
       false,
       false,
       listed,
     );
-    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "compatible" ? "provider" : "api-key" });
+    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "compatible" ? "provider" : "api-key" }, !suppressSuccessNotice);
     return applied;
   }
 

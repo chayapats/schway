@@ -32,7 +32,7 @@ export class TuiController extends TurnLayer {
       compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
       changeReview: this.changeReview ? structuredClone(this.changeReview) : undefined,
-      readiness: this.startupAbort ? "loading" : !this.model && !this.modelId.trim() && !this.startupDiagnostic ? "not-connected" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
+      readiness: this.startupAbort ? "loading" : this.isNotConnected() ? "not-connected" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
       ...(!this.model && this.startupDiagnostic ? { readinessDetail:
         /Missing OpenAI API key/.test(this.startupDiagnostic) ? "Missing OpenAI API key."
           : /no longer available/.test(this.startupDiagnostic) ? "Remembered model is no longer available in this account."

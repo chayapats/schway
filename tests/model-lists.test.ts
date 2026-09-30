@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { TextareaRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
@@ -265,6 +265,34 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
         expect(frame).toContain("Enter send");
       }
     } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
+  });
+});
+
+test("initial sign-in preserves memory failure warnings while suppressing setup success notices", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const configEditor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+    await mkdir(join(home, ".schway"), { recursive: true });
+    await writeFile(join(home, ".schway/interactive"), "not a directory");
+    const controller = new TuiController({
+      session: createSession(), sessionId: "initial-memory-failure", workspace, configEditor, home,
+      provider: configEditor.settings.provider, modelId: configEditor.settings.model, contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }),
+        listRouteModels: async () => [{ id: ROUTE_FALLBACK_MODELS.openai }] },
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: "openai", id: settings.model }), contextManager: createContextManager(workspace) }),
+    });
+    try {
+      expect(controller.beginLogin("openai")).toBe(true);
+      controller.enterCredentialText("fixture-private-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(controller.snapshot().readiness).toBe("ready");
+      expect(controller.snapshot().status).toBe("idle");
+      const notices = controller.snapshot().transcript.map(entry => entry.text);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("Model activated and usable, but its preference was not remembered.");
+      expect(notices[0]).toContain("No additional login is needed.");
+    } finally { controller.dispose(); }
   });
 });
 
