@@ -50,6 +50,7 @@ export const CONFIG_SETTING_NAMES = [
   "profile",
   "git",
   "appearance",
+  "ui",
 ] as const;
 
 const ProviderSchema = Type.Union([
@@ -141,6 +142,10 @@ export const ConfigSchema = Type.Object(
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
     git: Type.Optional(GitConfigSchema),
     appearance: Type.Optional(AppearanceSchema),
+    ui: Type.Optional(Type.Object(
+      { inlineDiffLines: Type.Optional(Type.Integer({ minimum: 0 })) },
+      { additionalProperties: false },
+    )),
   },
   { additionalProperties: false },
 );
@@ -175,6 +180,9 @@ export { DEFAULT_GIT_CHANGE_TRACKING };
 /** Headless exit text when neither config nor the CLI names a provider and model. */
 export const NO_MODEL_CONFIGURED_MESSAGE =
   "No model configured. Pass --provider and --model, or set them in config.";
+
+/** Default maximum changed rows shown inline for successful edits and created files. */
+export const DEFAULT_INLINE_DIFF_LINES = 12;
 
 /** Fully resolved runtime settings after precedence and catalog lookup. */
 export interface ResolvedSettings {
@@ -220,6 +228,8 @@ export interface ResolvedSettings {
   gitChangeTracking: GitChangeTrackingMode;
   /** TUI appearance preference before an explicit environment override. */
   appearance: "auto" | "dark" | "light";
+  /** Maximum changed rows shown inline; zero disables inline diffs. */
+  inlineDiffLines: number;
 }
 
 /** Lowest-precedence settings. Files and CLI override these; nothing writes them. */
@@ -228,6 +238,7 @@ export const BUILTIN_DEFAULTS: ConfigLayer = {
   maxTurns: DEFAULT_MAX_TURNS,
   maxConcurrentTools: DEFAULT_MAX_CONCURRENT_TOOLS,
   git: { changeTracking: DEFAULT_GIT_CHANGE_TRACKING },
+  ui: { inlineDiffLines: DEFAULT_INLINE_DIFF_LINES },
 };
 
 const SECRET_KEY_ALIASES = new Set([
@@ -670,6 +681,7 @@ function finishResolvedSettings(input: {
     catalog: input.catalog,
     gitChangeTracking: input.merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
     appearance: input.merged.appearance ?? "auto",
+    inlineDiffLines: input.merged.ui?.inlineDiffLines ?? DEFAULT_INLINE_DIFF_LINES,
     openaiAuth: input.merged.openaiAuth ?? "auto",
     xaiAuth: input.merged.xaiAuth ?? "auto",
     ...(input.merged.contextWindow !== undefined ? { explicitContextWindow: input.merged.contextWindow } : {}),

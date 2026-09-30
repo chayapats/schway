@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  DEFAULT_INLINE_DIFF_LINES,
   loadResolvedSettings,
   mergeConfigLayers,
   parseConfigObject,
@@ -17,6 +18,52 @@ import { withTempDir } from "./helpers.ts";
 
 test("an empty object is a valid config layer", () => {
   expect(parseConfigObject({}, "test")).toEqual({});
+});
+
+test("inline diff limits accept nonnegative integers and an empty ui object", () => {
+  expect(parseConfigObject({ ui: {} }, "test")).toEqual({ ui: {} });
+  for (const inlineDiffLines of [0, 12, 30]) {
+    expect(parseConfigObject({ ui: { inlineDiffLines } }, "test")).toEqual({ ui: { inlineDiffLines } });
+  }
+});
+
+test.each([-1, 1.5, "12"])("invalid inline diff limit %j uses the schema error path", inlineDiffLines => {
+  const result = parseConfigObject({ ui: { inlineDiffLines } }, "project-config");
+  expect("error" in result).toBe(true);
+  if (!("error" in result)) throw new Error("expected validation error");
+  expect(result.error).toContain("Invalid config at project-config:");
+  expect(result.error).toContain("ui.inlineDiffLines");
+});
+
+test("ui rejects unknown nested properties and non-object values", () => {
+  for (const ui of [{ inlineDifLines: 12 }, null, [], 12]) {
+    const result = parseConfigObject({ ui }, "test");
+    expect("error" in result).toBe(true);
+    if (!("error" in result)) throw new Error("expected validation error");
+    expect(result.error).toContain("ui");
+  }
+});
+
+test("inline diff defaults and overrides resolve with or without a configured model", () => {
+  expect(DEFAULT_INLINE_DIFF_LINES).toBe(12);
+  for (const model of [undefined, "gpt-5.4"]) {
+    const user = model === undefined ? {} : { model };
+    expect(resolveSettings({ user })).toMatchObject({ inlineDiffLines: DEFAULT_INLINE_DIFF_LINES });
+    expect(resolveSettings({ user: { ...user, ui: { inlineDiffLines: 0 } } })).toMatchObject({ inlineDiffLines: 0 });
+    expect(resolveSettings({ user: { ...user, ui: { inlineDiffLines: 30 } } })).toMatchObject({ inlineDiffLines: 30 });
+  }
+});
+
+test("inline diff limits follow user, project, CLI and session precedence", () => {
+  const user = { ui: { inlineDiffLines: 24 } };
+  const project = { ui: { inlineDiffLines: 18 } };
+  const cli = { ui: { inlineDiffLines: 6 } };
+  const session = { ui: { inlineDiffLines: 0 } };
+  expect(resolveSettings({ user })).toMatchObject({ inlineDiffLines: 24 });
+  expect(resolveSettings({ user, project })).toMatchObject({ inlineDiffLines: 18 });
+  expect(resolveSettings({ user, project, cli })).toMatchObject({ inlineDiffLines: 6 });
+  expect(resolveSettings({ user, project, cli, session })).toMatchObject({ inlineDiffLines: 0 });
+  expect(resolveSettings({ user, project: { ui: {} } })).toMatchObject({ inlineDiffLines: DEFAULT_INLINE_DIFF_LINES });
 });
 
 test("an unset model keeps profile, connection, appearance, git tracking, and explicit limits", () => {
@@ -202,6 +249,7 @@ test("zero-config uses built-in defaults and does not create config files", asyn
     expect(resolved.modelConfigured).toBe(false);
     expect(resolved.maxTurns).toBe(DEFAULT_MAX_TURNS);
     expect(resolved.maxConcurrentTools).toBe(DEFAULT_MAX_CONCURRENT_TOOLS);
+    expect(resolved.inlineDiffLines).toBe(DEFAULT_INLINE_DIFF_LINES);
     expect(resolved.catalog.id).toBe("");
 
     expect(await readdir(home)).toEqual([]);

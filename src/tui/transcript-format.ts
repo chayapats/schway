@@ -1,9 +1,62 @@
 import { toolTarget } from "./presentation.ts";
 import type { SessionRecord } from "../conversation/types.ts";
 import type { TuiTranscriptEntry } from "./controller-types.ts";
+import { buildEditDiff } from "../text/diff.ts";
+import { formatCount, formatDuration } from "../text/format.ts";
 
 /** Bound on displayed tool-result characters; session data stays complete. */
 export const MAX_TOOL_DISPLAY_CHARS = 2000;
+
+/** Summarize successful built-in results from validated summary fields, leaving other states and malformed details without a summary. */
+export function summarizeToolResult(
+  name: string,
+  status: TuiTranscriptEntry["toolStatus"],
+  details: unknown,
+  durationMs?: number,
+): string | undefined {
+  if (status !== "success" || typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
+  const record = details as Record<string, unknown>;
+  if (name === "read") {
+    const { lineCount, startLine, endLine, truncated } = record;
+    if (!isCount(lineCount) || !isCount(startLine) || startLine < 1 || !isCount(endLine) || typeof truncated !== "boolean") return undefined;
+    if (lineCount === 0) {
+      if (startLine !== 1 || endLine !== 0) return undefined;
+    } else if (endLine < startLine || endLine > lineCount) return undefined;
+    return startLine > 1 || endLine < lineCount || truncated
+      ? `lines ${startLine}–${endLine} of ${lineCount}`
+      : formatCount(lineCount, "line");
+  }
+  if (name === "grep" || name === "find" || name === "ls") {
+    const count = record[name === "grep" ? "matchCount" : name === "find" ? "fileCount" : "entryCount"];
+    if (!isCount(count) || typeof record.truncated !== "boolean") return undefined;
+    const singular = name === "ls" ? "entry" : "match";
+    const plural = name === "ls" ? "entries" : "matches";
+    return record.truncated
+      ? `${count}+ ${plural} · truncated`
+      : formatCount(count, singular, plural);
+  }
+  if (name === "bash") {
+    if (record.exitCode === null) return "stopped · no exit code";
+    if (!isCount(record.exitCode) || typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return undefined;
+    return `exit ${record.exitCode} · ${formatDuration(durationMs)}`;
+  }
+  if (name === "write") {
+    if (!isCount(record.lineCount) || typeof record.created !== "boolean") return undefined;
+    return `${record.created ? "new" : "overwritten"} · ${formatCount(record.lineCount, "line")}`;
+  }
+  if (name === "edit") {
+    const edit = asEditDetails(details);
+    if (!edit?.hunks || edit.hunks.some(hunk => !isCount(hunk.startLine) || hunk.startLine < 1)) return undefined;
+    const diff = buildEditDiff(edit.hunks);
+    return `+${diff.added} −${diff.removed}`;
+  }
+  return undefined;
+}
+
+/** Accept finite nonnegative integers for result counts and original line positions. */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
 
 /** Rebuild bounded display history without replaying tools, pairing results chronologically within each accepted call group. */
 export function buildTranscriptFromSession(items: readonly SessionRecord[]): TuiTranscriptEntry[] {
