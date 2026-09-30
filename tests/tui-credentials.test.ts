@@ -40,15 +40,17 @@ for (const route of ["codex", "grok"] as const) for (const committed of [true, f
       model: createScriptedModel({ provider: route === "codex" ? "codex-subscription" : "grok-subscription", id: modelId,
         responses: [() => { modelCalls++; return { text: "Old adapter must not run after replacement" }; }] }),
       credentials: { store, env: {}, reload: async () => ({ error: "Account requires activation" }),
-        codexLogin: options => { signal = options.signal; return codex({ ...options, device: true }); },
-        grokLogin: options => { signal = options.signal; return grok({ ...options, device: true }); } },
+        codexLogin: options => { signal = options.signal; options.onProgress("The browser could not be opened automatically"); return codex({ ...options, device: true }); },
+        grokLogin: options => { signal = options.signal; options.onProgress("The browser could not be opened automatically"); return grok({ ...options, device: true }); } },
     });
     let pending: Promise<boolean> | undefined;
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const query = route === "codex" ? "ChatGPT" : "Grok subscription";
       controller.searchModels(query); pending = controller.selectPickerModel(); await writing.promise;
-      expect(requests).toBe(2); controller.cancel(); expect(signal?.aborted).toBe(true);
+      expect(requests).toBe(2); expect(controller.snapshot().loginChooser).toBeDefined();
+      controller.cancel(); expect(signal?.aborted).toBe(true); controller.cancel();
+      expect(controller.snapshot().modelPicker).toBeUndefined(); expect(controller.snapshot().loginChooser).toBeDefined();
       expect(controller.running).toBe(true); expect(await controller.logout(route)).toBe(false); expect(deletes).toBe(0);
       expect(await controller.selectLoginChoice()).toBe(false);
       let idle = false; const waiting = controller.waitForIdle().then(() => { idle = true; });

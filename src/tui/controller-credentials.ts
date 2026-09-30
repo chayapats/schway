@@ -557,7 +557,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (this.loginAbort === abort) this.loginAbort = undefined; if (this.activeTurn === tracked) this.activeTurn = undefined;
       if (this.status === "running") this.status = "idle";
       this.loginApproval = undefined; this.loginApprovalData = undefined; this.loginReturn = undefined;
-      if (this.pickerReturn && !this.disposed && (signedIn || !this.loginChooserState)) this.restorePickerAfterConnection(signedIn);
+      if (this.pickerReturn && !this.disposed && (signedIn || !this.loginChooserState || abort.signal.aborted)) this.restorePickerAfterConnection(signedIn);
     }
   }
 
@@ -684,7 +684,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.restorePickerAfterConnection();
       return true;
     }
-    if (!signedIn && this.pickerReturn && !this.loginChooserState) this.restorePickerAfterConnection(false);
+    if (!signedIn && this.pickerReturn && (!this.loginChooserState || abort.signal.aborted)) this.restorePickerAfterConnection(false);
     if (signedIn && this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog && !this.disposed) {
       const discovery = new AbortController();
       this.activeAbort = discovery;
