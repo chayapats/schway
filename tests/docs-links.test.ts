@@ -33,16 +33,40 @@ function anchors(markdown: string): Set<string> {
   return result;
 }
 
+function linkDestination(markdown: string, start: number): string {
+  const angled = markdown[start] === "<";
+  let destination = "";
+  let depth = 0;
+  for (let index = start + (angled ? 1 : 0); index < markdown.length; index++) {
+    const character = markdown[index]!;
+    const next = markdown[index + 1];
+    if (character === "\\" && next && /[!-/:-@\[-`{-~]/.test(next)) {
+      destination += next;
+      index++;
+      continue;
+    }
+    if (angled) {
+      if (character === ">" || character === "\n") break;
+    } else {
+      if (/\s/.test(character) || character === ")" && depth === 0) break;
+      if (character === "(") depth++;
+      if (character === ")") depth--;
+    }
+    destination += character;
+  }
+  return destination;
+}
+
 async function brokenLinks(files: string[]): Promise<string[]> {
   const failures: string[] = [];
   for (const file of files) {
     const markdown = prose(await readFile(file, "utf8")).replace(/(`+)[\s\S]*?\1/g, "");
     const destinations = [
-      ...markdown.matchAll(/!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+["'][^\n]*["'])?\s*\)/g),
-      ...markdown.matchAll(/^ {0,3}\[[^\]]+\]:\s*(<[^>]+>|\S+)/gm),
+      ...markdown.matchAll(/!?\[(?:\\.|[^\]\\\n])*\]\(\s*/g),
+      ...markdown.matchAll(/^ {0,3}\[[^\]]+\]:\s*/gm),
     ];
     for (const match of destinations) {
-      const destination = match[1]!.replace(/^<|>$/g, "");
+      const destination = linkDestination(markdown, match.index! + match[0].length);
       if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(destination)) continue;
       const [path, fragment] = destination.split("#", 2);
       const target = path ? resolve(dirname(file), decodeURIComponent(path)) : file;
@@ -70,10 +94,14 @@ test("link checking catches missing files and anchors while respecting Markdown 
   try {
     const source = join(directory, "guide.md");
     await writeFile(join(directory, "other guide.md"), "# Choose a model (API key)\n## ภาษาไทย\n## Repeat\n## Repeat\n");
+    await writeFile(join(directory, "guide(v2).md"), "# Version 2\n");
+    await writeFile(join(directory, "guide).md"), "# Escaped delimiter\n");
     await writeFile(source, [
       "# Local heading", "[local](#local-heading)",
       "[other](<other%20guide.md#choose-a-model-api-key>)",
       "[unicode](other%20guide.md#ภาษาไทย)", "[duplicate](other%20guide.md#repeat-1)",
+      "[balanced](guide(v2).md#version-2)", "[escaped](guide\\).md#escaped-delimiter)",
+      "[balanced reference][version]", "[version]: guide(v2).md#version-2",
       "[missing file](absent.md)", "[missing heading](other%20guide.md#absent)",
       "[reference][missing]", "[missing]: absent-reference.md",
       "[external](https://example.test/no-network)", "`[inline example](absent-inline.md)`",

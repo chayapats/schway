@@ -94,6 +94,7 @@ Each line is a JavaScript regular-expression source followed by two spaces, `#` 
 ```text
 \[built-in\]  # All UI text: describe the command without an implementation tag.
 \b[a-z]\d+:   # Primary view: hide short tool-call IDs.
+\b[a-z]\d+\b  # Primary view: hide bare short tool-call IDs.
 \bcall_[A-Za-z0-9]+  # Primary view: hide provider tool-call IDs.
 unattributed  # Primary view: move attribution caveats to Ctrl+I details.
 not a (test-suite )?guarantee  # Primary view: move evidence caveats to Ctrl+I details.
