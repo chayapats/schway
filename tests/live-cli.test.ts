@@ -99,3 +99,50 @@ test("all lane parsing supports per-provider models and isolated compatible sett
 test("Grok live model override parses independently", () => {
   expect(parseLiveArgs(["--provider", "grok", "--model", "grok=grok-fixture"])).toMatchObject({ selection: { providers: ["grok"], models: { grok: "grok-fixture" } } });
 });
+
+test("thinking accepts every shared level per selected lane and rejects malformed/unselected overrides before spawn", async () => {
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]) {
+    expect(parseLiveArgs(["--thinking", `grok=${level}`, "--provider", "grok"]))
+      .toMatchObject({ selection: { thinking: { grok: level } } });
+  }
+  expect(parseLiveArgs(["--provider", "openai-api-key,codex,compatible,grok", "--thinking", "openai-api-key=high",
+    "--thinking", "codex=medium", "--thinking", "compatible=medium", "--thinking", "grok=medium"]))
+    .toMatchObject({ selection: { thinking: { "openai-api-key": "high", codex: "medium", compatible: "medium", grok: "medium" } } });
+  const spawned = spyOn(Bun, "spawn");
+  try {
+    for (const value of ["medium", "=medium", "grok=", "grok=MEDIUM", "grok=medium=high", "grok=medium\nPRIVATE_SECRET",
+      "unknown=medium", "codex=medium"]) {
+      let output = "";
+      let error = "";
+      const code = await runLiveCli(["--enable-live", "--provider", "grok", "--thinking", value], {
+        env: new Proxy({}, { get() { throw Error("credentials inspected"); } }), revision: "fixture",
+        out: text => { output += text; }, err: text => { error += text; },
+      });
+      expect(code).toBe(1);
+      expect(output).toBe("");
+      expect(error).not.toContain("PRIVATE_SECRET");
+    }
+    expect(spawned).not.toHaveBeenCalled();
+  } finally { spawned.mockRestore(); }
+});
+
+test("disabled CLI records explicit thinking without network, credentials or workers", async () => {
+  const spawned = spyOn(Bun, "spawn");
+  const fetched = spyOn(globalThis, "fetch");
+  let output = "";
+  try {
+    expect(await runLiveCli(["--provider", "all", "--thinking", "openai-api-key=high", "--thinking", "codex=medium",
+      "--thinking", "compatible=medium", "--thinking", "grok=medium"], {
+      env: new Proxy({}, { get() { throw Error("credentials inspected"); } }), revision: "fixture",
+      out: text => { output += text; }, err() { throw Error("unexpected error"); },
+    })).toBe(2);
+    expect(spawned).not.toHaveBeenCalled();
+    expect(fetched).not.toHaveBeenCalled();
+  } finally { spawned.mockRestore(); fetched.mockRestore(); }
+  expect(JSON.parse(output).scenarios).toMatchObject([
+    { thinking: "high", reason: "live_disabled" }, { reason: "live_disabled" },
+    { thinking: "medium", reason: "live_disabled" }, { thinking: "medium", reason: "live_disabled" },
+    { thinking: "medium", reason: "live_disabled" },
+  ]);
+  expect(JSON.parse(output).scenarios[1]).not.toHaveProperty("thinking");
+});

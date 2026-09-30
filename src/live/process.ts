@@ -3,6 +3,7 @@ import { access, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isThinkingLevel, type ThinkingLevel } from "../model/model.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import type { SmokeProvider, SmokeReport, SmokeScenario, SmokeSelection } from "./smoke.ts";
 import { isSmokeAuthSource, parseSmokeDiagnostics, parseSmokeProgress, type SmokeProgress } from "./diagnostics.ts";
@@ -13,7 +14,7 @@ const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const reasons = new Set(["verified", "missing_credentials", "credential_store_unavailable", "missing_subscription",
   "subscription_requires_login", "integration_unavailable", "compatible_endpoint_required", "timeout", "timeout_unsettled",
   "output_limit", "provider_error", "runner_error", "turn_limit", "no_final_response", "missing_tool_evidence",
-  "invalid_settings", "cancelled", "cleanup_failed", "disallowed_tool"]);
+  "invalid_settings", "cancelled", "cleanup_failed", "disallowed_tool", "unsupported_thinking", "thinking_capability_unavailable"]);
 const statuses = new Set(["passed", "skipped", "pending", "failed_provider", "failed_runner"]);
 
 /** Private fixture seam; installed execution uses the production worker and inherited environment. */
@@ -26,21 +27,21 @@ function scenario(provider: SmokeProvider, model: string, status: SmokeScenario[
   return { provider, model: safeId.test(model) ? model : "invalid-model-id", authSource: "unavailable", status, reason, durationMs, toolRoundTrip: false };
 }
 
-function validReply(text: string, provider: SmokeProvider, model: string, timeoutMs: number): SmokeScenario | undefined {
+function validReply(text: string, provider: SmokeProvider, model: string, timeoutMs: number, thinking?: ThinkingLevel): SmokeScenario | undefined {
   try {
     const value: unknown = JSON.parse(text);
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const data = value as Record<string, unknown>;
     const diagnostics = data.diagnostics === undefined ? undefined : parseSmokeDiagnostics(data.diagnostics);
-    if (Object.keys(data).some(key => !["provider", "model", "authSource", "status", "reason", "durationMs", "toolRoundTrip", "cleanup", "diagnostics"].includes(key))
-      || data.provider !== provider || data.model !== model
+    if (Object.keys(data).some(key => !["provider", "model", "thinking", "authSource", "status", "reason", "durationMs", "toolRoundTrip", "cleanup", "diagnostics"].includes(key))
+      || data.provider !== provider || data.model !== model || data.thinking !== thinking
       || !isSmokeAuthSource(data.authSource) || !statuses.has(data.status as string)
       || typeof data.reason !== "string" || !reasons.has(data.reason)
       || typeof data.durationMs !== "number" || !Number.isFinite(data.durationMs) || data.durationMs < 0 || data.durationMs > timeoutMs + REAP_MS
       || typeof data.toolRoundTrip !== "boolean" || (data.cleanup !== undefined && data.cleanup !== "deferred")
       || (data.diagnostics !== undefined && !diagnostics)
       || (data.status === "passed" && (data.reason !== "verified" || data.toolRoundTrip !== true || data.cleanup !== undefined))) return;
-    return { provider, model, authSource: data.authSource, status: data.status as SmokeScenario["status"],
+    return { provider, model, ...(thinking !== undefined ? { thinking } : {}), authSource: data.authSource, status: data.status as SmokeScenario["status"],
       reason: data.reason, durationMs: data.durationMs, toolRoundTrip: data.toolRoundTrip,
       ...(data.cleanup === "deferred" ? { cleanup: "deferred" as const } : {}), ...(diagnostics ? { diagnostics } : {}) };
   } catch { return; }
@@ -123,15 +124,18 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
   for (const provider of [...new Set(selection.providers)]) {
     const model = selection.models?.[provider] ?? ({ "openai-api-key": ROUTE_FALLBACK_MODELS.openai, "xai-api-key": ROUTE_FALLBACK_MODELS.xai, compatible: ROUTE_FALLBACK_MODELS["openai-compatible"],
       codex: ROUTE_FALLBACK_MODELS.openai, grok: ROUTE_FALLBACK_MODELS.xai } as const)[provider];
-    if (!selection.enabled) { scenarios.push(scenario(provider, model, "skipped", "live_disabled")); continue; }
+    const thinking = selection.thinking?.[provider];
+    const laneScenario = (status: SmokeScenario["status"], reason: string) => ({ ...scenario(provider, model, status, reason),
+      ...(isThinkingLevel(thinking) ? { thinking } : {}) });
+    if (!selection.enabled) { scenarios.push(laneScenario("skipped", "live_disabled")); continue; }
     // Bun cannot certify or kill a Windows descendant tree without a Job Object. Never spend a call on a best-effort stop.
-    if (process.platform === "win32") { scenarios.push(scenario(provider, model, "pending", "supervision_unavailable")); continue; }
-    if (!stopped) { scenarios.push(scenario(provider, model, "pending", "prior_run_unsettled")); continue; }
-    if (timedOut) { scenarios.push(scenario(provider, model, "pending", "prior_run_timeout")); continue; }
-    if (selection.signal?.aborted) { scenarios.push(scenario(provider, model, "pending", "cancelled")); continue; }
+    if (process.platform === "win32") { scenarios.push(laneScenario("pending", "supervision_unavailable")); continue; }
+    if (!stopped) { scenarios.push(laneScenario("pending", "prior_run_unsettled")); continue; }
+    if (timedOut) { scenarios.push(laneScenario("pending", "prior_run_timeout")); continue; }
+    if (selection.signal?.aborted) { scenarios.push(laneScenario("pending", "cancelled")); continue; }
     const start = performance.now();
     let workspace: string | undefined;
-    let result = scenario(provider, model, "failed_runner", "runner_error");
+    let result = laneScenario("failed_runner", "runner_error");
     let child: ReturnType<typeof Bun.spawn> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abort: (() => void) | undefined;
@@ -142,7 +146,8 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
       if (stop) { reason = stop; if (stop === "timeout") timedOut = true; throw Error("setup stopped"); }
     };
     try {
-      if (!safeId.test(model) || !Number.isInteger(selection.timeoutMs) || selection.timeoutMs < 1 || selection.timeoutMs > 120_000) {
+      if (!safeId.test(model) || !Number.isInteger(selection.timeoutMs) || selection.timeoutMs < 1 || selection.timeoutMs > 120_000
+        || (thinking !== undefined && !isThinkingLevel(thinking))) {
         result.reason = "invalid_settings";
       } else {
         workspace = await mkdtemp(join(tmpdir(), "schway-live-"));
@@ -155,7 +160,7 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         child = Bun.spawn([process.execPath, "--no-env-file", options.workerFile ?? fileURLToPath(new URL("./worker.ts", import.meta.url))], {
           cwd: workspace, env: selection.env, stdin: "pipe", stdout: "pipe", stderr: "ignore", detached: true,
         });
-        const input = JSON.stringify({ provider, model, timeoutMs: selection.timeoutMs, compatible: provider === "compatible" ? selection.compatible : undefined, workspaceRoot: workspace });
+        const input = JSON.stringify({ provider, model, thinking, timeoutMs: selection.timeoutMs, compatible: provider === "compatible" ? selection.compatible : undefined, workspaceRoot: workspace });
         if (input.length > 8192) throw Error("instruction too large");
         if (!child.stdin || typeof child.stdin === "number" || !child.stdout || typeof child.stdout === "number") throw Error("worker pipes unavailable");
         child.stdin.write(input);
@@ -172,26 +177,26 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         if (typeof first !== "string") {
           reason = first.reason;
           if (reason === "timeout") { timedOut = true; hardDeadline = true; }
-          result = scenario(provider, model, reason === "cancelled" ? "pending" : "failed_runner", reason);
+          result = laneScenario(reason === "cancelled" ? "pending" : "failed_runner", reason);
         } else {
-          const reply = validReply(first, provider, model, selection.timeoutMs);
+          const reply = validReply(first, provider, model, selection.timeoutMs, thinking);
           // A deferred reply is already a real provider outcome. Hard-stop its
           // uncooperative worker now, rather than waiting for exit/deadline and erasing it.
           const exit = reply?.cleanup === "deferred" ? 0 : await Promise.race([child.exited, deadline]);
           if (typeof exit !== "number") {
             reason = exit.reason;
             if (reason === "timeout") { timedOut = true; hardDeadline = true; }
-            result = scenario(provider, model, reason === "cancelled" ? "pending" : "failed_runner", reason);
+            result = laneScenario(reason === "cancelled" ? "pending" : "failed_runner", reason);
           } else if (performance.now() - start >= selection.timeoutMs) {
             timedOut = true;
             hardDeadline = true;
-            result = scenario(provider, model, "failed_runner", "timeout");
+            result = laneScenario("failed_runner", "timeout");
           } else result = exit === 0 ? reply ?? result : result;
         }
       }
     } catch {
-      result = reason && !child ? scenario(provider, model, reason === "cancelled" ? "pending" : "failed_runner", reason)
-        : scenario(provider, model, "failed_runner", "runner_error");
+      result = reason && !child ? laneScenario(reason === "cancelled" ? "pending" : "failed_runner", reason)
+        : laneScenario("failed_runner", "runner_error");
     }
     finally {
       if (timer) clearTimeout(timer);
@@ -202,10 +207,10 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         const unexpectedGroup = result.status === "passed" && groupAlive(child.pid);
         stopped = await stopChild(child, reason !== undefined || result.reason === "runner_error" || result.cleanup === "deferred");
         if (!stopped) {
-          result = scenario(provider, model, "failed_runner", "process_stop_unverified");
+          result = laneScenario("failed_runner", "process_stop_unverified");
           result.cleanup = "deferred";
         } else if (unexpectedGroup) {
-          result = scenario(provider, model, "failed_runner", "process_group_leak");
+          result = laneScenario("failed_runner", "process_group_leak");
         } else if (result.reason === "timeout_unsettled") {
           result.reason = "timeout";
         }
@@ -221,7 +226,7 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
       }
       if (workspace && stopped) {
         try { await rm(workspace, { recursive: true, force: true }); delete result.cleanup; }
-        catch { result = scenario(provider, model, "failed_runner", "cleanup_failed"); result.cleanup = "deferred"; }
+        catch { result = laneScenario("failed_runner", "cleanup_failed"); result.cleanup = "deferred"; }
       }
       result.durationMs = Math.round(performance.now() - start);
       scenarios.push(result);

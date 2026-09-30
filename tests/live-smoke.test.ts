@@ -565,3 +565,48 @@ beforeAll(() => {
   }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
 });
 afterAll(() => { globalThis.fetch = unguardedFetch; });
+
+test("explicit thinking on disabled lanes never reads credentials or catalogs and survives pending credentials", async () => {
+  let calls = 0;
+  const deps = { createStore: () => { calls++; return missingStore; },
+    fetch: async () => { calls++; throw Error("unexpected HTTP"); },
+    createModel: async () => { calls++; throw Error("unexpected model"); } };
+  const disabled = await runLiveSmoke({ ...selection(["openai-api-key", "codex", "grok", "compatible", "xai-api-key"]), enabled: false,
+    thinking: { "openai-api-key": "high", codex: "medium", grok: "medium", compatible: "medium", "xai-api-key": "medium" } }, deps);
+  expect(calls).toBe(0);
+  expect(disabled.scenarios.map(scenario => scenario.thinking)).toEqual(["high", "medium", "medium", "medium", "medium"]);
+  const pending = await runLiveSmoke({ ...selection(["codex", "grok"]), thinking: { codex: "medium", grok: "medium" } }, deps);
+  expect(calls).toBe(2);
+  expect(pending.scenarios).toMatchObject([{ status: "pending", reason: "missing_subscription", thinking: "medium" },
+    { status: "pending", reason: "missing_subscription", thinking: "medium" }]);
+});
+
+test("shared public policy refuses unsupported OpenAI and generic compatible thinking before inference", async () => {
+  let calls = 0;
+  const report = await runLiveSmoke({ ...selection(["openai-api-key", "compatible"]),
+    env: { OPENAI_API_KEY: "PRIVATE_KEY" }, models: { "openai-api-key": "gpt-6-luna", compatible: "meta/muse-spark-1.3-contributor" },
+    thinking: { "openai-api-key": "minimal", compatible: "medium" }, compatible: { baseUrl: "https://example.org/v1", auth: "none" },
+  }, { createStore: () => missingStore, fetch: async () => { calls++; throw Error("unexpected inference"); },
+    createModel: async () => { calls++; throw Error("unexpected model construction"); } });
+  expect(calls).toBe(0);
+  expect(report.scenarios).toMatchObject([{ thinking: "minimal", status: "failed_runner", reason: "unsupported_thinking" },
+    { thinking: "medium", status: "failed_runner", reason: "unsupported_thinking" }]);
+  expect(JSON.stringify(report)).not.toContain("PRIVATE_KEY");
+});
+
+test("reasoning catalog discovery shares the lane byte budget and deadline without starting inference", async () => {
+  const { smokeProtocolFixture } = await import("./fixtures/live-process.ts");
+  for (const catalogMode of ["oversized", "hang"]) {
+    const fixture = smokeProtocolFixture({ catalogMode });
+    let models = 0;
+    const report = await runLiveSmoke({ ...selection(["grok"]), thinking: { grok: "medium" } }, {
+      createStore: () => fixture.store, fetch: fixture.fetch,
+      createModel: async () => { models++; throw Error("unexpected inference"); },
+    });
+    expect(models).toBe(0);
+    expect(fixture.requests).toHaveLength(1);
+    expect(report.scenarios[0]).toMatchObject({ thinking: "medium", reason: catalogMode === "oversized" ? "output_limit" : "timeout",
+      diagnostics: { modelAttemptsStarted: 0, httpRequestsStarted: 1, httpResponsesReceived: catalogMode === "oversized" ? 1 : 0 } });
+    expect(JSON.stringify(report)).not.toMatch(/PRIVATE_|api\.x\.ai|schway-live-/);
+  }
+});
