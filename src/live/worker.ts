@@ -1,6 +1,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, SMOKE_PROVIDERS, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
+import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, SMOKE_PROVIDERS, type SmokeDependencies, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
+import { isThinkingLevel } from "../model/model.ts";
 const safeId = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const safeOption = /^[^\x00-\x1f\x7f]{1,200}$/;
 const MAX_INPUT_BYTES = 8192;
@@ -9,7 +10,8 @@ const MAX_INPUT_BYTES = 8192;
 export function parseWorkerInput(value: unknown): Omit<SmokeSelection, "env" | "signal"> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("invalid instruction");
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !["provider", "model", "timeoutMs", "compatible", "workspaceRoot"].includes(key))) throw Error("invalid instruction");
+  if (Object.keys(input).some(key => !["provider", "model", "thinking", "timeoutMs", "compatible", "workspaceRoot"].includes(key))
+    || (input.thinking !== undefined && !isThinkingLevel(input.thinking))) throw Error("invalid instruction");
   if (!SMOKE_PROVIDERS.includes(input.provider as SmokeProvider) || typeof input.model !== "string" || !safeId.test(input.model)
     || !Number.isInteger(input.timeoutMs) || (input.timeoutMs as number) < 1 || (input.timeoutMs as number) > 120_000
     || typeof input.workspaceRoot !== "string" || !isAbsolute(input.workspaceRoot)
@@ -28,11 +30,12 @@ export function parseWorkerInput(value: unknown): Omit<SmokeSelection, "env" | "
   }
   if (input.provider === "compatible" && !compatible) throw Error("invalid instruction");
   return { enabled: true, providers: [input.provider as SmokeProvider], models: { [input.provider as string]: input.model },
+    ...(input.thinking !== undefined ? { thinking: { [input.provider as string]: input.thinking } } : {}),
     timeoutMs: input.timeoutMs as number, revision: "unknown", workspaceRoot: input.workspaceRoot, compatible };
 }
 
 /** Consume only a bounded private stdin instruction, then execute the selected native Schway loop. */
-export async function runWorker(input: ReadableStream<Uint8Array>, env: Record<string, string | undefined>): Promise<string> {
+export async function runWorker(input: ReadableStream<Uint8Array>, env: Record<string, string | undefined>, deps: SmokeDependencies = {}): Promise<string> {
   const reader = input.getReader();
   let size = 0;
   const chunks: Uint8Array[] = [];
@@ -48,7 +51,7 @@ export async function runWorker(input: ReadableStream<Uint8Array>, env: Record<s
   for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength; }
   const selection = parseWorkerInput(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
   let modelStarted = false;
-  const report = await runLiveSmoke({ ...selection, env }, { onModelStarted: () => {
+  const report = await runLiveSmoke({ ...selection, env }, { ...deps, onModelStarted: () => {
     if (modelStarted) return;
     // Empty private evidence lets the supervisor classify a hard stream timeout after reaping.
     writeFileSync(join(selection.workspaceRoot!, ".model-started"), "", { flag: "wx", mode: 0o600 });

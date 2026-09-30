@@ -383,3 +383,130 @@ test("checkpoint write or rename failures do not change a verified supervised ro
     }
   } finally { server.stop(true); }
 }, 10_000);
+
+test("private worker validates the shared thinking enum before any credential or catalog lookup", async () => {
+  const safe = { provider: "grok", model: "grok-4.7", timeoutMs: 500, workspaceRoot: join(tmpdir(), "schway-live-fixture") };
+  expect(parseWorkerInput({ ...safe, thinking: "medium" })).toMatchObject({ thinking: { grok: "medium" } });
+  expect(parseWorkerInput(safe)).not.toHaveProperty("thinking");
+  for (const thinking of [null, {}, ["medium"], 1, "MEDIUM", "medium\nPRIVATE_SECRET", "x".repeat(8192)]) {
+    expect(() => parseWorkerInput({ ...safe, thinking })).toThrow("invalid instruction");
+    let lookups = 0;
+    await expect(runWorker(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify({ ...safe, thinking }))); controller.close();
+    } }), {}, { createStore: () => { lookups++; throw Error("unexpected store"); },
+      fetch: async () => { lookups++; throw Error("unexpected catalog"); } })).rejects.toThrow();
+    expect(lookups).toBe(0);
+  }
+});
+
+test("supervised production worker carries exact thinking into both real adapter requests, preserving omission", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    for (const provider of ["openai-api-key", "codex", "compatible", "grok", "xai-api-key"] as const) {
+      const model = provider === "compatible" ? "meta/muse-spark-1.3-contributor" : provider === "codex" ? "gpt-6-sol"
+        : provider === "openai-api-key" ? "gpt-6-luna" : "grok-4.7";
+      const level = provider === "openai-api-key" ? "high" : "medium";
+      for (const explicit of [true, false]) {
+        const requestFile = join(temp, `${provider}-${explicit}.json`);
+        const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: 4000,
+          models: { [provider]: model }, ...(explicit ? { thinking: { [provider]: level } } : {}),
+          compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" }, env: {
+            SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
+            OPENAI_API_KEY: "PRIVATE_KEY", XAI_API_KEY: "PRIVATE_XAI_KEY",
+          } }, { workerFile: fixture });
+        expect(report.scenarios[0]).toMatchObject({ provider, model, status: "passed", toolRoundTrip: true });
+        if (explicit) expect(report.scenarios[0]?.thinking).toBe(level);
+        else expect(report.scenarios[0]).not.toHaveProperty("thinking");
+        const requests = JSON.parse(await readFile(requestFile, "utf8")) as Array<{ url: string; body?: Record<string, unknown> }>;
+        const inference = requests.filter(request => request.body);
+        expect(inference).toHaveLength(2);
+        expect(inference.map(request => request.body?.model)).toEqual([model, model]);
+        expect(inference.map(request => request.body?.reasoning)).toEqual(explicit
+          ? [provider === "compatible" ? { effort: level } : { effort: level, summary: "auto" },
+            provider === "compatible" ? { effort: level } : { effort: level, summary: "auto" }]
+          : [undefined, undefined]);
+        expect(requests.filter(request => !request.body)).toHaveLength(explicit && provider !== "openai-api-key" ? 1 : 0);
+        expect(JSON.stringify(report)).not.toMatch(/PRIVATE_|smoke-sentinel|openrouter\.ai|schway-live-/);
+      }
+    }
+  });
+}, 15_000);
+
+test("supervised account and endpoint discovery refuses unsupported or absent capabilities before inference", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    for (const provider of ["codex", "compatible", "grok", "xai-api-key"] as const) {
+      for (const catalogMode of ["unsupported", "missing", "failure"]) {
+        const requestFile = join(temp, `${provider}-${catalogMode}.json`);
+        const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: 4000,
+          models: { [provider]: provider === "compatible" ? "meta/muse-spark-1.3-contributor" : provider === "codex" ? "gpt-6-sol" : "grok-4.7" },
+          thinking: { [provider]: "medium" }, compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
+          env: { SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
+            SCHWAY_FIXTURE_CATALOG_MODE: catalogMode, XAI_API_KEY: "PRIVATE_KEY" },
+        }, { workerFile: fixture });
+        expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", thinking: "medium", toolRoundTrip: false,
+          reason: catalogMode === "failure" ? "thinking_capability_unavailable" : "unsupported_thinking" });
+        const requests = JSON.parse(await readFile(requestFile, "utf8")) as Array<{ body?: unknown }>;
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.body).toBeUndefined();
+        expect(JSON.stringify(report)).not.toMatch(/PRIVATE_|openrouter\.ai|schway-live-/);
+      }
+    }
+  });
+}, 15_000);
+
+test("supervisor rejects dropped, changed, invalid or unsolicited thinking in bounded replies", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    for (const [expected, returned] of [["medium", undefined], ["medium", "high"], ["medium", "PRIVATE_SECRET"],
+      ["medium", {}], [undefined, "off"]] as const) {
+      const workerFile = join(temp, "reply.ts");
+      await writeFile(workerFile, `let raw = "";
+for await (const chunk of Bun.stdin.stream()) raw += new TextDecoder().decode(chunk);
+const input = JSON.parse(raw);
+console.log(JSON.stringify({ provider: input.provider, model: input.model, thinking: ${JSON.stringify(returned) ?? "undefined"},
+authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoundTrip: true }));`);
+      const report = await runLiveProcesses({ ...settings(["openai-api-key"]),
+        ...(expected ? { thinking: { "openai-api-key": expected } } : {}) }, { workerFile });
+      expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error", toolRoundTrip: false });
+      if (expected) expect(report.scenarios[0]?.thinking).toBe(expected);
+      else expect(report.scenarios[0]).not.toHaveProperty("thinking");
+      expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
+    }
+  });
+});
+
+test("supervisor preserves explicit thinking on timeout and later pending lanes", async () => {
+  if (process.platform === "win32") return;
+  const report = await runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 250),
+    thinking: { "openai-api-key": "high", compatible: "medium" }, env: { SCHWAY_FIXTURE_MODE: "hang-stream" } }, { workerFile: fixture });
+  expect(report.scenarios).toMatchObject([{ thinking: "high", status: "failed_provider", reason: "timeout" },
+    { thinking: "medium", status: "pending", reason: "prior_run_timeout" }]);
+});
+
+test("installed thinking option reaches the production worker and unsupported compatible levels make no request", async () => {
+  if (process.platform === "win32") return;
+  let calls = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    calls++;
+    const body = await request.clone().json() as Record<string, unknown>;
+    expect(body.reasoning).toBeUndefined();
+    expect(body.reasoning_effort).toBeUndefined();
+    return new Response(await sentinelSse(request), { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    for (const level of ["off", "medium"]) {
+      const before = calls;
+      const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible",
+        "--thinking", `compatible=${level}`, "--base-url", `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", "4000"], {
+        cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "PRIVATE_UNUSED_KEY" }, stdout: "pipe", stderr: "pipe",
+      });
+      const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      expect(exit).toBe(level === "off" ? 0 : 1);
+      expect(calls - before).toBe(level === "off" ? 2 : 0);
+      expect(JSON.parse(stdout).scenarios[0]).toMatchObject({ thinking: level, status: level === "off" ? "passed" : "failed_runner",
+        reason: level === "off" ? "verified" : "unsupported_thinking" });
+      expect(stdout + stderr).not.toContain("PRIVATE_UNUSED_KEY");
+    }
+  } finally { server.stop(true); }
+}, 15_000);
