@@ -6,11 +6,63 @@ import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { loadInteractiveModel } from "../src/tui/app.ts";
+import { createCodexLoginRunner, createGrokLoginRunner, loadInteractiveModel } from "../src/tui/app.ts";
 import { credentialIdentity } from "../src/auth/store.ts";
 import { encodeSse, TEXT_STREAM_EVENTS } from "./fixtures/openai.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
+
+for (const route of ["codex", "grok"] as const) for (const committed of [true, false]) test(`${route} picker cancellation retains a started ${committed ? "successful" : "failed"} credential write until settlement`, async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] }, saved = fakeCredentialStore();
+    const writing = Promise.withResolvers<void>(), finishWrite = Promise.withResolvers<void>();
+    let deletes = 0, requests = 0, signal: AbortSignal | undefined;
+    const store = { ...saved, async set(identity: Parameters<typeof saved.set>[0], value: string) {
+      writing.resolve(); await finishWrite.promise;
+      if (!committed) throw Error("Fixture secure-store write failed");
+      await saved.set(identity, value);
+    }, async delete(identity: Parameters<typeof saved.delete>[0]) { deletes++; return saved.delete(identity); } };
+    const { codexSubscriptionIdentity, grokSubscriptionIdentity } = await import("../src/auth/store.ts");
+    const { GROK_DEVICE_AUTHORIZATION_URL } = await import("../src/model/providers/grok-subscription.ts");
+    const fetchFixture = async (input: string | URL | Request) => {
+      requests++;
+      if (String(input).includes("usercode") || String(input) === GROK_DEVICE_AUTHORIZATION_URL) {
+        return Response.json({ user_code: "FIXTURE-CODE", verification_uri: "https://approval.example/device", device_code: "fixture-device", interval: route === "grok" ? 1 : 0 });
+      }
+      return Response.json({ access_token: "fixture-account-access", refresh_token: "fixture-refresh", expires_in: 3600 });
+    };
+    const codex = createCodexLoginRunner({ store, secrets: [], fetch: fetchFixture });
+    const grok = createGrokLoginRunner({ store, secrets: [], fetch: fetchFixture });
+    const provider = route === "codex" ? "openai" : "xai", modelId = route === "codex" ? "gpt-5.4" : "grok-4.7";
+    let modelCalls = 0;
+    const controller = new TuiController({ session: createSession(), sessionId: "saving-picker", workspace, provider, modelId,
+      openaiAuth: "codex", xaiAuth: "grok", contextManager: createContextManager(workspace),
+      model: createScriptedModel({ provider: route === "codex" ? "codex-subscription" : "grok-subscription", id: modelId,
+        responses: [() => { modelCalls++; return { text: "Old adapter must not run after replacement" }; }] }),
+      credentials: { store, env: {}, reload: async () => ({ error: "Account requires activation" }),
+        codexLogin: options => { signal = options.signal; return codex({ ...options, device: true }); },
+        grokLogin: options => { signal = options.signal; return grok({ ...options, device: true }); } },
+    });
+    let pending: Promise<boolean> | undefined;
+    try {
+      controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      const query = route === "codex" ? "ChatGPT" : "Grok subscription";
+      controller.searchModels(query); pending = controller.selectPickerModel(); await writing.promise;
+      expect(requests).toBe(2); controller.cancel(); expect(signal?.aborted).toBe(true);
+      expect(controller.running).toBe(true); expect(await controller.logout(route)).toBe(false); expect(deletes).toBe(0);
+      expect(await controller.selectLoginChoice()).toBe(false);
+      let idle = false; const waiting = controller.waitForIdle().then(() => { idle = true; });
+      await Bun.sleep(0); expect(idle).toBe(false);
+      finishWrite.resolve(); expect(await pending).toBe(false); await waiting;
+      expect(controller.running).toBe(false); expect(controller.snapshot().modelPicker?.query).toBe(query);
+      expect(controller.snapshot().modelId).toBe(modelId); expect(controller.snapshot().provider).toBe(provider);
+      const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+      expect((await saved.get(identity)) !== null).toBe(committed);
+      if (committed) { controller.closeModelPicker(); expect(await controller.submit("Do not use the replaced account adapter")).toBe(false); expect(modelCalls).toBe(0); }
+      await controller.logout(route); expect(deletes).toBe(1); expect(await saved.get(identity)).toBeNull();
+    } finally { finishWrite.resolve(); await pending; controller.dispose(); }
+  });
+});
 
 test("interactive login and overwrite refresh the active real provider and logout disables its old saved key", async () => {
   await withTempDir(async root => {

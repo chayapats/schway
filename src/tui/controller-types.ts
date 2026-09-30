@@ -212,19 +212,29 @@ export interface TuiControllerOptions {
   changeTracking?: GitChangeTrackingMode;
 }
 
-/** Explicit subscription login runner injected for tests; production wires the verified browser/device OAuth flow. */
+/** Run explicit ChatGPT browser/device approval with secure-store write-start and commit notifications. */
 export type CodexLoginRunner = (input: {
   device: boolean;
   code?: string;
   signal: AbortSignal;
   onProgress: (message: string) => void;
+  /** Mark the start of a secure-store write that must settle before another credential mutation. */
+  onSaving?: () => void;
   onSaved?: () => void;
 }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
 
 /** Browser or device approval data that stays outside conversation and draft persistence. */
 export type LoginApproval = { kind: "browser" } | { kind: "device"; verificationUri: string; userCode: string };
-/** Explicit Grok OAuth runner with separate panel progress and secure-store commit notification. */
-export type GrokLoginRunner = (input: { device: boolean; signal: AbortSignal; onProgress: (message: string) => void; onApproval: (approval: LoginApproval) => void; onSaved?: () => void }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
+/** Run explicit Grok approval with separate panel progress and secure-store write-start and commit notifications. */
+export type GrokLoginRunner = (input: {
+  device: boolean;
+  signal: AbortSignal;
+  onProgress: (message: string) => void;
+  onApproval: (approval: LoginApproval) => void;
+  /** Mark the start of a secure-store write that must settle before another credential mutation. */
+  onSaving?: () => void;
+  onSaved?: () => void;
+}) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
 
 /** Chooser levels distinguish primary routes from a subscription's alternate sign-in methods. */
 export type LoginChooserLevel = "main" | "chatgpt" | "grok";

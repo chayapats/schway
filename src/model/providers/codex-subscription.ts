@@ -91,6 +91,8 @@ export interface CodexLoginDeps {
     timeoutMs: number;
   }) => Promise<string>;
   onProgress?: CodexProgress;
+  /** Called immediately before the non-cancellable secure-store write starts. */
+  onSaving?: () => void;
   /** Called only after the secure-store write resolves successfully. */
   onSaved?: () => void;
   /** Deterministic random bytes for PKCE/state in tests; defaults to crypto. */
@@ -101,6 +103,8 @@ export interface CodexLoginDeps {
 export interface CodexDeviceDeps {
   fetch?: CodexFetchLike;
   onProgress?: CodexProgress;
+  /** Called immediately before the non-cancellable secure-store write starts. */
+  onSaving?: () => void;
   /** Called only after the secure-store write resolves successfully. */
   onSaved?: () => void;
 }
@@ -250,9 +254,11 @@ export async function saveSubscriptionTokens(
   await store.set(codexSubscriptionIdentity(), JSON.stringify(serializeSubscriptionTokens(tokens)));
 }
 
-/** Commit a completed interactive sign-in and report the secure-store commit point. */
-async function commitInteractiveLogin(store: CredentialStore, tokens: CodexTokens, deps: { onSaved?: () => void; onProgress?: CodexProgress }): Promise<void> {
+/** Persist a completed sign-in, reporting the write-start boundary and successful secure-store commit. */
+async function commitInteractiveLogin(store: CredentialStore, tokens: CodexTokens, deps: { onSaving?: () => void; onSaved?: () => void; onProgress?: CodexProgress }, signal?: AbortSignal): Promise<void> {
   deps.onProgress?.("Approval received. Saving ChatGPT credential in the OS secure store…");
+  throwIfAborted(signal);
+  deps.onSaving?.();
   try { await saveSubscriptionTokens(store, tokens); }
   catch { throw new Error(credentialStoreError("save")); }
   deps.onSaved?.();
@@ -600,7 +606,7 @@ export async function loginWithBrowserFlow(input: {
       accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
       obtainedAt: Date.now(),
     };
-    await commitInteractiveLogin(input.store, enriched, deps);
+    await commitInteractiveLogin(input.store, enriched, deps, signal);
     return enriched;
   }
   const { verifier, challenge, state } = createPkceChallenge(deps.randomBytes);
@@ -647,7 +653,7 @@ export async function loginWithBrowserFlow(input: {
     accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
     obtainedAt: Date.now(),
   };
-  await commitInteractiveLogin(input.store, enriched, deps);
+  await commitInteractiveLogin(input.store, enriched, deps, signal);
   return enriched;
 }
 
@@ -866,7 +872,7 @@ export async function loginWithDeviceFlow(input: {
     accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
     obtainedAt: Date.now(),
   };
-  await commitInteractiveLogin(input.store, enriched, deps);
+  await commitInteractiveLogin(input.store, enriched, deps, input.signal);
   return enriched;
 }
 

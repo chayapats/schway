@@ -132,6 +132,8 @@ export abstract class ControllerCore {
   protected loginApprovalData?: import("./controller-types.ts").LoginApproval;
   /** Active subscription sign-in abort; unlike submitted OS writes, the OAuth wait stays cancellable. */
   protected loginAbort?: AbortController;
+  /** A started OAuth credential write retains operation ownership until the secure store settles. */
+  protected loginSaving = false;
   protected loginGeneration = 0;
   /** Abort for the post-sign-in model listing; Esc and dispose cancel it without blocking the picker. */
   protected signInListAbort?: AbortController;
