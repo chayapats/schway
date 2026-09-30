@@ -6,7 +6,9 @@ import { createContextManager } from "../src/context/manager.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
-import { dispatchEditorInput, helpText } from "../src/tui/commands.ts";
+import { dispatchEditorInput, helpText, type SlashCommandName } from "../src/tui/commands.ts";
+import { BUILT_IN_COMMAND_ORDER, COMMAND_DESCRIPTIONS, commandCatalog } from "../src/tui/command-catalog.ts";
+import type { SkillDiscovery } from "../src/skills/skills.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import { withTempDir } from "./helpers.ts";
@@ -33,6 +35,63 @@ async function commandFixture(dir: string, body: string, secrets: string[] = [],
 }
 
 const noBuiltin = async () => { throw new Error("Unexpected builtin dispatch"); };
+
+test("the curated built-in order covers descriptions and the slash-command union exactly once", () => {
+  const coversSlashCommands: Exclude<SlashCommandName, typeof BUILT_IN_COMMAND_ORDER[number]> extends never ? true : false = true;
+  expect(coversSlashCommands).toBe(true);
+  expect(BUILT_IN_COMMAND_ORDER).toEqual([
+    "model", "new", "sessions", "changes", "compact", "resume", "branch", "thinking", "context", "skills",
+    "add-dir", "config", "theme", "session", "login", "logout", "help", "quit", "delete-session",
+  ]);
+  expect(Object.keys(COMMAND_DESCRIPTIONS).sort()).toEqual([...BUILT_IN_COMMAND_ORDER].sort());
+  expect(new Set(BUILT_IN_COMMAND_ORDER).size).toBe(BUILT_IN_COMMAND_ORDER.length);
+  expect(commandCatalog([]).map(entry => entry.name)).toEqual([...BUILT_IN_COMMAND_ORDER]);
+  expect(Object.fromEntries(["model", "new", "sessions", "changes", "compact", "delete-session"].map(name => [name, COMMAND_DESCRIPTIONS[name as SlashCommandName]])))
+    .toEqual({ model: "Choose model", new: "Start a new conversation", sessions: "Open saved work", changes: "Review changes", compact: "Summarize to free context", "delete-session": "Delete a saved session" });
+});
+
+test("catalog groups skills and unavailable entries before extension owners and destructive built-ins", () => {
+  const skills: SkillDiscovery = {
+    skills: [{ name: "study", description: "Study the plan", scope: "project", userOnly: true, dir: "/skills/study", skillFile: "/skills/study/SKILL.md", displayPath: "study" }],
+    collisions: [{ name: "theme", command: "theme", source: "/skills/theme/SKILL.md" }],
+    ambiguous: [{ name: "duplicate", sources: ["first", "second"] }],
+    diagnostics: [{ source: "invalid-one", reason: "Repair the first skill" }, { source: "invalid-two", reason: "Repair the second skill" }],
+  };
+  const entries = commandCatalog([
+    { name: "greet", description: "Say hello", source: "/modules/arbitrary.ts", packageName: "greeting-pkg" },
+    { name: "local", description: "Local action", source: "/modules/local.ts" },
+  ], skills);
+  expect(entries.map(entry => entry.name)).toEqual([
+    ...BUILT_IN_COMMAND_ORDER.slice(0, -1), "study", "theme", "duplicate", "unavailable", "unavailable", "greet", "local", "delete-session",
+  ]);
+  expect(entries.filter(entry => entry.group === "skills").map(entry => entry.name))
+    .toEqual(["study", "theme", "duplicate", "unavailable", "unavailable"]);
+  expect(entries.filter(entry => entry.group === "skills" && !entry.available).every(entry => entry.insertion === "")).toBe(true);
+  expect(entries.filter(entry => entry.id.startsWith("diagnostic:")).map(entry => entry.description))
+    .toEqual(["Repair the first skill", "Repair the second skill"]);
+  expect(entries.find(entry => entry.id === "builtin:theme")?.available).toBe(false);
+  expect(entries.find(entry => entry.name === "study")?.source).toBe("project skill · user-only");
+  expect(entries.find(entry => entry.name === "greet")?.provenance).toBe("greeting-pkg");
+  expect(entries.find(entry => entry.name === "greet")?.source).toBe("extension /modules/arbitrary.ts");
+  expect(entries.find(entry => entry.name === "local")?.provenance).toBe("local.ts");
+  expect(entries.filter(entry => entry.destructive).map(entry => entry.name)).toEqual(["delete-session"]);
+  expect(entries.at(-1)?.group).toBe("destructive");
+  expect(entries.find(entry => entry.name === "logout")?.destructive).toBe(false);
+});
+
+test("CLI commands retain their canonical identity and use the module filename as display provenance", async () => {
+  await withTempDir(async dir => {
+    const fixture = await commandFixture(dir, `export default ctx => ctx.registerCommand({ name: 'greet', description: 'Say hello', execute() {} });`);
+    try {
+      const command = fixture.runtime.command("greet")!;
+      expect(command.source).toBe(fixture.path);
+      expect(command.packageName).toBeUndefined();
+      expect(Object.isFrozen(command)).toBe(true);
+      expect(commandCatalog([command]).find(entry => entry.name === "greet"))
+        .toMatchObject({ id: `extension:${fixture.path}:greet`, provenance: "commands.ts", source: `extension ${fixture.path}` });
+    } finally { fixture.controller.dispose(); }
+  });
+});
 
 test("extension help and editor dispatch preserve raw arguments and submit one ordinary user turn", async () => {
   await withTempDir(async dir => {

@@ -25,11 +25,11 @@ export async function loadExtensions(options: {
 }): Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }> {
   options.signal?.throwIfAborted();
   const packages = await discoverPackages({ workspaceRoot: options.workspace.root, home: options.home, signal: options.signal });
-  const declarations = [
-    ...packages.flatMap(pkg => pkg.extensions.map(path => ({ path, source: `${pkg.source}: ${path}` }))),
+  const declarations: Array<{ path: string; source: string; packageName?: string }> = [
+    ...packages.flatMap(pkg => pkg.extensions.map(path => ({ path, source: `${pkg.source}: ${path}`, packageName: pkg.name }))),
     ...options.modules.map(path => ({ path: resolve(options.workspace.root, path), source: `CLI module "${path}"` })),
   ];
-  const paths: Array<{ path: string; source: string }> = [];
+  const paths: Array<{ path: string; source: string; packageName?: string }> = [];
   const identities = new Map<string, string>();
   for (const declaration of declarations) {
     try {
@@ -38,7 +38,7 @@ export async function loadExtensions(options: {
       const previous = identities.get(path);
       if (previous) throw new Error(`Duplicate extension identity ${path}; enabled by both ${previous} and ${declaration.source}. Remove one enablement.`);
       identities.set(path, declaration.source);
-      paths.push({ path, source: declaration.source });
+      paths.push({ ...declaration, path });
     } catch (error) {
       throw extensionError(declaration.source, error);
     }
@@ -49,7 +49,7 @@ export async function loadExtensions(options: {
   const staged = forkToolRegistry(options.tools);
   const runtime = new ExtensionRuntime({ secrets: options.secrets, onDiagnostic: options.onDiagnostic });
   try {
-    for (const { path, source } of paths) {
+    for (const { path, source, packageName } of paths) {
       options.signal?.throwIfAborted();
       try {
         const module = await cancellable(import(pathToFileURL(path).href), options.signal);
@@ -83,7 +83,7 @@ export async function loadExtensions(options: {
               staged.register(guardExtensionTool(snapshotTool(tool), path, options.secrets ?? []));
             });
           },
-          registerCommand: (command: Parameters<ExtensionContext["registerCommand"]>[0]) => register(() => runtime.registerCommand(path, command, skills)),
+          registerCommand: (command: Parameters<ExtensionContext["registerCommand"]>[0]) => register(() => runtime.registerCommand(path, command, skills, packageName)),
           onRuntimeEvent: (listener: Parameters<ExtensionContext["onRuntimeEvent"]>[0]) => register(() => runtime.subscribe(path, listener)),
           onDispose: (cleanup: Parameters<ExtensionContext["onDispose"]>[0]) => register(() => runtime.onDispose(path, cleanup)),
         });
