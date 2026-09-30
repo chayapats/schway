@@ -1,0 +1,192 @@
+schway-screen 1
+screen table-and-code
+title Table and code wrapping
+description Wide table cells and long code lines wrap without losing their text.
+variant light-120
+size 120x40
+cursor 7 37 visible
+== text
+ ⚡ schway  /project
+
+  ▌ You
+  ▌ Show wrapping
+
+
+  Wrapping report
+
+   Name                                                                         State      Count      Owner
+   A pneumonoultramicroscopicsilicovolcanoconiosis-with-an-extra-long-suffix    B ready    C seven    D Ada
+   E Beta                                                                       F done     G nine     H Lin
+
+    ts                                                                                                    Alt+I copy
+   const message =
+   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
+   yz0123456789";
+   console.log(message);
+  End of wrapping report
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ✓ Done · 0.0s · Alt+R review
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › Ask Schway…
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ● READY   scripted/scripted-model                                                                            ctx ~109
+  Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-2 #ffffff #f7f7f4 -
+02 2-3 #0a5894 #ecedea -
+02 3-4 #ffffff #ecedea -
+02 4-7 #0a5894 #ecedea b
+02 7-117 #ffffff #ecedea -
+02 117-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-3 #0a5894 #ecedea -
+03 3-4 #ffffff #ecedea -
+03 4-17 #1d232c #ecedea -
+03 17-117 #ffffff #ecedea -
+03 117-120 #ffffff #f7f7f4 -
+04 0-120 #ffffff #f7f7f4 -
+05 0-120 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-17 #1d232c #f7f7f4 -
+06 17-120 #ffffff #f7f7f4 -
+07 0-120 #ffffff #f7f7f4 -
+08 0-3 #ffffff #f7f7f4 -
+08 3-7 #1d232c #f7f7f4 b
+08 7-80 #ffffff #f7f7f4 -
+08 80-85 #1d232c #f7f7f4 b
+08 85-91 #ffffff #f7f7f4 -
+08 91-96 #1d232c #f7f7f4 b
+08 96-102 #ffffff #f7f7f4 -
+08 102-107 #1d232c #f7f7f4 b
+08 107-120 #ffffff #f7f7f4 -
+09 0-3 #ffffff #f7f7f4 -
+09 3-76 #1d232c #f7f7f4 -
+09 76-80 #ffffff #f7f7f4 -
+09 80-87 #1d232c #f7f7f4 -
+09 87-91 #ffffff #f7f7f4 -
+09 91-98 #1d232c #f7f7f4 -
+09 98-102 #ffffff #f7f7f4 -
+09 102-107 #1d232c #f7f7f4 -
+09 107-120 #ffffff #f7f7f4 -
+10 0-3 #ffffff #f7f7f4 -
+10 3-9 #1d232c #f7f7f4 -
+10 9-80 #ffffff #f7f7f4 -
+10 80-86 #1d232c #f7f7f4 -
+10 86-91 #ffffff #f7f7f4 -
+10 91-97 #1d232c #f7f7f4 -
+10 97-102 #ffffff #f7f7f4 -
+10 102-107 #1d232c #f7f7f4 -
+10 107-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
+12 0-2 #ffffff #f7f7f4 -
+12 2-3 #ffffff #e1e3df -
+12 3-7 #0a5894 #c7d2d6 b
+12 7-106 #ffffff #e1e3df -
+12 106-116 #545e6c #e1e3df -
+12 116-117 #ffffff #e1e3df -
+12 117-120 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-3 #ffffff #ecedea -
+13 3-9 #6a3fb0 #ecedea -
+13 9-16 #1d232c #ecedea -
+13 16-19 #6a3fb0 #ecedea -
+13 19-117 #ffffff #ecedea -
+13 117-120 #ffffff #f7f7f4 -
+14 0-2 #ffffff #f7f7f4 -
+14 2-3 #ffffff #ecedea -
+14 3-116 #19612f #ecedea -
+14 116-117 #ffffff #ecedea -
+14 117-120 #ffffff #f7f7f4 -
+15 0-2 #ffffff #f7f7f4 -
+15 2-3 #ffffff #ecedea -
+15 3-16 #19612f #ecedea -
+15 16-17 #6a3fb0 #ecedea -
+15 17-117 #ffffff #ecedea -
+15 117-120 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-3 #ffffff #ecedea -
+16 3-10 #1d232c #ecedea -
+16 10-11 #6a3fb0 #ecedea -
+16 11-14 #0a5894 #ecedea -
+16 14-22 #1d232c #ecedea -
+16 22-24 #6a3fb0 #ecedea -
+16 24-117 #ffffff #ecedea -
+16 117-120 #ffffff #f7f7f4 -
+17 0-2 #ffffff #f7f7f4 -
+17 2-24 #1d232c #f7f7f4 -
+17 24-120 #ffffff #f7f7f4 -
+18 0-120 #ffffff #f7f7f4 -
+19 0-120 #ffffff #f7f7f4 -
+20 0-120 #ffffff #f7f7f4 -
+21 0-120 #ffffff #f7f7f4 -
+22 0-120 #ffffff #f7f7f4 -
+23 0-120 #ffffff #f7f7f4 -
+24 0-120 #ffffff #f7f7f4 -
+25 0-120 #ffffff #f7f7f4 -
+26 0-120 #ffffff #f7f7f4 -
+27 0-120 #ffffff #f7f7f4 -
+28 0-120 #ffffff #f7f7f4 -
+29 0-120 #ffffff #f7f7f4 -
+30 0-120 #ffffff #f7f7f4 -
+31 0-120 #ffffff #f7f7f4 -
+32 0-120 #ffffff #f7f7f4 -
+33 0-120 #ffffff #f7f7f4 -
+34 0-2 #ffffff #f7f7f4 -
+34 2-3 #19612f #f7f7f4 b
+34 3-4 #545e6c #f7f7f4 -
+34 4-8 #19612f #f7f7f4 b
+34 8-18 #545e6c #f7f7f4 -
+34 18-23 #1d232c #caced3 b
+34 23-30 #545e6c #f7f7f4 -
+34 30-120 #ffffff #f7f7f4 -
+35 0-2 #ffffff #f7f7f4 -
+35 2-118 #ecedea #f7f7f4 -
+35 118-120 #ffffff #f7f7f4 -
+36 0-2 #ffffff #f7f7f4 -
+36 2-6 #0a5894 #ecedea -
+36 6-17 #545e6c #ecedea -
+36 17-118 #ffffff #ecedea -
+36 118-120 #ffffff #f7f7f4 -
+37 0-2 #ffffff #f7f7f4 -
+37 2-118 #ecedea #f7f7f4 -
+37 118-120 #ffffff #f7f7f4 -
+38 0-1 #545e6c #ecedea -
+38 1-10 #19612f #d3dcd4 b
+38 10-11 #545e6c #ecedea -
+38 11-36 #1d232c #e1e3df -
+38 36-119 #545e6c #ecedea -
+38 119-120 #ffffff #f7f7f4 -
+39 0-2 #ffffff #f7f7f4 -
+39 2-7 #1d232c #caced3 b
+39 7-15 #545e6c #f7f7f4 -
+39 15-21 #1d232c #caced3 b
+39 21-29 #545e6c #f7f7f4 -
+39 29-34 #1d232c #caced3 b
+39 34-45 #545e6c #f7f7f4 -
+39 45-51 #1d232c #caced3 b
+39 51-60 #545e6c #f7f7f4 -
+39 60-61 #1d232c #caced3 b
+39 61-70 #545e6c #f7f7f4 -
+39 70-120 #ffffff #f7f7f4 -

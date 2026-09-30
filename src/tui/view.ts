@@ -701,9 +701,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           rows.set(entry.id, row);
           transcript.add(row.root);
         }
+        // OpenTUI 0.5.11 caches finalized Markdown prefixes. A notice may follow an
+        // active answer; finalizing that row early permanently splits later deltas.
         row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
             resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
-          }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
+          }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
           inspection?.id === entry.id && inspection.kind === "tool", controller.inlineDiffLines());
       }

@@ -129,8 +129,9 @@ test("inspection identity and reading position survive new output and tool compl
 
 test("multiple code blocks navigate individually through streaming and resize", async () => {
   const ui = await setup(44, 18);
+  const second = `second 😀 ${"unbroken".repeat(18)}\nlast source line`;
   await ui.mockInput.pasteBracketedText("future draft");
-  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nfirst ภาษาไทย\n```\n\n```txt\nsecond 😀\n```" } });
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: `\`\`\`txt\nfirst ภาษาไทย\n\`\`\`\n\n\`\`\`txt\n${second}\n\`\`\`` } });
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
   ui.mockInput.pressKey("c");
@@ -138,12 +139,20 @@ test("multiple code blocks navigate individually through streaming and resize", 
   ui.mockInput.pressTab();
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("C copy");
-  ui.resize(80, 24);
-  await ui.settle();
+  for (const width of [80, 50, 120, 50, 80]) {
+    ui.resize(width, 24);
+    await ui.settle();
+    ui.mockInput.pressKey("c");
+    expect(ui.copied.at(-1)).toBe(second);
+  }
   ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "\nLater text" } });
   await ui.settle();
   ui.mockInput.pressKey("c");
-  expect(ui.copied.at(-1)).toBe("second 😀");
+  expect(ui.copied.at(-1)).toBe(second);
+  ui.controller.applyEvent({ type: "model.finished" });
+  ui.resize(50, 24); await ui.settle();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied.at(-1)).toBe(second);
   ui.mockInput.pressKey("f", { ctrl: true });
   expect(ui.editor.plainText).toBe("future draft");
   ui.mockInput.pressEscape();

@@ -511,9 +511,9 @@ export abstract class TurnLayer extends CompactionLayer {
         return;
       }
       case "error": {
-        if (event.message === "Your Grok plan doesn't include API access. Use an xAI API key instead.") { this.fail(event.message); return; }
         this.markProvisionalIncomplete();
         this.clearRetryNotice();
+        if (event.message === "Your Grok plan doesn't include API access. Use an xAI API key instead.") { this.fail(event.message); return; }
         if (event.origin === "harness" && event.category !== "session-write") {
           this.fail(redactSecrets(event.message, this.secrets));
         } else {

@@ -18,6 +18,7 @@ import { editTool } from "../../src/tools/edit.ts";
 import { bashTool } from "../../src/tools/bash.ts";
 import { writeTool } from "../../src/tools/write.ts";
 import { createScriptedModel, type ScriptedTurn } from "../helpers/scripted-model.ts";
+import { MARKDOWN_ANSWER } from "../helpers/markdown-answer.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity } from "../../src/auth/store.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
 import type { Screen, Variant } from "./screens.ts";
@@ -62,6 +63,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "retry-countdown") responses = [{ error: "busy", status: 503, headers: { "Retry-After": "3" } }];
   if (screen.id === "compaction") responses = [{ waitForAbort: true }];
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
+  if (screen.id === "table-and-code") responses = [{ text: MARKDOWN_ANSWER }];
   let tools = createToolRegistry();
   if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
     tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);

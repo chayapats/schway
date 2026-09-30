@@ -11,7 +11,7 @@ export * from "./transcript-format.ts";
 
 /** Own interactive transcript state around the shared agent loop without loading the renderer. */
 export class TuiController extends TurnLayer {
-  /** Return current state with a new transcript array, masking known secrets in displayed targets, results, and diff rows. */
+  /** Return redacted current state and the active assistant preview independently of transcript order. */
   snapshot(): TuiSnapshot {
     const thinking = this.configEditor ? this.configEditor.settings.thinking : this.thinking;
     const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId, this.thinkingContext());
@@ -23,6 +23,7 @@ export class TuiController extends TurnLayer {
     const context = this.contextSnapshot();
     return {
       status: this.status,
+      streamingAssistantId: this.transcript.find(entry => entry.id === this.currentAssistantId && entry.text.length > 0 && !entry.incomplete)?.id,
       context,
       compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
