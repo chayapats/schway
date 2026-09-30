@@ -1,0 +1,128 @@
+schway-screen 1
+screen command-palette-groups
+title Command palette groups
+description Skills and extension owners precede the final destructive command.
+variant dark-50
+size 50x30
+cursor 7 27 visible
+== text
+ ⚡ schway  ~/demo
+
+
+ scripted/scripted-model · scripted API key ·
+ configured, unverified
+
+ Type a task · Enter sends
+
+
+
+
+
+
+
+
+
+
+
+
+      Skills
+      /grill-me       Stress-test a plan
+      Extensions
+      /greet          Say hello · greeting-pkg
+      /local          Local action · local.ts
+  ›   /delete-session Delete a saved … · deletes
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › /
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ● READY   scripted/scripted-model        ctx ~0
+ ↑/↓ select · Tab complete · Esc dismiss
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-18 #8b95a7 #161b24 -
+00 18-50 #ffffff #161b24 -
+01 0-50 #ffffff #0e1117 -
+02 0-50 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-24 #e6eaf0 #0e1117 b
+03 24-46 #8b95a7 #0e1117 -
+03 46-50 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-23 #8b95a7 #0e1117 -
+04 23-50 #ffffff #0e1117 -
+05 0-50 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-15 #8b95a7 #0e1117 -
+06 15-20 #e6eaf0 #293140 b
+06 20-26 #8b95a7 #0e1117 -
+06 26-50 #ffffff #0e1117 -
+07 0-50 #ffffff #0e1117 -
+08 0-50 #ffffff #0e1117 -
+09 0-50 #ffffff #0e1117 -
+10 0-50 #ffffff #0e1117 -
+11 0-50 #ffffff #0e1117 -
+12 0-50 #ffffff #0e1117 -
+13 0-50 #ffffff #0e1117 -
+14 0-50 #ffffff #0e1117 -
+15 0-50 #ffffff #0e1117 -
+16 0-50 #ffffff #0e1117 -
+17 0-50 #ffffff #0e1117 -
+18 0-50 #ffffff #0e1117 -
+19 0-1 #ffffff #0e1117 -
+19 1-2 #ffffff #1e2430 -
+19 2-12 #8b95a7 #1e2430 -
+19 12-49 #ffffff #1e2430 -
+19 49-50 #ffffff #0e1117 -
+20 0-1 #ffffff #0e1117 -
+20 1-2 #ffffff #1e2430 -
+20 2-40 #8b95a7 #1e2430 -
+20 40-49 #ffffff #1e2430 -
+20 49-50 #ffffff #0e1117 -
+21 0-1 #ffffff #0e1117 -
+21 1-2 #ffffff #1e2430 -
+21 2-16 #8b95a7 #1e2430 -
+21 16-49 #ffffff #1e2430 -
+21 49-50 #ffffff #0e1117 -
+22 0-1 #ffffff #0e1117 -
+22 1-2 #ffffff #1e2430 -
+22 2-46 #8b95a7 #1e2430 -
+22 46-49 #ffffff #1e2430 -
+22 49-50 #ffffff #0e1117 -
+23 0-1 #ffffff #0e1117 -
+23 1-2 #ffffff #1e2430 -
+23 2-45 #8b95a7 #1e2430 -
+23 45-49 #ffffff #1e2430 -
+23 49-50 #ffffff #0e1117 -
+24 0-1 #ffffff #0e1117 -
+24 1-2 #ffffff #1e2430 -
+24 2-38 #e6eaf0 #33475e -
+24 38-48 #beae8e #33475e -
+24 48-49 #ffffff #1e2430 -
+24 49-50 #ffffff #0e1117 -
+25 0-1 #ffffff #0e1117 -
+25 1-49 #161b24 #0e1117 -
+25 49-50 #ffffff #0e1117 -
+26 0-1 #ffffff #0e1117 -
+26 1-5 #7cc4ff #161b24 -
+26 5-6 #e6eaf0 #161b24 -
+26 6-49 #ffffff #161b24 -
+26 49-50 #ffffff #0e1117 -
+27 0-1 #ffffff #0e1117 -
+27 1-49 #161b24 #0e1117 -
+27 49-50 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-10 #8fd19e #31433f b
+28 10-11 #8b95a7 #161b24 -
+28 11-36 #e6eaf0 #1e2430 -
+28 36-49 #8b95a7 #161b24 -
+28 49-50 #ffffff #0e1117 -
+29 0-1 #ffffff #0e1117 -
+29 1-4 #e6eaf0 #293140 b
+29 4-14 #8b95a7 #0e1117 -
+29 14-17 #e6eaf0 #293140 b
+29 17-29 #8b95a7 #0e1117 -
+29 29-32 #e6eaf0 #293140 b
+29 32-40 #8b95a7 #0e1117 -
+29 40-50 #ffffff #0e1117 -

@@ -1,4 +1,4 @@
-/** Rank a case-insensitive subsequence from exact (0) through prefix, hyphen word start, substring and subsequence (4). */
+/** Return exact (0), prefix, hyphen word start, substring or subsequence (4) rank ignoring case, or undefined for no match. */
 export function fuzzyRank(query: string, candidate: string): number | undefined {
   const needle = query.toLowerCase();
   const haystack = candidate.toLowerCase();

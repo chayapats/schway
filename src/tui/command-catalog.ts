@@ -42,6 +42,11 @@ export function commandCatalog(extensions: readonly ExtensionCommandInfo[], skil
   for (const command of extensions) entries.push({ id: `extension:${command.source}:${command.name}`, name: command.name, insertion: `/${command.name} `, description: command.description, source: `extension ${command.source}`, available: true, group: "extensions", provenance: command.packageName ?? basename(command.source) });
   entries.push(...builtins.filter(entry => entry.destructive));
   const commands = entries.filter(entry => !entry.id.startsWith("diagnostic:"));
-  for (const entry of commands) if (commands.filter(other => other.name === entry.name).length > 1) { entry.available = false; entry.description = `Collision · ${entry.description}`; }
-  return entries;
+  for (const entry of commands) if (commands.filter(other => other.name === entry.name).length > 1) {
+    entry.available = false; entry.description = `Collision · ${entry.description}`;
+    if (!entry.destructive) entry.group = "skills";
+  }
+  const groupOrder = { "built-in": 0, skills: 1, extensions: 2, destructive: 3 };
+  return entries.sort((left, right) => groupOrder[left.group!] - groupOrder[right.group!]
+    || Number(left.id.startsWith("diagnostic:")) - Number(right.id.startsWith("diagnostic:")));
 }

@@ -62,11 +62,11 @@ test("catalog groups skills and unavailable entries before extension owners and 
     { name: "local", description: "Local action", source: "/modules/local.ts" },
   ], skills);
   expect(entries.map(entry => entry.name)).toEqual([
-    ...BUILT_IN_COMMAND_ORDER.slice(0, -1), "study", "theme", "duplicate", "unavailable", "unavailable", "greet", "local", "delete-session",
+    ...BUILT_IN_COMMAND_ORDER.slice(0, -1).filter(name => name !== "theme"), "theme", "study", "theme", "duplicate", "unavailable", "unavailable", "greet", "local", "delete-session",
   ]);
   expect(entries.filter(entry => entry.group === "skills").map(entry => entry.name))
-    .toEqual(["study", "theme", "duplicate", "unavailable", "unavailable"]);
-  expect(entries.filter(entry => entry.group === "skills" && !entry.available).every(entry => entry.insertion === "")).toBe(true);
+    .toEqual(["theme", "study", "theme", "duplicate", "unavailable", "unavailable"]);
+  expect(entries.filter(entry => entry.id.startsWith("collision:") || entry.id.startsWith("ambiguous:") || entry.id.startsWith("diagnostic:")).every(entry => entry.insertion === "")).toBe(true);
   expect(entries.filter(entry => entry.id.startsWith("diagnostic:")).map(entry => entry.description))
     .toEqual(["Repair the first skill", "Repair the second skill"]);
   expect(entries.find(entry => entry.id === "builtin:theme")?.available).toBe(false);
@@ -270,6 +270,8 @@ test("unified controller discovery exposes two extensions, user-only skills and 
       expect(choices.filter(entry => entry.name === "ping")).toHaveLength(2);
       expect(choices.filter(entry => entry.name === "theme").every(entry => !entry.available)).toBe(true);
       expect(choices.find(entry => entry.name === "pong")?.source).toContain("extension");
+      expect(choices.filter(entry => entry.name === "ping" || entry.name === "theme").every(entry => entry.group === "skills")).toBe(true);
+      expect(choices.findIndex(entry => entry.name === "pong")).toBeGreaterThan(choices.findLastIndex(entry => entry.group === "skills"));
       let accepted = false;
       expect(await dispatchEditorInput("/theme dark", fixture.controller, noBuiltin, () => { accepted = true; })).toBe(false);
       expect(await dispatchEditorInput("/ping", fixture.controller, noBuiltin)).toBe(false);
@@ -277,6 +279,28 @@ test("unified controller discovery exposes two extensions, user-only skills and 
       expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("/thinking");
       expect(accepted).toBe(false); expect(fixture.module.calls).toBe(0); expect(fixture.requests).toEqual([]);
       expect(fixture.controller.commandChoices("/login ").map(entry => entry.insertion)).toEqual(["/login openai", "/login xai", "/login openai-compatible", "/login codex", "/login grok"]);
+    } finally { fixture.controller.dispose(); }
+  });
+});
+
+test("controller ranks command names before searchable descriptions, package provenance and skill sources", async () => {
+  await withTempDir(async dir => {
+    const fixture = await commandFixture(dir, `export default ctx => {
+      ctx.registerCommand({ name: 'check', description: 'Inspect sessions', execute() {} });
+      ctx.registerCommand({ name: 'session-helper', description: 'Handle saved work', execute() {} });
+    };`);
+    try {
+      const skillDir = join(dir, ".agents/skills/guide");
+      await mkdir(skillDir, { recursive: true });
+      await Bun.write(join(skillDir, "SKILL.md"), "---\nname: guide\ndescription: Review plan\ndisable-model-invocation: true\n---\nTask");
+      await fixture.controller.refreshCommands();
+      const all = fixture.controller.commandChoices("/");
+      expect(all.map(entry => entry.name)).toEqual([...BUILT_IN_COMMAND_ORDER.slice(0, -1), "guide", "check", "session-helper", "delete-session"]);
+      expect(fixture.controller.commandChoices("/ses").map(entry => entry.name)).toEqual(["sessions", "session", "session-helper", "delete-session"]);
+      expect(fixture.controller.commandChoices("sessions", true).map(entry => entry.name)).toEqual(["sessions", "check", "session"]);
+      expect(fixture.controller.commandChoices("user-only", true).map(entry => entry.name)).toEqual(["guide"]);
+      expect(fixture.controller.commandChoices("project skill", true).map(entry => entry.name)).toEqual(["guide"]);
+      expect(fixture.controller.commandChoices(fixture.path, true).map(entry => entry.name)).toEqual(["check", "session-helper"]);
     } finally { fixture.controller.dispose(); }
   });
 });
@@ -321,7 +345,7 @@ test("enabled extension replacement refreshes command discovery through the actu
       expect(fixture.controller.commandChoices("/old-skill")).toHaveLength(0);
       await fixture.controller.refreshCommands();
       expect(fixture.controller.commandChoices("/previous")).toHaveLength(0);
-      expect(fixture.controller.commandChoices("/next")).toHaveLength(1);
+      expect(fixture.controller.commandChoices("/next")[0]?.name).toBe("next");
     } finally { fixture.controller.dispose(); }
   });
 });

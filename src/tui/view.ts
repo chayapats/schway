@@ -14,6 +14,7 @@ import { readGitHead } from "./git-head.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
+import type { CommandChoice } from "./command-catalog.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -90,7 +91,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let sessionOriginalScroll = 0;
   let reviewContent = "";
   let helpInserted = false;
-  let lastQuery = "";
+  let lastQuery: string | undefined;
   let dismissedQuery: string | undefined;
   let unseen = false;
   let lastTail = "";
@@ -303,6 +304,37 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   function completions() {
     if (panelMode && panelMode !== "help" || editor.plainText === dismissedQuery) return [];
     return controller.commandChoices(editor.plainText, panelMode === "help" && !helpInserted);
+  }
+
+  function paletteRows(choices: readonly CommandChoice[]) {
+    const grouped = panelMode === "help" && !helpInserted ? !editor.plainText.trim() : editor.plainText === "/";
+    const result: Array<{ header: string } | { entry: CommandChoice; index: number }> = [];
+    let group: CommandChoice["group"];
+    choices.forEach((entry, index) => {
+      if (grouped && entry.group !== group) {
+        if (entry.group === "skills") result.push({ header: "Skills" });
+        if (entry.group === "extensions") result.push({ header: "Extensions" });
+        group = entry.group;
+      }
+      result.push({ entry, index });
+    });
+    return result;
+  }
+
+  function commandRow(entry: CommandChoice, selected: boolean, nameColumns: number, columns: number) {
+    const color = selected ? theme.text : entry.destructive ? theme.warning : theme.muted;
+    const prefix = `${selected ? "›" : " "} ${entry.available ? "  " : "! "}`;
+    const name = fitLine(`/${safe(entry.name)}`, nameColumns);
+    const label = name + " ".repeat(Math.max(0, nameColumns - Bun.stringWidth(name)) + 1);
+    const remaining = Math.max(0, columns - Bun.stringWidth(prefix + label));
+    const suffix = fitLine(entry.destructive ? " · deletes" : entry.provenance ? ` · ${safe(entry.provenance)}` : "", remaining);
+    const description = fitLine(safe(entry.description), Math.max(0, remaining - Bun.stringWidth(suffix)));
+    const row = new TextRenderable(renderer, { content: new StyledText([
+      fg(color)(prefix + label + description),
+      fg(entry.destructive ? mixColor(theme.warning, theme.muted, 0.5) : theme.muted)(suffix),
+    ]), flexShrink: 0, height: 1, wrapMode: "none" });
+    if (selected) row.bg = tint(theme, theme.accent);
+    picker.add(row);
   }
 
   function refreshDiscovery() {
@@ -519,7 +551,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (panelMode === "tree" && !nextPanel && !sessionChanged) searchRestoreScroll = treeOriginalScroll;
         if (nextPanel === "review") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "review" && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
-        if (nextPanel === "help") { helpInserted = false; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (nextPanel === "help") { helpInserted = false; lastQuery = undefined; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "help" && !nextPanel && !sessionChanged) searchRestoreScroll = helpOriginalScroll;
         panelMode = nextPanel;
         setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
@@ -672,9 +704,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (browsing && !discoveryOpen) refreshDiscovery();
       discoveryOpen = browsing;
       const available = completions();
-      if (editor.plainText !== lastQuery) { completionIndex = 0; completionId = available[0]?.id; lastQuery = editor.plainText; }
+      if (editor.plainText !== lastQuery) { completionIndex = available.findIndex(entry => entry.available); completionId = available[completionIndex]?.id; lastQuery = editor.plainText; }
       else if (completionId) completionIndex = available.findIndex(entry => entry.id === completionId && entry.available);
       else completionIndex = -1;
+      const commandRows = paletteRows(available);
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
       const maxRows = Math.max(1, Math.min(snapshot.loginChooser ? 8 : 6, Math.floor(renderer.height / 3) - 2));
       const legacyDevice = snapshot.loginApproval && !snapshot.loginApprovalData ? /^Enter this code at (.*?): (.+)$/.exec(snapshot.loginApproval) : null;
@@ -686,7 +719,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ? (!snapshot.loginApprovalData && renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval!.code)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval!.address)/(width - 2))
         : snapshot.loginApprovalData ? Math.max(1, Math.ceil(Bun.stringWidth(snapshot.loginApproval ?? "")/(width - 2))) : 2;
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
-      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, available.length));
+      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, commandRows.length));
       const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
@@ -784,10 +817,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const detail = selected ? `${routeDetail} · ${models.selectedIndex + 1}/${models.entries.length}${selected.connect ? "" : ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`}` : "No matches. Try provider/model-id.";
           textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
         } else if (browsing) {
-          const start = Math.max(0, completionIndex - maxRows + 1);
+          const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
+          const start = Math.max(0, Math.min(selectedRow - Math.floor(maxRows / 2), commandRows.length - maxRows));
+          const nameColumns = Math.min(23, Math.max(1, ...available.map(entry => Bun.stringWidth(`/${safe(entry.name)}`))));
           if (!available.length) textRow(picker, "No matches · Esc dismiss", theme.muted);
-          available.slice(start, start + maxRows).forEach((entry, offset) => {
-            textRow(picker, fitLine(`${start + offset === completionIndex ? "›" : " "} ${entry.available ? "" : "! "}[${entry.source.startsWith("extension ") ? "extension" : entry.source}] /${entry.name} ${entry.description}`, width - 2), start + offset === completionIndex ? theme.accent : theme.muted);
+          commandRows.slice(start, start + maxRows).forEach(row => {
+            if ("header" in row) textRow(picker, `    ${row.header}`, theme.muted);
+            else commandRow(row.entry, row.index === completionIndex, nameColumns, width - 2);
           });
         }
         // Selected choices become a tinted row so the highlight reads as a block, not only a marker.
@@ -1140,7 +1176,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (snapshot.modelPicker) { controller.moveModelPicker(delta); handled(); return; }
       if (snapshot.branchTree) { controller.moveBranchTreeAction(delta); handled(); return; }
       const choices = completions();
-      if (choices.length) { completionIndex = (completionIndex + delta + choices.length) % choices.length; completionId = choices[completionIndex]?.id; handled(); return; }
+      if (choices.length) {
+        const selectable = choices.map((entry, index) => entry.available ? index : -1).filter(index => index >= 0);
+        const selected = selectable.indexOf(completionIndex);
+        const next = selected < 0 ? (delta > 0 ? 0 : selectable.length - 1) : (selected + delta + selectable.length) % selectable.length;
+        completionIndex = selectable[next] ?? -1; completionId = choices[completionIndex]?.id; handled(); return;
+      }
       if (panelMode === "help") { handled(); return; }
       if (!key.shift && !key.ctrl && !key.meta && history.length && (name === "up" ? editor.visualCursor.visualRow === 0 : editor.visualCursor.visualRow >= editor.virtualLineCount - 1)) {
         if (historyIndex === -1 && name === "down") return;

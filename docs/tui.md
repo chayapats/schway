@@ -363,14 +363,28 @@ reader's scroll position.
 
 ## Discover commands and skills
 
-Type `/` to browse built-ins, active extension commands, and user-invokable
-project/global skills, including user-only skills. Rows identify their source;
-`!` marks a collision or unavailable action. Rename conflicting skills or
+Type `/` to browse commands in a fixed order: `/model`, `/new`, `/sessions`,
+`/changes`, `/compact`, then the remaining built-ins. User-invokable project and
+global skills, including user-only skills, follow under **Skills**, then active
+extension commands under **Extensions**. Empty groups have no header. Extension
+rows show their package name, or the module filename for `--extension` modules.
+Descriptions share one column; long names are clipped, while Tab inserts the full
+name. `/delete-session` comes last, uses warning color and ends with `· deletes`,
+including without color. `/logout` stays with ordinary built-ins.
+
+Type after `/` to search a flat list with case-insensitive fuzzy matching. Exact
+names rank first, then prefixes, word starts after a hyphen, substrings and other
+subsequences. Ties keep the fixed order. Clearing the search restores the groups
+and selects the first command. In Alt+H help, names rank before matches in
+descriptions or sources such as `project skill`, `global skill` and `user-only`.
+
+`!` marks a collision or unavailable action in the Skills group. Rename conflicting skills or
 extensions before invoking either meaning of the name. Metadata refreshes when
 browsing reopens, and submission rechecks collisions. Removing or disabling a
 highlighted choice clears its selection: press an arrow before completing again.
 
-Use Up/Down to select, Tab to insert, and Escape to dismiss. Completion never
+Use Up/Down to select and wrap, Tab to insert, and Escape to dismiss. Arrows skip
+group headers and unavailable rows; Tab never inserts them. Completion never
 executes an action. `/thinking ` suggests only validated current model levels
 (and `reset`); subscription levels require advertised account metadata. OpenRouter
 uses endpoint-scoped model metadata for the same choices in `/thinking` and

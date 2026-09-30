@@ -21,6 +21,7 @@ import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { pathToFileURL } from "node:url";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
+import { BUILT_IN_COMMAND_ORDER } from "../src/tui/command-catalog.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
 
 const cleanups: (() => void)[] = [];
@@ -1490,7 +1491,7 @@ test("dynamic skill refresh cannot transfer an active completion selection to it
     const ui = await setup(44, 18, {}, undefined, { workspace, home: join(root, "home") });
     await ui.controller.refreshCommands();
     await ui.mockInput.pasteBracketedText("/al"); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("project skill");
+    expect(ui.captureCharFrame()).toContain("Unicode 日本語");
     ui.mockInput.pressArrow("down"); await settle(ui);
     await rm(join(root, ".agents/skills/alpine"), { recursive: true });
     await ui.controller.refreshCommands(); await settle(ui);
@@ -1504,6 +1505,120 @@ test("dynamic skill refresh cannot transfer an active completion selection to it
     await writeFile(join(root, ".agents/skills/alpine/SKILL.md"), "---\nname: alpine\ndescription: Returned\n---\nBODY");
     ui.editor.setText("/al"); await settle(ui); await ui.controller.refreshCommands(); await settle(ui);
     expect(ui.controller.commandChoices("/al").map(entry => entry.name)).toEqual(["alpha", "alpine"]);
+  });
+});
+
+for (const width of [120, 50]) for (const noColor of [false, true]) {
+  test(`command palette groups, aligned columns, ranked queries and destructive styling at ${width} columns${noColor ? " without color" : ""}`, async () => {
+    await withTempDir(async root => {
+      const home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
+      await Bun.write(join(root, ".agents/skills/grill-me/SKILL.md"), "---\nname: grill-me\ndescription: Stress-test a plan\n---\nTask");
+      await Bun.write(join(root, "node_modules/greeting-pkg/package.json"), JSON.stringify({ name: "greeting-pkg", schway: { extensions: ["main.ts"] } }));
+      await Bun.write(join(root, "node_modules/greeting-pkg/main.ts"), "export default ctx => ctx.registerCommand({ name: 'greet', description: 'Say hello', execute() {} });");
+      await Bun.write(join(root, ".schway/config.json"), JSON.stringify({ packages: ["greeting-pkg"] }));
+      await Bun.write(join(root, "local.ts"), "export default ctx => ctx.registerCommand({ name: 'local', description: 'Local action', execute() {} });");
+      const loaded = await loadExtensions({ modules: ["local.ts"], workspace, home, tools: createToolRegistry() });
+      const ui = await setup(width, 30, {}, undefined, { workspace, home, tools: loaded.tools, extensions: loaded.runtime }, undefined, noColor ? { NO_COLOR: "1" } : {});
+      await ui.controller.refreshCommands();
+      const picker = () => ui.renderer.root.findDescendantById("picker") as BoxRenderable;
+      const rows = () => picker().getChildren() as TextRenderable[];
+      const selected = () => rows().find(row => row.plainText.startsWith("› "))!;
+      await ui.mockInput.typeText("/"); await settle(ui);
+      expect(selected().plainText).toContain("/model");
+      expect(ui.controller.commandChoices("/").map(entry => entry.name)).toEqual([...BUILT_IN_COMMAND_ORDER.slice(0, -1), "grill-me", "greet", "local", "delete-session"]);
+      const visited: string[] = [];
+      for (let index = 0; index < ui.controller.commandChoices("/").length; index++) {
+        visited.push(selected().plainText.match(/\/(\S+)/)![1]!);
+        ui.mockInput.pressArrow("down"); await settle(ui);
+        expect(rows().length).toBeLessThanOrEqual(6);
+        expect(selected().plainText).not.toContain("Skills");
+        expect(selected().plainText).not.toContain("Extensions");
+      }
+      expect(visited).toEqual(ui.controller.commandChoices("/").map(entry => entry.name));
+      expect(selected().plainText).toContain("/model");
+      ui.mockInput.pressArrow("up"); await settle(ui);
+      const frame = ui.captureCharFrame();
+      expect(frame).toContain("Skills"); expect(frame).toContain("Extensions");
+      expect(frame).toContain("· greeting-pkg"); expect(frame).toContain("· local.ts");
+      expect(frame).not.toContain("[built-in]"); expect(frame).not.toContain("[extension]"); expect(frame).not.toContain("project skill");
+      expect(rows().at(-1)?.plainText).toEndWith(" · deletes");
+      expect(selected().plainText).toContain("/delete-session");
+      const theme = resolveTheme("dark", null, noColor ? { NO_COLOR: "1" } : {});
+      expect(selected().bg?.equals(RGBA.fromHex(tint(theme, theme.accent)))).toBe(true);
+      const descriptionStarts = rows().filter(row => row.plainText.includes("/")).map(row => row.chunks[0]!.text.search(/Stress-|Say |Local |Delete /));
+      expect(new Set(descriptionStarts).size).toBe(1);
+      await ui.mockInput.typeText("ses"); await settle(ui);
+      expect(rows().map(row => row.plainText.match(/\/(\S+)/)?.[1])).toEqual(["sessions", "session", "delete-session"]);
+      expect(ui.captureCharFrame()).not.toContain("Skills"); expect(ui.captureCharFrame()).not.toContain("Extensions");
+      const deletion = rows().at(-1)!;
+      expect(deletion.chunks[0]?.fg?.equals(RGBA.fromHex(theme.warning))).toBe(true);
+      expect(deletion.chunks[1]?.fg?.equals(RGBA.fromHex(mixColor(theme.warning, theme.muted, 0.5)))).toBe(true);
+      expect(deletion.plainText).toEndWith(" · deletes");
+      ui.mockInput.pressBackspace(); ui.mockInput.pressBackspace(); ui.mockInput.pressBackspace(); await settle(ui);
+      expect(ui.editor.plainText).toBe("/"); expect(selected().plainText).toContain("/model");
+      ui.mockInput.pressArrow("up"); await settle(ui);
+      expect(ui.captureCharFrame()).toContain("Skills"); expect(ui.captureCharFrame()).toContain("Extensions");
+      ui.editor.setText("/logout"); await settle(ui);
+      expect(rows()[0]?.plainText).toContain("/logout"); expect(rows()[0]?.plainText).not.toContain("· deletes");
+      ui.mockInput.pressEscape(); ui.editor.setText(""); ui.mockInput.pressKey("h", { meta: true }); await settle(ui);
+      expect(selected().plainText).toContain("/model");
+      ui.mockInput.pressArrow("up"); await settle(ui);
+      expect(ui.captureCharFrame()).toContain("Skills"); expect(ui.captureCharFrame()).toContain("Extensions");
+      await ui.mockInput.typeText("ses"); await settle(ui);
+      expect(rows().slice(0, 3).map(row => row.plainText.match(/\/(\S+)/)?.[1])).toEqual(["sessions", "session", "delete-session"]);
+      expect(ui.captureCharFrame()).not.toContain("Skills"); expect(ui.captureCharFrame()).not.toContain("Extensions");
+      for (let count = 0; count < 3; count++) ui.mockInput.pressBackspace();
+      await settle(ui); expect(selected().plainText).toContain("/model");
+    });
+  });
+}
+
+test("long command names clip to the capped column while Tab inserts the full name", async () => {
+  await withTempDir(async root => {
+    const name = "very-long-extension-command-name", home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
+    await Bun.write(join(root, "long.ts"), `export default ctx => ctx.registerCommand({ name: '${name}', description: 'Long action', execute() {} });`);
+    const loaded = await loadExtensions({ modules: ["long.ts"], workspace, home, tools: createToolRegistry() });
+    const ui = await setup(50, 24, {}, undefined, { workspace, home, extensions: loaded.runtime });
+    await ui.mockInput.typeText("/very"); await settle(ui);
+    const picker = ui.renderer.root.findDescendantById("picker") as BoxRenderable;
+    const row = picker.getChildren()[0] as TextRenderable;
+    expect(row.plainText).toContain("/very-long-extension-c… Long");
+    expect(row.plainText.indexOf("Long")).toBe(28);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe(`/${name} `);
+  });
+});
+
+test("dynamic extension and built-in collisions appear in Skills and Tab cannot insert either owner", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
+    await Bun.write(join(root, "ping.ts"), "export default ctx => ctx.registerCommand({ name: 'ping', description: 'Ping extension', execute() {} });");
+    const loaded = await loadExtensions({ modules: ["ping.ts"], workspace, home, tools: createToolRegistry() });
+    for (const name of ["ping", "help"]) await Bun.write(join(root, `.agents/skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: Conflicting skill\n---\nTask`);
+    await Bun.write(join(root, ".agents/skills/invalid/SKILL.md"), "Invalid frontmatter");
+    const ui = await setup(50, 30, {}, undefined, { workspace, home, extensions: loaded.runtime });
+    await ui.controller.refreshCommands();
+    const choices = ui.controller.commandChoices("/");
+    expect(choices.filter(entry => entry.name === "ping" || entry.name === "help").every(entry => entry.group === "skills" && !entry.available)).toBe(true);
+    const skillRows = choices.filter(entry => entry.group === "skills");
+    expect(skillRows.at(-1)?.id).toStartWith("diagnostic:");
+    for (const name of ["ping", "help"]) {
+      ui.editor.setText(`/${name}`); await settle(ui);
+      const picker = ui.renderer.root.findDescendantById("picker") as BoxRenderable;
+      expect(picker.getChildren().filter(row => (row as TextRenderable).plainText.includes("! /"))).toHaveLength(2);
+      ui.mockInput.pressTab(); await settle(ui);
+      expect(ui.editor.plainText).toBe(`/${name}`);
+    }
+    ui.editor.setText("/"); await settle(ui); ui.mockInput.pressArrow("up"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("! /ping");
+    const picker = ui.renderer.root.findDescendantById("picker") as BoxRenderable;
+    expect(picker.getChildren().filter(row => (row as TextRenderable).plainText.startsWith("› ")).map(row => (row as TextRenderable).plainText))
+      .toHaveLength(1);
+    ui.mockInput.pressArrow("up"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Skills");
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.editor.plainText).toBe("/delete-session ");
   });
 });
 

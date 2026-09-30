@@ -1,5 +1,6 @@
 import { redactSecrets } from "../auth/secrets.ts";
 import { commandCatalog, type CommandChoice } from "./command-catalog.ts";
+import { fuzzyRank } from "./fuzzy.ts";
 import type { Session } from "../session/session.ts";
 import { addWorkspaceRoots, type Workspace } from "../workspace/workspace.ts";
 import { discoverSkills } from "../skills/skills.ts";
@@ -81,12 +82,12 @@ export abstract class CommandsLayer extends CredentialsLayer {
     return true;
   }
 
-  /** Expose safe discovery entries without loading providers or activating skills. */
+  /** Return curated discovery or name-first fuzzy results without loading providers or activating skills. */
   commandChoices(input = "/", help = false): CommandChoice[] {
     const commands = commandCatalog(this.extensionCommands(), this.discoveredCommands);
     if (help) {
       const query = input.trim().toLowerCase();
-      return commands.filter(entry => `${entry.name} ${entry.description} ${entry.source}`.toLowerCase().includes(query));
+      return rankCommands(commands, query, true);
     }
     const match = /^\/(thinking|theme|login|logout)\s+([^\s]*)$/.exec(input);
     if (match) {
@@ -97,7 +98,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
       return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
     }
     if (!/^\/[^\s]*$/.test(input)) return [];
-    return commands.filter(entry => entry.name.startsWith(input.slice(1).toLowerCase()));
+    return rankCommands(commands, input.slice(1));
   }
 
   /** Revalidate command collisions immediately before explicit dispatch. */
@@ -180,4 +181,15 @@ export abstract class CommandsLayer extends CredentialsLayer {
     if (succeeded && prompt !== undefined && !this.disposed && !abort.signal.aborted) await this.submit(prompt);
     return executed;
   }
+}
+
+/** Keep curated ties stable and put metadata-only help matches after every matching command name. */
+function rankCommands(commands: CommandChoice[], query: string, help = false): CommandChoice[] {
+  if (!query) return commands;
+  return commands.flatMap((entry, order) => {
+    const nameRank = fuzzyRank(query, entry.name);
+    const metadataRank = help ? fuzzyRank(query, `${entry.description} ${entry.source} ${entry.provenance ?? ""}`) : undefined;
+    const rank = nameRank ?? (metadataRank === undefined ? undefined : 5 + metadataRank);
+    return rank === undefined ? [] : [{ entry, order, rank }];
+  }).sort((left, right) => left.rank - right.rank || left.order - right.order).map(({ entry }) => entry);
 }
