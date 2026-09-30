@@ -163,6 +163,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/package.json",
       "package/README.md",
       "package/LICENSE",
+      "package/CHANGELOG.md",
       ...["configuration", "credentials", "diagnostics", "doctor", "evals", "extensions", "live-providers", "sessions", "workspaces"]
         .map((name) => `package/docs/${name}.md`),
     ]) {
@@ -178,6 +179,9 @@ test("npm pack installs the public extension API and completes a headless tool r
     expect(entries.some((entry) => entry.startsWith("package/tests/"))).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/.github/"))).toBe(false);
     expect(entries.includes("package/.travis.yml")).toBe(false);
+    expect(entries.includes("package/docs/releasing.md")).toBe(false);
+    expect(entries.includes("package/docs/release-verification.md")).toBe(false);
+    expect(entries.some((entry) => entry.startsWith("package/.scratch/"))).toBe(false);
 
     // Install the tarball into an isolated directory and run the installed binary.
     // This step needs registry access for the runtime dependencies.

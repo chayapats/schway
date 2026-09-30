@@ -1,5 +1,79 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## 0.4.0 release (2026-09-30)
+
+**Verdict: release preparation in progress; not published.**
+
+The release candidate is being prepared from
+`e624d1171fe37789408a4efa194f098379bd4344` in an owned issue #138 worktree.
+The actual merged release commit `R`, `v0.4.0` tag and registry version remain
+pending. Raw precondition evidence is private at
+`~/schway-release-evidence/0.4.0/preconditions-20260930T0515Z.json`.
+
+### Preconditions
+
+On 2026-09-30, all ten native blockers (#129–#137 and #166) were closed.
+The initial 0.4 milestone query listed only #138. Severity labels P0, P1 and P2 were updated
+idempotently; every truth-pass defect (#173, #174, #176 and #179) carried P2.
+The open P0 and P1 queries both returned empty lists.
+
+An initial `npm whoami` exited 1 with `ENEEDAUTH`. After maintainer login,
+the repeated check exited 0 and identified `chayapats`.
+`npm view schway --json` exited 1 with E404 and reported the package unpublished
+on 2022-04-24; this is not proof of publish permission.
+`npm profile get --json` initially exited 0 with `tfa: false`. The operator
+then enabled 2FA; a repeated read confirmed `pending: null` and
+`mode: "auth-and-writes"`. Private profile responses are retained outside Git.
+
+### Offline preparation
+
+`bun install --frozen-lockfile` and `bun run typecheck` exited 0 in the candidate
+worktree. The focused package/packaging suite passed 57 tests with 0 failures,
+including installing the packed harness and greeting package and exercising
+their tool round trips. `bun test` exited 0: 1,450 tests passed across 100 files,
+with 0 failures. All three checks on the actual merge commit remain pending.
+
+### Live smoke
+
+No live inference has run for this release. The operator selected OpenAI Luna
+with high thinking, Codex Sol with medium thinking, and compatible Muse Spark
+with medium thinking, with a ceiling of USD 1.50 per API key for all release
+calls. Model discovery confirmed `gpt-6-luna` and `gpt-6-sol`; the operator
+confirmed OpenRouter and `meta/muse-spark-1.3-contributor`. The operator required
+explicit thinking support before release, now tracked as prerequisite
+[#185](https://github.com/chayapats/schway/issues/185). It was added to milestone
+0.4 and as a native blocker of #138 after the initial precondition check.
+Its implementation was merged through
+[PR #187](https://github.com/chayapats/schway/pull/187), implementation commit
+`c8a11e44a145d2f1184198b8dc23f3595d536ff7`; typecheck and 1,461 deterministic
+tests passed. The main merge commit is
+`9b488d1900622df0f87be5affdc4b9493bbdb404`; both CI checks and CodeRabbit
+passed, and #185 is closed. Actual live verification remains pending.
+
+Initial secure-store presence checks found OpenAI and OpenRouter API keys and
+a Codex login; xAI API-key and Grok subscription identities were absent.
+The operator subsequently completed Grok login and saved an xAI API key.
+Both account catalogs advertised `grok-4.7` with medium thinking, which the
+operator selected for both routes. Credential presence and model discovery do
+not verify live inference. No stored credential value was printed.
+
+| Route | Provider | Model | Auth source | Status | Reason | Tested at | Revision |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ChatGPT subscription | — | — | — | not run | awaiting release commit and smoke settings | — | — |
+| Grok subscription | — | — | — | not run | awaiting release commit and thinking support | — | — |
+| OpenAI API key | — | — | — | not run | awaiting release commit and smoke settings | — | — |
+| xAI API key | — | — | — | not run | awaiting release commit and thinking support | — | — |
+| Compatible endpoint | — | — | — | not run | awaiting release commit and smoke settings | — | — |
+
+These are pending gates, not smoke-report results. No lane has passed at `R`.
+Full live evals are outside #138's minor-release scope.
+
+### Publish and clean-HOME install
+
+Publish, tag, registry installation and its help/doctor/no-model/compatible-turn/
+Anthropic-removal checks have not run. OS/tool versions and install exits will
+be recorded with those results. Issue #138 remains open.
+
 ## 0.4 truth pass (#137, 2026-09-29)
 
 **Verdict: live verification recorded with failures; release approval remains pending.**

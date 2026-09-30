@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdir, realpath, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { inc } from "semver";
+import { version } from "../package.json";
 import { runCli } from "../src/cli/main.ts";
 import { parseConfigObject } from "../src/config/config.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -93,10 +95,10 @@ const invalidManifests: Array<[string, unknown, string]> = [
   ["directory module", { schway: { extensions: ["skill"] } }, "module file"],
   ["file skill", { schway: { skills: ["main.ts"] } }, "skill directory"],
   ["missing skill file", { schway: { skills: ["empty"] } }, "missing SKILL.md"],
-  ["incompatible peer", { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: ">=99" } }, "installed Schway is 0.1.0"],
+  ["incompatible peer", { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: ">=99" } }, `installed Schway is ${version}`],
   ["malformed peer", { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: 42 } }, "Invalid Schway peer range"],
   ["bundled harness", { schway: { extensions: ["main.ts"] }, dependencies: { schway: "*" } }, "peerDependencies instead"],
-  ...["garbage", "workspace:*", "latest", "not valid semver", ">=0.1.0 garbage", "npm:schway@^0.1.0", "file:../schway", ""].map(range => [
+  ...["garbage", "workspace:*", "latest", "not valid semver", `>=${version} garbage`, `npm:schway@^${version}`, "file:../schway", ""].map(range => [
     `malformed peer ${JSON.stringify(range)}`, { schway: { extensions: ["main.ts"] }, peerDependencies: { schway: range } }, "Invalid Schway peer range",
   ] as [string, unknown, string]),
 ];
@@ -116,7 +118,7 @@ for (const [name, manifest, reason] of invalidManifests) {
   });
 }
 
-for (const range of ["^0.1.0", "~0.1.0", ">=0.1.0 <0.2.0", "99.x || 0.1.x", "0.1.0 - 0.2.0", "*"]) {
+for (const range of [`^${version}`, `~${version}`, `>=${version} <${inc(version, "minor")}`, `99.x || ${version}`, `${version} - ${inc(version, "minor")}`, ...(version.includes("-") ? [] : ["*"])]) {
   test(`valid npm peer range ${range} enables a compatible installed package`, async () => {
     await withIsolatedCliDirs(async ({ work, home }) => {
       await installed(work, "compatible", { schway: { skills: [] }, peerDependencies: { schway: range } });
@@ -136,7 +138,7 @@ for (const declaration of [
   test(`second harness declaration ${JSON.stringify(declaration)} fails before importing its nested API`, async () => {
     await withIsolatedCliDirs(async ({ work, home }) => {
       const marker = join(work, "nested-api-ran");
-      const dir = await installed(work, "second-harness", { ...declaration, peerDependencies: { schway: "^0.1.0" }, schway: { extensions: ["main.ts"] } }, {
+      const dir = await installed(work, "second-harness", { ...declaration, peerDependencies: { schway: `^${version}` }, schway: { extensions: ["main.ts"] } }, {
         "main.ts": "import { defineExtension } from 'schway/extensions'; export default defineExtension(() => {});",
       });
       await installed(dir, "schway", { version: "99.0.0", exports: { "./extensions": "./api.js" } }, {
@@ -270,7 +272,7 @@ test("global package, project package, manifest, and CLI order govern actual req
 for (const mode of ["headless", "interactive"] as const) {
   test(`${mode} packaged skill invocation and custom tool share the real loop without persisting bodies`, async () => {
     await withIsolatedCliDirs(async ({ work, home }) => {
-      await installed(work, "mixed", { peerDependencies: { schway: "^0.1.0" }, schway: { skills: ["guide"], extensions: ["main.ts"] } }, {
+      await installed(work, "mixed", { peerDependencies: { schway: `^${version}` }, schway: { skills: ["guide"], extensions: ["main.ts"] } }, {
         "guide/SKILL.md": skill("guide", "PACKAGED SKILL BODY"), "main.ts": extension("packaged"),
       });
       await configure(work, ["mixed"]);
