@@ -23,6 +23,15 @@ GitHub Issues for `chayapats/schway`, via `gh`. See `docs/agents/issue-tracker.m
 
 Before implementing or taking over a tracked issue, read `docs/agents/parallel-implementation.md`. Use an owned issue worktree and atomic claim; a shared GitHub assignee or `ready-for-agent` label is not ownership.
 
+### PR review and merge
+
+For implementation PRs, complete this loop before merging. In managed-worker mode, the coordinator owns the loop.
+
+1. After creating the PR and after every push, wait for CodeRabbit to finish reviewing the current PR HEAD. A pending, skipped or unavailable review leaves this gate incomplete; report the blocker if review cannot finish.
+2. Evaluate every CodeRabbit finding against the code and specification. Fix every valid finding regardless of severity. Record evidence for findings dismissed as incorrect or already addressed.
+3. Rerun affected checks, push fixes and repeat the review loop until CodeRabbit has reviewed the latest HEAD, every finding has a recorded disposition, no valid finding remains outstanding and all required checks pass.
+4. Merge once these conditions hold and existing user/repository authorization permits it. Otherwise preserve the PR and report the remaining blocker.
+
 ### Triage labels
 
 Default roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
