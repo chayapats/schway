@@ -21,6 +21,11 @@ const chunks = [
   "```ts\n" + codeLines.join("\n") + "\n```\n\nEnd of answer",
 ];
 const answer = chunks.join("");
+const interruptedChunks = [
+  "Resize report\n\n| Module | State | Count | Owner |\n",
+  '| --- | --- | --- | --- |\n| Alpha | Ready | Seven | Ada |\n| Beta | Done | Nine | Lin |\n\n```ts\nconst first = "al',
+  'pha";\nconst second = "beta";\nconsole.log(first, second);\n```\n\nEnd of answer',
+];
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
@@ -157,11 +162,7 @@ test("resumed session table and code remain visible after 110 to 60 columns", as
 });
 
 test("notice between streamed table and code deltas does not permanently split Markdown blocks", async () => {
-  const pieces = [
-    "Resize report\n\n| Module | State | Count | Owner |\n",
-    '| --- | --- | --- | --- |\n| Alpha | Ready | Seven | Ada |\n| Beta | Done | Nine | Lin |\n\n```ts\nconst first = "al',
-    'pha";\nconst second = "beta";\nconsole.log(first, second);\n```\n\nEnd of answer',
-  ];
+  const pieces = interruptedChunks;
   const gated = gatedModel(pieces);
   const ui = await setup(110, 60, gated.model);
   const turn = ui.controller.submit("Compare the modules");
@@ -313,11 +314,12 @@ test("completion can extend the last delta without freezing a partial Markdown b
   } finally { gated.gates.forEach(gate => gate.resolve()); await turn; }
 });
 
-test("cancelled, failed and overflow-abandoned code previews stay finalized across resize", async () => {
+test("cancelled, failed, Grok-rejected and overflow-abandoned code previews stay finalized across resize", async () => {
   for (const event of [
     { type: "agent.finished", reason: "cancelled" },
     { type: "agent.finished", reason: "error" },
     { type: "compaction.started", reason: "overflow" },
+    { type: "error", message: "Your Grok plan doesn't include API access. Use an xAI API key instead." },
   ] satisfies RuntimeEvent[]) {
     const ui = await setup();
     ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```ts\nconst abandoned = 1;" } });
@@ -331,6 +333,32 @@ test("cancelled, failed and overflow-abandoned code previews stay finalized acro
       expect(ui.controller.snapshot().streamingAssistantId).toBeUndefined();
     }
   }
+});
+
+test("a local diagnostic does not finalize an answer that is still receiving deltas", async () => {
+  const gated = gatedModel(interruptedChunks);
+  const ui = await setup(60, 60, gated.model);
+  const turn = ui.controller.submit("Compare the modules");
+  try {
+    await gated.delivered[0]!.promise;
+    await settle(ui);
+    const active = ui.controller.snapshot().streamingAssistantId;
+    ui.controller.fail("A local diagnostic; the model is still responding.");
+    await settle(ui);
+    expect(ui.controller.snapshot().status).toBe("error");
+    expect(ui.controller.snapshot().streamingAssistantId).toBe(active);
+    for (let index = 1; index < interruptedChunks.length; index++) {
+      gated.gates[index - 1]!.resolve();
+      await gated.delivered[index]!.promise;
+      await settle(ui);
+    }
+    gated.gates.at(-1)!.resolve();
+    await turn;
+    const text = await frame(ui, "diagnostic-completed-60");
+    expectAnswer(text);
+    expect(text).not.toContain("|");
+    expect(text.match(/Alt\+I copy/g)).toHaveLength(1);
+  } finally { gated.gates.forEach(gate => gate.resolve()); await turn; }
 });
 
 test("searching a tall table after resize lands on the matching cell", async () => {
