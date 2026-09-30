@@ -29,6 +29,26 @@ test("config edits preserve provenance and reset to lower precedence without cre
   });
 });
 
+test("config editor loads inline diff limits and unrelated edits preserve the ui layer", async () => {
+  await withTempDir(async dir => {
+    const home = join(dir, "home"), root = join(dir, "project");
+    await mkdir(join(home, ".schway"), { recursive: true });
+    await mkdir(join(root, ".schway"), { recursive: true });
+    await writeFile(join(home, ".schway/config.json"), JSON.stringify({ ui: { inlineDiffLines: 24 } }));
+    const path = join(root, ".schway/config.json");
+    await writeFile(path, JSON.stringify({ ui: { inlineDiffLines: 0 }, maxTurns: 5 }));
+    const editor = await loadConfigEditor({ home, workspaceRoot: root });
+    expect(editor.settings.inlineDiffLines).toBe(0);
+    expect(editor.origins.ui).toBe("project");
+    await (await editor.prepare({ scope: "project", key: "maxTurns", value: 7 })).commit();
+    expect(editor.settings.inlineDiffLines).toBe(0);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ui: { inlineDiffLines: 0 }, maxTurns: 7 });
+    const overridden = await loadConfigEditor({ home, workspaceRoot: root, cli: { ui: { inlineDiffLines: 6 } } });
+    expect(overridden.settings.inlineDiffLines).toBe(6);
+    expect(overridden.origins.ui).toBe("CLI");
+  });
+});
+
 test("provider changes clear inherited model origins and cancelled writes create no files", async () => {
   await withTempDir(async dir => {
     const home = join(dir, "home"), root = join(dir, "project");

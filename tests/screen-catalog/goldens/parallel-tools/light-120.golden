@@ -11,9 +11,9 @@ cursor 7 27 visible
   ▌ You
   ▌ Inspect the project
 
-   ⠋  READ   running…                                                                                             ▸
-   ⠋  GREP   running…                                                                                             ▸
-   ⠋  BASH   running…                                                                                             ▸
+   ⠋  READ  clamp.ts                                                                                    running… ▸
+   ⠋  GREP  clamp                                                                                       running… ▸
+   ⠋  BASH  bun test                                                                                    running… ▸
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ TOOLS 3 7s   scripted/scripted-model                                                             Esc stops  ctx ~11
+  ⠋ TOOLS 3 7s   scripted/scripted-model                                                             Esc stops  ctx ~24
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -62,27 +62,27 @@ cursor 7 27 visible
 05 3-4 #0a5894 #e1e3df b
 05 4-5 #1d232c #e1e3df -
 05 5-11 #0a5894 #c7d2d6 b
-05 11-13 #1d232c #e1e3df -
-05 13-116 #545e6c #e1e3df -
-05 116-117 #ffffff #e1e3df -
+05 11-20 #1d232c #e1e3df -
+05 20-115 #545e6c #e1e3df -
+05 115-117 #ffffff #e1e3df -
 05 117-120 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
 06 2-3 #0a5894 #e1e3df -
 06 3-4 #0a5894 #e1e3df b
 06 4-5 #1d232c #e1e3df -
 06 5-11 #0a5894 #c7d2d6 b
-06 11-13 #1d232c #e1e3df -
-06 13-116 #545e6c #e1e3df -
-06 116-117 #ffffff #e1e3df -
+06 11-17 #1d232c #e1e3df -
+06 17-115 #545e6c #e1e3df -
+06 115-117 #ffffff #e1e3df -
 06 117-120 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-3 #0a5894 #e1e3df -
 07 3-4 #0a5894 #e1e3df b
 07 4-5 #1d232c #e1e3df -
 07 5-11 #6a3fb0 #d3cfd9 b
-07 11-13 #1d232c #e1e3df -
-07 13-116 #545e6c #e1e3df -
-07 116-117 #ffffff #e1e3df -
+07 11-20 #1d232c #e1e3df -
+07 20-115 #545e6c #e1e3df -
+07 115-117 #ffffff #e1e3df -
 07 117-120 #ffffff #f7f7f4 -
 08 0-120 #ffffff #f7f7f4 -
 09 0-120 #ffffff #f7f7f4 -

@@ -4,13 +4,15 @@ import type { RuntimeEvent } from "../agent/events.ts";
 import { credentialStoreError } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { TuiRecovery, TuiTranscriptEntry, TuiControllerOptions } from "./controller-types.ts";
-import { MAX_TOOL_DISPLAY_CHARS, boundDisplay, formatToolFinishedText } from "./transcript-format.ts";
+import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, summarizeToolResult } from "./transcript-format.ts";
+import { buildEditDiff, countLines, type DiffRow } from "../text/diff.ts";
 import { recoveryMessage, startupFailureCategory, startupRecoveryMessage, redactRecoveryDetails } from "./controller-support.ts";
 import { CompactionLayer } from "./controller-compaction.ts";
 
 
 /** Turn runner, runtime-event reducer, cancellation and recovery offers. */
 export abstract class TurnLayer extends CompactionLayer {
+  private readonly toolStartedAt = new Map<string, number>();
   /**
    * Signal cancellation of the active operation without waiting; idle calls do nothing.
    * Applies to both submitted turns and manual compaction.
@@ -208,6 +210,7 @@ export abstract class TurnLayer extends CompactionLayer {
   }
 
   protected async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
+    this.toolStartedAt.clear();
     this.closeChangeReview();
     this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
     this.outcome = { reason: "completed", commands: [], commandCounts: { exitZero: 0, nonzero: 0, unknown: 0 }, toolResults: 0, failedTools: 0, changes: "Turn running." };
@@ -241,6 +244,7 @@ export abstract class TurnLayer extends CompactionLayer {
       }
       this.settleActivity(operationId);
       this.invalidateBranchTreeCache();
+      this.toolStartedAt.clear();
     }
     return true;
   }
@@ -369,6 +373,7 @@ export abstract class TurnLayer extends CompactionLayer {
         return;
       }
       case "tool.started": {
+        this.toolStartedAt.set(event.toolCallId, this.activityClock());
         const assistant = this.session.items.findLast(item => item.type === "assistant");
         const call = assistant?.type === "assistant" ? assistant.content.find(block => block.type === "tool_call" && block.id === event.toolCallId) : undefined;
         const entry: TuiTranscriptEntry = {
@@ -404,17 +409,38 @@ export abstract class TurnLayer extends CompactionLayer {
           }
         }
         const entry = this.toolEntryByCallId.get(event.toolCallId);
-        const display = formatToolFinishedText(
+        const startedAt = this.toolStartedAt.get(event.toolCallId);
+        const durationMs = startedAt === undefined ? undefined : Math.max(0, this.activityClock() - startedAt);
+        this.toolStartedAt.delete(event.toolCallId);
+        const resultSummary = summarizeToolResult(event.name, event.status, event.details, durationMs);
+        const edit = event.name === "edit" && event.status === "success" ? asEditDetails(event.details) : undefined;
+        let diffRows: DiffRow[] | undefined;
+        if (resultSummary && edit?.hunks) diffRows = buildEditDiff(edit.hunks).rows;
+        let display = formatToolFinishedText(
           event.name,
-          event.content,
+          redactSecrets(event.content, this.secrets),
           event.details,
           event.status,
+          text => redactSecrets(text, this.secrets),
         );
+        if (event.name === "write" && resultSummary && typeof event.details === "object" && event.details !== null) {
+          const details = event.details as { created: boolean; lineCount: number };
+          const assistant = this.session.items.findLast(item => item.type === "assistant" && item.content.some(block => block.type === "tool_call" && block.id === event.toolCallId));
+          const call = assistant?.type === "assistant" ? assistant.content.find(block => block.type === "tool_call" && block.id === event.toolCallId) : undefined;
+          const args = call?.type === "tool_call" && typeof call.arguments === "object" && call.arguments !== null && !Array.isArray(call.arguments) ? call.arguments as Record<string, unknown> : undefined;
+          if (details.created && typeof args?.content === "string" && countLines(args.content) === details.lineCount) {
+            const hunk = { startLine: 1, oldText: "", newText: args.content };
+            diffRows = buildEditDiff([hunk]).rows;
+            display = boundDisplay(formatNumberedEditDiff([hunk], redactSecrets(event.content, this.secrets), text => redactSecrets(text, this.secrets)));
+          }
+        }
         const text = event.status === "error" ? `${display}\nTool failed. Inspect this result before continuing.` : display;
         if (entry) {
           entry.text = text;
           entry.toolStatus =
             event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error";
+          entry.resultSummary = resultSummary;
+          entry.diffRows = diffRows;
         } else {
           this.transcript.push({
             id: this.nextId("tool"),
@@ -423,6 +449,8 @@ export abstract class TurnLayer extends CompactionLayer {
             toolName: event.name,
             toolCallId: event.toolCallId,
             toolStatus: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error",
+            resultSummary,
+            diffRows,
           });
         }
         return;

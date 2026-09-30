@@ -18,6 +18,7 @@ thai-composer
 streaming-answer
 parallel-tools
 completed-turn
+large-edit
 failed-turn
 retry-countdown
 review-panel

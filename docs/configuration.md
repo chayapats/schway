@@ -63,6 +63,18 @@ Then `/config set maxTurns 12 --scope project` saves 12 but reports that CLI val
 
 The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider.
 
+## Inline file diffs
+
+Set `ui.inlineDiffLines` in user or project config to control how many changed rows appear beneath successful edits and newly created files. The default is `12`; `0` disables inline diffs. The value must be a non-negative integer. Larger diffs keep their result summary and expand through the tool details controls. Existing-file writes show their overwritten line count without a diff.
+
+```json
+{
+  "ui": { "inlineDiffLines": 12 }
+}
+```
+
+This file setting has no preferences-panel row. Change the config file and restart Schway to apply it.
+
 ## Upgrading from the Anthropic provider
 
 The Anthropic provider was removed in 0.4. Configuration or `--provider anthropic` that names it stops before the terminal opens, in interactive and headless runs, prints the notice below and exits non-zero. Remove `"provider": "anthropic"` from `~/.schway/config.json` or `.schway/config.json`.

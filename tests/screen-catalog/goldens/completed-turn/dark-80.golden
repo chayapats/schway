@@ -11,15 +11,15 @@ cursor 7 27 visible
   ▌ You
   ▌ Fix the clamp upper bound
 
-   ✓  READ  clamp.ts                                                      ▸
-   ✓  EDIT  clamp.ts                                                      ▸
-   ✓  BASH  printf 'ok\n'                                                 ▸
+   ✓  READ  clamp.ts                                             3 lines ▸
+   ✓  EDIT  clamp.ts                                                  +1 −1
+     2 │-return Math.max(lo, n);
+     2 │+return Math.min(hi, Math.max(lo, n));
+
+   ✓  WRITE  src/util/range.ts                            new · 42 lines ▸
+   ✓  BASH  printf 'ok\n'                                  exit 0 · 1.2s ▸
 
   Fixed clamp so it respects the upper bound.
-
-
-
-
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   scripted/scripted-model                                    ctx ~105
+  ● READY   scripted/scripted-model                                    ctx ~310
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #161b24 -
@@ -64,8 +64,8 @@ cursor 7 27 visible
 05 4-5 #e6eaf0 #1e2430 -
 05 5-11 #7cc4ff #33475e b
 05 11-20 #e6eaf0 #1e2430 -
-05 20-76 #8b95a7 #1e2430 -
-05 76-77 #ffffff #1e2430 -
+05 20-75 #8b95a7 #1e2430 -
+05 75-77 #ffffff #1e2430 -
 05 77-80 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
 06 2-3 #7cc4ff #1e2430 -
@@ -73,26 +73,44 @@ cursor 7 27 visible
 06 4-5 #e6eaf0 #1e2430 -
 06 5-11 #f0c674 #4c483f b
 06 11-20 #e6eaf0 #1e2430 -
-06 20-76 #8b95a7 #1e2430 -
-06 76-77 #ffffff #1e2430 -
+06 20-75 #8b95a7 #1e2430 -
+06 75-77 #ffffff #1e2430 -
 06 77-80 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
-07 2-3 #7cc4ff #1e2430 -
-07 3-4 #8fd19e #1e2430 b
-07 4-5 #e6eaf0 #1e2430 -
-07 5-11 #c0acff #42425e b
-07 11-25 #e6eaf0 #1e2430 -
-07 25-76 #8b95a7 #1e2430 -
+07 2-5 #ffffff #1e2430 -
+07 5-8 #8b95a7 #4e3f48 -
+07 8-76 #f79d9d #4e3f48 -
 07 76-77 #ffffff #1e2430 -
 07 77-80 #ffffff #0e1117 -
-08 0-80 #ffffff #0e1117 -
-09 0-2 #ffffff #0e1117 -
-09 2-45 #e6eaf0 #0e1117 -
-09 45-80 #ffffff #0e1117 -
-10 0-80 #ffffff #0e1117 -
-11 0-80 #ffffff #0e1117 -
+08 0-2 #ffffff #0e1117 -
+08 2-5 #ffffff #1e2430 -
+08 5-8 #8b95a7 #374a48 -
+08 8-76 #8fd19e #374a48 -
+08 76-77 #ffffff #1e2430 -
+08 77-80 #ffffff #0e1117 -
+09 0-80 #ffffff #0e1117 -
+10 0-2 #ffffff #0e1117 -
+10 2-3 #7cc4ff #1e2430 -
+10 3-4 #8fd19e #1e2430 b
+10 4-5 #e6eaf0 #1e2430 -
+10 5-12 #f0c674 #4c483f b
+10 12-30 #e6eaf0 #1e2430 -
+10 30-75 #8b95a7 #1e2430 -
+10 75-77 #ffffff #1e2430 -
+10 77-80 #ffffff #0e1117 -
+11 0-2 #ffffff #0e1117 -
+11 2-3 #7cc4ff #1e2430 -
+11 3-4 #8fd19e #1e2430 b
+11 4-5 #e6eaf0 #1e2430 -
+11 5-11 #c0acff #42425e b
+11 11-25 #e6eaf0 #1e2430 -
+11 25-75 #8b95a7 #1e2430 -
+11 75-77 #ffffff #1e2430 -
+11 77-80 #ffffff #0e1117 -
 12 0-80 #ffffff #0e1117 -
-13 0-80 #ffffff #0e1117 -
+13 0-2 #ffffff #0e1117 -
+13 2-45 #e6eaf0 #0e1117 -
+13 45-80 #ffffff #0e1117 -
 14 0-80 #ffffff #0e1117 -
 15 0-80 #ffffff #0e1117 -
 16 0-80 #ffffff #0e1117 -

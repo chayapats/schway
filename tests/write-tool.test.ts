@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTool } from "../src/tools/read.ts";
 import type { ToolContext } from "../src/tools/types.ts";
@@ -41,6 +41,24 @@ test("write fully replaces an existing file", async () => {
     const read = await readTool.execute({ path: "note.txt" }, ctx);
     expect(read.content).toContain("new-content");
     expect(read.content.includes("old")).toBe(false);
+  });
+});
+
+test.each([
+  ["", 0],
+  ["one line", 1],
+  ["one\ntwo\nthree\n", 3],
+])("write reports the actual content line count for %j", async (content, lineCount) => {
+  await withTempDir(async (dir) => {
+    const input = { path: "note.txt", content: content as string };
+    const ctx = contextFor(dir);
+    for (const created of [true, false]) {
+      const result = await writeTool.execute(input, ctx);
+      expect(result.isError).toBeUndefined();
+      expect(result.details).toMatchObject({ created, lineCount });
+      expect(result.content).toBe("Wrote note.txt");
+      expect(await readFile(join(dir, "note.txt"), "utf8")).toBe(content);
+    }
   });
 });
 

@@ -2,7 +2,7 @@ import { preferenceRows, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./p
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
-import { type ConfigLayer, type ResolvedSettings, describeEffectiveThinking } from "../config/config.ts";
+import { type ConfigLayer, type ResolvedSettings, describeEffectiveThinking, DEFAULT_INLINE_DIFF_LINES } from "../config/config.ts";
 import { EDITABLE_CONFIG_KEYS, type ConfigScope, type ConfigTransaction } from "../config/editing.ts";
 import { isDeepStrictEqual } from "node:util";
 import { sanitizeBaseUrl } from "./transcript-format.ts";
@@ -14,6 +14,9 @@ import { ChangesLayer } from "./controller-changes.ts";
 export abstract class SettingsLayer extends ChangesLayer {
   /** Return the effective configured appearance before a launch environment override. */
   appearanceMode(): "auto" | "dark" | "light" { return this.configEditor?.settings.appearance ?? "auto"; }
+
+  /** Return the effective maximum inline changed rows; zero disables inline diffs. */
+  inlineDiffLines(): number { return this.configEditor?.settings.inlineDiffLines ?? DEFAULT_INLINE_DIFF_LINES; }
 
   /** Report whether appearance can use the shared session and saved preferences. */
   hasAppearancePreferences(): boolean { return !!this.configEditor; }

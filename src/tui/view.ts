@@ -16,6 +16,7 @@ import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 import type { CommandChoice } from "./command-catalog.ts";
+import { hasInlineDiff } from "./transcript-format.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -650,15 +651,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         let row = rows.get(entry.id);
         if (!row) {
           row = createTranscriptItem(renderer, entry, theme, syntax, () => {
+            const current = controller.snapshot().transcript.find(item => item.id === entry.id);
+            if (current && hasInlineDiff(current, controller.inlineDiffLines())) return;
             if (expandedTools.has(entry.id)) expandedTools.delete(entry.id); else expandedTools.add(entry.id);
             refresh();
           }, { now, mode: motion });
           rows.set(entry.id, row);
           transcript.add(row.root);
         }
-        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined }, allExpanded !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
+        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
+            resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
+          }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), snapshot.status === "running" && entry === tail, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
-          inspection?.id === entry.id && inspection.kind === "tool");
+          inspection?.id === entry.id && inspection.kind === "tool", controller.inlineDiffLines());
       }
       if (inspection && !inspectionTargets(entries).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
         inspection = undefined;
@@ -1122,7 +1127,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (name === "return" || name === "kpenter") {
         if (inspection.kind === "tool") {
-          if (expandedTools.has(inspection.id)) expandedTools.delete(inspection.id); else expandedTools.add(inspection.id);
+          const entry = snapshot.transcript.find(item => item.id === inspection!.id);
+          if (!entry || !hasInlineDiff(entry, controller.inlineDiffLines())) {
+            if (expandedTools.has(inspection.id)) expandedTools.delete(inspection.id); else expandedTools.add(inspection.id);
+          }
           scrollToInspection = true;
         } else copyInspection(snapshot.transcript);
         handled(); return;

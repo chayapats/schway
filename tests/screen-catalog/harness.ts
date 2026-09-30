@@ -16,6 +16,7 @@ import { loadExtensions } from "../../src/extensions/loader.ts";
 import { readTool } from "../../src/tools/read.ts";
 import { editTool } from "../../src/tools/edit.ts";
 import { bashTool } from "../../src/tools/bash.ts";
+import { writeTool } from "../../src/tools/write.ts";
 import { createScriptedModel, type ScriptedTurn } from "../helpers/scripted-model.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity } from "../../src/auth/store.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
@@ -34,11 +35,11 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || ["completed-turn", "review-panel", "recent-work-resume"].includes(screen.id);
+  const disk = palette || ["completed-turn", "large-edit", "review-panel", "recent-work-resume"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
-    if (["completed-turn", "review-panel"].includes(screen.id)) {
+    if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
       for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
@@ -62,19 +63,20 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "compaction") responses = [{ waitForAbort: true }];
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
   let tools = createToolRegistry();
-  if (["completed-turn", "review-panel"].includes(screen.id)) {
-    tools = createToolRegistry([readTool, editTool, bashTool]);
+  if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
+    tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);
     responses = [
       { toolCalls: [{ id: "read-clamp", name: "read", arguments: { path: "clamp.ts" } }] },
-      { toolCalls: [{ id: "edit-clamp", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: "return Math.min(hi, Math.max(lo, n));" }] } }] },
+      { toolCalls: [{ id: "edit-clamp", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: screen.id === "large-edit" ? Array.from({ length: 13 }, (_, i) => `const step${i} = n;`).join("\n") : "return Math.min(hi, Math.max(lo, n));" }] } }] },
+      ...(screen.id === "completed-turn" ? [{ toolCalls: [{ id: "write-range", name: "write", arguments: { path: "src/util/range.ts", content: Array.from({ length: 42 }, (_, i) => `// Range line ${i + 1}`).join("\n") + "\n" } }] }] : []),
       { toolCalls: [{ id: "check-clamp", name: "bash", arguments: { command: "printf 'ok\\n'" } }] },
-      { text: "Fixed clamp so it respects the upper bound." },
+      { text: screen.id === "large-edit" ? "Updated the clamp implementation." : "Fixed clamp so it respects the upper bound." },
     ];
   }
   if (screen.id === "parallel-tools") {
     const names = ["read", "grep", "bash"];
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
-    responses = [{ toolCalls: names.map(name => ({ id: `parallel-${name}`, name, arguments: {} })) }];
+    responses = [{ toolCalls: names.map(name => ({ id: `parallel-${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
   }
   const fresh = ["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";
@@ -84,6 +86,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: "catalog-session",
     model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
+    onRuntimeEvent: event => { if (event.type === "tool.finished") activityTime += 1200; },
     agentClock: { now: () => 10_000, sleep: async (_ms, signal) => { if (screen.id === "retry-countdown") await stopped(signal); } },
     credentials: { store, grokLogin: async ({ device, signal, onApproval, onSaved }) => {
       if (screen.id === "grok-plan-error") {

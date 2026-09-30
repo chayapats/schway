@@ -11,15 +11,15 @@ cursor 6 27 visible
  ▌ You
  ▌ Fix the clamp upper bound
 
-  ✓  READ  clamp.ts                          ▸
-  ✓  EDIT  clamp.ts                          ▸
-  ✓  BASH  printf 'ok\n'                     ▸
+  ✓  READ  clamp.ts                 3 lines ▸
+  ✓  EDIT  clamp.ts                      +1 −1
+    2 │-return Math.max(lo, n);
+    2 │+return Math.min(hi, Math.max(lo, n));
+
+  ✓  WRITE  src/util/range.ts               ▸
+  ✓  BASH  printf 'ok\n'      exit 0 · 1.2s ▸
 
  Fixed clamp so it respects the upper bound.
-
-
-
-
 
 
 
@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   scripted/scripted-model      ctx ~105
+  ● READY   scripted/scripted-model      ctx ~310
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -64,8 +64,8 @@ cursor 6 27 visible
 05 3-4 #1d232c #e1e3df -
 05 4-10 #0a5894 #c7d2d6 b
 05 10-19 #1d232c #e1e3df -
-05 19-47 #545e6c #e1e3df -
-05 47-48 #ffffff #e1e3df -
+05 19-46 #545e6c #e1e3df -
+05 46-48 #ffffff #e1e3df -
 05 48-50 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-2 #0a5894 #e1e3df -
@@ -73,26 +73,44 @@ cursor 6 27 visible
 06 3-4 #1d232c #e1e3df -
 06 4-10 #7a5000 #d5d1c4 b
 06 10-19 #1d232c #e1e3df -
-06 19-47 #545e6c #e1e3df -
-06 47-48 #ffffff #e1e3df -
+06 19-46 #545e6c #e1e3df -
+06 46-48 #ffffff #e1e3df -
 06 48-50 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
-07 1-2 #0a5894 #e1e3df -
-07 2-3 #19612f #e1e3df b
-07 3-4 #1d232c #e1e3df -
-07 4-10 #6a3fb0 #d3cfd9 b
-07 10-24 #1d232c #e1e3df -
-07 24-47 #545e6c #e1e3df -
+07 1-4 #ffffff #e1e3df -
+07 4-7 #545e6c #dacbc7 -
+07 7-47 #a61f16 #dacbc7 -
 07 47-48 #ffffff #e1e3df -
 07 48-50 #ffffff #f7f7f4 -
-08 0-50 #ffffff #f7f7f4 -
-09 0-1 #ffffff #f7f7f4 -
-09 1-44 #1d232c #f7f7f4 -
-09 44-50 #ffffff #f7f7f4 -
-10 0-50 #ffffff #f7f7f4 -
-11 0-50 #ffffff #f7f7f4 -
+08 0-1 #ffffff #f7f7f4 -
+08 1-4 #ffffff #e1e3df -
+08 4-7 #545e6c #c9d3ca -
+08 7-47 #19612f #c9d3ca -
+08 47-48 #ffffff #e1e3df -
+08 48-50 #ffffff #f7f7f4 -
+09 0-50 #ffffff #f7f7f4 -
+10 0-1 #ffffff #f7f7f4 -
+10 1-2 #0a5894 #e1e3df -
+10 2-3 #19612f #e1e3df b
+10 3-4 #1d232c #e1e3df -
+10 4-11 #7a5000 #d5d1c4 b
+10 11-29 #1d232c #e1e3df -
+10 29-46 #545e6c #e1e3df -
+10 46-48 #ffffff #e1e3df -
+10 48-50 #ffffff #f7f7f4 -
+11 0-1 #ffffff #f7f7f4 -
+11 1-2 #0a5894 #e1e3df -
+11 2-3 #19612f #e1e3df b
+11 3-4 #1d232c #e1e3df -
+11 4-10 #6a3fb0 #d3cfd9 b
+11 10-24 #1d232c #e1e3df -
+11 24-46 #545e6c #e1e3df -
+11 46-48 #ffffff #e1e3df -
+11 48-50 #ffffff #f7f7f4 -
 12 0-50 #ffffff #f7f7f4 -
-13 0-50 #ffffff #f7f7f4 -
+13 0-1 #ffffff #f7f7f4 -
+13 1-44 #1d232c #f7f7f4 -
+13 44-50 #ffffff #f7f7f4 -
 14 0-50 #ffffff #f7f7f4 -
 15 0-50 #ffffff #f7f7f4 -
 16 0-50 #ffffff #f7f7f4 -

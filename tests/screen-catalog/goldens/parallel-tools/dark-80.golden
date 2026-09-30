@@ -11,9 +11,9 @@ cursor 7 27 visible
   ▌ You
   ▌ Inspect the project
 
-   ⠋  READ   running…                                                     ▸
-   ⠋  GREP   running…                                                     ▸
-   ⠋  BASH   running…                                                     ▸
+   ⠋  READ  clamp.ts                                            running… ▸
+   ⠋  GREP  clamp                                               running… ▸
+   ⠋  BASH  bun test                                            running… ▸
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ TOOLS 3 7s   scripted/scripted-model                     Esc stops  ctx ~11
+  ⠋ TOOLS 3 7s   scripted/scripted-model                     Esc stops  ctx ~24
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #161b24 -
@@ -62,27 +62,27 @@ cursor 7 27 visible
 05 3-4 #7cc4ff #1e2430 b
 05 4-5 #e6eaf0 #1e2430 -
 05 5-11 #7cc4ff #33475e b
-05 11-13 #e6eaf0 #1e2430 -
-05 13-76 #8b95a7 #1e2430 -
-05 76-77 #ffffff #1e2430 -
+05 11-20 #e6eaf0 #1e2430 -
+05 20-75 #8b95a7 #1e2430 -
+05 75-77 #ffffff #1e2430 -
 05 77-80 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
 06 2-3 #7cc4ff #1e2430 -
 06 3-4 #7cc4ff #1e2430 b
 06 4-5 #e6eaf0 #1e2430 -
 06 5-11 #7cc4ff #33475e b
-06 11-13 #e6eaf0 #1e2430 -
-06 13-76 #8b95a7 #1e2430 -
-06 76-77 #ffffff #1e2430 -
+06 11-17 #e6eaf0 #1e2430 -
+06 17-75 #8b95a7 #1e2430 -
+06 75-77 #ffffff #1e2430 -
 06 77-80 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
 07 2-3 #7cc4ff #1e2430 -
 07 3-4 #7cc4ff #1e2430 b
 07 4-5 #e6eaf0 #1e2430 -
 07 5-11 #c0acff #42425e b
-07 11-13 #e6eaf0 #1e2430 -
-07 13-76 #8b95a7 #1e2430 -
-07 76-77 #ffffff #1e2430 -
+07 11-20 #e6eaf0 #1e2430 -
+07 20-75 #8b95a7 #1e2430 -
+07 75-77 #ffffff #1e2430 -
 07 77-80 #ffffff #0e1117 -
 08 0-80 #ffffff #0e1117 -
 09 0-80 #ffffff #0e1117 -
