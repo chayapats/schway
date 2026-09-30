@@ -9,6 +9,7 @@ grok-browser-approval
 grok-device-approval
 grok-plan-error
 model-picker
+model-picker-unconnected
 thinking-controls
 command-palette
 command-palette-groups

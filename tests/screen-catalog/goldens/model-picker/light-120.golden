@@ -1,7 +1,7 @@
 schway-screen 1
 screen model-picker
 title Model picker
-description Connected models show their context and output budgets.
+description Auth-route groups show model IDs, context capacity and reasoning support.
 variant light-120
 size 120x30
 cursor 7 27 visible
@@ -9,7 +9,7 @@ cursor 7 27 visible
  ⚡ schway  /project
 
 
-  openai/gpt-6-astra · OpenAI route · configured, unverified
+  openai/gpt-6-astra · ChatGPT subscription
 
   Type a task · Enter sends
 
@@ -21,20 +21,20 @@ cursor 7 27 visible
 
 
 
-
-
-   Choose model + route · ↑/↓ select · Enter apply/connect · Ctrl+R retry · Esc back
-   › API key · openai/gpt-6-astra ✓ current
-    API key · openai/gpt-5.6-terra
-    API key · openai/gpt-5.6-luna
-    API key · openai/gpt-4.1
-    Login required · openai-compatible/gpt-4o · Connect
-    Login required · openai-compatible/gpt-4o-mini · Connect
-   OpenAI API key · configured, unverified · 1/8 · 1,050,000 context · 128,000 output
+   Choose model · ↑↓ select · Enter use · Esc back
+     ChatGPT subscription
+   › gpt-6-astra                                                                                 1.05M · reasoning  ✓
+     gpt-6-sol                                                                                    400k · reasoning
+     Grok subscription                                                                                Sign in · Enter
+     OpenAI API key                                                                                   Sign in · Enter
+     xAI API key                                                                                      Sign in · Enter
+     OpenAI-compatible · localhost:8787
+     fake-coder                                                                                    32k
+   1/6 · 1,050,000 context · 128,000 output
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Search models or type provider/model…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   openai/gpt-6-astra  OpenAI route                                                          ctx ━━━━━━━━━━ 0%
+  ● READY   openai/gpt-6-astra  ChatGPT subscription                                                  ctx ━━━━━━━━━━ 0%
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -47,8 +47,8 @@ cursor 7 27 visible
 02 0-120 #ffffff #f7f7f4 -
 03 0-2 #ffffff #f7f7f4 -
 03 2-20 #1d232c #f7f7f4 b
-03 20-60 #545e6c #f7f7f4 -
-03 60-120 #ffffff #f7f7f4 -
+03 20-43 #545e6c #f7f7f4 -
+03 43-120 #ffffff #f7f7f4 -
 04 0-120 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
 05 2-16 #545e6c #f7f7f4 -
@@ -64,47 +64,55 @@ cursor 7 27 visible
 12 0-120 #ffffff #f7f7f4 -
 13 0-120 #ffffff #f7f7f4 -
 14 0-120 #ffffff #f7f7f4 -
-15 0-120 #ffffff #f7f7f4 -
-16 0-120 #ffffff #f7f7f4 -
+15 0-2 #ffffff #f7f7f4 -
+15 2-3 #ffffff #e1e3df -
+15 3-50 #0a5894 #e1e3df -
+15 50-118 #ffffff #e1e3df -
+15 118-120 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-3 #ffffff #e1e3df -
+16 3-25 #545e6c #e1e3df -
+16 25-118 #ffffff #e1e3df -
+16 118-120 #ffffff #f7f7f4 -
 17 0-2 #ffffff #f7f7f4 -
 17 2-3 #ffffff #e1e3df -
-17 3-84 #0a5894 #e1e3df -
-17 84-118 #ffffff #e1e3df -
+17 3-117 #1d232c #c7d2d6 -
+17 117-118 #ffffff #e1e3df -
 17 118-120 #ffffff #f7f7f4 -
 18 0-2 #ffffff #f7f7f4 -
 18 2-3 #ffffff #e1e3df -
-18 3-43 #1d232c #c7d2d6 -
-18 43-118 #ffffff #e1e3df -
+18 3-117 #1d232c #e1e3df -
+18 117-118 #ffffff #e1e3df -
 18 118-120 #ffffff #f7f7f4 -
 19 0-2 #ffffff #f7f7f4 -
 19 2-3 #ffffff #e1e3df -
-19 3-34 #1d232c #e1e3df -
-19 34-118 #ffffff #e1e3df -
+19 3-117 #1d232c #e1e3df -
+19 117-118 #ffffff #e1e3df -
 19 118-120 #ffffff #f7f7f4 -
 20 0-2 #ffffff #f7f7f4 -
 20 2-3 #ffffff #e1e3df -
-20 3-33 #1d232c #e1e3df -
-20 33-118 #ffffff #e1e3df -
+20 3-117 #1d232c #e1e3df -
+20 117-118 #ffffff #e1e3df -
 20 118-120 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
 21 2-3 #ffffff #e1e3df -
-21 3-28 #1d232c #e1e3df -
-21 28-118 #ffffff #e1e3df -
+21 3-117 #1d232c #e1e3df -
+21 117-118 #ffffff #e1e3df -
 21 118-120 #ffffff #f7f7f4 -
 22 0-2 #ffffff #f7f7f4 -
 22 2-3 #ffffff #e1e3df -
-22 3-55 #1d232c #e1e3df -
-22 55-118 #ffffff #e1e3df -
+22 3-39 #545e6c #e1e3df -
+22 39-118 #ffffff #e1e3df -
 22 118-120 #ffffff #f7f7f4 -
 23 0-2 #ffffff #f7f7f4 -
 23 2-3 #ffffff #e1e3df -
-23 3-60 #1d232c #e1e3df -
-23 60-118 #ffffff #e1e3df -
+23 3-117 #1d232c #e1e3df -
+23 117-118 #ffffff #e1e3df -
 23 118-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #ffffff #e1e3df -
-24 3-85 #545e6c #e1e3df -
-24 85-118 #ffffff #e1e3df -
+24 3-43 #545e6c #e1e3df -
+24 43-118 #ffffff #e1e3df -
 24 118-120 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
 25 2-118 #ecedea #f7f7f4 -

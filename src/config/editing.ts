@@ -33,7 +33,7 @@ export interface ConfigTransaction {
 type Layers = { memory?: ConfigLayer; user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer };
 
 /** Describe an independently configured compatible endpoint using policies and credential references, never secret values. */
-export type StandaloneEndpointConnection = Pick<ResolvedSettings, "baseUrl" | "auth" | "credentialEnv" | "credentialIdentity">;
+export type StandaloneEndpointConnection = Pick<ResolvedSettings, "baseUrl" | "auth" | "headers" | "credentialEnv" | "credentialIdentity">;
 
 /** Resolve effective origins with the same provider-change model inheritance rules as settings. */
 export function configOrigins(layers: Layers): ConfigOrigins {
@@ -187,6 +187,7 @@ export class ConfigEditor {
     return {
       ...(configured.baseUrl !== undefined ? { baseUrl: configured.baseUrl.trim() } : {}),
       ...(configured.auth !== undefined ? { auth: configured.auth } : {}),
+      ...(configured.headers !== undefined ? { headers: structuredClone(configured.headers) } : {}),
     };
   }
 

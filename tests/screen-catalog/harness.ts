@@ -17,7 +17,7 @@ import { readTool } from "../../src/tools/read.ts";
 import { editTool } from "../../src/tools/edit.ts";
 import { bashTool } from "../../src/tools/bash.ts";
 import { createScriptedModel, type ScriptedTurn } from "../helpers/scripted-model.ts";
-import { grokSubscriptionIdentity } from "../../src/auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity } from "../../src/auth/store.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
 import type { Screen, Variant } from "./screens.ts";
 import { serializeScreen } from "./format.ts";
@@ -78,10 +78,11 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   const fresh = ["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";
+  const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
-    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: "catalog-session",
-    model: fresh ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
+    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: "catalog-session",
+    model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     agentClock: { now: () => 10_000, sleep: async (_ms, signal) => { if (screen.id === "retry-countdown") await stopped(signal); } },
     credentials: { store, grokLogin: async ({ device, signal, onApproval, onSaved }) => {
@@ -93,6 +94,21 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
+  if (picker || unconnectedPicker) {
+    options.configEditor = new ConfigEditor(picker ? { cli: { provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787/v1", auth: "none" } } : {},
+      { user: join(home, "config.json"), project: join(root, "config.json") });
+    options.stageSettings = async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) });
+    if (picker) {
+      await store.set(codexSubscriptionIdentity(), "fixture-token");
+      options.model = createScriptedModel({ provider: "codex-subscription", id: "gpt-6-astra" });
+      options.credentials!.env = {};
+      options.credentials!.listSubscriptionCatalog = async () => [
+        { id: "gpt-6-astra", contextWindow: 1050000, maxOutput: 128000, supportedThinking: ["off", "high"] },
+        { id: "gpt-6-sol", contextWindow: 400000, maxOutput: 128000, supportedThinking: ["high"] },
+      ];
+      options.credentials!.listRouteModels = async () => [{ id: "fake-coder", contextWindow: 32768 }];
+    }
+  }
   if (palette) {
     await Bun.write(join(root, ".agents/skills/grill-me/SKILL.md"), "---\nname: grill-me\ndescription: Stress-test a plan\n---\nTask");
     await Bun.write(join(root, "node_modules/greeting-pkg/package.json"), JSON.stringify({ name: "greeting-pkg", schway: { extensions: ["main.ts"] } }));

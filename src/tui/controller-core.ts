@@ -81,7 +81,8 @@ export abstract class ControllerCore {
   protected modelPicker?: ModelPickerSnapshot;
   protected subscriptionModels?: readonly string[];
   protected modelPickerAccess?: ModelPickerAccess;
-  protected pickerReturn?: { query: string; identity: string };
+  protected pickerReturn?: { query: string; identity: string; route: Pick<ModelPickerEntry, "provider" | "authRoute" | "profile">; access?: ModelPickerAccess };
+  protected pickerPreferredRoute?: Pick<ModelPickerEntry, "provider" | "authRoute" | "profile">;
   protected pickerPreferredIdentity?: string;
   protected pickerSelectionTouched = false;
   protected subscriptionCapabilities?: readonly ModelCapability[];
@@ -131,6 +132,7 @@ export abstract class ControllerCore {
   protected loginApprovalData?: import("./controller-types.ts").LoginApproval;
   /** Active subscription sign-in abort; unlike submitted OS writes, the OAuth wait stays cancellable. */
   protected loginAbort?: AbortController;
+  protected loginGeneration = 0;
   /** Abort for the post-sign-in model listing; Esc and dispose cancel it without blocking the picker. */
   protected signInListAbort?: AbortController;
   /** Advances when the active provider, model, or profile changes so a stale sign-in cannot overwrite it. */
@@ -264,7 +266,7 @@ export abstract class ControllerCore {
     sessionId: string,
     options?: { workspace?: Workspace; contextManager?: ContextManager },
   ): void;
-  protected abstract restorePickerAfterConnection(): void;
+  protected abstract restorePickerAfterConnection(connected?: boolean): void;
   abstract get running(): boolean;
   abstract snapshot(): TuiSnapshot;
   abstract submit(prompt: string, accepted?: () => void): Promise<boolean>;

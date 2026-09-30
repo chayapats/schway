@@ -204,7 +204,7 @@ choice beneath it. Schway does not edit terminal, shell or window-manager settin
 | Dismiss suggestions | Esc |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down field, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
-| Model and route picker | `/model` or Alt+M; Up/Down, Enter to apply or connect, Ctrl+R to retry a failed account catalog, Esc to cancel |
+| Model picker | `/model` or Alt+M; Up/Down skips headers, Enter uses a model or starts sign-in, Ctrl+R retries a failed account catalog, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles all; click a heading to toggle one |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
@@ -320,20 +320,32 @@ for clipping, wheel handling and sticky scroll state.
 
 Esc first closes an open sign-in, model or branch picker or command suggestion
 list. The underlying prompt and cursor are restored after a picker closes.
-The model picker lists usable routes first. ChatGPT subscription and OpenAI API
-key are separate choices even when they advertise the same model ID. The footer
-shows the active route. API-key and endpoint labels mean credentials are
-configured; they do not mean the remote service accepted them. Subscription
-model rows appear only after account catalog discovery. An unknown OpenAI API
-model ID can be typed with fallback budgets, while an unknown subscription ID
-cannot be sent. A missing credential row opens its connection action, then
-returns to the same search and highlight after a successful save. Connection
-cancellation leaves the model unchanged. An empty, offline, or failed ChatGPT
-catalog shows a retry action; it never substitutes API-key billing for a
-subscription choice. Explicit CLI and configuration preferences remain visible
-until the user selects a different route. Successful picker choices apply to the
-current session and are remembered for later interactive launches in the same
-canonical workspace, below explicit CLI and configuration preferences.
+The model picker groups choices in a fixed order: ChatGPT subscription, Grok
+subscription, OpenAI API key, xAI API key, then the configured OpenAI-compatible
+endpoint and named profiles in config order. Each endpoint header shows only its
+host and port. Model rows lead with their ID, followed by compact context capacity,
+reasoning support and a checkmark for the active model. The active model is
+highlighted when the picker opens; it does not move within its group.
+
+Search ignores case and matches model IDs, provider/model IDs and group labels
+using exact, prefix, substring and subsequence matches. Headers are informational;
+Up/Down skips them. A disconnected route has one `Sign in · Enter` row and no
+model rows. Sign-in returns to the same query with the route's first matching
+model highlighted, without applying a picker choice. Esc returns to the sign-in
+row; during custom endpoint setup, Esc from key entry returns to the typed URL
+first. The model and settings stay unchanged when setup is cancelled before saving.
+A failed model list shows `list unavailable` once on its header, with fallback
+choices still selectable. Ctrl+R is offered only for an empty, offline or failed
+account catalog. The detail line counts selectable rows and shows full context
+and output budgets without naming the route.
+
+The footer shows the active route. Configured API-key and endpoint access does
+not prove a remote service accepts requests. Subscription model rows appear after
+account discovery; an unknown subscription ID cannot be sent. Unknown API model
+IDs can be typed with fallback budgets. Explicit CLI and configuration preferences
+remain visible until a different choice succeeds. Successful picker choices apply
+to the current session and are remembered for later interactive launches in the
+same canonical workspace, below explicit CLI and configuration preferences.
 Headless launches do not automatically consume this memory.
 
 Prompt recall excludes slash commands. API keys and pasted browser callbacks

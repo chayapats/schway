@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
+import { TuiController } from "../src/tui/controller.ts";
+import { createSession } from "../src/session/session.ts";
+import { createContextManager } from "../src/context/manager.ts";
+import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { ConfigEditor } from "../src/config/editing.ts";
 import { credentialIdentity } from "../src/auth/store.ts";
 import { loadModelPickerAccess } from "../src/tui/model-access.ts";
@@ -112,4 +116,34 @@ test("omitting primary metadata preserves legacy picker access while an explicit
   expect((await loadModelPickerAccess(input)).providers["openai-compatible"]).toBe("No key required");
   expect((await loadModelPickerAccess({ ...input, activeProfile: "remote" })).providers["openai-compatible"]).toBe("Login required");
   expect((await loadModelPickerAccess({ ...input, standaloneEndpoint: {} })).providers["openai-compatible"]).toBe("Login required");
+});
+
+
+test("picker primary listing and credential entry never borrow the active profile endpoint", async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] }, store = fakeCredentialStore();
+    const editor = new ConfigEditor({ user: { baseUrl: primary, auth: "required", profiles: { remote: profile }, profile: "remote" } }, paths);
+    const requests: Array<string | undefined> = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "separate-primary", workspace, configEditor: editor,
+      provider: "openai-compatible", modelId: profile.model, profile: "remote", baseUrl: profile.baseUrl,
+      model: createScriptedModel({ provider: "openai-compatible", id: profile.model }), contextManager: createContextManager(workspace),
+      credentials: { store, env: { PROFILE_KEY: "profile-env-secret" }, reload: async () => { throw Error("profile must not reload"); },
+        listRouteModels: async (_route, _signal, connection) => { requests.push(connection?.baseUrl); return [{ id: "primary-model" }]; } },
+    });
+    try {
+      controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      expect(requests).toEqual([]); controller.searchModels("OpenAI-compatible");
+      const initial = controller.snapshot().modelPicker!;
+      const signIn = initial.entries.findIndex(entry => entry.kind === "sign-in" && entry.provider === "openai-compatible" && entry.profile === undefined);
+      controller.moveModelPicker(signIn - initial.selectedIndex);
+      expect(await controller.selectPickerModel()).toBe(true); controller.enterCredentialText("primary-secret"); expect(await controller.submitCredential()).toBe(true);
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      expect(requests).toEqual([primary]);
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: primary }))).toBe("primary-secret");
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", profile: "remote", baseUrl: profile.baseUrl, credentialIdentity: profile.credentialIdentity }))).toBeNull();
+      expect(editor.settings.profile).toBe("remote"); expect(editor.settings.baseUrl).toBe(profile.baseUrl);
+      const picker = controller.snapshot().modelPicker!;
+      expect(picker.entries[picker.selectedIndex]).toMatchObject({ modelId: "primary-model", groupLabel: "OpenAI-compatible · localhost:8787" });
+    } finally { controller.dispose(); }
+  });
 });

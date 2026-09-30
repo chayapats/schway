@@ -262,8 +262,8 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
       expect(controller.snapshot().provider).toBe("openai");
       expect(controller.openModelPicker()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).map(entry => entry.modelId)).toEqual(["real-codex"]);
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.provider === "openai-compatible" && entry.otherProvider)).toBe(true);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex").map(entry => entry.modelId)).toEqual(["real-codex"]);
+      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.provider === "openai-compatible" && entry.kind === "sign-in")).toBe(true);
       controller.searchModels("real-codex");
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
@@ -548,8 +548,8 @@ test("subscription picker distinguishes other provider choices from account mode
     subscriptionModels: ["real-codex"], profiles: { local: { baseUrl: "http://127.0.0.1:11434/v1", model: "local-model" } } });
   expect(entries.some(entry => entry.provider === "openai" && entry.modelId === "gpt-5.4" && entry.authRoute === "api-key")).toBe(true);
   expect(entries.find(entry => entry.provider === "openai" && entry.modelId === "real-codex")?.otherProvider).toBeFalsy();
-  expect(entries.find(entry => entry.provider === "openai-compatible" && !entry.profile)?.otherProvider).toBe(true);
-  expect(entries.find(entry => entry.profile === "local")?.otherProvider).toBe(true);
+  expect(entries.find(entry => entry.kind === "model" && entry.authRoute === "api-key")?.otherProvider).toBe(true);
+  expect(entries.find(entry => entry.kind === "model" && entry.profile === "local")?.otherProvider).toBe(true);
 });
 
 test("catalog failure never falls back to static OpenAI choices", async () => {
@@ -567,8 +567,8 @@ test("catalog failure never falls back to static OpenAI choices", async () => {
       await Bun.sleep(0);
       const picker = controller.snapshot().modelPicker!;
       expect(picker.error).toContain("/login codex");
-      expect(picker.entries.some(entry => entry.authRoute === "codex" && entry.listUnavailable)).toBe(true);
-      expect(picker.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).every(entry => entry.listUnavailable)).toBe(true);
+      expect(picker.entries.filter(entry => entry.authRoute === "codex")).toMatchObject([{ kind: "sign-in" }]);
+      expect(picker.entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex").every(entry => entry.listUnavailable)).toBe(true);
       expect(picker.entries.some(entry => entry.provider === "openai" && entry.authRoute === "api-key")).toBe(true);
       expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
     } finally { controller.dispose(); }
@@ -581,17 +581,19 @@ test("explicit Codex preference discovers models even before switching from anot
     await mkdir(join(root, "home/.schway"), { recursive: true });
     await Bun.write(join(root, "home/.schway/config.json"), JSON.stringify({ openaiAuth: "codex" }));
     const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root });
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "saved-account");
     const controller = new TuiController({
       session: createSession(), sessionId: "switch-provider", workspace, configEditor,
       provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "openai" }),
       contextManager: createContextManager(workspace),
-      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: async () => ["real-codex"] },
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: async () => ["real-codex"] },
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
     });
     try {
       controller.openModelPicker();
       await Bun.sleep(0);
-      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).map(entry => entry.modelId)).toEqual(["real-codex"]);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex").map(entry => entry.modelId)).toEqual(["real-codex"]);
       expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
       expect(controller.snapshot().provider).toBe("openai");
       expect(await controller.selectModel("openai/real-codex")).toBe(true);
@@ -670,17 +672,17 @@ test("authenticated subscription picker shows only fetched models, validates sel
     try {
       expect(controller.openModelPicker()).toBe(true);
       expect(controller.snapshot().modelPicker?.loading).toBe(true);
-      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.authRoute === "codex" && !entry.connect)).toBe(false);
+      expect(controller.snapshot().modelPicker?.entries.some(entry => entry.kind === "model" && entry.authRoute === "codex")).toBe(false);
       while (requests === 0) await Bun.sleep(1);
       controller.closeModelPicker();
       expect(controller.openModelPicker()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.authRoute === "codex" && !entry.connect).map(entry => entry.modelId)).toEqual(["real-codex"]);
+      expect(controller.snapshot().modelPicker?.entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex").map(entry => entry.modelId)).toEqual(["real-codex"]);
       resolveFirst(["stale-codex"]);
       await Bun.sleep(0);
       expect(controller.snapshot().modelPicker?.entries.some(entry => entry.modelId === "stale-codex")).toBe(false);
       controller.searchModels("openai/gpt-5.4");
-      expect(controller.snapshot().modelPicker?.entries).toMatchObject([{ authRoute: "api-key", modelId: "gpt-5.4" }]);
+      expect(controller.snapshot().modelPicker?.entries).toEqual([]);
       expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
       expect(controller.snapshot().modelId).toBe("gpt-5.4");
       controller.searchModels("real-codex");

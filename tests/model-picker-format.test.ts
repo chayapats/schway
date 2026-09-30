@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatContextWindow, MODEL_PICKER_ROUTE_GROUPS } from "../src/tui/model-picker.ts";
+import { formatContextWindow, modelPickerEntries, MODEL_PICKER_ROUTE_GROUPS } from "../src/tui/model-picker.ts";
 
 describe("compact model picker context windows", () => {
   test.each([
@@ -33,4 +33,20 @@ test("real auth routes have one fixed group order", () => {
     { provider: "xai", authRoute: "api-key", label: "xAI API key" },
     { provider: "openai-compatible", authRoute: "provider", label: "OpenAI-compatible" },
   ]);
+});
+
+
+test("model fuzzy tiers rank exact, prefix, substring and subsequence within their original group", () => {
+  const options = { apiModels: [{ id: "gpt-6-astra" }, { id: "astra-next" }, { id: "astra" }, { id: "a-s-t-r-a" }] };
+  expect(modelPickerEntries("ASTRA", "openai", "", {}, options).filter(row => row.kind === "model").map(row => row.modelId))
+    .toEqual(["astra", "astra-next", "gpt-6-astra", "a-s-t-r-a"]);
+  expect(modelPickerEntries("g6a", "openai", "", {}, options).filter(row => row.kind === "model").map(row => row.modelId)).toEqual(["gpt-6-astra"]);
+  const tied = { apiModels: [{ id: "nearastra" }, { id: "gpt-astra" }] };
+  expect(modelPickerEntries("astra", "openai", "", {}, tied).filter(row => row.kind === "model").map(row => row.modelId)).toEqual(["nearastra", "gpt-astra"]);
+});
+
+test("typed models are last in their provider group and headers disappear without matching choices", () => {
+  const entries = modelPickerEntries("openai/new", "openai", "", {}, { apiModels: [{ id: "newish" }] });
+  expect(entries.map(row => [row.kind, row.modelId])).toEqual([["header", ""], ["model", "newish"], ["model", "new"]]);
+  expect(modelPickerEntries("no-match-at-all", "openai", "", {}, { apiModels: [{ id: "newish" }] })).toEqual([]);
 });

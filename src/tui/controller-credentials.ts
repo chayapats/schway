@@ -233,7 +233,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       const result = await entry.submit();
       this.notice(result.message);
       savedNotice = this.transcript.at(-1)?.id;
-      if (!result.ok) { this.pickerReturn = undefined; this.status = "error"; return false; }
+      if (!result.ok) { this.status = "error"; return false; }
       if (endpointUrl && this.configEditor) {
         const previous = this.configEditor.settings;
         await this.resetUnsupportedEndpointThinking(endpointUrl, previous.model);
@@ -273,12 +273,12 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
-    if (saved && (!this.modelId.trim() || endpointUrl)) {
+    if (saved && (!this.modelId.trim() || endpointUrl && !this.pickerReturn)) {
       const activated = await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target, initialConnection, !!endpointUrl);
       // The ready empty state confirms setup; retain earlier history and credential override warnings.
       if (activated && initialConnection) this.transcript = this.transcript.filter(entry => entry.id !== savedNotice);
     }
-    if (saved) this.restorePickerAfterConnection();
+    if (this.pickerReturn) this.restorePickerAfterConnection(saved);
     return saved;
   }
 
@@ -494,6 +494,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (!runner) { this.fail("Grok sign-in is unavailable in this session."); return false; }
     this.closeModelPicker(); this.loginChooserState = undefined;
     const abort = new AbortController(); let saved = false;
+    const generation = ++this.loginGeneration;
     this.activeAbort = abort; this.loginAbort = abort; this.credentialMutation = true; this.status = "running";
     this.loginApprovalData = { kind: "browser" };
     this.loginApproval = target.device ? "Starting Grok device approval… · Esc cancel" : "Waiting for approval in your browser… · Esc cancel";
@@ -501,15 +502,16 @@ export abstract class CredentialsLayer extends ControllerCore {
     const task = (async () => {
       try {
         const result = await runner({ device: target.device, signal: abort.signal,
-          onSaved: () => { saved = true; this.invalidateGrokAdapter(); },
+          onSaved: () => { if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return; saved = true; this.invalidateGrokAdapter(); },
           onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Waiting for approval in your browser… · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
-          onProgress: message => { this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserState = { level: "grok", selectedId: "grok-device" }; },
+          onProgress: message => { if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return; this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserState = { level: "grok", selectedId: "grok-device" }; },
         });
         abort.signal.throwIfAborted(); if (this.disposed) return false;
         if (!result.ok) { this.fail(result.message); return false; }
         this.loginChooserState = undefined;
         if (!saved) this.invalidateGrokAdapter();
         saved = true; this.grokPending = true;
+        if (this.pickerReturn) { this.notice(result.status); return true; }
         if (!this.credentials?.listGrokModels || !this.configEditor || !this.stageSettings) { this.notice(result.status); return true; }
         const models = filterXaiModels(await this.credentials.listGrokModels(AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)])));
         abort.signal.throwIfAborted(); if (this.disposed) return false;
@@ -521,19 +523,22 @@ export abstract class CredentialsLayer extends ControllerCore {
         if (applied) { this.grokPending = false; this.grokReactivationRequired = false; await this.emitModelActivated({ provider: "xai", modelId: this.modelId, authRoute: "grok" }); }
         return applied;
       } catch (error) {
+        if (this.loginGeneration !== generation) return false;
         if (abort.signal.aborted) this.notice(saved ? "Grok sign-in cancelled after credential saving; the login remains saved." : "Grok sign-in cancelled before credential saving; nothing was saved.");
         else this.fail(redactSecrets(error instanceof Error ? error.message : "Grok sign-in failed.", this.secrets));
         return false;
       }
     })();
     const tracked = task.then(() => {}); this.activeTurn = tracked;
-    try { return await task; }
+    let signedIn = false;
+    try { signedIn = await task; return signedIn; }
     finally {
+      if (this.loginGeneration !== generation) return false;
       this.credentialMutation = false; if (this.activeAbort === abort) this.activeAbort = undefined;
       if (this.loginAbort === abort) this.loginAbort = undefined; if (this.activeTurn === tracked) this.activeTurn = undefined;
       if (this.status === "running") this.status = "idle";
       this.loginApproval = undefined; this.loginApprovalData = undefined; this.loginReturn = undefined;
-      if (this.pickerReturn && !this.disposed) this.restorePickerAfterConnection();
+      if (this.pickerReturn && !this.disposed) this.restorePickerAfterConnection(signedIn);
     }
   }
 
@@ -561,6 +566,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.closeModelPicker();
     this.loginApproval = target.device ? "Starting device approval… · Esc cancel" : "Waiting for approval in your browser… · Esc cancel";
     const abort = new AbortController();
+    const generation = ++this.loginGeneration;
     let credentialSaved = false;
     this.activeAbort = abort;
     this.loginAbort = abort;
@@ -575,10 +581,12 @@ export abstract class CredentialsLayer extends ControllerCore {
           ...(target.code !== undefined ? { code: target.code } : {}),
           signal: abort.signal,
           onSaved: () => {
+            if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return;
             credentialSaved = true;
             this.invalidateSubscriptionAdapter();
           },
           onProgress: (message) => {
+            if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return;
             if (message.startsWith("Enter this code at ")) this.loginApproval = message;
             else {
               this.notice(redactSecrets(message, this.secrets));
@@ -598,6 +606,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         this.notice(redactSecrets(result.status, this.secrets));
         // Test runners may omit onSaved; production also invalidates at the store commit point.
         this.invalidateSubscriptionAdapter();
+        if (this.pickerReturn) { this.status = "idle"; return true; }
         if (this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog) {
           this.subscriptionPending = true;
           this.status = "idle";
@@ -623,6 +632,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         this.status = "idle";
         return true;
       } catch (error) {
+        if (this.loginGeneration !== generation) return false;
         if (abort.signal.aborted) {
           this.notice(credentialSaved
             ? "Sign-in cancelled after the credential was saved. It remains in the OS secure store; choose an account model to activate it."
@@ -639,6 +649,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.activeTurn = tracked;
     let signedIn: boolean;
     try { signedIn = await task; } finally {
+      if (this.loginGeneration !== generation) return false;
       this.credentialMutation = false;
       if (this.loginAbort === abort) this.loginAbort = undefined;
       if (this.activeAbort === abort) this.activeAbort = undefined;
@@ -651,7 +662,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.restorePickerAfterConnection();
       return true;
     }
-    if (!signedIn) this.pickerReturn = undefined;
+    if (!signedIn && this.pickerReturn && !this.loginChooserState) this.restorePickerAfterConnection(false);
     if (signedIn && this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog && !this.disposed) {
       const discovery = new AbortController();
       this.activeAbort = discovery;

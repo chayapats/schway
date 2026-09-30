@@ -277,13 +277,14 @@ test("controller picker searches, navigates, marks active and accepts an unknown
       stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.provider, id: settings.model, text: "selected" }), contextManager: createContextManager(workspace, { contextWindow: settings.contextWindow }) }),
     });
     expect(controller.openModelPicker()).toBe(true);
-    expect(controller.snapshot().modelPicker?.entries[0]?.active).toBe(true);
+    const opened = controller.snapshot().modelPicker!;
+    expect(opened.entries[opened.selectedIndex]?.active).toBe(true);
     controller.searchModels("gpt");
     expect(controller.snapshot().modelPicker?.entries[0]?.provider).toBe("openai");
     controller.moveModelPicker(1);
-    expect(controller.snapshot().modelPicker?.selectedIndex).toBe(1);
+    expect(controller.snapshot().modelPicker?.entries[controller.snapshot().modelPicker!.selectedIndex]?.kind).not.toBe("header");
     controller.searchModels("openai/new-unknown");
-    expect(controller.snapshot().modelPicker?.entries[0]).toMatchObject({ modelId: "new-unknown", provider: "openai", contextWindow: 32768, maxOutput: 16384, custom: true });
+    expect(controller.snapshot().modelPicker?.entries[controller.snapshot().modelPicker!.selectedIndex]).toMatchObject({ modelId: "new-unknown", provider: "openai", contextWindow: 32768, maxOutput: 16384, custom: true });
     expect(await controller.selectPickerModel()).toBe(true);
     expect(controller.snapshot().modelId).toBe("new-unknown");
     expect(controller.snapshot().modelPicker).toBeUndefined();
