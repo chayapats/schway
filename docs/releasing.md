@@ -83,6 +83,9 @@ Only reviewed summaries belong in a new top section of
   selected models with repeated `--model provider=model-id` flags when they
   differ from defaults; lane IDs are `codex`, `grok`, `openai-api-key`,
   `xai-api-key` and `compatible`.
+  Set explicit reasoning with repeated `--thinking provider=level` flags;
+  the selected route/model must advertise that level. Omission keeps provider
+  defaults. Preserve the requested `thinking` field with each evidence row.
 
   ```sh
   bun run live-smoke --enable-live --provider all --base-url "$COMPAT_URL" > "$EVID/live-smoke.json"

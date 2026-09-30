@@ -43,6 +43,10 @@ confirmed OpenRouter and `meta/muse-spark-1.3-contributor`. The operator require
 explicit thinking support before release, now tracked as prerequisite
 [#185](https://github.com/chayapats/schway/issues/185). It was added to milestone
 0.4 and as a native blocker of #138 after the initial precondition check.
+Its implementation is prepared in
+[PR #187](https://github.com/chayapats/schway/pull/187), commit
+`c8a11e44a145d2f1184198b8dc23f3595d536ff7`; typecheck and 1,461 deterministic
+tests passed. Integration and actual live verification remain pending.
 
 Initial secure-store presence checks found OpenAI and OpenRouter API keys and
 a Codex login; xAI API-key and Grok subscription identities were absent.

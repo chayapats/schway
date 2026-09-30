@@ -39,3 +39,6 @@ Versions before 0.4.0 were not published to npm.
   selection from advertised capabilities (#132).
 - `bun run eval --max-spend <usd>` to limit live eval spend between cases,
   including a stop when usage is incomplete (#130).
+- Lane-specific `bun run live-smoke --thinking provider=level` selections,
+  validated against the selected route's reasoning capabilities and recorded
+  in the smoke report (#185).
