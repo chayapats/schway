@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { TuiController } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
@@ -10,6 +10,7 @@ import { readTool } from "../src/tools/read.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { ConfigEditor } from "../src/config/editing.ts";
+import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 
@@ -203,8 +204,9 @@ test("read-only no-change, non-Git and off review are explicit and remain useful
     expect(clean.snapshot().changeReview!.details).toContain("No new turn changes");
     expect(clean.snapshot().changeReview!.files).toEqual([]);
     clean.dispose();
-    const off = controller(dir, [{ text: "done" }], "off");
-    await off.submit("read");
+    const off = controller(dir, [{ toolCalls: [edit] }, { text: "done" }], "off");
+    await off.submit("write with tracking off");
+    expect(off.snapshot().outcome!.files).toEqual([{ path: "edited.txt", source: "tool", added: 1, removed: 0 }]);
     await off.openChangeReview();
     expect(off.snapshot().changeReview!.detail).toContain("No Git state read");
     off.dispose();
@@ -343,6 +345,37 @@ test("capture failure remains usable and explains missing shell detection only i
     expect(c.snapshot().changeReview!.details).toContain("Shell-change detection unavailable");
     expect(c.snapshot().changeReview!.details).toContain("fixture Git capture error");
     c.dispose();
+  });
+});
+
+test("review keeps successful tool identity when a non-Git workspace gains an ancestor repository", async () => {
+  await withTempDir(async dir => {
+    const nested = join(dir, "nested");
+    await mkdir(nested);
+    const workspace = await resolveWorkspace(nested);
+    expect(workspace.root).toBe(nested);
+    const c = new TuiController({ session: createSession(), workspace, sessionId: "new-ancestor-repo", provider: "scripted", modelId: "scripted",
+      model: createScriptedModel({ responses: [{ toolCalls: [edit] }, { text: "done" }] }),
+      contextManager: createContextManager(workspace), tools: createToolRegistry([writeTool]),
+    });
+    try {
+      await c.submit("write before Git exists");
+      expect(c.snapshot().outcome!.files).toEqual([{ path: "edited.txt", source: "tool", added: 1, removed: 0 }]);
+      await c.openChangeReview();
+      expect(c.snapshot().changeReview!.detail).toContain("Non-Git workspace");
+      c.closeChangeReview();
+      await git(dir, "init", "-q");
+      await writeFile(join(dir, "edited.txt"), "wrong root-file evidence\n");
+      for (let visit = 0; visit < 2; visit++) {
+        await c.openChangeReview();
+        const review = c.snapshot().changeReview!;
+        expect(review.detail).toContain("retained edit");
+        expect(review.detail).not.toContain("wrong root-file evidence");
+        expect(review.files).toEqual([{ path: "nested/edited.txt", source: "tool", added: 1, removed: 0 }]);
+        c.closeChangeReview();
+      }
+      expect(c.snapshot().outcome!.files[0]!.path).toBe("edited.txt");
+    } finally { c.dispose(); }
   });
 });
 

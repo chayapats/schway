@@ -144,7 +144,8 @@ export abstract class ControllerCore {
   protected outcomeIdentity?: string;
   protected outcomeUserId?: string;
   protected outcomeDiagnostics?: string;
-  protected successfulToolPaths = new Set<string>();
+  /** Preserve each outcome display path's resolved tool identity until the outcome is cleared. */
+  protected successfulToolPaths = new Map<string, string>();
   protected changeReview?: ChangeReview;
   protected reviewGeneration = 0;
   protected gitBaseline?: GitSnapshot;

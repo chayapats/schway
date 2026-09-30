@@ -93,7 +93,10 @@ export abstract class ChangesLayer extends BranchesLayer {
       if ("error" in status) unavailable = `Changes unavailable: ${status.error}`;
       else if (!status.isGit) unavailable = "Non-Git workspace. Git changes and attribution unavailable.";
       else {
-        review.files = structuredClone(outcome.files);
+        review.files = outcome.files.map(file => {
+          const resolvedPath = file.source === "tool" ? this.successfulToolPaths.get(file.path) : undefined;
+          return { ...file, path: resolvedPath === undefined ? file.path : relative(status.root, resolvedPath) };
+        });
         if (!review.files.length) review.detail = status.dirty ? "No files changed during this turn." : "No working-tree changes.";
       }
     }
@@ -151,6 +154,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     this.changeReview = undefined;
   }
 
+  /** Settle duration, retained diagnostics, and observed file evidence for the latest accepted turn. */
   protected finishOutcome(reason?: TurnOutcome["reason"]): void {
     this.compactionNotice = undefined;
     if (!this.outcome || this.disposed) return;
@@ -208,7 +212,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     this.gitAfter = after;
     this.gitComparison = comparison;
     this.gitSnapshotError = undefined;
-    const toolPaths = new Set([...this.successfulToolPaths].map(path => relative(baseline.root, path)));
+    const toolPaths = new Set([...this.successfulToolPaths.values()].map(path => relative(baseline.root, path)));
     this.gitShellPaths = [...new Set([...comparison.newChanges, ...comparison.updatedPreExisting, ...(comparison.resolved ?? [])])]
       .filter(path => !toolPaths.has(path)).sort((a, b) => a.localeCompare(b));
   }

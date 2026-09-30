@@ -214,6 +214,7 @@ export abstract class TurnLayer extends CompactionLayer {
     return true;
   }
 
+  /** Replace retained outcome evidence and start one accepted turn with its own cancellation signal. */
   protected async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
     this.toolStartedAt.clear();
     this.closeChangeReview();
@@ -257,6 +258,7 @@ export abstract class TurnLayer extends CompactionLayer {
     return true;
   }
 
+  /** Run the owned accepted turn and settle its outcome without publishing stale operation results. */
   protected async runTurn(signal: AbortSignal, operationId: number): Promise<void> {
     if (this.disposed || this.activeAbort?.signal !== signal) return;
     try {
@@ -415,8 +417,8 @@ export abstract class TurnLayer extends CompactionLayer {
           if (event.status === "success" && (event.name === "edit" || event.name === "write") && event.details && typeof event.details === "object") {
             const details = event.details as { resolvedPath?: unknown; created?: unknown; lineCount?: unknown };
             if (typeof details.resolvedPath === "string") {
-              this.successfulToolPaths.add(details.resolvedPath);
               const path = relative(this.gitBaseline?.root ?? this.workspace?.root ?? "", details.resolvedPath);
+              this.successfulToolPaths.set(path, details.resolvedPath);
               let file = this.outcome.files.find(file => file.path === path);
               if (!file) { file = { path, source: "tool" }; this.outcome.files.push(file); }
               const edit = event.name === "edit" ? asEditDetails(event.details) : undefined;
