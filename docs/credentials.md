@@ -111,43 +111,10 @@ working secure storage. ChatGPT subscription OAuth uses a separate stored
 identity; see [subscription login](configuration.md#chatgpt-subscription-codex-oauth).
 Credentials are never migrated from another CLI.
 
-## Deterministic checks and opt-in native smoke
-
-```sh
-bun test tests/credentials.test.ts tests/credential-store.test.ts tests/credential-management.test.ts tests/cli.test.ts tests/cli-process.test.ts tests/config-cli.test.ts
-bun run typecheck
-```
-
-These checks inject an in-memory store. CLI subprocess tests preload a fake
-`Bun.secrets`; a temporary `HOME` alone does **not** isolate the OS keychain.
-
-The following optional smoke uses a unique test account, a non-production value,
-and removes it in `finally`. Run it only when you explicitly want to exercise your
-real OS credential store. It does not contact a model provider or alter Schway's
-saved provider accounts:
-
-```sh
-bun --no-env-file -e '
-const address = { service: "schway-smoke", name: crypto.randomUUID() };
-try {
-  await Bun.secrets.set({ ...address, value: "non-production-smoke-value" });
-  if (await Bun.secrets.get(address) !== "non-production-smoke-value") throw new Error("read mismatch");
-  if (!await Bun.secrets.delete(address)) throw new Error("delete mismatch");
-  if (await Bun.secrets.get(address) !== null) throw new Error("credential still present");
-  console.log(`OS store smoke passed: ${process.platform}, Bun ${Bun.version}`);
-} finally {
-  await Bun.secrets.delete(address);
-}
-'
-```
-
-Record the actual OS, Bun version and result. A fake-store test is not evidence
-that any native store, all supported platforms, live providers or human terminal
-interaction passed. Native smoke and human terminal dogfood remain pending until
-performed explicitly.
-
 ## Grok subscription
 
 `/login grok` opens browser approval; `/login grok --device` shows a temporary verification address and code. OAuth tokens live only at `grok-subscription:xai` in the OS secure store, separate from `api-key:xai`. Schway does not read another CLI's credentials. Device codes stay in the approval panel and never enter session history or saved drafts.
 
 `--provider xai --xai-auth grok` uses only the saved Grok login. Access refresh is shared across simultaneous requests; a 401 gets one refresh and resend. Revocation and plan-level 403 errors never fall back to API-key billing. `/logout grok` removes only this login. See [route configuration](configuration.md#grok-subscription-xai-oauth).
+
+Test coverage for this guide: [release verification](release-verification.md#credentials).

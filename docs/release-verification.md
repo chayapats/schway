@@ -699,3 +699,293 @@ panels added after #105 remain pending in the final installed-journey gate.
 2. Run the installed coding eval for selected live models with `--allow-paid`, record private per-case outcomes and grader evidence at the same revision (see [evals](evals.md)). Fixture passes cannot substitute for this.
 3. Exercise native OS credential storage and ChatGPT login/refresh/logout on the supported path, plus human terminal model/config, branch tree and Git inspection. Record observed results without tokens or keys.
 4. Carry out the real #16/#58 Schway-development dogfood task above. If any required gate remains pending or fails, retain this **pending** verdict; do not publish or claim a fully passed release.
+
+## Automated coverage by guide
+
+### TUI
+
+Moved from `tui.md`; the section names below identify each passage’s original location.
+
+#### First launch and readiness
+
+Automated coverage uses the actual renderer's keyboard, paste and resize input,
+plus a packed-and-installed executable launched outside the checkout with isolated
+HOME, credential storage, terminal and model fixtures. It covers fresh startup,
+remembered credentials/model, setup cancellation and activation, one explicit send,
+explicit subscription models absent from the fixture account catalog, denied
+credential storage, missing profiles/HOME and invalid configuration. Renderer tests additionally delay startup, simulate offline
+failure and fence late results after cancellation/disposal. These fixtures do not
+verify a human terminal, real OS secure storage, live OAuth or a paid provider;
+those checks remain unrun for the final installed-journey gate.
+
+#### Returning to recent work
+
+`tests/recent-startup.test.ts` exercises actual interactive startup in isolated
+subprocesses with renderer keyboard, paste and resize: new/reopen, one-action
+resume, explicit branch/auth/model, changed config over remembered billing,
+credential repair, deleted/corrupt suggestions, and repeated navigation. Existing
+interactive-memory tests cover missing profiles. These are deterministic model and
+credential fixtures; live OAuth, real provider and human-terminal verification
+remain unrun. Durable cross-process draft recovery is described in [the TUI guide](tui.md#leaving-and-recovering-unfinished-input).
+
+#### Turn outcomes and change review
+
+Automated verification covers the actual loop/controller with successful edits and
+command exits, failed checks, cancellation and model failure after edits, pre-existing
+snapshot dirt, concurrent on-demand edits, read-only/no-change and non-Git workspaces.
+A real renderer fixture uses keyboard, paste, and resize input to navigate bounded
+text, deleted, renamed and binary diffs, then restores the draft, cursor and scroll.
+These deterministic fixtures use isolated workspaces and injected credentials; live
+providers, OAuth, real credential storage and a human terminal journey remain unrun.
+
+These are command results, not a claim that a test suite passed;
+model prose and command invocation alone provide no verification evidence.
+
+#### Color roles
+
+Every text role meets a 4.5:1 contrast ratio on the canvas, both
+surfaces and every tint it is used on; `tests/tui-view.test.ts` checks the pairs.
+
+#### Motion and startup splash
+
+Renderer fixtures run
+with `off`; `tests/tui-motion.test.ts` covers the splash timeline and gating, key
+forwarding, spinners, the completion flash and the streaming caret with an injected
+clock.
+
+#### Interaction: panel keyboard contract
+
+| Panel | Navigation and action | Renderer fixture |
+| --- | --- | --- |
+| Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back | `tui-view.test.ts` appearance/preferences |
+| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+R retries catalog | `tui-view.test.ts`, `tui-sessions.test.ts` |
+| Credential, callback, approval | Masked entry or external wait, Enter only on entry, Esc cancel | `tui-view.test.ts` credential/login/approval |
+| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown | `tui-view.test.ts` branch/review |
+| Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer | `tui-view.test.ts`, `tui-search.test.ts`, `tui-inspection.test.ts` |
+
+New panels added after this slice require their own renderer and installed
+journey checks in the final gate; this contract alone does not verify them.
+
+#### Offline preview and checks
+
+From a development checkout:
+
+```sh
+bun tests/fixtures/tui-demo.ts
+# Long streamed Markdown for mouse/PageUp/PageDown and resize checks:
+bun tests/fixtures/tui-demo.ts --scroll
+```
+
+Type a task to run the scripted read/edit/check demonstration. A second task waits
+for cancellation so Esc can be checked. Everything runs in a temporary workspace
+and home directory, removed on exit. No model API or stored credentials are used.
+
+```sh
+bun test tests/tui-view.test.ts
+bun test tests/tui-activity.test.ts
+bun run typecheck
+```
+
+The route, connection, catalog, profile, keyboard, paste, and resize checks in
+this repository use isolated credentials and scripted or protocol fixtures.
+They verify the local interaction and request path. They do not establish live
+OAuth approval, remote account entitlement, or success in a human terminal;
+those checks remain for the installed-journey gate.
+
+Renderer tests exercise real keyboard/paste events, Markdown, output disclosure,
+draft preservation, scroll anchoring, theme changes, Unicode, and resizing. Tests
+assert behavior and a few stable layout landmarks, not snapshots of every cell.
+
+#### Offline preview and checks (preferences)
+
+The preference journeys are covered by real renderer keyboard, paste, resize and
+isolated persisted-state fixtures in `tests/tui-view.test.ts`: scoped save/reset,
+restart, CLI shadowing, file/memory conflicts, malformed files, unavailable models,
+staging cancellation, secret exclusion, draft/cursor restoration, appearance
+palettes and environment precedence. `tests/startup-installed.test.ts` exercises
+the appearance canvas and source through a packed executable in fresh isolated
+processes, plus installed Unicode/resize/recovery input and terminal cleanup
+through a Linux OS PTY. Live provider, OAuth and human-terminal preference checks have not
+been run; they remain for the installed-journey gate.
+
+#### Discover commands and skills
+
+Automated coverage uses isolated credentials, controller/dispatcher fixtures,
+actual renderer keyboard/paste/resize at 44×18, and fresh-process metadata/SDK
+loading checks. Human terminal use, real OAuth, and live provider journeys were
+not run for this slice and remain part of the installed-journey gate.
+
+#### Context and conversation continuity
+
+Implemented behavior is verified by isolated scripted controller/loop tests for
+pressure, overflow, manual summary, incomplete streams, cancellation, persistence
+failure, unknown usage, capacity changes, branch isolation and disk resume. A
+real JSONL fault fixture verifies that restoring storage still leaves the old
+handle fenced, and the actual `/resume` dispatcher reloads it before compaction
+can succeed without losing original records.
+Renderer keyboard/paste/resize fixtures invoke `/context`, retain a future draft
+during real tool execution at 44×18, and keep the composer usable at 24×8.
+These fixtures do not establish live-provider, OAuth, or human-terminal success;
+those checks remain unrun for the installed-journey gate.
+
+#### Recent sessions
+
+Verified with isolated scripted-model dispatcher and renderer tests: 106 sessions,
+search/paging, workspace roots/subdirectories/symlinks, branch and attachment
+resume, interrupted/legacy/corrupt/deleted files, keyboard/paste/resize and cancel, cross-workspace draft/viewport round trips,
+late resume cancellation, bounded previews and auth-command exclusion. Human
+terminal and live-provider journeys remain unrun; fixtures do not certify them.
+
+#### Alternate conversation paths
+
+Automated verification uses renderer keyboard, bracketed paste and resize input for duplicate shared-head paths, named forks, narrow Unicode lists, busy/failing confirmation, and draft/reading-position restoration. Controller/session fixtures verify persisted compaction isolation and no tool replay. Human terminal and live-provider checks are unrun; these fixtures do not establish live-provider or release success.
+
+#### Leaving and recovering unfinished input
+
+Automated coverage uses real renderer keyboard/paste/resize input and isolated app
+subprocesses: multiline checkpoint/kill/reopen, discard, accepted cleanup, late
+acceptance, cross-workspace switching, masked keys/callbacks, permission/disk-full
+failures, conflicting writers, normal-exit flush, a deliberately blocked exit writer, terminal stop/destroy and a silent
+tool that ignores cancellation. Store subprocesses also kill an atomic replacement
+between temporary-file sync and rename. These fixtures use scripted models and fake
+credential stores; live providers, actual OAuth, human terminal restoration and
+macOS filesystem behavior remain unrun installed-journey checks.
+
+### Sessions
+
+Moved from `sessions.md`; the section names below identify each passage’s original location.
+
+#### Unsent draft checkpoints
+
+No real macOS filesystem run is claimed by the Linux fixtures.
+
+### Configuration
+
+Moved from `configuration.md`; the section names below identify each passage’s original location.
+
+#### Remembering and forgetting choices
+
+Deterministic coverage uses isolated credentials, scripted/protocol transports, fresh interactive/headless processes, and real renderer keyboard, paste and resize input (`bun test tests/interactive-memory.test.ts`). These checks do not establish live OAuth, provider service access or human terminal success; those remain part of the installed-journey verification gate.
+
+#### Reasoning levels
+
+Runnable example (no paid APIs; fixtures in `tests/reasoning.test.ts` inspect outgoing controls):
+
+```sh
+# OpenAI efforts via scripted fixtures
+bun test tests/reasoning.test.ts
+# Live-equivalent CLI (needs a key; shows validation, not fixtures)
+schway --provider openai --model gpt-5.4 --thinking low -p 'plan only'
+# OpenRouter: exact provider-advertised effort
+schway --provider openai-compatible --base-url https://openrouter.ai/api/v1 --model meta/muse-spark-1.3-contributor --thinking medium -p 'hello'
+# Other compatible services: reasoning via extraBody, thinking stays unset
+schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body '{"reasoning_effort":"medium"}' -p 'hello'
+```
+
+Protocol tests in `tests/thinking-policy.test.ts` cover all auth routes without paid calls.
+
+#### ChatGPT subscription (Codex OAuth)
+
+The query is a verified Codex client compatibility version, **not** the Schway package version: sending Schway `0.1.0` returned an empty catalog on a real account.
+
+A live subscription catalog request and TUI picker were tested on 2026-09-25 (7 visible models, 2 hidden); this does not prove inference or release readiness for every account.
+
+Runnable examples (deterministic; no paid APIs or live subscription calls):
+
+```sh
+# Scripted login/refresh/selection/resume/redaction coverage plus a real tool round trip
+bun test tests/codex-subscription.test.ts tests/codex-callback.test.ts
+# Deterministic headless behavior without credentials: fails actionably, starts no browser
+schway --provider openai --openai-auth codex -p 'hello'
+# Live-equivalent API-key path (needs a key; shows validation, not fixtures)
+schway --provider openai --openai-auth api-key -p 'hello'
+```
+
+Optional bounded live smoke stays separate evidence and is reported independently of fixture success.
+
+#### Named OpenAI-compatible profiles
+
+Runnable example with two local protocol fixtures (no paid APIs):
+
+```sh
+cat ~/.schway/config.json
+# { "profiles": { "a": { "baseUrl": "http://127.0.0.1:8101/v1", "model": "model-a", "credentialEnv": "PROFILE_A_KEY" }, "b": { "baseUrl": "http://127.0.0.1:8102/v1", "model": "model-b", "credentialEnv": "PROFILE_B_KEY" } } }
+PROFILE_A_KEY=sentinel-a PROFILE_B_KEY=sentinel-b schway --profile a -p 'hello from a'
+PROFILE_A_KEY=sentinel-a PROFILE_B_KEY=sentinel-b schway --profile b --model override-model --header 'X-Test: ok' -p 'hello from b'
+```
+
+Each endpoint receives only its profile's model, body, headers, and sentinel credential; runtime overrides apply last; switching never leaks the earlier credential. See `tests/profiles.test.ts` for deterministic two-endpoint, precedence, isolation, auth-mode, and atomic-switch coverage.
+
+#### Git change tracking
+
+Runnable example (no paid APIs; temporary filesystems in `tests/git-changes.test.ts`):
+
+```sh
+bun test tests/git-changes.test.ts
+```
+
+### Credentials
+
+Moved from `credentials.md`; the section names below identify each passage’s original location.
+
+#### Deterministic checks and opt-in native smoke
+
+```sh
+bun test tests/credentials.test.ts tests/credential-store.test.ts tests/credential-management.test.ts tests/cli.test.ts tests/cli-process.test.ts tests/config-cli.test.ts
+bun run typecheck
+```
+
+These checks inject an in-memory store. CLI subprocess tests preload a fake
+`Bun.secrets`; a temporary `HOME` alone does **not** isolate the OS keychain.
+
+The following optional smoke uses a unique test account, a non-production value,
+and removes it in `finally`. Run it only when you explicitly want to exercise your
+real OS credential store. It does not contact a model provider or alter Schway's
+saved provider accounts:
+
+```sh
+bun --no-env-file -e '
+const address = { service: "schway-smoke", name: crypto.randomUUID() };
+try {
+  await Bun.secrets.set({ ...address, value: "non-production-smoke-value" });
+  if (await Bun.secrets.get(address) !== "non-production-smoke-value") throw new Error("read mismatch");
+  if (!await Bun.secrets.delete(address)) throw new Error("delete mismatch");
+  if (await Bun.secrets.get(address) !== null) throw new Error("credential still present");
+  console.log(`OS store smoke passed: ${process.platform}, Bun ${Bun.version}`);
+} finally {
+  await Bun.secrets.delete(address);
+}
+'
+```
+
+Record the actual OS, Bun version and result. A fake-store test is not evidence
+that any native store, all supported platforms, live providers or human terminal
+interaction passed. Native smoke and human terminal dogfood remain pending until
+performed explicitly.
+
+### Workspaces
+
+No verification prose was present in this guide when issue #139 separated usage from verification.
+
+### Extensions
+
+Moved from `extensions.md`; the section names below identify each passage’s original location.
+
+#### Tool argument and result hooks
+
+Deterministic tests exercise real temporary-file edits through the loop, invalid
+and denied rewrites, post-execution failures without replay, scheduling barriers,
+parallel siblings, every cancellation phase, and durable JSONL reload. The
+headless CLI and installed-package tests use scripted/local protocol fixtures;
+they are not live-provider or human terminal evidence.
+
+#### Runnable example and verification
+
+Deterministic tests use
+the real controller and loop with scripted models, including cancellation,
+collisions, listener failures/mutation, bounded queues, JSONL parity, and new/resume
+cleanup. Request tests additionally cover actual scripted requests, ordered
+waterfalls, retries, pressure/overflow summaries, durable JSONL resume, invalid
+outputs, retained-reference mutation, and cancellation after tool settlement.
+Installed-package verification uses a local protocol fixture. These checks do
+not provide live-provider or human terminal validation.

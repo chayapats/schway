@@ -36,3 +36,5 @@ Accepted changes are durable session-wide metadata, separate from conversation a
 Forking or switching conversation branches retains the same accepted root set. Root metadata is read from the whole session file, including changes made while another branch was active; it is never copied into a branch's ancestry. New format 3 sessions and legacy format 1/2 upgrades retain this behavior. Branch changes also preserve the current executable extension runtime and do not undo files in any root.
 
 The core `addWorkspaceRoots(workspace, directories, signal?)` returns a validated copy without mutating its input. `restoreWorkspace(workspace)` returns usable roots plus diagnostics, leaving the supplied saved root list intact. `Session.metadata.extraRoots` stores accepted identities; `Session.setExtraRoots(roots)` persists metadata without adding model-facing records. Callers must validate roots before persisting them and bind the context manager and tools to the same active workspace.
+
+Test coverage for this guide: [release verification](release-verification.md#workspaces).
