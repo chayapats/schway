@@ -1,6 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import { countLines } from "../text/diff.ts";
 import {
   abortError,
   filesystemFailure,
@@ -35,11 +36,12 @@ export const writeInputSchema = Type.Object(
 /** Destination path and full file contents accepted by the write schema. */
 export type WriteInput = Static<typeof writeInputSchema>;
 
-/** Successful-write paths and whether the destination was absent when checked before writing. */
+/** Successful-write paths, written-content line count, and whether the destination was absent before writing. */
 export interface WriteDetails {
   path: string;
   resolvedPath: string;
   created: boolean;
+  lineCount: number;
 }
 
 /** Full-file writing definition that runs behind an exclusive scheduling barrier. */
@@ -52,11 +54,7 @@ export const writeTool: ToolDefinition<WriteInput> = {
   execute: executeWrite,
 };
 
-/**
- * Create parent directories and atomically create or replace a file with the supplied content.
- * Relative paths resolve from the workspace root; filesystem failures return error results
- * and cancellation detected before or during the write rejects.
- */
+/** Atomically write complete content from the workspace root, creating parents, returning filesystem failures, and rejecting detected cancellation. */
 export async function executeWrite(
   input: WriteInput,
   ctx: ToolContext,
@@ -99,6 +97,7 @@ export async function executeWrite(
       path: input.path,
       resolvedPath,
       created,
+      lineCount: countLines(input.content),
     } satisfies WriteDetails,
   };
 }
