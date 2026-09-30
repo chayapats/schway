@@ -61,7 +61,7 @@ OPENAI_API_KEY=your-key bun run start --provider openai --max-turns 8
 
 Then `/config set maxTurns 12 --scope project` saves 12 but reports that CLI value 8 remains effective. `/config set maxTurns 4` applies 4 immediately, and `/config reset maxTurns` restores CLI value 8. Restart without `--max-turns` to use the saved project value.
 
-The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider. These interfaces support deterministic controller/configuration tests without loading OpenTUI or using paid model APIs.
+The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider.
 
 ## Upgrading from the Anthropic provider
 
@@ -85,8 +85,6 @@ Use `/model forget` (alias `/model reset`) to remove only this workspace's memor
 
 Missing profiles or credentials keep the stale choice visible and repairable without switching billing routes. Restored ChatGPT models and reasoning are checked against the current account catalog. API and custom endpoint model availability is established by the provider on a request; request failures retain the chosen route. Choose another model or forget the preference to recover. A failed or cancelled activation preserves the last remembered choice. If the runtime activates but saving fails, it stays usable and a notice says **not remembered**; no second login is needed. Concurrent sessions use revisions: a stale writer cannot replace a newer choice and must reopen before remembering again. Process termination releases writer ownership automatically; a retained secret-free `.lock` file is normal. Unreadable memory blocks automatic model activation unless explicit settings independently select the full provider/model/billing connection (or a valid named profile); that override leaves the unreadable state unchanged and displays an explanation.
 
-Deterministic coverage uses isolated credentials, scripted/protocol transports, fresh interactive/headless processes, and real renderer keyboard, paste and resize input (`bun test tests/interactive-memory.test.ts`). These checks do not establish live OAuth, provider service access or human terminal success; those remain part of the installed-journey verification gate.
-
 ## Reasoning levels
 
 Select reasoning with config `"thinking": "medium"`, CLI `--thinking medium`, interactive `/thinking medium`, or `/config set thinking medium` (session only by default). Interactive precedence is built-in → remembered workspace choice → user → project → CLI → session, so a session choice overrides files and flags. `/thinking` without arguments shows requested and effective values with provider/model; `/thinking reset` clears the session override for ordinary providers; in Codex subscription mode it selects the backend default for this session, safely shadowing an incompatible saved level without changing the file. `/config` always shows `thinking` with origin and effective mapping, and the status header shows `(thinking <level>)` when set. Changing reasoning affects future requests only and never rewrites history; thinking and opaque provider metadata still round-trip across tool calls, compaction, and resume.
@@ -105,12 +103,9 @@ Truthful capability handling:
 - `thinking` plus any reasoning body key in effective `extraBody` (direct or selected-profile `extraBody`) is rejected as `thinking "<level>" conflicts with extraBody.<key>`; remove one to define a single source of truth.
 - Model and profile switches recompute capability and effective reasoning. Subscription model switches shadow incompatible saved thinking with a session-only provider default, without editing files. Other providers reject an incompatible request with the previous settings intact; set a compatible level or reset thinking first.
 
-Runnable example (no paid APIs; fixtures in `tests/reasoning.test.ts` inspect outgoing controls):
+Set reasoning for a task:
 
 ```sh
-# OpenAI efforts via scripted fixtures
-bun test tests/reasoning.test.ts
-# Live-equivalent CLI (needs a key; shows validation, not fixtures)
 schway --provider openai --model gpt-5.4 --thinking low -p 'plan only'
 # OpenRouter: exact provider-advertised effort
 schway --provider openai-compatible --base-url https://openrouter.ai/api/v1 --model meta/muse-spark-1.3-contributor --thinking medium -p 'hello'
@@ -118,7 +113,7 @@ schway --provider openai-compatible --base-url https://openrouter.ai/api/v1 --mo
 schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body '{"reasoning_effort":"medium"}' -p 'hello'
 ```
 
-The shared contract lives in `src/model/thinking.ts`: capability provenance, selected model/endpoint checks, validation, conflicts, and effective descriptions. Config, command completion, preferences and adapters reuse it; only `src/model/providers/*` builds wire fields. Protocol tests in `tests/thinking-policy.test.ts` cover all auth routes without paid calls.
+The shared contract lives in `src/model/thinking.ts`: capability provenance, selected model/endpoint checks, validation, conflicts, and effective descriptions. Config, command completion, preferences and adapters reuse it; only `src/model/providers/*` builds wire fields.
 
 Capability sources: [OpenAI Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [OpenAI Sol](https://developers.openai.com/api/docs/models/gpt-6-sol), and [OpenRouter reasoning metadata](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
 
@@ -175,7 +170,7 @@ Sign in interactively (never paste secrets after the slash command):
 /logout codex
 ```
 
-After a successful explicit `/login codex`, Schway discovers this account's visible Codex models and activates the subscription transport and an available model for the current session. It keeps the current model if still visible; otherwise it selects the first advertised visible model. Previous provider/settings remain active if OAuth itself fails or is cancelled. After a successful re-login that replaces subscription credentials, a previous Codex adapter is blocked until the new account's catalog and model activate; this prevents an old model from silently using the new account. Other active providers remain usable if discovery fails. Retry `/model` without repeating OAuth. Saved provider/auth preferences are never overwritten; use `/model` to browse this account's models or `/thinking` to see this model's default and supported levels. Headless Codex runs also discover visible model capabilities before inference: when no available model was selected, Schway uses the first advertised model for that run without editing config; an explicit unavailable `--model` fails instead of silently substituting another ID. `--thinking` is validated against that account's advertised levels before a request. The picker calls `GET https://chatgpt.com/backend-api/codex/models?client_version=0.156.1` using only Schway's stored subscription identity. The query is a verified Codex client compatibility version, **not** the Schway package version: sending Schway `0.1.0` returned an empty catalog on a real account. Update the pinned version only after verifying the model catalog and selected-model transport against that Codex protocol version. The endpoint and `models[].slug` / `visibility` response follow the official open-source [Codex models client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) and [Codex model protocol](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs). Only `visibility: list` entries are shown; errors do not disclose provider payloads or silently switch billing. A live subscription catalog request and TUI picker were tested on 2026-09-25 (7 visible models, 2 hidden); this does not prove inference or release readiness for every account.
+After a successful explicit `/login codex`, Schway discovers this account's visible Codex models and activates the subscription transport and an available model for the current session. It keeps the current model if still visible; otherwise it selects the first advertised visible model. Previous provider/settings remain active if OAuth itself fails or is cancelled. After a successful re-login that replaces subscription credentials, a previous Codex adapter is blocked until the new account's catalog and model activate; this prevents an old model from silently using the new account. Other active providers remain usable if discovery fails. Retry `/model` without repeating OAuth. Saved provider/auth preferences are never overwritten; use `/model` to browse this account's models or `/thinking` to see this model's default and supported levels. Headless Codex runs also discover visible model capabilities before inference: when no available model was selected, Schway uses the first advertised model for that run without editing config; an explicit unavailable `--model` fails instead of silently substituting another ID. `--thinking` is validated against that account's advertised levels before a request. The picker calls `GET https://chatgpt.com/backend-api/codex/models?client_version=0.156.1` using only Schway's stored subscription identity. The query uses a Codex client compatibility version rather than the Schway package version. Update the pinned version only after verifying the model catalog and selected-model transport against that Codex protocol version. The endpoint and `models[].slug` / `visibility` response follow the official open-source [Codex models client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) and [Codex model protocol](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs). Only `visibility: list` entries are shown; errors do not disclose provider payloads or silently switch billing.
 
 `/login codex` opens the provider browser flow with a localhost callback and per-attempt PKCE/state; denial, expiry, timeout, and Esc cancellation settle without leaked listeners. On machines where the browser cannot reach the loopback callback, `/login codex --device` prints a user code to approve at `https://auth.openai.com/codex/device` (beta, 900 s timeout), and `--code` exchanges a manually pasted redirect URL or code. Tokens (short-lived access plus `offline_access` refresh) live only at the subscription secure-store identity with serialized pre-expiry refresh; `/logout codex` removes exactly that identity. Resume rebuilds the native conversation under the currently selected auth identity without replaying tools, and prior provider metadata round-trips across auth switches.
 
@@ -192,18 +187,16 @@ Without a saved provider preference, Schway starts with its built-in OpenAI prov
 
 The browser returning to `http://localhost:1455/auth/callback` is expected. Schway starts that listener before launching the browser and finishes sending the callback page before closing the connection. The page confirms receipt; the terminal reports whether the tokens were saved. A callback from an older browser tab returns an error without cancelling the current attempt.
 
-Runnable examples (deterministic; no paid APIs or live subscription calls):
+Use the saved subscription or an API key:
 
 ```sh
-# Scripted login/refresh/selection/resume/redaction coverage plus a real tool round trip
-bun test tests/codex-subscription.test.ts tests/codex-callback.test.ts
-# Deterministic headless behavior without credentials: fails actionably, starts no browser
+# Use a saved ChatGPT login
 schway --provider openai --openai-auth codex -p 'hello'
-# Live-equivalent API-key path (needs a key; shows validation, not fixtures)
+# Use an API key
 schway --provider openai --openai-auth api-key -p 'hello'
 ```
 
-See `src/model/providers/codex-subscription.ts` (verified OAuth/Responses contract, token lifecycle, wire conversion), `src/auth/credentials.ts` (`selectOpenAITransport`), and `src/auth/store.ts` (`codexSubscriptionIdentity`) for the implementation contract. Optional bounded live smoke stays separate evidence and is reported independently of fixture success.
+See `src/model/providers/codex-subscription.ts` (verified OAuth/Responses contract, token lifecycle, wire conversion), `src/auth/credentials.ts` (`selectOpenAITransport`), and `src/auth/store.ts` (`codexSubscriptionIdentity`) for the implementation contract.
 
 ## Named OpenAI-compatible profiles
 
@@ -253,7 +246,7 @@ Display and selection:
 - `/config show` and the status header show the active `profile` with redacted effective settings (`credentialEnv`/`credentialIdentity` names are shown, values hidden; URLs sanitized; headers/bodies hidden).
 - `/model` opens the picker with profile rows (`profile:<name>`); `/model profile:<name>` and `/config set profile <name>` switch profiles. Only the explicit `profile:<name>` form switches profiles; a bare model token never selects a profile, so direct model IDs cannot collide with profile names. `/model <provider>/<id>` clears the profile for direct selection. `/model <provider>/<id>` and `/config reset profile` record a session-only cleared profile that outranks user, project, and CLI selections.
 
-Runnable example with two local protocol fixtures (no paid APIs):
+Use two local endpoints:
 
 ```sh
 cat ~/.schway/config.json
@@ -262,7 +255,7 @@ PROFILE_A_KEY=sentinel-a PROFILE_B_KEY=sentinel-b schway --profile a -p 'hello f
 PROFILE_A_KEY=sentinel-a PROFILE_B_KEY=sentinel-b schway --profile b --model override-model --header 'X-Test: ok' -p 'hello from b'
 ```
 
-Each endpoint receives only its profile's model, body, headers, and sentinel credential; runtime overrides apply last; switching never leaks the earlier credential. See `tests/profiles.test.ts` for deterministic two-endpoint, precedence, isolation, auth-mode, and atomic-switch coverage.
+Each endpoint receives only its profile's model, body, headers, and sentinel credential; runtime overrides apply last; switching never leaks the earlier credential.
 
 ## Git change tracking
 
@@ -295,12 +288,6 @@ Inspect with:
 
 `/changes` shows branch, HEAD, dirty counts, and bounded changed files (staged, unstaged, untracked, deleted, renamed, binary). Detached HEAD renders as `detached HEAD at <sha>`; a non-Git workspace reports `Not a Git workspace` and keeps coding. Large outputs truncate explicitly (`… truncated`) with follow-ups (`git status --short`, `git diff -- <path>`). Binary content is summarized, never dumped. Snapshot comparisons list new turn changes separately from pre-existing files changed further and pre-existing files left untouched. A failed capture reports `Snapshot unavailable: <reason>` instead of a fabricated clean diff. Snapshots retain only the latest turn pair for the current session/run and cannot restore files. Resume shows current on-demand state and never claims a historical snapshot unless one was retained with a valid identity.
 
-Runnable example (no paid APIs; temporary filesystems in `tests/git-changes.test.ts`):
-
-```sh
-bun test tests/git-changes.test.ts
-```
-
 See `src/workspace/git.ts` (`inspectGitStatus`, `captureGitSnapshot`, `compareGitSnapshots`, `getGitDiffPreview`), `src/config/config.ts` (`git.changeTracking`, `DEFAULT_GIT_CHANGE_TRACKING`), and `src/tui/controller.ts` (`changesCommand`, `gitChangeTracking`) for the contract.
 
 ## Grok subscription (xAI OAuth)
@@ -310,3 +297,5 @@ A SuperGrok account can connect through `/login grok` for browser approval or `/
 `xaiAuth` selects `auto` (the default), `grok` or `api-key`. Set it with `/config set xaiAuth grok` or `--provider xai --xai-auth grok`. Automatic selection prefers a supplied API key or `XAI_API_KEY`, then a saved Grok login, then a saved xAI API key. Explicit `grok` ignores API keys. Explicit `api-key` ignores Grok tokens. There is no automatic billing fallback.
 
 After interactive sign-in, headless runs can use `schway --provider xai --xai-auth grok --model <id> -p "…"`. They refresh stored tokens when needed and never open a browser. Missing or revoked logins require interactive sign-in. `/logout grok` removes only the Grok OAuth credential and blocks an active Grok account until sign-in and activation succeed again.
+
+Test coverage for this guide: [release verification](release-verification.md#configuration).

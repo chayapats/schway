@@ -58,16 +58,6 @@ unknown profiles or unwritable session storage can instead cause an actionable
 startup exit before the terminal opens. Headless execution keeps its existing
 configuration and credential path and does not read interactive choice memory.
 
-Automated coverage uses the actual renderer's keyboard, paste and resize input,
-plus a packed-and-installed executable launched outside the checkout with isolated
-HOME, credential storage, terminal and model fixtures. It covers fresh startup,
-remembered credentials/model, setup cancellation and activation, one explicit send,
-explicit subscription models absent from the fixture account catalog, denied
-credential storage, missing profiles/HOME and invalid configuration. Renderer tests additionally delay startup, simulate offline
-failure and fence late results after cancellation/disposal. These fixtures do not
-verify a human terminal, real OS secure storage, live OAuth or a paid provider;
-those checks remain unrun for the final installed-journey gate.
-
 ## Returning to recent work
 
 Ordinary launch opens a new conversation. When this workspace has saved work,
@@ -100,22 +90,13 @@ first durable conversation mutation persists its header and records together.
 Drafts kept while switching conversations remain associated with their original
 session; returning to new work does not paste an older session's draft into it.
 
-`tests/recent-startup.test.ts` exercises actual interactive startup in isolated
-subprocesses with renderer keyboard, paste and resize: new/reopen, one-action
-resume, explicit branch/auth/model, changed config over remembered billing,
-credential repair, deleted/corrupt suggestions, and repeated navigation. Existing
-interactive-memory tests cover missing profiles. These are deterministic model and
-credential fixtures; live OAuth, real provider and human-terminal verification
-remain unrun. Durable cross-process draft recovery is described below.
-
 ## Turn outcomes and change review
 
 After an accepted turn settles, the activity line reports **completed**, **failed**,
 **cancelled**, or **limit** separately from the model's answer. Command counts report
 observed exit zero, nonzero, and unknown results across the entire turn, even when
 only the latest 50 command details are retained. A completed model turn can contain
-a failed check. These are command results, not a claim that a test suite passed;
-model prose and command invocation alone provide no verification evidence.
+a failed check.
 
 **Alt+R** or `/changes review` opens a read-only panel with the latest turn's tool
 counts and up to 50 command results, identified by call ID and command. **Alt+I**
@@ -137,14 +118,6 @@ tracking-off, and unavailable-attribution states are explicit. Review does not e
 snapshots, commit, undo, or restore files. Failure, cancellation, and conversation
 branching leave completed filesystem effects in place. Turn summaries are transient;
 old/resumed sessions still expose their saved tool results and current Git review.
-
-Automated verification covers the actual loop/controller with successful edits and
-command exits, failed checks, cancellation and model failure after edits, pre-existing
-snapshot dirt, concurrent on-demand edits, read-only/no-change and non-Git workspaces.
-A real renderer fixture uses keyboard, paste, and resize input to navigate bounded
-text, deleted, renamed and binary diffs, then restores the draft, cursor and scroll.
-These deterministic fixtures use isolated workspaces and injected credentials; live
-providers, OAuth, real credential storage and a human terminal journey remain unrun.
 
 ## Color roles
 
@@ -169,7 +142,7 @@ The Voltage palette pairs calm canvases with color blocks for each zone.
 Tints mix a semantic color into Surface 2 (22% dark, 12% light) for pills, diff
 rows and selected picker rows; only body text or that same semantic color is drawn
 on a tint. Every text role meets a 4.5:1 contrast ratio on the canvas, both
-surfaces and every tint it is used on; `tests/tui-view.test.ts` checks the pairs.
+surfaces and every tint it is used on.
 Symbols and labels retain meaning without color. Nonempty `NO_COLOR` maps semantic
 accents to the text color. This is a monochrome TUI, not a plain-text output mode;
 use `-p` for headless text.
@@ -198,10 +171,7 @@ runs while something is moving.
 
 `SCHWAY_MOTION=full|reduced|off` selects the level. `reduced` keeps spinners and a
 steady caret but removes the splash, highlights, flashes, caret blink and slides;
-`off` also replaces spinners with a static `●` and drops the caret. `NO_COLOR` or `TERM=dumb` default to `reduced`. Renderer fixtures run
-with `off`; `tests/tui-motion.test.ts` covers the splash timeline and gating, key
-forwarding, spinners, the completion flash and the streaming caret with an injected
-clock.
+`off` also replaces spinners with a static `●` and drops the caret. `NO_COLOR` or `TERM=dumb` default to `reduced`.
 
 The default is automatic terminal light/dark detection, then `COLORFGBG`, then
 dark. In `/config` (Alt+P), select **appearance** and choose **Reset (inherit)**,
@@ -252,16 +222,25 @@ clipping long display values so both controls remain visible. Ctrl+L
 re-enters the renderer and keeps conversation, draft and
 reading position.
 
-| Panel | Navigation and action | Renderer fixture |
-| --- | --- | --- |
-| Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back | `tui-view.test.ts` appearance/preferences |
-| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+R retries catalog | `tui-view.test.ts`, `tui-sessions.test.ts` |
-| Credential, callback, approval | Masked entry or external wait, Enter only on entry, Esc cancel | `tui-view.test.ts` credential/login/approval |
-| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown | `tui-view.test.ts` branch/review |
-| Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer | `tui-view.test.ts`, `tui-search.test.ts`, `tui-inspection.test.ts` |
+| Panel | Navigation and action |
+| --- | --- |
+| Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back |
+| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+R retries catalog |
+| Credential, callback, approval | Masked entry or external wait, Enter only on entry, Esc cancel |
+| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown |
+| Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer |
 
-New panels added after this slice require their own renderer and installed
-journey checks in the final gate; this contract alone does not verify them.
+Open preferences from the task composer. If another panel is open, Escape returns
+to the task before Alt+P; preferences likewise keep ownership of input until closed
+(or their explicit model-picker action is selected). Repeated Alt+P preserves the
+current preference selection and preview.
+
+Preferences show effective values, their origins, and separately saved lower values.
+Session edits disappear on restart; workspace memory, user config and project
+config are distinct explicit scopes, explained before confirmation. Project scope
+writes only after the second Enter. Credential material is excluded; model-route
+selection is a separate action that activates and remembers a successful choice.
+Textual `/config set`, `/config reset` and `/config show` remain available.
 
 The conversation follows new output until you scroll back. Streaming then keeps
 your reading position; Ctrl+End resumes following. Wheel input over non-scrollable
@@ -376,59 +355,6 @@ is unavailable, Schway reports the failure and leaves the selection and draft
 intact. New streamed rows and tool completion keep the selected item and the
 reader's scroll position.
 
-## Offline preview and checks
-
-From a development checkout:
-
-```sh
-bun tests/fixtures/tui-demo.ts
-# Long streamed Markdown for mouse/PageUp/PageDown and resize checks:
-bun tests/fixtures/tui-demo.ts --scroll
-```
-
-Type a task to run the scripted read/edit/check demonstration. A second task waits
-for cancellation so Esc can be checked. Everything runs in a temporary workspace
-and home directory, removed on exit. No model API or stored credentials are used.
-
-```sh
-bun test tests/tui-view.test.ts
-bun test tests/tui-activity.test.ts
-bun run typecheck
-```
-
-The route, connection, catalog, profile, keyboard, paste, and resize checks in
-this repository use isolated credentials and scripted or protocol fixtures.
-They verify the local interaction and request path. They do not establish live
-OAuth approval, remote account entitlement, or success in a human terminal;
-those checks remain for the installed-journey gate.
-
-Renderer tests exercise real keyboard/paste events, Markdown, output disclosure,
-draft preservation, scroll anchoring, theme changes, Unicode, and resizing. Tests
-assert behavior and a few stable layout landmarks, not snapshots of every cell.
-
-
-Open preferences from the task composer. If another panel is open, Escape returns
-to the task before Alt+P; preferences likewise keep ownership of input until closed
-(or their explicit model-picker action is selected). Repeated Alt+P preserves the
-current preference selection and preview.
-
-Preferences show effective values, their origins, and separately saved lower values.
-Session edits disappear on restart; workspace memory, user config and project
-config are distinct explicit scopes, explained before confirmation. Project scope
-writes only after the second Enter. Credential material is excluded; model-route
-selection is a separate action that activates and remembers a successful choice.
-Textual `/config set`, `/config reset` and `/config show` remain available.
-
-The preference journeys are covered by real renderer keyboard, paste, resize and
-isolated persisted-state fixtures in `tests/tui-view.test.ts`: scoped save/reset,
-restart, CLI shadowing, file/memory conflicts, malformed files, unavailable models,
-staging cancellation, secret exclusion, draft/cursor restoration, appearance
-palettes and environment precedence. `tests/startup-installed.test.ts` exercises
-the appearance canvas and source through a packed executable in fresh isolated
-processes, plus installed Unicode/resize/recovery input and terminal cleanup
-through a Linux OS PTY. Live provider, OAuth and human-terminal preference checks have not
-been run; they remain for the installed-journey gate.
-
 ## Discover commands and skills
 
 Type `/` to browse built-ins, active extension commands, and user-invokable
@@ -456,11 +382,6 @@ restores the task and viewport. Tab previews the selected command within help,
 so Escape still restores the task. Enter transfers that preview to the composer;
 press Enter again to submit it. Help does not append repeated command lists to the transcript.
 Skill browsing reads bounded frontmatter; full body validation happens on invocation.
-
-Automated coverage uses isolated credentials, controller/dispatcher fixtures,
-actual renderer keyboard/paste/resize at 44×18, and fresh-process metadata/SDK
-loading checks. Human terminal use, real OAuth, and live provider journeys were
-not run for this slice and remain part of the installed-journey gate.
 
 ## Context and conversation continuity
 
@@ -496,17 +417,6 @@ are failures and are never committed as successful summaries. Pressure failures
 preserve the existing loop policy; overflow without freed context stops with a
 recovery explanation instead of retrying forever.
 
-Implemented behavior is verified by isolated scripted controller/loop tests for
-pressure, overflow, manual summary, incomplete streams, cancellation, persistence
-failure, unknown usage, capacity changes, branch isolation and disk resume. A
-real JSONL fault fixture verifies that restoring storage still leaves the old
-handle fenced, and the actual `/resume` dispatcher reloads it before compaction
-can succeed without losing original records.
-Renderer keyboard/paste/resize fixtures invoke `/context`, retain a future draft
-during real tool execution at 44×18, and keep the composer usable at 24×8.
-These fixtures do not establish live-provider, OAuth, or human-terminal success;
-those checks remain unrun for the installed-journey gate.
-
 ## Recent sessions
 
 Use `/sessions` or **Alt+S** to browse saved work. Alt+S keeps your multiline
@@ -534,22 +444,14 @@ truthfully displays unknown activity. Empty, legacy and corrupt files are retain
 restore an unavailable directory or repair a corrupt file outside Schway, then
 reopen the picker. A failed resume retains the current conversation and draft.
 
-Verified with isolated scripted-model dispatcher and renderer tests: 106 sessions,
-search/paging, workspace roots/subdirectories/symlinks, branch and attachment
-resume, interrupted/legacy/corrupt/deleted files, keyboard/paste/resize and cancel, cross-workspace draft/viewport round trips,
-late resume cancellation, bounded previews and auth-command exclusion. Draft
-preservation here is in memory; this picker does not add persistent per-session
-draft recovery. Human
-terminal and live-provider journeys remain unrun; fixtures do not certify them.
+Draft preservation here is in memory; this picker does not add persistent per-session
+draft recovery.
 
 ## Alternate conversation paths
 
 `/branch tree` opens a preview browser. Arrow keys select numbered, named existing paths; `●` means active and `›` means preview. Duplicate labels still select exact branch identities. Enter continues the selected existing path. Tab chooses a separate new-fork action at a complete turn; type a name and press Enter. Tab returns to existing paths. Escape returns to the ordinary draft, cursor and reading position. See [session branching](sessions.md#browsing-branches-in-the-tui).
 
 The confirmation controls explain that files and Git remain unchanged. Switching history neither undoes edits nor replays tools. While work runs, preview remains available but activation is refused. Failed activation retains the previous path. The list pages through large branch sets and truncates previews; exact IDs remain supported by explicit commands.
-
-Automated verification uses renderer keyboard, bracketed paste and resize input for duplicate shared-head paths, named forks, narrow Unicode lists, busy/failing confirmation, and draft/reading-position restoration. Controller/session fixtures verify persisted compaction isolation and no tool replay. Human terminal and live-provider checks are unrun; these fixtures do not establish live-provider or release success.
-
 
 ## Leaving and recovering unfinished input
 
@@ -568,11 +470,4 @@ cancellation without waiting indefinitely; it does not claim the tool settled or
 its filesystem effects were undone. After a forced kill, only the last completed
 checkpoint is promised. See [retention, deletion and storage limits](sessions.md#unsent-draft-checkpoints).
 
-Automated coverage uses real renderer keyboard/paste/resize input and isolated app
-subprocesses: multiline checkpoint/kill/reopen, discard, accepted cleanup, late
-acceptance, cross-workspace switching, masked keys/callbacks, permission/disk-full
-failures, conflicting writers, normal-exit flush, a deliberately blocked exit writer, terminal stop/destroy and a silent
-tool that ignores cancellation. Store subprocesses also kill an atomic replacement
-between temporary-file sync and rename. These fixtures use scripted models and fake
-credential stores; live providers, actual OAuth, human terminal restoration and
-macOS filesystem behavior remain unrun installed-journey checks.
+Test coverage for this guide: [release verification](release-verification.md#tui).

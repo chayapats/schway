@@ -9,6 +9,7 @@
 - Deterministic tests must not require paid model APIs. Use a scripted model and protocol fixtures.
 - Tool-relative paths resolve from the primary workspace root (nearest Git root, otherwise launch cwd), canonicalized through real paths.
 - Exported functions and types get a one-line TSDoc that states the contract, not the identifier.
+- User-visible text (TUI, CLI, errors, `--help`) follows `docs/voice-and-copy.md`; PRs that change it complete that guide’s reviewer checklist.
 
 - User-visible TUI changes must update screen-catalog goldens with `bun run screens:update` and commit them; see `docs/screen-catalog.md`.
 

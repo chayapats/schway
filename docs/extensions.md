@@ -182,12 +182,6 @@ bun run dev -- -p "Use edit to replace before with after in ./note.txt" --extens
 # Installed package: copy the example beside your project, then use --extension ./tool-policy.ts.
 ```
 
-Deterministic tests exercise real temporary-file edits through the loop, invalid
-and denied rewrites, post-execution failures without replay, scheduling barriers,
-parallel siblings, every cancellation phase, and durable JSONL reload. The
-headless CLI and installed-package tests use scripted/local protocol fixtures;
-they are not live-provider or human terminal evidence.
-
 ## Interactive commands
 
 `ExtensionCommand` has `name`, `description`, optional `arguments` help text,
@@ -252,7 +246,7 @@ Headless observer diagnostics go to stderr. TUI observer diagnostics appear as
 system notices and do not mark successful agent turns as errors. Disposal detaches
 controller diagnostic handlers before asynchronous cleanup can complete.
 
-## Runnable example and verification
+## Run the example
 
 The installed package includes `examples/extensions/commands-and-events.ts`:
 
@@ -264,15 +258,7 @@ schway --extension ./commands-and-events.ts
 ```
 
 From the repository, run `bun run dev -- --extension
-examples/extensions/commands-and-events.ts` on one line. Deterministic tests use
-the real controller and loop with scripted models, including cancellation,
-collisions, listener failures/mutation, bounded queues, JSONL parity, and new/resume
-cleanup. Request tests additionally cover actual scripted requests, ordered
-waterfalls, retries, pressure/overflow summaries, durable JSONL resume, invalid
-outputs, retained-reference mutation, and cancellation after tool settlement.
-Installed-package verification uses a local protocol fixture. These checks do
-not provide live-provider or human terminal validation.
-
+examples/extensions/commands-and-events.ts` on one line.
 
 ## Installed npm packages
 
@@ -307,3 +293,5 @@ side effects, so use `onDispose` and the lifetime signal for owned resources.
 
 See [the runnable mixed package](../examples/packages/greeting/package.json) and
 [installation and enablement instructions](../README.md#installed-skill-and-extension-packages).
+
+Test coverage for this guide: [release verification](release-verification.md#extensions).

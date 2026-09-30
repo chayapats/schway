@@ -171,7 +171,7 @@ This record has no entry ID or parent, advances no branch, and never becomes mod
 
 `/sessions` (Alt+S) provides searchable task/workspace discovery with explicit
 all-workspace and recovery scope (Ctrl+W). It never deletes history. See
-[the TUI guide](tui.md#recent-sessions) for paging, scan limits and verification.
+[the TUI guide](tui.md#recent-sessions) for paging and scan limits.
 
 New committed `branch_append` operations carry an optional `committedAt` ISO time.
 Readers that ignore unknown fields remain compatible with formats 1–3. Branch
@@ -217,7 +217,7 @@ remain locked and produce a save failure rather than silently taking ownership.
 Unexpected symlink targets are rejected. Linux pins directory descriptors; portable
 platforms check no-follow directory opens and inode identities immediately before
 synchronous access. The portable check is not a sandbox against hostile same-user
-filesystem races. No real macOS filesystem run is claimed by the Linux fixtures.
+filesystem races.
 
 After abrupt termination only the latest completed checkpoint is recoverable, not
 every keystroke. Ordinary exit freezes edits and attempts one current checkpoint in an isolated
@@ -228,3 +228,5 @@ generation before changing storage, so shutdown cannot overwrite another process
 errors are reported as failures, not success. A resume command is printed only when
 a durable session exists. Interrupted tools may already have changed files; resume
 marks pending tool calls interrupted and never replays them or claims to undo them.
+
+Test coverage for this guide: [release verification](release-verification.md#sessions).
