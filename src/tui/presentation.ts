@@ -1,7 +1,7 @@
 import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
 
-/** Tone of the status pill: calm when ready, filled while working, stopping, or needing attention. */
-export type StatusTone = "ready" | "active" | "stopping" | "attention";
+/** Pair connection and operation states with semantic status-pill colors. */
+export type StatusTone = "ready" | "neutral" | "active" | "stopping" | "attention";
 
 /** Uppercase footer pill for the current state; `spinning` marks labels that get the animated glyph. */
 export function statusPill(state: { readiness: string; status: string; activity?: TuiActivity }, tiny = false): { label: string; tone: StatusTone; spinning: boolean } {
@@ -10,6 +10,7 @@ export function statusPill(state: { readiness: string; status: string; activity?
   if (!activity) {
     if (state.status === "running") return { label: "WORKING", tone: "active", spinning: true };
     if (state.status === "error") return { label: "ATTENTION", tone: "attention", spinning: false };
+    if (state.readiness === "not-connected") return { label: "NOT CONNECTED", tone: "neutral", spinning: false };
     return { label: "READY", tone: "ready", spinning: false };
   }
   const elapsed = Math.floor(activity.elapsedMs / 1000);

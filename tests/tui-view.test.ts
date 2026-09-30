@@ -77,6 +77,26 @@ async function waitForUiState(
   if (!predicate()) throw new Error(`Timed out waiting for ${label}\n${ui.captureCharFrame()}`);
 }
 
+test("not-connected copy and neutral pill survive no-color, narrow widths and resize", async () => {
+  for (const env of [{}, { NO_COLOR: "1" }] as Record<string, string>[]) {
+    const ui = await setup(120, 24, {}, undefined, { provider: "openai", modelId: "", model: undefined }, undefined, env);
+    for (const [width, height] of [[120, 24], [80, 24], [50, 24], [120, 24], [44, 18], [24, 18], [80, 9]] as const) {
+      ui.resize(width, height);
+      await settle(ui);
+      expect(ui.captureCharFrame()).toContain("○ NOT CONNECTED");
+      if (height >= 10) expect(ui.captureCharFrame()).toContain("Alt+L sign in");
+      const empty = ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable;
+      expect(empty.chunks.map(chunk => chunk.text).join("")).toContain("Not connected\nSign in to choose a model · Alt+L");
+      if (height < 10) expect(empty.chunks.map(chunk => chunk.text).join("")).toStartWith("/project\n");
+      if (width >= 44) {
+        expect(ui.captureCharFrame()).toContain("Not connected");
+        expect(ui.captureCharFrame()).toContain("Sign in to choose a model · Alt+L");
+      }
+      for (const copy of ["gpt-", "openai/", "claude", "anthropic", "No model yet", "READY", "ATTENTION", "ctx", "Ctrl+I failure details", "Enter send"]) expect(ui.captureCharFrame()).not.toContain(copy);
+    }
+  }
+});
+
 test("rejected draft survives connect cancellation and recovery keys run only the saved turn", async () => {
   const missing = await setup(80, 24, {}, undefined, { model: undefined });
   await missing.mockInput.pasteBracketedText("unsent task");

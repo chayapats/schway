@@ -140,6 +140,16 @@ test("code highlighting, key chips, and pills keep text exact while adding color
   expect(tint(theme, theme.accent)).toBe(mixColor(theme.surface2, theme.accent, 0.22));
 });
 
+test("status pill distinguishes neutral setup and gives checks and activity precedence", () => {
+  expect(statusPill({ readiness: "not-connected", status: "idle" }, true)).toEqual({ label: "NOT CONNECTED", tone: "neutral", spinning: false });
+  expect(statusPill({ readiness: "not-connected", status: "error" }).label).toBe("ATTENTION");
+  expect(statusPill({ readiness: "not-connected", status: "running" }).label).toBe("WORKING");
+  expect(statusPill({ readiness: "connect", status: "error" }).label).toBe("ATTENTION");
+  expect(statusPill({ readiness: "loading", status: "error" }).label).toBe("CHECKING");
+  expect(statusPill({ readiness: "loading", status: "running", activity: { operationId: 1, phase: "streaming", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none" } }).label).toBe("CHECKING");
+  expect(statusPill({ readiness: "not-connected", status: "error", activity: { operationId: 1, phase: "waiting", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none" } }).label).toBe("WAITING 0s");
+});
+
 test("git head names the branch, a detached commit, or a worktree branch without spawning Git", async () => {
   await withTempDir(async dir => {
     expect(readGitHead(dir)).toBeUndefined();

@@ -16,7 +16,7 @@ const completed = (s: TuiSnapshot) => s.status === "idle" && !!s.outcome;
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
-  { id: "first-run", title: "First run", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
+  { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
   { id: "sign-in-chooser", title: "Sign-in chooser", description: "The connection chooser offers available sign-in routes.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); }, ready: s => !!s.loginChooser },
   { id: "subscription-sign-in", title: "Subscription sign-in", description: "Browser sign-in is waiting for authorization.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter(); }, ready: (s, ui) => s.status === "running" && ui.loginCalled() },
   { id: "grok-browser-approval", title: "Grok browser approval", description: "Grok subscription sign-in waits for browser approval.", drive: ui => grokLogin(ui), ready: s => s.status === "running" && s.loginApprovalData?.kind === "browser" },
@@ -42,6 +42,7 @@ export const SCREENS: readonly Screen[] = [
 export function variantsFor(screen: Screen): Variant[] {
   const make = (theme: "dark" | "light", cols: number, rows = screen.rows ?? 30, noColor = screen.id === "no-color"): Variant => ({ id: `${noColor ? "nocolor-" : ""}${theme}-${cols}`, theme, cols, rows, noColor });
   const variants = (["dark", "light"] as const).flatMap(theme => [120, 80, 50].map(cols => make(theme, cols)));
+  if (screen.id === "first-run") variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
   return variants;

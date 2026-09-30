@@ -10,10 +10,11 @@ workspace paths. A conversation branch is distinct from a Git branch.
 The status pill follows the active operation's runtime events: `PREPARING`,
 `WAITING` for the provider, `STREAMING` a response, `TOOLS n`, `RETRY a/b`,
 `COMPACTING`, `CANCEL REQUESTED` and `STOPPING`; otherwise it reads `READY`,
-`CHECKING` (connection check) or `ATTENTION` (a failure needs you). It is the only
-saturated block on screen: filled accent while working, warning while stopping,
-error when attention is needed, and a quiet green tint when ready. It shows elapsed
-time; provider retry countdowns use the reported delay and attempt. Quiet providers
+`CHECKING` (connection check), `NOT CONNECTED` (the neutral no-model state) or
+`ATTENTION` (a failure needs you). It is the only saturated block on screen: filled accent while working, warning while stopping,
+error when attention is needed, a quiet green tint when ready, and a muted tint
+with `○` when not connected. The not-connected status bar shows only its pill.
+Active operations show elapsed time; provider retry countdowns use the reported delay and attempt. Quiet providers
 and tools remain in their current phase with elapsed time, without an estimated
 percentage or a hang warning. The activity row above the composer describes the
 current work; parallel tools share a compact count and name summary. The context
@@ -32,11 +33,16 @@ saved”; completed tool results remain in the session.
 
 ## First launch and readiness
 
-An empty conversation identifies the workspace, effective model and auth route,
-then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
+A fresh install shows two lines: **Not connected**, then **Sign in to choose a
+model · Alt+L**. Its hint row reads **Alt+L sign in · / commands**; narrow widths
+keep the sign-in action. Enter leaves an ordinary draft and its cursor unchanged
+until a model is active.
+
+Once a model is selected, an empty conversation identifies the workspace,
+effective model and auth route, then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
 **Ctrl+R retry locked credential storage**, or **type a task**. **Ctrl+I** opens
-failure details. The ready screen does not add a recurring welcome or restored-choice
-message to the transcript; `/config` retains setting provenance and `/model forget`
+failure details; its hint appears only when those details exist. The ready screen
+does not add a recurring welcome or restored-choice message to the transcript; `/config` retains setting provenance and `/model forget`
 clears remembered interactive choices.
 
 The selected connection is checked after the editor opens. While a catalog or

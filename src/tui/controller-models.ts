@@ -346,11 +346,11 @@ export abstract class ModelsLayer extends CommandsLayer {
     return applied;
   }
 
-  /** Notify persistence consumers only after the selected route has activated. */
-  protected async emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): Promise<void> {
+  /** Remember an activated route and notify consumers, retaining warnings when success notices are suppressed. */
+  protected async emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">, notifySuccess = true): Promise<void> {
     if (!this.model) return;
     try {
-      if (await this.configEditor?.rememberChoice(choice.authRoute)) this.notice("Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.");
+      if (await this.configEditor?.rememberChoice(choice.authRoute) && notifySuccess) this.notice("Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.");
       this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
       ...(choice.profile ? { profile: choice.profile } : {}) }); }
     catch (error) { this.notice(`Model activated and usable, but its preference was not remembered. ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)} No additional login is needed.`); }

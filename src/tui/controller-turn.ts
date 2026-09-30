@@ -64,6 +64,7 @@ export abstract class TurnLayer extends CompactionLayer {
       return false;
     }
     if (!this.model) {
+      if (this.isNotConnected()) return false;
       const category = (this.subscriptionReactivationRequired || this.grokReactivationRequired) ? "model" : this.startupRecoveryCategory;
       this.offerRecovery(category, false,
         startupRecoveryMessage(category), this.startupDiagnostic);

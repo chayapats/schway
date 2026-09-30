@@ -147,7 +147,8 @@ export abstract class SettingsLayer extends ChangesLayer {
     }, undefined, false, key === "appearance");
   }
 
-  protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate = false, appearanceOnly = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
+  /** Commit staged settings before publishing the runtime and optional success notice. */
+  protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate = false, appearanceOnly = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
     if (!this.configEditor || (!appearanceOnly && !this.stageSettings)) { this.fail("Interactive settings are unavailable in this session."); return false; }
@@ -178,7 +179,8 @@ export abstract class SettingsLayer extends ChangesLayer {
         }
         this.closeModelPicker();
         this.status = "idle";
-        this.notice(redactSecrets(message(), this.secrets));
+        const successNotice = message();
+        if (successNotice !== undefined) this.notice(redactSecrets(successNotice, this.secrets));
         return true;
       } catch (error) {
         this.settingsFailure = abort.signal.aborted ? "Settings change cancelled. Previous settings remain active." : failureMessage ?? redactSecrets(error instanceof Error ? error.message : String(error), this.secrets);

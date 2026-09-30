@@ -183,6 +183,10 @@ export abstract class ControllerCore {
       this.offerRecovery(category, false, startupRecoveryMessage(category), options.startupError);
     }
   }
+  /** Identify an unconfigured connection without an adapter, startup check or diagnostic. */
+  protected isNotConnected(): boolean {
+    return !this.startupAbort && !this.model && !this.modelId.trim() && !this.startupDiagnostic;
+  }
   protected beginActivity(phase: TuiActivityPhase): number {
     this.compactionNotice = undefined;
     const id = ++this.operationSequence;
@@ -239,13 +243,13 @@ export abstract class ControllerCore {
   protected abstract abortActiveTurn(): void;
   abstract applyEvent(event: RuntimeEvent, operationId?: number): void;
   abstract cancel(): void;
-  protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string, failureMessage?: string, activate?: boolean, appearanceOnly?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean>;
+  protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate?: boolean, appearanceOnly?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean>;
   abstract closeModelPicker(): void;
   abstract describeThinking(): string;
   protected abstract thinkingSelection(): ReturnType<typeof resolveThinkingSelection>;
   protected abstract thinkingContext(): ReturnType<typeof resolveThinkingSelection>["context"];
   abstract effectiveBudgets(): { contextWindow: number; maxOutput: number };
-  protected abstract emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">): Promise<void>;
+  protected abstract emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">, notifySuccess?: boolean): Promise<void>;
   protected abstract loadAccountCatalog(signal: AbortSignal): Promise<readonly ModelCapability[]>;
   protected abstract observeRuntimeEvent(event: RuntimeEvent): void;
   protected abstract offerRecovery(category: TuiRecovery["category"], accepted: boolean, message: string, details?: string, operationId?: number, markError?: boolean): void;
