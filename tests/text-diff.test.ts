@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildEditDiff, countLines } from "../src/text/diff.ts";
+import { buildEditDiff, buildEditDiffHunks, countLines } from "../src/text/diff.ts";
 
 test("a single-line replacement keeps its original and edited line numbers", () => {
   expect(buildEditDiff([{ startLine: 2, oldText: "old", newText: "new" }])).toEqual({
@@ -125,4 +125,28 @@ test("the pure helper leaves row and text bounds to callers", () => {
   const diff = buildEditDiff([{ startLine: 1, oldText: "", newText: text }]);
   expect(diff.added).toBe(30);
   expect(diff.rows[29]).toEqual({ sign: "+", line: 30, text: `29 ${"x".repeat(400)}` });
+});
+
+test("grouped diffs retain sorted hunk boundaries and full prior line shifts", () => {
+  const hunks = [
+    { startLine: 10, oldText: "late", newText: "later" },
+    { startLine: 2, oldText: "before\nold\nafter\n", newText: "before\none\ntwo\nafter\n" },
+    { startLine: 6, oldText: "same", newText: "same" },
+  ];
+  const groups = buildEditDiffHunks(hunks);
+  expect(groups).toEqual([
+    { rows: [
+      { sign: "-", line: 3, text: "old" },
+      { sign: "+", line: 3, text: "one" },
+      { sign: "+", line: 4, text: "two" },
+    ], added: 2, removed: 1 },
+    { rows: [], added: 0, removed: 0 },
+    { rows: [
+      { sign: "-", line: 10, text: "late" },
+      { sign: "+", line: 11, text: "later" },
+    ], added: 1, removed: 1 },
+  ]);
+  expect(groups.flatMap(group => group.rows)).toEqual(buildEditDiff(hunks).rows);
+  expect(hunks.map(hunk => hunk.startLine)).toEqual([10, 2, 6]);
+  expect(buildEditDiffHunks([])).toEqual([]);
 });

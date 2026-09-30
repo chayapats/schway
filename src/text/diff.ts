@@ -28,8 +28,20 @@ export function countLines(text: string): number {
 /** Trim common context from stably sorted hunks, numbering deletions originally and additions after prior newline changes. */
 export function buildEditDiff(hunks: readonly DiffHunk[]): TextDiff {
   const diff: TextDiff = { rows: [], added: 0, removed: 0 };
+  for (const hunk of buildEditDiffHunks(hunks)) {
+    for (const row of hunk.rows) diff.rows.push(row);
+    diff.added += hunk.added;
+    diff.removed += hunk.removed;
+  }
+  return diff;
+}
+
+/** Return one trimmed diff per stably sorted hunk, retaining full prior newline shifts for callers that bound individual groups. */
+export function buildEditDiffHunks(hunks: readonly DiffHunk[]): TextDiff[] {
+  const diffs: TextDiff[] = [];
   let lineShift = 0;
   for (const hunk of [...hunks].sort((a, b) => a.startLine - b.startLine)) {
+    const diff: TextDiff = { rows: [], added: 0, removed: 0 };
     const oldLines = splitLines(hunk.oldText);
     const newLines = splitLines(hunk.newText);
     let prefix = 0;
@@ -51,8 +63,9 @@ export function buildEditDiff(hunks: readonly DiffHunk[]): TextDiff {
     diff.removed += oldEnd - prefix;
     diff.added += newEnd - prefix;
     lineShift += countLineBreaks(hunk.newText) - countLineBreaks(hunk.oldText);
+    diffs.push(diff);
   }
-  return diff;
+  return diffs;
 }
 
 /** Split recorded text without inventing a row for empty text or a trailing newline. */

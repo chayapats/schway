@@ -1,7 +1,7 @@
 import { toolTarget } from "./presentation.ts";
 import type { SessionRecord } from "../conversation/types.ts";
 import type { TuiTranscriptEntry } from "./controller-types.ts";
-import { buildEditDiff } from "../text/diff.ts";
+import { buildEditDiff, buildEditDiffHunks, type DiffRow } from "../text/diff.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
 
 /** Bound on displayed tool-result characters; session data stays complete. */
@@ -51,6 +51,51 @@ export function summarizeToolResult(
     return `+${diff.added} −${diff.removed}`;
   }
   return undefined;
+}
+
+/** Summarize successful persisted edit arguments without inferring result data or claiming persisted line positions. */
+export function summarizeResumedToolResult(
+  name: string,
+  status: TuiTranscriptEntry["toolStatus"],
+  args: unknown,
+): string | undefined {
+  if (name !== "edit" || status !== "success" || typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+  const record = args as Record<string, unknown>;
+  if (typeof record.path !== "string" || !Array.isArray(record.edits) || record.edits.length === 0) return undefined;
+  const hunks: EditHunkDisplay[] = [];
+  for (const edit of record.edits) {
+    if (typeof edit !== "object" || edit === null || Array.isArray(edit)) return undefined;
+    const entry = edit as Record<string, unknown>;
+    if (typeof entry.oldText !== "string" || entry.oldText.length === 0 || typeof entry.newText !== "string") return undefined;
+    hunks.push({ startLine: 1, oldText: entry.oldText, newText: entry.newText });
+  }
+  const diff = buildEditDiff(hunks);
+  return `+${diff.added} −${diff.removed}`;
+}
+
+/** Align original deletion and edited addition line numbers without clipping, redacting, or sanitizing recorded text. */
+export function formatDiffRows(rows: readonly DiffRow[]): string {
+  let width = 1;
+  for (const row of rows) width = Math.max(width, String(row.line).length);
+  return rows.map(row => `${String(row.line).padStart(width)} │${row.sign}${row.text}`).join("\n");
+}
+
+/** Format numbered changes from eight sorted hunks, capped at twelve changed rows per side and three hundred characters per row. */
+export function formatNumberedEditDiff(hunks: readonly EditHunkDisplay[], summary = ""): string {
+  const shown = [...hunks].sort((a, b) => a.startLine - b.startLine).slice(0, 8);
+  const rows: DiffRow[] = [];
+  for (const hunk of buildEditDiffHunks(shown)) {
+    const count = { "+": 0, "-": 0 };
+    for (const row of hunk.rows) {
+      if (count[row.sign]++ < 12) rows.push(row);
+    }
+  }
+  const lines = summary ? [summary] : [];
+  if (rows.length > 0) lines.push(...formatDiffRows(rows).split("\n").map(line => line.slice(0, 300)));
+  if (hunks.length > shown.length) {
+    lines.push(`… ${formatCount(hunks.length - shown.length, "more replacement")}. Full diff is in the session file.`);
+  }
+  return lines.join("\n");
 }
 
 /** Accept finite nonnegative integers for result counts and original line positions. */

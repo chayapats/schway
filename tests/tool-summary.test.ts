@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { summarizeToolResult } from "../src/tui/transcript-format.ts";
+import { formatDiffRows, formatNumberedEditDiff, summarizeResumedToolResult, summarizeToolResult } from "../src/tui/transcript-format.ts";
 
 test("read summaries distinguish complete, empty, partial and truncated reads", () => {
   for (const lineCount of [0, 1, 3]) {
@@ -121,5 +121,106 @@ test("edit details require a path and valid complete hunk records", () => {
     ].map(hunk => ({ path: "file.ts", hunks: [hunk] })),
   ]) {
     expect(summarizeToolResult("edit", "success", details)).toBeUndefined();
+  }
+});
+
+test("numbered diff formatting aligns lines and preserves recorded signs and fragments", () => {
+  expect(formatDiffRows([
+    { sign: "-", line: 9, text: "  old\r" },
+    { sign: "+", line: 10, text: "  new\r" },
+  ])).toBe(" 9 │-  old\r\n10 │+  new\r");
+  expect(formatDiffRows([])).toBe("");
+  expect(formatNumberedEditDiff([{ startLine: 2, oldText: "before\nold\nafter\n", newText: "before\nnew\nafter\n" }], "Edited file.ts"))
+    .toBe("Edited file.ts\n3 │-old\n3 │+new");
+  expect(formatNumberedEditDiff([])).toBe("");
+  expect(formatNumberedEditDiff([], "Edited file.ts")).toBe("Edited file.ts");
+});
+
+test("bounded numbered diffs sort first and preserve full shifts after hidden rows", () => {
+  const hunks = [
+    { startLine: 40, oldText: "later-old\n", newText: "later-new\n" },
+    { startLine: 2, oldText: Array.from({ length: 13 }, (_, i) => `old-${i}\n`).join(""), newText: Array.from({ length: 17 }, (_, i) => `new-${i}\n`).join("") },
+  ];
+  const text = formatNumberedEditDiff(hunks);
+  const rows = text.split("\n");
+  expect(rows).toHaveLength(26);
+  expect(rows[0]).toBe(" 2 │-old-0");
+  expect(rows[11]).toBe("13 │-old-11");
+  expect(rows[12]).toBe(" 2 │+new-0");
+  expect(rows[23]).toBe("13 │+new-11");
+  expect(rows[24]).toBe("40 │-later-old");
+  expect(rows[25]).toBe("44 │+later-new");
+  expect(text).not.toContain("old-12");
+  expect(text).not.toContain("new-12");
+  expect(text).not.toContain("--- ");
+  expect(hunks.map(hunk => hunk.startLine)).toEqual([40, 2]);
+});
+
+test("bounded diff rows clip at three hundred characters without clipping the shared raw formatter", () => {
+  const text = "x".repeat(400);
+  expect(formatDiffRows([{ sign: "+", line: 1, text }])).toHaveLength(404);
+  expect(formatNumberedEditDiff([{ startLine: 1, oldText: "", newText: text }])).toBe(`1 │+${"x".repeat(296)}`);
+});
+
+test("bounded diff side limits apply after large common prefix and suffix contexts are trimmed", () => {
+  const prefix = Array.from({ length: 100 }, (_, index) => `prefix-${index}\n`).join("");
+  const suffix = Array.from({ length: 100 }, (_, index) => `suffix-${index}\n`).join("");
+  const oldText = prefix + Array.from({ length: 14 }, (_, index) => `old-${index}\n`).join("") + suffix;
+  const newText = prefix + Array.from({ length: 14 }, (_, index) => `new-${index}\n`).join("") + suffix;
+  const text = formatNumberedEditDiff([{ startLine: 1, oldText, newText }]);
+  expect(text.split("\n")).toHaveLength(24);
+  expect(text).toStartWith("101 │-old-0");
+  expect(text).toEndWith("112 │+new-11");
+  expect(text).not.toContain("prefix");
+  expect(text).not.toContain("suffix");
+});
+
+test("numbered diff hunks on the same original line remain in input order", () => {
+  expect(formatNumberedEditDiff([
+    { startLine: 2, oldText: "first", newText: "FIRST\n" },
+    { startLine: 2, oldText: "second", newText: "SECOND" },
+  ])).toBe("2 │-first\n2 │+FIRST\n2 │-second\n3 │+SECOND");
+});
+
+test("bounded diffs show the first eight sorted hunks and count remaining replacements", () => {
+  const hunks = Array.from({ length: 10 }, (_, index) => ({ startLine: index + 1, oldText: `old-${index}`, newText: `new-${index}` })).reverse();
+  const text = formatNumberedEditDiff(hunks);
+  expect(text.split("\n")).toHaveLength(17);
+  expect(text).toStartWith("1 │-old-0\n1 │+new-0");
+  expect(text).toContain("8 │+new-7");
+  expect(text).not.toContain("old-8");
+  expect(text).toEndWith("… 2 more replacements. Full diff is in the session file.");
+  expect(formatNumberedEditDiff(hunks.slice(1))).toEndWith("… 1 more replacement. Full diff is in the session file.");
+});
+
+test("resumed edit summaries trim persisted arguments without line positions", () => {
+  expect(summarizeResumedToolResult("edit", "success", { path: "file.ts", edits: [{ oldText: "old", newText: "new" }] })).toBe("+1 −1");
+  expect(summarizeResumedToolResult("edit", "success", { path: "file.ts", edits: [{ oldText: "before\nold\nafter\n", newText: "before\nnew\nafter\n" }] })).toBe("+1 −1");
+  expect(summarizeResumedToolResult("edit", "success", { path: "file.ts", edits: [
+    { oldText: "before\nafter\n", newText: "before\ninserted\nafter\n" },
+    { oldText: "deleted\n", newText: "" },
+  ] })).toBe("+1 −1");
+  expect(summarizeResumedToolResult("edit", "success", { path: "file.ts", edits: [{ oldText: "same", newText: "same" }] })).toBe("+0 −0");
+});
+
+test("resumed summaries never infer result data for other tools or unsuccessful edits", () => {
+  const args = { path: "file.ts", edits: [{ oldText: "old", newText: "new" }], created: true, lineCount: 3, exitCode: 0, matchCount: 1 };
+  for (const name of ["read", "write", "bash", "grep", "find", "ls", "extension-tool"]) {
+    expect(summarizeResumedToolResult(name, "success", args)).toBeUndefined();
+  }
+  for (const status of ["running", "error", "cancelled", undefined] as const) {
+    expect(summarizeResumedToolResult("edit", status, args)).toBeUndefined();
+  }
+});
+
+test("resumed summaries reject malformed edit arguments instead of parsing text", () => {
+  for (const args of [undefined, null, [], "Edited file.ts (+1 -1)", {},
+    { edits: [{ oldText: "old", newText: "new" }] },
+    { path: 3, edits: [{ oldText: "old", newText: "new" }] },
+    { path: "file.ts", edits: [] }, { path: "file.ts", edits: {} },
+    ...[null, [], {}, { oldText: "old" }, { oldText: 3, newText: "new" }, { oldText: "old", newText: 3 }, { oldText: "", newText: "new" }]
+      .map(edit => ({ path: "file.ts", edits: [edit] })),
+  ]) {
+    expect(summarizeResumedToolResult("edit", "success", args)).toBeUndefined();
   }
 });
