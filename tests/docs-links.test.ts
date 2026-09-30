@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+/** Keep Markdown outside fenced examples for link and heading checks. */
 function prose(markdown: string): string {
   let fence: string | undefined;
   return markdown.split("\n").filter(line => {
@@ -16,6 +17,7 @@ function prose(markdown: string): string {
   }).join("\n");
 }
 
+/** Collect GitHub-style heading anchors, including duplicate suffixes. */
 function anchors(markdown: string): Set<string> {
   const result = new Set<string>();
   const lines = prose(markdown).split("\n");
@@ -33,6 +35,7 @@ function anchors(markdown: string): Set<string> {
   return result;
 }
 
+/** Read a Markdown destination with balanced parentheses and escaped punctuation. */
 function linkDestination(markdown: string, start: number): string {
   const angled = markdown[start] === "<";
   let destination = "";
@@ -57,6 +60,7 @@ function linkDestination(markdown: string, start: number): string {
   return destination;
 }
 
+/** Report relative links whose target file or heading is missing. */
 async function brokenLinks(files: string[]): Promise<string[]> {
   const failures: string[] = [];
   for (const file of files) {
