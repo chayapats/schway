@@ -436,6 +436,52 @@ for (const existing of [false, true]) test(`${existing ? "replacement" : "first"
   });
 });
 
+for (const source of ["api-high", "api-off", "router-high", "router-same-high", "router-new-model-high"] as const) for (const outcome of ["success", "list-failure", "activation-failure"] as const) test(`endpoint replacement from ${source} retains only applicable reasoning through ${outcome}`, async () => {
+  await withTempDir(async root => {
+    const router = source.startsWith("router"), home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
+    const configEditor = new ConfigEditor({ cli: router
+      ? { profile: "old", profiles: { old: { baseUrl: "https://openrouter.ai/api/v1", model: "router-model", auth: "required" } }, thinking: "high" }
+      : { provider: "openai", model: source === "api-off" ? "gpt-6-sol" : "gpt-6-astra", thinking: source === "api-off" ? "off" : "high" },
+    }, { user: join(home, ".schway/config.json"), project: join(root, ".schway/config.json") }, router ? [
+      { id: "router-model", baseUrl: "https://openrouter.ai/api/v1", supportedThinking: ["off", "high"] },
+      { id: "endpoint-model", baseUrl: "https://openrouter.ai/api/v1", supportedThinking: ["off"] },
+    ] : undefined);
+    const initial = configEditor.settings;
+    const endpointUrl = source === "router-same-high" || source === "router-new-model-high" ? "https://openrouter.ai/api/v1" : "http://localhost:8787/v1";
+    const selectedModel = source === "router-same-high" ? "router-model" : "endpoint-model";
+    const expectedThinking = source === "api-off" ? "off" : source === "router-same-high" || (source === "router-new-model-high" && outcome === "list-failure") ? "high" : undefined;
+    const listings: string[] = [], staged: unknown[] = [];
+    const controller = chooserController({ home, workspace, configEditor, provider: initial.provider, modelId: initial.model,
+      profile: initial.profile, baseUrl: initial.baseUrl, thinking: initial.thinking,
+      model: createScriptedModel({ provider: initial.provider, id: initial.model }),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => { throw Error("the old adapter must not reload"); }, listRouteModels: async (_route, _signal, options) => {
+        listings.push(options!.baseUrl!); if (outcome === "list-failure") throw Error("Offline"); return [{ id: selectedModel, recommended: true }];
+      } },
+      stageSettings: async settings => {
+        staged.push({ baseUrl: settings.baseUrl, thinking: settings.thinking }); if (outcome === "activation-failure") throw Error("Offline");
+        return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+    });
+    try {
+      controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); await controller.selectLoginChoice();
+      while (controller.snapshot().endpointUrlEntry!.value) controller.backspaceEndpointUrl();
+      controller.enterEndpointUrlText(endpointUrl); expect(controller.submitEndpointUrl()).toBe(true);
+      controller.enterCredentialText("endpoint-key"); expect(await controller.submitCredential()).toBe(true);
+      expect(listings).toEqual([endpointUrl]);
+      expect(configEditor.settings.provider).toBe("openai-compatible"); expect(configEditor.settings.baseUrl).toBe(endpointUrl);
+      expect(configEditor.settings.profile).toBeUndefined(); expect(configEditor.settings.thinking).toBe(expectedThinking);
+      expect(controller.snapshot().thinking).toBe(expectedThinking);
+      expect(staged).toEqual(outcome === "list-failure" ? [] : [{ baseUrl: endpointUrl, thinking: expectedThinking }]);
+      if (outcome === "success") expect(controller.snapshot().modelId).toBe(selectedModel);
+      else {
+        expect(controller.snapshot().transcript.at(-1)?.text).toContain("Credential saved, but the recommended model could not be activated");
+        expect(await controller.submit("do not use the previous adapter")).toBe(false);
+        expect(configEditor.settings.baseUrl).toBe(endpointUrl);
+      }
+    } finally { controller.dispose(); }
+  });
+});
+
 test("opening a chooser while a turn runs gives the specified busy notice and never starts sign-in", async () => {
   const controller = chooserController({ model: createScriptedModel({ waitForAbort: true }), modelId: "test" });
   const turn = controller.submit("work");

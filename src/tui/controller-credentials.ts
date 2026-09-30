@@ -3,6 +3,7 @@ import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, ty
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { filterXaiModels, recommendedListedModel, xaiModelCapabilities } from "../model/model-list.ts";
+import { validateThinking } from "../model/thinking.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
 import { isValidProfileBaseUrl } from "../config/profile-name.ts";
@@ -234,15 +235,22 @@ export abstract class CredentialsLayer extends ControllerCore {
       savedNotice = this.transcript.at(-1)?.id;
       if (!result.ok) { this.pickerReturn = undefined; this.status = "error"; return false; }
       if (endpointUrl && this.configEditor) {
+        const previous = this.configEditor.settings;
+        await this.resetUnsupportedEndpointThinking(endpointUrl, previous.model);
         const endpoint = await this.configEditor.prepare({ scope: "session", key: "baseUrl", value: endpointUrl });
         await endpoint.commit();
-        const provider = await this.configEditor.prepare({ scope: "session", key: "provider", value: "openai-compatible" });
+        const provider = previous.model
+          ? await this.configEditor.prepareModel("openai-compatible", previous.model)
+          : await this.configEditor.prepare({ scope: "session", key: "provider", value: "openai-compatible" });
         await provider.commit();
-        const profile = await this.configEditor.prepare({ scope: "session", key: "profile", value: null });
-        await profile.commit();
+        if (!previous.model) {
+          const profile = await this.configEditor.prepare({ scope: "session", key: "profile", value: null });
+          await profile.commit();
+        }
         this.provider = "openai-compatible";
         this.baseUrl = endpointUrl;
         this.auth = this.configEditor.settings.auth;
+        this.thinking = this.configEditor.settings.thinking;
         this.profile = undefined;
         // The previous adapter may target another host; it must not survive failed activation.
         this.model = undefined;
@@ -272,6 +280,18 @@ export abstract class CredentialsLayer extends ControllerCore {
     }
     if (saved) this.restorePickerAfterConnection();
     return saved;
+  }
+
+  /** Clear only effort unsupported by the target endpoint/model, keeping capability evidence bound to its host. */
+  private async resetUnsupportedEndpointThinking(baseUrl: string, model: string): Promise<void> {
+    if (!this.configEditor) return;
+    const settings = this.configEditor.settings;
+    const known = this.configEditor.modelCapability(model);
+    const capability = known?.baseUrl === baseUrl.replace(/\/+$/, "") ? known : undefined;
+    if (!settings.thinking || !validateThinking("openai-compatible", model, settings.thinking, settings.extraBody, capability, baseUrl)) return;
+    const thinking = await this.configEditor.prepare({ scope: "session", key: "thinking", value: null });
+    await thinking.commit();
+    this.thinking = this.configEditor.settings.thinking;
   }
 
   /** Select the route's recommended model after sign-in and remember it for the next interactive launch. */
@@ -308,6 +328,10 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (this.signInListAbort === listing) this.signInListAbort = undefined;
     }
     if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile, replaceActive)) return false;
+    if (replaceActive && route === "compatible") {
+      await this.resetUnsupportedEndpointThinking(target.baseUrl!, modelId);
+      if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile, replaceActive)) return false;
+    }
     const applied = await this.changeSettings(
       () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId)
         : route === "xai" ? this.configEditor!.prepareXaiModel(modelId)
