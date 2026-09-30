@@ -27,16 +27,8 @@ export abstract class TurnLayer extends CompactionLayer {
     if (this.loginAbort && !this.loginAbort.signal.aborted) {
       const abort = this.loginAbort;
       if (!this.pickerReturn) { this.recoveryRepair = false; this.restoreLoginOrigin(); abort.abort(); return; }
-      this.loginGeneration++;
-      abort.abort();
+      this.abortPickerLogin();
       this.recoveryRepair = false;
-      this.loginAbort = undefined;
-      if (this.activeAbort === abort) this.activeAbort = undefined;
-      this.activeTurn = undefined;
-      this.credentialMutation = false;
-      this.loginApproval = undefined;
-      this.loginApprovalData = undefined;
-      this.status = "idle";
       this.restoreLoginOrigin();
       if (this.pickerReturn) this.restorePickerAfterConnection(false);
       return;

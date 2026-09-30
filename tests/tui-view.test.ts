@@ -2135,6 +2135,61 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
 });
 
 
+for (const route of ["codex", "grok"] as const) for (const browserSettled of [true, false]) test(`${route} picker browser failure (${browserSettled ? "settled" : "deferred"}) then device retry Esc restores the rendered picker and fences late OAuth callbacks`, async () => {
+  let attempts = 0;
+  const deferred: Array<{ options: Parameters<CodexLoginRunner>[0]; resolve: (result: Awaited<ReturnType<CodexLoginRunner>>) => void }> = [];
+  const runner: CodexLoginRunner = async options => {
+    if (++attempts === 1) {
+      options.onProgress("The browser could not be opened automatically");
+      if (browserSettled) return { ok: false, message: "Browser approval unavailable" };
+    }
+    return new Promise(resolve => deferred.push({ options, resolve }));
+  };
+  const ui = await setup(80, 30, {}, runner, { provider: "openai", modelId: "gpt-5.4",
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: runner, grokLogin: runner } });
+  const label = route === "codex" ? "ChatGPT" : "Grok subscription", chooser = route === "codex" ? "chatgpt" : "grok";
+  const retryIndex = browserSettled ? 0 : 1;
+  try {
+    ui.mockInput.pressKey("m", { meta: true }); await settle(ui);
+    while (ui.controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+    ui.controller.searchModels(label); await settle(ui);
+    const picker = ui.controller.snapshot().modelPicker!;
+    const identity = picker.entries[picker.selectedIndex]!.identity;
+    ui.mockInput.pressEnter(); if (browserSettled) await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: chooser, selectedId: `${chooser}-device` });
+    expect(ui.captureCharFrame()).toContain(`${route === "codex" ? "ChatGPT" : "Grok"} · more options`);
+    // Exercise the public retry while the old browser runner still ignores abort.
+    if (browserSettled) ui.mockInput.pressEnter(); else void ui.controller.selectLoginChoice();
+    await settle(ui);
+    expect(deferred).toHaveLength(retryIndex + 1); expect(deferred[retryIndex]!.options.device).toBe(true);
+    if (!browserSettled) expect(deferred[0]!.options.signal.aborted).toBe(true);
+    expect(ui.controller.running).toBe(true);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(deferred[retryIndex]!.options.signal.aborted).toBe(true);
+    expect(ui.controller.running).toBe(false); expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+    expect(ui.controller.snapshot().modelPicker?.query).toBe(label);
+    const restored = ui.controller.snapshot().modelPicker!;
+    expect(restored.entries[restored.selectedIndex]!.identity).toBe(identity);
+    expect(ui.captureCharFrame()).toContain("Choose model");
+    expect(ui.captureCharFrame()).not.toContain("· more options");
+    expect(ui.controller.snapshot().modelId).toBe("gpt-5.4"); expect(ui.controller.snapshot().provider).toBe("openai");
+    while (ui.controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+    ui.mockInput.pressEnter(); await settle(ui); expect(deferred).toHaveLength(retryIndex + 2);
+    const approval = ui.controller.snapshot().loginApproval;
+    for (const old of deferred.slice(0, retryIndex + 1)) {
+      old.options.onProgress("The browser could not be opened automatically"); old.options.onSaved?.();
+      old.resolve({ ok: true, status: "Old saved result" });
+    }
+    await settle(ui);
+    expect(ui.controller.running).toBe(true); expect(ui.controller.snapshot().loginApproval).toBe(approval);
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined(); expect(ui.controller.snapshot().modelPicker).toBeUndefined();
+    ui.mockInput.pressEscape(); await settle(ui);
+    deferred[retryIndex + 1]!.resolve({ ok: true, status: "Late retry result" }); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined(); expect(ui.controller.snapshot().modelPicker?.query).toBe(label);
+    expect(ui.captureCharFrame()).toContain("Choose model"); expect(ui.controller.snapshot().modelId).toBe("gpt-5.4");
+  } finally { for (const call of deferred) call.resolve({ ok: true, status: "Stopped" }); await ui.controller.waitForIdle(); }
+});
+
 for (const provider of ["chatgpt", "grok"] as const) test(`${provider} pending cancellation allows three Esc presses and restores the Thai draft after settlement`, async () => {
   let finish!: () => void;
   const wait = async () => {

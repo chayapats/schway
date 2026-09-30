@@ -274,7 +274,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     let started: boolean;
     if (selection.authRoute === "grok" || selection.authRoute === "codex") {
       started = await this.login(selection.authRoute);
-      if (!started && this.pickerReturn === returning) this.restorePickerAfterConnection(false);
+      if (!started && this.pickerReturn === returning && !this.running && !this.loginChooserState) this.restorePickerAfterConnection(false);
       return started;
     }
     if (selection.profile) {
@@ -294,6 +294,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     const returning = this.pickerReturn;
     this.pickerReturn = undefined;
     if (!returning || this.disposed) return;
+    this.loginChooserState = undefined;
     this.openModelPicker();
     if (connected) this.pickerPreferredRoute = returning.route;
     else { this.pickerPreferredIdentity = returning.identity; this.modelPickerAccess = returning.access; }

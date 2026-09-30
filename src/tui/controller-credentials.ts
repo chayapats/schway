@@ -103,8 +103,8 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (!choice) return false;
     this.loginChooserState = undefined;
     if (this.loginAbort) {
-      this.loginAbort.abort();
-      await this.activeTurn;
+      if (this.pickerReturn) this.abortPickerLogin();
+      else { this.loginAbort.abort(); await this.activeTurn; }
     }
     this.loginReturn = { ...state };
     if (choice.action.kind === "callback") { this.loginCallbackValue = ""; return true; }
@@ -112,6 +112,21 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (choice.action.kind === "grok") return this.runGrokLogin({ device: choice.action.device });
     if (choice.action.kind === "codex") return this.runCodexLogin({ device: choice.action.device });
     return this.beginLogin(choice.action.provider);
+  }
+
+  /** Detach a picker-owned OAuth operation so ignored aborts and late callbacks cannot consume a retry or restored picker. */
+  protected abortPickerLogin(): void {
+    const abort = this.loginAbort;
+    if (!abort) return;
+    this.loginGeneration++;
+    abort.abort();
+    this.loginAbort = undefined;
+    if (this.activeAbort === abort) this.activeAbort = undefined;
+    this.activeTurn = undefined;
+    this.credentialMutation = false;
+    this.loginApproval = undefined;
+    this.loginApprovalData = undefined;
+    this.status = "idle";
   }
 
   /** Open ephemeral URL entry for a compatible endpoint, retaining a valid configured URL only. */
@@ -538,7 +553,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (this.loginAbort === abort) this.loginAbort = undefined; if (this.activeTurn === tracked) this.activeTurn = undefined;
       if (this.status === "running") this.status = "idle";
       this.loginApproval = undefined; this.loginApprovalData = undefined; this.loginReturn = undefined;
-      if (this.pickerReturn && !this.disposed) this.restorePickerAfterConnection(signedIn);
+      if (this.pickerReturn && !this.disposed && (signedIn || !this.loginChooserState)) this.restorePickerAfterConnection(signedIn);
     }
   }
 
