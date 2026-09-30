@@ -103,8 +103,10 @@ Only reviewed summaries belong in a new top section of
   `--input-price` / `--output-price` when needed. All release eval runs
   together must stay within the $10 cap, or the operator's smaller cap.
   Record per-case outcomes, grader exits, total spend and whether usage is
-  exact; reconcile incomplete billing before more paid runs. Use only routes
-  supported by the eval runner and record unsupported routes explicitly.
+  exact; reconcile incomplete billing before more paid runs. Full evals must
+  pass on all five auth routes at rc and 1.0. A route unsupported by the eval
+  runner is a pending gate that blocks those releases until support exists;
+  recording it does not satisfy the gate.
   Full evals are not required for ordinary minor releases such as 0.4.
 
 See [live smoke](live-providers.md) and [evals](evals.md) for runner limits and

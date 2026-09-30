@@ -13,7 +13,7 @@ pending. Raw precondition evidence is private at
 ### Preconditions
 
 On 2026-09-30, all ten native blockers (#129–#137 and #166) were closed.
-The 0.4 milestone listed only #138. Severity labels P0, P1 and P2 were updated
+The initial 0.4 milestone query listed only #138. Severity labels P0, P1 and P2 were updated
 idempotently; every truth-pass defect (#173, #174, #176 and #179) carried P2.
 The open P0 and P1 queries both returned empty lists.
 
@@ -35,13 +35,17 @@ with 0 failures. All three checks on the actual merge commit remain pending.
 No live inference has run for this release. The operator selected OpenAI Luna
 with high thinking, Codex Sol with medium thinking, and compatible Muse Spark
 with medium thinking, with a ceiling of USD 1.50 per API key for all release
-calls. Exact catalog IDs and compatible endpoint selection must be confirmed.
-The stock smoke runner exposes no thinking selector; consent for provider
-defaults or separate runner support is pending.
+calls. Model discovery confirmed `gpt-6-luna` and `gpt-6-sol`; the operator
+confirmed OpenRouter and `meta/muse-spark-1.3-contributor`. The operator required
+explicit thinking support before release, now tracked as prerequisite
+[#185](https://github.com/chayapats/schway/issues/185). It was added to milestone
+0.4 and as a native blocker of #138 after the initial precondition check.
 
 Local secure-store presence checks found OpenAI and OpenRouter API keys and a
 Codex login; xAI API-key and Grok subscription identities were absent. Presence
-does not verify remote access. No stored credential value was printed.
+does not verify remote access. The operator confirmed having no xAI API key and
+reported that Grok subscription login currently cannot complete; its exact
+failure is awaiting reproduction. No stored credential value was printed.
 
 | Route | Provider | Model | Auth source | Status | Reason | Tested at | Revision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
