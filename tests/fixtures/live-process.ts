@@ -6,7 +6,7 @@ import { runWorker } from "../../src/live/worker.ts";
 import { encodeSse, TEXT_STREAM_EVENTS, TOOL_USE_STREAM_EVENTS } from "./openai.ts";
 
 /** Replay selected-route model catalogs and the real sentinel tool round trip without remote requests. */
-export function smokeProtocolFixture(options: { catalogMode?: string } = {}): {
+export function smokeProtocolFixture(options: { catalogMode?: string; catalogBytes?: number; inferenceBytes?: number } = {}): {
   fetch: FetchLike; store: CredentialStore; requests: Array<{ url: string; body?: Record<string, unknown> }>;
 } {
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
@@ -17,20 +17,24 @@ export function smokeProtocolFixture(options: { catalogMode?: string } = {}): {
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
     requests.push({ url, ...(body ? { body } : {}) });
     const catalog = url.includes("/models");
+    const catalogResponse = (payload: object) => {
+      const json = JSON.stringify(payload);
+      return new Response(json.padEnd(options.catalogBytes ?? json.length, " "), { headers: { "content-type": "application/json" } });
+    };
     if (catalog) {
       if (options.catalogMode === "failure") return Response.json({ error: "PRIVATE_CATALOG_BODY" }, { status: 503 });
-      if (options.catalogMode === "oversized") return new Response("x".repeat(256 * 1024 + 1));
+      if (options.catalogMode === "oversized") return new Response("x".repeat(1024 * 1024 + 1));
       if (options.catalogMode === "hang") return new Promise(() => {});
       const levels = options.catalogMode === "unsupported" ? ["low"] : ["medium"];
-      if (url.startsWith("https://chatgpt.com/backend-api/codex/models?")) return Response.json({ models: [{
+      if (url.startsWith("https://chatgpt.com/backend-api/codex/models?")) return catalogResponse({ models: [{
         slug: options.catalogMode === "missing" ? "other" : "gpt-6-sol", visibility: "list",
         supported_reasoning_levels: levels.map(effort => ({ effort })), default_reasoning_level: "medium",
       }] });
-      if (url === "https://openrouter.ai/api/v1/models") return Response.json({ data: [{
+      if (url === "https://openrouter.ai/api/v1/models") return catalogResponse({ data: [{
         id: options.catalogMode === "missing" ? "other" : "meta/muse-spark-1.3-contributor",
         reasoning: { mandatory: true, supported_efforts: options.catalogMode === "unsupported" ? levels : ["max", "xhigh", "high", "medium", "low", "minimal"], default_effort: "medium" },
       }] });
-      if (url === "https://api.x.ai/v1/models") return Response.json({ data: [{
+      if (url === "https://api.x.ai/v1/models") return catalogResponse({ data: [{
         id: options.catalogMode === "missing" ? "grok-other" : "grok-4.7", supported_reasoning_levels: options.catalogMode === "unsupported" ? levels : ["low", "medium", "high", "xhigh"],
       }] });
       throw Error("unexpected catalog route");
@@ -39,19 +43,20 @@ export function smokeProtocolFixture(options: { catalogMode?: string } = {}): {
       "https://api.x.ai/v1/responses", "https://openrouter.ai/api/v1/chat/completions"].includes(url)) throw Error("unexpected inference route");
     // The marker comes only from the actual read result in round two.
     const marker = JSON.stringify(body.input ?? body.messages).match(/1\|([a-f0-9]{40})/)?.[1];
+    const padding = options.inferenceBytes ? `:${" ".repeat(options.inferenceBytes)}\n\n` : "";
     if (url.endsWith("/chat/completions")) {
       const delta = marker ? { content: marker } : { tool_calls: [{ index: 0, id: "read1", type: "function", function: {
         name: "read", arguments: '{"path":"smoke-sentinel.txt"}' } }] };
       const chunk = (delta: object, finish_reason: string | null) => ({ id: "fixture", object: "chat.completion.chunk", created: 0,
         model: body.model, choices: [{ index: 0, delta, finish_reason }] });
-      return new Response([chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
+      return new Response(padding + [chunk(delta, null), chunk({}, marker ? "stop" : "tool_calls")]
         .map(item => `data: ${JSON.stringify(item)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } });
     }
     const events = marker
       ? TEXT_STREAM_EVENTS.map(event => ({ ...event, ...("delta" in event ? { delta: event.sequence_number === 2 ? marker : "" } : {}),
         ...("item" in event ? { item: { ...event.item, content: [{ type: "output_text", text: marker, annotations: [] }] } } : {}) }))
       : JSON.parse(JSON.stringify(TOOL_USE_STREAM_EVENTS).replaceAll("note.txt", "smoke-sentinel.txt")) as object[];
-    return new Response(encodeSse(events), { headers: { "content-type": "text/event-stream" } });
+    return new Response(padding + encodeSse(events), { headers: { "content-type": "text/event-stream" } });
   };
   return { fetch, store, requests };
 }
@@ -69,7 +74,7 @@ if (import.meta.main) {
     if (path) await writeFile(path, String(process.pid));
     const mode = process.env.SCHWAY_FIXTURE_MODE;
     if (mode === "protocol") {
-      const fixture = smokeProtocolFixture({ catalogMode: process.env.SCHWAY_FIXTURE_CATALOG_MODE });
+      const fixture = smokeProtocolFixture({ catalogMode: process.env.SCHWAY_FIXTURE_CATALOG_MODE, catalogBytes: Number(process.env.SCHWAY_FIXTURE_CATALOG_BYTES) || undefined });
       const output = await runWorker(new ReadableStream({ start(controller) {
         controller.enqueue(new TextEncoder().encode(raw)); controller.close();
       } }), process.env, { createStore: () => fixture.store, fetch: fixture.fetch });
