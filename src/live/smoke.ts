@@ -10,7 +10,7 @@ import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { loadProviderModel, type FetchLike, type ProviderLoaderInput } from "../model/loader.ts";
 import { isThinkingLevel, type Model, type ThinkingLevel } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
-import { readTool, type ReadInput } from "../tools/read.ts";
+import { readTool, readInputSchema, type ReadInput } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
@@ -88,6 +88,14 @@ const SENTINEL_FILE = "smoke-sentinel.txt";
 function sentinelReadTool(execute: ToolDefinition<ReadInput>["execute"]): ToolDefinition<ReadInput> {
   return {
     ...readTool,
+    description: `Read the smoke sentinel using the exact relative path "${SENTINEL_FILE}". Do not prepend the workspace root. Output is line-numbered and bounded.`,
+    inputSchema: {
+      ...readInputSchema,
+      properties: {
+        ...readInputSchema.properties,
+        path: { ...readInputSchema.properties.path, enum: [SENTINEL_FILE] },
+      },
+    },
     execute: async (input, context) => input.path === SENTINEL_FILE
       ? await execute(input, context)
       : { content: "Only the smoke sentinel may be read.", isError: true },
@@ -195,7 +203,7 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     await writeFile(join(directory, SENTINEL_FILE), `${marker}\n`, { flag: "wx", mode: 0o600 });
     const session = createSession([{
       type: "user", id: crypto.randomUUID(), content: [{ type: "text", text:
-        `Use the read tool to read ${SENTINEL_FILE} in this workspace. Then reply with only the exact value on its first line. Do not guess.` }],
+        `Use the read tool with path exactly "${SENTINEL_FILE}" (a relative path; do not prepend the workspace root) to read the first line. Then reply with only the exact value on its first line. Do not guess.` }],
     }]);
     let error = false;
     let needsLogin = false;

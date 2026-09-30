@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, expect, test } from "bun:test";
+import Ajv from "ajv";
 import { access } from "node:fs/promises";
 import type { Model, ModelRequest } from "../src/model/model.ts";
 import type { CredentialStore } from "../src/auth/store.ts";
@@ -145,7 +146,7 @@ test("tool-free final statement and incorrect read never pass", async () => {
       request => { const result = request.items.find(item => item.type === "tool_result"); rejected = result?.type === "tool_result" ? result.content : ""; return { text: "done" }; },
     ] }),
   });
-  expect(rejected).toBe("Only the smoke sentinel may be read.");
+  expect(rejected).toContain("Invalid arguments for tool read:");
   expect(absolute.scenarios[0]?.status).toBe("failed_provider");
 });
 
@@ -641,4 +642,45 @@ test("large discovery preserves cumulative inference limits across rounds", asyn
   expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit", toolRoundTrip: false,
     diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 1, toolResultsCompleted: 1,
       httpRequestsStarted: 3, httpResponsesReceived: 3 } });
+});
+
+
+test("smoke advertises the same relative sentinel path restriction it enforces", async () => {
+  const requests: ModelRequest[] = [];
+  const report = await runLiveSmoke({ ...selection(["xai-api-key"]), env: { XAI_API_KEY: "PRIVATE_KEY" } }, {
+    createStore: () => missingStore,
+    createModel: async () => validModel(requests),
+  });
+  expect(report.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true });
+  const tool = requests[0]?.tools?.find(tool => tool.name === "read");
+  expect(tool).toBeDefined();
+  const validate = new Ajv().compile(tool!.inputSchema);
+  expect(validate({ path: "smoke-sentinel.txt", limit: 5 })).toBe(true);
+  // Captured #189 failure pattern: the general read contract accepts the absolute spelling.
+  const root = requests[0]!.context.find(section => section.name === "environment")?.content.match(/Workspace root: (.+)/)?.[1];
+  expect(root).toBeDefined();
+  expect(validate({ path: `${root}/smoke-sentinel.txt`, limit: 5 })).toBe(false);
+  for (const path of ["./smoke-sentinel.txt", "wrong.txt", "/etc/passwd"]) expect(validate({ path })).toBe(false);
+  expect(tool?.description).toContain("exact relative path");
+  const user = requests[0]!.items.find(item => item.type === "user");
+  expect(user?.type === "user" ? JSON.stringify(user.content) : "").toContain('path exactly');
+});
+
+
+test("captured xAI absolute sentinel call remains a failed read rather than a verified round trip", async () => {
+  let root = "";
+  let reads = 0;
+  const report = await runLiveSmoke({ ...selection(["xai-api-key"]), env: { XAI_API_KEY: "PRIVATE_KEY" } }, {
+    createStore: () => missingStore,
+    onWorkspace: workspace => { root = workspace.root; },
+    readSentinel: async () => { reads++; throw Error("absolute path must be rejected before reading"); },
+    createModel: async () => createScriptedModel({ responses: [
+      () => ({ toolCalls: [{ id: "read1", name: "read", arguments: { path: `${root}/smoke-sentinel.txt`, limit: 5 } }] }),
+      { text: "I cannot read the file." },
+    ] }),
+  });
+  expect(reads).toBe(0);
+  expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "missing_tool_evidence", toolRoundTrip: false,
+    diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1 } });
+  expect(JSON.stringify(report)).not.toMatch(/PRIVATE_|smoke-sentinel|schway-live-/);
 });

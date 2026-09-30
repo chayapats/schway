@@ -1,3 +1,4 @@
+import Ajv from "ajv";
 import { expect, spyOn, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
@@ -420,6 +421,16 @@ test("supervised production worker carries exact thinking into both real adapter
         const requests = JSON.parse(await readFile(requestFile, "utf8")) as Array<{ url: string; body?: Record<string, unknown> }>;
         const inference = requests.filter(request => request.body);
         expect(inference).toHaveLength(2);
+        for (const request of inference) {
+          const tools = request.body?.tools as Array<{ name?: string; parameters?: Record<string, unknown>;
+            function?: { name?: string; parameters?: Record<string, unknown> } }>;
+          const read = provider === "compatible" ? tools[0]?.function : tools[0];
+          expect(read?.name).toBe("read");
+          const validate = new Ajv().compile(read!.parameters!);
+          expect(validate({ path: "smoke-sentinel.txt" })).toBe(true);
+          // The exact absolute-path pattern observed in #189 must be disallowed on the wire.
+          expect(validate({ path: "/tmp/schway-live-fixture/smoke-sentinel.txt", limit: 5 })).toBe(false);
+        }
         expect(inference.map(request => request.body?.model)).toEqual([model, model]);
         expect(inference.map(request => request.body?.reasoning)).toEqual(explicit
           ? [provider === "compatible" ? { effort: level } : { effort: level, summary: "auto" },
