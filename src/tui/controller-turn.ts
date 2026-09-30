@@ -35,7 +35,7 @@ export abstract class TurnLayer extends CompactionLayer {
     }
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.endpointUrlEntry) {
-      this.endpointUrlEntry = undefined; this.endpointTargetUrl = undefined;
+      this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined;
       this.restoreLoginOrigin(); this.recoveryRepair = false; return;
     }
     if (this.credentialEntry) {
@@ -44,9 +44,9 @@ export abstract class TurnLayer extends CompactionLayer {
       this.credentialTarget = undefined;
       this.pickerReturn = undefined;
       this.recoveryRepair = false;
-      if (this.endpointTargetUrl !== undefined) {
-        this.endpointUrlEntry = { value: this.endpointTargetUrl };
-        this.endpointTargetUrl = undefined;
+      if (this.endpointInputUrl !== undefined) {
+        this.endpointUrlEntry = { value: this.endpointInputUrl };
+        this.endpointInputUrl = undefined;
       } else this.restoreLoginOrigin();
       this.notice("Credential entry cancelled; nothing saved.");
       return;

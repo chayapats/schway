@@ -122,7 +122,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.loginChooserState = undefined;
     const current = this.configEditor?.settings.baseUrl ?? this.baseUrl;
     this.endpointUrlEntry = { value: current && isValidProfileBaseUrl(current) ? current : "" };
-    this.endpointTargetUrl = undefined;
+    this.endpointInputUrl = undefined;
     return true;
   }
 
@@ -154,8 +154,9 @@ export abstract class CredentialsLayer extends ControllerCore {
     else if (url.href.split("#", 1)[0]!.includes("?")) error = "Remove the query string from the URL.";
     else if (!isValidProfileBaseUrl(value)) error = "Enter a full URL that starts with http:// or https://.";
     if (error) { entry.error = error; return false; }
-    if (!this.beginCredentialTarget({ provider: "openai-compatible", baseUrl: value })) return false;
-    this.endpointTargetUrl = value;
+    const baseUrl = value.split("#", 1)[0]!;
+    if (!this.beginCredentialTarget({ provider: "openai-compatible", baseUrl })) return false;
+    this.endpointInputUrl = entry.value;
     this.endpointUrlEntry = undefined;
     return true;
   }
@@ -224,7 +225,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     const target = this.credentialTarget;
     if (!entry || !target || this.credentialMutation) return false;
     const initialConnection = this.isNotConnected();
-    const endpointUrl = this.endpointTargetUrl;
+    const endpointUrl = this.endpointInputUrl !== undefined ? target.baseUrl : undefined;
     let savedNotice: string | undefined;
     this.credentialMutation = true;
     const task = (async () => {
@@ -233,10 +234,10 @@ export abstract class CredentialsLayer extends ControllerCore {
       savedNotice = this.transcript.at(-1)?.id;
       if (!result.ok) { this.pickerReturn = undefined; this.status = "error"; return false; }
       if (endpointUrl && this.configEditor) {
-        const provider = await this.configEditor.prepare({ scope: "session", key: "provider", value: "openai-compatible" });
-        await provider.commit();
         const endpoint = await this.configEditor.prepare({ scope: "session", key: "baseUrl", value: endpointUrl });
         await endpoint.commit();
+        const provider = await this.configEditor.prepare({ scope: "session", key: "provider", value: "openai-compatible" });
+        await provider.commit();
         const profile = await this.configEditor.prepare({ scope: "session", key: "profile", value: null });
         await profile.commit();
         this.provider = "openai-compatible";
@@ -259,7 +260,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     try { saved = await task; } finally {
       this.credentialEntry = undefined;
       this.credentialTarget = undefined;
-      this.endpointTargetUrl = undefined;
+      this.endpointInputUrl = undefined;
       this.loginReturn = undefined;
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;

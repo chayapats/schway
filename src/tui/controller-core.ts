@@ -124,7 +124,8 @@ export abstract class ControllerCore {
   protected loginChooserState?: { level: import("./controller-types.ts").LoginChooserLevel; selectedId: string };
   protected loginReturn?: { level: import("./controller-types.ts").LoginChooserLevel; selectedId: string };
   protected endpointUrlEntry?: { value: string; error?: string };
-  protected endpointTargetUrl?: string;
+  /** Retain exact endpoint input for key-step cancellation; the credential target holds its routing URL. */
+  protected endpointInputUrl?: string;
   protected loginCallbackValue?: string;
   protected loginApproval?: string;
   protected loginApprovalData?: import("./controller-types.ts").LoginApproval;

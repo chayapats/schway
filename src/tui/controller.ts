@@ -127,7 +127,7 @@ export class TuiController extends TurnLayer {
     this.signInListAbort?.abort();
     this.disposed = true;
     this.closeModelPicker();
-    if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; this.endpointUrlEntry = undefined; this.endpointTargetUrl = undefined; this.loginReturn = undefined; }
+    if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined; this.loginReturn = undefined; }
     this.abortActiveTurn();
     this.contextManager.clearActiveSkill();
     this.detachDiagnostics?.();

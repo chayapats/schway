@@ -395,6 +395,47 @@ test("URL and key Esc retain the typed endpoint while an empty key saves nothing
   } finally { controller.dispose(); }
 });
 
+for (const existing of [false, true]) test(`${existing ? "replacement" : "first"} endpoint fragments stay in cancelled input but are removed from saved routing and model activation`, async () => {
+  await withTempDir(async root => {
+    const store = fakeCredentialStore();
+    const home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
+    const configEditor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true,
+      cli: existing ? { provider: "openai-compatible", baseUrl: "http://old.example/v1" } : { provider: "openai" },
+    });
+    const listings: unknown[] = [], staged: string[] = [];
+    const controller = chooserController({ configEditor, home, workspace,
+      credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async (route, _signal, options) => {
+        listings.push({ route, baseUrl: options?.baseUrl }); return [{ id: "endpoint-model", recommended: true }];
+      } },
+      stageSettings: async settings => {
+        staged.push(settings.baseUrl!);
+        return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+    });
+    try {
+      controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); await controller.selectLoginChoice();
+      while (controller.snapshot().endpointUrlEntry!.value) controller.backspaceEndpointUrl();
+      const typed = "  http://localhost:8787/v1#section  ";
+      controller.enterEndpointUrlText(typed); expect(controller.submitEndpointUrl()).toBe(true);
+      controller.enterCredentialText("cancelled-key"); controller.cancel();
+      expect(controller.snapshot().endpointUrlEntry).toEqual({ value: typed });
+      expect(configEditor.settings.baseUrl).toBe(existing ? "http://old.example/v1" : undefined);
+      expect(controller.submitEndpointUrl()).toBe(true); controller.enterCredentialText("endpoint-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(listings).toEqual([{ route: "compatible", baseUrl: "http://localhost:8787/v1" }]);
+      expect(staged).toEqual(["http://localhost:8787/v1"]);
+      expect(configEditor.settings.baseUrl).toBe("http://localhost:8787/v1");
+      expect(controller.snapshot().modelId).toBe("endpoint-model");
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787/v1" }))).toBe("endpoint-key");
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Endpoint saved for this session. To keep it, run /config set baseUrl http://localhost:8787/v1 --scope user.")).toBe(true);
+      expect(await Bun.file(join(home, ".schway/config.json")).exists()).toBe(false);
+      expect(await Bun.file(join(root, ".schway/config.json")).exists()).toBe(false);
+      const next = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+      expect(next.settings.baseUrl).not.toBe("http://localhost:8787/v1");
+    } finally { controller.dispose(); }
+  });
+});
+
 test("opening a chooser while a turn runs gives the specified busy notice and never starts sign-in", async () => {
   const controller = chooserController({ model: createScriptedModel({ waitForAbort: true }), modelId: "test" });
   const turn = controller.submit("work");
