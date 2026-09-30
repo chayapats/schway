@@ -1,6 +1,6 @@
 {
   "name": "schway",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "A lean, light, fast, and hackable coding-agent harness",
   "type": "module",
   "license": "MIT",
@@ -29,7 +29,8 @@
     "docs/tui.md",
     "docs/workspaces.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "dev": "bun --no-env-file src/cli/main.ts",
