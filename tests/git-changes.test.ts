@@ -7,11 +7,13 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { readTool } from "../src/tools/read.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { TuiController } from "../src/tui/controller.ts";
+import { parseGitDiff } from "../src/text/diff.ts";
 import { parseSlashCommand, helpText } from "../src/tui/commands.ts";
 import {
   captureGitSnapshot,
   compareGitSnapshots,
   formatGitStatus,
+  formatGitDiffPreview,
   inspectGitStatus,
   getGitDiffPreview,
   parseGitChangeTracking,
@@ -24,6 +26,43 @@ import {
 } from "../src/config/config.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
+
+test("real untracked previews keep literal source separate from a multiline filename footer", async () => {
+  await withTempDir(async root => {
+    const initialized = Bun.spawnSync(["git", "init", "-q"], { cwd: root, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } });
+    expect(initialized.exitCode).toBe(0);
+    const path = "multi\nline.txt";
+    const prefix = "hello\n... truncated at SOURCE CONTENT\nmore source\n";
+    await writeFile(join(root, path), `${prefix}additional text beyond the preview`);
+    const preview = await getGitDiffPreview(root, path, prefix.length);
+    if ("error" in preview) throw new Error(preview.error);
+    const cliDiff = `Untracked:\n${prefix}\n… truncated at ${prefix.length} chars. Use git diff --no-index /dev/null -- ${path} in ${root} for the full content.`;
+    expect(preview.diff).toBe(cliDiff);
+    expect(formatGitDiffPreview(preview)).toBe(`Diff for ${path}:\n${cliDiff}\nPreview truncated. Use git diff in the workspace for full content.`);
+    expect(parseGitDiff(preview)).toEqual([
+      { sign: "+", line: 1, text: "hello" },
+      { sign: "+", line: 2, text: "... truncated at SOURCE CONTENT" },
+      { sign: "+", line: 3, text: "more source" },
+      { sign: " ", text: "Preview truncated · use git diff for full content" },
+    ]);
+    const tiny = await getGitDiffPreview(root, path, 5);
+    if ("error" in tiny) throw new Error(tiny.error);
+    expect(parseGitDiff(tiny)).toEqual([
+      { sign: "+", line: 1, text: "hello" },
+      { sign: " ", text: "Preview truncated · use git diff for full content" },
+    ]);
+    const literal = "hello\n… truncated at SOURCE CONTENT\nmore source\n";
+    await writeFile(join(root, path), literal);
+    const complete = await getGitDiffPreview(root, path);
+    if ("error" in complete) throw new Error(complete.error);
+    expect(complete.diff).toBe(`Untracked:\n${literal}`);
+    expect(parseGitDiff(complete)).toEqual([
+      { sign: "+", line: 1, text: "hello" },
+      { sign: "+", line: 2, text: "… truncated at SOURCE CONTENT" },
+      { sign: "+", line: 3, text: "more source" },
+    ]);
+  });
+});
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const env: Record<string, string | undefined> = { ...process.env };
@@ -220,7 +259,7 @@ test("rename links origPath to updated pre-existing instead of new plus resolved
   });
 });
 
-test("off performs no tracking and on-demand avoids per-turn capture", async () => {
+test("off performs no tracking and on-demand keeps status output on demand", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);
     const off = controllerFor(dir, "off", createScriptedModel({ text: "done" }));

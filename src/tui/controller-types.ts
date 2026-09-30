@@ -13,10 +13,9 @@ import type { Workspace } from "../workspace/workspace.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import type { ResolvedSettings, GitChangeTrackingMode } from "../config/config.ts";
 import type { ConfigEditor } from "../config/editing.ts";
-import type { GitFileChange } from "../workspace/git.ts";
 import type { ModelPickerSnapshot } from "./model-picker.ts";
 import type { BranchTreeSnapshot } from "./branch-tree.ts";
-import type { DiffRow } from "../text/diff.ts";
+import type { DiffRow, GitDiffRow } from "../text/diff.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -68,7 +67,7 @@ export interface TuiTranscriptEntry {
   diffRows?: DiffRow[];
 }
 
-/** Observed completion and command evidence for the latest accepted turn in this conversation. */
+/** Plain-data duration, observed file changes, and command evidence for the latest accepted turn. */
 export interface TurnOutcome {
   reason: "completed" | "failed" | "cancelled" | "limit";
   commands: { callId: string; command: string; exitCode: number | null; status: TuiToolStatus }[];
@@ -76,15 +75,19 @@ export interface TurnOutcome {
   commandCounts: { exitZero: number; nonzero: number; unknown: number };
   toolResults: number;
   failedTools: number;
-  changes: string;
+  elapsedMs: number;
+  files: { path: string; added?: number; removed?: number; source: "tool" | "shell" }[];
 }
 
 /** Bounded read-only working-tree review; file contents are current, never a rollback preview. */
 export interface ChangeReview {
   heading: string;
-  files: GitFileChange[];
+  files: TurnOutcome["files"];
   selected: number;
   detail: string;
+  rows: GitDiffRow[];
+  details: string;
+  showingDetails: boolean;
   loading: boolean;
 }
 

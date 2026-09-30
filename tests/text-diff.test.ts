@@ -1,5 +1,47 @@
 import { expect, test } from "bun:test";
-import { buildEditDiff, buildEditDiffHunks, countLines } from "../src/text/diff.ts";
+import { buildEditDiff, buildEditDiffHunks, countLines, parseGitDiff } from "../src/text/diff.ts";
+
+test("Git review drops metadata and stats and numbers each hunk using old removals and new context", () => {
+  expect(parseGitDiff({ diff: "Unstaged:\n a.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\ndiff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -2,3 +4,4 @@ title\n context\n-old\n+new\n+extra\n tail\n@@ -10 +13 @@\n-late\n+later\n", truncated: false, binaryFiles: [] })).toEqual([
+    { sign: " ", line: 4, text: "context" },
+    { sign: "-", line: 3, text: "old" },
+    { sign: "+", line: 5, text: "new" },
+    { sign: "+", line: 6, text: "extra" },
+    { sign: " ", line: 7, text: "tail" },
+    { sign: "-", line: 10, text: "late" },
+    { sign: "+", line: 13, text: "later" },
+  ]);
+});
+
+test("Git review keeps plain explanations for binary deleted renamed truncated and untracked files", () => {
+  expect(parseGitDiff({ diff: "Untracked:\nhello\n\nworld\n", untrackedContent: "hello\n\nworld\n", truncated: false, binaryFiles: [] })).toEqual([
+    { sign: "+", line: 1, text: "hello" }, { sign: "+", line: 2, text: "" }, { sign: "+", line: 3, text: "world" },
+  ]);
+  expect(parseGitDiff({ diff: "diff --git a/old b/new\nsimilarity index 100%\nrename from old\nrename to new", truncated: false, binaryFiles: [] })).toEqual([{ sign: " ", text: "Renamed from old to new" }]);
+  expect(parseGitDiff({ diff: "diff --git a/a b/a\ndeleted file mode 100644\n--- a/a\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone", truncated: false, binaryFiles: [] })).toEqual([{ sign: " ", text: "File deleted" }, { sign: "-", line: 1, text: "gone" }]);
+  expect(parseGitDiff({ diff: "Untracked binary file blob. Content summarized, not shown.", truncated: false, binaryFiles: ["blob"] })).toEqual([{ sign: " ", text: "Binary file · content not shown" }]);
+  expect(parseGitDiff({ diff: "Untracked:\nhello\n… truncated at 5 chars.", untrackedContent: "hello", truncated: true, binaryFiles: [] })).toEqual([{ sign: "+", line: 1, text: "hello" }, { sign: " ", text: "Preview truncated · use git diff for full content" }]);
+  expect(parseGitDiff({ diff: "No textual diff. Staged, untracked, or binary-only changes may still be listed by /changes status.", truncated: false, binaryFiles: [] })).toEqual([{ sign: " ", text: "No textual diff" }]);
+});
+
+test("metadata-looking untracked content remains literal numbered source text", () => {
+  expect(parseGitDiff({ diff: "Untracked:\ndiff --git literal\nBinary files are ordinary text\n+++ source\n@@ source\n", untrackedContent: "diff --git literal\nBinary files are ordinary text\n+++ source\n@@ source\n", truncated: false, binaryFiles: [] })).toEqual([
+    { sign: "+", line: 1, text: "diff --git literal" },
+    { sign: "+", line: 2, text: "Binary files are ordinary text" },
+    { sign: "+", line: 3, text: "+++ source" },
+    { sign: "+", line: 4, text: "@@ source" },
+  ]);
+});
+
+test("structured untracked previews preserve literal markers regardless of multiline footer prose", () => {
+  expect(parseGitDiff({ diff: "Untracked:\nhello\n… truncated at SOURCE CONTENT\n… truncated at 5 chars. Another literal source line\nmore source\n… truncated at 8000 chars. Use git diff --no-index /dev/null -- multi\nline.txt in /project\nroot for the full content.", untrackedContent: "hello\n… truncated at SOURCE CONTENT\n… truncated at 5 chars. Another literal source line\nmore source", truncated: true, binaryFiles: [] })).toEqual([
+    { sign: "+", line: 1, text: "hello" },
+    { sign: "+", line: 2, text: "… truncated at SOURCE CONTENT" },
+    { sign: "+", line: 3, text: "… truncated at 5 chars. Another literal source line" },
+    { sign: "+", line: 4, text: "more source" },
+    { sign: " ", text: "Preview truncated · use git diff for full content" },
+  ]);
+});
 
 test("a single-line replacement keeps its original and edited line numbers", () => {
   expect(buildEditDiff([{ startLine: 2, oldText: "old", newText: "new" }])).toEqual({

@@ -89,7 +89,14 @@ test("Thai task keeps tool effects, keyboard reading, review, and compacted resu
       terminal.mockInput.pressKey("r", { meta: true });
       await waitFor(() => !!controller.snapshot().changeReview && !controller.snapshot().changeReview?.loading);
       expect(controller.snapshot().changeReview?.files.map(file => file.path)).toContain("task.txt");
-      expect(controller.snapshot().changeReview?.heading).toContain("check-journey");
+      expect(controller.snapshot().changeReview?.heading).toBe("Review · turn 5");
+      terminal.mockInput.pressKey("i", { ctrl: true });
+      await settle();
+      expect(controller.snapshot().changeReview?.showingDetails).toBe(true);
+      expect(controller.snapshot().changeReview?.details).toContain('test "$(cat task.txt)" = FIXED → exit 0');
+      expect(controller.snapshot().changeReview?.details).not.toContain("check-journey");
+      terminal.mockInput.pressEscape();
+      expect(controller.snapshot().changeReview?.showingDetails).toBe(false);
       terminal.mockInput.pressEscape();
       expect(editor.plainText).toBe("keep this next task");
       expect(await controller.compact()).toBe(true);

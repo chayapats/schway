@@ -98,32 +98,56 @@ session; returning to new work does not paste an older session's draft into it.
 
 ## Turn outcomes and change review
 
-After an accepted turn settles, the activity line reports **completed**, **failed**,
-**cancelled**, or **limit** separately from the model's answer. Command counts report
-observed exit zero, nonzero, and unknown results across the entire turn, even when
-only the latest 50 command details are retained. A completed model turn can contain
-a failed check.
+After an accepted turn settles, the activity line shows `✓ Done`, `✗ Failed`,
+`− Cancelled`, or `◌ Limit`, then changed files and known line counts, observed
+command results, elapsed time, and **Alt+R review**. Failed turns also offer
+**Ctrl+I details**. For example:
 
-**Alt+R** or `/changes review` opens a read-only panel with the latest turn's tool
-counts and up to 50 command results, identified by call ID and command. **Alt+I**
-inspects individual tool results in the conversation. Up/Down selects from at most
-50 current changed file paths, including files inside new untracked directories;
-PageUp/PageDown scrolls details. Selected names are literal paths, including glob
-characters and Git pathspec syntax. Each diff is bounded,
-with explicit truncation, deleted-file content, rename metadata, or a binary-content
-explanation. Esc restores the same conversation position, unsent draft, and cursor.
-`/changes status` and `/changes diff -- <path>` remain available as textual commands.
+```text
+✓ Done · 1 file +1 −1 · 2 commands ok · 14s · Alt+R review
+✗ Failed · 2 files +8 −3 · 1 command failed · Alt+R review · Ctrl+I details
+```
 
-The default on-demand mode reads Git only when review is requested. Current
-working-tree changes are **unattributed** and may include prior or concurrent edits.
-If snapshot mode was explicitly enabled before the turn, review additionally shows
-its retained before/after comparison: prior dirt, newly observed paths, paths changed
-further, and resolved dirt. Those observations are not proof of exclusive Schway
-authorship; the current diff can also contain later edits. No-change, non-Git,
-tracking-off, and unavailable-attribution states are explicit. Review does not enable
-snapshots, commit, undo, or restore files. Failure, cancellation, and conversation
-branching leave completed filesystem effects in place. Turn summaries are transient;
-old/resumed sessions still expose their saved tool results and current Git review.
+Counts include successful file-tool changes and paths detected as changed by shell
+commands, extension tools, or other processes. Created writes and edits contribute
+known additions and removals; overwritten writes have no line counts. Commands can
+be `ok`, `failed`, or `stopped`. Counts cover the whole turn even though only the
+latest 50 commands are retained. A completed model turn can contain a failed check.
+At narrow widths, elapsed time drops first, then commands, then files; the outcome
+and actions stay until the terminal is too narrow even for those.
+
+**Alt+R** or `/changes review` opens `Review · turn N`, numbered by user messages on
+the active conversation branch. The left column lists this turn's files, with `›`
+marking the selection and line counts or a `shell` badge. The right column shows
+the selected file's current, numbered diff: removals use old line numbers, additions
+and context use new line numbers. Colors and ASCII `-`/`+` signs distinguish changes.
+Below 80 terminal columns, the file list stacks above the diff. Binary, deleted,
+renamed, and truncated previews have short explanations instead of Git metadata.
+Shell files begin with `changed by shell · not undoable`.
+
+Up/Down selects files; PageUp/PageDown scrolls the diff. **Ctrl+I** swaps the diff for
+turn details; Ctrl+I again or Esc returns to the diff. Esc from the diff restores the
+same conversation position, unsent draft, and cursor. After a failed turn, Ctrl+I in
+the conversation appends the same details, including any recovery diagnostics.
+Details contain tool counts, whole-turn exit-zero/nonzero/unknown totals, and the
+retained commands without tool-call IDs. **Alt+I** still inspects individual tools.
+Selected filenames are literal paths, including glob characters and Git pathspec
+syntax. `/changes status` and `/changes diff -- <path>` remain available.
+
+The default `on-demand` mode and `snapshot` mode capture paths and hashes before and
+after each accepted turn, without retaining file content. Untouched pre-existing
+dirt is excluded from the turn list. Shell detection subtracts successful edit/write
+paths from the observed changes; it is not proof of who made the remaining changes.
+Details explain unavailable detection in non-Git workspaces, off mode, or capture
+failures, and expose the latest before/after comparison.
+
+Review is read-only. Current content is unattributed and may include earlier,
+concurrent, or later external edits; snapshots do not prove exclusive Schway
+authorship. Exit codes are observed command results, not a test-suite guarantee.
+Failure, cancellation, and conversation branching leave completed filesystem
+effects in place. Review does not commit, undo, or restore files. Only the latest
+turn pair is retained, and switching a session or branch clears it. Fresh and resumed
+sessions show `No turn to review yet`; saved tool results remain in the conversation.
 
 ## Color roles
 
