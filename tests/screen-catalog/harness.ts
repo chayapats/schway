@@ -74,7 +74,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
     responses = [{ toolCalls: names.map(name => ({ id: `parallel-${name}`, name, arguments: {} })) }];
   }
-  const fresh = ["first-run", "sign-in-chooser", "subscription-sign-in"].includes(screen.id);
+  const fresh = ["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
@@ -91,6 +91,10 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
+  if (screen.id.startsWith("endpoint-url")) {
+    options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
+    options.stageSettings = async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) });
+  }
   if (screen.id === "thinking-controls") {
     const baseUrl = "https://openrouter.ai/api/v1", model = "meta/muse-spark-1.3-contributor";
     const capabilities = openRouterModelCapabilities(parseModelList({ data: [{ id: model, reasoning: {

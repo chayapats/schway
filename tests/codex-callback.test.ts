@@ -127,7 +127,7 @@ test("occupied callback port leaves a device fallback reachable through the cont
     expect(await controller.login("codex")).toBe(false);
     const snapshot = controller.snapshot();
     expect(JSON.stringify(snapshot)).toContain("callback port is unavailable");
-    expect(snapshot.loginChooser?.choices[snapshot.loginChooser.selectedIndex]).toContain("Device");
+    expect(snapshot.loginChooser).toMatchObject({ level: "chatgpt", selectedId: "chatgpt-device" });
     expect(JSON.stringify(snapshot)).not.toContain("EADDRINUSE");
   } finally {
     controller.dispose();

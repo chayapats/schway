@@ -671,8 +671,8 @@ test("login chooser and masked callback use real keyboard and paste input while 
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("Sign in");
   expect(ui.editor.plainText).toBe("");
-  ui.mockInput.pressArrow("down");
-  ui.mockInput.pressArrow("down");
+  ui.mockInput.pressTab(); await settle(ui);
+  while (ui.controller.snapshot().loginChooser!.selectedId !== "chatgpt-callback") ui.mockInput.pressArrow("down");
   ui.mockInput.pressEnter();
   await settle(ui);
   await ui.mockInput.pasteBracketedText("callback-secret-sentinel");
@@ -681,8 +681,11 @@ test("login chooser and masked callback use real keyboard and paste input while 
   expect(JSON.stringify(ui.controller.snapshot())).not.toContain("callback-secret-sentinel");
   ui.resize(36, 16);
   await settle(ui);
-  ui.mockInput.pressEscape();
-  await settle(ui);
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "chatgpt", selectedId: "chatgpt-callback" });
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "chatgpt" });
+  ui.mockInput.pressEscape(); await settle(ui);
   expect(ui.editor.plainText).toBe("continue this task\nsecond line");
   expect(ui.editor.cursorOffset).toBe(8);
   expect(ui.session.items).toHaveLength(0);
@@ -702,11 +705,11 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     ui.editor.cursorOffset = 5;
     expect(await ui.controller.login("")).toBe(true);
     await settle(ui);
-    for (let step = 0; step < 6; step++) ui.mockInput.pressArrow("down");
+    while (ui.controller.snapshot().loginChooser!.selectedId !== "xai") ui.mockInput.pressArrow("down");
     await settle(ui);
     const frame = ui.captureCharFrame();
-    const openai = frame.indexOf("OpenAI API key");
-    const xai = frame.indexOf("xAI API key");
+    const openai = frame.indexOf("OpenAI");
+    const xai = frame.indexOf("xAI");
     expect(openai).toBeGreaterThanOrEqual(0);
     expect(xai).toBeGreaterThan(openai);
     ui.mockInput.pressEnter();
@@ -714,6 +717,8 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     expect(ui.captureCharFrame()).toContain("API key · xai");
     ui.mockInput.pressEscape();
     await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "xai" });
+    ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("keep this draft");
     expect(ui.editor.cursorOffset).toBe(5);
     expect(ui.controller.snapshot().credentialEntry).toBeUndefined();
@@ -1874,15 +1879,18 @@ test("Grok chooser, browser and device panels preserve drafts and show codes at 
     } } });
     await ui.mockInput.pasteBracketedText("Keep my Thai ไทย draft"); ui.editor.cursorOffset = 5;
     ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
-    const choices = ui.controller.snapshot().loginChooser!.choices;
-    const browserIndex = choices.indexOf("Grok · Browser approval"); expect(browserIndex).toBe(choices.indexOf("ChatGPT · Paste browser callback") + 1);
-    expect(choices[browserIndex + 1]).toBe("Grok · Device approval");
-    for (let index = 0; index < browserIndex + Number(device); index++) ui.mockInput.pressArrow("down");
+    const choices = ui.controller.snapshot().loginChooser!.rows.filter(row => row.kind === "choice");
+    expect(choices.map(row => row.id)).toEqual(["chatgpt", "grok", "openai", "xai", "compatible"]);
+    while (ui.controller.snapshot().loginChooser!.selectedId !== "grok") ui.mockInput.pressArrow("down");
+    if (device) { ui.mockInput.pressTab(); await settle(ui); expect(ui.controller.snapshot().loginChooser!.selectedId).toBe("grok-device"); }
     ui.mockInput.pressEnter(); await settle(ui);
     expect(ui.captureCharFrame()).toContain(device ? "Open x.ai/device and enter ABCD-EFGH · Esc cancel" : "Waiting for approval in your browser… · Esc cancel");
     if (device) { ui.resize(24, 8); await settle(ui); expect(ui.captureCharFrame()).toContain("x.ai/device"); expect(ui.captureCharFrame()).toContain("ABCD-EFGH"); }
     expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
     ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.controller.snapshot().loginChooser).toMatchObject(device ? { level: "grok", selectedId: "grok-device" } : { level: "main", selectedId: "grok" });
+    if (device) { ui.mockInput.pressEscape(); await settle(ui); }
+    ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("Keep my Thai ไทย draft"); expect(ui.editor.cursorOffset).toBe(5); expect(ui.session.items).toHaveLength(0);
   }
 });
@@ -1899,7 +1907,7 @@ test("Grok success and failure restore the composer, and plan rejection opens th
     }, listGrokModels: async () => { if (outcome === "plan") throw Error("Your Grok plan doesn't include API access. Use an xAI API key instead."); return [{ id: "grok-4.7", recommended: true }]; } }, stageSettings: async next => ({ model: createScriptedModel({ provider: "xai", id: next.model }), contextManager: createContextManager(workspace) }) });
     await ui.mockInput.pasteBracketedText("My pending task"); ui.editor.cursorOffset = 4;
     ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
-    const index = ui.controller.snapshot().loginChooser!.choices.indexOf("Grok · Browser approval"); for (let i = 0; i < index; i++) ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await settle(ui);
+    while (ui.controller.snapshot().loginChooser!.selectedId !== "grok") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await settle(ui);
     finish(); await ui.controller.waitForIdle(); await settle(ui);
     expect(ui.editor.plainText).toBe("My pending task"); expect(ui.editor.cursorOffset).toBe(4); expect(ui.session.items).toHaveLength(0);
     if (outcome === "plan") {
@@ -1922,3 +1930,131 @@ beforeAll(() => {
   }, { preconnect: unguardedGrokFetch.preconnect }) as typeof fetch;
 });
 afterAll(() => { globalThis.fetch = unguardedGrokFetch; });
+
+
+async function selectRenderedLoginRow(ui: Awaited<ReturnType<typeof setup>>, id: string) {
+  const panel = ui.controller.snapshot().loginChooser!;
+  const ids = panel.rows.filter(row => row.kind === "choice").map(row => row.id);
+  expect(ids).toContain(id);
+  while (ui.controller.snapshot().loginChooser!.selectedId !== id) ui.mockInput.pressArrow("down");
+  await settle(ui);
+}
+
+for (const width of [120, 80]) test(`grouped sign-in rows, muted details and global hints render at ${width} columns`, async () => {
+  const ui = await setup(width, 30);
+  ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
+  const picker = ui.renderer.root.findDescendantById("picker")!;
+  const rows = picker.getChildren().filter((row): row is TextRenderable => row instanceof TextRenderable);
+  expect(rows.map(row => row.plainText.trim())).toEqual([
+    "Sign in", "Subscription", "› ChatGPT            recommended · browser", "Grok               browser", "API key", "OpenAI", "xAI", "Custom endpoint", "OpenAI-compatible  URL + key",
+  ]);
+  expect(rows[1]!.plainText.startsWith("  Subscription")).toBe(true);
+  expect(rows[2]!.plainText.startsWith("    › ChatGPT")).toBe(true);
+  expect(rows[2]!.bg.equals(RGBA.fromHex(tint(TUI_THEMES.dark, TUI_THEMES.dark.accent)))).toBe(true);
+  const detailColumns = [rows[2]!.plainText.indexOf("recommended"), rows[3]!.plainText.indexOf("browser"), rows[8]!.plainText.indexOf("URL + key")];
+  expect(new Set(detailColumns).size).toBe(1);
+  expect(rows.some(row => row.plainText.includes("↑↓"))).toBe(false);
+  const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
+  expect(hints.plainText).toBe("↑↓ select · Enter · Tab more options · Esc back");
+  await selectRenderedLoginRow(ui, "openai"); expect(hints.plainText).toBe("↑↓ select · Enter · Esc back");
+  await selectRenderedLoginRow(ui, "chatgpt"); ui.mockInput.pressTab(); await settle(ui);
+  expect(picker.getChildren().filter((row): row is TextRenderable => row instanceof TextRenderable).map(row => row.plainText.trim())).toEqual(["ChatGPT · more options", "› Device approval", "Paste browser callback"]);
+  expect(hints.plainText).toBe("↑↓ select · Enter · Esc back");
+  ui.mockInput.pressEscape(); await settle(ui); await selectRenderedLoginRow(ui, "grok"); ui.mockInput.pressTab(); await settle(ui);
+  expect(picker.getChildren().filter((row): row is TextRenderable => row instanceof TextRenderable).map(row => row.plainText.trim())).toEqual(["Grok · more options", "› Device code"]);
+});
+
+test("44 by 18 chooser omits the entire details column, skips headers and scrolls the selected label into view", async () => {
+  const ui = await setup(44, 18);
+  ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
+  const picker = ui.renderer.root.findDescendantById("picker")!;
+  for (const id of ["chatgpt", "grok", "openai", "xai", "compatible"]) {
+    await selectRenderedLoginRow(ui, id);
+    const lines = picker.getChildren().filter((row): row is TextRenderable => row instanceof TextRenderable).map(row => row.plainText);
+    expect(lines.length).toBeLessThanOrEqual(5); // Four budget rows plus the title; headers use the same budget.
+    expect(lines.join("\n")).not.toContain("…"); expect(lines.join("\n")).not.toMatch(/recommended|browser|URL \+ key/);
+    const selected = ui.controller.snapshot().loginChooser!.rows.find(row => row.kind === "choice" && row.id === id)!;
+    expect(lines.some(line => line.trim() === `› ${selected.label}`)).toBe(true);
+  }
+});
+
+for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "chatgpt-browser", "chatgpt-device", "grok-browser", "grok-device"] as const) test(`Thai draft and cursor survive the ${chain} Esc chain without entering session or recall`, async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root });
+    const wait = async ({ signal }: { signal: AbortSignal }) => { await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return { ok: false as const, message: "Cancelled" }; };
+    const ui = await setup(80, 30, {}, wait, { configEditor, workspace,
+      stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) }),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: wait, grokLogin: wait },
+    });
+    const draft = "ช่วยอ่านไฟล์นี้\nอธิบายเป็นภาษาไทย\nอย่าเพิ่งส่ง";
+    await ui.mockInput.pasteBracketedText(draft); ui.mockInput.pressArrow("left"); const cursor = ui.editor.cursorOffset;
+    ui.mockInput.pressKey("l", { meta: true }); await settle(ui);
+    if (chain === "more-options" || chain === "callback") {
+      ui.mockInput.pressTab(); await settle(ui);
+      if (chain === "callback") { await selectRenderedLoginRow(ui, "chatgpt-callback"); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-browser-callback"); }
+    } else if (chain === "openai" || chain === "xai") {
+      await selectRenderedLoginRow(ui, chain); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-api-key");
+    } else if (chain === "endpoint") {
+      await selectRenderedLoginRow(ui, "compatible"); ui.mockInput.pressEnter(); await settle(ui);
+      expect(ui.captureCharFrame()).toContain("Endpoint URL · http://localhost:8787/v1");
+      const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable; expect(hints.plainText).toBe("Enter confirm · Esc back");
+      await ui.mockInput.pasteBracketedText("http://localhost:8787/v1"); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-endpoint-key");
+      expect(ui.editor.plainText).toBe("");
+      ui.mockInput.pressEscape(); await settle(ui); expect(ui.controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787/v1");
+      expect(ui.editor.plainText).toBe("");
+    } else {
+      const provider = chain.startsWith("grok") ? "grok" : "chatgpt";
+      await selectRenderedLoginRow(ui, provider); if (chain.endsWith("device")) { ui.mockInput.pressTab(); await settle(ui); }
+      ui.mockInput.pressEnter(); await settle(ui); expect(ui.controller.running).toBe(true);
+    }
+    for (let step = 0; step < 4 && (ui.controller.running || ui.controller.snapshot().loginChooser); step++) {
+      ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
+    }
+    expect(ui.editor.plainText).toBe(draft); expect(ui.editor.cursorOffset).toBe(cursor); expect(ui.session.items).toEqual([]);
+    expect(ui.editor.plainText).not.toContain("http://localhost:8787/v1");
+    // Recall the submitted ordinary task: ephemeral URL/key/callback input never becomes a prompt.
+    ui.mockInput.pressEnter(); await ui.controller.waitForIdle(); await settle(ui); ui.mockInput.pressArrow("up");
+    expect(ui.editor.plainText).toBe(draft);
+  });
+});
+
+
+test("ephemeral endpoint URL never enters a durable draft checkpoint or deferred session file", async () => {
+  await withTempDir(async root => {
+    const { createJsonlSession, sessionsDirectory } = await import("../src/session/jsonl.ts");
+    const { openDraftStore } = await import("../src/drafts/store.ts");
+    const home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
+    const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace, deferred: true });
+    const configEditor = await loadConfigEditor({ home, workspaceRoot: root });
+    const controller = new TuiController({ session, sessionId: session.header.id, home, workspace, configEditor,
+      provider: "openai", modelId: "", contextManager: createContextManager(workspace),
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) },
+      stageSettings: async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) }),
+    });
+    const terminal = await createTestRenderer({ width: 80, height: 30, kittyKeyboard: true });
+    const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: root, env: {}, secrets: [], draftPersistence: true,
+      quit() {}, submit: (value, accepted) => dispatchEditorInput(value, controller, async () => false, accepted) });
+    const ui = { ...terminal, view };
+    const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
+    try {
+      const draft = "เก็บร่างงานนี้\nยังไม่ต้องส่ง"; await terminal.mockInput.pasteBracketedText(draft); terminal.mockInput.pressArrow("left"); const cursor = editor.cursorOffset;
+      view.flushDraft(); expect(openDraftStore({ home, workspaceRoot: root, sessionId: session.header.id }).checkpoint?.text).toBe(draft);
+      terminal.mockInput.pressKey("l", { meta: true }); await settle(ui);
+      while (controller.snapshot().loginChooser!.selectedId !== "compatible") terminal.mockInput.pressArrow("down");
+      terminal.mockInput.pressEnter(); await settle(ui);
+      await terminal.mockInput.pasteBracketedText("http://localhost:8787/v1"); view.flushDraft();
+      expect(editor.plainText).toBe(""); expect(openDraftStore({ home, workspaceRoot: root, sessionId: session.header.id }).checkpoint?.text).not.toContain("http://localhost:8787/v1");
+      terminal.mockInput.pressEnter(); await settle(ui); await terminal.mockInput.pasteBracketedText("ephemeral-private-key"); view.flushDraft();
+      terminal.mockInput.pressEscape(); await settle(ui); expect(controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787/v1");
+      terminal.mockInput.pressEscape(); await settle(ui); expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "compatible" });
+      terminal.mockInput.pressEscape(); await settle(ui); view.flushDraft();
+      expect(editor.plainText).toBe(draft); expect(editor.cursorOffset).toBe(cursor); expect(session.items).toEqual([]);
+      expect(openDraftStore({ home, workspaceRoot: root, sessionId: session.header.id }).checkpoint?.text).toBe(draft);
+      const artifacts = await Promise.all((await readdir(join(home, ".schway/drafts"))).map(name => readFile(join(home, ".schway/drafts", name), "utf8")));
+      expect(artifacts.join("\n")).not.toContain("http://localhost:8787/v1"); expect(artifacts.join("\n")).not.toContain("ephemeral-private-key");
+      const savedSession = await Bun.file(join(sessionsDirectory(home), `${session.header.id}.jsonl`)).text();
+      expect(savedSession).not.toContain("http://localhost:8787/v1"); expect(savedSession).not.toContain("ephemeral-private-key");
+    } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
+  });
+});

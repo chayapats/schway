@@ -64,7 +64,7 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "sign-in-chooser", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "thinking-controls", "command-palette", "thai-composer", "streaming-answer", "parallel-tools", "completed-turn", "failed-turn", "retry-countdown", "review-panel", "recent-work-resume", "compaction", "no-color", "narrow-layout"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "thinking-controls", "command-palette", "thai-composer", "streaming-answer", "parallel-tools", "completed-turn", "failed-turn", "retry-countdown", "review-panel", "recent-work-resume", "compaction", "no-color", "narrow-layout"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);

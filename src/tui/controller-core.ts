@@ -121,7 +121,10 @@ export abstract class ControllerCore {
   protected credentialEntry?: MaskedCredentialEntry;
   protected credentialTarget?: CredentialTarget;
   protected credentialMutation = false;
-  protected loginChooserIndex?: number;
+  protected loginChooserState?: { level: import("./controller-types.ts").LoginChooserLevel; selectedId: string };
+  protected loginReturn?: { level: import("./controller-types.ts").LoginChooserLevel; selectedId: string };
+  protected endpointUrlEntry?: { value: string; error?: string };
+  protected endpointTargetUrl?: string;
   protected loginCallbackValue?: string;
   protected loginApproval?: string;
   protected loginApprovalData?: import("./controller-types.ts").LoginApproval;

@@ -67,7 +67,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
   }
 
   /** Open searchable command help without appending to the conversation. */
-  openCommandHelp(): boolean { if (this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserIndex !== undefined || this.loginApproval || this.credentialEntry || this.loginCallbackValue !== undefined) return false; this.commandHelpOpen = true; return true; }
+  openCommandHelp(): boolean { if (this.preferences || this.modelPicker || this.branchTreeOpen || this.loginChooserState !== undefined || this.loginApproval || this.credentialEntry || this.loginCallbackValue !== undefined) return false; this.commandHelpOpen = true; return true; }
 
   /** Refresh only skill frontmatter; stale workspace/session results cannot replace current choices. */
   async refreshCommands(): Promise<boolean> {

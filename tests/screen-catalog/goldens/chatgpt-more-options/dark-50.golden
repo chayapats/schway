@@ -1,0 +1,108 @@
+schway-screen 1
+screen chatgpt-more-options
+title ChatGPT more options
+description Device approval and a pasted callback are alternate ChatGPT methods.
+variant dark-50
+size 50x30
+cursor 6 27 visible
+== text
+ ⚡ schway  /project
+
+
+ Not connected
+ Sign in to choose a model · Alt+L
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ChatGPT · more options
+      › Device approval
+        Paste browser callback
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ○ NOT CONNECTED
+ ↑↓ select · Enter · Esc back
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-50 #ffffff #161b24 -
+01 0-50 #ffffff #0e1117 -
+02 0-50 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-14 #e6eaf0 #0e1117 b
+03 14-50 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-29 #8b95a7 #0e1117 -
+04 29-34 #e6eaf0 #293140 b
+04 34-50 #ffffff #0e1117 -
+05 0-50 #ffffff #0e1117 -
+06 0-50 #ffffff #0e1117 -
+07 0-50 #ffffff #0e1117 -
+08 0-50 #ffffff #0e1117 -
+09 0-50 #ffffff #0e1117 -
+10 0-50 #ffffff #0e1117 -
+11 0-50 #ffffff #0e1117 -
+12 0-50 #ffffff #0e1117 -
+13 0-50 #ffffff #0e1117 -
+14 0-50 #ffffff #0e1117 -
+15 0-50 #ffffff #0e1117 -
+16 0-50 #ffffff #0e1117 -
+17 0-50 #ffffff #0e1117 -
+18 0-50 #ffffff #0e1117 -
+19 0-50 #ffffff #0e1117 -
+20 0-50 #ffffff #0e1117 -
+21 0-50 #ffffff #0e1117 -
+22 0-1 #ffffff #0e1117 -
+22 1-2 #ffffff #1e2430 -
+22 2-24 #7cc4ff #1e2430 -
+22 24-49 #ffffff #1e2430 -
+22 49-50 #ffffff #0e1117 -
+23 0-1 #ffffff #0e1117 -
+23 1-2 #ffffff #1e2430 -
+23 2-23 #7cc4ff #33475e -
+23 23-49 #ffffff #1e2430 -
+23 49-50 #ffffff #0e1117 -
+24 0-1 #ffffff #0e1117 -
+24 1-2 #ffffff #1e2430 -
+24 2-30 #e6eaf0 #1e2430 -
+24 30-49 #ffffff #1e2430 -
+24 49-50 #ffffff #0e1117 -
+25 0-1 #ffffff #0e1117 -
+25 1-49 #161b24 #0e1117 -
+25 49-50 #ffffff #0e1117 -
+26 0-1 #ffffff #0e1117 -
+26 1-5 #7cc4ff #161b24 -
+26 5-16 #8b95a7 #161b24 -
+26 16-49 #ffffff #161b24 -
+26 49-50 #ffffff #0e1117 -
+27 0-1 #ffffff #0e1117 -
+27 1-49 #161b24 #0e1117 -
+27 49-50 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-18 #8b95a7 #303641 b
+28 18-50 #ffffff #0e1117 -
+29 0-1 #ffffff #0e1117 -
+29 1-3 #e6eaf0 #293140 b
+29 3-13 #8b95a7 #0e1117 -
+29 13-18 #e6eaf0 #293140 b
+29 18-21 #8b95a7 #0e1117 -
+29 21-24 #e6eaf0 #293140 b
+29 24-29 #8b95a7 #0e1117 -
+29 29-50 #ffffff #0e1117 -

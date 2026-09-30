@@ -2,7 +2,6 @@ import { redactSecrets } from "../auth/secrets.ts";
 import type { Model } from "../model/model.ts";
 import { describeEffectiveThinking } from "../config/config.ts";
 import type { TuiSnapshot } from "./controller-types.ts";
-import { LOGIN_CHOICES } from "./controller-credentials.ts";
 import { startupFailureCategory, startupRecoveryMessage } from "./controller-support.ts";
 import { TurnLayer } from "./controller-turn.ts";
 
@@ -63,7 +62,8 @@ export class TuiController extends TurnLayer {
       sessionPicker: this.sessionPicker ? structuredClone(this.sessionPicker) : undefined,
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
       credentialEntry: this.credentialEntry?.snapshot(),
-      ...(this.loginChooserIndex !== undefined ? { loginChooser: { selectedIndex: this.loginChooserIndex, choices: LOGIN_CHOICES.map(choice => choice.label) } } : {}),
+      ...(this.loginChooserState ? { loginChooser: this.loginChooserSnapshot() } : {}),
+      ...(this.endpointUrlEntry ? { endpointUrlEntry: { ...this.endpointUrlEntry } } : {}),
       ...(this.loginCallbackValue !== undefined ? { loginCallbackEntry: { masked: "•".repeat(Math.min(this.loginCallbackValue.length, 64)) } } : {}),
       ...(this.loginApproval !== undefined ? { loginApproval: this.loginApproval } : {}),
       ...(branchTree.tree !== undefined ? { branchTree: branchTree.tree } : {}),
@@ -74,7 +74,7 @@ export class TuiController extends TurnLayer {
 
   /** True while startup, a turn, compaction or credential input owns interactive execution. */
   get running(): boolean {
-    return this.startupAbort !== undefined || this.activeAbort !== undefined || this.credentialEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
+    return this.startupAbort !== undefined || this.activeAbort !== undefined || this.credentialEntry !== undefined || this.endpointUrlEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
   }
 
   /** Resolve the selected startup adapter without blocking editing or implicitly submitting a task. */
@@ -127,7 +127,7 @@ export class TuiController extends TurnLayer {
     this.signInListAbort?.abort();
     this.disposed = true;
     this.closeModelPicker();
-    if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; }
+    if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; this.endpointUrlEntry = undefined; this.endpointTargetUrl = undefined; this.loginReturn = undefined; }
     this.abortActiveTurn();
     this.contextManager.clearActiveSkill();
     this.detachDiagnostics?.();

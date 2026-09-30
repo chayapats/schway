@@ -120,7 +120,9 @@ export interface TuiSnapshot {
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
   /** Available sign-in actions while the interactive chooser is open. */
-  loginChooser?: { selectedIndex: number; choices: readonly string[] };
+  loginChooser?: LoginChooserSnapshot;
+  /** Ephemeral plain endpoint input and its field-local validation message, excluded from conversation persistence. */
+  endpointUrlEntry?: { value: string; error?: string };
   /** Masked browser callback input, kept outside transcript and composer history. */
   loginCallbackEntry?: { masked: string };
   /** Ephemeral approval instruction; user codes never enter transcript notices. */
@@ -223,3 +225,10 @@ export type CodexLoginRunner = (input: {
 export type LoginApproval = { kind: "browser" } | { kind: "device"; verificationUri: string; userCode: string };
 /** Explicit Grok OAuth runner with separate panel progress and secure-store commit notification. */
 export type GrokLoginRunner = (input: { device: boolean; signal: AbortSignal; onProgress: (message: string) => void; onApproval: (approval: LoginApproval) => void; onSaved?: () => void }) => Promise<{ ok: true; status: string } | { ok: false; message: string }>;
+
+/** Chooser levels distinguish primary routes from a subscription's alternate sign-in methods. */
+export type LoginChooserLevel = "main" | "chatgpt" | "grok";
+/** Ordered chooser rows separate nonselectable group headers from stable selectable actions. */
+export type LoginChooserRow = { kind: "group"; label: string } | { kind: "choice"; id: string; label: string; detail?: string; hasMore: boolean };
+/** A sign-in panel exposes its current level, ordered rows and selected action identity. */
+export interface LoginChooserSnapshot { level: LoginChooserLevel; rows: readonly LoginChooserRow[]; selectedId: string }

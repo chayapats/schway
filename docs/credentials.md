@@ -22,11 +22,24 @@ OpenAI still has a separate identity from native OpenAI.
 
 ## Explicit interactive management
 
-Start an interactive session and type `/login` to choose ChatGPT browser approval,
-device approval, a pasted browser callback, or a provider API key. Use Up/Down,
-Enter and Esc; no credential syntax is needed in the chooser. The callback entry
-is masked and stays outside prompt recall and session history. A draft and its
-cursor return after the chooser or masked entry closes.
+Start an interactive session and type `/login` or press Alt+L. The chooser groups
+connections by what you pay for: **Subscription** (ChatGPT, Grok), **API key**
+(OpenAI, xAI), and **Custom endpoint** (OpenAI-compatible). ChatGPT browser approval
+is recommended. Use ↑↓ to select a row and Enter to start its primary method.
+Tab on ChatGPT opens **Device approval** and **Paste browser callback**; Tab on Grok
+opens **Device code**. Esc returns one level. Callback and API key entry are masked,
+stay outside prompt recall and session history, and return to their originating
+chooser row on Esc. Your composer draft and cursor survive every step.
+
+OpenAI-compatible asks for an **Endpoint URL**, then a masked API key. Nothing is
+saved until you submit the key. The new URL replaces a selected compatible profile
+for this session only; user and project config files stay unchanged. After saving,
+Schway lists that endpoint's models and selects the recommended model. If listing
+or activation fails, the saved session URL remains available through `/model`.
+To keep the URL, run `/config set baseUrl <url> --scope user`. Esc from key entry
+returns to the typed URL; another Esc returns to the compatible chooser row.
+The direct `/login openai-compatible` command keeps its key-only behavior against
+the configured URL.
 
 You can also name the provider explicitly:
 

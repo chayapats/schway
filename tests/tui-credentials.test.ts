@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
-import { loadConfigEditor } from "../src/config/editing.ts";
+import { ConfigEditor, loadConfigEditor } from "../src/config/editing.ts";
 import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createSession } from "../src/session/session.ts";
@@ -189,4 +189,244 @@ afterAll(() => { globalThis.fetch = unguardedFetch; });
     expect(controller.snapshot().loginApprovalData?.kind).toBe("browser"); controller.cancel(); await signingIn;
     expect(controller.snapshot().modelPicker?.query).toBe("Grok subscription");
   } finally { controller.dispose(); }
+});
+
+
+function chooserController(overrides: Partial<import("../src/tui/controller.ts").TuiControllerOptions> = {}) {
+  const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
+  return new TuiController({ session: createSession(), sessionId: "grouped-login", workspace,
+    provider: "openai", modelId: "", contextManager: createContextManager(workspace),
+    configEditor: new ConfigEditor({ cli: { provider: "openai", ...(overrides.baseUrl ? { baseUrl: overrides.baseUrl } : {}) } }, { user: "/unused-user-config", project: "/unused-project-config" }),
+    stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) }),
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) }, ...overrides });
+}
+
+function chooseLoginRow(controller: TuiController, id: string) {
+  const panel = controller.snapshot().loginChooser!;
+  const ids = panel.rows.filter(row => row.kind === "choice").map(row => row.id);
+  expect(ids).toContain(id);
+  controller.moveLoginChooser(ids.indexOf(id) - ids.indexOf(panel.selectedId));
+}
+
+test("grouped chooser orders payment groups, details and stable actions without starting work", async () => {
+  const calls: string[] = [];
+  const controller = chooserController({ credentials: { store: fakeCredentialStore(), env: {}, reload: async () => { calls.push("reload"); return { model: createScriptedModel() }; },
+    codexLogin: async () => { calls.push("codex"); return { ok: false, message: "Denied" }; },
+    grokLogin: async () => { calls.push("grok"); return { ok: false, message: "Denied" }; } } });
+  try {
+    expect(controller.openLoginChooser()).toBe(true);
+    expect(controller.snapshot().loginChooser).toEqual({ level: "main", selectedId: "chatgpt", rows: [
+      { kind: "group", label: "Subscription" },
+      { kind: "choice", id: "chatgpt", label: "ChatGPT", detail: "recommended · browser", hasMore: true },
+      { kind: "choice", id: "grok", label: "Grok", detail: "browser", hasMore: true },
+      { kind: "group", label: "API key" },
+      { kind: "choice", id: "openai", label: "OpenAI", hasMore: false },
+      { kind: "choice", id: "xai", label: "xAI", hasMore: false },
+      { kind: "group", label: "Custom endpoint" },
+      { kind: "choice", id: "compatible", label: "OpenAI-compatible", detail: "URL + key", hasMore: false },
+    ] });
+    controller.moveLoginChooser(-1); expect(controller.snapshot().loginChooser!.selectedId).toBe("compatible");
+    controller.moveLoginChooser(1); expect(controller.snapshot().loginChooser!.selectedId).toBe("chatgpt");
+    for (const id of ["chatgpt", "grok", "openai", "xai", "compatible"]) {
+      chooseLoginRow(controller, id);
+      const notices = controller.snapshot().transcript.length;
+      expect(controller.openLoginMoreOptions()).toBe(id === "chatgpt" || id === "grok");
+      if (id === "chatgpt" || id === "grok") {
+        expect(controller.snapshot().loginChooser).toMatchObject({ level: id, selectedId: `${id}-device` });
+        expect(controller.snapshot().loginChooser!.rows.map(row => row.label)).toEqual(id === "chatgpt" ? ["Device approval", "Paste browser callback"] : ["Device code"]);
+        controller.cancel(); expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: id });
+      }
+      expect(controller.snapshot().transcript.length).toBe(notices);
+    }
+    expect(calls).toEqual([]);
+    controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined();
+    expect(await controller.login("")).toBe(true); expect(controller.snapshot().loginChooser!.selectedId).toBe("chatgpt");
+  } finally { controller.dispose(); }
+});
+
+test("key and callback entries restore their originating row and direct commands return to the composer", async () => {
+  const store = fakeCredentialStore();
+  const controller = chooserController({ credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }) } });
+  try {
+    for (const id of ["openai", "xai"]) {
+      controller.openLoginChooser(); chooseLoginRow(controller, id);
+      expect(await controller.selectLoginChoice()).toBe(true);
+      controller.enterCredentialText("cancelled-key"); controller.cancel();
+      expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: id });
+      expect(await store.get(credentialIdentity({ provider: id as "openai" | "xai" }))).toBeNull();
+      controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined();
+    }
+    controller.openLoginChooser(); controller.openLoginMoreOptions(); chooseLoginRow(controller, "chatgpt-callback");
+    expect(await controller.selectLoginChoice()).toBe(true); expect(controller.snapshot().loginCallbackEntry).toEqual({ masked: "" });
+    controller.enterLoginCallbackText("private-callback"); controller.cancel();
+    expect(controller.snapshot().loginChooser).toMatchObject({ level: "chatgpt", selectedId: "chatgpt-callback" });
+    controller.cancel(); expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "chatgpt" });
+    controller.cancel();
+    expect(await controller.login("openai")).toBe(true); controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined();
+  } finally { controller.dispose(); }
+});
+
+for (const provider of ["chatgpt", "grok"] as const) for (const device of [false, true]) test(`${provider} ${device ? "device" : "browser"} approval cancellation restores its exact chooser origin`, async () => {
+  const methods: boolean[] = [];
+  const wait = async ({ device, signal }: { device: boolean; signal: AbortSignal }) => {
+    methods.push(device); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+    return { ok: false as const, message: "Cancelled" };
+  };
+  const controller = chooserController({ credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: wait, grokLogin: wait } });
+  try {
+    controller.openLoginChooser(); chooseLoginRow(controller, provider); if (device) controller.openLoginMoreOptions();
+    const origin = controller.snapshot().loginChooser!;
+    const pending = controller.selectLoginChoice(); expect(controller.running).toBe(true);
+    controller.cancel(); await pending;
+    expect(controller.snapshot().loginChooser).toMatchObject({ level: origin.level, selectedId: origin.selectedId });
+    expect(methods).toEqual([device]);
+    if (device) controller.cancel(); controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined();
+    const direct = controller.login(provider === "chatgpt" ? `codex${device ? " --device" : ""}` : `grok${device ? " --device" : ""}`);
+    controller.cancel(); await direct; expect(controller.snapshot().loginChooser).toBeUndefined();
+  } finally { controller.dispose(); }
+});
+
+for (const [value, error] of [
+  ["", "Enter the endpoint URL, for example http://localhost:8787/v1."],
+  ["localhost:8787", "Enter a full URL that starts with http:// or https://."],
+  ["ftp://host/v1", "Enter a full URL that starts with http:// or https://."],
+  ["http://user:pw@host/v1", "Remove the user name and password from the URL; enter the key in the next step."],
+  ["http://host/v1?x=1", "Remove the query string from the URL."],
+  ["http://host/v1?", "Remove the query string from the URL."],
+]) test(`endpoint URL validation keeps ${JSON.stringify(value)} in the ephemeral field`, async () => {
+  const controller = chooserController();
+  try {
+    controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); await controller.selectLoginChoice();
+    controller.enterEndpointUrlText(value); expect(controller.submitEndpointUrl()).toBe(false);
+    expect(controller.snapshot().endpointUrlEntry).toEqual({ value, error });
+    expect(controller.snapshot().credentialEntry).toBeUndefined();
+    expect(controller.snapshot().transcript).toEqual([]);
+    controller.cancel(); expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "compatible" });
+  } finally { controller.dispose(); }
+});
+
+test("endpoint URL prefill accepts only the same valid HTTP(S) URLs as profiles, and direct login stays key-only", async () => {
+  for (const baseUrl of [undefined, "http://localhost:8787/v1", "https://host/v1#models", "localhost:8787", "https://user:pw@host/v1", "https://host/v1?x=1"]) {
+    const controller = chooserController({ baseUrl });
+    try {
+      expect(controller.beginEndpointLogin()).toBe(true);
+      expect(controller.snapshot().endpointUrlEntry?.value).toBe(baseUrl === "http://localhost:8787/v1" || baseUrl === "https://host/v1#models" ? baseUrl : "");
+      controller.cancel();
+      if (baseUrl === "http://localhost:8787/v1") { expect(await controller.login("openai-compatible")).toBe(true); expect(controller.snapshot().endpointUrlEntry).toBeUndefined(); controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined(); }
+    } finally { controller.dispose(); }
+  }
+});
+
+for (const outcome of ["success", "list-failure", "activation-failure"] as const) test(`endpoint key save replaces a current profile in session scope through ${outcome}`, async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] }, store = fakeCredentialStore();
+    const editor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true, cli: {
+      profile: "old", profiles: { old: { baseUrl: "https://old.example/v1", model: "old-model", auth: "none" } },
+    } });
+    const session = createSession(); const listings: unknown[] = []; const staged: string[] = [];
+    const controller = chooserController({ session, home, workspace, configEditor: editor, provider: editor.settings.provider, modelId: editor.settings.model,
+      profile: "old", baseUrl: editor.settings.baseUrl, auth: editor.settings.auth, model: createScriptedModel({ provider: "openai-compatible", id: "old-model" }),
+      credentials: { store, env: {}, reload: async () => { throw Error("the old endpoint must not reload"); }, listRouteModels: async (route, _signal, options) => {
+        listings.push({ route, options }); if (outcome === "list-failure") throw Error("Offline"); return [{ id: "other" }, { id: "endpoint-model", recommended: true }];
+      } }, stageSettings: async settings => { staged.push(settings.baseUrl!); if (outcome === "activation-failure") throw Error("Offline");
+        return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) }; },
+    });
+    try {
+      controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); expect(await controller.selectLoginChoice()).toBe(true);
+      // Replace the valid profile URL prefill without touching any settings.
+      while (controller.snapshot().endpointUrlEntry!.value) controller.backspaceEndpointUrl();
+      controller.enterEndpointUrlText("  http://localhost:8787/v1  "); expect(controller.submitEndpointUrl()).toBe(true);
+      expect(controller.snapshot().credentialEntry).toBeDefined(); expect(editor.settings.baseUrl).toBe("https://old.example/v1");
+      controller.enterCredentialText("endpoint-private-key"); expect(await controller.submitCredential()).toBe(true);
+      expect(listings).toEqual([{ route: "compatible", options: { baseUrl: "http://localhost:8787/v1" } }]);
+      expect(editor.settings.baseUrl).toBe("http://localhost:8787/v1"); expect(editor.settings.profile).toBeUndefined();
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Automatic authentication is disabled"))).toBe(false);
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787/v1" }))).toBe("endpoint-private-key");
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Endpoint saved for this session. To keep it, run /config set baseUrl http://localhost:8787/v1 --scope user.")).toBe(true);
+      if (outcome === "success") { expect(controller.snapshot().modelId).toBe("endpoint-model"); expect(staged).toEqual(["http://localhost:8787/v1"]); }
+      else { expect(controller.snapshot().modelId).toBe("old-model"); expect(controller.snapshot().status).toBe("error"); expect(controller.snapshot().transcript.at(-1)?.text).toContain("Credential saved, but the recommended model could not be activated"); }
+      expect(await Bun.file(join(home, ".schway/config.json")).exists()).toBe(false); expect(await Bun.file(join(root, ".schway/config.json")).exists()).toBe(false);
+      if (outcome !== "success") expect(await controller.submit("do not reuse the old endpoint adapter")).toBe(false);
+      expect(JSON.stringify(session.items)).not.toContain("http://localhost:8787/v1");
+      // Durable workspace choice contains route/model only; the ephemeral endpoint is not remembered.
+      const next = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+      expect(next.settings.baseUrl).not.toBe("http://localhost:8787/v1");
+    } finally { controller.dispose(); }
+  });
+});
+
+test("URL and key Esc retain the typed endpoint while an empty key saves nothing", async () => {
+  const controller = chooserController();
+  try {
+    controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); await controller.selectLoginChoice();
+    controller.enterEndpointUrlText("http://localhost:8787/v1"); controller.submitEndpointUrl(); controller.enterCredentialText("cancelled-key");
+    controller.cancel(); expect(controller.snapshot().endpointUrlEntry).toEqual({ value: "http://localhost:8787/v1" });
+    expect(controller.submitEndpointUrl()).toBe(true); expect(await controller.submitCredential()).toBe(false);
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("API key is empty; nothing saved.");
+    expect(controller.snapshot().loginChooser).toBeUndefined();
+  } finally { controller.dispose(); }
+});
+
+test("opening a chooser while a turn runs gives the specified busy notice and never starts sign-in", async () => {
+  const controller = chooserController({ model: createScriptedModel({ waitForAbort: true }), modelId: "test" });
+  const turn = controller.submit("work");
+  try { expect(controller.openLoginChooser()).toBe(false); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Busy: finish the current operation before signing in."); }
+  finally { controller.cancel(); await turn; controller.dispose(); }
+});
+
+
+for (const device of [false, true]) test(`Grok chooser ${device ? "device" : "browser"} uses the real OAuth runner and protocol fixtures`, async () => {
+  const { createGrokLoginRunner } = await import("../src/tui/app.ts");
+  const { GROK_TOKEN_URL, GROK_DEVICE_AUTHORIZATION_URL } = await import("../src/model/providers/grok-subscription.ts");
+  const { grokSubscriptionIdentity } = await import("../src/auth/store.ts");
+  const store = fakeCredentialStore(), requests: string[] = [], secrets: string[] = [];
+  const runner = createGrokLoginRunner({ store, secrets,
+    openBrowser: async value => {
+      const url = new URL(value); expect(url.origin).toBe("https://auth.x.ai");
+      expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+      await (await fetch(`${url.searchParams.get("redirect_uri")}?state=${url.searchParams.get("state")}&code=fixture-code`)).text();
+    }, fetch: async (input, init) => {
+      const url = String(input); requests.push(url); const body = new URLSearchParams(String(init?.body));
+      if (url === GROK_DEVICE_AUTHORIZATION_URL) { expect(body.get("scope")).toContain("api:access"); return Response.json({ device_code: "fixture-device", user_code: "ABCD-EFGH", verification_uri: "https://x.ai/device", interval: 1 }); }
+      expect(url).toBe(GROK_TOKEN_URL); expect(body.get("grant_type")).toBe(device ? "urn:ietf:params:oauth:grant-type:device_code" : "authorization_code");
+      if (!device) { expect(body.get("code")).toBe("fixture-code"); expect(body.get("code_verifier")!.length).toBeGreaterThanOrEqual(43); }
+      return Response.json({ access_token: "fixture-access", refresh_token: "fixture-refresh", expires_in: 3600 });
+    },
+  });
+  const controller = chooserController({ credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: runner, listGrokModels: async () => [{ id: "grok-4.7", recommended: true }] } });
+  try {
+    controller.openLoginChooser(); chooseLoginRow(controller, "grok"); if (device) controller.openLoginMoreOptions();
+    expect(requests).toEqual([]); expect(await controller.selectLoginChoice()).toBe(true);
+    expect(requests).toEqual(device ? [GROK_DEVICE_AUTHORIZATION_URL, GROK_TOKEN_URL] : [GROK_TOKEN_URL]);
+    expect(await store.get(grokSubscriptionIdentity())).toContain("fixture-access"); expect(controller.snapshot().modelId).toBe("grok-4.7");
+    expect(JSON.stringify(controller.snapshot())).not.toContain("fixture-access");
+  } finally { controller.dispose(); }
+});
+
+test("xAI chooser saves only its API key and discovers models through the xAI protocol fixture", async () => {
+  const { XAI_MODELS_PAYLOAD } = await import("./fixtures/xai.ts");
+  const { fetchProviderModelList } = await import("../src/model/model-list.ts");
+  const { XAI_MODELS_URL } = await import("../src/model/providers/xai.ts");
+  const store = fakeCredentialStore(), requests: string[] = [];
+  const controller = chooserController({ credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }),
+    listRouteModels: async (route, signal) => {
+      expect(route).toBe("xai");
+      const key = await store.get(credentialIdentity({ provider: "xai" }));
+      return fetchProviderModelList({ url: XAI_MODELS_URL, apiKey: key!, label: "xAI", signal, fetch: async (input, init) => {
+        requests.push(String(input)); expect(new Headers(init?.headers).get("authorization")).toBe("Bearer xai-fixture-key"); return Response.json(XAI_MODELS_PAYLOAD);
+      } });
+    },
+  } });
+  try {
+    controller.openLoginChooser(); chooseLoginRow(controller, "xai"); expect(await controller.selectLoginChoice()).toBe(true);
+    expect(requests).toEqual([]); controller.enterCredentialText("xai-fixture-key"); expect(await controller.submitCredential()).toBe(true);
+    expect(requests).toEqual([XAI_MODELS_URL]); expect(controller.snapshot().modelId).toBe("grok-4.7");
+    expect(await store.get(credentialIdentity({ provider: "openai" }))).toBeNull();
+  } finally { controller.dispose(); }
+});
+
+test("endpoint entry fails clearly when session settings cannot be committed", () => {
+  const controller = chooserController({ configEditor: undefined, stageSettings: undefined });
+  try { expect(controller.beginEndpointLogin()).toBe(false); expect(controller.snapshot().endpointUrlEntry).toBeUndefined(); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Endpoint setup unavailable · Restart Schway · Alt+L sign in"); }
+  finally { controller.dispose(); }
 });
