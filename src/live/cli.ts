@@ -1,5 +1,6 @@
 import { isSafeEndpoint, isSafeSmokeEndpoint, runLiveSmoke, SMOKE_PROVIDERS, type SmokeProvider, type SmokeSelection } from "./smoke.ts";
 import { runLiveProcesses } from "./process.ts";
+import { isThinkingLevel } from "../model/model.ts";
 const SAFE_ID = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const SAFE_OPTION = /^[^\x00-\x1f\x7f]{1,200}$/;
 /** Argument parser that never inspects the environment or OS credential store. */
@@ -27,6 +28,12 @@ export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeS
       const id = value.slice(separator + 1);
       if (separator < 1 || !SMOKE_PROVIDERS.includes(provider) || !SAFE_ID.test(id)) return { error: "Use --model provider=model-id with a valid provider and model ID." };
       selection.models![provider] = id;
+    } else if (flag === "--thinking") {
+      const separator = value.indexOf("=");
+      const provider = value.slice(0, separator) as SmokeProvider;
+      const level = value.slice(separator + 1);
+      if (separator < 1 || !SMOKE_PROVIDERS.includes(provider) || !isThinkingLevel(level)) return { error: "Use --thinking provider=level with a valid provider and ThinkingLevel." };
+      (selection.thinking ??= {})[provider] = level;
     } else if (flag === "--base-url") {
       if (!isSafeEndpoint(value)) return { error: "Compatible endpoint must be an HTTP(S) URL without userinfo, query, or fragment." };
       url = new URL(value).href;
@@ -39,6 +46,7 @@ export function parseLiveArgs(argv: readonly string[]): { selection: Omit<SmokeS
   }
   if (selection.providers.length === 0) return { error: "Select --provider openai-api-key|xai-api-key|compatible|codex|grok|all (or a comma-separated list)." };
   if (selection.models && Object.keys(selection.models).some(p => !selection.providers.includes(p as SmokeProvider))) return { error: "Model override must target a selected provider." };
+  if (selection.thinking && Object.keys(selection.thinking).some(p => !selection.providers.includes(p as SmokeProvider))) return { error: "Thinking override must target a selected provider." };
   if (selection.providers.includes("compatible") && !url && selection.enabled) return { error: "Select --base-url for the compatible endpoint." };
   if (url && !isSafeSmokeEndpoint(url, auth)) return { error: "Use HTTPS for compatible credentials; local HTTP requires explicit --auth none." };
   if ((url || auth !== "required" || profile || credentialEnv || credentialIdentity) && !selection.providers.includes("compatible")) return { error: "Compatible connection options require --provider compatible." };

@@ -7,8 +7,8 @@ import { resolveProviderCredential, selectOpenAITransport } from "../auth/creden
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { createContextManager } from "../context/manager.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
-import { loadProviderModel, type ProviderLoaderInput } from "../model/loader.ts";
-import type { Model } from "../model/model.ts";
+import { loadProviderModel, type FetchLike, type ProviderLoaderInput } from "../model/loader.ts";
+import { isThinkingLevel, type Model, type ThinkingLevel } from "../model/model.ts";
 import { createSession } from "../session/session.ts";
 import { readTool, type ReadInput } from "../tools/read.ts";
 import { createToolRegistry } from "../tools/registry.ts";
@@ -16,6 +16,7 @@ import type { ToolDefinition } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import { boundedSmokeFetch } from "./transport.ts";
 import type { SmokeDiagnostics, SmokeProgress } from "./diagnostics.ts";
+import { prepareSmokeThinking } from "./thinking.ts";
 
 /** Independently selectable provider/auth lanes; API-key OpenAI never silently switches to subscription billing. */
 export const SMOKE_PROVIDERS = ["openai-api-key", "xai-api-key", "compatible", "codex", "grok"] as const;
@@ -38,6 +39,8 @@ export interface SmokeSelection {
     credentialIdentity?: string;
   };
   models?: Partial<Record<SmokeProvider, string>>;
+  /** Explicit requested reasoning levels, scoped to selected lanes; omission preserves provider defaults. */
+  thinking?: Partial<Record<SmokeProvider, ThinkingLevel>>;
   /** Optional programmatic runtime key overrides, scoped to one selected provider. */
   runtimeKeys?: Partial<Record<SmokeProvider, string>>;
   /** Parent-owned workspace for an isolated subprocess; the worker must never remove it. */
@@ -47,6 +50,8 @@ export interface SmokeSelection {
 export interface SmokeDependencies {
   createStore?: () => CredentialStore;
   createModel?: (input: ProviderLoaderInput) => Promise<Model>;
+  /** Replace HTTP with protocol fixtures inside the production cumulative byte/deadline policy. */
+  fetch?: FetchLike;
   onWorkspace?: (workspace: Workspace) => void;
   /** Record that the selected model stream has started, without exposing model content. */
   onModelStarted?: () => void;
@@ -59,6 +64,8 @@ export interface SmokeDependencies {
 export interface SmokeScenario {
   provider: SmokeProvider;
   model: string;
+  /** Explicit requested level, retained even when the lane cannot start or complete. */
+  thinking?: ThinkingLevel;
   authSource: "runtime" | "env" | "stored" | "stored-subscription" | "none" | "unavailable";
   status: "passed" | "skipped" | "pending" | "failed_provider" | "failed_runner";
   reason: string;
@@ -108,6 +115,7 @@ export async function runLiveSmoke(selection: SmokeSelection, deps: SmokeDepende
     const requestedModel = selection.models?.[provider] ?? DEFAULT_MODELS[provider];
     const scenario: SmokeScenario = {
       provider, model: SAFE_ID.test(requestedModel) ? requestedModel : "invalid-model-id",
+      ...(isThinkingLevel(selection.thinking?.[provider]) ? { thinking: selection.thinking![provider] } : {}),
       authSource: "unavailable", status: "skipped", reason: "live_disabled", durationMs: 0, toolRoundTrip: false,
     };
     if (priorUnsettled) { scenario.status = "pending"; scenario.reason = "prior_run_unsettled"; }
@@ -124,7 +132,8 @@ export async function runLiveSmoke(selection: SmokeSelection, deps: SmokeDepende
 /** Bound the entire selected lane and always drain the cooperative loop before removing its workspace. */
 async function runScenario(selection: SmokeSelection, provider: SmokeProvider, result: SmokeScenario, deps: SmokeDependencies): Promise<void> {
   if (selection.signal?.aborted) { result.status = "pending"; result.reason = "cancelled"; return; }
-  if (!SAFE_ID.test(result.model) || !Number.isInteger(selection.timeoutMs) || selection.timeoutMs < 1 || selection.timeoutMs > 120_000) {
+  if (!SAFE_ID.test(result.model) || !Number.isInteger(selection.timeoutMs) || selection.timeoutMs < 1 || selection.timeoutMs > 120_000
+    || (selection.thinking?.[provider] !== undefined && !isThinkingLevel(selection.thinking[provider]))) {
     result.status = "failed_runner"; result.reason = "invalid_settings"; return;
   }
   const controller = new AbortController();
@@ -156,11 +165,15 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     }
     // Bound selected production adapters' SSE response bytes before their parsers
     // can accumulate streamed arguments without emitting normalized model events.
-    const fetchFn = boundedSmokeFetch({ signal, onLimit: () => { outputLimit = true; controller.abort(); }, onProgress: event => {
+    const fetchFn = boundedSmokeFetch({ signal, fetch: deps.fetch, onLimit: () => { outputLimit = true; controller.abort(); }, onProgress: event => {
       if (event.type === "request") diagnostics.httpRequestsStarted++;
       else { diagnostics.httpResponsesReceived++; diagnostics.lastHttpStatus = event.status; }
       checkpoint();
     } });
+    input.thinking = result.thinking;
+    const thinkingError = await awaitSetup(prepareSmokeThinking(input, fetchFn, signal), signal);
+    if (signal.aborted) throw Error("setup aborted");
+    if (thinkingError) { result.status = "failed_runner"; result.reason = thinkingError; return; }
     const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input, fetchFn)))(input), signal);
     result.model = SAFE_ID.test(model.id) ? model.id : "invalid-model-id";
     // The loop registers activate_skill whenever it has a workspace. Do not
