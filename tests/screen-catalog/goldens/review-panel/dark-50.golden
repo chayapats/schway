@@ -13,10 +13,10 @@ cursor 1 1 hidden
  › clamp.ts                                 +1 −1
 
    1   export function clamp(n: number, lo: numbe
+ r, hi: number) {
    2 -   return Math.max(lo, n);
    2 +   return Math.min(hi, Math.max(lo, n));
    3   }
-
 
 
 
@@ -57,15 +57,17 @@ cursor 1 1 hidden
 06 1-49 #e6eaf0 #0e1117 -
 06 49-50 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-32 #f79d9d #0e1117 -
-07 32-50 #ffffff #0e1117 -
+07 1-17 #e6eaf0 #0e1117 -
+07 17-50 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-46 #8fd19e #0e1117 -
-08 46-50 #ffffff #0e1117 -
+08 1-32 #f79d9d #0e1117 -
+08 32-50 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-8 #e6eaf0 #0e1117 -
-09 8-50 #ffffff #0e1117 -
-10 0-50 #ffffff #0e1117 -
+09 1-46 #8fd19e #0e1117 -
+09 46-50 #ffffff #0e1117 -
+10 0-1 #ffffff #0e1117 -
+10 1-8 #e6eaf0 #0e1117 -
+10 8-50 #ffffff #0e1117 -
 11 0-50 #ffffff #0e1117 -
 12 0-50 #ffffff #0e1117 -
 13 0-50 #ffffff #0e1117 -

@@ -11,10 +11,10 @@ cursor 1 1 hidden
   Review · turn 1
 
   › clamp.ts     +1 −1 │   1   export function clamp(n: number, lo: number, hi
+                       │ : number) {
                        │   2 -   return Math.max(lo, n);
                        │   2 +   return Math.min(hi, Math.max(lo, n));
                        │   3   }
-                       │
                        │
                        │
                        │
@@ -56,19 +56,20 @@ cursor 1 1 hidden
 04 78-80 #ffffff #f7f7f4 -
 05 0-22 #ffffff #f7f7f4 -
 05 22-25 #c5c9cf #f7f7f4 -
-05 25-56 #a61f16 #f7f7f4 -
-05 56-80 #ffffff #f7f7f4 -
+05 25-36 #1d232c #f7f7f4 -
+05 36-80 #ffffff #f7f7f4 -
 06 0-22 #ffffff #f7f7f4 -
 06 22-25 #c5c9cf #f7f7f4 -
-06 25-70 #19612f #f7f7f4 -
-06 70-80 #ffffff #f7f7f4 -
+06 25-56 #a61f16 #f7f7f4 -
+06 56-80 #ffffff #f7f7f4 -
 07 0-22 #ffffff #f7f7f4 -
 07 22-25 #c5c9cf #f7f7f4 -
-07 25-32 #1d232c #f7f7f4 -
-07 32-80 #ffffff #f7f7f4 -
+07 25-70 #19612f #f7f7f4 -
+07 70-80 #ffffff #f7f7f4 -
 08 0-22 #ffffff #f7f7f4 -
 08 22-25 #c5c9cf #f7f7f4 -
-08 25-80 #ffffff #f7f7f4 -
+08 25-32 #1d232c #f7f7f4 -
+08 32-80 #ffffff #f7f7f4 -
 09 0-22 #ffffff #f7f7f4 -
 09 22-25 #c5c9cf #f7f7f4 -
 09 25-80 #ffffff #f7f7f4 -

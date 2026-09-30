@@ -202,10 +202,11 @@ export abstract class TurnLayer extends CompactionLayer {
     return true;
   }
 
-  /** Append one shared turn-details notice for a failed outcome, or startup recovery diagnostics. */
+  /** Inspect current unaccepted recovery first, otherwise the retained failed turn or accepted recovery. */
   inspectRecovery(): boolean {
     const recovery = this.currentRecovery();
-    if (this.snapshot().outcome?.reason === "failed") {
+    const unacceptedDetails = recovery?.accepted === false && recovery.actions.includes("details");
+    if (!unacceptedDetails && this.snapshot().outcome?.reason === "failed") {
       this.notice(this.turnDetails());
       return true;
     }

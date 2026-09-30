@@ -649,7 +649,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));
         reviewDivider.visible = !stacked && fileRows.length > 0;
         reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
-        reviewText.wrapMode = review.showingDetails ? "word" : "none";
+        reviewText.wrapMode = review.showingDetails ? "word" : "char";
         const content = JSON.stringify([review.showingDetails, review.detail, review.details, mode]);
         if (content !== reviewContent) {
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
@@ -1094,11 +1094,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (key.ctrl && name === "i") { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); handled(); return; }
       if (name === "escape") { if (snapshot.changeReview.showingDetails) { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); } else controller.closeChangeReview(); handled(); return; }
       if (!snapshot.changeReview.showingDetails && (name === "up" || name === "down")) { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewDiff.scrollTo(0); }
-      if (name === "pageup" || name === "pagedown") reviewDiff.scrollBy(name === "pageup" ? -Math.max(1, renderer.height - 8) : Math.max(1, renderer.height - 8));
+      if (name === "pageup" || name === "pagedown") {
+        const distance = Math.max(1, reviewDiff.viewport.height - 2);
+        reviewDiff.scrollBy(name === "pageup" ? -distance : distance);
+      }
       handled(); return;
     }
     if (key.ctrl && name === "i" && !panelMode && !controller.running && snapshot.outcome) {
-      if (activityPaint.text.includes("Ctrl+I details")) controller.inspectRecovery();
+      if ((snapshot.recovery?.accepted === false && snapshot.recovery.actions.includes("details")) || activityPaint.text.includes("Ctrl+I details")) controller.inspectRecovery();
       handled(); return;
     }
     if ((key.meta || key.option) && name === "r" && !panelMode && !controller.running) {

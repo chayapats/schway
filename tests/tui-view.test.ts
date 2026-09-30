@@ -2651,6 +2651,100 @@ test("failed outcome details append once and review details escape returns to th
   expect(ui.controller.snapshot().changeReview).toBeUndefined();
 });
 
+test("review pages reveal long unbroken and Thai line tails at two-column and stacked widths", async () => {
+  await withTempDir(async dir => {
+    const git = Bun.spawn(["git", "init", "-q"], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } });
+    expect(await git.exited).toBe(0);
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    for (const width of [80, 79, 50]) {
+      const ui = await setup(width, 22, {}, undefined, { workspace, contextManager: createContextManager(workspace), tools: createToolRegistry([writeTool]),
+        model: createScriptedModel({ responses: [{ toolCalls: [{ id: "long-lines", name: "write", arguments: {
+          path: "long.txt", content: `${"x".repeat(1200)}終\n${"ภาษาไทย".repeat(150)}尾\n`,
+        } }] }, { text: "done" }] }),
+      });
+      await ui.controller.submit("write long lines");
+      await ui.controller.openChangeReview(); await settle(ui);
+      expect(ui.captureCharFrame()).toContain("1 + ");
+      expect(ui.captureCharFrame()).not.toContain("終");
+      const text = ui.renderer.root.findDescendantById("change-review-text") as TextRenderable;
+      expect(text.chunks.find(chunk => chunk.text.includes("終"))?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.success));
+      const diff = ui.renderer.root.findDescendantById("change-review-diff") as ScrollBoxRenderable;
+      let visible = ui.captureCharFrame();
+      for (let page = 0; page < 60; page++) {
+        const before = diff.scrollTop;
+        await ui.mockInput.pressKeys(["\u001b[6~"]); await settle(ui);
+        visible += ui.captureCharFrame();
+        if (diff.scrollTop === before) break;
+      }
+      expect(visible).toContain("終");
+      expect(visible).toContain("尾");
+      expect(visible).toContain("2 + ");
+    }
+  });
+});
+
+test("review pages overlap without skipping numbered rows at two-column and stacked widths", async () => {
+  await withTempDir(async dir => {
+    const git = Bun.spawn(["git", "init", "-q"], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } });
+    expect(await git.exited).toBe(0);
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const content = Array.from({ length: 60 }, (_, index) => `ROW_${String(index).padStart(3, "0")}`).join("\n");
+    for (const width of [80, 79, 50]) {
+      const ui = await setup(width, 22, {}, undefined, { workspace, contextManager: createContextManager(workspace), tools: createToolRegistry([writeTool]),
+        model: createScriptedModel({ responses: [{ toolCalls: Array.from({ length: 8 }, (_, index) => ({
+          id: `page-file-${index}`, name: "write", arguments: { path: `${index}.txt`, content },
+        })) }, { text: "done" }] }),
+      });
+      await ui.controller.submit("write numbered lines");
+      await ui.controller.openChangeReview(); await settle(ui);
+      const visibleRows = () => [...ui.captureCharFrame().matchAll(/ROW_(\d+)/g)].map(match => Number(match[1]));
+      let previous = visibleRows();
+      expect(previous[0]).toBe(0);
+      const seen = new Set(previous);
+      for (let page = 0; page < 60 && !seen.has(59); page++) {
+        await ui.mockInput.pressKeys(["\u001b[6~"]); await settle(ui);
+        const current = visibleRows();
+        expect(current[0]).toBeLessThanOrEqual(previous.at(-1)!);
+        expect(current.at(-1)).toBeGreaterThan(previous.at(-1)!);
+        current.forEach(row => seen.add(row));
+        previous = current;
+      }
+      expect([...seen].sort((a, b) => a - b)).toEqual(Array.from({ length: 60 }, (_, index) => index));
+      await ui.mockInput.pressKeys(["\u001b[5~"]); await settle(ui);
+      const earlier = visibleRows();
+      expect(earlier[0]).toBeLessThan(previous[0]!);
+      expect(earlier.at(-1)).toBeGreaterThanOrEqual(previous[0]!);
+    }
+  });
+});
+
+test("new unaccepted recovery details take priority over retained completed and failed outcomes", async () => {
+  for (const failed of [false, true]) {
+    const ui = await setup(80, 28, {}, undefined, { changeTracking: "off",
+      model: createScriptedModel(failed ? { error: "old accepted-turn diagnostic" } : { text: "done" }),
+    });
+    await ui.controller.submit("first turn"); await settle(ui);
+    ui.controller.setModel(undefined, "openai", "fixture");
+    await ui.controller.initializeStartup(async () => ({ error: "new unaccepted startup diagnostic" }));
+    await ui.mockInput.pasteBracketedText("keep the new draft"); await settle(ui);
+    expect(ui.controller.snapshot().recovery).toMatchObject({ accepted: false, actions: ["details", "keep-editing"] });
+    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+    const before = ui.controller.snapshot().transcript.length;
+    ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+    expect(ui.controller.snapshot().transcript).toHaveLength(before + 1);
+    expect(ui.controller.snapshot().transcript.at(-1)!.text).toBe("Failure details: new unaccepted startup diagnostic");
+    expect(ui.editor.plainText).toBe("keep the new draft");
+    expect(ui.session.items.filter(item => item.type === "user")).toHaveLength(1);
+    ui.controller.keepEditingRecovery();
+    ui.resize(24, 28); await settle(ui);
+    const activity = ui.renderer.root.findDescendantById("activity") as TextRenderable;
+    expect(activity.plainText).not.toContain("Ctrl+I details");
+    const dismissed = ui.controller.snapshot().transcript.length;
+    ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+    expect(ui.controller.snapshot().transcript).toHaveLength(dismissed);
+  }
+});
+
 test("fresh review has exactly its empty message and no files", async () => {
   const ui = await setup();
   ui.mockInput.pressKey("r", { meta: true }); await settle(ui);
