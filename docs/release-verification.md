@@ -41,16 +41,17 @@ explicit thinking support before release, now tracked as prerequisite
 [#185](https://github.com/chayapats/schway/issues/185). It was added to milestone
 0.4 and as a native blocker of #138 after the initial precondition check.
 
-Local secure-store presence checks found OpenAI and OpenRouter API keys and a
-Codex login; xAI API-key and Grok subscription identities were absent. Presence
-does not verify remote access. The operator confirmed having no xAI API key and
-reported that Grok subscription login currently cannot complete; its exact
-failure is awaiting reproduction. No stored credential value was printed.
+Initial secure-store presence checks found OpenAI and OpenRouter API keys and
+a Codex login; xAI API-key and Grok subscription identities were absent.
+The operator subsequently completed Grok login. Its account catalog advertised
+`grok-4.7` with medium thinking, which the operator selected. xAI API-key access
+remains pending. Credential presence and model discovery do not verify live
+inference. No stored credential value was printed.
 
 | Route | Provider | Model | Auth source | Status | Reason | Tested at | Revision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ChatGPT subscription | — | — | — | not run | awaiting release commit and smoke settings | — | — |
-| Grok subscription | — | — | — | not run | missing local subscription login | — | — |
+| Grok subscription | — | — | — | not run | awaiting release commit and thinking support | — | — |
 | OpenAI API key | — | — | — | not run | awaiting release commit and smoke settings | — | — |
 | xAI API key | — | — | — | not run | missing local API key | — | — |
 | Compatible endpoint | — | — | — | not run | awaiting release commit and smoke settings | — | — |
