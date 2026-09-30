@@ -111,6 +111,7 @@ export interface TranscriptItemView {
   searchSegments(): readonly { text: string; target: Renderable; visualLine: number; lineInfo?: { lineSources: readonly number[]; lineStartCols: readonly number[] } }[];
   /** Mark the selected search row without changing its rendered content. */
   setSearchMatch(selected: boolean): void;
+  /** Render the current entry at the supplied width and expansion state using the effective inline diff limit. */
   update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean, inlineDiffLines?: number): void;
   /** Advance spinners and completion flashes; returns whether this row still animates. */
   tick(): boolean;
