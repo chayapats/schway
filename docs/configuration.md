@@ -282,8 +282,8 @@ Schway inspects repository state observationally; it never commits, stages, stas
 Modes:
 
 - `off` disables change inspection and performs no Git reads.
-- `on-demand` (default) reads repository state only on explicit `/changes` inspection; no per-turn capture runs.
-- `snapshot` captures a content-hash baseline immediately before each user turn and compares after the turn settles (completed, failed, or cancelled, once tool cleanup settles). Hashes distinguish pre-existing dirt from new turn edits; a filename list alone is never used as the comparison.
+- `on-demand` (default) captures paths and content hashes before and after each accepted turn, with no file content retained. This detects shell changes while excluding untouched pre-existing dirt and successful file-tool paths. Current content diffs load only on explicit review or `/changes diff`.
+- `snapshot` performs the same before/after path-and-hash capture and also includes the retained comparison in `/changes status`. Capture settles after completed, failed, or cancelled turns and tool cleanup. Neither mode stores file content; hashes distinguish pre-existing dirt from new turn edits.
 
 Inspect with:
 

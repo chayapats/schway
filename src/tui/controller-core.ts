@@ -142,12 +142,16 @@ export abstract class ControllerCore {
   protected explicitChangeTracking?: GitChangeTrackingMode;
   protected outcome?: TurnOutcome;
   protected outcomeIdentity?: string;
+  protected outcomeUserId?: string;
+  protected outcomeDiagnostics?: string;
+  protected successfulToolPaths = new Set<string>();
   protected changeReview?: ChangeReview;
   protected reviewGeneration = 0;
   protected gitBaseline?: GitSnapshot;
   protected gitAfter?: GitSnapshot;
   protected gitComparison?: GitTurnComparison;
   protected gitSnapshotError?: string;
+  protected gitShellPaths: string[] = [];
   /** Initialize display history from the supplied session and dependencies without starting a model turn. */
   constructor(options: TuiControllerOptions) {
     this.session = options.session;

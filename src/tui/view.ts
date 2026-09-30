@@ -6,7 +6,7 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
 import { formatContextWindow } from "./model-picker.ts";
-import { activityDetail, displayText, fitLine, statusPill, type StatusTone } from "./presentation.ts";
+import { activityDetail, displayText, fitLine, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
 import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
@@ -164,9 +164,22 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   body.add(tree);
   const preferencePanel = new ScrollBoxRenderable(renderer, { id: "preferences-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   body.add(preferencePanel);
-  const reviewPanel = new ScrollBoxRenderable(renderer, { id: "change-review-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
+  const reviewPanel = new BoxRenderable(renderer, { id: "change-review-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column" });
+  const reviewHeading = new TextRenderable(renderer, { id: "change-review-heading", content: "", fg: theme.text, flexShrink: 0, marginBottom: 1 });
+  const reviewColumns = new BoxRenderable(renderer, { id: "change-review-columns", flexGrow: 1, minHeight: 0, flexDirection: "row" });
+  const reviewFiles = new ScrollBoxRenderable(renderer, { id: "change-review-files", width: 20, flexShrink: 0, scrollX: false });
+  const reviewList = new TextRenderable(renderer, { id: "change-review-list", content: "", fg: theme.text, wrapMode: "none" });
+  const reviewDivider = new TextRenderable(renderer, { id: "change-review-divider", width: 3, flexShrink: 0, content: "", fg: theme.border });
+  const reviewDiff = new ScrollBoxRenderable(renderer, { id: "change-review-diff", flexGrow: 1, minHeight: 1, minWidth: 0, scrollX: false });
   const reviewText = new TextRenderable(renderer, { id: "change-review-text", content: "", fg: theme.text, wrapMode: "word" });
-  reviewPanel.add(reviewText);
+  reviewFiles.add(reviewList);
+  reviewFiles.verticalScrollBar.visible = false;
+  reviewDiff.add(reviewText);
+  reviewColumns.add(reviewFiles);
+  reviewColumns.add(reviewDivider);
+  reviewColumns.add(reviewDiff);
+  reviewPanel.add(reviewHeading);
+  reviewPanel.add(reviewColumns);
   body.add(reviewPanel);
   const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted, marginTop: 1 });
   body.add(activity);
@@ -212,7 +225,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
   let footerParts: { model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; notConnected?: boolean; override?: string } = { model: "", route: "", ctx: "", running: false };
-  type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean };
+  type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
   let rowsAnimating = false;
@@ -362,7 +375,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     editor.placeholderColor = theme.muted;
     editor.cursorColor = promptMark.fg = focusBar.fg = theme.accent;
     editor.selectionBg = theme.border;
-    credential.fg = reviewText.fg = theme.text;
+    credential.fg = reviewText.fg = reviewList.fg = reviewHeading.fg = theme.text;
+    reviewDivider.fg = theme.border;
     hints.fg = footer.fg = empty.fg = theme.muted;
     pillFrom = pillColors(pill.tone).bg;
     pillChangedAt = -Infinity;
@@ -444,7 +458,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const glyph = paint.spin ? spinnerFrame(at, motion) : paint.glyph;
     const lead = glyph ? [bold(fg(color)(glyph)), fg(theme.muted)(" ")] : [];
     const text = fitLine(paint.text, width - (glyph ? 2 : 0));
-    const chunks = paint.spin ? shimmer(text, at, theme.muted, theme.text, motion)
+    const labelEnd = text.indexOf(" · ");
+    const chunks = paint.outcome ? [bold(fg(color)(labelEnd < 0 ? text : text.slice(0, labelEnd))), ...(labelEnd < 0 ? [] : keyHintChunks(text.slice(labelEnd), hintColors(theme.background)))]
+      : paint.spin ? shimmer(text, at, theme.muted, theme.text, motion)
       : paint.chips ? keyHintChunks(text, hintColors(theme.background)) : [fg(paint.tone === "muted" ? theme.muted : color)(text)];
     activity.content = new StyledText([...lead, ...(chunkWidth(chunks) + (glyph ? 2 : 0) <= width ? chunks : [fg(color)(text)])]);
   }
@@ -614,8 +630,34 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       reviewPanel.visible = !!snapshot.changeReview;
       if (snapshot.changeReview) {
         const review = snapshot.changeReview;
-        const content = safe(`${review.heading}\n\n${review.files.map((file, i) => `${i === review.selected ? "›" : " "} ${file.staged}${file.unstaged} ${file.origPath ? `${file.origPath} → ` : ""}${file.path}${file.binary ? " [binary]" : ""}`).join("\n")}\n\n${review.detail}`);
-        if (content !== reviewContent) { reviewText.content = content; reviewContent = content; }
+        const stacked = renderer.width < 80;
+        const fileRows = review.files.map(file => ({ path: safe(file.path), badge: file.source === "shell" ? "shell" : file.added !== undefined || file.removed !== undefined ? `+${file.added ?? 0} −${file.removed ?? 0}` : "" }));
+        const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), 20);
+        const fileWidth = stacked ? width : Math.min(Math.floor(width * 0.4), longestFile);
+        reviewHeading.content = safe(review.heading);
+        reviewColumns.flexDirection = stacked ? "column" : "row";
+        reviewFiles.visible = fileRows.length > 0;
+        reviewFiles.width = fileWidth;
+        reviewFiles.height = stacked ? Math.min(fileRows.length, Math.max(1, Math.floor((renderer.height - 8) / 3))) : "100%";
+        reviewFiles.marginBottom = stacked && fileRows.length ? 1 : 0;
+        reviewList.content = fileRows.map((row, index) => {
+          if (!row.badge) return `${index === review.selected ? "›" : " "} ${fitLine(row.path, fileWidth - 2)}`;
+          const pathWidth = Math.max(1, fileWidth - 4 - Bun.stringWidth(row.badge));
+          const path = fitLine(row.path, pathWidth);
+          return `${index === review.selected ? "›" : " "} ${path}${" ".repeat(Math.max(0, pathWidth - Bun.stringWidth(path)))}  ${row.badge}`;
+        }).join("\n");
+        reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));
+        reviewDivider.visible = !stacked && fileRows.length > 0;
+        reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
+        reviewText.wrapMode = review.showingDetails ? "word" : "none";
+        const content = JSON.stringify([review.showingDetails, review.detail, review.details, mode]);
+        if (content !== reviewContent) {
+          reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
+            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${row.sign} `}${safe(row.text)}${index < review.rows.length - 1 ? "\n" : ""}`;
+            return fg(row.sign === "+" ? theme.success : row.sign === "-" ? theme.error : theme.text)(text);
+          }));
+          reviewContent = content;
+        }
       }
       preferencePanel.visible = !!snapshot.preferences;
       tree.visible = !!snapshot.branchTree;
@@ -691,9 +733,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
-      const counts = completed?.commandCounts;
-      const outcomeText = completed ? width < 65 ? `Turn ${completed.reason} · Alt+R review · ${counts!.nonzero} nonzero exits` : `Turn ${completed.reason} · commands: ${counts!.exitZero} exit 0 / ${counts!.nonzero} nonzero / ${counts!.unknown} unknown · Alt+R review` : "";
-      const outcomeGlyph = completed ? { completed: "✓", failed: "!", cancelled: "−", limit: "◌" }[completed.reason as string] ?? "●" : undefined;
+      const outcomeText = completed ? formatOutcomeLine(completed, width) : "";
+      const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error" } as const)[completed.reason as "completed" | "failed"] ?? "warning" : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
         : searchOpen ? { text: searchStatus, tone: "accent", glyph: "⌕" }
@@ -703,7 +744,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : snapshot.activity ? { text: activityDetail(snapshot.activity), tone: "accent", spin: true }
         : snapshot.status === "running" ? { text: "Working on your request…", tone: "accent", spin: true }
         : snapshot.compactionNotice ? { text: snapshot.compactionNotice, tone: "muted" }
-        : outcomeText ? { text: outcomeText, tone: outcomeTone, glyph: outcomeGlyph, chips: true } : { text: "", tone: "muted" };
+        : outcomeText ? { text: outcomeText.slice(outcomeGlyph!.length + 1), tone: outcomeTone, glyph: outcomeGlyph, outcome: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
       const browsing = panelMode === "help" || (!panelMode && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery);
@@ -896,7 +937,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+      hints.height = panelMode === "review" ? "auto" : 1;
+      hints.wrapMode = panelMode === "review" ? "word" : "none";
+      if (panelMode === "review") {
+        hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
+      } else {
+        hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+      }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
       pickerWasVisible = picker.visible;
@@ -1044,9 +1091,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if ((key.meta || key.option) && name === "s" && !panelMode && !controller.running) { void options.submit("/sessions", () => {}).then(refresh, fail); handled(); return; }
     if (snapshot.changeReview) {
-      if (name === "escape") { controller.closeChangeReview(); handled(); return; }
-      if (name === "up" || name === "down") { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewPanel.scrollTo(0); }
-      if (name === "pageup" || name === "pagedown") reviewPanel.scrollBy(name === "pageup" ? -Math.max(1, renderer.height - 8) : Math.max(1, renderer.height - 8));
+      if (key.ctrl && name === "i") { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); handled(); return; }
+      if (name === "escape") { if (snapshot.changeReview.showingDetails) { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); } else controller.closeChangeReview(); handled(); return; }
+      if (!snapshot.changeReview.showingDetails && (name === "up" || name === "down")) { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewDiff.scrollTo(0); }
+      if (name === "pageup" || name === "pagedown") reviewDiff.scrollBy(name === "pageup" ? -Math.max(1, renderer.height - 8) : Math.max(1, renderer.height - 8));
+      handled(); return;
+    }
+    if (key.ctrl && name === "i" && !panelMode && !controller.running && snapshot.outcome) {
+      if (activityPaint.text.includes("Ctrl+I details")) controller.inspectRecovery();
       handled(); return;
     }
     if ((key.meta || key.option) && name === "r" && !panelMode && !controller.running) {

@@ -7,7 +7,7 @@ export type GitChangeTrackingMode = "off" | "on-demand" | "snapshot";
 /** Valid change-tracking modes in display order for validation and help text. */
 export const GIT_CHANGE_TRACKING_MODES: readonly GitChangeTrackingMode[] = ["off", "on-demand", "snapshot"] as const;
 
-/** Default mode that reads repository state only on explicit inspection. */
+/** Default mode for per-turn path/hash capture with content diffs read only on explicit inspection. */
 export const DEFAULT_GIT_CHANGE_TRACKING: GitChangeTrackingMode = "on-demand";
 
 /** Maximum files shown in a formatted status or comparison before truncation. */
@@ -96,12 +96,14 @@ export interface GitTurnComparison {
   truncated: boolean;
 }
 
-/** Bounded diff preview with explicit truncation and a follow-up hint. */
+/** Bounded diff preview with CLI explanation text and separate raw untracked source for structured review. */
 export interface GitDiffPreview {
   path?: string;
   diff: string;
   truncated: boolean;
   binaryFiles: string[];
+  /** Bounded untracked text without headings or footer prose, absent for tracked and binary previews. */
+  untrackedContent?: string;
 }
 
 
@@ -555,9 +557,9 @@ async function readUntrackedPreview(root: string, path: string, maxChars: number
   const text = await file.slice(0, maxChars + 1).text().catch(() => undefined);
   if (text === undefined) return undefined;
   if (text.length > maxChars) {
-    return { path, diff: `Untracked:\n${text.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff --no-index /dev/null -- ${path} in ${root} for the full content.`, truncated: true, binaryFiles: [] };
+    return { path, diff: `Untracked:\n${text.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff --no-index /dev/null -- ${path} in ${root} for the full content.`, truncated: true, binaryFiles: [], untrackedContent: text.slice(0, maxChars) };
   }
-  return { path, diff: `Untracked:\n${text}`, truncated: false, binaryFiles: [] };
+  return { path, diff: `Untracked:\n${text}`, truncated: false, binaryFiles: [], untrackedContent: text };
 }
 
 /** Render a diff preview with explicit truncation and follow-up guidance. */

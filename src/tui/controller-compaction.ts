@@ -230,6 +230,10 @@ export abstract class CompactionLayer extends SettingsLayer {
     this.gitAfter = undefined;
     this.gitComparison = undefined;
     this.gitSnapshotError = undefined;
+    this.gitShellPaths = [];
+    this.successfulToolPaths.clear();
+    this.outcomeUserId = undefined;
+    this.outcomeDiagnostics = undefined;
     this.outcome = undefined;
     this.closeChangeReview();
   }

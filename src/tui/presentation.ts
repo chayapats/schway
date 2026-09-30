@@ -1,4 +1,28 @@
 import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
+import type { TurnOutcome } from "./controller-types.ts";
+import { formatCount, formatDuration } from "../text/format.ts";
+
+/** Return the visible completion word and glyph without implying verification. */
+export function outcomeLabel(outcome: TurnOutcome): string {
+  return { completed: "✓ Done", failed: "✗ Failed", cancelled: "− Cancelled", limit: "◌ Limit" }[outcome.reason];
+}
+
+/** Fit a turn summary by dropping elapsed, commands, then files before clipping outcome and actions. */
+export function formatOutcomeLine(outcome: TurnOutcome, columns: number): string {
+  let elapsed = formatDuration(outcome.elapsedMs);
+  const actions = `Alt+R review${outcome.reason === "failed" ? " · Ctrl+I details" : ""}`;
+  const counts = outcome.commandCounts;
+  let commands = [[counts.exitZero, "ok"], [counts.nonzero, "failed"], [counts.unknown, "stopped"]]
+    .filter(([count]) => Number(count) > 0).map(([count, word]) => `${formatCount(Number(count), "command")} ${word}`).join(" · ");
+  const counted = outcome.files.filter(file => file.added !== undefined || file.removed !== undefined);
+  let files = outcome.files.length ? formatCount(outcome.files.length, "file") : "";
+  if (counted.length) files += ` +${counted.reduce((sum, file) => sum + (file.added ?? 0), 0)} −${counted.reduce((sum, file) => sum + (file.removed ?? 0), 0)}`;
+  const line = () => [outcomeLabel(outcome), files, commands, elapsed, actions].filter(Boolean).join(" · ");
+  if (Bun.stringWidth(line()) > columns) elapsed = "";
+  if (Bun.stringWidth(line()) > columns) commands = "";
+  if (Bun.stringWidth(line()) > columns) files = "";
+  return fitLine(line(), columns);
+}
 
 /** Pair connection and operation states with semantic status-pill colors. */
 export type StatusTone = "ready" | "neutral" | "active" | "stopping" | "attention";

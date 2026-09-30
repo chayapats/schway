@@ -116,15 +116,20 @@ export class TuiController extends TurnLayer {
     return true;
   }
 
-  /**
-   * Clear active cancellation state and abort the active operation without awaiting it.
-   * Applies to both submitted turns and manual compaction during terminal cleanup.
-   */
+  /** Abort owned work and discard transient review evidence without waiting for terminal cleanup. */
   dispose(): void {
     this.closeSessionPicker();
     this.startupAbort?.abort();
     this.signInListAbort?.abort();
     this.disposed = true;
+    this.outcome = undefined;
+    this.outcomeDiagnostics = undefined;
+    this.gitBaseline = undefined;
+    this.gitAfter = undefined;
+    this.gitComparison = undefined;
+    this.gitShellPaths = [];
+    this.successfulToolPaths.clear();
+    this.closeChangeReview();
     this.closeModelPicker();
     if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined; this.loginReturn = undefined; }
     this.abortActiveTurn();

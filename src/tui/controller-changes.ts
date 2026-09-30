@@ -1,7 +1,10 @@
 import { redactSecrets } from "../auth/secrets.ts";
+import { relative } from "node:path";
 import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../config/config.ts";
-import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus, type GitFileChange } from "../workspace/git.ts";
+import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import type { TurnOutcome } from "./controller-types.ts";
+import { parseGitDiff } from "../text/diff.ts";
+import { buildOutcomeDetails } from "./outcome-details.ts";
 import { BranchesLayer } from "./controller-branches.ts";
 
 
@@ -30,7 +33,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     const action = !sub ? "status" : sub.toLowerCase();
     if (action === "mode") {
       const origin = this.configEditor?.origins.git ? ` [${this.configEditor.origins.git}]` : "";
-      this.notice(`Change tracking: ${mode}${origin}. Off disables inspection; on-demand reads only here; snapshot captures a baseline before each turn and compares after it settles.`);
+      this.notice(`Change tracking: ${mode} · /changes review\n${origin ? `Configuration source:${origin}.\n` : ""}Off disables inspection; on-demand and snapshot capture paths and hashes before and after each turn, never file content. Snapshot also shows the comparison in /changes status. Diffs load only when requested.`);
       return true;
     }
     if (action === "diff") {
@@ -73,49 +76,72 @@ export abstract class ChangesLayer extends BranchesLayer {
     return true;
   }
 
-  /** Open explicit observational review without enabling snapshots or mutating repository state. */
+  /** Open read-only review of the retained turn, loading current content only on request. */
   async openChangeReview(): Promise<boolean> {
     if (this.disposed || this.running) return false;
     const generation = ++this.reviewGeneration;
-    this.changeReview = { heading: "Loading current working tree…", files: [], selected: 0, detail: "", loading: true };
+    const outcome = this.snapshot().outcome;
+    const ordinal = this.session.items.filter(item => item.type === "user").findIndex(item => item.id === this.outcomeUserId) + 1;
+    const review = { heading: outcome ? `Review · turn ${ordinal}` : "No turn to review yet", files: [] as TurnOutcome["files"], selected: 0, detail: "", rows: [] as import("../text/diff.ts").GitDiffRow[], details: outcome ? this.turnDetails() : "", showingDetails: false, loading: !!outcome };
+    this.changeReview = review;
+    if (!outcome) return true;
     const mode = this.gitChangeTracking();
-    const evidence = this.snapshot().outcome;
-    const prefix = evidence ? `Turn ${evidence.reason}. ${evidence.toolResults} tool results; ${evidence.failedTools} failed tools.\nCommands: ${evidence.commandCounts.exitZero} exit 0 / ${evidence.commandCounts.nonzero} nonzero / ${evidence.commandCounts.unknown} unknown (entire turn).\nCommand results (latest 50; exit codes, not a test-suite guarantee):\n${evidence.commands.map(c => `${c.callId}: ${c.command} → ${c.exitCode === null ? "no exit observed" : `exit ${c.exitCode}`} (${c.status})`).join("\n") || "No command exit evidence."}\n\n` : "No retained turn outcome.\n";
-    let heading = mode === "off" ? "Change tracking off. No Git state read; attribution unavailable." : !this.workspace ? "No workspace; changes unavailable." : "";
-    let files: GitFileChange[] = [];
-    if (!heading && this.workspace) {
+    let unavailable = mode === "off" ? "Change tracking off. No Git state read; attribution unavailable." : !this.workspace ? "No workspace; changes unavailable." : "";
+    if (!unavailable && this.workspace) {
       const status = await inspectGitStatus(this.workspace.root);
       if (generation !== this.reviewGeneration || this.disposed) return false;
-      if ("error" in status) heading = `Changes unavailable: ${status.error}`;
-      else if (!status.isGit) heading = "Non-Git workspace. Git changes and attribution unavailable.";
+      if ("error" in status) unavailable = `Changes unavailable: ${status.error}`;
+      else if (!status.isGit) unavailable = "Non-Git workspace. Git changes and attribution unavailable.";
       else {
-        files = status.files.slice(0, 50);
-        heading = status.dirty ? `Current working tree: ${status.totalFiles} changed paths${status.truncated || status.totalFiles > files.length ? " (list truncated)" : ""}.` : "No working-tree changes.";
-        heading += "\nCurrent working-tree content is unattributed; external edits may be included.";
-        if (mode === "snapshot" && evidence && this.gitBaseline && this.gitAfter && this.gitComparison) {
-          heading += `\n${formatGitComparison(this.gitBaseline, this.gitAfter, this.gitComparison)}\nSnapshots show changes observed during the turn, not exclusive Schway authorship. Current diffs may include later edits.`;
-        } else heading += `\nSnapshot attribution unavailable (${mode}${this.gitSnapshotError ? `: ${this.gitSnapshotError}` : ""}).`;
+        review.files = structuredClone(outcome.files);
+        if (!review.files.length) review.detail = status.dirty ? "No files changed during this turn." : "No working-tree changes.";
       }
     }
     if (generation !== this.reviewGeneration || this.disposed) return false;
-    const explanation = redactSecrets(prefix + heading + "\nReview is read-only. Files remain changed after failure/cancellation; conversation branching does not restore files.", this.secrets);
-    this.changeReview = { heading: explanation.length > 14000 ? `${explanation.slice(0, 13900)}\n… Review truncated; inspect individual results and git status for full evidence.` : explanation, files, selected: 0, detail: "", loading: false };
+    if (unavailable) review.detail = redactSecrets(unavailable, this.secrets);
+    review.rows = review.detail ? [{ sign: " ", text: review.detail }] : [];
+    review.loading = false;
     await this.selectReviewFile(0);
     return true;
   }
 
-  /** Select a current changed path and load its bounded textual or binary explanation. */
+  /** Toggle the shared turn evidence in place without closing review or changing its file selection. */
+  toggleReviewDetails(): boolean {
+    if (!this.changeReview || !this.snapshot().outcome) return false;
+    this.changeReview.showingDetails = !this.changeReview.showingDetails;
+    return true;
+  }
+
+  /** Build one redacted evidence view for review and the failed-turn transcript notice. */
+  protected turnDetails(): string {
+    if (!this.outcome) return "No turn to review yet";
+    const mode = this.gitChangeTracking();
+    const shellUnavailable = mode === "off" ? 'change tracking is off (git.changeTracking="off").'
+      : !this.workspace ? "no workspace is active."
+      : this.gitSnapshotError ?? (!this.gitComparison ? `Snapshot attribution unavailable (${mode}); no completed capture.` : undefined);
+    return redactSecrets(buildOutcomeDetails(this.outcome, {
+      shellUnavailable,
+      comparison: this.gitBaseline && this.gitAfter && this.gitComparison ? formatGitComparison(this.gitBaseline, this.gitAfter, this.gitComparison) : undefined,
+      recovery: this.outcomeDiagnostics,
+    }), this.secrets);
+  }
+
+  /** Select a retained turn path and load numbered current diff rows or a plain explanation. */
   async selectReviewFile(delta: number): Promise<void> {
     const review = this.changeReview;
     if (!review || !review.files.length || !this.workspace) return;
     review.selected = (review.selected + delta + review.files.length) % review.files.length;
-    const path = review.files[review.selected]!.path;
+    const file = review.files[review.selected]!;
     const generation = ++this.reviewGeneration;
     review.loading = true;
     review.detail = "Loading diff…";
-    const preview = await getGitDiffPreview(this.workspace.root, path);
+    review.rows = [{ sign: " ", text: review.detail }];
+    const preview = await getGitDiffPreview(this.workspace.root, file.path);
     if (this.changeReview !== review || generation !== this.reviewGeneration || this.disposed) return;
-    review.detail = redactSecrets("error" in preview ? preview.error : formatGitDiffPreview(preview), this.secrets).slice(0, 12000);
+    review.rows = "error" in preview ? [{ sign: " ", text: preview.error }] : parseGitDiff(preview);
+    if (file.source === "shell") review.rows.unshift({ sign: " ", text: "changed by shell · not undoable" });
+    review.rows = review.rows.map(row => ({ ...row, text: redactSecrets(row.text, this.secrets) }));
+    review.detail = review.rows.map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`).join("\n");
     review.loading = false;
   }
 
@@ -127,26 +153,24 @@ export abstract class ChangesLayer extends BranchesLayer {
 
   protected finishOutcome(reason?: TurnOutcome["reason"]): void {
     this.compactionNotice = undefined;
-    if (!this.outcome) return;
+    if (!this.outcome || this.disposed) return;
     if (reason) this.outcome.reason = reason;
-    const comparison = this.gitComparison;
-    this.outcome.changes = comparison
-      ? `${comparison.newChanges.length} new paths; ${comparison.updatedPreExisting.length} pre-existing paths changed further; ${comparison.preExistingUnchanged.length} pre-existing unchanged (observed snapshots; not exclusive authorship).`
-      : this.gitSnapshotError ? `Attribution unavailable: ${this.gitSnapshotError}`
-      : "Changes not inspected; snapshot attribution unavailable. Alt+R review.";
-    this.outcome.changes = redactSecrets(this.outcome.changes, this.secrets);
+    this.outcomeDiagnostics = this.outcome.reason === "failed" && this.recovery?.accepted ? this.recovery.details : undefined;
+    this.outcome.elapsedMs = this.activity ? Math.max(0, this.activityClock() - this.activity.startedAt) : 0;
+    this.outcome.files = this.outcome.files.filter(file => file.source === "tool");
+    this.outcome.files.push(...this.gitShellPaths.map(path => ({ path, source: "shell" as const })));
   }
 
   /** Capture a snapshot baseline for the owning turn signal, dropping stale results after replacement. */
   protected async captureTurnBaseline(signal: AbortSignal): Promise<void> {
+    if (this.disposed || this.activeAbort?.signal !== signal) return;
     this.gitSnapshotError = undefined;
-    if (this.gitChangeTracking() !== "snapshot" || !this.workspace || this.disposed) {
-      this.gitBaseline = undefined;
-      this.gitAfter = undefined;
-      this.gitComparison = undefined;
-      return;
-    }
-    const snapshot = await captureGitSnapshot(this.workspace.root);
+    this.gitBaseline = undefined;
+    this.gitAfter = undefined;
+    this.gitComparison = undefined;
+    this.gitShellPaths = [];
+    if (this.gitChangeTracking() === "off" || !this.workspace) return;
+    const snapshot = await captureGitSnapshot(this.workspace.root).catch(error => ({ error: error instanceof Error ? error.message : String(error) }));
     if (this.disposed || this.activeAbort?.signal !== signal) return;
     if ("error" in snapshot) {
       this.gitBaseline = undefined;
@@ -161,11 +185,12 @@ export abstract class ChangesLayer extends BranchesLayer {
   }
 
   /** Capture final state after a settled turn and compare it against the baseline. */
-  protected async captureTurnResult(): Promise<void> {
-    if (this.gitChangeTracking() !== "snapshot" || !this.workspace || this.disposed) return;
+  protected async captureTurnResult(signal: AbortSignal): Promise<void> {
+    if (this.gitChangeTracking() === "off" || !this.workspace || this.disposed || this.activeAbort?.signal !== signal) return;
     const baseline = this.gitBaseline;
     if (!baseline) return;
-    const after = await captureGitSnapshot(this.workspace.root);
+    const after = await captureGitSnapshot(this.workspace.root).catch(error => ({ error: error instanceof Error ? error.message : String(error) }));
+    if (this.disposed || this.activeAbort?.signal !== signal || this.gitBaseline !== baseline) return;
     if ("error" in after) {
       this.gitAfter = undefined;
       this.gitComparison = undefined;
@@ -183,5 +208,8 @@ export abstract class ChangesLayer extends BranchesLayer {
     this.gitAfter = after;
     this.gitComparison = comparison;
     this.gitSnapshotError = undefined;
+    const toolPaths = new Set([...this.successfulToolPaths].map(path => relative(baseline.root, path)));
+    this.gitShellPaths = [...new Set([...comparison.newChanges, ...comparison.updatedPreExisting, ...(comparison.resolved ?? [])])]
+      .filter(path => !toolPaths.has(path)).sort((a, b) => a.localeCompare(b));
   }
 }

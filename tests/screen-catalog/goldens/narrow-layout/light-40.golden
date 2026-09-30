@@ -20,7 +20,7 @@ cursor 6 17 visible
   Math.min(hi, Math.max(lo, n));
 
 
- ✓ Turn completed · Alt+R review · 0 n…
+ ✓ Done · 0.0s · Alt+R review
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -117,10 +117,12 @@ cursor 6 17 visible
 13 0-40 #ffffff #f7f7f4 -
 14 0-1 #ffffff #f7f7f4 -
 14 1-2 #19612f #f7f7f4 b
-14 2-20 #545e6c #f7f7f4 -
-14 20-25 #1d232c #caced3 b
-14 25-39 #545e6c #f7f7f4 -
-14 39-40 #ffffff #f7f7f4 -
+14 2-3 #545e6c #f7f7f4 -
+14 3-7 #19612f #f7f7f4 b
+14 7-17 #545e6c #f7f7f4 -
+14 17-22 #1d232c #caced3 b
+14 22-29 #545e6c #f7f7f4 -
+14 29-40 #ffffff #f7f7f4 -
 15 0-1 #ffffff #f7f7f4 -
 15 1-39 #ecedea #f7f7f4 -
 15 39-40 #ffffff #f7f7f4 -

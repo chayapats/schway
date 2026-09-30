@@ -1952,12 +1952,17 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     await writeFile(join(dir, "old-name.txt"), "rename evidence\n");
     await git("add", ".");
     await git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "commit", "-qm", "baseline");
-    await writeFile(join(dir, "a-text.txt"), "after\n" + "long-line\n".repeat(3000));
-    await rm(join(dir, "b-deleted.txt"));
-    await git("mv", "old-name.txt", "c-renamed.txt");
-    await writeFile(join(dir, "d-binary.bin"), Buffer.from([0, 1, 2, 3]));
     const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
-    const ui = await setup(80, 24, {}, undefined, { workspace, contextManager: createContextManager(workspace) });
+    const ui = await setup(80, 24, {}, undefined, { workspace, contextManager: createContextManager(workspace),
+      model: createScriptedModel({ responses: [{ toolCalls: [{ id: "call_fixture_files", name: "fixture", arguments: {} }] }, { text: "done" }] }),
+      tools: createToolRegistry([{ name: "fixture", description: "change fixture files", execution: "exclusive", inputSchema: { type: "object" }, execute: async () => {
+        await writeFile(join(dir, "a-text.txt"), "after\n" + "long-line\n".repeat(3000));
+        await rm(join(dir, "b-deleted.txt"));
+        await git("mv", "old-name.txt", "c-renamed.txt");
+        await writeFile(join(dir, "d-binary.bin"), Buffer.from([0, 1, 2, 3]));
+        return { content: "changed" };
+      } }]),
+    });
     // Keyboard dispatch still starts each operation; await its actual Git I/O rather than visual frames.
     let reviewOperation: Promise<unknown> | undefined;
     const openReview = ui.controller.openChangeReview.bind(ui.controller);
@@ -1983,7 +1988,7 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     ui.mockInput.pressKey("r", { meta: true });
     await awaitReview();
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("Turn completed");
+    expect(ui.captureCharFrame()).toContain("✓ Done");
     expect(ui.controller.snapshot().changeReview!.detail).toContain("truncated");
     expect(ui.controller.snapshot().changeReview!.detail.length).toBeLessThanOrEqual(12000);
     // Review owns input: a paste must not submit or overwrite the saved draft.
@@ -1994,24 +1999,24 @@ test("change review real keyboard, paste and resize navigate bounded text/delete
     ui.mockInput.pressArrow("down");
     await awaitReview();
     await settle(ui);
-    expect(ui.controller.snapshot().changeReview!.detail).toContain("-deleted evidence");
+    expect(ui.controller.snapshot().changeReview!.detail).toContain("- deleted evidence");
     ui.mockInput.pressArrow("down");
     await awaitReview();
     await settle(ui);
-    expect(ui.controller.snapshot().changeReview!.files[2]?.origPath).toBe("old-name.txt");
-    expect(ui.controller.snapshot().changeReview!.detail).toContain("rename to c-renamed.txt");
+    expect(ui.controller.snapshot().changeReview!.files[2]?.path).toBe("c-renamed.txt");
+    expect(ui.controller.snapshot().changeReview!.detail).toContain("Renamed from old-name.txt to c-renamed.txt");
     ui.resize(44, 18);
     await settle(ui);
     ui.mockInput.pressArrow("down");
     await awaitReview();
     await settle(ui);
-    expect(ui.controller.snapshot().changeReview!.detail).toContain("binary file");
+    expect(ui.controller.snapshot().changeReview!.detail).toContain("Binary file");
     expect(ui.controller.snapshot().changeReview!.detail).toContain("not shown");
     await ui.mockInput.pressKeys(["\u001b[6~"]);
     await settle(ui);
     await ui.mockInput.pressKeys(["\u001b[6~"]);
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("binary");
+    expect(ui.captureCharFrame()).toContain("Binary");
     ui.mockInput.pressEscape();
     ui.resize(80, 24);
     await settle(ui);
@@ -2040,15 +2045,17 @@ test("turn command totals retain an early failure beyond the latest fifty eviden
   await settle(ui);
   expect(ui.controller.snapshot().outcome!.commands).toHaveLength(50);
   expect(ui.controller.snapshot().outcome!.toolResults).toBe(51);
-  expect(ui.captureCharFrame()).toContain("1 nonzero");
+  expect(ui.captureCharFrame()).toContain("1 command failed");
   ui.mockInput.pressKey("r", { meta: true });
   await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview?.loading, "change review");
   await settle(ui);
-  const heading = ui.controller.snapshot().changeReview!.heading;
+  ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+  const heading = ui.controller.snapshot().changeReview!.details;
   expect(heading).toContain("50 exit 0 / 1 nonzero / 0 unknown");
   expect(heading).toContain("latest 50");
   expect(heading).not.toContain("check-0:");
-  expect(heading).toContain("check-50:");
+  expect(heading).not.toContain("check-50:");
+  expect(heading.match(/pass → exit 0/g)).toHaveLength(50);
 });
 
 test("context inspection uses keyboard input and retains draft and controls during narrow tool activity", async () => {
@@ -2095,7 +2102,7 @@ test("context inspection uses keyboard input and retains draft and controls duri
     await ui.controller.waitForIdle();
     ui.resize(80, 24);
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("Turn completed");
+    expect(ui.captureCharFrame()).toContain("✓ Done");
   });
 });
 
@@ -2531,4 +2538,125 @@ test("failed route list status renders once on its header and route-free details
   const frame = ui.captureCharFrame(); expect(frame.match(/list unavailable/g)).toHaveLength(1);
   expect(frame).toContain("1/1 · 256,000 context · 16,384 output");
   expect(ui.controller.snapshot().modelPicker!.entries.filter(entry => entry.kind === "model")).toHaveLength(1);
+});
+
+test("completed outcome and responsive numbered review preserve draft and hide fixture call IDs", async () => {
+  await withTempDir(async dir => {
+    const git = async (...args: string[]) => {
+      const proc = Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } });
+      if (await proc.exited) throw new Error(await new Response(proc.stderr).text());
+    };
+    await git("init", "-q");
+    await writeFile(join(dir, "a.txt"), "before\n");
+    await git("add", ".");
+    await git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "commit", "-qm", "baseline");
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    let now = 0;
+    const ui = await setup(80, 28, {}, undefined, { workspace, contextManager: createContextManager(workspace), activityClock: () => now,
+      onRuntimeEvent: event => { if (event.type === "agent.finished") now = 14000; }, tools: createToolRegistry([editTool, bashTool]),
+      model: createScriptedModel({ responses: [{ toolCalls: [
+        { id: "call_fixture_1", name: "edit", arguments: { path: "a.txt", edits: [{ oldText: "before", newText: "after" }] } },
+        { id: "call_fixture_2", name: "bash", arguments: { command: "printf ok" } },
+      ] }, { text: "done" }, { toolCalls: [{ id: "call_fixture_3", name: "bash", arguments: { command: "printf changed > a.txt; printf generated > shell.txt" } }] }, { text: "generated" }] }),
+    });
+    await ui.controller.submit("edit and check");
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("✓ Done · 1 file +1 −1 · 1 command ok");
+    const outcomeRow = ui.renderer.root.findDescendantById("activity") as TextRenderable;
+    expect(outcomeRow.chunks.find(chunk => chunk.text === "Done")?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.success));
+    expect(ui.captureCharFrame()).toContain("Alt+R review");
+    expect(ui.captureCharFrame()).not.toContain("Turn completed");
+    expect(ui.captureCharFrame()).not.toContain("exit 0 /");
+    const count = ui.controller.snapshot().transcript.length;
+    ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+    expect(ui.controller.snapshot().transcript).toHaveLength(count);
+    await ui.mockInput.pasteBracketedText("keep draft");
+    ui.mockInput.pressKey("r", { meta: true });
+    await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview!.loading, "numbered review");
+    await settle(ui);
+    const frame = ui.captureCharFrame();
+    expect(frame).toContain("Review · turn 1");
+    expect(frame).toContain("› a.txt");
+    expect(frame).toContain("1 - before");
+    expect(frame).toContain("1 + after");
+    const diffText = ui.renderer.root.findDescendantById("change-review-text") as TextRenderable;
+    expect(diffText.chunks.find(chunk => chunk.text.includes("- before"))?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.error));
+    expect(diffText.chunks.find(chunk => chunk.text.includes("+ after"))?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.success));
+    for (const hidden of ["diff --git", "@@", "call_fixture_1", "call_fixture_2", "unattributed"]) expect(frame).not.toContain(hidden);
+    const files = ui.renderer.root.findDescendantById("change-review-files")!;
+    const diff = ui.renderer.root.findDescendantById("change-review-diff")!;
+    expect(files.y).toBe(diff.y);
+    expect(diff.x).toBeGreaterThan(files.x);
+    expect(files.width).toBe(20);
+    ui.resize(79, 28); await settle(ui);
+    expect(diff.y).toBeGreaterThan(files.y);
+    expect(diff.x).toBe(files.x);
+    ui.resize(50, 28); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("Esc back");
+    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+    ui.resize(79, 28); await settle(ui);
+    ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+    expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(true);
+    expect(ui.captureCharFrame()).toContain("1 exit 0 / 0 nonzero / 0 unknown");
+    expect(ui.captureCharFrame()).not.toContain("call_fixture_");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(false);
+    expect(ui.captureCharFrame()).toContain("1 + after");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("keep draft");
+    await ui.controller.submit("generate files");
+    ui.mockInput.pressKey("r", { meta: true });
+    await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview!.loading, "shell review");
+    ui.mockInput.pressArrow("down");
+    await waitForUiState(ui, () => ui.controller.snapshot().changeReview?.selected === 1 && !ui.controller.snapshot().changeReview!.loading, "second shell file");
+    await settle(ui);
+    expect(ui.captureCharFrame()).toContain("› shell.txt");
+    expect(ui.captureCharFrame()).toContain("changed by shell · not undoable");
+    expect(ui.captureCharFrame()).toContain("1 + generated");
+    expect(ui.captureCharFrame()).not.toContain("call_fixture_");
+  });
+});
+
+test("failed outcome details append once and review details escape returns to the diff", async () => {
+  const ui = await setup(80, 28, {}, undefined, { activityClock: () => 0,
+    tools: createToolRegistry([{ ...bashTool, execute: async () => ({ content: "failed", isError: true, details: { command: "check", exitCode: 7 } }) }]),
+    model: createScriptedModel({ responses: [{ toolCalls: [{ id: "call_fixture_failure", name: "bash", arguments: { command: "check" } }] }, { error: "fixture diagnostic" }] }),
+  });
+  await ui.controller.submit("try a check"); await settle(ui);
+  expect(ui.captureCharFrame()).toContain("✗ Failed");
+  expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().recovery).toBeUndefined();
+  expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+  const before = ui.controller.snapshot().transcript.length;
+  ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+  expect(ui.controller.snapshot().transcript).toHaveLength(before + 1);
+  const details = ui.controller.snapshot().transcript.at(-1)!.text;
+  expect(details).toContain("0 exit 0 / 1 nonzero / 0 unknown");
+  expect(details).toContain("check → exit 7");
+  expect(details).toContain("fixture diagnostic");
+  expect(details).not.toContain("call_fixture_failure");
+  ui.mockInput.pressKey("r", { meta: true });
+  await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview!.loading, "failed review");
+  ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+  expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(true);
+  expect(ui.controller.snapshot().changeReview!.details).toBe(details);
+  expect(ui.captureCharFrame()).not.toContain("call_fixture_failure");
+  ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+  expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(false);
+  ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(false);
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().changeReview).toBeUndefined();
+});
+
+test("fresh review has exactly its empty message and no files", async () => {
+  const ui = await setup();
+  ui.mockInput.pressKey("r", { meta: true }); await settle(ui);
+  expect(ui.controller.snapshot().changeReview!.heading).toBe("No turn to review yet");
+  expect(ui.controller.snapshot().changeReview!.files).toEqual([]);
+  expect(ui.captureCharFrame()).toContain("No turn to review yet");
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().changeReview).toBeUndefined();
 });

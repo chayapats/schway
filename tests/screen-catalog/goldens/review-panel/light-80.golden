@@ -8,34 +8,34 @@ cursor 1 1 hidden
 == text
  ⚡ schway  ~/demo on main
 
-  Turn completed. 3 tool results; 0 failed tools.                            █
-  Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).                  █
-  Command results (latest 50; exit codes, not a test-suite guarantee):       ▀
-  check-clamp: printf 'ok\n' → exit 0 (success)
+  Review · turn 1
 
-  Current working tree: 1 changed paths.
-  Current working-tree content is unattributed; external edits may be
-  included.
-  Snapshot attribution unavailable (on-demand).
-  Review is read-only. Files remain changed after failure/cancellation;
-  conversation branching does not restore files.
+  › clamp.ts     +1 −1 │   1   export function clamp(n: number, lo: number, hi
+                       │   2 -   return Math.max(lo, n);
+                       │   2 +   return Math.min(hi, Math.max(lo, n));
+                       │   3   }
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
 
-  › .M clamp.ts
-
-  Diff for clamp.ts:
-  Unstaged:
-   clamp.ts | 2 +-
-   1 file changed, 1 insertion(+), 1 deletion(-)
-
-  diff --git a/clamp.ts b/clamp.ts
-  index 46ffc67..6f30e92 100644
-
-  ✓ Turn completed · commands: 1 exit 0 / 0 nonzero / 0 unknown · Alt+R review
+  ✓ Done · 1 file +1 −1 · 1 command ok · 3.6s · Alt+R review
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
   ● READY   scripted/scripted-model                                    ctx ~105
-  ↑↓ files · PgUp/PgDn scroll · Esc return to draft
+  ↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -46,109 +46,80 @@ cursor 1 1 hidden
 00 26-80 #ffffff #ecedea -
 01 0-80 #ffffff #f7f7f4 -
 02 0-2 #ffffff #f7f7f4 -
-02 2-49 #1d232c #f7f7f4 -
-02 49-77 #ffffff #f7f7f4 -
-02 77-78 #9a9ea3 #252527 -
-02 78-80 #ffffff #f7f7f4 -
-03 0-2 #ffffff #f7f7f4 -
-03 2-59 #1d232c #f7f7f4 -
-03 59-77 #ffffff #f7f7f4 -
-03 77-78 #9a9ea3 #252527 -
-03 78-80 #ffffff #f7f7f4 -
+02 2-17 #1d232c #f7f7f4 -
+02 17-80 #ffffff #f7f7f4 -
+03 0-80 #ffffff #f7f7f4 -
 04 0-2 #ffffff #f7f7f4 -
-04 2-70 #1d232c #f7f7f4 -
-04 70-77 #ffffff #f7f7f4 -
-04 77-78 #9a9ea3 #252527 -
+04 2-22 #1d232c #f7f7f4 -
+04 22-25 #c5c9cf #f7f7f4 -
+04 25-78 #1d232c #f7f7f4 -
 04 78-80 #ffffff #f7f7f4 -
-05 0-2 #ffffff #f7f7f4 -
-05 2-47 #1d232c #f7f7f4 -
-05 47-77 #ffffff #f7f7f4 -
-05 77-78 #ffffff #252527 -
-05 78-80 #ffffff #f7f7f4 -
-06 0-77 #ffffff #f7f7f4 -
-06 77-78 #ffffff #252527 -
-06 78-80 #ffffff #f7f7f4 -
-07 0-2 #ffffff #f7f7f4 -
-07 2-40 #1d232c #f7f7f4 -
-07 40-77 #ffffff #f7f7f4 -
-07 77-78 #ffffff #252527 -
-07 78-80 #ffffff #f7f7f4 -
-08 0-2 #ffffff #f7f7f4 -
-08 2-70 #1d232c #f7f7f4 -
-08 70-77 #ffffff #f7f7f4 -
-08 77-78 #ffffff #252527 -
-08 78-80 #ffffff #f7f7f4 -
-09 0-2 #ffffff #f7f7f4 -
-09 2-11 #1d232c #f7f7f4 -
-09 11-77 #ffffff #f7f7f4 -
-09 77-78 #ffffff #252527 -
-09 78-80 #ffffff #f7f7f4 -
-10 0-2 #ffffff #f7f7f4 -
-10 2-47 #1d232c #f7f7f4 -
-10 47-77 #ffffff #f7f7f4 -
-10 77-78 #ffffff #252527 -
-10 78-80 #ffffff #f7f7f4 -
-11 0-2 #ffffff #f7f7f4 -
-11 2-72 #1d232c #f7f7f4 -
-11 72-77 #ffffff #f7f7f4 -
-11 77-78 #ffffff #252527 -
-11 78-80 #ffffff #f7f7f4 -
-12 0-2 #ffffff #f7f7f4 -
-12 2-48 #1d232c #f7f7f4 -
-12 48-77 #ffffff #f7f7f4 -
-12 77-78 #ffffff #252527 -
-12 78-80 #ffffff #f7f7f4 -
-13 0-77 #ffffff #f7f7f4 -
-13 77-78 #ffffff #252527 -
-13 78-80 #ffffff #f7f7f4 -
-14 0-2 #ffffff #f7f7f4 -
-14 2-15 #1d232c #f7f7f4 -
-14 15-77 #ffffff #f7f7f4 -
-14 77-78 #ffffff #252527 -
-14 78-80 #ffffff #f7f7f4 -
-15 0-77 #ffffff #f7f7f4 -
-15 77-78 #ffffff #252527 -
-15 78-80 #ffffff #f7f7f4 -
-16 0-2 #ffffff #f7f7f4 -
-16 2-20 #1d232c #f7f7f4 -
-16 20-77 #ffffff #f7f7f4 -
-16 77-78 #ffffff #252527 -
-16 78-80 #ffffff #f7f7f4 -
-17 0-2 #ffffff #f7f7f4 -
-17 2-11 #1d232c #f7f7f4 -
-17 11-77 #ffffff #f7f7f4 -
-17 77-78 #ffffff #252527 -
-17 78-80 #ffffff #f7f7f4 -
-18 0-2 #ffffff #f7f7f4 -
-18 2-18 #1d232c #f7f7f4 -
-18 18-77 #ffffff #f7f7f4 -
-18 77-78 #ffffff #252527 -
-18 78-80 #ffffff #f7f7f4 -
-19 0-2 #ffffff #f7f7f4 -
-19 2-48 #1d232c #f7f7f4 -
-19 48-77 #ffffff #f7f7f4 -
-19 77-78 #ffffff #252527 -
-19 78-80 #ffffff #f7f7f4 -
-20 0-77 #ffffff #f7f7f4 -
-20 77-78 #ffffff #252527 -
-20 78-80 #ffffff #f7f7f4 -
-21 0-2 #ffffff #f7f7f4 -
-21 2-34 #1d232c #f7f7f4 -
-21 34-77 #ffffff #f7f7f4 -
-21 77-78 #ffffff #252527 -
-21 78-80 #ffffff #f7f7f4 -
-22 0-2 #ffffff #f7f7f4 -
-22 2-31 #1d232c #f7f7f4 -
-22 31-77 #ffffff #f7f7f4 -
-22 77-78 #ffffff #252527 -
-22 78-80 #ffffff #f7f7f4 -
+05 0-22 #ffffff #f7f7f4 -
+05 22-25 #c5c9cf #f7f7f4 -
+05 25-56 #a61f16 #f7f7f4 -
+05 56-80 #ffffff #f7f7f4 -
+06 0-22 #ffffff #f7f7f4 -
+06 22-25 #c5c9cf #f7f7f4 -
+06 25-70 #19612f #f7f7f4 -
+06 70-80 #ffffff #f7f7f4 -
+07 0-22 #ffffff #f7f7f4 -
+07 22-25 #c5c9cf #f7f7f4 -
+07 25-32 #1d232c #f7f7f4 -
+07 32-80 #ffffff #f7f7f4 -
+08 0-22 #ffffff #f7f7f4 -
+08 22-25 #c5c9cf #f7f7f4 -
+08 25-80 #ffffff #f7f7f4 -
+09 0-22 #ffffff #f7f7f4 -
+09 22-25 #c5c9cf #f7f7f4 -
+09 25-80 #ffffff #f7f7f4 -
+10 0-22 #ffffff #f7f7f4 -
+10 22-25 #c5c9cf #f7f7f4 -
+10 25-80 #ffffff #f7f7f4 -
+11 0-22 #ffffff #f7f7f4 -
+11 22-25 #c5c9cf #f7f7f4 -
+11 25-80 #ffffff #f7f7f4 -
+12 0-22 #ffffff #f7f7f4 -
+12 22-25 #c5c9cf #f7f7f4 -
+12 25-80 #ffffff #f7f7f4 -
+13 0-22 #ffffff #f7f7f4 -
+13 22-25 #c5c9cf #f7f7f4 -
+13 25-80 #ffffff #f7f7f4 -
+14 0-22 #ffffff #f7f7f4 -
+14 22-25 #c5c9cf #f7f7f4 -
+14 25-80 #ffffff #f7f7f4 -
+15 0-22 #ffffff #f7f7f4 -
+15 22-25 #c5c9cf #f7f7f4 -
+15 25-80 #ffffff #f7f7f4 -
+16 0-22 #ffffff #f7f7f4 -
+16 22-25 #c5c9cf #f7f7f4 -
+16 25-80 #ffffff #f7f7f4 -
+17 0-22 #ffffff #f7f7f4 -
+17 22-25 #c5c9cf #f7f7f4 -
+17 25-80 #ffffff #f7f7f4 -
+18 0-22 #ffffff #f7f7f4 -
+18 22-25 #c5c9cf #f7f7f4 -
+18 25-80 #ffffff #f7f7f4 -
+19 0-22 #ffffff #f7f7f4 -
+19 22-25 #c5c9cf #f7f7f4 -
+19 25-80 #ffffff #f7f7f4 -
+20 0-22 #ffffff #f7f7f4 -
+20 22-25 #c5c9cf #f7f7f4 -
+20 25-80 #ffffff #f7f7f4 -
+21 0-22 #ffffff #f7f7f4 -
+21 22-25 #c5c9cf #f7f7f4 -
+21 25-80 #ffffff #f7f7f4 -
+22 0-22 #ffffff #f7f7f4 -
+22 22-25 #c5c9cf #f7f7f4 -
+22 25-80 #ffffff #f7f7f4 -
 23 0-80 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #19612f #f7f7f4 b
-24 3-66 #545e6c #f7f7f4 -
-24 66-71 #1d232c #caced3 b
-24 71-78 #545e6c #f7f7f4 -
-24 78-80 #ffffff #f7f7f4 -
+24 3-4 #545e6c #f7f7f4 -
+24 4-8 #19612f #f7f7f4 b
+24 8-48 #545e6c #f7f7f4 -
+24 48-53 #1d232c #caced3 b
+24 53-60 #545e6c #f7f7f4 -
+24 60-80 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
 25 2-78 #ecedea #f7f7f4 -
 25 78-80 #ffffff #f7f7f4 -
@@ -170,6 +141,8 @@ cursor 1 1 hidden
 29 4-13 #545e6c #f7f7f4 -
 29 13-22 #1d232c #caced3 b
 29 22-32 #545e6c #f7f7f4 -
-29 32-35 #1d232c #caced3 b
-29 35-51 #545e6c #f7f7f4 -
-29 51-80 #ffffff #f7f7f4 -
+29 32-38 #1d232c #caced3 b
+29 38-49 #545e6c #f7f7f4 -
+29 49-52 #1d232c #caced3 b
+29 52-57 #545e6c #f7f7f4 -
+29 57-80 #ffffff #f7f7f4 -

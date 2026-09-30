@@ -1,4 +1,5 @@
 import { runAgentLoop } from "../agent/loop.ts";
+import { relative } from "node:path";
 import { toolTarget } from "./presentation.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { credentialStoreError } from "../auth/store.ts";
@@ -201,9 +202,13 @@ export abstract class TurnLayer extends CompactionLayer {
     return true;
   }
 
-  /** Show optional redacted diagnostics for the current failed operation. */
+  /** Append one shared turn-details notice for a failed outcome, or startup recovery diagnostics. */
   inspectRecovery(): boolean {
     const recovery = this.currentRecovery();
+    if (this.snapshot().outcome?.reason === "failed") {
+      this.notice(this.turnDetails());
+      return true;
+    }
     if (!recovery || !recovery.actions.includes("details")) return false;
     this.notice(`Failure details: ${this.recovery?.details ?? "No additional diagnostics are available."}`);
     return true;
@@ -213,7 +218,10 @@ export abstract class TurnLayer extends CompactionLayer {
     this.toolStartedAt.clear();
     this.closeChangeReview();
     this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
-    this.outcome = { reason: "completed", commands: [], commandCounts: { exitZero: 0, nonzero: 0, unknown: 0 }, toolResults: 0, failedTools: 0, changes: "Turn running." };
+    this.outcomeUserId = this.session.items.findLast(item => item.type === "user")?.id;
+    this.outcomeDiagnostics = undefined;
+    this.successfulToolPaths.clear();
+    this.outcome = { reason: "completed", commands: [], commandCounts: { exitZero: 0, nonzero: 0, unknown: 0 }, toolResults: 0, failedTools: 0, files: [], elapsedMs: 0 };
     const operationId = this.beginActivity("preparing");
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -250,6 +258,7 @@ export abstract class TurnLayer extends CompactionLayer {
   }
 
   protected async runTurn(signal: AbortSignal, operationId: number): Promise<void> {
+    if (this.disposed || this.activeAbort?.signal !== signal) return;
     try {
       for await (const event of runAgentLoop({
         session: this.session,
@@ -277,13 +286,15 @@ export abstract class TurnLayer extends CompactionLayer {
         this.markProvisionalIncomplete();
         this.clearRetryNotice();
         this.transcript.push(this.systemEntry("Cancelled."));
-        await this.captureTurnResult();
+        await this.captureTurnResult(signal);
+        if (this.disposed || this.activeAbort?.signal !== signal) return;
         this.finishOutcome("cancelled");
         this.status = "idle";
         this.offerRecovery("provider", true, "The saved turn was stopped. Completed results remain available; continue when ready.", undefined, operationId, false);
         return;
       }
-      await this.captureTurnResult();
+      await this.captureTurnResult(signal);
+      if (this.disposed || this.activeAbort?.signal !== signal) return;
       this.finishOutcome();
       if (this.status === "running") {
         this.status = "idle";
@@ -296,7 +307,8 @@ export abstract class TurnLayer extends CompactionLayer {
       this.markProvisionalIncomplete();
       this.clearRetryNotice();
       this.fail(redactSecrets(message, this.secrets));
-      await this.captureTurnResult();
+      await this.captureTurnResult(signal);
+      if (this.disposed || this.activeAbort?.signal !== signal) return;
       this.finishOutcome(signal.aborted ? "cancelled" : "failed");
     }
   }
@@ -400,6 +412,20 @@ export abstract class TurnLayer extends CompactionLayer {
         if (this.outcome) {
           this.outcome.toolResults++;
           if (event.status === "error") this.outcome.failedTools++;
+          if (event.status === "success" && (event.name === "edit" || event.name === "write") && event.details && typeof event.details === "object") {
+            const details = event.details as { resolvedPath?: unknown; created?: unknown; lineCount?: unknown };
+            if (typeof details.resolvedPath === "string") {
+              this.successfulToolPaths.add(details.resolvedPath);
+              const path = relative(this.gitBaseline?.root ?? this.workspace?.root ?? "", details.resolvedPath);
+              let file = this.outcome.files.find(file => file.path === path);
+              if (!file) { file = { path, source: "tool" }; this.outcome.files.push(file); }
+              const edit = event.name === "edit" ? asEditDetails(event.details) : undefined;
+              const counts = edit?.hunks ? buildEditDiff(edit.hunks)
+                : event.name === "write" && details.created === true && typeof details.lineCount === "number" && Number.isInteger(details.lineCount) && details.lineCount >= 0
+                  ? { added: details.lineCount, removed: 0 } : undefined;
+              if (counts) { file.added = (file.added ?? 0) + counts.added; file.removed = (file.removed ?? 0) + counts.removed; }
+            }
+          }
           if (event.name === "bash") {
             const details = event.details as { command?: unknown; exitCode?: unknown } | undefined;
             const exitCode = typeof details?.exitCode === "number" && Number.isInteger(details.exitCode) ? details.exitCode : null;
