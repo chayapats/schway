@@ -34,8 +34,8 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ WORKING   No model yet                                                                            Esc stops  ctx ~0
-  Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  ⠋ WORKING
+  Alt+L sign in · / commands
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -85,21 +85,10 @@ cursor 7 27 visible
 27 118-120 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
 28 1-12 #ffffff #0a5894 b
-28 12-13 #545e6c #ecedea -
-28 13-27 #1d232c #e1e3df -
-28 27-102 #545e6c #ecedea -
-28 102-105 #1d232c #c9cdd2 b
-28 105-119 #545e6c #ecedea -
-28 119-120 #ffffff #f7f7f4 -
+28 12-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-7 #1d232c #caced3 b
-29 7-15 #545e6c #f7f7f4 -
-29 15-21 #1d232c #caced3 b
-29 21-29 #545e6c #f7f7f4 -
-29 29-34 #1d232c #caced3 b
-29 34-45 #545e6c #f7f7f4 -
-29 45-51 #1d232c #caced3 b
-29 51-60 #545e6c #f7f7f4 -
-29 60-61 #1d232c #caced3 b
-29 61-70 #545e6c #f7f7f4 -
-29 70-120 #ffffff #f7f7f4 -
+29 7-18 #545e6c #f7f7f4 -
+29 18-19 #1d232c #caced3 b
+29 19-28 #545e6c #f7f7f4 -
+29 28-120 #ffffff #f7f7f4 -

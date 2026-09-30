@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { TextareaRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { credentialIdentity } from "../src/auth/store.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -37,16 +38,32 @@ test("a fresh install names no model, keeps typed text, and will not send", asyn
   try {
     await terminal.flush();
     const frame = terminal.captureCharFrame();
-    expect(frame).toContain("No model yet · Sign in to choose one · Alt+L");
+    for (const copy of ["○ NOT CONNECTED", "Not connected", "Sign in to choose a model · Alt+L", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
+    for (const copy of ["Ctrl+I failure details", "Enter send", "No model yet", "READY", "ATTENTION", "anthropic", "ctx"]) expect(frame).not.toContain(copy);
+    expect(controller.snapshot().readiness).toBe("not-connected");
+    let accepted = false;
+    expect(await controller.submit("controller draft", () => { accepted = true; })).toBe(false);
+    expect(accepted).toBe(false);
+    expect(controller.snapshot().transcript).toHaveLength(0);
+    expect(controller.snapshot().recovery).toBeUndefined();
     expect(frame).not.toContain("gpt-");
     expect(frame).not.toContain("openai/");
     expect(frame).not.toContain("claude");
     await terminal.mockInput.pasteBracketedText("keep this task");
+    const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
+    terminal.mockInput.pressArrow("left");
+    const cursor = editor.cursorOffset;
     terminal.mockInput.pressEnter();
     await Bun.sleep(5);
     view.refresh();
     await terminal.flush();
-    const editor = terminal.renderer.root.findDescendantById("prompt") as unknown as { plainText: string };
+    expect(editor.cursorOffset).toBe(cursor);
+    expect(editor.focused).toBe(true);
+    expect(controller.snapshot().loginChooser).toBeUndefined();
+    expect(controller.snapshot().recovery).toBeUndefined();
+    expect(controller.snapshot().status).toBe("idle");
+    expect(controller.snapshot().transcript).toHaveLength(0);
+    expect(terminal.captureCharFrame()).toContain("○ NOT CONNECTED");
     expect(editor.plainText).toBe("keep this task");
     expect(controller.snapshot().transcript.some(entry => entry.kind === "user")).toBe(false);
     expect(controller.snapshot().modelId).toBe("");
@@ -167,6 +184,87 @@ test("sign-in activates the route fallback and restores it on the next launch", 
     expect(restored.origins.model).toBe("interactive memory");
     const memory = await InteractiveMemory.load(home, root);
     expect(memory.choice?.model).toBe(ROUTE_FALLBACK_MODELS.openai);
+  });
+});
+
+for (const activationFails of [false, true]) test(`rendered sign-in preserves a Thai draft through cancel and ${activationFails ? "failed" : "successful"} activation without sending`, async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const configEditor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
+    const store = fakeCredentialStore();
+    const session = createSession();
+    let requests = 0;
+    const terminal = await createTestRenderer({ width: 120, height: 24, kittyKeyboard: true });
+    const controller = new TuiController({
+      session, sessionId: "rendered-sign-in", workspace, configEditor, home,
+      provider: configEditor.settings.provider, modelId: configEditor.settings.model, contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, rememberSecret: () => {}, reload: async () => ({ error: "unused" }),
+        listRouteModels: async () => [{ id: "other-model" }, { id: ROUTE_FALLBACK_MODELS.openai }] },
+      stageSettings: async settings => {
+        if (activationFails) throw new Error("fixture staging failure");
+        return { model: createScriptedModel({ provider: "openai", id: settings.model, responses: [() => { requests++; return { text: "unused" }; }] }), contextManager: createContextManager(workspace) };
+      },
+    });
+    const view = createConversationView(terminal.renderer, { controller, workspaceRoot: root, home, env: {}, secrets: [], quit() {},
+      submit: (value, accepted) => dispatchEditorInput(value, controller, async () => false, accepted) });
+    const settle = async () => { await Bun.sleep(5); view.refresh(); await terminal.flush(); };
+    const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
+    try {
+      await settle();
+      const draft = "ช่วยตรวจงานนี้\nแล้วอธิบายเป็นภาษาไทย";
+      await terminal.mockInput.pasteBracketedText(draft);
+      terminal.mockInput.pressArrow("left");
+      const cursor = editor.cursorOffset;
+      terminal.mockInput.pressKey("l", { meta: true });
+      await settle();
+      expect(controller.snapshot().loginChooser).toBeDefined();
+      terminal.mockInput.pressEscape();
+      await settle();
+      expect(controller.snapshot().readiness).toBe("not-connected");
+    let accepted = false;
+    expect(await controller.submit("controller draft", () => { accepted = true; })).toBe(false);
+    expect(accepted).toBe(false);
+    expect(controller.snapshot().transcript).toHaveLength(0);
+    expect(controller.snapshot().recovery).toBeUndefined();
+      expect(terminal.captureCharFrame()).toContain("○ NOT CONNECTED");
+      expect(editor.plainText).toBe(draft);
+      expect(editor.cursorOffset).toBe(cursor);
+      terminal.mockInput.pressKey("l", { meta: true });
+      await settle();
+      for (let i = 0; i < 20; i++) {
+        const chooser = controller.snapshot().loginChooser;
+        if (chooser?.choices[chooser.selectedIndex] === "OpenAI API key") break;
+        terminal.mockInput.pressArrow("down");
+      }
+      const chooser = controller.snapshot().loginChooser!;
+      expect(chooser.choices[chooser.selectedIndex]).toBe("OpenAI API key");
+      terminal.mockInput.pressEnter();
+      await settle();
+      expect(controller.snapshot().credentialEntry).toBeDefined();
+      await terminal.mockInput.pasteBracketedText("signed-in-key");
+      terminal.mockInput.pressEnter();
+      for (let i = 0; i < 100 && controller.snapshot().credentialEntry; i++) await settle();
+      await settle();
+      expect(editor.plainText).toBe(draft);
+      expect(editor.cursorOffset).toBe(cursor);
+      expect(editor.focused).toBe(true);
+      expect(session.items.filter(item => item.type === "user")).toHaveLength(0);
+      expect(requests).toBe(0);
+      expect(await store.get(credentialIdentity({ provider: "openai" }))).toBe("signed-in-key");
+      const frame = terminal.captureCharFrame();
+      if (activationFails) {
+        expect(controller.snapshot().status).toBe("error");
+        expect(frame).toContain("! ATTENTION");
+        expect(controller.snapshot().transcript.some(entry => entry.text === "Credential saved, but the recommended model could not be activated. Choose one with /model.")).toBe(true);
+      } else {
+        expect(controller.snapshot().readiness).toBe("ready");
+        expect(frame).toContain("● READY");
+        expect(frame).toContain(`openai/${ROUTE_FALLBACK_MODELS.openai} · OpenAI API key`);
+        expect(frame).toContain("Type a task · Enter sends");
+        expect(frame).toContain("Enter send");
+      }
+    } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
   });
 });
 
@@ -497,11 +595,14 @@ test("xAI API key sign-in activates grok-4.7 and restores it without openaiAuth"
       onModelActivated: choice => { activated = choice; },
     });
     try {
+      controller.notice("Earlier workspace notice");
       expect(controller.beginLogin("xai")).toBe(true);
       controller.enterCredentialText("saved-xai-key");
       expect(await controller.submitCredential()).toBe(true);
       expect(controller.snapshot().modelId).toBe("grok-4.7");
-      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Signed in. Using xai/grok-4.7."))).toBe(true);
+      expect(controller.snapshot().readiness).toBe("ready");
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Signed in. Using xai/grok-4.7."))).toBe(false);
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Earlier workspace notice")).toBe(true);
       expect(controller.snapshot().transcript.some(entry => entry.text.includes("XAI_API_KEY still takes precedence over the saved key."))).toBe(true);
       expect(activated).toMatchObject({ provider: "xai", authRoute: "api-key" });
     } finally { controller.dispose(); }

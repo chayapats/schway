@@ -90,8 +90,8 @@ export interface TuiSnapshot {
   compactionNotice?: string;
   outcome?: TurnOutcome;
   changeReview?: ChangeReview;
-  /** Whether startup is still resolving the selected route, ready, or needs explicit setup. */
-  readiness: "loading" | "ready" | "connect" | "choose-model" | "repair";
+  /** Distinguish an unconfigured connection from startup checks, usable models and setup failures. */
+  readiness: "loading" | "ready" | "not-connected" | "connect" | "choose-model" | "repair";
   /** A bounded known startup explanation; raw provider diagnostics remain behind recovery details. */
   readinessDetail?: string;
   /** Live phase and elapsed time while an operation is owned; absent once settled. */

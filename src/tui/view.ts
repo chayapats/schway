@@ -155,7 +155,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   // Set the override afterwards so overflow never changes the text's width.
   transcript.verticalScrollBar.visible = false;
   body.add(transcript);
-  const empty = new TextRenderable(renderer, { content: "Start with a task. Type / to browse commands.", fg: theme.muted, marginTop: 1 });
+  const empty = new TextRenderable(renderer, { id: "empty-conversation", content: "Start with a task. Type / to browse commands.", fg: theme.muted, marginTop: 1 });
   transcript.add(empty);
   const tree = new ScrollBoxRenderable(renderer, { id: "branch-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   body.add(tree);
@@ -208,7 +208,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
-  let footerParts: { model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; override?: string } = { model: "", route: "", ctx: "", running: false };
+  let footerParts: { model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; notConnected?: boolean; override?: string } = { model: "", route: "", ctx: "", running: false };
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -340,6 +340,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (tone === "active") return { bg: theme.accent, fg: theme.onFill };
     if (tone === "stopping") return { bg: theme.warning, fg: theme.onFill };
     if (tone === "attention") return { bg: theme.error, fg: theme.onFill };
+    if (tone === "neutral") return { bg: tint(theme, theme.muted, theme.surface), fg: theme.muted };
     return { bg: tint(theme, theme.success, theme.surface), fg: theme.success };
   }
 
@@ -361,10 +362,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
     const fill = mixColor(pillFrom, colors.bg, fade);
-    const glyph = pill.spinning ? spinnerFrame(at, motion) : pill.tone === "stopping" ? "◌" : pill.tone === "attention" ? "!" : "●";
+    const glyph = pill.spinning ? spinnerFrame(at, motion) : pill.tone === "stopping" ? "◌" : pill.tone === "attention" ? "!" : pill.tone === "neutral" ? "○" : "●";
     const label = ` ${glyph} ${pill.label} `;
     const sweep = ((at / 30) % (label.length + 16)) - 8;
     const pillChunks = [...label].map((char, index) => bold(bg(pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill)(fg(colors.fg)(char))));
+    if (footerParts.notConnected) { footer.content = new StyledText([fg(theme.muted)(" "), ...pillChunks]); return; }
     const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
     const thinking = footerParts.thinking ? [bg(tint(theme, theme.violet, theme.surface))(fg(theme.violet)(` ${footerParts.thinking} `))] : [];
     const route = footerParts.route ? [fg(theme.muted)(` ${footerParts.route}`)] : [];
@@ -557,10 +559,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
       footerParts = {
-        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "No model yet", thinking: snapshot.modelId && snapshot.thinking ? safe(snapshot.thinking) : undefined,
+        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", thinking: snapshot.modelId && snapshot.thinking ? safe(snapshot.thinking) : undefined,
         route: snapshot.modelId ? safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`) : "",
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
         running: !!snapshot.activity || snapshot.status === "running",
+        notConnected: snapshot.readiness === "not-connected",
       };
       const tail = entries.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
@@ -583,21 +586,24 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       returnContext.content = (safe(snapshot.recentSession
         ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Preview incomplete · resume validates history" : "/sessions for all history"}`
         : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${connection}${route ? ` · ${route}` : ""}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
-      const action = !snapshot.modelId ? "Sign in to choose one · Alt+L"
-        : snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
+      const action = snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
         : snapshot.readiness === "ready" ? "Type a task · Enter sends"
         : snapshot.readiness === "connect" ? "Connect to get started · Alt+L"
         : snapshot.readiness === "choose-model" ? "Choose an available model · Alt+M"
         : snapshot.recovery?.category === "credential-store" ? "Repair connection: unlock OS credential storage · Ctrl+R retry"
         : "Repair connection: choose model/settings · Alt+M";
       // The top bar already names the workspace; repeat it only when that bar is hidden.
-      empty.content = new StyledText([
+      empty.content = snapshot.readiness === "not-connected" ? new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
-        bold(fg(theme.text)(safe(snapshot.modelId ? connection : "No model yet · Sign in to choose one · Alt+L"))),
+        bold(fg(theme.text)("Not connected")), fg(theme.muted)("\n"),
+        ...keyHintChunks("Sign in to choose a model · Alt+L", hintColors(theme.background)),
+      ]) : new StyledText([
+        ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
+        bold(fg(theme.text)(safe(connection))),
         ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n`))] : [fg(theme.muted)("\n\n")]),
         ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(`${safe(snapshot.readinessDetail)}\n`)] : []),
         ...keyHintChunks(safe(action), hintColors(theme.background)),
-        ...(snapshot.readiness !== "ready" && snapshot.readiness !== "loading" ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I failure details · Your task stays in the editor", hintColors(theme.background))] : []),
+        ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I failure details · Your task stays in the editor", hintColors(theme.background))] : []),
       ]);
       const ids = new Set(entries.map(entry => entry.id));
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
@@ -812,7 +818,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.content = fittedHints(panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : renderer.width < 70 ? "Enter send · Ctrl+F find · Alt+I inspect" : "Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands", width);
+      hints.content = fittedHints(panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "review" ? "↑↓ files · PgUp/PgDn scroll · Esc return to draft" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
       pickerWasVisible = picker.visible;

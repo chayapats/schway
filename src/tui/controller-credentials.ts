@@ -137,10 +137,14 @@ export abstract class CredentialsLayer extends ControllerCore {
     const entry = this.credentialEntry;
     const target = this.credentialTarget;
     if (!entry || !target || this.credentialMutation) return false;
+    const initialConnection = !this.startupAbort && !this.model && !this.modelId.trim() && !this.startupDiagnostic;
+    const priorEntries = new Set(this.transcript.map(entry => entry.id));
+    let savedNotice: string | undefined;
     this.credentialMutation = true;
     const task = (async () => {
       const result = await entry.submit();
       this.notice(result.message);
+      savedNotice = this.transcript.at(-1)?.id;
       if (!result.ok) { this.pickerReturn = undefined; this.status = "error"; return false; }
       const source = this.credentialOverrideNotice(target);
       if (source) this.notice(source);
@@ -156,7 +160,18 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
-    if (saved && !this.modelId.trim()) await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target);
+    if (saved && !this.modelId.trim()) {
+      const activated = await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target);
+      if (activated && initialConnection) {
+        // The ready empty state confirms setup; retain earlier history and credential override warnings.
+        const setupMessages = new Set([
+          `Signed in. Using ${target.provider}/${this.modelId}.`,
+          "Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.",
+        ]);
+        this.transcript = this.transcript.filter(entry => priorEntries.has(entry.id) || entry.kind !== "system" ||
+          entry.id !== savedNotice && !setupMessages.has(entry.text));
+      }
+    }
     if (saved) this.restorePickerAfterConnection();
     return saved;
   }
