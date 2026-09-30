@@ -2158,9 +2158,7 @@ for (const route of ["codex", "grok"] as const) for (const browserSettled of [tr
     ui.mockInput.pressEnter(); if (browserSettled) await ui.controller.waitForIdle(); await settle(ui);
     expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: chooser, selectedId: `${chooser}-device` });
     expect(ui.captureCharFrame()).toContain(`${route === "codex" ? "ChatGPT" : "Grok"} · more options`);
-    // Exercise the public retry while the old browser runner still ignores abort.
-    if (browserSettled) ui.mockInput.pressEnter(); else void ui.controller.selectLoginChoice();
-    await settle(ui);
+    ui.mockInput.pressEnter(); await settle(ui);
     expect(deferred).toHaveLength(retryIndex + 1); expect(deferred[retryIndex]!.options.device).toBe(true);
     if (!browserSettled) expect(deferred[0]!.options.signal.aborted).toBe(true);
     expect(ui.controller.running).toBe(true);

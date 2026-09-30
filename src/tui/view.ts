@@ -1211,6 +1211,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         handled(); return;
       }
     }
+    if (snapshot.loginChooser && (name === "return" || name === "kpenter")) {
+      void controller.selectLoginChoice().then(refresh, fail); handled(); return;
+    }
     if (snapshot.loginChooser && name === "tab") { controller.openLoginMoreOptions(); handled(); return; }
     if (snapshot.branchTree && name === "tab") { controller.toggleBranchTreeAction(); setDraft(""); handled(); return; }
     if (name === "tab" && !key.shift) {
