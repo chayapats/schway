@@ -3,6 +3,7 @@ import { chmod, mkdir, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
+/** Run the installed command with captured output and a bounded cleanup deadline. */
 async function run(argv: string[], cwd: string, env?: Record<string, string>) {
   const child = Bun.spawn(argv, { cwd, env, stdout: "pipe", stderr: "pipe" });
   const timeout = setTimeout(() => child.kill(), 30_000);
@@ -60,11 +61,19 @@ import { createTestRenderer } from "@opentui/core/testing";
 import * as storeModule from "./node_modules/schway/src/auth/store.ts";
 import { InteractiveMemory } from "./node_modules/schway/src/config/interactive-memory.ts";
 const scenario = process.env.STARTUP_SCENARIO;
-let splashWriteStarted = false;
-if (scenario === "splash-stalled") mock.module("node:fs/promises", () => ({ ...stateFs,
+const stateReadFile = stateFs.readFile, stateWriteFile = stateFs.writeFile;
+let splashWriteStarted = false, splashReadCalls = 0;
+if (scenario.startsWith("splash")) mock.module("node:fs/promises", () => ({ ...stateFs,
+  readFile: (...args) => {
+    if (String(args[0]).endsWith("/.schway/ui-state.json")) {
+      splashReadCalls++;
+      if (scenario === "splash-read-stalled") return new Promise(() => {});
+    }
+    return stateReadFile(...args);
+  },
   writeFile: (...args) => {
-    if (String(args[0]).includes("/.ui-state-")) { splashWriteStarted = true; return new Promise(() => {}); }
-    return stateFs.writeFile(...args);
+    if (scenario === "splash-stalled" && String(args[0]).includes("/.ui-state-")) { splashWriteStarted = true; return new Promise(() => {}); }
+    return stateWriteFile(...args);
   },
 }));
 const values = new Map();
@@ -125,6 +134,8 @@ void (async () => {
     const splash = () => terminal.renderer.root.findDescendantById("splash");
     const expected = process.env.SPLASH_EXPECT_FULL === "1";
     assert(!!splash() === expected, "installed splash policy mismatch");
+    if (["splash-off", "splash-reduced", "splash-never", "splash-always"].includes(scenario)) assert(splashReadCalls === 0, "gated splash unnecessarily read version state");
+    if (scenario === "splash-read-stalled") assert(splashReadCalls === 1, "stalled read fixture was not exercised");
     if (expected) {
       assert(terminal.captureCharFrame().includes("███████╗"), "full splash never painted");
       if (process.env.SPLASH_SKIP === "key") await terminal.mockInput.typeText("x");
@@ -262,14 +273,14 @@ void (async () => {
       expect(await Bun.file(result).json()).toEqual({ full, requests: 0 });
       expect(await Bun.file(splashState).json()).toEqual({ splashSeenVersion: installedVersion });
     }
-    for (const scenario of ["splash-off", "splash-small", "splash-never", "splash-paste", "splash-click", "splash-stalled"]) {
+    for (const scenario of ["splash-off", "splash-reduced", "splash-small", "splash-never", "splash-always", "splash-paste", "splash-click", "splash-stalled", "splash-read-stalled"]) {
       const home = join(root, scenario), result = join(root, `${scenario}.json`);
       await mkdir(home);
-      if (scenario === "splash-never") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ ui: { splash: "never" } }));
-      const full = scenario === "splash-paste" || scenario === "splash-click" || scenario === "splash-stalled";
+      if (scenario === "splash-never" || scenario === "splash-always") await Bun.write(join(home, ".schway/config.json"), JSON.stringify({ ui: { splash: scenario === "splash-never" ? "never" : "always" } }));
+      const full = ["splash-always", "splash-paste", "splash-click", "splash-stalled", "splash-read-stalled"].includes(scenario);
       const output = await run([executable], splashWork, buildIsolatedCliEnv(home, {
         PATH: `${launchers}:${process.env.PATH}`, STARTUP_SCENARIO: scenario, STARTUP_RESULT: result,
-        SCHWAY_MOTION: scenario === "splash-off" ? "off" : "full", SPLASH_EXPECT_FULL: full ? "1" : "0", SPLASH_SKIP: scenario.slice(7),
+        SCHWAY_MOTION: scenario === "splash-off" ? "off" : scenario === "splash-reduced" ? "reduced" : "full", SPLASH_EXPECT_FULL: full ? "1" : "0", SPLASH_SKIP: scenario.slice(7),
       }));
       if (output.exit !== 0) throw new Error(output.stderr || output.stdout);
       expect(await Bun.file(result).json()).toEqual({ full, requests: 0, ...(scenario === "splash-stalled" ? { restored: true } : {}) });
@@ -330,4 +341,5 @@ mock.module("./node_modules/schway/src/model/loader.ts", () => ({ bindGrokModel:
   });
 }, 120_000);
 
+/** Quote a filesystem path as one literal POSIX-shell argument. */
 function shell(value: string): string { return `'${value.replaceAll("'", "'\\''")}'`; }

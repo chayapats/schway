@@ -2,13 +2,25 @@ import { mock } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
 import * as fs from "node:fs";
+import * as asyncFs from "node:fs/promises";
 import { join } from "node:path";
 import { createScriptedModel } from "../helpers/scripted-model.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
 
 const [home, mode, resume] = process.argv.slice(2) as [string, string, string | undefined];
 const abort = new AbortController();
-let stopped = false, destroyed = false;
+let stopped = false, destroyed = false, splashReads = 0;
+const readFile = asyncFs.readFile;
+if (mode === "splash-read-abort") mock.module("node:fs/promises", () => ({ ...asyncFs,
+  readFile: (...args: Parameters<typeof asyncFs.readFile>) => {
+    if (String(args[0]).endsWith("/.schway/ui-state.json")) {
+      splashReads++;
+      setTimeout(() => abort.abort(), 10);
+      return new Promise<never>(() => {});
+    }
+    return readFile(...args);
+  },
+}));
 const event = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const wait = async (condition: () => boolean) => {
   const until = Date.now() + 5000;
@@ -49,6 +61,7 @@ const credential = await import("../../src/tui/credential-input.ts");
 const core = await credential.loadCredentialSafeTui();
 let driver: Promise<void> | undefined;
 mock.module(join(import.meta.dir, "../../src/tui/credential-input.ts"), () => ({ ...credential, loadCredentialSafeTui: async () => ({ ...core, createCliRenderer: async (options: { exitOnCtrlC: boolean; exitSignals: NodeJS.Signals[] }) => {
+  if (mode === "splash-read-abort") throw new Error("Renderer opened after cancelled startup");
   const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true, ...options });
   const stop = terminal.renderer.stop.bind(terminal.renderer), destroy = terminal.renderer.destroy.bind(terminal.renderer);
   terminal.renderer.stop = () => { stopped = true; return stop(); };
@@ -79,7 +92,7 @@ mock.module(join(import.meta.dir, "../../src/tui/credential-input.ts"), () => ({
 const { runInteractiveTui } = await import("../../src/tui/app.ts");
 let stderr = "";
 const model = mode === "tool" ? createScriptedModel({ toolCalls: [{ id: "silent-tool", name: "bash", arguments: { command: "fixture" } }] }) : createScriptedModel({ text: "must not be sent" });
-const code = await runInteractiveTui({ cwd: home, env: { HOME: home, SCHWAY_MOTION: "off" }, args: { json: false, help: false, ...(resume ? { resume } : {}) }, model, signal: abort.signal, credentialStore: fakeCredentialStore(), stdout: { write() {} }, stderr: { write(text) { stderr += text; } } });
+const code = await runInteractiveTui({ cwd: home, env: { HOME: home, SCHWAY_MOTION: mode === "splash-read-abort" ? "full" : "off" }, args: { json: false, help: false, ...(resume ? { resume } : {}) }, model, signal: abort.signal, credentialStore: fakeCredentialStore(), stdout: { write() {} }, stderr: { write(text) { stderr += text; } } });
 await driver;
-event({ code, stopped, destroyed, stderr });
+event({ code, stopped, destroyed, stderr, ...(mode === "splash-read-abort" ? { splashReads } : {}) });
 if (mode === "tool") setInterval(() => {}, 1000);

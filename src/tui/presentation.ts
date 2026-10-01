@@ -109,7 +109,9 @@ export function shortenWorkspacePath(path: string, home: string, columns: number
     if (Bun.stringWidth(candidate) <= columns) return candidate;
   }
   const tail = `…/${last}`;
-  return Bun.stringWidth(tail) <= columns ? tail : columns > 2 ? `…/${fitLine(last, columns - 2)}` : fitLine(last, columns);
+  if (Bun.stringWidth(tail) <= columns) return tail;
+  if (Bun.stringWidth(last) <= columns) return last;
+  return columns > 2 ? `…/${fitLine(last, columns - 2)}` : fitLine(last, columns);
 }
 
 /** Select a built-in tool target; callers redact it before clipping it for display. */

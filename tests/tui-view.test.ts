@@ -31,6 +31,7 @@ import { bashTool } from "../src/tools/bash.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
+/** Build a real disposable conversation renderer with optional workspace and view dependencies. */
 async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}, submitOverride?: ConversationViewOptions["submit"], viewEnv: Record<string, string> = {}, viewOptions: Partial<ConversationViewOptions> = {}) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
   const session = overrides.session ?? createSession();

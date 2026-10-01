@@ -386,6 +386,10 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
     for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
+      const motion = resolveMotion(env);
+      const seen = settings.splash === "first-run" && motion === "full" && !io.args.resume
+        ? await readSplashSeenVersion(home, io.signal) : undefined;
+      if (io.signal?.aborted) return 0;
       await runTuiRenderer({
         controller,
         initialize: settings.model.length > 0 && !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
@@ -402,7 +406,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         signal: io.signal,
         stderr: io.stderr,
         diagnostics,
-        splash: resolveSplash(settings.splash, resolveMotion(env), await readSplashSeenVersion(home), version, !!io.args.resume),
+        splash: resolveSplash(settings.splash, motion, seen, version, !!io.args.resume),
       });
     } catch (error) {
       diagnostics.record("tui", "renderer_failed", { category: "terminal_setup" }, "error");
@@ -449,6 +453,7 @@ export async function stageInteractiveSettings(
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
+/** Own renderer lifecycle and bounded decorative persistence around interactive input. */
 async function runTuiRenderer(options: {
   controller: TuiController;
   initialize?: () => Promise<void>;

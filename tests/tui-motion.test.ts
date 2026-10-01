@@ -25,6 +25,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 const text = (chunks: readonly TextChunk[]) => chunks.map(chunk => chunk.text).join("");
 const theme = TUI_THEMES.dark;
 
+/** Build a disposable real renderer with an injected animation clock and observable startup lifecycle. */
 async function view(options: { width?: number; height?: number; splash?: "full" | "accent" | "none"; onSplashPlayed?: () => void; beforePaint?: boolean; motion?: "full" | "reduced" | "off" } = {}) {
   const terminal = await createTestRenderer({ width: options.width ?? 90, height: options.height ?? 26, kittyKeyboard: true });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };

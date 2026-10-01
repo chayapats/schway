@@ -207,14 +207,17 @@ both, regardless of the saved splash preference. The interactive UI records
 `{"splashSeenVersion":"<version>"}` in `~/.schway/ui-state.json` only when a full
 splash has painted and is removed, including input skips. A new version, upgrade
 or downgrade, gets the full first-run splash again. A missing, unreadable or
-malformed state file counts as unseen. Writes are atomic and best-effort, with no
+malformed state file counts as unseen. Version reads are needed only for eligible
+first-run launches, stop waiting after 100 ms or cancellation, and treat a timeout
+as unseen. Writes are atomic and best-effort, with no
 startup error or transcript notice on failure. Accent-only and gated launches
 write nothing, so the next eligible launch still gets the full splash. Headless
 runs and CLI subcommands never read or write this file.
 
 The top bar preserves the repository folder when shortening a workspace path.
 It abbreviates home to `~`, removes whole middle segments with `/…/`, then drops
-the prefix to `…/<folder>` if needed. A branch can use all remaining columns; it
+the prefix to `…/<folder>` if needed, then shows just the whole folder when that
+is the only form that fits. A branch can use all remaining columns; it
 is clipped only after the path reaches its shortest whole-folder form, and is
 hidden below 40 columns. Only after hiding the branch may an oversized final
 folder be clipped. Resizing wider restores the longer path and branch.
