@@ -1,4 +1,5 @@
 import { pruneUndoStore } from "../undo/store.ts";
+import { isErrno } from "../tools/fs.ts";
 import { formatCount } from "../text/format.ts";
 import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
@@ -628,7 +629,11 @@ export async function handleSlashCommand(
       if (!id || /\s/.test(id)) { ctx.controller.fail("Usage: /delete-session <exact-session-id>. Switch away with /new first."); return false; }
       if (id === ctx.controller.snapshot().sessionId) { ctx.controller.fail("Switch away with /new before deleting this session."); return false; }
       try { await deleteJsonlSession({ directory: ctx.sessionsDir, home: ctx.home, id }); ctx.controller.notice("Session and draft deleted · /sessions browse"); return true; }
-      catch (error) { ctx.controller.fail(`Cannot delete session: ${messageOf(error)}`); return false; }
+      catch (error) {
+        if (isErrno(error, "UNDO_STORE_BUSY")) ctx.controller.fail("Cannot delete session · /delete-session retry · Ctrl+I details", messageOf(error));
+        else ctx.controller.fail(`Cannot delete session: ${messageOf(error)}`);
+        return false;
+      }
     }
     case "sessions": {
       return ctx.controller.openSessionPicker(ctx.sessionsDir, (id, signal) => handleSlashCommand("resume", id, ctx, undefined, undefined, signal));

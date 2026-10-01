@@ -1,4 +1,7 @@
 import { ConfigEditor } from "../../src/config/editing.ts";
+import { Database } from "bun:sqlite";
+import { openUndoStore } from "../../src/undo/store.ts";
+import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
@@ -36,7 +39,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || ["completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const disk = palette || ["completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -144,7 +147,16 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: true });
   const controller = new TuiController(options);
-  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : Promise.resolve(false), accepted) });
+  let undoLock: Database | undefined;
+  if (screen.id === "delete-session-busy") {
+    sessionDirectory = sessionsDirectory(home); await mkdir(sessionDirectory, { recursive: true });
+    await writeFile(join(sessionDirectory, "saved-session.jsonl"), JSON.stringify({ type: "session", version: 4, id: "saved-session", createdAt: new Date().toISOString(), workspaceRoot: root, launchCwd: root, extraRoots: [] }) + "\n");
+    await openUndoStore({ home }).recordShell({ sessionId: "saved-session", turnId: "saved-turn", turnNumber: 1 }, { detection: "unavailable" });
+    undoLock = new Database(join(home, ".schway", "undo.lock"));
+    undoLock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+  }
+  const deletionContext = screen.id === "delete-session-busy" ? { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionDirectory!, settings: () => new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") }).settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } } : undefined;
+  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();
@@ -156,7 +168,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   await settle();
   return { ...terminal, controller, view, session, sessionDirectory, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
-    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); if (temp) await rm(temp, { recursive: true, force: true }); },
+    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
   };
 }
 /** Reach the named state, capture all spans and dispose every owned resource. */

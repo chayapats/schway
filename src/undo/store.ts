@@ -23,7 +23,7 @@ export interface UndoStore {
   settle(turn: UndoTurn, path: string, created: boolean): Promise<void>;
   /** Atomically record latest detection, merging available paths without replacing original file pre-images. */
   recordShell(turn: UndoTurn, shell: UndoShell): Promise<void>;
-  /** Read all durable manifests for one validated session identity. */
+  /** Read durable manifests for one validated session, skipping only concurrently removed manifests. */
   list(sessionId: string): Promise<UndoManifest[]>;
   /** Read and verify exact pre-image bytes by their session-local content hash. */
   blob(sessionId: string, sha256: string): Promise<Buffer>;
@@ -104,7 +104,11 @@ export function openUndoStore({ home }: { home: string }): UndoStore {
       const directory = join(sessionPath(sessionId), "turns");
       let names: string[];
       try { names = await readdir(directory); } catch (error) { if (isErrno(error, "ENOENT")) return []; throw error; }
-      return Promise.all(names.filter(name => name.endsWith(".json")).map(async name => parseManifest(JSON.parse(await readFile(join(directory, name), "utf8")), sessionId, name.slice(0, -5))));
+      const manifests = await Promise.all(names.filter(name => name.endsWith(".json")).map(async name => {
+        try { return parseManifest(JSON.parse(await readFile(join(directory, name), "utf8")), sessionId, name.slice(0, -5)); }
+        catch (error) { if (isErrno(error, "ENOENT")) return undefined; throw error; }
+      }));
+      return manifests.filter((manifest): manifest is UndoManifest => manifest !== undefined);
     },
     async blob(sessionId, sha256) {
       if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error("Invalid undo blob hash");
@@ -193,10 +197,10 @@ async function pruneLocked(root: string, maxAgeDays: number, maxSizeBytes: numbe
   }
 }
 
-/** Remove one session's undo data under the same cross-process exclusion as publication and pruning. */
+/** Remove existing session undo data under publication/pruning exclusion, without locking an absent target. */
 export async function deleteUndoSession({ home, sessionId }: { home: string; sessionId: string }): Promise<void> {
   const path = join(home, ".schway", "undo", validId(sessionId));
-  if (!await storeExists(join(home, ".schway", "undo"))) return;
+  if (!await storeExists(path)) return;
   return withStoreLock(home, () => rm(path, { recursive: true, force: true }));
 }
 
@@ -212,7 +216,7 @@ async function storeExists(root: string): Promise<boolean> {
   catch (error) { if (isErrno(error, "ENOENT")) return false; throw error; }
 }
 
-/** Exclude concurrent store mutations with an OS-released lock and immediate, fail-safe contention. */
+/** Exclude mutations with an OS-released lock, rejecting contention immediately with UNDO_STORE_BUSY. */
 async function withStoreLock<T>(home: string, operation: () => Promise<T>): Promise<T> {
   const directory = join(home, ".schway");
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -225,7 +229,7 @@ async function withStoreLock<T>(home: string, operation: () => Promise<T>): Prom
   try {
     try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
     catch (error) {
-      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw new Error("Undo store is updating · Retry when finished");
+      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw Object.assign(new Error("Undo store is updating · Retry when finished"), { code: "UNDO_STORE_BUSY" });
       throw error;
     }
     return await operation();

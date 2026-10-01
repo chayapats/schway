@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deleteUndoSession, openUndoStore, pruneUndoStore, undoStoreSize } from "../src/undo/store.ts";
 import { withTempDir } from "./helpers.ts";
+import { createJsonlSession, deleteJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 
 /** Pause a real child at an I/O seam while retaining its store operation ownership. */
 async function pausedOperation(home: string, operation: "prune" | "capture", fail = false) {
@@ -75,6 +76,92 @@ test("pruning excludes concurrent manifest publication and a retried turn keeps 
       expect((await store.blob("session", manifest.files[0]!.before!.sha256)).toString()).toBe(bytes);
       await pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1000000 });
       expect((await store.blob("session", hash)).toString()).toBe(bytes);
+    } finally { await paused.stop(); }
+  });
+});
+
+test("listing retains an available turn when pruning removes an enumerated manifest", async () => {
+  await withTempDir(async home => {
+    const store = openUndoStore({ home });
+    for (const turnId of ["expired", "available"]) {
+      const turn = { sessionId: "session", turnId, turnNumber: 1 }, path = join(home, "file");
+      await writeFile(path, "before"); await store.capture(turn, path);
+      await writeFile(path, "after"); await store.settle(turn, path, true);
+    }
+    const expired = join(home, ".schway", "undo", "session", "turns", "expired.json");
+    const manifest = JSON.parse(await readFile(expired, "utf8")); manifest.createdAt = "2000-01-01T00:00:00Z";
+    await writeFile(expired, JSON.stringify(manifest));
+    const script = `
+      import { mock } from "bun:test";
+      const fs = await import("node:fs/promises"), realReadDir = fs.readdir;
+      let armed = true, prune;
+      mock.module("node:fs/promises", () => ({ ...fs, readdir: async (...args) => {
+        const names = await realReadDir(...args);
+        if (armed && args[1] === undefined && String(args[0]).endsWith("turns")) {
+          armed = false;
+          await prune({ home: ${JSON.stringify(home)}, maxAgeDays: 30, maxSizeBytes: 1000000 });
+        }
+        return names;
+      } }));
+      const { openUndoStore, pruneUndoStore } = await import(${JSON.stringify(join(import.meta.dir, "../src/undo/store.ts"))});
+      prune = pruneUndoStore;
+      console.log(JSON.stringify((await openUndoStore({ home: ${JSON.stringify(home)} }).list("session")).map(m => m.turnId)));
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
+    const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect(code, error).toBe(0); expect(JSON.parse(output)).toEqual(["available"]);
+  });
+});
+
+for (const failure of ["malformed", "EACCES", "EIO"]) test(`listing does not hide ${failure} manifest failures`, async () => {
+  await withTempDir(async home => {
+    const store = openUndoStore({ home });
+    await store.recordShell({ sessionId: "session", turnId: "bad", turnNumber: 1 }, { detection: "unavailable" });
+    if (failure === "malformed") await writeFile(join(home, ".schway", "undo", "session", "turns", "bad.json"), "{");
+    const script = `
+      import { mock } from "bun:test";
+      const fs = await import("node:fs/promises"), realRead = fs.readFile;
+      mock.module("node:fs/promises", () => ({ ...fs, readFile: async (...args) => {
+        if (${failure !== "malformed"} && String(args[0]).endsWith("bad.json")) throw Object.assign(new Error("Read failed"), { code: ${JSON.stringify(failure)} });
+        return realRead(...args);
+      } }));
+      const { openUndoStore } = await import(${JSON.stringify(join(import.meta.dir, "../src/undo/store.ts"))});
+      try { await openUndoStore({ home: ${JSON.stringify(home)} }).list("session"); process.exitCode = 2; }
+      catch (error) { console.log(error.code ?? error.name); }
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
+    const [code, output] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+    expect(code).toBe(0); expect(output.trim()).toBe(failure === "malformed" ? "SyntaxError" : failure);
+  });
+});
+
+test.skipIf(process.platform === "win32")("a session without undo data bypasses an inaccessible lock file", async () => {
+  await withTempDir(async home => {
+    await openUndoStore({ home }).recordShell({ sessionId: "other", turnId: "seed", turnNumber: 1 }, { detection: "unavailable" });
+    const directory = sessionsDirectory(home), lockPath = join(home, ".schway", "undo.lock");
+    const session = await createJsonlSession({ directory, workspace: { root: home, launchCwd: home, extraRoots: [] } });
+    await chmod(lockPath, 0o000);
+    try {
+      await deleteJsonlSession({ directory, home, id: session.header.id });
+      expect(await Bun.file(join(directory, session.header.id + ".jsonl")).exists()).toBe(false);
+    } finally { await chmod(lockPath, 0o600); }
+  });
+});
+
+test("a session without undo data can be deleted while an unrelated store operation owns the lock", async () => {
+  await withTempDir(async home => {
+    const store = openUndoStore({ home });
+    await store.recordShell({ sessionId: "session", turnId: "seed", turnNumber: 1 }, { detection: "unavailable" });
+    const directory = sessionsDirectory(home);
+    const session = await createJsonlSession({ directory, workspace: { root: home, launchCwd: home, extraRoots: [] } });
+    const paused = await pausedOperation(home, "prune");
+    try {
+      await deleteUndoSession({ home, sessionId: "absent" });
+      await deleteJsonlSession({ directory, home, id: session.header.id });
+      expect(await Bun.file(join(directory, session.header.id + ".jsonl")).exists()).toBe(false);
+      expect((await store.list("session"))[0]?.turnId).toBe("seed");
+      await expect(deleteUndoSession({ home, sessionId: "session" })).rejects.toThrow("Undo store is updating");
+      paused.release(); expect(await paused.child.exited, await paused.error).toBe(0);
     } finally { await paused.stop(); }
   });
 });

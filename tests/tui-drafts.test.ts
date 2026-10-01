@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
 import { mkdir, readFile, readdir, writeFile, chmod } from "node:fs/promises";
@@ -15,6 +16,7 @@ import { loadConfigEditor } from "../src/config/editing.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
+import { openUndoStore } from "../src/undo/store.ts";
 
 async function setup(home: string, resume?: string, submit?: ConversationViewOptions["submit"]) {
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
@@ -281,4 +283,25 @@ test.skipIf(process.platform === "win32")("failed undo directory removal keeps t
     expect(await Bun.file(join(sessionsDirectory(home), `${id}.jsonl`)).exists()).toBe(true);
     expect(ui.controller.snapshot().transcript.at(-1)?.text).toStartWith("Cannot delete session:");
   } finally { await chmod(blocked, 0o700); ui.close(); }
+}));
+
+test("busy session deletion shows a retry command and retains its storage reason only in details", async () => withTempDir(async home => {
+  const ui = await setup(home), id = ui.session.header.id;
+  ui.session.append({ type: "user", id: "accepted", content: [{ type: "text", text: "Saved turn" }] });
+  await openUndoStore({ home }).recordShell({ sessionId: id, turnId: "accepted", turnNumber: 1 }, { detection: "unavailable" });
+  const lock = new Database(join(home, ".schway", "undo.lock"));
+  lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+  try {
+    expect(await handleSlashCommand("new", "", ui.ctx)).toBe(true);
+    ui.view.refresh(); await ui.renderOnce();
+    await ui.mockInput.pasteBracketedText(`/delete-session ${id}`); ui.mockInput.pressEnter(); await ui.submitted();
+    ui.view.refresh(); await ui.renderOnce();
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Cannot delete session · /delete-session retry · Ctrl+I details");
+    expect(ui.captureCharFrame()).toContain("/delete-session retry");
+    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+    expect(ui.captureCharFrame()).not.toContain("Undo store is updating");
+    expect(await Bun.file(join(sessionsDirectory(home), `${id}.jsonl`)).exists()).toBe(true);
+    ui.mockInput.pressKey("i", { ctrl: true }); ui.view.refresh(); await ui.renderOnce();
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Undo store is updating · Retry when finished");
+  } finally { lock.close(); ui.close(); }
 }));
