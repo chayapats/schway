@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -461,7 +462,7 @@ export function formatGitStatus(summary: GitStatusSummary): string {
     lines.push("Working tree is clean.");
     return lines.join("\n");
   }
-  lines.push(`Changed files (${summary.totalFiles}):`);
+  lines.push(`${formatCount(summary.totalFiles, "changed file")}:`);
   for (const file of summary.files) {
     const rename = file.origPath !== undefined ? ` (renamed from ${file.origPath})` : "";
     const kind = file.untracked ? "untracked" : file.staged !== "." && file.unstaged !== "." ? `staged ${file.staged}/unstaged ${file.unstaged}` : file.staged !== "." ? `staged ${file.staged}` : `unstaged ${file.unstaged}`;
@@ -469,7 +470,7 @@ export function formatGitStatus(summary: GitStatusSummary): string {
     const deleted = file.staged === "D" || file.unstaged === "D" ? " [deleted]" : "";
     lines.push(`- ${file.path}${rename} [${kind}]${binary}${deleted}`);
   }
-  if (summary.truncated) lines.push(`… truncated to ${summary.files.length} of ${summary.totalFiles} files. Use git status --short in ${summary.root} for the full list.`);
+  if (summary.truncated) lines.push(`Showing ${formatCount(summary.files.length, "file")} of ${formatCount(summary.totalFiles, "file")} · Run git status --short in ${summary.root} for all files`);
   lines.push(`Inspect further with git status --short or git diff -- <path> in ${summary.root}.`);
   return lines.join("\n");
 }
@@ -567,7 +568,7 @@ export function formatGitDiffPreview(preview: GitDiffPreview): string {
   const header = preview.path !== undefined ? `Diff for ${preview.path}:` : "Working-tree diff:";
   const lines = [header, preview.diff];
   if (preview.binaryFiles.length > 0) {
-    lines.push(`Binary files (${preview.binaryFiles.length}):`);
+    lines.push(`${formatCount(preview.binaryFiles.length, "binary file")}:`);
     for (const entry of preview.binaryFiles) lines.push(`- ${entry}`);
     lines.push("Binary content is summarized, not shown. Use git diff --stat for sizes.");
   }

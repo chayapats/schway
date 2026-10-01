@@ -22,7 +22,7 @@ cursor 6 27 visible
  Read the records, validate them, and restore
  the conversation.
 
- Manual compaction. Compacting older turns…
+ Compacting older turns · Esc stop
 
 
 
@@ -30,11 +30,11 @@ cursor 6 27 visible
 
 
 
- ⠋ Manual compaction · summarizing older turns; …
+ ⠋ Compacting context · Esc stop
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ COMPACTING 3s   script…    Esc stops  ctx ~48
+  ⠋ Compacting 3.0s   scri…    Esc stops  ctx ~48
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -87,8 +87,8 @@ cursor 6 27 visible
 14 18-50 #ffffff #f7f7f4 -
 15 0-50 #ffffff #f7f7f4 -
 16 0-1 #ffffff #f7f7f4 -
-16 1-43 #545e6c #f7f7f4 -
-16 43-50 #ffffff #f7f7f4 -
+16 1-34 #545e6c #f7f7f4 -
+16 34-50 #ffffff #f7f7f4 -
 17 0-50 #ffffff #f7f7f4 -
 18 0-50 #ffffff #f7f7f4 -
 19 0-50 #ffffff #f7f7f4 -
@@ -98,8 +98,8 @@ cursor 6 27 visible
 23 0-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #0a5894 #f7f7f4 b
-24 2-49 #545e6c #f7f7f4 -
-24 49-50 #ffffff #f7f7f4 -
+24 2-32 #545e6c #f7f7f4 -
+24 32-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -
 25 49-50 #ffffff #f7f7f4 -
@@ -112,9 +112,9 @@ cursor 6 27 visible
 27 1-49 #ecedea #f7f7f4 -
 27 49-50 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-18 #ffffff #0a5894 b
-28 18-19 #545e6c #ecedea -
-28 19-28 #1d232c #e1e3df -
+28 1-20 #ffffff #0a5894 b
+28 20-21 #545e6c #ecedea -
+28 21-28 #1d232c #e1e3df -
 28 28-31 #545e6c #ecedea -
 28 31-34 #1d232c #c9cdd2 b
 28 34-49 #545e6c #ecedea -

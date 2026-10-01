@@ -9,10 +9,10 @@ cursor 7 27 visible
  ⚡ schway  ~/demo
 
 
- scripted/scripted-model · scripted API key ·
- configured, unverified
+ scripted/scripted-model · scripted API key
 
  Type a task · Enter sends
+
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › /
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   scripted/scripted-model        ctx ~0
+  ● Ready   scripted/scripted-model        ctx ~0
  ↑/↓ select · Tab complete · Esc dismiss
 == styles
 00 0-1 #ffffff #161b24 -
@@ -47,17 +47,15 @@ cursor 7 27 visible
 02 0-50 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
 03 1-24 #e6eaf0 #0e1117 b
-03 24-46 #8b95a7 #0e1117 -
-03 46-50 #ffffff #0e1117 -
-04 0-1 #ffffff #0e1117 -
-04 1-23 #8b95a7 #0e1117 -
-04 23-50 #ffffff #0e1117 -
-05 0-50 #ffffff #0e1117 -
-06 0-1 #ffffff #0e1117 -
-06 1-15 #8b95a7 #0e1117 -
-06 15-20 #e6eaf0 #293140 b
-06 20-26 #8b95a7 #0e1117 -
-06 26-50 #ffffff #0e1117 -
+03 24-43 #8b95a7 #0e1117 -
+03 43-50 #ffffff #0e1117 -
+04 0-50 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-15 #8b95a7 #0e1117 -
+05 15-20 #e6eaf0 #293140 b
+05 20-26 #8b95a7 #0e1117 -
+05 26-50 #ffffff #0e1117 -
+06 0-50 #ffffff #0e1117 -
 07 0-50 #ffffff #0e1117 -
 08 0-50 #ffffff #0e1117 -
 09 0-50 #ffffff #0e1117 -

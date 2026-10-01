@@ -466,20 +466,20 @@ test("picker endpoint key Esc returns to URL, URL Esc restores the sign-in row, 
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1); controller.searchModels("OpenAI-compatible");
       const settings = editor.settings, identity = controller.snapshot().modelPicker!.entries[0]!.identity;
-      expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787/v1"); expect(controller.submitEndpointUrl()).toBe(true);
+      expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787"); expect(controller.submitEndpointUrl()).toBe(true);
       controller.enterCredentialText("cancelled-secret"); controller.cancel();
-      expect(controller.snapshot().endpointUrlEntry?.value).toBe("http://localhost:8787/v1"); expect(editor.settings).toEqual(settings);
+      expect(controller.snapshot().endpointUrlEntry?.value).toBe("http://localhost:8787"); expect(editor.settings).toEqual(settings);
       controller.cancel(); expect(controller.snapshot().modelPicker?.query).toBe("OpenAI-compatible");
       expect(controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity).toBe(identity);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787/v1"); expect(controller.submitEndpointUrl()).toBe(true);
+      expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787"); expect(controller.submitEndpointUrl()).toBe(true);
       controller.enterCredentialText("endpoint-secret"); expect(await controller.submitCredential()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(editor.settings.baseUrl).toBe("http://localhost:8787/v1"); expect(editor.settings.provider).toBe("openai-compatible");
+      expect(editor.settings.baseUrl).toBe("http://localhost:8787"); expect(editor.settings.provider).toBe("openai-compatible");
       expect(controller.snapshot().modelId).toBe("gpt-5.4"); expect(activated).toEqual([]);
       const picker = controller.snapshot().modelPicker!; expect(picker.query).toBe("OpenAI-compatible");
       expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "model", modelId: "fake-coder", groupLabel: "OpenAI-compatible · localhost:8787" });
-      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787/v1" }))).toBe("endpoint-secret");
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787" }))).toBe("endpoint-secret");
       expect(await controller.submit("old adapter must not run")).toBe(false);
     } finally { controller.dispose(); }
   });

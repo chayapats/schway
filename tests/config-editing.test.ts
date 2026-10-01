@@ -100,7 +100,7 @@ test("invalid values, malformed destinations and concurrent changes never replac
     await writeFile(path, '{"maxTurns":5}');
     const pending = await editor.prepare({ scope: "project", key: "maxTurns", value: 9 });
     await writeFile(path, '{"maxTurns":6}');
-    await expect(pending.commit()).rejects.toThrow("changed while");
+    await expect(pending.commit()).rejects.toThrow("Settings file changed · Reopen and retry the edit");
     expect(await readFile(path, "utf8")).toBe('{"maxTurns":6}');
     expect(editor.settings.maxTurns).toBe(5);
     expect(await readdir(join(dir, ".schway"))).toEqual(["config.json"]);

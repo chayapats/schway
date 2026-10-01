@@ -71,7 +71,7 @@ test("missing Codex adapter still allows thinking reset after a saved unverified
       stageSettings: async () => ({ model: undefined, contextManager: createContextManager(workspace) }),
     });
     try {
-      expect(controller.describeThinking()).toContain("subscription capability not yet verified");
+      expect(controller.describeThinking()).toContain("Choose thinking · /model open choices");
       expect(await controller.thinkingCommand("reset")).toBe(true);
       expect(editor.settings.thinking).toBeUndefined();
     } finally { controller.dispose(); }
@@ -140,12 +140,12 @@ test("explicit Codex login activates the account model and reasoning only in thi
       expect(await controller.login("codex")).toBe(true);
       expect(controller.snapshot()).toMatchObject({ provider: "openai", modelId: "real-codex" });
       expect(editor.settings).toMatchObject({ provider: "openai", model: "real-codex", openaiAuth: "codex", contextWindow: 111000, defaultThinking: "medium" });
-      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect(controller.describeThinking()).toContain("Provider default (medium");
       expect(await controller.thinkingCommand("max")).toBe(true);
       expect(controller.snapshot().thinking).toBe("max");
       expect(await controller.thinkingCommand("ultra")).toBe(false);
       expect(await controller.thinkingCommand("reset")).toBe(true);
-      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect(controller.describeThinking()).toContain("Provider default (medium");
       expect((await Bun.file(join(home, ".schway/config.json")).json()).provider).toBe("openai-compatible");
       expect(resolveCodexReasoning("max", "real-codex", capability)).toEqual({ effort: "max", summary: "auto" });
       expect(() => resolveCodexReasoning("ultra", "real-codex", capability)).toThrow("subscription catalog");
@@ -226,7 +226,7 @@ test("cancelling after secure-store commit reports saved credentials and blocks 
       expect(await pending).toBe(false);
       expect(await store.get(codexSubscriptionIdentity())).toBe("replacement-credential");
       const text = JSON.stringify(controller.snapshot());
-      expect(text).toContain("credential was saved");
+      expect(text).toContain("Sign-in cancelled; credential saved · /model choose model");
       expect(text).not.toContain("Nothing was saved");
       await controller.submit("continue task");
       expect(oldCalls).toBe(0);
@@ -294,7 +294,7 @@ test("activation failure keeps saved credentials and gives a redacted model retr
       expect(await store.get(codexSubscriptionIdentity())).toBe("saved-credential-secret");
       expect(controller.snapshot().provider).toBe("openai");
       const text = JSON.stringify(controller.snapshot());
-      expect(text).toContain("Retry /model");
+      expect(text).toContain("/model retry");
       expect(text).not.toContain("native-activation-secret-sentinel");
     } finally { controller.dispose(); }
   });
@@ -320,7 +320,7 @@ test("failed Codex activation does not turn the active API-key model into a subs
       expect(await controller.thinkingCommand("")).toBe(true);
       expect(await controller.thinkingCommand("high")).toBe(true);
       expect(discoveries).toBe(1);
-      expect(controller.describeThinking()).not.toContain("subscription capability not yet verified");
+      expect(controller.describeThinking()).not.toContain("Choose thinking · /model open choices");
       expect(controller.describeThinking()).toContain("high");
     } finally { controller.dispose(); }
   });
@@ -640,7 +640,7 @@ test("account catalog selection reaches the real Schway loop and Codex request b
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       controller.searchModels("real-codex");
       expect(await controller.selectPickerModel()).toBe(true);
-      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect(controller.describeThinking()).toContain("Provider default (medium");
       expect(await controller.thinkingCommand("max")).toBe(true);
       await controller.submit("hello");
       expect(requests.map(request => request.model).filter(Boolean)).toEqual(["real-codex"]);

@@ -2,7 +2,7 @@
 
 Start Schway with `bun run start` (or `schway` after installation). Set the selected provider's API key in the environment or pass `--api-key` at launch. Configuration does not store API keys.
 
-A fresh install names no model. The screen shows `No model yet · Sign in to choose one · Alt+L`, and sending stays unavailable until a model is usable. Typed text is kept. Headless runs do not invent a model: without a provider and model in config or `--provider` and `--model`, Schway exits non-zero with `No model configured. Pass --provider and --model, or set them in config.`
+A fresh install names no model. The screen shows `Not connected; Sign in to choose a model · Alt+L`, and sending stays unavailable until a model is usable. Typed text is kept. Headless runs do not invent a model: without a provider and model in config or `--provider` and `--model`, Schway exits non-zero with `No model configured · Pass --provider and --model, or set them in config`
 
 Enter `/model` to choose a model. Search ignores case and ranks exact, prefix, substring and subsequence matches against model IDs, `provider/modelId` and group labels. Routes stay grouped in this order: ChatGPT subscription, Grok subscription, OpenAI API key, xAI API key, the configured OpenAI-compatible endpoint, then named profiles in config order. Endpoint headers show host and port; profile headers show their name and host. Up/Down skips headers, Enter uses the selected model or opens a `Sign in · Enter` row, and Esc goes back. Disconnected routes show one sign-in row and no models. Successful sign-in restores the query and highlights that route's first matching model; cancellation restores its sign-in row. Each connected route lists models from its model-list endpoint. The OpenAI API-key picker shows chat models only. Static metadata fills missing context, reasoning support and per-model maximum output; unknown IDs keep conservative budgets. A failed list shows `list unavailable` once on the route header, with fallback models still selectable. A typed `provider/model-id` appears last in its group even if absent from the catalog. For a model ID containing a slash, include the provider first, for example `openai-compatible/org/custom-model`.
 
@@ -96,11 +96,11 @@ This file setting has no preferences-panel row. Change the config file and resta
 
 ## Upgrading from the Anthropic provider
 
-The Anthropic provider was removed in 0.4. Configuration or `--provider anthropic` that names it stops before the terminal opens, in interactive and headless runs, prints the notice below and exits non-zero. Remove `"provider": "anthropic"` from `~/.schway/config.json` or `.schway/config.json`.
+Anthropic support ended in 0.4 Configuration or `--provider anthropic` that names it stops before the terminal opens, in interactive and headless runs, prints the notice below and exits non-zero. Remove `"provider": "anthropic"` from `~/.schway/config.json` or `.schway/config.json`.
 
 ```text
-The Anthropic provider was removed in 0.4.
-Use Claude through an OpenAI-compatible endpoint:
+Anthropic support ended in 0.4
+Use Claude through a compatible endpoint:
   schway --provider openai-compatible --base-url <url> --model <id>
 ```
 
@@ -164,7 +164,7 @@ schway --provider xai --model grok-4.7 -p "explain this repository"
 /logout xai
 ```
 
-`/login xai` asks for the key in the masked prompt and stores it at the `api-key:xai` identity. Headless runs never open that prompt. With no model named, headless exits with `No model configured. Pass --provider and --model, or set them in config.` and does not invent `grok-4.7`. After an interactive sign-in with no model set, Schway selects the recommended listed model, falling back to `grok-4.7` when the list names no default.
+`/login xai` asks for the key in the masked prompt and stores it at the `api-key:xai` identity. Headless runs never open that prompt. With no model named, headless exits with `No model configured · Pass --provider and --model, or set them in config` and does not invent `grok-4.7`. After an interactive sign-in with no model set, Schway selects the recommended listed model, falling back to `grok-4.7` when the list names no default.
 
 Reasoning levels come from that model's `capabilities.reasoning_effort` in `GET https://api.x.ai/v1/models`. `none` is offered as `off` and is the only level that sends `reasoning.effort: none`. A model whose efforts omit `none` offers no `off`. A model with no reasoning capability offers only `off`, which sends no `reasoning` field. An unlisted level is rejected. With thinking unset, Schway does not fetch the model list and sends no reasoning control. With thinking set, headless fetches the list once and validates the level before the turn. Capabilities are bound to the API-key or Grok subscription auth route, even when both offer the same model ID. Switching routes fetches the target route’s list before activation; a rejected effort keeps the previous settings and route active. Credential replacement and logout invalidate the affected route’s evidence. If a replacement Grok account’s catalog cannot be verified, its previous adapter stays blocked; another active provider remains usable.
 

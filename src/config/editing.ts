@@ -210,13 +210,13 @@ export class ConfigEditor {
 
   /** Stage an indivisible workspace memory update without changing session or explicit config overrides. */
   async prepareMemory(choice?: InteractiveChoice): Promise<ConfigTransaction> {
-    if (!this.memory) throw new Error("Interactive memory is unavailable in this session.");
+    if (!this.memory) throw new Error("Workspace memory unavailable · Restart Schway to retry");
     const revision = this.revision;
     const layers = { ...this.layers, memory: choice };
     const settings = resolved(layers, this.modelCapabilities);
     return { settings, origins: configOrigins(layers), commit: async signal => {
       signal?.throwIfAborted();
-      if (revision !== this.revision || this.committing) throw new Error("Configuration changed while this edit was staged. Retry the edit.");
+      if (revision !== this.revision || this.committing) throw new Error("Settings changed · Reopen and retry the edit");
       this.committing = true;
       try {
         await this.memory!.write(choice, signal);
@@ -287,7 +287,7 @@ export class ConfigEditor {
 
   /** Forget only this workspace's memory and session selection, retaining explicit inherited settings. */
   async forgetChoice(): Promise<ConfigEditor> {
-    if (!this.memory) throw new Error("Interactive memory is unavailable in this session.");
+    if (!this.memory) throw new Error("Workspace memory unavailable · Restart Schway to retry");
     await this.memory.write();
     const session = { ...this.layers.session };
     for (const key of ["provider", "model", "thinking", "profile", "openaiAuth", "xaiAuth"] as const) delete session[key];
@@ -397,7 +397,7 @@ export class ConfigEditor {
     const settings = resolved(layers, this.modelCapabilities);
     return { settings, origins: configOrigins(layers), commit: async (signal) => {
       signal?.throwIfAborted();
-      if (revision !== this.revision || this.committing) throw new Error("Configuration changed while this edit was staged. Retry the edit.");
+      if (revision !== this.revision || this.committing) throw new Error("Settings changed · Reopen and retry the edit");
       this.committing = true;
       try {
         const saved = { ...source } as Record<string, unknown>;
@@ -465,7 +465,7 @@ async function atomicWrite(path: string, layer: ConfigLayer, before: string | un
     let current: string | undefined;
     try { current = readFileSync(path, "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    if (current !== before) throw new Error("Configuration file changed while this edit was staged. Retry the edit.");
+    if (current !== before) throw new Error("Settings file changed · Reopen and retry the edit");
     // Rename is the commit point: cancellation after it cannot undo the saved edit.
     renameSync(temporary, path);
     committed = true;

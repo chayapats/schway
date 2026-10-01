@@ -5,14 +5,14 @@ import { sanitizeBaseUrl } from "./transcript-format.ts";
 /** Plain-language recovery guidance never includes provider diagnostic text. */
 export function recoveryMessage(category: TuiRecovery["category"]): string {
   switch (category) {
-    case "auth": return "The selected provider rejected its sign-in. Connect again, then continue this saved turn. Completed results remain available.";
-    case "credential-store": return "Credential storage is locked or unavailable. Restore OS secure-store access, then retry credential access. Saved task progress remains available.";
-    case "model": return "The selected model is unavailable. Choose a model, then continue this saved turn. Completed results remain available.";
-    case "offline": return "The provider connection timed out or is offline. Check the connection, then continue this saved turn.";
-    case "rate-limit": return "The provider rate limit is still exhausted after retries. Wait for access, then continue this saved turn.";
-    case "session-write": return "Could not save progress to this session. Further tool execution stopped. Inspect the visible output and repair storage before starting new work.";
-    case "tool": return "A tool failed. Inspect its result before deciding how to proceed; completed effects remain in this session.";
-    default: return "The provider could not finish this step. Inspect details or continue this session when ready.";
+    case "auth": return "Access rejected · Connect again to continue";
+    case "credential-store": return "Credential storage unavailable · Unlock the secure store";
+    case "model": return "Model unavailable · Choose another model";
+    case "offline": return "Connection unavailable · Check your network";
+    case "rate-limit": return "Usage limit reached · Wait before continuing";
+    case "session-write": return "Progress not saved · Repair storage before continuing";
+    case "tool": return "Tool failed · Inspect the result";
+    default: return "Request failed · Inspect details before continuing";
   }
 }
 
@@ -27,10 +27,10 @@ export function startupFailureCategory(message: string): "auth" | "credential-st
 /** Explain a startup failure while keeping its diagnostic out of the primary row. */
 export function startupRecoveryMessage(category: "auth" | "credential-store" | "model" | "provider"): string {
   switch (category) {
-    case "auth": return "Missing credentials. Use /login or connect to the selected provider. Your draft is still in the editor.";
-    case "credential-store": return "Credential storage is locked or unavailable. Restore OS secure-store access, then retry credential access. Your draft is still in the editor.";
-    case "model": return "The selected model is unavailable. Choose an available model; your draft is still in the editor.";
-    case "provider": return "The selected provider could not be loaded. Inspect details and repair its settings; your draft is still in the editor.";
+    case "auth": return "Sign in to continue · Alt+L sign in";
+    case "credential-store": return "Credential storage unavailable · Unlock the secure store";
+    case "model": return "Model unavailable · Alt+M choose model";
+    case "provider": return "Connection unavailable · Ctrl+I inspect details";
   }
 }
 

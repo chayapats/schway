@@ -1,6 +1,6 @@
 import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
-import type { TurnOutcome } from "./controller-types.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
+import type { TurnOutcome } from "./controller-types.ts";
 
 /** Return the visible completion word and glyph without implying verification. */
 export function outcomeLabel(outcome: TurnOutcome): string {
@@ -27,48 +27,47 @@ export function formatOutcomeLine(outcome: TurnOutcome, columns: number): string
 /** Pair connection and operation states with semantic status-pill colors. */
 export type StatusTone = "ready" | "neutral" | "active" | "stopping" | "attention";
 
-/** Uppercase footer pill for the current state; `spinning` marks labels that get the animated glyph. */
+/** Describe the current state in sentence case; spinning labels receive an animated glyph. */
 export function statusPill(state: { readiness: string; status: string; activity?: TuiActivity }, tiny = false): { label: string; tone: StatusTone; spinning: boolean } {
   const activity = state.activity;
-  if (state.readiness === "loading") return { label: "CHECKING", tone: "active", spinning: true };
+  if (state.readiness === "loading") return { label: "Checking", tone: "active", spinning: true };
   if (!activity) {
-    if (state.status === "running") return { label: "WORKING", tone: "active", spinning: true };
-    if (state.status === "error") return { label: "ATTENTION", tone: "attention", spinning: false };
-    if (state.readiness === "not-connected") return { label: "NOT CONNECTED", tone: "neutral", spinning: false };
-    return { label: "READY", tone: "ready", spinning: false };
+    if (state.status === "running") return { label: "Working", tone: "active", spinning: true };
+    if (state.status === "error") return { label: "Attention", tone: "attention", spinning: false };
+    if (state.readiness === "not-connected") return { label: "Not connected", tone: "neutral", spinning: false };
+    return { label: "Ready", tone: "ready", spinning: false };
   }
-  const elapsed = Math.floor(activity.elapsedMs / 1000);
-  const duration = tiny ? "" : ` ${elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`}`;
-  if (activity.phase === "stopping") return { label: activity.cancellation === "requested" ? tiny ? "CANCEL SENT" : "CANCEL REQUESTED" : `STOPPING${duration}`, tone: "stopping", spinning: false };
+  const duration = tiny ? "" : ` ${formatDuration(activity.elapsedMs)}`;
+  if (activity.phase === "stopping") return { label: activity.cancellation === "requested" ? "Stop requested" : `Stopping${duration}`, tone: "stopping", spinning: false };
   if (activity.phase === "retry") {
     const label = activity.retry
-      ? `RETRY ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts}${tiny ? "" : ` · ${Math.ceil(activity.retry.remainingMs / 1000)}s`}`
-      : `RETRYING${duration}`;
+      ? `Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts}${tiny ? "" : ` · ${formatDuration(activity.retry.remainingMs)}`}`
+      : `Retrying${duration}`;
     return { label, tone: "stopping", spinning: true };
   }
-  const phase = activity.phase === "tools" ? `TOOLS ${activity.activeTools}` : { preparing: "PREPARING", waiting: "WAITING", streaming: "STREAMING", compacting: "COMPACTING" }[activity.phase];
+  const phase = activity.phase === "tools" ? formatCount(activity.activeTools, "tool") : { preparing: "Preparing", waiting: "Waiting", streaming: "Receiving", compacting: "Compacting" }[activity.phase];
   return { label: `${phase}${duration}`, tone: "active", spinning: true };
 }
 
 /** Summarize current work without implying that a quiet provider or tool has stalled. */
 export function activityDetail(activity: TuiActivity): string {
-  const detail = currentWorkDetail(activity);
-  return activity.compactionOutcome && activity.phase !== "stopping"
-    ? `Compaction ${activity.compactionOutcome === "noop" ? "no-op" : activity.compactionOutcome} · ${detail}`
-    : detail;
+  if (activity.compactionOutcome && activity.phase !== "stopping") return {
+    completed: "Context compacted · Esc stop", cancelled: "Compaction cancelled · Esc stop",
+    failed: "Compaction failed · Esc stop", noop: "Context unchanged · Esc stop",
+  }[activity.compactionOutcome];
+  return currentWorkDetail(activity);
 }
 
 /** Describe the current phase independently of the prior compaction result. */
 function currentWorkDetail(activity: TuiActivity): string {
-  if (activity.phase === "stopping") return activity.cancellation === "requested" ? "Cancellation requested · stop signal sent" : "Stopping · waiting for active work to settle";
-  if (activity.phase === "compacting") return `${activity.compactionReason === "overflow" ? "Context overflow" : activity.compactionReason === "pressure" ? "Context pressure" : "Manual compaction"} · summarizing older turns; history retained`;
+  if (activity.phase === "stopping") return activity.cancellation === "requested" ? "Stop requested · Waiting for cleanup" : "Stopping · Waiting for cleanup";
+  if (activity.phase === "compacting") return "Compacting context · Esc stop";
   if (activity.phase === "tools") {
-    const names = [...new Set(activity.toolNames)];
-    return names.length ? `Running ${activity.activeTools} tool${activity.activeTools === 1 ? "" : "s"}: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}` : `Running ${activity.activeTools} tools`;
+    return `Running ${formatCount(activity.activeTools, "tool")}`;
   }
-  if (activity.phase === "retry" && activity.retry) return `Provider retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} after the requested delay`;
-  if (activity.phase === "retry") return "Retrying provider request…";
-  return { preparing: "Preparing request…", waiting: "Waiting for provider response…", streaming: "Receiving response…" }[activity.phase];
+  if (activity.phase === "retry" && activity.retry) return `Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} · Esc stop`;
+  if (activity.phase === "retry") return "Retrying connection · Esc stop";
+  return { preparing: "Preparing request · Esc stop", waiting: "Waiting for response · Esc stop", streaming: "Receiving response · Esc stop" }[activity.phase];
 }
 
 /** Remove terminal control sequences while retaining ordinary Unicode, tabs, and newlines. */

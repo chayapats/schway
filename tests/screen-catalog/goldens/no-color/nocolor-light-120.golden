@@ -12,7 +12,7 @@ cursor 7 27 visible
   ▌ Summarize the changes
 
   ▌ ! Error
-  ▌ The provider could not finish this step. Inspect details or continue this session when ready.
+  ▌ Request failed · Inspect details before continuing
   ▌ Ctrl+R continue · Ctrl+I details · Esc keep editing
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ! ATTENTION   scripted/scripted-model                                                                          ctx ~6
+  ! Attention   scripted/scripted-model                                                                          ctx ~6
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -66,8 +66,8 @@ cursor 7 27 visible
 06 0-2 #ffffff #f7f7f4 -
 06 2-3 #1d232c #dddedc -
 06 3-4 #ffffff #dddedc -
-06 4-97 #1d232c #dddedc -
-06 97-117 #ffffff #dddedc -
+06 4-54 #1d232c #dddedc -
+06 54-117 #ffffff #dddedc -
 06 117-120 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-3 #1d232c #dddedc -

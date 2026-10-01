@@ -8,7 +8,7 @@ cursor 1 1 hidden
 == text
  ⚡ schway  /project
 
-  Starting ChatGPT subscription browser sign-in. Press Esc to cancel.
+  Starting ChatGPT browser sign-in · Esc cancel
 
 
 
@@ -28,13 +28,13 @@ cursor 1 1 hidden
 
 
 
-  ⠋ Working on your request…
+  ⠋ Working · Esc stop
    Complete ChatGPT approval · Esc cancels
-   Waiting for approval in your browser… · Esc cancel
+   Approve in your browser · Esc cancel
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Approval pending · Esc cancels
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ WORKING
+  ⠋ Working
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -45,8 +45,8 @@ cursor 1 1 hidden
 00 20-80 #ffffff #161b24 -
 01 0-80 #ffffff #0e1117 -
 02 0-2 #ffffff #0e1117 -
-02 2-69 #8b95a7 #0e1117 -
-02 69-80 #ffffff #0e1117 -
+02 2-47 #8b95a7 #0e1117 -
+02 47-80 #ffffff #0e1117 -
 03 0-80 #ffffff #0e1117 -
 04 0-80 #ffffff #0e1117 -
 05 0-80 #ffffff #0e1117 -
@@ -68,8 +68,8 @@ cursor 1 1 hidden
 21 0-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #7cc4ff #0e1117 b
-22 3-28 #8b95a7 #0e1117 -
-22 28-80 #ffffff #0e1117 -
+22 3-22 #8b95a7 #0e1117 -
+22 22-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
 23 3-42 #7cc4ff #1e2430 -
@@ -77,8 +77,8 @@ cursor 1 1 hidden
 23 78-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -
-24 3-53 #e6eaf0 #1e2430 -
-24 53-78 #ffffff #1e2430 -
+24 3-39 #e6eaf0 #1e2430 -
+24 39-78 #ffffff #1e2430 -
 24 78-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -

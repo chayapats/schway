@@ -94,7 +94,7 @@ test("slow listeners preserve their own order without gating other listeners or 
     expect(slow).toEqual(fast.slice(0, OBSERVER_QUEUE_LIMIT + 1));
     runtime.dispose();
     expect(signal!.aborted).toBe(true);
-    expect(diagnostics.join("\n")).toContain(`dropped ${events.length - OBSERVER_QUEUE_LIMIT - 1} runtime notification(s) in total`);
+    expect(diagnostics.join("\n")).toContain(`dropped ${events.length - OBSERVER_QUEUE_LIMIT - 1} runtime notifications in total`);
   });
 });
 
@@ -116,7 +116,7 @@ test("observer byte limits and disposal keep unresolved listener work from holdi
   runtime.dispose();
   expect(signal!.aborted).toBe(true);
   expect(diagnostics.join("\n")).toContain("queue limit exceeded");
-  expect(diagnostics.join("\n")).toContain("1 queued runtime notification(s): runtime disposed");
+  expect(diagnostics.join("\n")).toContain("1 queued runtime notification: runtime disposed");
 });
 
 test("unsubscribe aborts current work and catches a rejection returned after self-unsubscription", async () => {

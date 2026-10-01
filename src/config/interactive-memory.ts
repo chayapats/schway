@@ -55,10 +55,10 @@ export class InteractiveMemory {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     const lock = new Database(lockPath);
     try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
-    catch { lock.close(); throw new Error("Interactive memory is being changed by another process. Retry after its update finishes."); }
+    catch { lock.close(); throw new Error("Workspace choice is updating · Retry when finished"); }
     const temporary = `${this.path}.${crypto.randomUUID()}.tmp`;
     try {
-      if (await readOptional(this.path) !== this.before) throw new Error("Interactive memory changed in another process. Reopen before choosing again; the newer choice was preserved.");
+      if (await readOptional(this.path) !== this.before) throw new Error("Workspace choice changed · Reopen before choosing again");
       const record: RecordState = { version: 1, revision: crypto.randomUUID(), ...(choice ? { choice } : {}) };
       const text = JSON.stringify(record) + "\n";
       const file = await open(temporary, "wx", 0o600);

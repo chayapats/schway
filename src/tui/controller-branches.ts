@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { TuiTranscriptEntry } from "./controller-types.ts";
 import { type BranchTreeSnapshot, branchTreePreviewForRecord, branchTreeAncestryRecords, buildBranchTreeSnapshot } from "./branch-tree.ts";
@@ -13,24 +14,24 @@ export abstract class BranchesLayer extends SessionsLayer {
     if ((action === "tree" || action === "show") && id === undefined) {
       if (this.disposed) return false;
       this.openBranchTree();
-      this.notice("Branch tree open. Up/Down browses, Enter switches or forks the highlighted complete turn, Esc closes without changing branches.");
+      this.notice("Choose a conversation · ↑↓ browse · Enter continue · Esc back");
       return true;
     }
     if (action === "list" && id === undefined) {
       let branches;
       try { branches = this.session.listBranches(); }
       catch (error) { this.fail(error instanceof Error ? error.message : String(error)); return false; }
-      const lines = [`Conversation root: ${this.session.rootId}`, "Branches (IDs are selectors; names are labels):"];
+      const lines = [`Conversation root: ${this.session.rootId}`, "Branches · /branch switch <branch-id> continue:"];
       for (const branch of branches.slice(0, 50)) {
-        lines.push(`${branch.active ? "*" : "-"} ${branch.id}${branch.name ? ` (${branch.name})` : ""}: head ${branch.headId}, ${branch.entryCount} entries`);
+        lines.push(`${branch.active ? "*" : "-"} ${branch.id}${branch.name ? ` (${branch.name})` : ""}: head ${branch.headId}, ${formatCount(branch.entryCount, "entry", "entries")}`);
         lines.push(`  Recent complete-turn entries: ${branch.forkPoints.slice(-12).join(", ")}`);
       }
-      if (branches.length > 50) lines.push("More branches are available through the session branch API.");
+      if (branches.length > 50) lines.push("More branches available · /branch tree browse");
       this.notice(lines.join("\n").slice(0, 50_000));
       return true;
     }
     if (this.disposed) return false;
-    if (this.running) { this.notice("Busy: wait for the active operation to settle before changing branches."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     if (!id || (action !== "fork" && action !== "switch") || (action === "switch" && label.length)) {
       this.fail("Usage: /branch list | /branch tree | /branch fork <entry-id> [name] | /branch switch <branch-id>. Branches do not undo file changes.");
       return false;
@@ -39,7 +40,7 @@ export abstract class BranchesLayer extends SessionsLayer {
       if (action === "fork") this.session.forkBranch(id, label.length ? label.join(" ") : undefined);
       else this.session.selectBranch(id);
       this.replaceSession(this.session, this.sessionId);
-      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes or switch Git branches.`);
+      this.notice(`Active branch: ${this.session.activeBranchId} · Enter send`);
       return true;
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
@@ -143,12 +144,12 @@ export abstract class BranchesLayer extends SessionsLayer {
   /** Switch to one stable branch ID while idle and rebuild the transcript without replaying tools. */
   activateBranchTreeBranch(branchId: string): boolean {
     if (this.disposed) return false;
-    if (this.running) { this.notice("Busy: wait for the active operation to settle before changing branches. Press Esc to cancel the turn first."); return false; }
-    if (!branchId) { this.fail("Usage: select one stable branch ID from the tree. Labels and prefixes are not selectors."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
+    if (!branchId) { this.fail("Choose a branch · /branch tree browse"); return false; }
     try {
       this.session.selectBranch(branchId);
       this.replaceSession(this.session, this.sessionId);
-      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes or switch Git branches.`);
+      this.notice(`Active branch: ${this.session.activeBranchId} · Enter send`);
       return true;
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
@@ -159,12 +160,12 @@ export abstract class BranchesLayer extends SessionsLayer {
   /** Fork one complete-turn entry while idle, selecting the new head without touching files. */
   forkBranchTreeNode(entryId: string, name?: string): boolean {
     if (this.disposed) return false;
-    if (this.running) { this.notice("Busy: wait for the active operation to settle before changing branches. Press Esc to cancel the turn first."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const trimmed = name?.trim() || undefined;
     try {
       this.session.forkBranch(entryId, trimmed);
       this.replaceSession(this.session, this.sessionId);
-      this.notice(`Active branch: ${this.session.activeBranchId}. Conversation branching does not undo file changes or switch Git branches.`);
+      this.notice(`Active branch: ${this.session.activeBranchId} · Enter send`);
       return true;
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));

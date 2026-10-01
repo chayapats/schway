@@ -110,7 +110,7 @@ test("headless /skills awaits ordered extension initializers without constructin
     });
     expect(code).toBe(0);
     expect(stderr).toBe("");
-    expect(stdout).toContain("No skills are installed.");
+    expect(stdout).toContain("No skills installed · /help browse commands");
     expect(await Bun.file(marker).text()).toBe("first\nsecond\n");
     expect(modelLoads).toBe(0);
     await expect(stat(join(home, ".schway/sessions"))).rejects.toMatchObject({ code: "ENOENT" });

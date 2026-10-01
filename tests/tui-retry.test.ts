@@ -52,7 +52,7 @@ test("exhausted partial attempts leave one labelled preview and a recovery error
     const transcript = controller.snapshot().transcript;
     expect(transcript.filter(entry => entry.kind === "assistant")).toMatchObject([{ text: "three", incomplete: true }]);
     expect(transcript.filter(entry => entry.kind === "system" && entry.text.includes("Retrying"))).toHaveLength(0);
-    expect(transcript.find(entry => entry.kind === "error")?.text).toContain("continue this session");
+    expect(transcript.find(entry => entry.kind === "error")?.text).toContain("Ctrl+R continue");
     expect(session.items.filter(item => item.type === "assistant")).toHaveLength(0);
     controller.dispose();
   });

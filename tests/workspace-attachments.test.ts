@@ -251,7 +251,7 @@ test("controller reserves idle ownership before asynchronous validation and canc
     expect(session.metadata.extraRoots).toEqual([]);
     expect(session.items).toEqual([]);
     expect(controller.running).toBe(false);
-    expect(controller.snapshot().transcript.map(entry => entry.text).join("\n")).toContain("Busy: /add-dir");
+    expect(controller.snapshot().transcript.map(entry => entry.text).join("\n")).toContain("Directory not attached · Esc stop · /add-dir retry");
     expect(await controller.addDirectories([extra])).toBe(true);
     controller.dispose();
   });

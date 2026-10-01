@@ -10,6 +10,7 @@ export interface PreferenceRow {
   saved: string;
   reset: string;
   choices: readonly unknown[];
+  action?: "choose-model";
 }
 
 /** Keyboard selection and preview, with no raw configuration or credential fields. */
@@ -24,10 +25,10 @@ export interface PreferencesSnapshot {
 
 /** Describe the effect of each scope before a preference is applied. */
 export const PREFERENCE_SCOPES = {
-  session: "Session only; disappears on restart. No files change.",
-  memory: "Workspace memory in user-local storage; explicit config/CLI wins. Headless ignores it.",
-  user: "User config; survives restart for all workspaces, below project/CLI/session.",
-  project: "Project config; writes repository-owned .schway/config.json ONLY on confirmation.",
+  session: "This session only · Resets on restart",
+  memory: "Remember for this workspace · Configuration overrides memory",
+  user: "Save for all workspaces · Project settings override",
+  project: "Save for this project · Enter confirm",
 } as const;
 
 /** Build a secret-free view from the same editor used by the effective resolver. */
@@ -62,6 +63,7 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
     return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(describeEffectiveThinking(settings.provider, settings.thinking, settings.model, context))})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : key === "ui.splash" ? settings.splash : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,
       saved: Object.entries(layers).filter(([, layer]) => layer[key] !== undefined).map(([name, layer]) => `${labels[name]}=${safe(layer[key])}`).join("; ") || "No saved override",
       reset: key === "appearance" && appearanceEnvironment ? "SCHWAY_THEME overrides saved appearance. Remove it to use the saved preference; reset a scope to inherit auto." : memoryConflict ?? (origin.startsWith("profile ") ? "The selected profile supplies this value; reset its selection on the profile row or edit the named profile configuration." : origin === "CLI" ? "CLI shadows lower values: remove the launch flag to inherit." : originScope ? `Reset in ${labels[originScope]} to inherit lower values.` : "Inherited default; reset the selected scope to inherit."),
-      choices: choices[key] ?? [undefined, "open model + route picker (activates and remembers)"] };
+      choices: choices[key] ?? [undefined, "choose a model and connection"],
+      ...(!choices[key] ? { action: "choose-model" as const } : {}) };
   });
 }

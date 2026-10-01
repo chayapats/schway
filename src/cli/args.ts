@@ -298,7 +298,7 @@ export function parseArgs(
     if (arg === "--xai-auth" || arg.startsWith("--xai-auth=")) {
       const value = arg === "--xai-auth" ? argv[++i] : arg.slice("--xai-auth=".length);
       if (value === undefined || value.startsWith("-")) return { error: "Missing value for --xai-auth" };
-      if (value !== "auto" && value !== "grok" && value !== "api-key") return { error: `Unknown xAI auth preference: ${value}. Use auto, grok, or api-key.` };
+      if (value !== "auto" && value !== "grok" && value !== "api-key") return { error: `Unknown xAI auth preference: ${value} · Use auto, grok, or api-key` };
       args.xaiAuth = value; continue;
     }
     const intFlag = parseIntegerFlag(arg, argv, i);
@@ -372,12 +372,12 @@ function parseHeader(
 ): { name: string; value: string } | { error: string } {
   const separator = value.indexOf(":");
   if (separator <= 0) {
-    return { error: "Invalid --header. Use Name:Value." };
+    return { error: "Invalid --header · Use Name:Value" };
   }
   const name = value.slice(0, separator).trim();
   const headerValue = value.slice(separator + 1).trim();
   if (name.length === 0) {
-    return { error: "Invalid --header. Use Name:Value." };
+    return { error: "Invalid --header · Use Name:Value" };
   }
   return { name, value: headerValue };
 }
@@ -393,11 +393,11 @@ function parseExtraBody(
       typeof parsed !== "object" ||
       Array.isArray(parsed)
     ) {
-      return { error: "Invalid --body. Expected a JSON object." };
+      return { error: "Invalid --body · Use a JSON object" };
     }
     return { fields: parsed as Record<string, unknown> };
   } catch {
-    return { error: "Invalid --body. Expected a JSON object." };
+    return { error: "Invalid --body · Use a JSON object" };
   }
 }
 
@@ -407,7 +407,7 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
     return value;
   }
   return {
-    error: `Unknown auth mode: ${value}. Use required, optional, or none.`,
+    error: `Unknown auth mode: ${value} · Use required, optional, or none`,
   };
 }
 
@@ -418,7 +418,7 @@ function parseOpenAIAuth(value: string): CliOpenAIAuth | { error: string } {
     return preference;
   }
   return {
-    error: `Unknown OpenAI auth preference: ${value}. Use auto, codex, or api-key.`,
+    error: `Unknown OpenAI auth preference: ${value} · Use auto, codex, or api-key`,
   };
 }
 
@@ -429,7 +429,7 @@ function parseThinking(value: string): CliThinking | { error: string } {
     return level;
   }
   return {
-    error: `Unknown thinking level: ${value}. Use off, minimal, low, medium, high, xhigh, max, or ultra.`,
+    error: `Unknown thinking level: ${value} · Use off, minimal, low, medium, high, xhigh, max, or ultra`,
   };
 }
 

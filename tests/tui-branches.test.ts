@@ -299,7 +299,7 @@ test("busy turns reject switch and fork while preview stays side-effect-free", a
       expect(controller.confirmBranchTreeSelection()).toBe(false);
       expect(controller.branchCommand("switch main")).toBe(false);
       expect(session.listBranches()).toHaveLength(branchesBefore);
-      expect(controller.snapshot().transcript.some((entry) => entry.text.includes("Busy"))).toBe(true);
+      expect(controller.snapshot().transcript.some((entry) => entry.text === "Wait for this turn · Esc stop")).toBe(true);
       // Cancellation stays explicit; the settled tree then accepts branch changes.
       controller.cancel();
       await pending;

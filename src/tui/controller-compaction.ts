@@ -75,12 +75,12 @@ export abstract class CompactionLayer extends SettingsLayer {
   /** Start manual compaction after model checks and notify acceptance before it settles. */
   async compact(accepted: () => void = () => {}): Promise<boolean> {
     if (this.running) {
-      this.notice("Already running. Press Esc to cancel first.");
+      this.notice("Wait for this turn · Esc stop");
       return false;
     }
     if (!this.model) {
       this.fail(
-        "Missing credentials. Use /login <provider> to save an API key, or set the provider API-key environment variable and restart schway.",
+        "Sign in to compact · Alt+L sign in",
       );
       return false;
     }
@@ -120,7 +120,7 @@ export abstract class CompactionLayer extends SettingsLayer {
   async switchSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) {
-      this.notice("Already running. Press Esc to cancel first.");
+      this.notice("Wait for this turn · Esc stop");
       return false;
     }
     const abort = new AbortController();
@@ -172,7 +172,7 @@ export abstract class CompactionLayer extends SettingsLayer {
     } catch (error) {
       if (!this.disposed && this.activeAbort === abort) {
         if (abort.signal.aborted) {
-          this.notice("Session switch cancelled. The previous session remains active.");
+          this.notice("Session unchanged · /sessions choose another");
           this.status = "idle";
         } else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
       }

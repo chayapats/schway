@@ -282,15 +282,15 @@ test("recent-work controller and renderer keep assistant-only activity metadata 
     expect(metadata.activityAt).toBeString();
     await f.controller.offerRecentSession(f.directory);
     expect(f.controller.snapshot().recentSession).toMatchObject({ id: saved.header.id, activityAt: metadata.activityAt,
-      previewIncomplete: true, title: "Recent history (preview unavailable)" });
+      previewIncomplete: true, title: "Recent conversation" });
     expect(f.controller.snapshot().recentSession?.hasWork).toBeUndefined();
     const terminal = await createTestRenderer({ width: 100, height: 24, kittyKeyboard: true });
     const view = createConversationView(terminal.renderer, { controller: f.controller, home, workspaceRoot: home, env: {}, secrets: [], quit() {},
       submit: (value, accepted) => dispatchEditorInput(value, f.controller, command => handleSlashCommand(command.name, command.args, f.ctx), accepted) });
     try {
       view.refresh(); await terminal.flush();
-      expect(terminal.captureCharFrame()).toContain("Recent history (preview unavailable)");
-      expect(terminal.captureCharFrame()).toContain("Preview incomplete · resume validates history");
+      expect(terminal.captureCharFrame()).toContain("Recent conversation");
+      expect(terminal.captureCharFrame()).toContain("Resume saved work · Alt+B resume · /sessions browse");
       expect(f.calls()).toBe(0);
       await Bun.sleep(3);
       const meaningful = await createJsonlSession({ directory: f.directory, workspace: f.workspace });

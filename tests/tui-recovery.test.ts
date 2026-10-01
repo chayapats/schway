@@ -70,7 +70,7 @@ test("startup diagnostics stay out of the primary row and optional details mask 
       contextManager: createContextManager(workspace), workspace, provider: "scripted", modelId: "broken",
       sessionId: "sensitive-startup", startupError: "Provider failed: Bearer opaque-startup-token\npayload: private customer text and address\nbody: private invoice records\ndata: private account notes\ntoken=unknown-token" });
     const primary = tui.snapshot().transcript.at(-1)?.text ?? "";
-    expect(primary).toContain("provider could not be loaded");
+    expect(primary).toContain("Connection unavailable · Ctrl+I inspect details");
     expect(primary).not.toContain("opaque-startup-token");
     expect(primary).not.toContain("private customer text");
     expect(tui.inspectRecovery()).toBe(true);
@@ -288,5 +288,18 @@ test("cancelling a continuation retains its saved task for another explicit cont
     expect(tui.snapshot().status).toBe("idle");
     expect(tui.snapshot().recovery?.actions).toContain("continue");
     expect(session.items.filter(item => item.type === "user")).toHaveLength(1);
+  });
+});
+
+
+test("forbidden credentials do not imply expiry and retain diagnostic details", async () => {
+  await withTempDir(async dir => {
+    const tui = controller(dir, [{ error: "account access forbidden", status: 403 }]);
+    await tui.submit("test access");
+    expect(tui.snapshot().recovery?.category).toBe("auth");
+    expect(tui.snapshot().transcript.at(-1)?.text).toBe("Access rejected · Connect again to continue\nAlt+L connect · Ctrl+I details · Esc keep editing");
+    expect(tui.inspectRecovery()).toBe(true);
+    expect(tui.snapshot().transcript.at(-1)?.text).toContain("account access forbidden");
+    tui.dispose();
   });
 });

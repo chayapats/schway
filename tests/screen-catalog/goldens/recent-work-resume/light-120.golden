@@ -11,7 +11,7 @@ cursor 7 27 visible
   New conversation · Alt+B resume: Refactor the session loader
   /sessions for all history
 
-  scripted/scripted-model · scripted API key · configured, unverified
+  scripted/scripted-model · scripted API key
 
   Type a task · Enter sends
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   scripted/scripted-model                                                                              ctx ~0
+  ● Ready   scripted/scripted-model                                                                              ctx ~0
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -53,8 +53,8 @@ cursor 7 27 visible
 04 0-120 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
 05 2-25 #1d232c #f7f7f4 b
-05 25-69 #545e6c #f7f7f4 -
-05 69-120 #ffffff #f7f7f4 -
+05 25-44 #545e6c #f7f7f4 -
+05 44-120 #ffffff #f7f7f4 -
 06 0-120 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-16 #545e6c #f7f7f4 -

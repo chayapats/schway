@@ -399,7 +399,7 @@ test("compaction refuses while a turn is running", async () => {
     expect(controller.running).toBe(true);
     const ok = await controller.compact();
     expect(ok).toBe(false);
-    expect(controller.snapshot().transcript.some((entry) => entry.text.includes("Already running"))).toBe(true);
+    expect(controller.snapshot().transcript.some((entry) => entry.text === "Wait for this turn · Esc stop")).toBe(true);
     controller.cancel();
     await pending;
     expect(controller.snapshot().status).toBe("idle");

@@ -87,7 +87,7 @@ test("search scope excludes sibling branches and truncated or collapsed tool out
   await ui.mockInput.typeText("sibling-only-token");
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("No matches");
-  expect(ui.captureCharFrame()).toContain("active branch");
+  expect(ui.captureCharFrame()).toContain("this branch");
   ui.mockInput.pressArrow("down");
   await ui.settle();
   expect(session.activeBranchId).toBe("main");
@@ -257,7 +257,7 @@ test("Unicode wraps logically, empty/no-match states stay usable, and live row c
   const ui = await setup(createSession([user("u", "ข้อความภาษาไทย e\u0301 match"), assistant("a", "ไทย e\u0301 match")]), 44, 18);
   ui.mockInput.pressKey("f", { ctrl: true });
   await ui.settle();
-  expect(ui.captureCharFrame()).toContain("Find in active branch");
+  expect(ui.captureCharFrame()).toContain("this branch");
   await ui.mockInput.typeText("é match");
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("Find 1/2");

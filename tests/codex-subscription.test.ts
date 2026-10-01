@@ -1017,7 +1017,9 @@ test("interactive subscription login succeeds, denies, and cancels through the c
     expect(seen).toHaveLength(1);
     expect(new URLSearchParams(seen[0]?.body ?? "").get("code_verifier")).toBe(pending?.verifier ?? "");
     const snapshot = JSON.stringify(controller.snapshot());
-    expect(snapshot).toContain("acct-tui");
+    expect(snapshot).not.toContain("acct-tui");
+    expect(controller.inspectNoticeDetails()).toBe(true);
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("acct-tui");
     expect(snapshot).not.toContain("pasted-tui-code");
     controller.dispose();
     clearPendingBrowserAttempt();
@@ -1193,9 +1195,12 @@ test("controller browser callback saves a credential, discovers account models a
       expect(controller.snapshot().transcript.filter(entry => entry.kind === "user")).toHaveLength(0);
       const text = JSON.stringify(controller.snapshot());
       expect(text).toContain("Approval received");
-      expect(text).toContain("credential saved");
-      expect(text).toContain("discovery succeeded");
-      expect(text).toContain("active for this session");
+      expect(text).toContain("Sign-in saved · /model choose model · Ctrl+I details");
+      expect(text).not.toContain("acct-browser-journey");
+      expect(controller.inspectNoticeDetails()).toBe(true);
+      expect(controller.snapshot().transcript.at(-1)?.text).toContain("acct-browser-journey");
+      expect(text).toContain("Found 1 model · Activating account-model · Esc cancel");
+      expect(text).toContain("ChatGPT model active · Enter send · account-model");
       expect(text).not.toContain("browser-journey-secret");
       expect(text).not.toContain("refresh-journey-secret");
       expect(inferences).toBe(0);
@@ -1290,7 +1295,7 @@ test("controller cancels a live device poll before saving and clears the approva
       expect(await pending).toBe(false);
       expect(await loadSubscriptionTokens(store)).toBeNull();
       const text = JSON.stringify(controller.snapshot());
-      expect(text).toContain("nothing was saved");
+      expect(text).toContain("Sign-in cancelled; nothing saved · Alt+L retry");
       expect(text).not.toContain("CANCEL-CODE");
     } finally { controller.dispose(); }
   });
@@ -1373,7 +1378,7 @@ test("logout blocks an active ChatGPT account while reporting untouched API-key 
       expect(reloads).toBe(0);
       const text = JSON.stringify(controller.snapshot());
       expect(text).toContain("OPENAI_API_KEY");
-      expect(text).toContain("will not switch");
+      expect(text).toContain("ChatGPT disconnected · Alt+L reconnect this account");
       expect(text).not.toContain("env-api-key-secret");
     } finally { controller.dispose(); }
   });

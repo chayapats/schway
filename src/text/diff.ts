@@ -27,13 +27,14 @@ export interface GitDiffRow {
 }
 
 /** Number Git patch hunks or bounded raw untracked source without interpreting CLI explanation prose. */
-export function parseGitDiff(preview: { diff: string; truncated: boolean; binaryFiles: readonly string[]; untrackedContent?: string }): GitDiffRow[] {
+export function parseGitDiff(preview: { diff: string; truncated: boolean; binaryFiles: readonly string[]; untrackedContent?: string }, options: { includePaths?: boolean; includeSections?: boolean } = {}): GitDiffRow[] {
   const rows: GitDiffRow[] = [];
   const explain = (text: string) => rows.push({ sign: " ", text });
   if (preview.untrackedContent !== undefined) {
     for (const [index, text] of splitLines(preview.untrackedContent).entries()) rows.push({ sign: "+", line: index + 1, text });
   } else {
-    let oldLine = 0, newLine = 0, oldRemaining = 0, newRemaining = 0, renamedFrom: string | undefined;
+    let oldLine = 0, newLine = 0, oldRemaining = 0, newRemaining = 0, renamedFrom: string | undefined, oldPath = "";
+    const headerPath = (value: string) => value.replace(/^(["']?)[abiw]\//, "$1").replace(/\t$/, "");
     for (const text of preview.diff.split("\n")) {
       const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(text);
       if (hunk) { oldLine = Number(hunk[1]); oldRemaining = Number(hunk[2] ?? 1); newLine = Number(hunk[3]); newRemaining = Number(hunk[4] ?? 1); continue; }
@@ -42,6 +43,13 @@ export function parseGitDiff(preview: { diff: string; truncated: boolean; binary
         if (text.startsWith("+")) { rows.push({ sign: "+", line: newLine++, text: text.slice(1) }); newRemaining--; continue; }
         if (text.startsWith(" ")) { rows.push({ sign: " ", line: newLine++, text: text.slice(1) }); oldLine++; oldRemaining--; newRemaining--; continue; }
       }
+      if (options.includePaths) {
+        // Path headers occur outside hunks; literal source rows above remain untouched.
+        if (text.startsWith("--- ")) oldPath = headerPath(text.slice(4));
+        if (text.startsWith("+++ ")) explain(`File: ${text.slice(4) === "/dev/null" ? oldPath : headerPath(text.slice(4))}`);
+
+      }
+      if (options.includeSections && (text === "Unstaged:" || text === "Staged:")) explain(text === "Staged:" ? "Staged changes" : "Unstaged changes");
       if (text.startsWith("deleted file mode ")) explain("File deleted");
       if (text.startsWith("rename from ")) renamedFrom = text.slice("rename from ".length);
       if (text.startsWith("rename to ")) { explain(`Renamed from ${renamedFrom ?? "previous path"} to ${text.slice("rename to ".length)}`); renamedFrom = undefined; }

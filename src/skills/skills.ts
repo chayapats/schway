@@ -404,9 +404,9 @@ export function formatAvailableSkillsSection(skills: readonly SkillMetadata[]): 
 export function formatSkillsListing(discovery: SkillDiscovery): string {
   const lines: string[] = [];
   if (discovery.skills.length === 0) {
-    lines.push("No skills are installed.");
+    lines.push("No skills installed · /help browse commands");
   } else {
-    lines.push("Available skills (invoke with /<skill-name> [arguments]):");
+    lines.push("Choose a skill · /<skill-name> run:");
     for (const skill of discovery.skills) {
       const scope = skill.scope === "project" ? "project" : "global";
       const marker = skill.userOnly ? " (user-only)" : "";
@@ -427,7 +427,7 @@ export function formatSkillsListing(discovery: SkillDiscovery): string {
   for (const diagnostic of discovery.diagnostics) {
     lines.push(`Invalid skill at ${diagnostic.source}: ${diagnostic.reason}`);
   }
-  lines.push("Skill bodies load on user invocation or eligible model activation for one user turn; resources resolve relative to their skill directory.");
+  lines.push("Run a skill · /<skill-name> [arguments]");
   return lines.join("\n");
 }
 

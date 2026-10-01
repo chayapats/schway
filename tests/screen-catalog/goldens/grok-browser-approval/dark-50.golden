@@ -9,8 +9,7 @@ cursor 1 1 hidden
  ⚡ schway  /project
 
 
- scripted/scripted-model · scripted API key ·
- configured, unverified
+ scripted/scripted-model · scripted API key
 
  Type a task · Enter sends
 
@@ -28,13 +27,14 @@ cursor 1 1 hidden
 
 
 
- ⠋ Working on your request…
-  Waiting for approval in your browser… · Esc ca
-  ncel
+
+
+ ⠋ Working · Esc stop
+  Approve in your browser · Esc cancel
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Approval pending · Esc cancels
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ WORKING   scripted/scri…    Esc stops  ctx ~0
+  ⠋ Working   scripted/scri…    Esc stops  ctx ~0
  Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -47,17 +47,15 @@ cursor 1 1 hidden
 02 0-50 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
 03 1-24 #e6eaf0 #0e1117 b
-03 24-46 #8b95a7 #0e1117 -
-03 46-50 #ffffff #0e1117 -
-04 0-1 #ffffff #0e1117 -
-04 1-23 #8b95a7 #0e1117 -
-04 23-50 #ffffff #0e1117 -
-05 0-50 #ffffff #0e1117 -
-06 0-1 #ffffff #0e1117 -
-06 1-15 #8b95a7 #0e1117 -
-06 15-20 #e6eaf0 #293140 b
-06 20-26 #8b95a7 #0e1117 -
-06 26-50 #ffffff #0e1117 -
+03 24-43 #8b95a7 #0e1117 -
+03 43-50 #ffffff #0e1117 -
+04 0-50 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-15 #8b95a7 #0e1117 -
+05 15-20 #e6eaf0 #293140 b
+05 20-26 #8b95a7 #0e1117 -
+05 26-50 #ffffff #0e1117 -
+06 0-50 #ffffff #0e1117 -
 07 0-50 #ffffff #0e1117 -
 08 0-50 #ffffff #0e1117 -
 09 0-50 #ffffff #0e1117 -
@@ -73,19 +71,15 @@ cursor 1 1 hidden
 19 0-50 #ffffff #0e1117 -
 20 0-50 #ffffff #0e1117 -
 21 0-50 #ffffff #0e1117 -
-22 0-1 #ffffff #0e1117 -
-22 1-2 #7cc4ff #0e1117 b
-22 2-27 #8b95a7 #0e1117 -
-22 27-50 #ffffff #0e1117 -
+22 0-50 #ffffff #0e1117 -
 23 0-1 #ffffff #0e1117 -
-23 1-2 #ffffff #1e2430 -
-23 2-48 #e6eaf0 #1e2430 -
-23 48-49 #ffffff #1e2430 -
-23 49-50 #ffffff #0e1117 -
+23 1-2 #7cc4ff #0e1117 b
+23 2-21 #8b95a7 #0e1117 -
+23 21-50 #ffffff #0e1117 -
 24 0-1 #ffffff #0e1117 -
 24 1-2 #ffffff #1e2430 -
-24 2-6 #e6eaf0 #1e2430 -
-24 6-49 #ffffff #1e2430 -
+24 2-38 #e6eaf0 #1e2430 -
+24 38-49 #ffffff #1e2430 -
 24 49-50 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
 25 1-49 #161b24 #0e1117 -

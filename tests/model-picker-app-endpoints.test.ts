@@ -44,7 +44,7 @@ const script = String.raw`
     throw Error("App did not reach expected picker state: " + terminal.captureCharFrame() + errors);
   };
   try {
-    await wait(() => terminal.captureCharFrame().includes("READY"));
+    await wait(() => terminal.captureCharFrame().includes("Ready"));
     terminal.mockInput.pressKey("m", { meta: true });
     await wait(() => terminal.captureCharFrame().includes("primary-model"));
     const expected = [{ url: "https://primary.example/v1/models", authorization: auth === "required" ? "Bearer primary-secret" : null,

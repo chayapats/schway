@@ -46,7 +46,7 @@ export function credentialIdentity(target: CredentialTarget): CredentialIdentity
   const profileLabel = target.profile?.trim() ? ` profile "${target.profile.trim()}" ` : " ";
   return {
     account: `api-key:openai-compatible:${digest}`,
-    label: `openai-compatible${profileLabel}(${url.host}, identity ${digest.slice(0, 12)})`,
+    label: `Compatible endpoint${profileLabel}(${url.host})`,
   };
 }
 

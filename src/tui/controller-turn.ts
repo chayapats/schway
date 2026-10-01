@@ -222,6 +222,7 @@ export abstract class TurnLayer extends CompactionLayer {
     this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
     this.outcomeUserId = this.session.items.findLast(item => item.type === "user")?.id;
     this.outcomeDiagnostics = undefined;
+    this.noticeDetails = undefined;
     this.successfulToolPaths.clear();
     this.outcome = { reason: "completed", commands: [], commandCounts: { exitZero: 0, nonzero: 0, unknown: 0 }, toolResults: 0, failedTools: 0, files: [], elapsedMs: 0 };
     const operationId = this.beginActivity("preparing");
@@ -384,7 +385,7 @@ export abstract class TurnLayer extends CompactionLayer {
       }
       case "model.retry": {
         this.markProvisionalIncomplete();
-        this.showRetryNotice(`Retrying provider connection (attempt ${event.attempt + 1}/${event.maxAttempts}).`);
+        this.showRetryNotice(`Retrying connection · Attempt ${event.attempt + 1}/${event.maxAttempts} · Esc stop`);
         return;
       }
       case "tool.started": {
@@ -492,22 +493,24 @@ export abstract class TurnLayer extends CompactionLayer {
         this.transcript.push(
           this.systemEntry(
             event.reason === "overflow"
-              ? "Context overflow. Compacting…"
-              : event.reason === "manual" ? "Manual compaction. Compacting older turns…" : "Context pressure. Compacting…",
+              ? "Compacting context · Esc stop"
+              : event.reason === "manual" ? "Compacting older turns · Esc stop" : "Compacting context · Esc stop",
           ),
         );
         return;
       }
       case "compaction.finished": {
         const text = event.status === "completed"
-          ? "Context compacted. Original history remains inspectable; /context shows the active summary boundary."
+          ? "Context compacted · /context inspect summary"
           : event.status === "cancelled"
-            ? "Compaction cancelled. History unchanged; /compact retries when ready."
+            ? "Compaction cancelled · /compact retry"
             : event.status === "failed"
-              ? `Compaction failed. History unchanged. For a model failure, check connection then /compact or /model. After a storage failure, repair storage and /resume ${this.sessionId} to reload before retrying /compact.`
-              : "Compaction no-op: no older turns or usable summary. History unchanged; try /compact after more turns.";
+              ? "Compaction failed · Ctrl+I repair details"
+              : "Context unchanged · /compact retry after more turns";
         this.compactionNotice = { identity: this.contextIdentity(), text: redactSecrets(text, this.secrets) };
-        this.transcript.push(this.systemEntry(text));
+        this.notice(text, event.status === "failed"
+          ? `History unchanged. For a model failure, check connection then /compact or /model. After a storage failure, repair storage and /resume ${this.sessionId} to reload before retrying /compact.${event.message ? `\n${event.message}` : ""}`
+          : undefined);
         return;
       }
       case "error": {
@@ -536,7 +539,7 @@ export abstract class TurnLayer extends CompactionLayer {
           // runTurn adds the Cancelled notice once the loop settles.
         } else if (event.reason === "max_turns") {
           this.transcript.push(
-            this.systemEntry("Stopped at the turn limit. Refine the prompt and continue."),
+            this.systemEntry("Turn limit reached · Edit your task to continue"),
           );
           if (this.status === "running") {
             this.status = "idle";

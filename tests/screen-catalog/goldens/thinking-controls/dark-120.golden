@@ -9,12 +9,12 @@ cursor 7 27 visible
  ⚡ schway  /project
 
   Preferences · session · 1/14
-  › thinking: unset (effective: provider default (medium; no explicit control sent)) [built-in default]
+  › thinking: unset (effective: Provider default (medium)) [built-in default]
   Choice: Reset (inherit) (1/7)
   Enter previews; no changes yet.
   ↑/↓ field · ←/→ choice · Tab scope
   Enter preview/confirm · Esc back · PgUp/PgDn scroll
-  Session only; disappears on restart. No files change.
+  This session only · Resets on restart
   Saved: No saved override
   CLI provider selection shadows workspace memory; reset that CLI override to restore it.
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   openai-compatible/meta/muse-spark-1.3-contributor                                                    ctx ~0
+  ● Ready   openai-compatible/meta/muse-spark-1.3-contributor                                                    ctx ~0
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -48,8 +48,8 @@ cursor 7 27 visible
 02 2-30 #e6eaf0 #0e1117 -
 02 30-120 #ffffff #0e1117 -
 03 0-2 #ffffff #0e1117 -
-03 2-103 #e6eaf0 #0e1117 -
-03 103-120 #ffffff #0e1117 -
+03 2-77 #e6eaf0 #0e1117 -
+03 77-120 #ffffff #0e1117 -
 04 0-2 #ffffff #0e1117 -
 04 2-31 #e6eaf0 #0e1117 -
 04 31-120 #ffffff #0e1117 -
@@ -63,8 +63,8 @@ cursor 7 27 visible
 07 2-53 #e6eaf0 #0e1117 -
 07 53-120 #ffffff #0e1117 -
 08 0-2 #ffffff #0e1117 -
-08 2-55 #e6eaf0 #0e1117 -
-08 55-120 #ffffff #0e1117 -
+08 2-39 #e6eaf0 #0e1117 -
+08 39-120 #ffffff #0e1117 -
 09 0-2 #ffffff #0e1117 -
 09 2-26 #e6eaf0 #0e1117 -
 09 26-120 #ffffff #0e1117 -

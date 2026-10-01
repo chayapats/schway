@@ -25,7 +25,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
   async addDirectories(directories: readonly string[]): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) {
-      this.notice("Busy: /add-dir was not run. Press Esc to cancel the active operation, then retry.");
+      this.notice("Directory not attached · Esc stop · /add-dir retry");
       return false;
     }
     if (!this.workspace || directories.length === 0) {
@@ -52,7 +52,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
       } catch (error) {
         if (!this.disposed && this.activeAbort === abort) {
           if (abort.signal.aborted) {
-            this.notice("Directory attachment cancelled. Roots are unchanged.");
+            this.notice("Attachment cancelled · /add-dir retry");
             this.status = "idle";
           } else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
         }
@@ -107,10 +107,10 @@ export abstract class CommandsLayer extends CredentialsLayer {
     const workspace = this.workspace;
     const session = this.session;
     const skills = workspace ? await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true }) : undefined;
-    if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) { this.notice("Command availability changed. Retry the retained command."); return true; }
+    if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) { this.notice("Commands changed · Enter retry"); return true; }
     this.discoveredCommands = skills;
     const choices = commandCatalog(this.extensionCommands(), skills).filter(entry => entry.name === name);
-    if (choices.some(entry => !entry.available)) { this.notice(`/${name} conflicts with skill or command sources: ${choices.map(entry => entry.source).join(", ")}. Rename the skill or extension; use /help to inspect sources.`); return true; }
+    if (choices.some(entry => !entry.available)) { this.notice("Command conflicts with skill · /help inspect sources · Ctrl+I details", `/${name} conflicts with skill or command sources: ${choices.map(entry => entry.source).join(", ")}. Rename the skill or extension.`); return true; }
     return false;
   }
 
@@ -122,7 +122,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
     const command = this.extensions?.command(name);
     if (!command || this.disposed) return false;
     if (this.running) {
-      this.notice(`Busy: /${name} was not run. Press Esc to cancel the active operation, then retry.`);
+      this.notice(`Command not run · Esc stop · /${name} retry`);
       return false;
     }
     const abort = new AbortController();

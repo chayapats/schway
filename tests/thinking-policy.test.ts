@@ -39,7 +39,7 @@ test("OpenAI Luna and Sol requested/default reasoning agrees with Responses wire
     } });
     for (const thinking of [undefined, "medium", "off"] as const) await collect(adapter.stream({ ...sampleRequest(), thinking }));
     expect(bodies.map(body => body.reasoning)).toEqual([undefined, { effort: "medium", summary: "auto" }, { effort: "none" }]);
-    expect(describeEffectiveThinking("openai", undefined, model)).toContain("provider default (medium");
+    expect(describeEffectiveThinking("openai", undefined, model)).toContain("Provider default (medium");
     await expect(collect(adapter.stream({ ...sampleRequest(), thinking: "minimal" }))).rejects.toThrow("not supported");
     expect(bodies).toHaveLength(3);
   }
@@ -128,13 +128,13 @@ test("interactive OpenRouter discovers on /thinking, shares options with prefere
     });
     try {
       expect(await controller.thinkingCommand("medium")).toBe(true);
-      expect(controller.snapshot().effectiveThinking).toContain("medium (reasoning effort medium)");
+      expect(controller.snapshot().effectiveThinking).toContain("medium");
       expect(controller.commandChoices("/thinking ").map(choice => choice.name)).toContain("thinking minimal");
       expect(controller.commandChoices("/thinking ").map(choice => choice.name)).not.toContain("thinking off");
       expect(preferenceRows(editor, "session", []).find(row => row.key === "thinking")?.choices).toEqual([undefined, "max", "xhigh", "high", "medium", "low", "minimal"]);
       expect(await controller.thinkingCommand("off")).toBe(false);
       await (await editor.prepare({ scope: "session", key: "thinking", value: null })).commit();
-      expect(controller.describeThinking()).toContain("provider default (medium");
+      expect(controller.describeThinking()).toContain("Provider default (medium");
       await (await editor.prepare({ scope: "session", key: "baseUrl", value: "https://example.com/v1" })).commit();
       expect(editor.settings.reasoningCapability).toBeUndefined();
       await expect(editor.prepare({ scope: "session", key: "thinking", value: "medium" })).rejects.toThrow("not supported");
@@ -171,7 +171,7 @@ test("OpenRouter catalog refresh preserves account model capabilities and explic
       supported_efforts: ["low", "high"], default_effort: "high", default_enabled: false,
     } }] }, "OpenRouter", baseUrl))[0]!;
     expect(disabled.defaultThinking).toBe("off");
-    expect(describeEffectiveThinking("openai-compatible", undefined, "optional", { baseUrl, capability: disabled })).toContain("provider default (off");
+    expect(describeEffectiveThinking("openai-compatible", undefined, "optional", { baseUrl, capability: disabled })).toContain("Provider default (off");
   });
 });
 

@@ -188,7 +188,7 @@ export { DEFAULT_GIT_CHANGE_TRACKING };
 
 /** Headless exit text when neither config nor the CLI names a provider and model. */
 export const NO_MODEL_CONFIGURED_MESSAGE =
-  "No model configured. Pass --provider and --model, or set them in config.";
+  "No model configured · Pass --provider and --model, or set them in config";
 
 /** Default maximum changed rows shown inline for successful edits and created files. */
 export const DEFAULT_INLINE_DIFF_LINES = 12;

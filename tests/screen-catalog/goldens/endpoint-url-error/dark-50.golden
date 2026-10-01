@@ -29,12 +29,12 @@ cursor 1 1 hidden
 
 
 
+
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Endpoint URL · localhost:8787
-     Enter a full URL that starts with http:// or
-     https://.
+     Enter a full URL · Use http:// or https://
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ○ NOT CONNECTED
+  ○ Not connected
  Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -70,22 +70,19 @@ cursor 1 1 hidden
 20 0-50 #ffffff #0e1117 -
 21 0-50 #ffffff #0e1117 -
 22 0-50 #ffffff #0e1117 -
-23 0-1 #ffffff #0e1117 -
-23 1-49 #161b24 #0e1117 -
-23 49-50 #ffffff #0e1117 -
+23 0-50 #ffffff #0e1117 -
 24 0-1 #ffffff #0e1117 -
-24 1-5 #7cc4ff #161b24 -
-24 5-34 #e6eaf0 #161b24 -
-24 34-49 #ffffff #161b24 -
+24 1-49 #161b24 #0e1117 -
 24 49-50 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
-25 1-5 #ffffff #161b24 -
-25 5-49 #f79d9d #161b24 -
+25 1-5 #7cc4ff #161b24 -
+25 5-34 #e6eaf0 #161b24 -
+25 34-49 #ffffff #161b24 -
 25 49-50 #ffffff #0e1117 -
 26 0-1 #ffffff #0e1117 -
 26 1-5 #ffffff #161b24 -
-26 5-14 #f79d9d #161b24 -
-26 14-49 #ffffff #161b24 -
+26 5-47 #f79d9d #161b24 -
+26 47-49 #ffffff #161b24 -
 26 49-50 #ffffff #0e1117 -
 27 0-1 #ffffff #0e1117 -
 27 1-49 #161b24 #0e1117 -

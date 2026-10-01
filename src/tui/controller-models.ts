@@ -38,7 +38,7 @@ export abstract class ModelsLayer extends CommandsLayer {
   /** Open model search while idle, selecting the currently active entry. */
   openModelPicker(): boolean {
     if (this.preferences) return false;
-    if (this.running || this.disposed) { this.notice("Busy: model selection requires an idle session."); return false; }
+    if (this.running || this.disposed) { this.notice("Wait for this turn · Esc stop"); return false; }
     this.preferences = undefined; this.preferenceTransaction = undefined; this.preferenceGeneration++;
     this.closeModelPicker();
     this.pickerSelectionTouched = false;
@@ -86,7 +86,7 @@ export abstract class ModelsLayer extends CommandsLayer {
         this.subscriptionModels = models.map(model => model.id);
         this.subscriptionListUnavailable = false;
         picker.catalogState = models.length ? "ready" : "empty";
-        if (!models.length) picker.error = "No ChatGPT models were returned for this account. Press Ctrl+R to retry or Esc to cancel.";
+        if (!models.length) picker.error = "No ChatGPT models found · Ctrl+R retry · Esc back";
       } else {
         picker.catalogState = "empty";
       }
@@ -268,7 +268,7 @@ export abstract class ModelsLayer extends CommandsLayer {
   /** Start the selected route's sign-in while retaining its query and identity. */
   protected async connectPickerRoute(selection: ModelPickerEntry): Promise<boolean> {
     const picker = this.modelPicker;
-    if (!picker || !this.credentials) { this.fail("Sign-in is unavailable in this session."); return false; }
+    if (!picker || !this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     const returning = { query: picker.query, identity: selection.identity, route: { provider: selection.provider, authRoute: selection.authRoute, profile: selection.profile }, access: this.modelPickerAccess };
     this.pickerReturn = returning;
     let started: boolean;
@@ -331,7 +331,7 @@ export abstract class ModelsLayer extends CommandsLayer {
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
-    if (this.modelPicker?.accessLoading) { this.notice("Checking configured credentials. Try again shortly."); return false; }
+    if (this.modelPicker?.accessLoading) { this.notice("Checking sign-in · Wait or Esc back"); return false; }
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
     if (!selection || selection.kind === "header") return false;
     if (selection.kind === "sign-in") {
@@ -341,20 +341,20 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (selection.profile !== undefined) applied = await this.selectProfile(selection.profile);
     else if (selection.authRoute === "codex") {
       if (!selection.listUnavailable && !this.subscriptionModels?.includes(selection.modelId)) {
-        this.fail("This ChatGPT model is not in the current account catalog. Press Ctrl+R to retry discovery.");
+        this.fail("Model unavailable · Ctrl+R refresh models");
         return false;
       }
       applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via ChatGPT subscription.`, undefined, true);
+        () => `Using ${this.modelId} · ChatGPT subscription · Enter send`, undefined, true);
     } else if (selection.authRoute === "grok") {
       this.installXaiCapabilities(this.grokModels ?? [], "grok");
-      applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(selection.modelId), () => `Switched to xai/${this.modelId} via Grok subscription.`, undefined, true, false, this.listedBudgets(selection));
+      applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(selection.modelId), () => `Using ${this.modelId} · Grok subscription · Enter send`, undefined, true, false, this.listedBudgets(selection));
     } else if (selection.provider === "xai") {
       applied = await this.changeSettings(() => this.configEditor!.prepareXaiModel(selection.modelId),
-        () => `Switched to xai/${this.modelId} via xAI API key.`, undefined, true, false, this.listedBudgets(selection));
+        () => `Using ${this.modelId} · xAI API key · Enter send`, undefined, true, false, this.listedBudgets(selection));
     } else if (selection.authRoute === "api-key") {
       applied = await this.changeSettings(() => this.configEditor!.prepareOpenAIApiModel(selection.modelId),
-        () => `Switched to openai/${this.modelId} via OpenAI API key.`, undefined, true, false, this.listedBudgets(selection));
+        () => `Using ${this.modelId} · OpenAI API key · Enter send`, undefined, true, false, this.listedBudgets(selection));
     } else {
       applied = await this.selectModel(`${selection.provider}/${selection.modelId}`, this.listedBudgets(selection));
     }
@@ -366,20 +366,20 @@ export abstract class ModelsLayer extends CommandsLayer {
   protected async emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">, notifySuccess = true): Promise<void> {
     if (!this.model) return;
     try {
-      if (await this.configEditor?.rememberChoice(choice.authRoute) && notifySuccess) this.notice("Choice remembered for this workspace. Explicit config and CLI settings take precedence on restart; /model forget resets memory.");
+      if (await this.configEditor?.rememberChoice(choice.authRoute) && notifySuccess) this.notice("Choice remembered · /model forget reset");
       this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
       ...(choice.profile ? { profile: choice.profile } : {}) }); }
-    catch (error) { this.notice(`Model activated and usable, but its preference was not remembered. ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)} No additional login is needed.`); }
+    catch (error) { this.notice("Choice not remembered · Enter use model · Ctrl+I details", `Model activated and usable, but its preference was not remembered. ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)} No additional login is needed.`); }
   }
 
   /** Switch the named compatible profile as one staged change, retaining previous on failure. */
   async selectProfile(name: string): Promise<boolean> {
-    if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const trimmed = name.trim();
     if (!trimmed) { this.fail("Usage: /model profile:<name>."); return false; }
     const applied = await this.changeSettings(() => this.configEditor!.prepareProfile(trimmed), () => {
       const active = this.configEditor!.settings.profile ?? trimmed;
-      return `Switched to profile "${active}" (${this.provider}/${this.modelId}, ${this.effectiveBudgets().contextWindow} ctx, thinking ${this.describeThinking()}).`;
+      return `Profile selected · Enter send · ${active}`;
     }, undefined, true);
     if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId, authRoute: "provider", profile: trimmed });
     return applied;
@@ -387,7 +387,7 @@ export abstract class ModelsLayer extends CommandsLayer {
 
   /** Forget workspace memory and expose inherited configuration even when its credentials need repair. */
   async forgetModelChoice(): Promise<boolean> {
-    if (this.running || !this.configEditor || !this.stageSettings) { this.notice("Memory reset requires an idle configured session."); return false; }
+    if (this.running || !this.configEditor || !this.stageSettings) { this.notice("Wait before resetting · Esc stop"); return false; }
     this.status = "running";
     try {
       const editor = await this.configEditor.forgetChoice();
@@ -399,15 +399,15 @@ export abstract class ModelsLayer extends CommandsLayer {
       catch { staged = { model: undefined, contextManager: this.contextManager }; }
       this.publishSettings(next, staged);
       this.recovery = undefined;
-      this.notice(`Forgot interactive memory for this workspace. Inherited configuration is active.${staged.model ? "" : " Configure access with /model or /login before submitting."}`);
+      this.notice(`Workspace choice forgotten · ${staged.model ? "Enter send" : "Alt+L sign in · /model choose model"}`);
       return true;
-    } catch (error) { this.notice(`Could not forget interactive memory: ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)}`); return false; }
+    } catch (error) { this.notice("Choice not forgotten · /model forget retry · Ctrl+I details", error instanceof Error ? error.message : String(error)); return false; }
     finally { this.status = "idle"; }
   }
 
   /** Apply the textual model or profile form through the same atomic session settings path as the picker. */
   async selectModel(args: string, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
-    if (this.running) { this.notice("Busy: model selection requires an idle session."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     if (["forget", "reset"].includes(args.trim())) return this.forgetModelChoice();
     const selection = parseModelArgs(args, this.provider);
     if ("error" in selection) { this.fail(selection.error); return false; }
@@ -418,7 +418,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       try {
         const available = this.subscriptionModels ?? (await this.loadAccountCatalog(AbortSignal.timeout(5_000))).map(model => model.id);
         if (!available?.includes(selection.modelId)) {
-          this.fail(`Model "${selection.modelId}" is not in the ChatGPT subscription model catalog. Open /model to see available choices.`);
+          this.fail(`Model unavailable: ${selection.modelId} · /model choose another`);
           return false;
         }
       } catch (error) {
@@ -462,7 +462,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       try {
         const models = this.subscriptionCapabilities ?? await this.loadAccountCatalog(AbortSignal.timeout(5_000));
         if (!models.some(model => model.id === this.modelId)) {
-          this.fail(`Model "${this.modelId}" is not available for this ChatGPT subscription. Open /model to choose an account-visible model.`);
+          this.fail(`Model unavailable: ${this.modelId} · /model choose another`);
           return false;
         }
         // Auto-selected Codex is an active subscription, but saved auth remains "auto".

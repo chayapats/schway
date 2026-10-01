@@ -30,11 +30,11 @@ cursor 6 27 visible
 
 
 
- ⠋ Receiving response…
+ ⠋ Receiving response · Esc stop
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ STREAMING 4s   scripted…    Esc stops  ctx ~7
+  ⠋ Receiving 4.0s   script…    Esc stops  ctx ~7
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -92,8 +92,8 @@ cursor 6 27 visible
 23 0-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #0a5894 #f7f7f4 b
-24 2-22 #545e6c #f7f7f4 -
-24 22-50 #ffffff #f7f7f4 -
+24 2-32 #545e6c #f7f7f4 -
+24 32-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -
 25 49-50 #ffffff #f7f7f4 -
@@ -106,9 +106,9 @@ cursor 6 27 visible
 27 1-49 #ecedea #f7f7f4 -
 27 49-50 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-17 #ffffff #0a5894 b
-28 17-18 #545e6c #ecedea -
-28 18-29 #1d232c #e1e3df -
+28 1-19 #ffffff #0a5894 b
+28 19-20 #545e6c #ecedea -
+28 20-29 #1d232c #e1e3df -
 28 29-32 #545e6c #ecedea -
 28 32-35 #1d232c #c9cdd2 b
 28 35-49 #545e6c #ecedea -

@@ -11,10 +11,10 @@ cursor 6 27 visible
  New conversation · Alt+B resume: Refactor the s…
  /sessions for all history
 
- scripted/scripted-model · scripted API key ·
- configured, unverified
+ scripted/scripted-model · scripted API key
 
  Type a task · Enter sends
+
 
 
 
@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   scripted/scripted-model        ctx ~0
+  ● Ready   scripted/scripted-model        ctx ~0
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -53,17 +53,15 @@ cursor 6 27 visible
 04 0-50 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
 05 1-24 #1d232c #f7f7f4 b
-05 24-46 #545e6c #f7f7f4 -
-05 46-50 #ffffff #f7f7f4 -
-06 0-1 #ffffff #f7f7f4 -
-06 1-23 #545e6c #f7f7f4 -
-06 23-50 #ffffff #f7f7f4 -
-07 0-50 #ffffff #f7f7f4 -
-08 0-1 #ffffff #f7f7f4 -
-08 1-15 #545e6c #f7f7f4 -
-08 15-20 #1d232c #caced3 b
-08 20-26 #545e6c #f7f7f4 -
-08 26-50 #ffffff #f7f7f4 -
+05 24-43 #545e6c #f7f7f4 -
+05 43-50 #ffffff #f7f7f4 -
+06 0-50 #ffffff #f7f7f4 -
+07 0-1 #ffffff #f7f7f4 -
+07 1-15 #545e6c #f7f7f4 -
+07 15-20 #1d232c #caced3 b
+07 20-26 #545e6c #f7f7f4 -
+07 26-50 #ffffff #f7f7f4 -
+08 0-50 #ffffff #f7f7f4 -
 09 0-50 #ffffff #f7f7f4 -
 10 0-50 #ffffff #f7f7f4 -
 11 0-50 #ffffff #f7f7f4 -

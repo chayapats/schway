@@ -1039,7 +1039,7 @@ test("xAI headless runs with a key, refuses a missing model or key, and lists mo
     fetch: async () => { requests += 1; return new Response("no"); },
   });
   expect(missingModel.exitCode).toBe(1);
-  expect(missingModel.stderr.trim()).toBe("No model configured. Pass --provider and --model, or set them in config.");
+  expect(missingModel.stderr.trim()).toBe("No model configured · Pass --provider and --model, or set them in config");
   expect(missingModel.stderr).not.toContain("grok-4.7");
   expect(requests).toBe(0);
   const missingKey = await run(["-p", "hello", "--provider", "xai", "--model", "grok-4.7"], {
@@ -1102,7 +1102,7 @@ test("Grok headless uses stored OAuth, refreshes, and maps missing, revoked and 
     expect(result.stderr).not.toContain("Alt+L"); expect(result.stderr).not.toContain("billing-sentinel");
   }
   expect((await run(["--provider", "openai", "--xai-auth", "grok", "-p", "hello"])).stderr).toContain("xAI auth preference requires --provider xai");
-  expect((await run(["--xai-auth", "bogus", "-p", "hello"])).stderr).toContain("Unknown xAI auth preference: bogus. Use auto, grok, or api-key.");
+  expect((await run(["--xai-auth", "bogus", "-p", "hello"])).stderr).toContain("Unknown xAI auth preference: bogus · Use auto, grok, or api-key");
 });
 
 const unguardedFetch = globalThis.fetch;

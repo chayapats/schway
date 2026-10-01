@@ -124,7 +124,7 @@ test("busy editor commands retain input without invoking their handler", async (
     expect(await dispatchEditorInput(editor, fixture.controller, noBuiltin, () => { editor = ""; })).toBe(false);
     expect(editor).toBe("/ping keep these arguments");
     expect(fixture.module.calls).toBe(0);
-    expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("Busy: /ping was not run");
+    expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("Command not run · Esc stop · /ping retry");
     fixture.controller.cancel();
     await turn;
     expect(await dispatchEditorInput(editor, fixture.controller, noBuiltin)).toBe(true);
@@ -227,6 +227,7 @@ test("newly discovered skill collisions fail commands after session replacement 
     expect(accepted).toBe(0);
     expect(fixture.module.ran).toBe(false);
     expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain("conflicts with skill");
+    expect(fixture.controller.inspectNoticeDetails()).toBe(true);
     expect(fixture.controller.snapshot().transcript.at(-1)?.text).toContain(fixture.path);
     expect(fixture.requests).toEqual([]);
     fixture.controller.dispose();

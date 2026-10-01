@@ -98,7 +98,7 @@ test("splash overlays startup, forwards the skipping key to the editor, and neve
 test("status bar shows one colored state pill with model and context, and the composer is a raised block", async () => {
   const ui = await view({ splash: "none", motion: "off" });
   const frame = ui.captureCharFrame();
-  expect(frame).toContain("● READY");
+  expect(frame).toContain("● Ready");
   expect(frame).toContain("scripted/test-model");
   expect(frame).toContain("ctx ~");
   expect(frame).toContain("▄▄▄▄");
@@ -139,21 +139,21 @@ test("code highlighting, key chips, and pills keep text exact while adding color
   expect(styled.find(chunk => chunk.text === "Ctrl+F")?.bg?.equals(RGBA.fromHex(theme.border))).toBe(true);
   expect(styled.find(chunk => chunk.text === "Files/Git unchanged")?.bg).toBeUndefined();
 
-  expect(statusPill({ readiness: "ready", status: "idle" })).toEqual({ label: "READY", tone: "ready", spinning: false });
-  expect(statusPill({ readiness: "loading", status: "idle" }).label).toBe("CHECKING");
+  expect(statusPill({ readiness: "ready", status: "idle" })).toEqual({ label: "Ready", tone: "ready", spinning: false });
+  expect(statusPill({ readiness: "loading", status: "idle" }).label).toBe("Checking");
   expect(statusPill({ readiness: "ready", status: "error" }).tone).toBe("attention");
   expect(mixColor("#000000", "#ffffff", 0.5)).toBe("#808080");
   expect(tint(theme, theme.accent)).toBe(mixColor(theme.surface2, theme.accent, 0.22));
 });
 
 test("status pill distinguishes neutral setup and gives checks and activity precedence", () => {
-  expect(statusPill({ readiness: "not-connected", status: "idle" }, true)).toEqual({ label: "NOT CONNECTED", tone: "neutral", spinning: false });
-  expect(statusPill({ readiness: "not-connected", status: "error" }).label).toBe("ATTENTION");
-  expect(statusPill({ readiness: "not-connected", status: "running" }).label).toBe("WORKING");
-  expect(statusPill({ readiness: "connect", status: "error" }).label).toBe("ATTENTION");
-  expect(statusPill({ readiness: "loading", status: "error" }).label).toBe("CHECKING");
-  expect(statusPill({ readiness: "loading", status: "running", activity: { operationId: 1, phase: "streaming", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none" } }).label).toBe("CHECKING");
-  expect(statusPill({ readiness: "not-connected", status: "error", activity: { operationId: 1, phase: "waiting", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none" } }).label).toBe("WAITING 0s");
+  expect(statusPill({ readiness: "not-connected", status: "idle" }, true)).toEqual({ label: "Not connected", tone: "neutral", spinning: false });
+  expect(statusPill({ readiness: "not-connected", status: "error" }).label).toBe("Attention");
+  expect(statusPill({ readiness: "not-connected", status: "running" }).label).toBe("Working");
+  expect(statusPill({ readiness: "connect", status: "error" }).label).toBe("Attention");
+  expect(statusPill({ readiness: "loading", status: "error" }).label).toBe("Checking");
+  expect(statusPill({ readiness: "loading", status: "running", activity: { operationId: 1, phase: "streaming", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none" } }).label).toBe("Checking");
+  expect(statusPill({ readiness: "not-connected", status: "error", activity: { operationId: 1, phase: "waiting", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none" } }).label).toBe("Waiting 0.0s");
 });
 
 test("git head names the branch, a detached commit, or a worktree branch without spawning Git", async () => {

@@ -9,7 +9,7 @@ cursor 1 1 hidden
  ⚡ schway  /project
 
 
-  scripted/scripted-model · scripted API key · configured, unverified
+  scripted/scripted-model · scripted API key
 
   Type a task · Enter sends
 
@@ -29,12 +29,12 @@ cursor 1 1 hidden
 
 
 
-  ⠋ Working on your request…
+  ⠋ Working · Esc stop
    Open x.ai/device and enter ABCD-EFGH · Esc cancel
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Approval pending · Esc cancels
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ WORKING   scripted/scripted-model                                                                 Esc stops  ctx ~0
+  ⠋ Working   scripted/scripted-model                                                                 Esc stops  ctx ~0
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -47,8 +47,8 @@ cursor 1 1 hidden
 02 0-120 #ffffff #f7f7f4 -
 03 0-2 #ffffff #f7f7f4 -
 03 2-25 #1d232c #f7f7f4 b
-03 25-69 #545e6c #f7f7f4 -
-03 69-120 #ffffff #f7f7f4 -
+03 25-44 #545e6c #f7f7f4 -
+03 44-120 #ffffff #f7f7f4 -
 04 0-120 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
 05 2-16 #545e6c #f7f7f4 -
@@ -74,8 +74,8 @@ cursor 1 1 hidden
 22 0-120 #ffffff #f7f7f4 -
 23 0-2 #ffffff #f7f7f4 -
 23 2-3 #0a5894 #f7f7f4 b
-23 3-28 #545e6c #f7f7f4 -
-23 28-120 #ffffff #f7f7f4 -
+23 3-22 #545e6c #f7f7f4 -
+23 22-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #ffffff #e1e3df -
 24 3-52 #1d232c #e1e3df -

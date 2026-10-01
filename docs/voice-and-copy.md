@@ -89,23 +89,33 @@ The callback entry remains available behind `Tab more options`; the target names
 
 ## Banned patterns
 
-Each line is a JavaScript regular-expression source followed by two spaces, `#` and its reason and scope. Use multiline matching for the anchored diff-header patterns. “Primary view” excludes Ctrl+I details; “all UI text” includes details. Before examples and this contributor guide are reference material rather than UI text.
+Each line is a JavaScript regular-expression source followed by two spaces, `#` and its reason. Use multiline matching for anchored patterns. Scan primary catalog text, including fixture prompts and answers. Ctrl+I diagnostics and the before examples in this contributor guide are not primary copy. Guide and test list are checked in both directions.
 
 ```text
-\[built-in\]  # All UI text: describe the command without an implementation tag.
-\b[a-z]\d+:   # Primary view: hide short tool-call IDs.
-\b[a-z]\d+\b  # Primary view: hide bare short tool-call IDs.
-\bcall_[A-Za-z0-9]+  # Primary view: hide provider tool-call IDs.
-unattributed  # Primary view: move attribution caveats to Ctrl+I details.
-not a (test-suite )?guarantee  # Primary view: move evidence caveats to Ctrl+I details.
-^diff --git   # Primary view: show a file label rather than a raw diff header.
-^index [0-9a-f]{7,}\.\.  # Primary view: hide raw Git object metadata.
-^(---|\+\+\+) [abiw]/  # Primary view: hide raw diff path headers.
-\bi/\S+ w/\S+  # Primary view: hide Git index and working-tree prefixes.
-exit 0 / \d+ nonzero  # Primary view: move exit-code tallies to Ctrl+I details.
-\b1 (files|paths|commands|changes|results|tools|lines)\b  # All UI text: use singular nouns for one.
-\b1 changed paths\b  # All UI text: use a singular noun through an adjective.
-\w!(\s|$)  # All UI text: end sentences without an exclamation mark; the ! status glyph is allowed.
+\[built-in\]  # Hide implementation tags.
+\b[a-z]\d+:  # Hide short tool-call labels.
+\b[a-z]\d+\b  # Hide bare tool-call identifiers.
+\bcall_[A-Za-z0-9]+  # Hide provider tool-call identifiers.
+\bcall_[A-Za-z0-9_-]{4,}  # Hide underscore and hyphen call identifiers.
+\bfc_[A-Za-z0-9]{4,}  # Hide function-call identifiers.
+(^|\s)b\d+:  # Hide labelled bash-call identifiers.
+unattributed  # Keep attribution caveats in details.
+not a (test-suite )?guarantee  # Keep evidence caveats in details.
+diff --git  # Hide raw diff headers.
+^diff --git  # Hide anchored diff headers.
+index [0-9a-f]{7,}\.\.  # Hide raw Git object metadata.
+^index [0-9a-f]{7,}\.\.  # Hide anchored Git metadata.
+(---|\+\+\+) [ab]\/  # Hide raw diff path headers.
+^(---|\+\+\+) [abiw]\/  # Hide all Git diff path prefixes.
+@@ -\d  # Hide raw diff hunk headers.
+\bi\/\S+ w\/\S+  # Hide Git index and worktree prefixes.
+exit 0 \/  # Keep exit-code tallies in details.
+exit 0 \/ \d+ nonzero  # Keep detailed exit tallies in details.
+\b1 (files|paths|commands|changes|results|tools|lines)\b  # Use singular base nouns.
+\b1 changed paths\b  # Use singular modified nouns.
+\b1 (?:[a-z]+ )?(files|paths|lines|commands|matches|entries|tools|results|models|skills|sessions|branches|nodes|changes|errors|turns|replacements)\b  # Use singular nouns for one.
+[A-Za-z]!  # Use calm copy without exclamation marks.
+\w!(\s|$)  # Keep the standalone attention glyph only.
 ```
 
 ## Reviewer checklist

@@ -38,8 +38,8 @@ test("a fresh install names no model, keeps typed text, and will not send", asyn
   try {
     await terminal.flush();
     const frame = terminal.captureCharFrame();
-    for (const copy of ["○ NOT CONNECTED", "Not connected", "Sign in to choose a model · Alt+L", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
-    for (const copy of ["Ctrl+I failure details", "Enter send", "No model yet", "READY", "ATTENTION", "anthropic", "ctx"]) expect(frame).not.toContain(copy);
+    for (const copy of ["○ Not connected", "Not connected", "Sign in to choose a model · Alt+L", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
+    for (const copy of ["Ctrl+I failure details", "Enter send", "No model yet", "Ready", "Attention", "anthropic", "ctx"]) expect(frame).not.toContain(copy);
     expect(controller.snapshot().readiness).toBe("not-connected");
     let accepted = false;
     expect(await controller.submit("controller draft", () => { accepted = true; })).toBe(false);
@@ -63,7 +63,7 @@ test("a fresh install names no model, keeps typed text, and will not send", asyn
     expect(controller.snapshot().recovery).toBeUndefined();
     expect(controller.snapshot().status).toBe("idle");
     expect(controller.snapshot().transcript).toHaveLength(0);
-    expect(terminal.captureCharFrame()).toContain("○ NOT CONNECTED");
+    expect(terminal.captureCharFrame()).toContain("○ Not connected");
     expect(editor.plainText).toBe("keep this task");
     expect(controller.snapshot().transcript.some(entry => entry.kind === "user")).toBe(false);
     expect(controller.snapshot().modelId).toBe("");
@@ -229,7 +229,7 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
     expect(accepted).toBe(false);
     expect(controller.snapshot().transcript).toHaveLength(0);
     expect(controller.snapshot().recovery).toBeUndefined();
-      expect(terminal.captureCharFrame()).toContain("○ NOT CONNECTED");
+      expect(terminal.captureCharFrame()).toContain("○ Not connected");
       expect(editor.plainText).toBe(draft);
       expect(editor.cursorOffset).toBe(cursor);
       terminal.mockInput.pressKey("l", { meta: true });
@@ -257,11 +257,11 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
       const frame = terminal.captureCharFrame();
       if (activationFails) {
         expect(controller.snapshot().status).toBe("error");
-        expect(frame).toContain("! ATTENTION");
-        expect(controller.snapshot().transcript.some(entry => entry.text === "Credential saved, but the recommended model could not be activated. Choose one with /model.")).toBe(true);
+        expect(frame).toContain("! Attention");
+        expect(controller.snapshot().transcript.some(entry => entry.text === "Sign-in saved · /model choose a model")).toBe(true);
       } else {
         expect(controller.snapshot().readiness).toBe("ready");
-        expect(frame).toContain("● READY");
+        expect(frame).toContain("● Ready");
         expect(frame).toContain(`openai/${ROUTE_FALLBACK_MODELS.openai} · OpenAI API key`);
         expect(frame).toContain("Type a task · Enter sends");
         expect(frame).toContain("Enter send");
@@ -292,8 +292,9 @@ test("initial sign-in preserves memory failure warnings while suppressing setup 
       expect(controller.snapshot().status).toBe("idle");
       const notices = controller.snapshot().transcript.map(entry => entry.text);
       expect(notices).toHaveLength(1);
-      expect(notices[0]).toContain("Model activated and usable, but its preference was not remembered.");
-      expect(notices[0]).toContain("No additional login is needed.");
+      expect(notices[0]).toBe("Choice not remembered · Enter use model · Ctrl+I details");
+      expect(controller.inspectNoticeDetails()).toBe(true);
+      expect(controller.snapshot().transcript.at(-1)?.text).toContain("No additional login is needed.");
     } finally { controller.dispose(); }
   });
 });
@@ -631,7 +632,7 @@ test("xAI API key sign-in activates grok-4.7 and restores it without openaiAuth"
       expect(await controller.submitCredential()).toBe(true);
       expect(controller.snapshot().modelId).toBe("grok-4.7");
       expect(controller.snapshot().readiness).toBe("ready");
-      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Signed in. Using xai/grok-4.7."))).toBe(false);
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Signed in · Using xai/grok-4.7 · Enter send"))).toBe(false);
       expect(controller.snapshot().transcript.some(entry => entry.text === "Earlier workspace notice")).toBe(true);
       expect(controller.snapshot().transcript.some(entry => entry.text.includes("XAI_API_KEY still takes precedence over the saved key."))).toBe(true);
       expect(activated).toMatchObject({ provider: "xai", authRoute: "api-key" });

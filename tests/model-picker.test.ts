@@ -293,3 +293,23 @@ test("controller picker searches, navigates, marks active and accepts an unknown
     expect(controller.snapshot().transcript.some(entry => entry.text === "selected")).toBe(true);
   });
 });
+
+
+test("model preference actions open the picker without editing configuration", async () => {
+  await withTempDir(async root => {
+    const controller = await fixture(root);
+    const before = controller.describeConfig();
+    for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "xaiAuth"]) {
+      expect(controller.openPreferences()).toBe(true);
+      const index = controller.snapshot().preferences!.rows.findIndex(row => row.key === key);
+      controller.movePreference(index);
+      controller.movePreference(1, "choice");
+      expect(await controller.selectPreference()).toBe(true);
+      expect(controller.snapshot().preferences).toBeUndefined();
+      expect(controller.snapshot().modelPicker).toBeDefined();
+      expect(controller.describeConfig()).toBe(before);
+      controller.closeModelPicker();
+    }
+    controller.dispose();
+  });
+});

@@ -783,7 +783,7 @@ test("a skill turn starting while another turn runs is refused without activatin
     await other;
     const snapshot = controller.snapshot();
     expect(
-      snapshot.transcript.some((entry) => entry.text.includes("Already running")),
+      snapshot.transcript.some((entry) => entry.text === "Wait for this turn · Esc stop"),
     ).toBe(true);
     const userTexts = session.items
       .filter((item) => item.type === "user")
@@ -793,5 +793,12 @@ test("a skill turn starting while another turn runs is refused without activatin
     expect(check.context.some((entry) => entry.name === ACTIVE_SKILL_SECTION_NAME)).toBe(
       false,
     );
+  });
+});
+
+
+test("model skill activation retains the shared no-skills diagnostic", async () => {
+  await withTempDir(async root => {
+    expect(await prepareSkillInvocation({ workspaceRoot: root, home: root, name: "missing", modelInvocation: true })).toEqual({ ok: false, error: "Unknown skill 'missing'. No skills are installed." });
   });
 });

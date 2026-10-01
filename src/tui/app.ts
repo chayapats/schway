@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
 import { version } from "../../package.json";
@@ -337,7 +338,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         controller.markRestored();
         if (!startupError) {
           controller.notice(
-            `Resumed ${resumed.items.length} saved records. /session for details.`,
+            `Resumed ${formatCount(resumed.items.length, "saved record")} · /session details`,
           );
         }
       } else {
@@ -598,7 +599,7 @@ export async function handleSlashCommand(
   resumeSignal?: AbortSignal,
 ): Promise<boolean> {
   if ((name === "new" || name === "resume" || name === "sessions") && ctx.controller.running) {
-    ctx.controller.notice("Already running. Press Esc to cancel first.");
+    ctx.controller.notice("Wait for this turn · Esc stop");
     return false;
   }
   const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow);
@@ -615,14 +616,14 @@ export async function handleSlashCommand(
       ctx.skillScope.manager = ctx.controller.activeContextManager();
       ctx.skillScope.workspaceRoot = workspace.root;
       void ctx.controller.offerRecentSession(ctx.sessionsDir);
-      ctx.controller.notice("New session. Type / for commands or /session for details.");
+      ctx.controller.notice("New session · Enter send · / browse commands");
       return true;
     }
     case "delete-session": {
       const id = args.trim();
       if (!id || /\s/.test(id)) { ctx.controller.fail("Usage: /delete-session <exact-session-id>. Switch away with /new first."); return false; }
       if (id === ctx.controller.snapshot().sessionId) { ctx.controller.fail("Switch away with /new before deleting this session."); return false; }
-      try { await deleteJsonlSession({ directory: ctx.sessionsDir, home: ctx.home, id }); ctx.controller.notice("Session and associated draft content deleted."); return true; }
+      try { await deleteJsonlSession({ directory: ctx.sessionsDir, home: ctx.home, id }); ctx.controller.notice("Session and draft deleted · /sessions browse"); return true; }
       catch (error) { ctx.controller.fail(`Cannot delete session: ${messageOf(error)}`); return false; }
     }
     case "sessions": {
@@ -646,7 +647,7 @@ export async function handleSlashCommand(
         ctx.skillScope.workspaceRoot = workspace.root;
         for (const diagnostic of restored.diagnostics) ctx.controller.notice(diagnostic);
         ctx.controller.notice(
-          `Resumed ${resumed.items.length} saved records. /session for details.`,
+          `Resumed ${formatCount(resumed.items.length, "saved record")} · /session details`,
         );
         return true;
       } catch (error) {
@@ -709,11 +710,11 @@ export async function handleSlashCommand(
       if (invocation) {
         return invokeSkillTurn(invocation, ctx, accepted);
       }
-      ctx.controller.fail("Unknown command. Type /help for commands.");
+      ctx.controller.fail("Unknown command · /help browse commands");
       return false;
     }
     default: {
-      ctx.controller.fail("Unknown command. Type /help for commands.");
+      ctx.controller.fail("Unknown command · /help browse commands");
       return false;
     }
   }
@@ -730,12 +731,12 @@ export async function invokeSkillTurn(
   accepted: () => void = () => {},
 ): Promise<boolean> {
   if (ctx.controller.running) {
-    ctx.controller.notice("Already running. Press Esc to cancel first.");
+    ctx.controller.notice("Wait for this turn · Esc stop");
     return false;
   }
   const manager = ctx.skillScope.manager;
   if (!manager) {
-    ctx.controller.fail("Skills are not ready yet; try again.");
+    ctx.controller.fail("Skills loading · Retry shortly");
     return false;
   }
   const branchId = ctx.controller.snapshot().branchId;
@@ -751,11 +752,11 @@ export async function invokeSkillTurn(
     return false;
   }
   if (ctx.controller.running) {
-    ctx.controller.notice("Already running. Press Esc to cancel first.");
+    ctx.controller.notice("Wait for this turn · Esc stop");
     return false;
   }
   if (ctx.skillScope.manager !== manager || ctx.controller.snapshot().branchId !== branchId || JSON.stringify(workspaceIdentity) !== JSON.stringify(ctx.controller.workspaceIdentity())) {
-    ctx.controller.notice("The active session changed. Retry the skill when ready.");
+    ctx.controller.notice("Session changed · Enter retry the skill");
     return false;
   }
   manager.setActiveSkill({
@@ -798,7 +799,7 @@ export function formatBranchTree(tree: BranchTreeSnapshot): string {
       return `${marker}${head} ${fork} ${indent}${node.id} [${node.kind}]${heads} ${node.preview}`.trimEnd();
     }),
   ];
-  if (tree.truncated) lines.push(`… truncated to ${tree.nodes.length} of ${tree.totalNodeCount} nodes. Use /branch list for IDs.`);
+  if (tree.truncated) lines.push(`Showing ${formatCount(tree.nodes.length, "node")} of ${formatCount(tree.totalNodeCount, "node")} · /branch list browse`);
   return lines.join("\n");
 }
 

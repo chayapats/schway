@@ -31,11 +31,11 @@ test("contextual startup keeps Thai task and cursor through keyboard setup cance
   try {
     await ui.controller.initializeStartup(async () => ({ error: "Missing API key" }));
     await ui.settle();
-    expect(ui.captureCharFrame()).toContain("Connect to get started · Alt+L");
-    expect(ui.captureCharFrame()).toContain("! ATTENTION");
-    expect(ui.captureCharFrame()).not.toContain("NOT CONNECTED");
+    expect(ui.captureCharFrame()).toContain("Connect to continue · Alt+L sign in");
+    expect(ui.captureCharFrame()).toContain("! Attention");
+    expect(ui.captureCharFrame()).not.toContain("Not connected");
     expect(ui.captureCharFrame()).not.toContain("Enter send");
-    expect(ui.captureCharFrame()).toContain("Ctrl+I failure details");
+    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
     expect(ui.captureCharFrame()).toContain("/isolated-workspace");
     expect(ui.captureCharFrame()).not.toContain("Missing credentials. Use /login");
     const draft = "ช่วยตรวจงานนี้\nแล้วอธิบายเป็นภาษาไทย";
@@ -94,9 +94,9 @@ test("slow startup allows paste and resize, blocks duplicate setup, and offline 
       });
     });
     await ui.settle();
-    expect(ui.captureCharFrame()).toContain("Checking selected connection");
+    expect(ui.captureCharFrame()).toContain("Checking connection");
     expect(ui.captureCharFrame()).not.toContain("Enter send");
-    expect(ui.captureCharFrame()).not.toContain("Ctrl+I failure details");
+    expect(ui.captureCharFrame()).not.toContain("Ctrl+I details");
     await ui.mockInput.pasteBracketedText("รอได้\nอย่าลบงาน");
     ui.resize(44, 18);
     ui.mockInput.pressKey("m", { meta: true });
@@ -155,7 +155,7 @@ test("real API adapters accept custom IDs offline and readiness does not claim p
   try {
     await ui.controller.initializeStartup(async () => ({ model: ui.model }));
     await ui.settle();
-    expect(ui.captureCharFrame()).toContain("configured, unverified");
+    expect(ui.captureCharFrame()).not.toContain("configured, unverified");
     expect(ui.requests()).toBe(0);
   } finally { ui.close(); }
 });

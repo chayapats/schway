@@ -30,11 +30,11 @@ cursor 7 27 visible
 
 
 
-  ⠋ Running 3 tools: read, grep +1
+  ⠋ Running 3 tools
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ TOOLS 3 7s   scripted/scripted-model                                                             Esc stops  ctx ~24
+  ⠋ 3 tools 7.0s   scripted/scripted-model                                                           Esc stops  ctx ~24
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -102,8 +102,8 @@ cursor 7 27 visible
 23 0-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #0a5894 #f7f7f4 b
-24 3-34 #545e6c #f7f7f4 -
-24 34-120 #ffffff #f7f7f4 -
+24 3-19 #545e6c #f7f7f4 -
+24 19-120 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
 25 2-118 #ecedea #f7f7f4 -
 25 118-120 #ffffff #f7f7f4 -
@@ -116,10 +116,10 @@ cursor 7 27 visible
 27 2-118 #ecedea #f7f7f4 -
 27 118-120 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-15 #ffffff #0a5894 b
-28 15-16 #545e6c #ecedea -
-28 16-41 #1d232c #e1e3df -
-28 41-101 #545e6c #ecedea -
+28 1-17 #ffffff #0a5894 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-101 #545e6c #ecedea -
 28 101-104 #1d232c #c9cdd2 b
 28 104-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -

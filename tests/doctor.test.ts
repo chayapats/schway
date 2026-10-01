@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { diagnose, doctorExitCode } from "../src/doctor/doctor.ts";
+import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
 import { runCli } from "../src/cli/main.ts";
 import { inspectPackages } from "../src/packages/packages.ts";
 import type { CredentialStore } from "../src/auth/store.ts";
@@ -22,6 +22,19 @@ const store = (value: string | null | Error): CredentialStore => ({
   delete: async () => { throw Error("unexpected mutation"); },
 });
 const check = (report: Awaited<ReturnType<typeof diagnose>>, id: string) => report.checks.find(item => item.id === id);
+
+for (const count of [1, 2]) test(`doctor renders ${count} skills without changing JSON summaries`, async () => {
+  const { workspace, home } = await fixture();
+  for (let index = 0; index < count; index++) {
+    const path = join(workspace, ".agents", "skills", `copy-skill-${index}`);
+    await mkdir(path, { recursive: true });
+    await writeFile(join(path, "SKILL.md"), `---\nname: copy-skill-${index}\ndescription: Check copy\n---\nCheck user copy.\n`);
+  }
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(check(report, "skills")?.summary).toBe(`${count} skill(s) available.`);
+  expect(formatDoctor(report).split("\n").find(line => line.includes(" skills: "))).toBe(`[Ok] skills: ${count === 1 ? "1 skill" : "2 skills"} available.`);
+  expect(JSON.parse(JSON.stringify(report)).checks.find((item: { id: string }) => item.id === "skills").summary).toBe(`${count} skill(s) available.`);
+});
 
 test("independently diagnoses invalid configuration, storage and search availability", async () => {
   const { workspace, home } = await fixture();

@@ -144,6 +144,7 @@ export abstract class ControllerCore {
   protected outcomeIdentity?: string;
   protected outcomeUserId?: string;
   protected outcomeDiagnostics?: string;
+  protected noticeDetails?: { identity: string; text: string };
   /** Preserve each outcome display path's resolved tool identity until the outcome is cleared. */
   protected successfulToolPaths = new Map<string, string>();
   protected changeReview?: ChangeReview;
@@ -231,11 +232,24 @@ export abstract class ControllerCore {
   protected commandDiscoveryGeneration = 0;
   protected contextIdentity(): string { return `${this.sessionId}/${this.session.activeBranchId}/${this.provider}/${this.modelId}`; }
   /** Append a system line without touching session history. */
-  notice(text: string): void {
+  notice(text: string, details?: string): void {
+    if (details) this.retainNoticeDetails(details);
     this.transcript.push(this.systemEntry(text));
   }
+  protected retainNoticeDetails(details: string): void {
+    this.noticeDetails = { identity: `${this.sessionId}/${this.session.activeBranchId}`, text: redactSecrets(details, this.secrets).slice(0, 50_000) };
+  }
+  /** Reveal retained notice diagnostics only on request and within their original conversation. */
+  inspectNoticeDetails(): boolean {
+    if (!this.noticeDetails || this.noticeDetails.identity !== `${this.sessionId}/${this.session.activeBranchId}`) return false;
+    const details = this.noticeDetails.text;
+    this.noticeDetails = undefined;
+    this.notice(`Details · Esc keep editing\n${details}`);
+    return true;
+  }
   /** Append an actionable error line and mark the status as error. */
-  fail(text: string): void {
+  fail(text: string, details?: string): void {
+    if (details) this.retainNoticeDetails(details);
     if (text === "Your Grok plan doesn't include API access. Use an xAI API key instead.") text = "Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L";
     this.transcript.push({
       id: this.nextId("err"),
