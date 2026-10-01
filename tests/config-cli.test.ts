@@ -542,5 +542,5 @@ test("zero-config OpenAI request does not invent a model", async () => {
     }),
   });
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr).toContain("No model configured. Pass --provider and --model, or set them in config.");
+  expect(result.stderr).toBe("No model configured · Pass --provider and --model, or set them in config\n");
 });

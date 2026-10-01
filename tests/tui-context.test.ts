@@ -31,6 +31,7 @@ test("manual summary failure is failed, preserves history, and permits retry", a
     expect(await controller.compact()).toBe(false);
     expect(session.items).toEqual(history());
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("failed");
+    expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("/compact");
     expect(controller.running).toBe(false);
     expect(await controller.compact()).toBe(true);
@@ -53,7 +54,9 @@ test("persisted summary write failure requires explicit resume before compaction
     await rename(path, saved);
     await mkdir(path);
     expect(await controller.compact()).toBe(false);
-    expect(controller.snapshot().compactionNotice).toContain(`/resume ${session.header.id}`);
+    expect(controller.snapshot().compactionNotice).toBe("Compaction failed · Ctrl+I repair details");
+    expect(controller.inspectNoticeDetails()).toBe(true);
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain(`/resume ${session.header.id}`);
     expect(controller.snapshot().compactionNotice).not.toContain("EISDIR");
     expect(session.items).toEqual(history(12));
     await rm(path, { recursive: true });
@@ -115,7 +118,7 @@ test("overflow compaction and retry remain visible through the real controller l
       contextManager: createContextManager(workspace, { home, keepTurns: 2 }) });
     await controller.submit("continue");
     const rows = controller.snapshot().transcript.map(row => row.text);
-    expect(rows.join("\n")).toContain("Context overflow");
+    expect(rows.join("\n")).toContain("Compacting context · Esc stop");
     expect(rows.join("\n")).toContain("Context compacted");
     expect(rows.join("\n")).toContain("continued after overflow");
     expect(rows.filter(text => text === "original 0")).toHaveLength(1);
@@ -199,8 +202,11 @@ test("actual pressure loop distinguishes failed summarization from no-op and con
     wait.resolve();
     await task;
     const transcript = controller.snapshot().transcript.map(row => row.text).join("\n");
-    expect(transcript).toContain("Context pressure");
-    expect(transcript).toContain("Compaction failed");
+    expect(transcript).toContain("Compacting context · Esc stop");
+    expect(transcript).toContain("Compaction failed · Ctrl+I repair details");
+    expect(transcript).not.toContain("After a storage failure");
+    expect(controller.inspectNoticeDetails()).toBe(true);
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("After a storage failure");
     expect(transcript).toContain("task continued");
     expect(session.items.some(item => item.type === "compaction")).toBe(false);
     controller.dispose();
@@ -220,7 +226,7 @@ test("manual cancellation reports cancelled and no-op is distinct", async () => 
     expect(session.items).toEqual(history());
     controller.replaceSession(createSession(), "empty", { contextManager: createContextManager(workspace, { home }) });
     expect(await controller.compact()).toBe(false);
-    expect(controller.snapshot().compactionNotice).toContain("no-op");
+    expect(controller.snapshot().compactionNotice).toBe("Context unchanged · /compact retry after more turns");
     controller.dispose();
   });
 });

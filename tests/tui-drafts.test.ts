@@ -130,7 +130,7 @@ test("conflicting checkpoint and explicit deletion operate through renderer and 
     const store = openDraftStore({ home, workspaceRoot: home, sessionId: ui.session.header.id });
     await writeFile(`${store.path}.lock`, "uncertain writer", { mode: 0o600 });
     ui.editor.setText("memory retained on failure"); await idle(ui);
-    expect(ui.captureCharFrame()).toContain("Draft NOT saved"); expect(ui.saved()).toBe("previous completed");
+    expect(ui.captureCharFrame()).toContain("Draft not saved"); expect(ui.saved()).toBe("previous completed");
     expect(ui.editor.plainText).toBe("memory retained on failure");
   } finally { ui.close(); }
 }));
@@ -187,7 +187,7 @@ test("ordinary app exit flushes pending text and restores terminal; disk failure
     openDraftStore({ home: isolated, workspaceRoot: isolated, sessionId: previous.header.id }).save("previous valid checkpoint", 1);
     const failure = await runProcess(isolated, mode, previous.header.id);
     try {
-      const ui = await failure.next(); expect(ui.retained).toContain("unfinished Thai"); expect(ui.frame).toContain("Draft NOT saved");
+      const ui = await failure.next(); expect(ui.retained).toContain("unfinished Thai"); expect(ui.frame).toContain("Draft not saved");
       const result = await failure.next(); expect(result.stderr).toContain("checkpoint failed"); expect(result.stderr).not.toContain("checkpoint saved"); expect(result.destroyed).toBe(true);
       expect(await artifacts(isolated)).not.toContain("unfinished Thai");
       expect(openDraftStore({ home: isolated, workspaceRoot: isolated, sessionId: previous.header.id }).checkpoint?.text).toBe("previous valid checkpoint");

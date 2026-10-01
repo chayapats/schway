@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
@@ -51,7 +52,7 @@ export abstract class CredentialsLayer extends ControllerCore {
   /** Show grouped sign-in choices while retaining the ordinary composer draft. */
   openLoginChooser(): boolean {
     if (this.preferences) return false;
-    if (this.disposed || this.running) { this.notice("Busy: finish the current operation before signing in."); return false; }
+    if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     this.closeModelPicker();
     this.loginReturn = undefined;
     this.loginChooserState = { level: "main", selectedId: "chatgpt" };
@@ -96,7 +97,7 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Start only the selected action and remember its chooser level for cancellation. */
   async selectLoginChoice(): Promise<boolean> {
-    if (this.loginSaving) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return false; }
+    if (this.loginSaving) { this.notice("Saving credential · Wait for secure storage"); return false; }
     const state = this.loginChooserState;
     if (!state) return false;
     const primary = LOGIN_GROUPS.flatMap<(typeof LOGIN_GROUPS)[number]["rows"][number]>(group => group.rows).find(row => row.id === state.selectedId);
@@ -132,8 +133,8 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Open ephemeral URL entry for a compatible endpoint, retaining a valid configured URL only. */
   beginEndpointLogin(): boolean {
-    if (this.disposed || this.running) { this.notice("Busy: finish the current operation before signing in."); return false; }
-    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
+    if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
+    if (!this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     if (!this.configEditor || !this.stageSettings) { this.fail("Endpoint setup unavailable · Restart Schway · Alt+L sign in"); return false; }
     this.closeModelPicker();
     this.loginChooserState = undefined;
@@ -165,11 +166,11 @@ export abstract class CredentialsLayer extends ControllerCore {
     let error: string | undefined;
     let url: URL | undefined;
     try { url = new URL(value); } catch { /* The field explains malformed input below. */ }
-    if (!value) error = "Enter the endpoint URL, for example http://localhost:8787/v1.";
-    else if (!url || !["http:", "https:"].includes(url.protocol)) error = "Enter a full URL that starts with http:// or https://.";
-    else if (url.username || url.password) error = "Remove the user name and password from the URL; enter the key in the next step.";
-    else if (url.href.split("#", 1)[0]!.includes("?")) error = "Remove the query string from the URL.";
-    else if (!isValidProfileBaseUrl(value)) error = "Enter a full URL that starts with http:// or https://.";
+    if (!value) error = "Enter an endpoint URL · Use http:// or https://";
+    else if (!url || !["http:", "https:"].includes(url.protocol)) error = "Enter a full URL · Use http:// or https://";
+    else if (url.username || url.password) error = "Remove credentials from the URL · Enter the key next";
+    else if (url.href.split("#", 1)[0]!.includes("?")) error = "Remove the URL query · Enter retry";
+    else if (!isValidProfileBaseUrl(value)) error = "Enter a full URL · Use http:// or https://";
     if (error) { entry.error = error; return false; }
     const baseUrl = value.split("#", 1)[0]!;
     if (!this.beginCredentialTarget({ provider: "openai-compatible", baseUrl })) return false;
@@ -184,7 +185,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     const value = text.replace(/[\r\n]+$/, "");
     if (/[\x00-\x1f\x7f]/.test(value) || this.loginCallbackValue.length + value.length > 16_384) {
       this.loginCallbackValue = "";
-      this.fail("The callback contains invalid input. Paste the complete browser redirect again.");
+      this.fail("Invalid callback · Paste the complete redirect");
       return;
     }
     this.loginCallbackValue += value;
@@ -200,13 +201,13 @@ export abstract class CredentialsLayer extends ControllerCore {
     const code = this.loginCallbackValue?.trim();
     if (code === undefined) return false;
     this.loginCallbackValue = undefined;
-    if (!code) { this.fail("Paste the browser callback URL or code before continuing."); return false; }
+    if (!code) { this.fail("Paste the callback · Enter continue"); return false; }
     return this.runCodexLogin({ device: false, code });
   }
 
   /** Start masked entry for one explicit provider only while the conversation is idle. */
   beginLogin(args: string): boolean {
-    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const target = this.parseCredentialTarget(args);
     if (!target || !this.credentials) return false;
     return this.beginCredentialTarget(target);
@@ -217,7 +218,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (!this.credentials) return false;
     let identity: CredentialIdentity;
     try { identity = credentialIdentity(target); }
-    catch { this.fail("Select a valid compatible base URL before /login openai-compatible."); return false; }
+    catch { this.fail("Choose an endpoint · /model choose connection"); return false; }
     this.closeModelPicker();
     this.loginChooserState = undefined;
     this.credentialTarget = target;
@@ -271,7 +272,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         // The previous adapter may target another host; it must not survive failed activation.
         this.model = undefined;
         this.selectionGeneration += 1;
-        this.notice(`Endpoint saved for this session. To keep it, run /config set baseUrl ${endpointUrl} --scope user.`);
+        this.notice(`Endpoint ready for this session · /config set baseUrl ${endpointUrl} --scope user to keep it`);
       }
       const source = this.credentialOverrideNotice(target);
       if (source) this.notice(source);
@@ -335,7 +336,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     } catch {
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile, replaceActive)) return false;
       if (replaceActive) {
-        this.fail("Credential saved, but the recommended model could not be activated. Choose one with /model.");
+        this.fail("Sign-in saved · /model choose a model");
         return false;
       }
       if (route === "xai") this.clearXaiCapabilities("api-key");
@@ -352,8 +353,8 @@ export abstract class CredentialsLayer extends ControllerCore {
       () => route === "api-key" ? this.configEditor!.prepareOpenAIApiModel(modelId)
         : route === "xai" ? this.configEditor!.prepareXaiModel(modelId)
         : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
-      () => suppressSuccessNotice ? undefined : `Signed in. Using ${target.provider}/${this.modelId}.`,
-      "Credential saved, but the recommended model could not be activated. Choose one with /model.",
+      () => suppressSuccessNotice ? undefined : `Signed in · Using ${target.provider}/${this.modelId} · Enter send`,
+      "Sign-in saved · /model choose a model",
       false,
       false,
       listed,
@@ -369,7 +370,7 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Remove exactly one provider's saved credential without altering runtime or environment overrides. */
   async logout(args: string): Promise<boolean> {
-    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const routed = parseLoginTarget(args);
     if ("error" in routed) {
       this.fail(routed.error);
@@ -393,7 +394,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         ? { credentialIdentity: this.configEditor?.settings.credentialIdentity }
         : {}),
     };
-    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
+    if (!this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     this.closeModelPicker();
     this.credentialMutation = true;
     const task = (async () => {
@@ -417,7 +418,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.fail(LOGIN_USAGE);
       return;
     }
-    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return; }
+    if (!this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return; }
     const settings = this.configEditor?.settings;
     return {
       provider: provider as CredentialTarget["provider"],
@@ -468,7 +469,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       }
       this.status = "idle";
     } catch {
-      this.fail("Credential storage changed, but the provider could not be refreshed. Retry /login or restart after checking provider settings.");
+      this.fail("Connection not refreshed · /login retry");
     }
   }
 
@@ -505,23 +506,23 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Save an explicit Grok login, discover its models and atomically activate its billing route. */
   protected async runGrokLogin(target: { device: boolean }, accepted: () => void = () => {}): Promise<boolean> {
-    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
+    if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const runner = this.credentials?.grokLogin;
-    if (!runner) { this.fail("Grok sign-in is unavailable in this session."); return false; }
+    if (!runner) { this.fail("Grok sign-in unavailable · Restart Schway to connect"); return false; }
     this.closeModelPicker(); this.loginChooserState = undefined;
     const abort = new AbortController(); let saved = false;
     const generation = ++this.loginGeneration;
     this.loginSaving = false;
     this.activeAbort = abort; this.loginAbort = abort; this.credentialMutation = true; this.status = "running";
     this.loginApprovalData = { kind: "browser" };
-    this.loginApproval = target.device ? "Starting Grok device approval… · Esc cancel" : "Waiting for approval in your browser… · Esc cancel";
+    this.loginApproval = target.device ? "Starting Grok approval · Esc cancel" : "Approve in your browser · Esc cancel";
     try { accepted(); } catch { /* Presentation cannot cancel an accepted operation. */ }
     const task = (async () => {
       try {
         const result = await runner({ device: target.device, signal: abort.signal,
           onSaving: () => { if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return; this.loginSaving = true; },
           onSaved: () => { if ((abort.signal.aborted && !this.loginSaving) || this.loginAbort !== abort || this.disposed) return; saved = true; this.invalidateGrokAdapter(); },
-          onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Waiting for approval in your browser… · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
+          onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Approve in your browser · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
           onProgress: message => { if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return; this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserState = { level: "grok", selectedId: "grok-device" }; },
         });
         abort.signal.throwIfAborted(); if (this.disposed) return false;
@@ -537,13 +538,13 @@ export abstract class CredentialsLayer extends ControllerCore {
         const preferred = recommendedListedModel("grok", models) || ROUTE_FALLBACK_MODELS.xai;
         // Settings staging requires an idle controller; the abort still guards the preceding sign-in and list.
         this.activeAbort = undefined; this.loginAbort = undefined; this.credentialMutation = false; this.status = "idle";
-        const applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(preferred), () => `Signed in. Using xai/${this.modelId}.`, undefined, true);
+        const applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(preferred), () => `Signed in · Using xai/${this.modelId} · Enter send`, undefined, true);
         if (applied) { this.grokPending = false; this.grokReactivationRequired = false; await this.emitModelActivated({ provider: "xai", modelId: this.modelId, authRoute: "grok" }); }
         return applied;
       } catch (error) {
         if (this.loginGeneration !== generation) return false;
-        if (abort.signal.aborted) this.notice(saved ? "Grok sign-in cancelled after credential saving; the login remains saved." : "Grok sign-in cancelled before credential saving; nothing was saved.");
-        else this.fail(redactSecrets(error instanceof Error ? error.message : "Grok sign-in failed.", this.secrets));
+        if (abort.signal.aborted) this.notice(saved ? "Sign-in saved; activation cancelled · /model choose model" : "Sign-in cancelled · Alt+L retry");
+        else this.fail(redactSecrets(error instanceof Error ? error.message : "Grok sign-in failed · Alt+L retry", this.secrets));
         return false;
       }
     })();
@@ -568,9 +569,9 @@ export abstract class CredentialsLayer extends ControllerCore {
     try {
       const { deleteSubscriptionTokens } = await import("../model/providers/grok-subscription.ts");
       const removed = await deleteSubscriptionTokens(this.credentials.store);
-      this.notice(removed ? "Removed the Grok subscription (xAI OAuth) credential. The selected account can no longer run until sign-in and activation succeed again." : "No Grok subscription login found; nothing was removed.");
+      this.notice(removed ? "Grok sign-in removed · Alt+L sign in" : "No Grok sign-in saved · Alt+L sign in");
       this.grokModels = undefined; this.grokPending = false; this.clearXaiCapabilities("grok");
-      if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("The removed active Grok account is blocked; Schway will not switch this conversation to xAI API-key billing."); }
+      if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("Grok disconnected · Alt+L reconnect this account"); }
       return true;
     } catch { this.fail(credentialStoreError("delete")); return false; }
     finally { this.credentialMutation = false; }
@@ -578,12 +579,12 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Run the explicit ChatGPT subscription sign-in, persisting only the subscription identity on success. */
   protected async runCodexLogin(target: { device: boolean; code?: string }, accepted: () => void = () => {}): Promise<boolean> {
-    if (this.disposed || this.running) { this.notice("Busy: credential changes require an idle session."); return false; }
-    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
+    if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
+    if (!this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     const runner = this.credentials.codexLogin;
-    if (!runner) { this.fail("ChatGPT subscription sign-in is unavailable in this session. Restart schway to enable it."); return false; }
+    if (!runner) { this.fail("ChatGPT sign-in unavailable · Restart Schway to connect"); return false; }
     this.closeModelPicker();
-    this.loginApproval = target.device ? "Starting device approval… · Esc cancel" : "Waiting for approval in your browser… · Esc cancel";
+    this.loginApproval = target.device ? "Starting device approval · Esc cancel" : "Approve in your browser · Esc cancel";
     const abort = new AbortController();
     const generation = ++this.loginGeneration;
     this.loginSaving = false;
@@ -592,7 +593,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.loginAbort = abort;
     this.credentialMutation = true;
     this.status = "running";
-    this.notice(target.device ? "Starting ChatGPT subscription device sign-in. Press Esc to cancel." : "Starting ChatGPT subscription browser sign-in. Press Esc to cancel.");
+    this.notice(target.device ? "Starting ChatGPT device sign-in · Esc cancel" : "Starting ChatGPT browser sign-in · Esc cancel");
     try { accepted(); } catch { /* Presentation cannot cancel an accepted sign-in. */ }
     const task = (async (): Promise<boolean> => {
       try {
@@ -610,7 +611,9 @@ export abstract class CredentialsLayer extends ControllerCore {
             if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return;
             if (message.startsWith("Enter this code at ")) this.loginApproval = message;
             else {
-              this.notice(redactSecrets(message, this.secrets));
+              if (message.startsWith("ChatGPT subscription (Codex OAuth):")) this.notice("Sign-in saved · /model choose model · Ctrl+I details", message);
+              else if (message.startsWith("Approval received.")) this.notice("Approval received · Saving sign-in · Esc cancel");
+              else this.notice(redactSecrets(message, this.secrets));
               if (message.startsWith("The browser could not be opened automatically")) this.loginChooserState = { level: "chatgpt", selectedId: "chatgpt-device" };
             }
           },
@@ -624,19 +627,19 @@ export abstract class CredentialsLayer extends ControllerCore {
           }
           return false;
         }
-        this.notice(redactSecrets(result.status, this.secrets));
+        this.notice("Sign-in saved · /model choose model · Ctrl+I details", result.status);
         // Test runners may omit onSaved; production also invalidates at the store commit point.
         this.invalidateSubscriptionAdapter();
         if (this.pickerReturn) { this.status = "idle"; return true; }
         if (this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog) {
           this.subscriptionPending = true;
           this.status = "idle";
-          this.notice("Credential saved. Discovering available account models…");
+          this.notice("Sign-in saved · Finding models · Esc cancel");
           return true;
         }
         if (this.provider !== "openai") {
           this.status = "idle";
-          this.notice("Credential saved but subscription is not active. Choose an account model with /model when ready.");
+          this.notice("Sign-in saved · /model activate a model");
           return true;
         }
         this.model = undefined;
@@ -656,11 +659,11 @@ export abstract class CredentialsLayer extends ControllerCore {
         if (this.loginGeneration !== generation) return false;
         if (abort.signal.aborted) {
           this.notice(credentialSaved
-            ? "Sign-in cancelled after the credential was saved. It remains in the OS secure store; choose an account model to activate it."
-            : "ChatGPT sign-in cancelled before credential saving; nothing was saved.");
+            ? "Sign-in cancelled; credential saved · /model choose model"
+            : "Sign-in cancelled; nothing saved · Alt+L retry");
           this.status = "idle";
         } else {
-          this.fail("ChatGPT sign-in could not complete. Retry from the sign-in chooser or check secure-store access.");
+          this.fail("ChatGPT sign-in failed · Alt+L retry");
           this.loginChooserState = { level: "main", selectedId: "chatgpt" };
         }
         return false;
@@ -696,20 +699,20 @@ export abstract class CredentialsLayer extends ControllerCore {
           ?? recommendedListedModel("codex", models.map(model => ({ id: model.id, ...(model.recommended ? { recommended: true } : {}) })));
         if (!preferred) throw new Error("No selectable models were returned for this ChatGPT subscription.");
         discovery.signal.throwIfAborted();
-        this.notice(`Account model discovery succeeded (${models.length} models). Activating ${preferred}…`);
+        this.notice(`Found ${formatCount(models.length, "model")} · Activating ${preferred} · Esc cancel`);
       } catch (error) {
-        if (discovery.signal.aborted) this.notice(`Subscription activation cancelled; sign-in remains saved. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model."}`);
-        else this.fail(`Credential saved, but account model discovery failed temporarily. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model without signing in again.`);
+        if (discovery.signal.aborted) this.notice("Activation cancelled; sign-in saved · /model retry · Ctrl+I details", this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model.");
+        else this.fail("Models unavailable; sign-in saved · /model retry · Ctrl+I details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model without signing in again.\n${error instanceof Error ? error.message : String(error)}`);
         return false;
       } finally {
         if (this.activeAbort === discovery) this.activeAbort = undefined;
         if (this.status === "running") this.status = "idle";
       }
       const applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(preferred),
-        () => `ChatGPT subscription active for this session: openai/${this.modelId}. ${this.describeThinking()}`,
-        "Credential saved and account model found, but activation could not complete. Retry /model after checking the selected provider settings.");
+        () => `ChatGPT model active · Enter send · ${this.modelId}`,
+        "Model activation failed · /model retry");
       if (applied) { this.subscriptionPending = false; await this.emitModelActivated({ provider: "openai", modelId: this.modelId, authRoute: "codex" }); }
-      else this.notice(`Credential saved and account models found, but subscription activation failed. ${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
+      else this.notice("Activation failed; sign-in saved · /model retry · Ctrl+I details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
       return applied;
     }
     return signedIn;
@@ -717,7 +720,7 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Remove only the selected subscription identity, refreshing the adapter when it served OpenAI. */
   protected async runCodexLogout(): Promise<boolean> {
-    if (!this.credentials) { this.fail("Credential management is unavailable in this session."); return false; }
+    if (!this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     this.closeModelPicker();
     this.credentialMutation = true;
     const task = (async (): Promise<boolean> => {
@@ -738,8 +741,8 @@ export abstract class CredentialsLayer extends ControllerCore {
       }
       this.notice(
         deleted
-          ? "Removed the ChatGPT subscription (Codex OAuth) credential. The selected account can no longer run until sign-in and activation succeed again."
-          : "No ChatGPT subscription login found; nothing was removed.",
+          ? "ChatGPT sign-in removed · Alt+L sign in"
+          : "No ChatGPT sign-in saved · Alt+L sign in",
       );
       const overrides: string[] = [];
       if (this.credentials!.runtimeApiKey !== undefined) overrides.push("--api-key");
@@ -748,7 +751,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (wasActiveCodex) {
         this.model = undefined;
         this.subscriptionReactivationRequired = true;
-        this.notice("The removed active ChatGPT account is blocked; Schway will not switch this conversation to API-key billing.");
+        this.notice("ChatGPT disconnected · Alt+L reconnect this account");
         this.status = "idle";
         return true;
       }
@@ -769,7 +772,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         this.status = "idle";
         return true;
       } catch {
-        this.fail("Subscription storage changed, but the provider could not be refreshed. Retry /login codex or restart after checking provider settings.");
+        this.fail("ChatGPT connection not refreshed · /login codex retry");
         return false;
       }
     })();

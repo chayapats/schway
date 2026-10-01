@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
@@ -60,7 +61,7 @@ export async function diagnose(input: {
     if (input.args.addDirs?.length) {
       try {
         extraRoots = (await addWorkspaceRoots(resolved, input.args.addDirs, input.signal)).extraRoots;
-        add("attachments", "ok", `${extraRoots.length} additional workspace root(s) accessible.`);
+        add("attachments", "ok", `${legacyDoctorCount(extraRoots.length, "additional workspace root")} accessible.`);
       } catch {
         input.signal?.throwIfAborted();
         add("attachments", "error", "An attached workspace directory is inaccessible.", "Correct --add-dir paths and permissions.");
@@ -234,7 +235,7 @@ export async function diagnose(input: {
   if (workspace) {
     try {
       const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal });
-      add("packages", "ok", `${inspected.packages.length} enabled package manifest(s) valid.`);
+      add("packages", "ok", `${legacyDoctorCount(inspected.packages.length, "enabled package manifest")} valid.`);
       // Bound identifiers and redact only known credential sources: ordinary env/header values are not keys.
       const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", COMPATIBLE_API_KEY_ENV,
         ...(!("error" in settings) && settings.credentialEnv ? [settings.credentialEnv] : [])];
@@ -261,7 +262,7 @@ export async function diagnose(input: {
       // Discovery accepts already validated packages and never imports extension registration code.
       try {
         const skills = await discoverSkills({ workspaceRoot: workspace, extraRoots, home, packages: inspected.packages, signal: input.signal });
-        add("skills", "ok", `${skills.skills.length} skill(s) available.`);
+        add("skills", "ok", `${legacyDoctorCount(skills.skills.length, "skill")} available.`);
         for (let i = 0; i < skills.diagnostics.length; i++) {
           const source = skills.diagnostics[i]!.source;
           const identifier = safeName(basename(source.endsWith("SKILL.md") ? dirname(source) : source));
@@ -300,5 +301,14 @@ export function doctorExitCode(report: DoctorReport): 0 | 1 {
 
 /** Render checks with concrete recovery guidance and no credential values. */
 export function formatDoctor(report: DoctorReport): string {
-  return report.checks.map(check => `[${check.status.toUpperCase()}] ${check.id}: ${check.summary}${check.status === "ok" ? "" : ` Fix: ${check.remedy}`}`).join("\n") + "\n";
+  return report.checks.map(check => {
+    const summary = check.summary.replace(/\b(\d+) (additional workspace root|enabled package manifest|skill)\(s\)/g,
+      (_match, count: string, noun: string) => formatCount(Number(count), noun));
+    return `[${{ ok: "Ok", warning: "Warning", error: "Error" }[check.status]}] ${check.id}: ${summary}${check.status === "ok" ? "" : ` Fix: ${check.remedy}`}`;
+  }).join("\n") + "\n";
+}
+
+/** Preserve version-one JSON summary values while the human renderer uses grammatical counts. */
+function legacyDoctorCount(count: number, noun: string): string {
+  return `${count} ${noun}(s)`;
 }

@@ -24,7 +24,7 @@ test("account model order stays fixed when the active model is in the middle, in
 });
 
 test("all five auth groups and compatible profiles keep fixed order regardless of active state", () => {
-  const entries = modelPickerEntries("", "xai", "api", {}, { activeRoute: "api-key", baseUrl: "http://localhost:8787/v1",
+  const entries = modelPickerEntries("", "xai", "api", {}, { activeRoute: "api-key", baseUrl: "http://localhost:8787",
     subscriptionModels: ["account"], grokModels: [{ id: "grok" }], apiModels: [{ id: "openai" }], xaiModels: [{ id: "api" }], compatibleModels: [{ id: "local" }],
     profiles: { second: { baseUrl: "https://b.example/path?hidden=1", model: "b" }, first: { baseUrl: "https://user:password@a.example:8443/v1", model: "a" } },
     access: { providers: { "openai-compatible": "No key required" }, profiles: { second: "No key required", first: "No key required" }, subscription: "ChatGPT", grok: "Grok", openaiApiKey: "API key", xaiApiKey: "API key" },

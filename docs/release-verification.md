@@ -104,7 +104,7 @@ No production login/logout or credential changes were made.
 | Registry install | 0 | `schway@0.4.0` installed |
 | `--help` | 0 | Installed executable works |
 | `doctor --json` | 0 | `.version` is `0.4.0` |
-| `-p "hello"`, no configured model | 1 | Exact `No model configured. Pass --provider and --model, or set them in config.` message |
+| `-p "hello"`, no configured model | 1 | Exact `No model configured · Pass --provider and --model, or set them in config` message |
 | Compatible `Reply with the word OK.` turn | 0 | `agent.finished.reason: completed`; exactly one session JSONL |
 | Removed Anthropic configuration | 1 | Exact `ANTHROPIC_REMOVED_MESSAGE` |
 

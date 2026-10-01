@@ -32,9 +32,9 @@ cursor 1 1 hidden
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Endpoint URL · http://localhost:8787/v1
+ ▌ › Endpoint URL · http://localhost:8787
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ○ NOT CONNECTED
+  ○ Not connected
  Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -77,8 +77,8 @@ cursor 1 1 hidden
 25 49-50 #ffffff #0e1117 -
 26 0-1 #ffffff #0e1117 -
 26 1-5 #e6eaf0 #161b24 -
-26 5-44 #8b95a7 #161b24 -
-26 44-49 #ffffff #161b24 -
+26 5-41 #8b95a7 #161b24 -
+26 41-49 #ffffff #161b24 -
 26 49-50 #ffffff #0e1117 -
 27 0-1 #ffffff #0e1117 -
 27 1-49 #161b24 #0e1117 -

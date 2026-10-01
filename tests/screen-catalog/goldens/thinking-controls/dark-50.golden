@@ -9,16 +9,14 @@ cursor 6 27 visible
  ⚡ schway  /project
 
  Preferences · session · 1/14
- › thinking: unset (effective: provider default (
- medium; no explicit control sent)) [built-in
- default]
+ › thinking: unset (effective: Provider default (
+ medium)) [built-in default]
  Choice: Reset (inherit) (1/7)
  Enter previews; no changes yet.
  ↑/↓ field · ←/→ choice · Tab scope
  Enter preview/confirm · Esc back · PgUp/PgDn
  scroll
- Session only; disappears on restart. No files
- change.
+ This session only · Resets on restart
  Saved: No saved override
  CLI provider selection shadows workspace memory;
  reset that CLI override to restore it.
@@ -31,10 +29,12 @@ cursor 6 27 visible
 
 
 
+
+
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   openai-compatible/meta/mus…    ctx ~0
+  ● Ready   openai-compatible/meta/mus…    ctx ~0
  Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -51,41 +51,37 @@ cursor 6 27 visible
 03 1-49 #e6eaf0 #0e1117 -
 03 49-50 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-46 #e6eaf0 #0e1117 -
-04 46-50 #ffffff #0e1117 -
+04 1-28 #e6eaf0 #0e1117 -
+04 28-50 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
-05 1-9 #e6eaf0 #0e1117 -
-05 9-50 #ffffff #0e1117 -
+05 1-30 #e6eaf0 #0e1117 -
+05 30-50 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-30 #e6eaf0 #0e1117 -
-06 30-50 #ffffff #0e1117 -
+06 1-32 #e6eaf0 #0e1117 -
+06 32-50 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-32 #e6eaf0 #0e1117 -
-07 32-50 #ffffff #0e1117 -
+07 1-35 #e6eaf0 #0e1117 -
+07 35-50 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-35 #e6eaf0 #0e1117 -
-08 35-50 #ffffff #0e1117 -
+08 1-46 #e6eaf0 #0e1117 -
+08 46-50 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-46 #e6eaf0 #0e1117 -
-09 46-50 #ffffff #0e1117 -
+09 1-7 #e6eaf0 #0e1117 -
+09 7-50 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-7 #e6eaf0 #0e1117 -
-10 7-50 #ffffff #0e1117 -
+10 1-38 #e6eaf0 #0e1117 -
+10 38-50 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-47 #e6eaf0 #0e1117 -
-11 47-50 #ffffff #0e1117 -
+11 1-25 #e6eaf0 #0e1117 -
+11 25-50 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-8 #e6eaf0 #0e1117 -
-12 8-50 #ffffff #0e1117 -
+12 1-49 #e6eaf0 #0e1117 -
+12 49-50 #ffffff #0e1117 -
 13 0-1 #ffffff #0e1117 -
-13 1-25 #e6eaf0 #0e1117 -
-13 25-50 #ffffff #0e1117 -
-14 0-1 #ffffff #0e1117 -
-14 1-49 #e6eaf0 #0e1117 -
-14 49-50 #ffffff #0e1117 -
-15 0-1 #ffffff #0e1117 -
-15 1-39 #e6eaf0 #0e1117 -
-15 39-50 #ffffff #0e1117 -
+13 1-39 #e6eaf0 #0e1117 -
+13 39-50 #ffffff #0e1117 -
+14 0-50 #ffffff #0e1117 -
+15 0-50 #ffffff #0e1117 -
 16 0-50 #ffffff #0e1117 -
 17 0-50 #ffffff #0e1117 -
 18 0-50 #ffffff #0e1117 -

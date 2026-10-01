@@ -5,8 +5,8 @@ The Anthropic route saw little use while its protocol and authentication support
 The removal covers the Messages adapter, SDK dependency, protocol fixtures and tests, catalog entries, credential kind, auth route and provider documentation. Configuration or `--provider anthropic` fails at startup in both interactive and headless execution with the notice defined in `src/config/removed-provider.ts`:
 
 ```text
-The Anthropic provider was removed in 0.4.
-Use Claude through an OpenAI-compatible endpoint:
+Anthropic support ended in 0.4
+Use Claude through a compatible endpoint:
   schway --provider openai-compatible --base-url <url> --model <id>
 See docs/configuration.md
 ```

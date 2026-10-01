@@ -9,7 +9,7 @@ cursor 8 27 visible
  ⚡ schway  ~/demo
 
 
-  scripted/scripted-model · scripted API key · configured, unverified
+  scripted/scripted-model · scripted API key
 
   Type a task · Enter sends
 
@@ -34,7 +34,7 @@ cursor 8 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › /
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● READY   scripted/scripted-model                                      ctx ~0
+  ● Ready   scripted/scripted-model                                      ctx ~0
   ↑/↓ select · Tab complete · Esc dismiss · Enter send
 == styles
 00 0-1 #ffffff #ecedea -
@@ -47,8 +47,8 @@ cursor 8 27 visible
 02 0-80 #ffffff #f7f7f4 -
 03 0-2 #ffffff #f7f7f4 -
 03 2-25 #1d232c #f7f7f4 b
-03 25-69 #545e6c #f7f7f4 -
-03 69-80 #ffffff #f7f7f4 -
+03 25-44 #545e6c #f7f7f4 -
+03 44-80 #ffffff #f7f7f4 -
 04 0-80 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
 05 2-16 #545e6c #f7f7f4 -

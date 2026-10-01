@@ -1,4 +1,5 @@
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
+import { formatDuration } from "../text/format.ts";
 import { resolve } from "node:path";
 import { createDiagnosticSink } from "../diagnostics/sink.ts";
 import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
@@ -115,7 +116,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       io.stdout.write(parsedDoctor.args.json ? `${JSON.stringify(report)}\n` : formatDoctor(report));
       return doctorExitCode(report);
     } catch {
-      io.stderr.write("Doctor could not complete. Retry after restoring local filesystem access or removing cancellation.\n");
+      io.stderr.write("Doctor could not finish · Check filesystem access and run schway doctor again\n");
       return 2;
     }
   }
@@ -135,13 +136,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   if (/^\s*\/(?:login|logout)(?:\s|$)/i.test(parsed.args.prompt)) {
-    io.stderr.write("Credential management requires interactive mode. Start schway without -p.\n");
+    io.stderr.write("Sign-in needs interactive mode · Run schway without -p\n");
     return 1;
   }
 
   const home = io.env.HOME;
   if (!home) {
-    io.stderr.write("HOME is not set; cannot write session history.\n");
+    io.stderr.write("Session storage unavailable · Set HOME to a writable directory\n");
     return 1;
   }
 
@@ -407,7 +408,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             printedText = false;
           }
           io.stderr.write(
-            `Retrying provider request (${safeEvent.attempt}/${safeEvent.maxAttempts}) in ${safeEvent.delayMs}ms: ${safeEvent.message}\n`,
+            `Retry ${safeEvent.attempt}/${safeEvent.maxAttempts} · Waiting ${formatDuration(safeEvent.delayMs)} · Ctrl+C stop\n${safeEvent.message}\n`,
           );
         }
 

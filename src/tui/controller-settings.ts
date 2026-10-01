@@ -62,9 +62,9 @@ export abstract class SettingsLayer extends ChangesLayer {
     const row = panel.rows[panel.selectedIndex]!;
     if (!presentationPreference(row.key) && !this.stageSettings) return false;
     const choice = row.choices[panel.choiceIndex];
-    if (panel.scope !== "memory" && typeof choice === "string" && choice.startsWith("open model")) {
+    if (panel.scope !== "memory" && row.action === "choose-model" && choice !== undefined) {
       this.preferences = undefined;
-      this.notice("Model + route picker activates and remembers a successful choice for this workspace; it does not write user or project config.");
+      this.notice("Choose a model · Enter use · Esc back");
       return this.openModelPicker();
     }
     if (this.preferenceTransaction && panel.preview) {
@@ -120,10 +120,10 @@ export abstract class SettingsLayer extends ChangesLayer {
   async configCommand(args: string): Promise<boolean> {
     if (args.trim() === "show") { this.notice(this.describeConfig()); return true; }
     if (!args.trim()) { if (this.configEditor) return this.openPreferences(); this.notice(this.describeConfig()); return true; }
-    if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const scoped = args.trim().match(/\s+--scope\s+(\S+)$/);
     const scopeValue = scoped?.[1];
-    if (scopeValue && !["user", "project", "session"].includes(scopeValue)) { this.fail("Config scope must be user, project or session."); return false; }
+    if (scopeValue && !["user", "project", "session"].includes(scopeValue)) { this.fail("Choose a config scope · Use user, project or session"); return false; }
     const command = scoped ? args.trim().slice(0, scoped.index) : args.trim();
     const match = command.match(/^(set|reset)\s+(\S+)(?:\s+([\s\S]+))?$/);
     if (!match) { this.fail("Usage: /config set <key> <value> [--scope user|project] or /config reset <key> [--scope user|project]."); return false; }
@@ -133,8 +133,8 @@ export abstract class SettingsLayer extends ChangesLayer {
     let value: unknown = raw;
     if (action === "reset") value = undefined;
     else if (["maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"].includes(key!)) value = Number(raw);
-    else if ((key === "git" || key === "ui") && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail(key === "ui" ? 'Invalid display settings · /config set ui {"splash":"never"} to retry' : 'Invalid git value. Use JSON like {"changeTracking":"snapshot"}.'); return false; } }
-    else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted config value."); return false; } }
+    else if ((key === "git" || key === "ui") && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail(key === "ui" ? 'Invalid display settings · /config set ui {"splash":"never"} to retry' : 'Invalid Git settings · Use JSON like {"changeTracking":"snapshot"}'); return false; } }
+    else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted value · Use valid JSON text"); return false; } }
     return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
       const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
       const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : key === "ui" ? { splash: this.configEditor!.settings.splash, inlineDiffLines: this.configEditor!.settings.inlineDiffLines } : this.configEditor!.settings[key as keyof ResolvedSettings];
@@ -153,8 +153,8 @@ export abstract class SettingsLayer extends ChangesLayer {
   /** Commit staged settings before publishing the runtime and optional success notice. */
   protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate = false, presentationOnly: false | "appearance" | "ui" = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
     if (this.disposed) return false;
-    if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
-    if (!this.configEditor || (!presentationOnly && !this.stageSettings)) { this.fail("Interactive settings are unavailable in this session."); return false; }
+    if (this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
+    if (!this.configEditor || (!presentationOnly && !this.stageSettings)) { this.fail("Preferences unavailable · Restart Schway to configure"); return false; }
     this.settingsFailure = undefined;
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -186,8 +186,8 @@ export abstract class SettingsLayer extends ChangesLayer {
         if (successNotice !== undefined) this.notice(redactSecrets(successNotice, this.secrets));
         return true;
       } catch (error) {
-        this.settingsFailure = abort.signal.aborted ? "Settings change cancelled. Previous settings remain active." : failureMessage ?? redactSecrets(error instanceof Error ? error.message : String(error), this.secrets);
-        if (abort.signal.aborted) { this.notice("Settings change cancelled. Previous settings remain active."); this.status = "idle"; }
+        this.settingsFailure = abort.signal.aborted ? "Settings unchanged · Alt+P reopen preferences" : failureMessage ?? redactSecrets(error instanceof Error ? error.message : String(error), this.secrets);
+        if (abort.signal.aborted) { this.notice("Settings unchanged · Alt+P reopen preferences"); this.status = "idle"; }
         else this.fail(failureMessage ?? redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
         return false;
       }

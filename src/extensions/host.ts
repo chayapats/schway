@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { RESERVED_SKILL_NAMES, type SkillDiscovery } from "../skills/skills.ts";
@@ -226,16 +227,16 @@ export class ExtensionRuntime {
 
   private drop(observer: Observer): void {
     observer.dropped++;
-    if (observer.dropped === 1) this.report(`Extension "${observer.source}" observer dropped a runtime notification: queue limit exceeded (${OBSERVER_QUEUE_LIMIT} events / ${OBSERVER_QUEUE_CHAR_LIMIT} characters). Agent output is unaffected.`);
+    if (observer.dropped === 1) this.report(`Extension "${observer.source}" observer dropped a runtime notification: queue limit exceeded (${formatCount(OBSERVER_QUEUE_LIMIT, "event")} / ${formatCount(OBSERVER_QUEUE_CHAR_LIMIT, "character")}). Agent output is unaffected.`);
   }
 
   private reportDrops(observer: Observer): void {
-    if (observer.dropped) this.report(`Extension "${observer.source}" observer dropped ${observer.dropped} runtime notification(s) in total.`);
+    if (observer.dropped) this.report(`Extension "${observer.source}" observer dropped ${formatCount(observer.dropped, "runtime notification")} in total.`);
     observer.dropped = 0;
   }
 
   private clearObserver(observer: Observer, reason: string): void {
-    if (observer.queue.length) this.report(`Extension "${observer.source}" observer dropped ${observer.queue.length} queued runtime notification(s): ${reason}.`);
+    if (observer.queue.length) this.report(`Extension "${observer.source}" observer dropped ${formatCount(observer.queue.length, "queued runtime notification")}: ${reason}.`);
     this.reportDrops(observer);
     observer.queue = [];
     observer.size = 0;

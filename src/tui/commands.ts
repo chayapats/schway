@@ -127,7 +127,7 @@ export async function dispatchEditorInput(
   const accept = () => { if (!notified) { notified = true; accepted(); } };
   const slash = parseSlashCommand(text);
   const invocation = splitSlashCommand(text);
-  if (controller.running) { controller.notice(invocation?.name === "login" || invocation?.name === "logout" ? "Busy: credential changes require an idle session." : invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Busy: /${invocation.name} was not run. Press Esc to cancel the active operation, then retry.` : "Already running. Press Esc to cancel first, then retry the retained command."); return false; }
+  if (controller.running) { controller.notice(invocation?.name === "login" || invocation?.name === "logout" ? "Wait for this turn · Esc stop" : invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Command not run · Esc stop · /${invocation.name} retry` : "Wait for this turn · Esc stop"); return false; }
   if (invocation && await controller.commandCollision(invocation.name)) return false;
   if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
     const executed = await controller.runExtensionCommand(invocation.name, invocation.args, accept);
@@ -136,12 +136,12 @@ export async function dispatchEditorInput(
   }
   if (slash?.name === "unknown" && !controller.commandChoices(`/${invocation?.name ?? ""}`).some(entry => entry.name === invocation?.name && entry.available)) {
     const alternatives = controller.commandChoices(`/${invocation?.name.slice(0, 2) ?? ""}`).filter(entry => entry.available).slice(0, 3).map(entry => `/${entry.name}`);
-    controller.notice(`Unknown command /${invocation?.name ?? ""}. ${alternatives.length ? `Try ${alternatives.join(", ")}, or ` : "Use "}/help to search commands and skills.`);
+    controller.notice(`Unknown command /${invocation?.name ?? ""} · ${alternatives.length ? `Try ${alternatives.join(", ")} · ` : ""}/help browse commands`);
     return false;
   }
   if (slash) {
     if (controller.running) {
-      controller.notice("Already running. Press Esc to cancel first.");
+      controller.notice("Wait for this turn · Esc stop");
       return false;
     }
     const executed = await builtin(slash, accept);
@@ -149,7 +149,7 @@ export async function dispatchEditorInput(
     return notified || executed;
   }
   if (controller.running) {
-    controller.notice("Already running. Press Esc to cancel first.");
+    controller.notice("Wait for this turn · Esc stop");
     return false;
   }
   return controller.submit(input, accepted);

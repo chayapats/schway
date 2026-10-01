@@ -12,11 +12,11 @@ cursor 6 27 visible
  ▌ Summarize the changes
 
  ▌ ! Error
- ▌ The provider could not finish this step.
- ▌ Inspect details or continue this session
- ▌ when ready.
+ ▌ Request failed · Inspect details before
+ ▌ continuing
  ▌ Ctrl+R continue · Ctrl+I details · Esc keep
  ▌ editing
+
 
 
 
@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ! ATTENTION   scripted/scripted-model    ctx ~6
+  ! Attention   scripted/scripted-model    ctx ~6
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -66,38 +66,33 @@ cursor 6 27 visible
 06 0-1 #ffffff #f7f7f4 -
 06 1-2 #a61f16 #edddd9 -
 06 2-3 #ffffff #edddd9 -
-06 3-44 #a61f16 #edddd9 -
-06 44-48 #ffffff #edddd9 -
+06 3-43 #a61f16 #edddd9 -
+06 43-48 #ffffff #edddd9 -
 06 48-50 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
 07 1-2 #a61f16 #edddd9 -
 07 2-3 #ffffff #edddd9 -
-07 3-44 #a61f16 #edddd9 -
-07 44-48 #ffffff #edddd9 -
+07 3-13 #a61f16 #edddd9 -
+07 13-48 #ffffff #edddd9 -
 07 48-50 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -
 08 1-2 #a61f16 #edddd9 -
 08 2-3 #ffffff #edddd9 -
-08 3-14 #a61f16 #edddd9 -
-08 14-48 #ffffff #edddd9 -
+08 3-9 #1d232c #c9cbd0 b
+08 9-21 #a61f16 #edddd9 -
+08 21-27 #1d232c #c9cbd0 b
+08 27-38 #a61f16 #edddd9 -
+08 38-41 #1d232c #c9cbd0 b
+08 41-47 #a61f16 #edddd9 -
+08 47-48 #ffffff #edddd9 -
 08 48-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
 09 1-2 #a61f16 #edddd9 -
 09 2-3 #ffffff #edddd9 -
-09 3-9 #1d232c #c9cbd0 b
-09 9-21 #a61f16 #edddd9 -
-09 21-27 #1d232c #c9cbd0 b
-09 27-38 #a61f16 #edddd9 -
-09 38-41 #1d232c #c9cbd0 b
-09 41-47 #a61f16 #edddd9 -
-09 47-48 #ffffff #edddd9 -
+09 3-10 #a61f16 #edddd9 -
+09 10-48 #ffffff #edddd9 -
 09 48-50 #ffffff #f7f7f4 -
-10 0-1 #ffffff #f7f7f4 -
-10 1-2 #a61f16 #edddd9 -
-10 2-3 #ffffff #edddd9 -
-10 3-10 #a61f16 #edddd9 -
-10 10-48 #ffffff #edddd9 -
-10 48-50 #ffffff #f7f7f4 -
+10 0-50 #ffffff #f7f7f4 -
 11 0-50 #ffffff #f7f7f4 -
 12 0-50 #ffffff #f7f7f4 -
 13 0-50 #ffffff #f7f7f4 -

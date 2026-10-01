@@ -30,11 +30,11 @@ cursor 6 27 visible
 
 
 
- ⠋ Running 3 tools: read, grep +1
+ ⠋ Running 3 tools
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ TOOLS 3 7s   scripted/…    Esc stops  ctx ~24
+  ⠋ 3 tools 7.0s   scripte…    Esc stops  ctx ~24
  Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -102,8 +102,8 @@ cursor 6 27 visible
 23 0-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #0a5894 #f7f7f4 b
-24 2-33 #545e6c #f7f7f4 -
-24 33-50 #ffffff #f7f7f4 -
+24 2-18 #545e6c #f7f7f4 -
+24 18-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -
 25 49-50 #ffffff #f7f7f4 -
@@ -116,9 +116,9 @@ cursor 6 27 visible
 27 1-49 #ecedea #f7f7f4 -
 27 49-50 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-15 #ffffff #0a5894 b
-28 15-16 #545e6c #ecedea -
-28 16-28 #1d232c #e1e3df -
+28 1-17 #ffffff #0a5894 b
+28 17-18 #545e6c #ecedea -
+28 18-28 #1d232c #e1e3df -
 28 28-31 #545e6c #ecedea -
 28 31-34 #1d232c #c9cdd2 b
 28 34-49 #545e6c #ecedea -

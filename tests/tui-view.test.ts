@@ -90,7 +90,7 @@ test("not-connected copy and neutral pill survive no-color, narrow widths and re
     for (const [width, height] of [[120, 24], [80, 24], [50, 24], [120, 24], [44, 18], [24, 18], [80, 9]] as const) {
       ui.resize(width, height);
       await settle(ui);
-      expect(ui.captureCharFrame()).toContain("○ NOT CONNECTED");
+      expect(ui.captureCharFrame()).toContain("○ Not connected");
       if (height >= 10) expect(ui.captureCharFrame()).toContain("Alt+L sign in");
       const empty = ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable;
       expect(empty.chunks.map(chunk => chunk.text).join("")).toContain("Not connected\nSign in to choose a model · Alt+L");
@@ -99,7 +99,7 @@ test("not-connected copy and neutral pill survive no-color, narrow widths and re
         expect(ui.captureCharFrame()).toContain("Not connected");
         expect(ui.captureCharFrame()).toContain("Sign in to choose a model · Alt+L");
       }
-      for (const copy of ["gpt-", "openai/", "claude", "anthropic", "No model yet", "READY", "ATTENTION", "ctx", "Ctrl+I failure details", "Enter send"]) expect(ui.captureCharFrame()).not.toContain(copy);
+      for (const copy of ["gpt-", "openai/", "claude", "anthropic", "No model yet", "Ready", "Attention", "ctx", "Ctrl+I failure details", "Enter send"]) expect(ui.captureCharFrame()).not.toContain(copy);
     }
   }
 });
@@ -266,7 +266,7 @@ test("busy built-in command keeps text and cursor through renderer dispatch", as
   await settle(ui);
   expect(ui.editor.plainText).toBe("/model unavailable");
   expect(ui.editor.cursorOffset).toBe(before);
-  expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("Already running"))).toBe(true);
+  expect(ui.controller.snapshot().transcript.some(entry => entry.text === "Wait for this turn · Esc stop")).toBe(true);
   ui.controller.cancel();
   await running;
 });
@@ -736,7 +736,7 @@ test("active OpenAI billing route stays visible at 80×24 and 44×18 after keybo
   await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.accessLoading, "model access discovery");
   await ui.mockInput.typeText("gpt-5.4");
   await settle(ui);
-  expect(ui.captureCharFrame()).toContain("configured, unverified");
+  expect(ui.captureCharFrame()).not.toContain("configured, unverified");
   ui.resize(44, 18);
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("OpenAI API key");
@@ -1055,7 +1055,7 @@ test("resize keeps the editor and status inside the viewport with a populated tr
     const footer = ui.renderer.root.findDescendantById("footer")!;
     expect(composer.y + composer.height, `composer at ${width}x${height}`).toBeLessThanOrEqual(height!);
     expect(footer.y + footer.height, `footer at ${width}x${height}`).toBeLessThanOrEqual(height!);
-    expect(ui.captureCharFrame(), `status at ${width}x${height}`).toContain("READY");
+    expect(ui.captureCharFrame(), `status at ${width}x${height}`).toContain("Ready");
   }
   ui.mockInput.pressEscape();
   await settle(ui);
@@ -1092,12 +1092,12 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   await settle(ui);
   expect(ui.controller.snapshot().activity?.operationId).toBe(operationId);
   expect(ui.editor.cursorOffset).toBe(draftCursor);
-  expect(ui.captureCharFrame()).toContain("RETRY 2/3");
+  expect(ui.captureCharFrame()).toContain("Retry 2/3");
   expect(ui.captureCharFrame()).toContain("Esc stops");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
   ui.mockInput.pressEscape();
   await ui.flush();
-  expect(ui.captureCharFrame()).toContain("CANCEL REQUESTED");
+  expect(ui.captureCharFrame()).toContain("Stop requested");
   expect(ui.controller.snapshot().activity?.cancellation).toBe("settling");
   ui.view.refresh();
   await ui.flush();
@@ -1107,7 +1107,7 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   await ui.controller.waitForIdle();
   await settle(ui);
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
-  expect(ui.captureCharFrame()).toContain("READY");
+  expect(ui.captureCharFrame()).toContain("Ready");
 });
 
 test("real renderer replaces failed stream and preserves an earlier reading position", async () => {
@@ -1333,7 +1333,7 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     ui.editor.setText("/theme wrong");
     ui.mockInput.pressEscape(); await settle(ui);
     ui.mockInput.pressEnter(); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("! ATTENTION");
+    expect(ui.captureCharFrame()).toContain("! Attention");
     expect(ui.editor.plainText).toBe("/theme wrong");
   });
 });
@@ -1431,7 +1431,7 @@ test("preferences real keyboard scopes preview save reset and restart preserve t
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
     expect(ui.configEditor.settings.maxTurns).toBe(7);
-    expect(ui.controller.snapshot().preferences?.preview).toContain("Session only");
+    expect(ui.controller.snapshot().preferences?.preview).toContain("This session only");
     await preferenceEnter(ui);
     expect(ui.configEditor.settings.maxTurns).toBe(8);
     expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot, cli: { maxTurns: 7 }, interactiveMemory: true })).settings.maxTurns).toBe(7);
@@ -1575,7 +1575,7 @@ test("preferences memory conflicts preserve the newer workspace choice and expos
     const concurrent = await InteractiveMemory.load(ui.home, ui.workspaceRoot);
     await concurrent.write({ provider: "openai", model: "gpt-5.4", openaiAuth: "api-key" });
     await preferenceEnter(ui);
-    expect(ui.controller.snapshot().preferences?.error).toContain("changed in another process");
+    expect(ui.controller.snapshot().preferences?.error).toContain("Workspace choice changed");
     expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice?.provider).toBe("openai");
     expect(ui.configEditor.settings.provider).toBe("openai");
   });
@@ -1605,7 +1605,7 @@ test("preferences at narrow width scroll preview and Escape keeps pasted task an
     ui.mockInput.pressKey("p", { meta: true }); ui.resize(36, 16); await settle(ui);
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
     ui.mockInput.pressKey("pagedown"); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("Esc cancels");
+    expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Esc cancels");
     expect(ui.editor.y + ui.editor.height).toBeLessThanOrEqual(16);
     await ui.mockInput.pasteBracketedText("paste while viewing");
     ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
@@ -2090,7 +2090,7 @@ test("context inspection uses keyboard input and retains draft and controls duri
     await settle(ui);
     const narrow = ui.captureCharFrame();
     expect(narrow).toContain("ctx ~");
-    expect(narrow).toContain("TOOLS 1");
+    expect(narrow).toContain("1 tool");
     expect(narrow).toContain("Esc stops");
     expect(narrow).toContain("future draft");
     expect(narrow).not.toContain("% complete");
@@ -2239,7 +2239,7 @@ test("Grok chooser, browser and device panels preserve drafts and show codes at 
     while (ui.controller.snapshot().loginChooser!.selectedId !== "grok") ui.mockInput.pressArrow("down");
     if (device) { ui.mockInput.pressTab(); await settle(ui); expect(ui.controller.snapshot().loginChooser!.selectedId).toBe("grok-device"); }
     ui.mockInput.pressEnter(); await settle(ui);
-    expect(ui.captureCharFrame()).toContain(device ? "Open x.ai/device and enter ABCD-EFGH · Esc cancel" : "Waiting for approval in your browser… · Esc cancel");
+    expect(ui.captureCharFrame()).toContain(device ? "Open x.ai/device and enter ABCD-EFGH · Esc cancel" : "Approve in your browser · Esc cancel");
     if (device) { ui.resize(24, 8); await settle(ui); expect(ui.captureCharFrame()).toContain("x.ai/device"); expect(ui.captureCharFrame()).toContain("ABCD-EFGH"); }
     expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
     ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
@@ -2272,7 +2272,7 @@ test("Grok success and failure restore the composer, and plan rejection opens th
       expect(ui.captureCharFrame()).toContain("Alt+L"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved-grok-token");
       ui.mockInput.pressKey("l", { meta: true }); await settle(ui); expect(ui.controller.snapshot().loginChooser).toBeDefined();
     }
-    if (outcome === "success") expect(ui.captureCharFrame()).toContain("Signed in. Using xai/grok-4.7.");
+    if (outcome === "success") expect(ui.captureCharFrame()).toContain("Signed in · Using xai/grok-4.7 · Enter send");
   });
 });
 
@@ -2352,11 +2352,11 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
       await selectRenderedLoginRow(ui, chain); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-api-key");
     } else if (chain === "endpoint") {
       await selectRenderedLoginRow(ui, "compatible"); ui.mockInput.pressEnter(); await settle(ui);
-      expect(ui.captureCharFrame()).toContain("Endpoint URL · http://localhost:8787/v1");
+      expect(ui.captureCharFrame()).toContain("Endpoint URL · http://localhost:8787");
       const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable; expect(hints.plainText).toBe("Enter confirm · Esc back");
-      await ui.mockInput.pasteBracketedText("http://localhost:8787/v1"); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-endpoint-key");
+      await ui.mockInput.pasteBracketedText("http://localhost:8787"); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-endpoint-key");
       expect(ui.editor.plainText).toBe("");
-      ui.mockInput.pressEscape(); await settle(ui); expect(ui.controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787/v1");
+      ui.mockInput.pressEscape(); await settle(ui); expect(ui.controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787");
       expect(ui.editor.plainText).toBe("");
     } else {
       const provider = chain.startsWith("grok") ? "grok" : "chatgpt";
@@ -2367,7 +2367,7 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
       ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
     }
     expect(ui.editor.plainText).toBe(draft); expect(ui.editor.cursorOffset).toBe(cursor); expect(ui.session.items).toEqual([]);
-    expect(ui.editor.plainText).not.toContain("http://localhost:8787/v1");
+    expect(ui.editor.plainText).not.toContain("http://localhost:8787");
     // Recall the submitted ordinary task: ephemeral URL/key/callback input never becomes a prompt.
     ui.mockInput.pressEnter(); await ui.controller.waitForIdle(); await settle(ui); ui.mockInput.pressArrow("up");
     expect(ui.editor.plainText).toBe(draft);
@@ -2482,18 +2482,18 @@ test("ephemeral endpoint URL never enters a durable draft checkpoint or deferred
       terminal.mockInput.pressKey("l", { meta: true }); await settle(ui);
       while (controller.snapshot().loginChooser!.selectedId !== "compatible") terminal.mockInput.pressArrow("down");
       terminal.mockInput.pressEnter(); await settle(ui);
-      await terminal.mockInput.pasteBracketedText("http://localhost:8787/v1"); view.flushDraft();
-      expect(editor.plainText).toBe(""); expect(openDraftStore({ home, workspaceRoot: root, sessionId: session.header.id }).checkpoint?.text).not.toContain("http://localhost:8787/v1");
+      await terminal.mockInput.pasteBracketedText("http://localhost:8787"); view.flushDraft();
+      expect(editor.plainText).toBe(""); expect(openDraftStore({ home, workspaceRoot: root, sessionId: session.header.id }).checkpoint?.text).not.toContain("http://localhost:8787");
       terminal.mockInput.pressEnter(); await settle(ui); await terminal.mockInput.pasteBracketedText("ephemeral-private-key"); view.flushDraft();
-      terminal.mockInput.pressEscape(); await settle(ui); expect(controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787/v1");
+      terminal.mockInput.pressEscape(); await settle(ui); expect(controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787");
       terminal.mockInput.pressEscape(); await settle(ui); expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "compatible" });
       terminal.mockInput.pressEscape(); await settle(ui); view.flushDraft();
       expect(editor.plainText).toBe(draft); expect(editor.cursorOffset).toBe(cursor); expect(session.items).toEqual([]);
       expect(openDraftStore({ home, workspaceRoot: root, sessionId: session.header.id }).checkpoint?.text).toBe(draft);
       const artifacts = await Promise.all((await readdir(join(home, ".schway/drafts"))).map(name => readFile(join(home, ".schway/drafts", name), "utf8")));
-      expect(artifacts.join("\n")).not.toContain("http://localhost:8787/v1"); expect(artifacts.join("\n")).not.toContain("ephemeral-private-key");
+      expect(artifacts.join("\n")).not.toContain("http://localhost:8787"); expect(artifacts.join("\n")).not.toContain("ephemeral-private-key");
       const savedSession = await Bun.file(join(sessionsDirectory(home), `${session.header.id}.jsonl`)).text();
-      expect(savedSession).not.toContain("http://localhost:8787/v1"); expect(savedSession).not.toContain("ephemeral-private-key");
+      expect(savedSession).not.toContain("http://localhost:8787"); expect(savedSession).not.toContain("ephemeral-private-key");
     } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
   });
 });
@@ -2503,7 +2503,7 @@ for (const width of [120, 80, 50, 24]) test(`grouped model picker preserves mode
   await withTempDir(async root => {
     const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
     const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: {
-      provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787/v1", auth: "none",
+      provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787", auth: "none",
     } });
     const store = fakeCredentialStore(); await store.set(codexSubscriptionIdentity(), "fixture-token");
     const ui = await setup(width, width === 24 ? 8 : 30, {}, undefined, {
@@ -2523,7 +2523,7 @@ for (const width of [120, 80, 50, 24]) test(`grouped model picker preserves mode
       expect(frame).not.toContain("Ctrl+R retry");
     } else {
       expect(frame).toContain("Choose model"); expect(frame).toContain("gpt-6-astra"); expect(frame).toContain("✓");
-      expect(frame).toContain("READY"); expect(frame.split("\n").filter(line => line.trim()).length).toBeLessThanOrEqual(8);
+      expect(frame).toContain("Ready"); expect(frame.split("\n").filter(line => line.trim()).length).toBeLessThanOrEqual(8);
     }
     ui.controller.searchModels("coder"); await settle(ui);
     const picker = ui.controller.snapshot().modelPicker!;
@@ -2844,4 +2844,18 @@ test("narrow header hides a detached SHA rather than shortening its identity", a
       expect(header).not.toContain("1234…");
     }
   });
+});
+
+
+test("Ctrl+I reveals notice diagnostics without changing the draft or session", async () => {
+  const session = createSession();
+  const ui = await setup(80, 28, {}, undefined, { session });
+  ui.controller.notice("Choice not remembered · Enter use model · Ctrl+I details", "Storage diagnostic secret-sentinel");
+  ui.editor.setText("retained draft");
+  await settle(ui);
+  expect(ui.captureCharFrame()).not.toContain("Storage diagnostic");
+  ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
+  expect(ui.captureCharFrame()).toContain("Storage diagnostic ***");
+  expect(ui.editor.plainText).toBe("retained draft");
+  expect(session.items).toEqual([]);
 });

@@ -7,17 +7,17 @@ status bar below it carries the state pill, model, reasoning preference, and con
 meter; key hints sit on the last row. `/session` reveals session IDs, the conversation branch, and attached
 workspace paths. A conversation branch is distinct from a Git branch.
 
-The status pill follows the active operation's runtime events: `PREPARING`,
-`WAITING` for the provider, `STREAMING` a response, `TOOLS n`, `RETRY a/b`,
-`COMPACTING`, `CANCEL REQUESTED` and `STOPPING`; otherwise it reads `READY`,
-`CHECKING` (connection check), `NOT CONNECTED` (the neutral no-model state) or
-`ATTENTION` (a failure needs you). It is the only saturated block on screen: filled accent while working, warning while stopping,
+The status pill follows the active operation's runtime events: `Preparing`,
+`Waiting` for the provider, `Receiving` a response, `N tools`, `Retry a/b`,
+`Compacting`, `Stop requested` and `Stopping`; otherwise it reads `Ready`,
+`Checking` (connection check), `Not connected` (the neutral no-model state) or
+`Attention` (a failure needs you). It is the only saturated block on screen: filled accent while working, warning while stopping,
 error when attention is needed, a quiet green tint when ready, and a muted tint
 with `○` when not connected. The not-connected status bar shows only its pill.
 Active operations show elapsed time; provider retry countdowns use the reported delay and attempt. Quiet providers
 and tools remain in their current phase with elapsed time, without an estimated
 percentage or a hang warning. The activity row above the composer describes the
-current work; parallel tools share a compact count and name summary. The context
+current work; parallel tools share a compact count summary. The context
 meter shows the estimated share of known capacity (`ctx ━━━━ 19%`), or the token
 estimate (`ctx ~132`) when capacity is unknown; `/context` explains it. At narrow
 widths the pill, `Esc stops` and the context estimate take priority; the route,
@@ -51,7 +51,7 @@ check. Setup actions wait for that check to finish or be cancelled. No browser o
 model inference is started by opening the screen. An explicit broken selection
 stays selected until you repair it; startup does not switch billing routes.
 Explicit and remembered ChatGPT subscription models are checked against the account
-catalog. API routes are labelled **configured, unverified**: initialization does not
+catalog. For API routes, initialization does not
 probe the provider or reject custom model IDs absent from Schway's built-in catalog.
 Sending is available once local initialization completes; the first explicit task
 may still reveal a remote authentication or model error.
@@ -323,9 +323,9 @@ closes search and follows the latest output again.
 After an accepted prompt clears, you can type or paste a future draft during the
 current turn. Enter does not queue it while work is active; the draft stays in the
 editor until you send it after settlement. Pressing Esc or Ctrl+C shows
-“Cancel requested” immediately, then “Stopping” while active work settles.
+“Stop requested” immediately, then “Stopping” while active work settles.
 Running tools and other owned work may
-still need to settle. Completed output and tool results remain visible; `READY`
+still need to settle. Completed output and tool results remain visible; `Ready`
 returns only after settlement, and cancellation does not undo completed effects.
 
 Enter releases a prompt only after its user record is saved. Missing credentials,

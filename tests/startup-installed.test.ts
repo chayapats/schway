@@ -161,10 +161,10 @@ void (async () => {
     terminal.mockInput.pressKey("c", { ctrl: true });
     return;
   }
-  const startupAction = scenario.startsWith("returning") ? "Type a task"
-    : scenario === "denied" ? "Repair connection"
-    : scenario.startsWith("invalid-model") ? "Choose an available model" : "Sign in to choose a model";
-  await settle(() => terminal.renderer.root.findDescendantById("prompt") && screenIncludes(startupAction), "startup readiness");
+  const startupAction = scenario.startsWith("returning") ? "Type a task · Enter sends"
+    : scenario === "denied" ? "Unlock credential storage"
+    : scenario.startsWith("invalid-model") ? "Choose a model" : "Sign in to choose a model";
+  await settle(() => terminal.renderer.root.findDescendantById("prompt")?.focused && screenIncludes(startupAction), "startup readiness");
   const editor = terminal.renderer.root.findDescendantById("prompt");
   const initial = terminal.captureCharFrame();
   assert(initial.includes(process.cwd().split("/").at(-1)), "workspace missing");
@@ -186,13 +186,13 @@ void (async () => {
       await settle(() => editor.focused && !screenIncludes("Preferences"), "appearance panel return");
     }
   } else if (scenario === "denied" || scenario.startsWith("invalid-model")) {
-    assert(initial.includes(scenario === "denied" ? "Repair connection" : "Choose an available model"), "repair action missing");
+    assert(initial.includes(scenario === "denied" ? "Unlock credential storage" : "Choose a model"), "repair action missing");
     if (scenario.startsWith("invalid-model")) assert(initial.includes("Selected model is not available in this account."), "selected model explanation missing");
     terminal.mockInput.pressKey("i", { ctrl: true });
     await settle(() => terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "failure details");
     assert(terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "actual failure unavailable");
   } else {
-    assert(initial.includes("NOT CONNECTED") && initial.includes("Sign in to choose a model"), "fresh connect action missing");
+    assert(initial.includes("Not connected") && initial.includes("Sign in to choose a model"), "fresh connect action missing");
     assert(!initial.includes("gpt-"), "fresh install named a model");
     const draft = "ตรวจงานนี้\\nอธิบายภาษาไทย";
     await terminal.mockInput.pasteBracketedText(draft);
@@ -211,11 +211,11 @@ void (async () => {
     await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");
     terminal.mockInput.pressEnter();
-    await settle(() => loaderCalls === 1 && editor.focused && screenIncludes("READY"), "connection activation");
+    await settle(() => loaderCalls === 1 && editor.focused && screenIncludes("Ready"), "connection activation");
     assert(editor.plainText === draft && editor.cursorOffset === cursor, "activation lost draft/cursor");
     assert(requests === 0, "setup submitted task");
     terminal.resize(44, 18);
-    await settle(() => terminal.renderer.width === 44 && editor.focused && screenIncludes("READY"), "resized task editor");
+    await settle(() => terminal.renderer.width === 44 && editor.focused && screenIncludes("Ready"), "resized task editor");
     terminal.mockInput.pressEnter();
     await settle(() => requests === 1 && screenIncludes("fixture complete"), "explicit task completion");
     assert(requests === 1, "explicit send did not produce exactly one request");

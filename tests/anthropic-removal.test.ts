@@ -35,8 +35,8 @@ async function run(argv: string[], home: string, cwd: string) {
 
 test("the removal notice names the supported replacement and the docs", () => {
   expect(ANTHROPIC_REMOVED_MESSAGE).toBe([
-    "The Anthropic provider was removed in 0.4.",
-    "Use Claude through an OpenAI-compatible endpoint:",
+    "Anthropic support ended in 0.4",
+    "Use Claude through a compatible endpoint:",
     "  schway --provider openai-compatible --base-url <url> --model <id>",
     "See docs/configuration.md",
   ].join("\n"));

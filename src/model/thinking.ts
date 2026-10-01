@@ -159,16 +159,15 @@ export function describeEffectiveThinking(provider: string, thinking: ThinkingLe
   context: { authRoute?: ThinkingContext["authRoute"]; baseUrl?: string; capability?: ModelCapability | null; extraBody?: Record<string, unknown> } = {}): string {
   const policy = resolveThinkingPolicy({ provider, model: modelId ?? "", ...context });
   if (thinking === undefined) {
-    if (findCompatibleReasoningBodyKey(context.extraBody)) return "custom reasoning controls via extraBody";
-    return policy.defaultThinking ? `provider default (${policy.defaultThinking}; no explicit control sent)` : "provider default (no reasoning controls sent)";
+    if (findCompatibleReasoningBodyKey(context.extraBody)) return "Custom reasoning controls";
+    return policy.defaultThinking ? `Provider default (${policy.defaultThinking})` : "Provider default";
   }
-  if (!policy.supported.includes(thinking)) return context.capability === null && provider === "openai" ? "subscription capability not yet verified; open /model" : `${thinking} (requested level not verified; no request allowed)`;
+  if (!policy.supported.includes(thinking)) return context.capability === null && provider === "openai" ? "Choose thinking · /model open choices" : `${thinking} unavailable · /model choose thinking`;
   if (thinking === "off") {
-    if (policy.supportsDisabling) return "off (reasoning effort none)";
-    if (modelId === undefined && provider === "openai") return "off (disable control on reasoning-capable models; otherwise no reasoning controls sent)";
-    return "off (provider default, no reasoning controls sent)";
+    if (policy.supportsDisabling) return "Off";
+    return "Provider default";
   }
-  return `${thinking} (reasoning effort ${thinking})`;
+  return `${thinking}`;
 }
 
 

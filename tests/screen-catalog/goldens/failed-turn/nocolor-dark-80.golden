@@ -12,9 +12,9 @@ cursor 7 27 visible
   ▌ Summarize the changes
 
   ▌ ! Error
-  ▌ The provider could not finish this step. Inspect details or continue
-  ▌ this session when ready.
+  ▌ Request failed · Inspect details before continuing
   ▌ Ctrl+R continue · Ctrl+I details · Esc keep editing
+
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ! ATTENTION   scripted/scripted-model                                  ctx ~6
+  ! Attention   scripted/scripted-model                                  ctx ~6
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #161b24 -
@@ -66,26 +66,21 @@ cursor 7 27 visible
 06 0-2 #ffffff #0e1117 -
 06 2-3 #e6eaf0 #282b31 -
 06 3-4 #ffffff #282b31 -
-06 4-73 #e6eaf0 #282b31 -
-06 73-77 #ffffff #282b31 -
+06 4-54 #e6eaf0 #282b31 -
+06 54-77 #ffffff #282b31 -
 06 77-80 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
 07 2-3 #e6eaf0 #282b31 -
 07 3-4 #ffffff #282b31 -
-07 4-28 #e6eaf0 #282b31 -
-07 28-77 #ffffff #282b31 -
+07 4-10 #e6eaf0 #2c3342 b
+07 10-22 #e6eaf0 #282b31 -
+07 22-28 #e6eaf0 #2c3342 b
+07 28-39 #e6eaf0 #282b31 -
+07 39-42 #e6eaf0 #2c3342 b
+07 42-55 #e6eaf0 #282b31 -
+07 55-77 #ffffff #282b31 -
 07 77-80 #ffffff #0e1117 -
-08 0-2 #ffffff #0e1117 -
-08 2-3 #e6eaf0 #282b31 -
-08 3-4 #ffffff #282b31 -
-08 4-10 #e6eaf0 #2c3342 b
-08 10-22 #e6eaf0 #282b31 -
-08 22-28 #e6eaf0 #2c3342 b
-08 28-39 #e6eaf0 #282b31 -
-08 39-42 #e6eaf0 #2c3342 b
-08 42-55 #e6eaf0 #282b31 -
-08 55-77 #ffffff #282b31 -
-08 77-80 #ffffff #0e1117 -
+08 0-80 #ffffff #0e1117 -
 09 0-80 #ffffff #0e1117 -
 10 0-80 #ffffff #0e1117 -
 11 0-80 #ffffff #0e1117 -

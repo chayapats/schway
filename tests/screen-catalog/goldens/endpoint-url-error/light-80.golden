@@ -32,9 +32,9 @@ cursor 1 1 hidden
 
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Endpoint URL · localhost:8787
-      Enter a full URL that starts with http:// or https://.
+      Enter a full URL · Use http:// or https://
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ○ NOT CONNECTED
+  ○ Not connected
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -81,8 +81,8 @@ cursor 1 1 hidden
 25 78-80 #ffffff #f7f7f4 -
 26 0-2 #ffffff #f7f7f4 -
 26 2-6 #ffffff #ecedea -
-26 6-60 #a61f16 #ecedea -
-26 60-78 #ffffff #ecedea -
+26 6-48 #a61f16 #ecedea -
+26 48-78 #ffffff #ecedea -
 26 78-80 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
 27 2-78 #ecedea #f7f7f4 -

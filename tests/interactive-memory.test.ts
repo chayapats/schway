@@ -106,6 +106,7 @@ test("failed and cancelled activation preserve memory while storage failure leav
     expect(await broken.controller.selectModel("openai/gpt-5.4")).toBe(true);
     expect(broken.controller.snapshot().modelId).toBe("gpt-5.4");
     expect(broken.controller.snapshot().transcript.at(-1)?.text).toContain("not remembered");
+    expect(broken.controller.inspectNoticeDetails()).toBe(true);
     expect(broken.controller.snapshot().transcript.at(-1)?.text).toContain("No additional login");
     await broken.controller.submit("still usable");
     expect(broken.controller.snapshot().status).not.toBe("error"); broken.controller.dispose();
@@ -118,7 +119,9 @@ test("interleaved controller updates preserve the newer revision and report stal
     const one = await launch(home, root), two = await launch(home, root);
     expect(await one.controller.selectModel("openai/gpt-4o")).toBe(true);
     expect(await two.controller.selectModel("openai/gpt-5.4")).toBe(true);
-    expect(two.controller.snapshot().transcript.at(-1)?.text).toContain("newer choice was preserved");
+    expect(two.controller.snapshot().transcript.at(-1)?.text).toBe("Choice not remembered · Enter use model · Ctrl+I details");
+    expect(two.controller.inspectNoticeDetails()).toBe(true);
+    expect(two.controller.snapshot().transcript.at(-1)?.text).toContain("Workspace choice changed · Reopen before choosing again");
     const reopen = await launch(home, root); expect(reopen.editor.settings.model).toBe("gpt-4o"); reopen.controller.dispose();
     expect(await one.controller.thinkingCommand("off")).toBe(true);
     const stateFiles = (await readdir(join(home, ".schway/interactive"))).filter(path => path.endsWith(".json")); expect(stateFiles).toHaveLength(1);
@@ -184,7 +187,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
     expect(reopened.screen).toContain("interactive memory"); expect(reopened.screen).not.toContain("fixture-stored-key");
     const override = await run("override");
     expect(override.requests).toEqual([]);
-    expect(override.screen).toContain("○ NOT CONNECTED");
+    expect(override.screen).toContain("○ Not connected");
     expect(override.screen).toContain("Sign in to choose a model · Alt+L");
     expect(await readFile(join(stateDirectory, stateFile), "utf8")).toBe(saved);
     expect(await readdir(project)).toEqual([]);
@@ -228,7 +231,7 @@ test("fresh startup explains removed credentials and subscription models without
     };
     await run("select");
     const missing = await run("missing-key"); expect(missing.requests).toEqual([]); expect(missing.screen).toContain("Missing OpenAI API key");
-    const repaired = await run("forget-missing-key"); expect(repaired.requests[0]).toMatchObject({ provider: "openai", openaiAuth: "codex" }); expect(repaired.screen).toContain("Forgot interactive memory");
+    const repaired = await run("forget-missing-key"); expect(repaired.requests[0]).toMatchObject({ provider: "openai", openaiAuth: "codex" }); expect(repaired.screen).toContain("Workspace choice forgotten");
     const selected = await run("select-codex"); expect(selected.requests.at(-1)).toMatchObject({ provider: "openai", openaiAuth: "codex", model: "account-model", thinking: "max" });
     const restored = await run("reopen-codex"); expect(restored.requests[0]).toMatchObject({ openaiAuth: "codex", model: "account-model", thinking: "max" });
     const removed = await run("missing-model"); expect(removed.requests).toEqual([]); expect(removed.screen.replace(/\s+/g, " ")).toContain("no longer available");

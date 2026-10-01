@@ -9,7 +9,7 @@ cursor 1 1 hidden
  ⚡ schway  /project
 
 
-  scripted/scripted-model · scripted API key · configured, unverified
+  scripted/scripted-model · scripted API key
 
   Type a task · Enter sends
 
@@ -29,12 +29,12 @@ cursor 1 1 hidden
 
 
 
-  ⠋ Working on your request…
-   Waiting for approval in your browser… · Esc cancel
+  ⠋ Working · Esc stop
+   Approve in your browser · Esc cancel
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Approval pending · Esc cancels
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ WORKING   scripted/scripted-model                         Esc stops  ctx ~0
+  ⠋ Working   scripted/scripted-model                         Esc stops  ctx ~0
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -47,8 +47,8 @@ cursor 1 1 hidden
 02 0-80 #ffffff #0e1117 -
 03 0-2 #ffffff #0e1117 -
 03 2-25 #e6eaf0 #0e1117 b
-03 25-69 #8b95a7 #0e1117 -
-03 69-80 #ffffff #0e1117 -
+03 25-44 #8b95a7 #0e1117 -
+03 44-80 #ffffff #0e1117 -
 04 0-80 #ffffff #0e1117 -
 05 0-2 #ffffff #0e1117 -
 05 2-16 #8b95a7 #0e1117 -
@@ -74,12 +74,12 @@ cursor 1 1 hidden
 22 0-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #7cc4ff #0e1117 b
-23 3-28 #8b95a7 #0e1117 -
-23 28-80 #ffffff #0e1117 -
+23 3-22 #8b95a7 #0e1117 -
+23 22-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -
-24 3-53 #e6eaf0 #1e2430 -
-24 53-78 #ffffff #1e2430 -
+24 3-39 #e6eaf0 #1e2430 -
+24 39-78 #ffffff #1e2430 -
 24 78-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -

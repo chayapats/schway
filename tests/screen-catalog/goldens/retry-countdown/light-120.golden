@@ -11,7 +11,7 @@ cursor 7 27 visible
   ▌ You
   ▌ Summarize the changes
 
-  Retrying provider connection (attempt 2/3).
+  Retrying connection · Attempt 2/3 · Esc stop
 
 
 
@@ -30,11 +30,11 @@ cursor 7 27 visible
 
 
 
-  ⠋ Provider retry 2/3 after the requested delay
+  ⠋ Retry 2/3 · Esc stop
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ RETRY 2/3 · 2s   scripted/scripted-model                                                          Esc stops  ctx ~6
+  ⠋ Retry 2/3 · 1.8s   scripted/scripted-model                                                        Esc stops  ctx ~6
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -58,8 +58,8 @@ cursor 7 27 visible
 03 117-120 #ffffff #f7f7f4 -
 04 0-120 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
-05 2-45 #545e6c #f7f7f4 -
-05 45-120 #ffffff #f7f7f4 -
+05 2-46 #545e6c #f7f7f4 -
+05 46-120 #ffffff #f7f7f4 -
 06 0-120 #ffffff #f7f7f4 -
 07 0-120 #ffffff #f7f7f4 -
 08 0-120 #ffffff #f7f7f4 -
@@ -80,8 +80,8 @@ cursor 7 27 visible
 23 0-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #0a5894 #f7f7f4 b
-24 3-48 #545e6c #f7f7f4 -
-24 48-120 #ffffff #f7f7f4 -
+24 3-24 #545e6c #f7f7f4 -
+24 24-120 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
 25 2-118 #ecedea #f7f7f4 -
 25 118-120 #ffffff #f7f7f4 -
@@ -95,10 +95,10 @@ cursor 7 27 visible
 27 2-118 #ecedea #f7f7f4 -
 27 118-120 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-19 #ffffff #7a5000 b
-28 19-20 #545e6c #ecedea -
-28 20-45 #1d232c #e1e3df -
-28 45-102 #545e6c #ecedea -
+28 1-21 #ffffff #7a5000 b
+28 21-22 #545e6c #ecedea -
+28 22-47 #1d232c #e1e3df -
+28 47-102 #545e6c #ecedea -
 28 102-105 #1d232c #c9cdd2 b
 28 105-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -

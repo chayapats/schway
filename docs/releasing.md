@@ -160,7 +160,7 @@ report fields.
   Help exits 0; doctor reports `$V`. A temporary HOME does not isolate the
   OS secure store. Do not run login/logout or alter saved production accounts.
 - [ ] `env HOME="$T/home" "$S" -p "hello"` exits 1 and prints
-  `No model configured. Pass --provider and --model, or set them in config.`
+  `No model configured · Pass --provider and --model, or set them in config`
 - [ ] Run the selected compatible endpoint:
 
   ```sh

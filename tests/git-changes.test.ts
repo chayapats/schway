@@ -106,6 +106,11 @@ function controllerFor(dir: string, mode: "off" | "on-demand" | "snapshot", mode
   });
 }
 
+function lastDetails(controller: TuiController): string {
+  expect(controller.inspectNoticeDetails()).toBe(true);
+  return lastNotice(controller);
+}
+
 function lastNotice(controller: TuiController): string {
   const entries = controller.snapshot().transcript;
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -182,7 +187,7 @@ test("non-Git workspace and detached HEAD display without blocking", async () =>
       expect(formatGitStatus(status)).toContain("detached HEAD");
       const detached = controllerFor(repo, "on-demand", createScriptedModel({ text: "ok" }));
       expect(await detached.changesCommand("status")).toBe(true);
-      expect(lastNotice(detached)).toContain("detached HEAD");
+      expect(lastDetails(detached)).toContain("detached HEAD");
     });
   });
 });
@@ -273,7 +278,7 @@ test("off performs no tracking and on-demand keeps status output on demand", asy
     await demand.submit("hello");
     expect(demand.snapshot().status).toBe("idle");
     expect(await demand.changesCommand("")).toBe(true);
-    const notice = lastNotice(demand);
+    const notice = lastDetails(demand);
     expect(notice).toContain("Change tracking: on-demand");
     expect(notice).not.toContain("Baseline");
     expect(notice).not.toContain("Snapshot comparison");
@@ -298,7 +303,7 @@ test("snapshot distinguishes pre-existing dirt from new turn edits", async () =>
     await controller.submit("make a change");
     expect(controller.snapshot().status).toBe("idle");
     expect(await controller.changesCommand("")).toBe(true);
-    const notice = lastNotice(controller);
+    const notice = lastDetails(controller);
     expect(notice).toContain("Snapshot comparison");
     expect(notice).toContain("turn-new.txt");
     expect(notice).toContain("Pre-existing");
@@ -333,7 +338,7 @@ test("failed turns report settled edits and failed snapshots are explicit, not c
     await failing.submit("fail please");
     expect(failing.snapshot().status).toBe("error");
     expect(await failing.changesCommand("")).toBe(true);
-    const notice = lastNotice(failing);
+    const notice = lastDetails(failing);
     expect(notice).toContain("Change tracking: snapshot");
     expect(notice).toContain("partial.txt");
     expect(notice).not.toContain("Snapshot unavailable");
@@ -345,7 +350,7 @@ test("failed turns report settled edits and failed snapshots are explicit, not c
       const snapshotMode = controllerFor(plain, "snapshot", createScriptedModel({ text: "ok" }));
       await snapshotMode.submit("hello");
       expect(await snapshotMode.changesCommand("")).toBe(true);
-      const text = lastNotice(snapshotMode);
+      const text = lastDetails(snapshotMode);
       expect(text).toContain("Not a Git workspace");
     });
   });
@@ -361,7 +366,7 @@ test("cancelled turns capture settled partial state", async () => {
     await turn;
     await controller.waitForIdle();
     expect(await controller.changesCommand("")).toBe(true);
-    const notice = lastNotice(controller);
+    const notice = lastDetails(controller);
     expect(notice).toContain("Change tracking: snapshot");
   });
 });
@@ -401,7 +406,7 @@ test("bounded summaries truncate large change sets explicitly", async () => {
     if (!status.isGit) return;
     expect(status.truncated).toBe(true);
     expect(status.files.length).toBeLessThanOrEqual(50);
-    expect(formatGitStatus(status)).toContain("truncated");
+    expect(formatGitStatus(status)).toContain("Showing 50 files of 60 files");
   });
 });
 
@@ -411,7 +416,7 @@ test("resume shows current state without claiming a retained snapshot", async ()
     const first = controllerFor(dir, "snapshot", createScriptedModel({ text: "done" }));
     await first.submit("one");
     expect(await first.changesCommand("")).toBe(true);
-    expect(lastNotice(first)).toContain("Snapshot comparison");
+    expect(lastDetails(first)).toContain("Snapshot comparison");
 
     const workspace = workspaceFor(dir);
     const second = new TuiController({
@@ -426,7 +431,7 @@ test("resume shows current state without claiming a retained snapshot", async ()
       changeTracking: "snapshot",
     });
     expect(await second.changesCommand("")).toBe(true);
-    const notice = lastNotice(second);
+    const notice = lastDetails(second);
     expect(notice).toContain("No retained snapshot");
     expect(notice).not.toContain("Baseline ");
   });
@@ -491,7 +496,7 @@ test("stale baseline capture does not repopulate a replaced session", async () =
     controller.replaceSession(createSession(), "replaced");
     await pending;
     expect(await controller.changesCommand("")).toBe(true);
-    const notice = lastNotice(controller);
+    const notice = lastDetails(controller);
     expect(notice).toContain("No retained snapshot");
     expect(notice).not.toContain("Snapshot unavailable");
   });
@@ -576,7 +581,7 @@ test("missing git leaves turns usable and the next submit recovers", async () =>
     await controller.submit("hello with git back");
     expect(controller.snapshot().status).toBe("idle");
     expect(await controller.changesCommand("")).toBe(true);
-    expect(lastNotice(controller)).toContain("Snapshot comparison");
+    expect(lastDetails(controller)).toContain("Snapshot comparison");
   });
 });
 
@@ -628,5 +633,57 @@ test("worktree-only move reports deleted plus untracked without dropping entries
     expect(comparison.newChanges).toContain("plain.txt");
     expect(comparison.newChanges).toContain("moved.txt");
     expect(comparison.preExistingUnchanged).toContain("tracked.txt");
+  });
+});
+
+
+test("diff command keeps Git headers behind requested details without losing source", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    await writeFile(join(dir, "tracked.txt"), "replacement\n");
+    const controller = controllerFor(dir, "on-demand", createScriptedModel({ text: "ok" }));
+    expect(await controller.changesCommand("diff tracked.txt")).toBe(true);
+    const primary = lastNotice(controller);
+    expect(primary).toContain("1 - original");
+    expect(primary).toContain("1 + replacement");
+    expect(primary).not.toMatch(/diff --git|index [0-9a-f]{7,}|@@ -|--- a\/|\+\+\+ b\//);
+    expect(primary).toContain("Ctrl+I details");
+    expect(controller.inspectNoticeDetails()).toBe(true);
+    expect(lastNotice(controller)).toContain("diff --git");
+    controller.dispose();
+  });
+});
+
+test("unscoped diff labels each file without exposing raw patch headers", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    await writeFile(join(dir, "second file.txt"), "second original\n");
+    await git(dir, "add", "second file.txt"); await git(dir, "commit", "-qm", "second");
+    await writeFile(join(dir, "tracked.txt"), "first replacement\n");
+    await writeFile(join(dir, "second file.txt"), "second replacement\n");
+    await git(dir, "add", "second file.txt");
+    const controller = controllerFor(dir, "on-demand", createScriptedModel({ text: "ok" }));
+    expect(await controller.changesCommand("diff")).toBe(true);
+    const primary = lastNotice(controller);
+    expect(primary).toContain("Staged changes\nFile: second file.txt\n1 - second original\n1 + second replacement");
+    expect(primary).toContain("Unstaged changes\nFile: tracked.txt\n1 - original\n1 + first replacement");
+    expect(primary).not.toMatch(/diff --git|index [0-9a-f]{7,}|@@ -|--- a\/|\+\+\+ b\//);
+    controller.dispose();
+  });
+});
+
+test("path-scoped diff distinguishes staged and unstaged edits to the same file", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    await writeFile(join(dir, "tracked.txt"), "staged replacement\n");
+    await git(dir, "add", "tracked.txt");
+    await writeFile(join(dir, "tracked.txt"), "unstaged replacement\n");
+    const controller = controllerFor(dir, "on-demand", createScriptedModel({ text: "ok" }));
+    expect(await controller.changesCommand("diff tracked.txt")).toBe(true);
+    const primary = lastNotice(controller);
+    expect(primary).toContain("Unstaged changes\n1 - staged replacement\n1 + unstaged replacement");
+    expect(primary).toContain("Staged changes\n1 - original\n1 + staged replacement");
+    expect(primary).not.toContain("diff --git");
+    controller.dispose();
   });
 });

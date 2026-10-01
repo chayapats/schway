@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { PREFERENCE_SCOPES } from "./preferences.ts";
 import type { ExitDraftCheckpoint } from "../drafts/exit.ts";
 import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/store.ts";
@@ -119,7 +120,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         state.dirty = false;
         state.notice = state.text ? "Draft checkpoint saved · Alt+D discard" : "";
       }
-    } catch { state.notice = "Draft NOT saved · text kept here; previous checkpoint retained"; }
+    } catch { state.notice = "Draft not saved · Keep this window open"; }
   }
 
   function observeDraft(text: string, suppressed: boolean): void {
@@ -138,7 +139,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     clearTimeout(state.timer); state.timer = undefined;
     state.dirty = false;
     try { state.store.clear(++state.revision); state.text = ""; state.notice = ""; return true; }
-    catch { state.notice = "Draft cleanup failed · previous checkpoint may reappear; use Alt+D to retry"; return false; }
+    catch { state.notice = "Draft cleanup failed · Alt+D retry"; return false; }
   }
 
   // Zones: top bar (surface) · canvas (background) · raised composer · status bar (surface) · key hints.
@@ -161,7 +162,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   // Set the override afterwards so overflow never changes the text's width.
   transcript.verticalScrollBar.visible = false;
   body.add(transcript);
-  const empty = new TextRenderable(renderer, { id: "empty-conversation", content: "Start with a task. Type / to browse commands.", fg: theme.muted, marginTop: 1 });
+  const empty = new TextRenderable(renderer, { id: "empty-conversation", content: "Start a task · / browse commands", fg: theme.muted, marginTop: 1 });
   transcript.add(empty);
   const tree = new ScrollBoxRenderable(renderer, { id: "branch-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   body.add(tree);
@@ -276,7 +277,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     let copied = false;
     try { copied = renderer.copyToClipboardOSC52(text); } catch { /* Clipboard support is optional. */ }
     const bounded = inspection.kind === "tool" && text.endsWith("… truncated. Full output is in the session file.");
-    showInteractionNotice(copied ? bounded ? "Copied bounded result preview · full output is in the session file" : inspection.kind === "tool" ? "Copied displayed result" : "Copied displayed code without Markdown fences" : "Clipboard unavailable · select text in the terminal");
+    showInteractionNotice(copied ? bounded ? "Copied bounded result preview · full output is in the session file" : inspection.kind === "tool" ? "Copied displayed result" : "Copied code · Esc back" : "Clipboard unavailable · select text in the terminal");
   };
   const onSelection = (selection: Selection) => {
     if (selection.isStart && selection.behavior === "cell") return;
@@ -553,7 +554,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             durableDraft.store = openDraftStore({ home: options.home, workspaceRoot: target.workspaceRoot ?? options.workspaceRoot, sessionId: target.sessionId });
             const recovered = durableDraft.store.checkpoint;
             if (recovered) { durableDraft.text = recovered.text; recoveredText = recovered.text; durableDraft.notice = "Recovered draft · Alt+D discard"; }
-          } catch { durableDraft.notice = "Draft recovery unavailable · storage was not changed"; }
+          } catch { durableDraft.notice = "Draft recovery unavailable · Enter start a task"; }
         } else recoveredText = durableDraft.text;
       }
       let destination: { draft: string; cursor: number; scroll: number } | undefined;
@@ -610,7 +611,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         editor.blur();
         credential.content = snapshot.endpointUrlEntry
           ? new StyledText([
-            fg(snapshot.endpointUrlEntry.value ? theme.text : theme.muted)(safe(`Endpoint URL · ${snapshot.endpointUrlEntry.value || "http://localhost:8787/v1"}`)),
+            fg(snapshot.endpointUrlEntry.value ? theme.text : theme.muted)(safe(`Endpoint URL · ${snapshot.endpointUrlEntry.value || "http://localhost:8787"}`)),
             ...(snapshot.endpointUrlEntry.error ? [fg(theme.error)(safe(`\n${snapshot.endpointUrlEntry.error}`))] : []),
           ])
           : snapshot.credentialEntry
@@ -691,14 +692,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const connection = snapshot.modelId ? `${snapshot.provider}/${snapshot.modelId}` : "No model yet";
       returnContext.visible = !panelMode && (!!snapshot.recentSession || !!snapshot.restored);
       returnContext.content = (safe(snapshot.recentSession
-        ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Preview incomplete · resume validates history" : "/sessions for all history"}`
+        ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Resume saved work · Alt+B resume · /sessions browse" : "/sessions for all history"}`
         : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${connection}${route ? ` · ${route}` : ""}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
-      const action = snapshot.readiness === "loading" ? "Checking selected connection… You can type while waiting · Esc cancels"
+      const action = snapshot.readiness === "loading" ? "Checking connection · Type a task · Esc cancel"
         : snapshot.readiness === "ready" ? "Type a task · Enter sends"
-        : snapshot.readiness === "connect" ? "Connect to get started · Alt+L"
-        : snapshot.readiness === "choose-model" ? "Choose an available model · Alt+M"
-        : snapshot.recovery?.category === "credential-store" ? "Repair connection: unlock OS credential storage · Ctrl+R retry"
-        : "Repair connection: choose model/settings · Alt+M";
+        : snapshot.readiness === "connect" ? "Connect to continue · Alt+L sign in"
+        : snapshot.readiness === "choose-model" ? "Choose a model · Alt+M browse models"
+        : snapshot.recovery?.category === "credential-store" ? "Unlock credential storage · Ctrl+R retry"
+        : "Repair connection · Alt+M choose model";
       // The top bar already names the workspace; repeat it only when that bar is hidden.
       empty.content = snapshot.readiness === "not-connected" ? new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
@@ -707,10 +708,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       ]) : new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
         bold(fg(theme.text)(safe(connection))),
-        ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}${snapshot.readiness === "ready" && snapshot.activeRoute !== "ChatGPT subscription" ? " · configured, unverified" : ""}\n\n`))] : [fg(theme.muted)("\n\n")]),
+        ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}\n\n`))] : [fg(theme.muted)("\n\n")]),
         ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(`${safe(snapshot.readinessDetail)}\n`)] : []),
         ...keyHintChunks(safe(action), hintColors(theme.background)),
-        ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I failure details · Your task stays in the editor", hintColors(theme.background))] : []),
+        ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I details · Esc keep editing", hintColors(theme.background))] : []),
       ]);
       const ids = new Set(entries.map(entry => entry.id));
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
@@ -755,9 +756,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       const selectedSearchId = searchOpen ? searchResult.matches[searchSelected]?.id : undefined;
       for (const [id, row] of rows) row.setSearchMatch(id === selectedSearchId);
-      const searchStatus = !editor.plainText ? "Find in active branch · type a literal query" : searchResult.matches.length
+      const searchStatus = !editor.plainText ? "Find in this branch · Type a query" : searchResult.matches.length
         ? `Find ${searchSelected + 1}/${searchResult.matches.length}${searchResult.limited ? "+ (limited)" : ""} · active branch, displayed text`
-        : `No matches${searchResult.limited ? " in searched portion" : ""} · active branch, displayed text`;
+        : `No matches${searchResult.limited ? " in searched portion" : " in this branch"} · Edit query · Esc back`;
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
       const outcomeText = completed ? formatOutcomeLine(completed, width) : "";
@@ -769,7 +770,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
         : snapshot.branchTreeError ? { text: safe(snapshot.branchTreeError), tone: "error", glyph: "!" }
         : snapshot.activity ? { text: activityDetail(snapshot.activity), tone: "accent", spin: true }
-        : snapshot.status === "running" ? { text: "Working on your request…", tone: "accent", spin: true }
+        : snapshot.status === "running" ? { text: "Working · Esc stop", tone: "accent", spin: true }
         : snapshot.compactionNotice ? { text: snapshot.compactionNotice, tone: "muted" }
         : outcomeText ? { text: outcomeText.slice(outcomeGlyph!.length + 1), tone: outcomeTone, glyph: outcomeGlyph, outcome: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
@@ -862,7 +863,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
         } else if (snapshot.sessionPicker) {
           const sessions = snapshot.sessionPicker;
-          if (renderer.height >= 12) textRow(picker, fitLine(`${sessions.hasMore ? "Partial results · Ctrl+L load 100 more" : "Recent sessions"} · ${sessions.allWorkspaces ? "All workspaces + recovery" : "Current workspace"} · Ctrl+W scope`, width - 2), theme.accent);
+          if (renderer.height >= 12) textRow(picker, fitLine(`${sessions.hasMore ? `Recent sessions · Ctrl+L load ${formatCount(100, "more session")}` : "Recent sessions"} · ${sessions.allWorkspaces ? "All workspaces + recovery" : "Current workspace"} · Ctrl+W scope`, width - 2), theme.accent);
           const start = Math.max(0, sessions.selectedIndex - sessionVisibleRows + 1);
           sessions.entries.slice(start, start + sessionVisibleRows).forEach((entry, index) => {
             textRow(picker, fitLine(`${start + index === sessions.selectedIndex ? "›" : " "} ${entry.id === snapshot.sessionId ? "● current · " : ""}${entry.title} · ${entry.activityAt ?? "activity unknown"}`, width - 2), start + index === sessions.selectedIndex ? theme.accent : theme.text);
@@ -906,7 +907,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           });
           const selected = models.entries[models.selectedIndex];
           const ordinal = selected ? choices.findIndex(entry => entry.identity === selected.identity) + 1 : 0;
-          const detail = selected ? `${ordinal}/${choices.length}${selected.kind === "model" ? ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output` : ""}` : "No matches. Try provider/model-id.";
+          const detail = selected ? `${ordinal}/${choices.length}${selected.kind === "model" ? ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output` : ""}` : "No models found · Type provider/model";
           textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
         } else if (browsing) {
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
@@ -942,7 +943,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
               const row = textRow(tree, fitLine(`${selected ? "›" : " "}${branch.active ? "●" : " "} ${ordinal}. ${branch.name || branch.preview}`, width), selected ? theme.accent : theme.text);
               row.id = `branch-choice-${branch.id}`;
             });
-            textRow(tree, `● active · › preview · ${branches.totalBranchCount} paths`, theme.muted);
+            textRow(tree, `● active · › preview · ${formatCount(branches.totalBranchCount ?? branches.branches.length, "path")}`, theme.muted);
           } else {
             const points = branches.nodes.filter(node => node.isForkPoint);
             const selectedIndex = points.findIndex(node => node.id === branches.selectedId);
@@ -957,7 +958,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           if (previewKey !== treePreviewKey) {
             treePreviewKey = previewKey;
             try { treePreview = controller.previewBranchTreeNode(branches.selectedId).slice(-MAX_BRANCH_TREE_PREVIEW_ENTRIES); }
-            catch { treePreview = [{ id: "error", kind: "error", text: "Preview unavailable. Reopen /branch tree to retry." }]; }
+            catch { treePreview = [{ id: "error", kind: "error", text: "Preview unavailable · /branch tree retry" }]; }
           }
           textRow(tree, "\nPreview", theme.accent);
           textRow(tree, treePreview.map(entry => `${entry.kind}: ${entry.text.slice(0, 1200)}`).join("\n\n") || "Empty conversation", theme.muted);
@@ -1040,13 +1041,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       latest();
       refresh();
     };
-    if (controller.running && /^\/(theme|session)(?:\s|$)/.test(value.trim())) { controller.notice("Already running. Press Esc to cancel first."); return; }
+    if (controller.running && /^\/(theme|session)(?:\s|$)/.test(value.trim())) { controller.notice("Wait for this turn · Esc stop"); return; }
     if (/^\/(theme|session)(?:\s|$)/.test(value.trim())) {
       pendingAcceptance = true;
       void controller.commandCollision(value.trim().split(/\s/)[0]!.slice(1)).then(collides => {
         pendingAcceptance = false;
         if (collides || editorRevision !== revision) { refresh(); return; }
-        if (controller.running) { controller.notice("Already running. Press Esc to cancel first."); refresh(); return; }
+        if (controller.running) { controller.notice("Wait for this turn · Esc stop"); refresh(); return; }
         submitLocal();
       }, error => { pendingAcceptance = false; fail(error); });
       return;
@@ -1127,6 +1128,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       handled(); return;
     }
+    if (key.ctrl && name === "i" && !panelMode && !controller.running && !snapshot.preferences && !snapshot.modelPicker && !snapshot.loginChooser && controller.inspectNoticeDetails()) { handled(); return; }
     if (key.ctrl && name === "i" && !panelMode && !controller.running && snapshot.outcome) {
       if ((snapshot.recovery?.accepted === false && snapshot.recovery.actions.includes("details")) || activityPaint.text.includes("Ctrl+I details")) controller.inspectRecovery();
       handled(); return;
@@ -1235,7 +1237,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if ((key.meta || key.option) && name === "p") {
       if (!panelMode && !inspection) controller.openPreferences();
-      else if (!snapshot.preferences) showInteractionNotice("Close the current panel with Esc before opening preferences.");
+      else if (!snapshot.preferences) showInteractionNotice("Close this panel · Esc back · Alt+P preferences");
       handled(); return;
     }
     if (snapshot.preferences) {
@@ -1254,7 +1256,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if ((key.meta || key.option) && name === "i" && !panelMode) {
       inspection = inspectionTargets(snapshot.transcript)[0];
       if (inspection) { editor.blur(); scrollToInspection = true; }
-      else showInteractionNotice("No tool results or code blocks to inspect");
+      else showInteractionNotice("Nothing to inspect · Enter send a task");
       handled(); return;
     }
     if (snapshot.modelPicker?.error && name === "r" && key.ctrl && !key.meta && !key.option &&

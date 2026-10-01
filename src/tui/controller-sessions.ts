@@ -29,9 +29,9 @@ export abstract class SessionsLayer extends ModelsLayer {
         if (rows.length < 100) break;
       }
       this.recentSession = latest && !latest.hasWork && !latest.hasDraft
-        ? { ...latest, title: "Recent history (preview unavailable)" } : latest;
+        ? { ...latest, title: "Recent conversation" } : latest;
     } catch {
-      if (!this.disposed && this.session === session) this.notice("Recent history is unavailable. Start a new task or use /sessions to recover saved work.");
+      if (!this.disposed && this.session === session) this.notice("Recent history unavailable · /sessions browse saved work");
     }
   }
 
@@ -59,7 +59,7 @@ export abstract class SessionsLayer extends ModelsLayer {
         }
         const canonical = roots.get(row.workspaceRoot)!;
         if (canonical) row.workspaceRoot = canonical;
-        else row.state = "Workspace unavailable · restore directory before resuming";
+        else row.state = "Workspace unavailable · Restore directory to resume";
       }
       if (this.sessionPicker !== picker || this.disposed) return false;
       this.sessionRows = [...this.sessionRows, ...rows].sort((a, b) => (b.activityAt ?? b.createdAt).localeCompare(a.activityAt ?? a.createdAt) || a.id.localeCompare(b.id));
@@ -124,7 +124,7 @@ export abstract class SessionsLayer extends ModelsLayer {
       const success = await this.resumePickedSession(selected.id, abort.signal);
       if (abort.signal.aborted || this.sessionPicker !== picker) return false;
       if (success) this.closeSessionPicker();
-      else { picker.error = "Resume failed; the current session is unchanged. See the diagnostic below; restore unavailable files or choose another row."; picker.loading = false; }
+      else { picker.error = "Resume failed · Choose another session · Esc back"; picker.loading = false; }
       return success;
     } catch (error) { picker.loading = false; picker.error = error instanceof Error ? error.message : String(error); return false; }
   }

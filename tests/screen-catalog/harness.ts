@@ -73,17 +73,17 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
     tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);
     responses = [
-      { toolCalls: [{ id: "read-clamp", name: "read", arguments: { path: "clamp.ts" } }] },
-      { toolCalls: [{ id: "edit-clamp", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: screen.id === "large-edit" ? Array.from({ length: 13 }, (_, i) => `const step${i} = n;`).join("\n") : "return Math.min(hi, Math.max(lo, n));" }] } }] },
-      ...(screen.id === "completed-turn" ? [{ toolCalls: [{ id: "write-range", name: "write", arguments: { path: "src/util/range.ts", content: Array.from({ length: 42 }, (_, i) => `// Range line ${i + 1}`).join("\n") + "\n" } }] }] : []),
-      { toolCalls: [{ id: "check-clamp", name: "bash", arguments: { command: "printf 'ok\\n'" } }] },
+      { toolCalls: [{ id: "call_fixture_read", name: "read", arguments: { path: "clamp.ts" } }] },
+      { toolCalls: [{ id: "fc_fixture1234", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: screen.id === "large-edit" ? Array.from({ length: 13 }, (_, i) => `const step${i} = n;`).join("\n") : "return Math.min(hi, Math.max(lo, n));" }] } }] },
+      ...(screen.id === "completed-turn" ? [{ toolCalls: [{ id: "call_fixture_write", name: "write", arguments: { path: "src/util/range.ts", content: Array.from({ length: 42 }, (_, i) => `// Range line ${i + 1}`).join("\n") + "\n" } }] }] : []),
+      { toolCalls: [{ id: "b1234", name: "bash", arguments: { command: "printf 'ok\\n'" } }] },
       { text: screen.id === "large-edit" ? "Updated the clamp implementation." : "Fixed clamp so it respects the upper bound." },
     ];
   }
   if (screen.id === "parallel-tools") {
     const names = ["read", "grep", "bash"];
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
-    responses = [{ toolCalls: names.map(name => ({ id: `parallel-${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
+    responses = [{ toolCalls: names.map(name => ({ id: `call_fixture_parallel_${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
   }
   const fresh = ["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";

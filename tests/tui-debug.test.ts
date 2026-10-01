@@ -144,7 +144,9 @@ test("interactive /compact reports completed, noop, cancellation and rejected tr
   });
   expect(await failure.compact()).toBe(false);
   expect(failure.snapshot().status).toBe("idle");
-  expect(failure.snapshot().compactionNotice).toContain("/compact");
+  expect(failure.snapshot().compactionNotice).toBe("Compaction failed · Ctrl+I repair details");
+  expect(failure.inspectNoticeDetails()).toBe(true);
+  expect(failure.snapshot().transcript.at(-1)?.text).toContain("/compact");
   await sink.close();
   const text = await readFile(diagnosticPath(home), "utf8");
   expect(text).not.toContain("private-manual-error");

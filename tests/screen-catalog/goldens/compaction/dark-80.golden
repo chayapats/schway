@@ -20,7 +20,7 @@ cursor 7 27 visible
 
   Read the records, validate them, and restore the conversation.
 
-  Manual compaction. Compacting older turns…
+  Compacting older turns · Esc stop
 
 
 
@@ -30,11 +30,11 @@ cursor 7 27 visible
 
 
 
-  ⠋ Manual compaction · summarizing older turns; history retained
+  ⠋ Compacting context · Esc stop
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ COMPACTING 3s   scripted/scripted-model                  Esc stops  ctx ~48
+  ⠋ Compacting 3.0s   scripted/scripted-model                Esc stops  ctx ~48
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #161b24 -
@@ -81,8 +81,8 @@ cursor 7 27 visible
 12 64-80 #ffffff #0e1117 -
 13 0-80 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
-14 2-44 #8b95a7 #0e1117 -
-14 44-80 #ffffff #0e1117 -
+14 2-35 #8b95a7 #0e1117 -
+14 35-80 #ffffff #0e1117 -
 15 0-80 #ffffff #0e1117 -
 16 0-80 #ffffff #0e1117 -
 17 0-80 #ffffff #0e1117 -
@@ -94,8 +94,8 @@ cursor 7 27 visible
 23 0-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #7cc4ff #0e1117 b
-24 3-65 #8b95a7 #0e1117 -
-24 65-80 #ffffff #0e1117 -
+24 3-33 #8b95a7 #0e1117 -
+24 33-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -
 25 78-80 #ffffff #0e1117 -
@@ -108,10 +108,10 @@ cursor 7 27 visible
 27 2-78 #161b24 #0e1117 -
 27 78-80 #ffffff #0e1117 -
 28 0-1 #8b95a7 #161b24 -
-28 1-18 #0e1117 #7cc4ff b
-28 18-19 #8b95a7 #161b24 -
-28 19-44 #e6eaf0 #1e2430 -
-28 44-61 #8b95a7 #161b24 -
+28 1-20 #0e1117 #7cc4ff b
+28 20-21 #8b95a7 #161b24 -
+28 21-46 #e6eaf0 #1e2430 -
+28 46-61 #8b95a7 #161b24 -
 28 61-64 #e6eaf0 #2a3241 b
 28 64-79 #8b95a7 #161b24 -
 28 79-80 #ffffff #0e1117 -

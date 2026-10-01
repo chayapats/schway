@@ -178,7 +178,7 @@ test("validateThinking and describeEffectiveThinking stay provider-independent",
   expect(validateThinking("openai", "gpt-5.4", "high", { reasoning: 1 })).toBeUndefined();
   expect(validateThinking("openai-compatible", "gpt-4o", "low", { reasoning_effort: "low" })).toContain("extraBody");
   expect(describeEffectiveThinking("openai", "high")).toContain("high");
-  expect(describeEffectiveThinking("openai", undefined)).toContain("provider default");
+  expect(describeEffectiveThinking("openai", undefined)).toContain("Provider default");
 });
 
 // CLI
@@ -426,13 +426,13 @@ test("controller /thinking shows requested and effective with provider/model", a
     const text = controller.describeThinking();
     expect(text).toContain("medium");
     expect(text).toContain("openai/gpt-5.4");
-    expect(text).toContain("reasoning effort medium");
+    expect(text).toContain("effective: medium");
     const config = controller.describeConfig();
     expect(config).toContain("thinking");
     expect(config).toContain("medium");
     const snapshot = controller.snapshot();
     expect(snapshot.thinking).toBe("medium");
-    expect(snapshot.effectiveThinking).toContain("reasoning effort medium");
+    expect(snapshot.effectiveThinking).toBe("medium");
     controller.dispose();
   });
 });
@@ -554,9 +554,10 @@ test("thinking support records disabling and describes off honestly", () => {
   expect(describeThinkingSupport("openai", "mystery-9")).toContain("no reasoning controls");
   expect(describeThinkingSupport("openai", "gpt-4o")).toContain("no reasoning controls");
   expect(describeThinkingSupport("openai", "gpt-5.4")).toContain("disable");
-  expect(describeEffectiveThinking("openai", "off", "mystery-9")).toContain("no reasoning controls");
-  expect(describeEffectiveThinking("openai", "off", "gpt-4o")).toContain("no reasoning controls");
-  expect(describeEffectiveThinking("openai", "off", "gpt-5.4")).toContain("none");
+  expect(describeEffectiveThinking("openai", "off", "mystery-9")).toBe("Provider default");
+  expect(describeEffectiveThinking("openai", "off", "gpt-4o")).toBe("Provider default");
+  expect(describeEffectiveThinking("openai", "off", "gpt-5.4")).toBe("Off");
+  expect(describeEffectiveThinking("openai-compatible", "off", "custom")).toBe("Provider default");
 });
 
 test("bare effort is not a compatible reasoning control and scanners share one source", () => {

@@ -82,6 +82,6 @@ test("later command refresh fences an older dispatch collision check without acc
     expect(result.dispatched).toBe(0); expect(result.accepted).toBe(0);
     expect(result.help).toHaveLength(2);
     expect(result.help.every((entry: { available: boolean }) => !entry.available)).toBe(true);
-    expect(result.notice).toContain("Retry the retained command");
+    expect(result.notice).toContain("Commands changed · Enter retry");
   });
 });

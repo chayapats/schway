@@ -30,11 +30,11 @@ cursor 7 27 visible
 
 
 
-  ⠋ Receiving response…
+  ⠋ Receiving response · Esc stop
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Type ahead · Enter sends after this turn settles
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ⠋ STREAMING 4s   scripted/scripted-model                                                            Esc stops  ctx ~7
+  ⠋ Receiving 4.0s   scripted/scripted-model                                                          Esc stops  ctx ~7
   Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -92,8 +92,8 @@ cursor 7 27 visible
 23 0-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #0a5894 #f7f7f4 b
-24 3-23 #545e6c #f7f7f4 -
-24 23-120 #ffffff #f7f7f4 -
+24 3-33 #545e6c #f7f7f4 -
+24 33-120 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
 25 2-118 #ecedea #f7f7f4 -
 25 118-120 #ffffff #f7f7f4 -
@@ -106,10 +106,10 @@ cursor 7 27 visible
 27 2-118 #ecedea #f7f7f4 -
 27 118-120 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-17 #ffffff #0a5894 b
-28 17-18 #545e6c #ecedea -
-28 18-43 #1d232c #e1e3df -
-28 43-102 #545e6c #ecedea -
+28 1-19 #ffffff #0a5894 b
+28 19-20 #545e6c #ecedea -
+28 20-45 #1d232c #e1e3df -
+28 45-102 #545e6c #ecedea -
 28 102-105 #1d232c #c9cdd2 b
 28 105-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -

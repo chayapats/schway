@@ -63,7 +63,7 @@ const wait = async (ready: () => boolean, label: string) => {
 const count = async () => (await readdir(directory)).filter(name => name.endsWith(".jsonl")).length;
 const app = start(args);
 try {
-  await wait(() => !!terminal.renderer.root.findDescendantById("prompt") && frame().includes(scenario === "repair" ? "ATTENTION" : "READY"), "startup");
+  await wait(() => !!terminal.renderer.root.findDescendantById("prompt") && frame().includes(scenario === "repair" ? "Attention" : "Ready"), "startup");
   const editor = terminal.renderer.root.findDescendantById("prompt") as core.TextareaRenderable;
   if (["explicit", "repair", "preferences"].includes(scenario)) {
     await wait(() => frame().includes("Restored workspace:"), "restored identity");
@@ -80,12 +80,12 @@ try {
       await wait(() => frame().includes("Enter saves"), "credential entry");
       await terminal.mockInput.pasteBracketedText("fixture-private-key");
       terminal.mockInput.pressEnter();
-      await wait(() => frame().includes("READY") && !frame().includes("ATTENTION"), "auth repaired");
+      await wait(() => frame().includes("Ready") && !frame().includes("Attention"), "auth repaired");
       assert(requests === 0, "repair never sends a task");
     }
   } else {
     await wait(() => frame().includes(["large", "partial-corrupt"].includes(scenario) ? "Alt+B resume:" : "Alt+B resume: Continue the local task"), "current workspace meaningful offer");
-    if (["large", "partial-corrupt"].includes(scenario)) assert(frame().includes("Preview incomplete · resume validates history"), "unknown preview explicitly labelled");
+    if (["large", "partial-corrupt"].includes(scenario)) assert(frame().includes("Resume saved work · Alt+B resume · /sessions browse"), "unknown preview explicitly labelled");
     assert(!frame().includes("Saved local answer") && !frame().includes("Other workspace task"), "new context only");
     assert(await count() === originalCount, "startup creates no empty session");
     await terminal.mockInput.pasteBracketedText("งานใหม่\nkeep this separate");
@@ -112,7 +112,7 @@ try {
       assert(editor.plainText === "", "new draft not copied into restored conversation");
       await terminal.mockInput.pasteBracketedText("old session draft");
       editor.setText("/new"); terminal.mockInput.pressEnter();
-      await wait(() => frame().includes("New session."), "fresh task action");
+      await wait(() => frame().includes("New session · Enter send"), "fresh task action");
       assert(editor.plainText === "", "old session draft not pasted into new task");
       assert(await count() === originalCount + 1, "only the checkpointed new-task draft materializes; /new remains deferred");
     }

@@ -103,7 +103,7 @@ test("interactive login and overwrite refresh the active real provider and logou
     expect(await store.get(credentialIdentity({ provider: "openai" }))).toBeNull();
     await controller.submit("cannot reuse deleted key");
     expect(headers).toHaveLength(2);
-    expect(controller.snapshot().transcript.at(-1)?.text).toContain("/login");
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("Alt+L sign in");
     controller.notice("first-secret-sentinel second-secret-sentinel");
     expect(JSON.stringify(controller.snapshot())).not.toContain("secret-sentinel");
     expect(await Bun.file(join(sessionsDirectory(home), `${session.header.id}.jsonl`)).text()).not.toContain("secret-sentinel");
@@ -156,7 +156,7 @@ test("credential changes wait for an active turn and cancelled entry leaves stor
     const turn = controller.submit("ongoing turn");
     expect(controller.beginLogin("openai")).toBe(false);
     expect(await controller.login("grok")).toBe(false);
-    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Busy: credential changes require an idle session.");
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Wait for this turn · Esc stop");
     expect(await controller.logout("openai")).toBe(false);
     expect(await store.get(credentialIdentity({ provider: "openai" }))).toBeNull();
     controller.cancel();
@@ -185,9 +185,9 @@ test("Grok sign-in activates its recommended model, emits billing route, and log
     });
     try {
       expect(await controller.login("grok")).toBe(true); expect(editor.settings.xaiAuth).toBe("grok"); expect(controller.snapshot().modelId).toBe("grok-4.7"); expect(activated).toEqual(["grok"]);
-      expect(controller.snapshot().transcript.some(entry => entry.text === "Signed in. Using xai/grok-4.7.")).toBe(true);
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Signed in · Using xai/grok-4.7 · Enter send")).toBe(true);
       expect(await controller.logout("grok")).toBe(true); expect(await store.get(grokSubscriptionIdentity())).toBeNull(); expect(await store.get(credentialIdentity({ provider: "xai" }))).toBe("billing-key");
-      expect(controller.snapshot().transcript.some(entry => entry.text.includes("removed active Grok account is blocked"))).toBe(true); expect(await controller.submit("Do not bill an API key")).toBe(false);
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Grok disconnected · Alt+L reconnect this account"))).toBe(true); expect(await controller.submit("Do not bill an API key")).toBe(false);
     } finally { controller.dispose(); }
   });
 });
@@ -212,7 +212,7 @@ test("Grok cancellation and disposal abort the shared login path without saving 
     expect(controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
     if (dispose) controller.dispose(); else controller.cancel();
     expect(await running).toBe(false); expect(controller.snapshot().loginApproval).toBeUndefined();
-    expect(controller.snapshot().transcript.some(entry => entry.text === "Grok sign-in cancelled before credential saving; nothing was saved.")).toBe(true); controller.dispose();
+    expect(controller.snapshot().transcript.some(entry => entry.text === "Sign-in cancelled · Alt+L retry")).toBe(true); controller.dispose();
   }
 });
 
@@ -369,12 +369,12 @@ for (const provider of ["chatgpt", "grok"] as const) test(`${provider} deferred 
 });
 
 for (const [value, error] of [
-  ["", "Enter the endpoint URL, for example http://localhost:8787/v1."],
-  ["localhost:8787", "Enter a full URL that starts with http:// or https://."],
-  ["ftp://host/v1", "Enter a full URL that starts with http:// or https://."],
-  ["http://user:pw@host/v1", "Remove the user name and password from the URL; enter the key in the next step."],
-  ["http://host/v1?x=1", "Remove the query string from the URL."],
-  ["http://host/v1?", "Remove the query string from the URL."],
+  ["", "Enter an endpoint URL · Use http:// or https://"],
+  ["localhost:8787", "Enter a full URL · Use http:// or https://"],
+  ["ftp://host/v1", "Enter a full URL · Use http:// or https://"],
+  ["http://user:pw@host/v1", "Remove credentials from the URL · Enter the key next"],
+  ["http://host/v1?x=1", "Remove the URL query · Enter retry"],
+  ["http://host/v1?", "Remove the URL query · Enter retry"],
 ]) test(`endpoint URL validation keeps ${JSON.stringify(value)} in the ephemeral field`, async () => {
   const controller = chooserController();
   try {
@@ -388,13 +388,13 @@ for (const [value, error] of [
 });
 
 test("endpoint URL prefill accepts only the same valid HTTP(S) URLs as profiles, and direct login stays key-only", async () => {
-  for (const baseUrl of [undefined, "http://localhost:8787/v1", "https://host/v1#models", "localhost:8787", "https://user:pw@host/v1", "https://host/v1?x=1"]) {
+  for (const baseUrl of [undefined, "http://localhost:8787", "https://host/v1#models", "localhost:8787", "https://user:pw@host/v1", "https://host/v1?x=1"]) {
     const controller = chooserController({ baseUrl });
     try {
       expect(controller.beginEndpointLogin()).toBe(true);
-      expect(controller.snapshot().endpointUrlEntry?.value).toBe(baseUrl === "http://localhost:8787/v1" || baseUrl === "https://host/v1#models" ? baseUrl : "");
+      expect(controller.snapshot().endpointUrlEntry?.value).toBe(baseUrl === "http://localhost:8787" || baseUrl === "https://host/v1#models" ? baseUrl : "");
       controller.cancel();
-      if (baseUrl === "http://localhost:8787/v1") { expect(await controller.login("openai-compatible")).toBe(true); expect(controller.snapshot().endpointUrlEntry).toBeUndefined(); controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined(); }
+      if (baseUrl === "http://localhost:8787") { expect(await controller.login("openai-compatible")).toBe(true); expect(controller.snapshot().endpointUrlEntry).toBeUndefined(); controller.cancel(); expect(controller.snapshot().loginChooser).toBeUndefined(); }
     } finally { controller.dispose(); }
   }
 });
@@ -417,22 +417,22 @@ for (const outcome of ["success", "list-failure", "activation-failure"] as const
       controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); expect(await controller.selectLoginChoice()).toBe(true);
       // Replace the valid profile URL prefill without touching any settings.
       while (controller.snapshot().endpointUrlEntry!.value) controller.backspaceEndpointUrl();
-      controller.enterEndpointUrlText("  http://localhost:8787/v1  "); expect(controller.submitEndpointUrl()).toBe(true);
+      controller.enterEndpointUrlText("  http://localhost:8787  "); expect(controller.submitEndpointUrl()).toBe(true);
       expect(controller.snapshot().credentialEntry).toBeDefined(); expect(editor.settings.baseUrl).toBe("https://old.example/v1");
       controller.enterCredentialText("endpoint-private-key"); expect(await controller.submitCredential()).toBe(true);
-      expect(listings).toEqual([{ route: "compatible", options: { baseUrl: "http://localhost:8787/v1" } }]);
-      expect(editor.settings.baseUrl).toBe("http://localhost:8787/v1"); expect(editor.settings.profile).toBeUndefined();
+      expect(listings).toEqual([{ route: "compatible", options: { baseUrl: "http://localhost:8787" } }]);
+      expect(editor.settings.baseUrl).toBe("http://localhost:8787"); expect(editor.settings.profile).toBeUndefined();
       expect(controller.snapshot().transcript.some(entry => entry.text.includes("Automatic authentication is disabled"))).toBe(false);
-      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787/v1" }))).toBe("endpoint-private-key");
-      expect(controller.snapshot().transcript.some(entry => entry.text === "Endpoint saved for this session. To keep it, run /config set baseUrl http://localhost:8787/v1 --scope user.")).toBe(true);
-      if (outcome === "success") { expect(controller.snapshot().modelId).toBe("endpoint-model"); expect(staged).toEqual(["http://localhost:8787/v1"]); }
-      else { expect(controller.snapshot().modelId).toBe("old-model"); expect(controller.snapshot().status).toBe("error"); expect(controller.snapshot().transcript.at(-1)?.text).toContain("Credential saved, but the recommended model could not be activated"); }
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787" }))).toBe("endpoint-private-key");
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Endpoint ready for this session · /config set baseUrl http://localhost:8787 --scope user to keep it")).toBe(true);
+      if (outcome === "success") { expect(controller.snapshot().modelId).toBe("endpoint-model"); expect(staged).toEqual(["http://localhost:8787"]); }
+      else { expect(controller.snapshot().modelId).toBe("old-model"); expect(controller.snapshot().status).toBe("error"); expect(controller.snapshot().transcript.at(-1)?.text).toContain("Sign-in saved · /model choose a model"); }
       expect(await Bun.file(join(home, ".schway/config.json")).exists()).toBe(false); expect(await Bun.file(join(root, ".schway/config.json")).exists()).toBe(false);
       if (outcome !== "success") expect(await controller.submit("do not reuse the old endpoint adapter")).toBe(false);
-      expect(JSON.stringify(session.items)).not.toContain("http://localhost:8787/v1");
+      expect(JSON.stringify(session.items)).not.toContain("http://localhost:8787");
       // Durable workspace choice contains route/model only; the ephemeral endpoint is not remembered.
       const next = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
-      expect(next.settings.baseUrl).not.toBe("http://localhost:8787/v1");
+      expect(next.settings.baseUrl).not.toBe("http://localhost:8787");
     } finally { controller.dispose(); }
   });
 });
@@ -441,8 +441,8 @@ test("URL and key Esc retain the typed endpoint while an empty key saves nothing
   const controller = chooserController();
   try {
     controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); await controller.selectLoginChoice();
-    controller.enterEndpointUrlText("http://localhost:8787/v1"); controller.submitEndpointUrl(); controller.enterCredentialText("cancelled-key");
-    controller.cancel(); expect(controller.snapshot().endpointUrlEntry).toEqual({ value: "http://localhost:8787/v1" });
+    controller.enterEndpointUrlText("http://localhost:8787"); controller.submitEndpointUrl(); controller.enterCredentialText("cancelled-key");
+    controller.cancel(); expect(controller.snapshot().endpointUrlEntry).toEqual({ value: "http://localhost:8787" });
     expect(controller.submitEndpointUrl()).toBe(true); expect(await controller.submitCredential()).toBe(false);
     expect(controller.snapshot().transcript.at(-1)?.text).toBe("API key is empty; nothing saved.");
     expect(controller.snapshot().loginChooser).toBeUndefined();
@@ -469,23 +469,23 @@ for (const existing of [false, true]) test(`${existing ? "replacement" : "first"
     try {
       controller.openLoginChooser(); chooseLoginRow(controller, "compatible"); await controller.selectLoginChoice();
       while (controller.snapshot().endpointUrlEntry!.value) controller.backspaceEndpointUrl();
-      const typed = "  http://localhost:8787/v1#section  ";
+      const typed = "  http://localhost:8787#section  ";
       controller.enterEndpointUrlText(typed); expect(controller.submitEndpointUrl()).toBe(true);
       controller.enterCredentialText("cancelled-key"); controller.cancel();
       expect(controller.snapshot().endpointUrlEntry).toEqual({ value: typed });
       expect(configEditor.settings.baseUrl).toBe(existing ? "http://old.example/v1" : undefined);
       expect(controller.submitEndpointUrl()).toBe(true); controller.enterCredentialText("endpoint-key");
       expect(await controller.submitCredential()).toBe(true);
-      expect(listings).toEqual([{ route: "compatible", baseUrl: "http://localhost:8787/v1" }]);
-      expect(staged).toEqual(["http://localhost:8787/v1"]);
-      expect(configEditor.settings.baseUrl).toBe("http://localhost:8787/v1");
+      expect(listings).toEqual([{ route: "compatible", baseUrl: "http://localhost:8787" }]);
+      expect(staged).toEqual(["http://localhost:8787"]);
+      expect(configEditor.settings.baseUrl).toBe("http://localhost:8787");
       expect(controller.snapshot().modelId).toBe("endpoint-model");
-      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787/v1" }))).toBe("endpoint-key");
-      expect(controller.snapshot().transcript.some(entry => entry.text === "Endpoint saved for this session. To keep it, run /config set baseUrl http://localhost:8787/v1 --scope user.")).toBe(true);
+      expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787" }))).toBe("endpoint-key");
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Endpoint ready for this session · /config set baseUrl http://localhost:8787 --scope user to keep it")).toBe(true);
       expect(await Bun.file(join(home, ".schway/config.json")).exists()).toBe(false);
       expect(await Bun.file(join(root, ".schway/config.json")).exists()).toBe(false);
       const next = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true });
-      expect(next.settings.baseUrl).not.toBe("http://localhost:8787/v1");
+      expect(next.settings.baseUrl).not.toBe("http://localhost:8787");
     } finally { controller.dispose(); }
   });
 });
@@ -501,7 +501,7 @@ for (const source of ["api-high", "api-off", "router-high", "router-same-high", 
       { id: "endpoint-model", baseUrl: "https://openrouter.ai/api/v1", supportedThinking: ["off"] },
     ] : undefined);
     const initial = configEditor.settings;
-    const endpointUrl = source === "router-same-high" || source === "router-new-model-high" ? "https://openrouter.ai/api/v1" : "http://localhost:8787/v1";
+    const endpointUrl = source === "router-same-high" || source === "router-new-model-high" ? "https://openrouter.ai/api/v1" : "http://localhost:8787";
     const selectedModel = source === "router-same-high" ? "router-model" : "endpoint-model";
     const expectedThinking = source === "api-off" ? "off" : source === "router-same-high" || (source === "router-new-model-high" && outcome === "list-failure") ? "high" : undefined;
     const listings: string[] = [], staged: unknown[] = [];
@@ -528,7 +528,7 @@ for (const source of ["api-high", "api-off", "router-high", "router-same-high", 
       expect(staged).toEqual(outcome === "list-failure" ? [] : [{ baseUrl: endpointUrl, thinking: expectedThinking }]);
       if (outcome === "success") expect(controller.snapshot().modelId).toBe(selectedModel);
       else {
-        expect(controller.snapshot().transcript.at(-1)?.text).toContain("Credential saved, but the recommended model could not be activated");
+        expect(controller.snapshot().transcript.at(-1)?.text).toContain("Sign-in saved · /model choose a model");
         expect(await controller.submit("do not use the previous adapter")).toBe(false);
         expect(configEditor.settings.baseUrl).toBe(endpointUrl);
       }
@@ -539,7 +539,7 @@ for (const source of ["api-high", "api-off", "router-high", "router-same-high", 
 test("opening a chooser while a turn runs gives the specified busy notice and never starts sign-in", async () => {
   const controller = chooserController({ model: createScriptedModel({ waitForAbort: true }), modelId: "test" });
   const turn = controller.submit("work");
-  try { expect(controller.openLoginChooser()).toBe(false); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Busy: finish the current operation before signing in."); }
+  try { expect(controller.openLoginChooser()).toBe(false); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Wait for this turn · Esc stop"); }
   finally { controller.cancel(); await turn; controller.dispose(); }
 });
 

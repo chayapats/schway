@@ -1,3 +1,4 @@
+import { formatCount } from "../text/format.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { relative } from "node:path";
 import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../config/config.ts";
@@ -21,11 +22,11 @@ export abstract class ChangesLayer extends BranchesLayer {
     if (args.trim() === "review") return this.openChangeReview();
     const mode = this.gitChangeTracking();
     if (mode === "off") {
-      this.notice("Change tracking is off (git.changeTracking=\"off\"). No Git state was read. Set git.changeTracking to \"on-demand\" or \"snapshot\" to inspect changes.");
+      this.notice("Change tracking is off · /config set git {\"changeTracking\":\"on-demand\"} enable");
       return true;
     }
     if (!this.workspace) {
-      this.fail("No workspace is active. Open a workspace before inspecting Git changes.");
+      this.fail("No workspace active · Restart Schway in a workspace");
       return false;
     }
     const trimmed = args.trim();
@@ -33,7 +34,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     const action = !sub ? "status" : sub.toLowerCase();
     if (action === "mode") {
       const origin = this.configEditor?.origins.git ? ` [${this.configEditor.origins.git}]` : "";
-      this.notice(`Change tracking: ${mode} · /changes review\n${origin ? `Configuration source:${origin}.\n` : ""}Off disables inspection; on-demand and snapshot capture paths and hashes before and after each turn, never file content. Snapshot also shows the comparison in /changes status. Diffs load only when requested.`);
+      this.notice(`Change tracking: ${mode} · /changes review · Ctrl+I details`, `${origin ? `Configuration source:${origin}.\n` : ""}Off disables inspection; on-demand and snapshot capture paths and hashes before and after each turn, never file content. Snapshot also shows the comparison in /changes status. Diffs load only when requested.`);
       return true;
     }
     if (action === "diff") {
@@ -47,11 +48,12 @@ export abstract class ChangesLayer extends BranchesLayer {
         this.fail(preview.error);
         return false;
       }
-      this.notice(redactSecrets(formatGitDiffPreview(preview), this.secrets).slice(0, 50_000));
+      const rows = parseGitDiff(preview, { includePaths: !path, includeSections: true }).map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`);
+      this.notice(redactSecrets(["Review diff · Ctrl+I details · Enter continue", ...(path ? [path] : []), ...rows].join("\n"), this.secrets).slice(0, 50_000), formatGitDiffPreview(preview));
       return true;
     }
     if (action !== "status" && trimmed.length > 0) {
-      this.fail("Usage: /changes [review|status|diff [-- <path>]]. Change tracking itself is configured with git.changeTracking.");
+      this.fail("Choose a changes view · /changes [review|status|diff [-- <path>]]");
       return false;
     }
     const status = await inspectGitStatus(this.workspace.root);
@@ -72,7 +74,11 @@ export abstract class ChangesLayer extends BranchesLayer {
       }
       lines.push("Snapshots cover the current session/run only and cannot restore files.");
     }
-    this.notice(redactSecrets(lines.join("\n"), this.secrets).slice(0, 50_000));
+    const primary = status.isGit
+      ? [`${formatCount(status.totalFiles, "changed file")} · /changes diff inspect · Ctrl+I details`, ...(status.branch ? [`Branch: ${status.branch}`] : ["Detached HEAD"]), ...status.files.map(file => file.path)]
+      : ["Not a Git workspace · Enter continue"];
+    if (this.gitSnapshotError) primary.unshift("Snapshot unavailable · Ctrl+I details");
+    this.notice(redactSecrets(primary.join("\n"), this.secrets), lines.join("\n"));
     return true;
   }
 

@@ -1,7 +1,7 @@
 /** Actionable notice printed when configuration or the CLI names the removed Anthropic provider. */
 export const ANTHROPIC_REMOVED_MESSAGE = [
-  "The Anthropic provider was removed in 0.4.",
-  "Use Claude through an OpenAI-compatible endpoint:",
+  "Anthropic support ended in 0.4",
+  "Use Claude through a compatible endpoint:",
   "  schway --provider openai-compatible --base-url <url> --model <id>",
   "See docs/configuration.md",
 ].join("\n");
