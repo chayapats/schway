@@ -127,3 +127,8 @@ function countLineBreaks(text: string): number {
   }
   return count;
 }
+
+/** Compare whole-file text as numbered deletion and addition rows, excluding common edge context. */
+export function diffLines(oldText: string, newText: string): TextDiff {
+  return buildEditDiff([{ startLine: 1, oldText, newText }]);
+}

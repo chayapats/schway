@@ -566,3 +566,14 @@ test("aborting during forced compaction discards a late summary and reports canc
   expect(finished[0]).toMatchObject({ status: "cancelled" });
   expect(session.items.some((item) => item.type === "compaction")).toBe(false);
 });
+
+
+test("undo notes stay with the preceding turn and never become compaction boundaries", async () => {
+  const session = createSession([...turns(3), { type: "turn_undo", id: "undo-note", turnId: "u2", turnNumber: 3,
+    reverted: [{ path: "clamp.ts", action: "restored" }], skipped: [], note: "The user undid your file changes from the previous turn: clamp.ts." }]);
+  const manager = createContextManager(workspace, { keepTurns: 1 });
+  const record = await manager.compact(session, createScriptedModel({ responses: [{ text: CODING_SUMMARY }] }), { reason: "manual" });
+  expect(record?.firstKeptId).toBe("u2");
+  const prepared = await manager.prepare(session, createScriptedModel({ responses: [] }));
+  expect(prepared.items.at(-1)).toEqual({ type: "user", id: "undo-note", content: [{ type: "text", text: "The user undid your file changes from the previous turn: clamp.ts." }] });
+});

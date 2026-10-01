@@ -289,6 +289,8 @@ export abstract class ControllerCore {
   ): void;
   protected abstract restorePickerAfterConnection(connected?: boolean): void;
   abstract get running(): boolean;
+  /** Close the transient undo panel on session replacement or disposal. */
+  abstract closeUndoPreview(): void;
   abstract snapshot(): TuiSnapshot;
   abstract submit(prompt: string, accepted?: () => void): Promise<boolean>;
 }

@@ -192,3 +192,12 @@ test("grouped diffs retain sorted hunk boundaries and full prior line shifts", (
   expect(hunks.map(hunk => hunk.startLine)).toEqual([10, 2, 6]);
   expect(buildEditDiffHunks([])).toEqual([]);
 });
+
+import { diffLines } from "../src/text/diff.ts";
+test("line diffs describe identical, replaced, created, deleted and unterminated text", () => {
+  expect(diffLines("same\n", "same\n")).toEqual({ rows: [], added: 0, removed: 0 });
+  expect(diffLines("keep\nold\n", "keep\nnew\n")).toEqual({ rows: [{ sign: "-", line: 2, text: "old" }, { sign: "+", line: 2, text: "new" }], added: 1, removed: 1 });
+  expect(diffLines("", "a\nb\n")).toEqual({ rows: [{ sign: "+", line: 1, text: "a" }, { sign: "+", line: 2, text: "b" }], added: 2, removed: 0 });
+  expect(diffLines("a\nb\n", "")).toEqual({ rows: [{ sign: "-", line: 1, text: "a" }, { sign: "-", line: 2, text: "b" }], added: 0, removed: 2 });
+  expect(diffLines("old", "new")).toEqual({ rows: [{ sign: "-", line: 1, text: "old" }, { sign: "+", line: 1, text: "new" }], added: 1, removed: 1 });
+});

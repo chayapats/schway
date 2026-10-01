@@ -36,7 +36,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || ["completed-turn", "large-edit", "review-panel", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const disk = palette || ["completed-turn", "large-edit", "review-panel", "undo-preview", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -45,7 +45,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await mkdir(join(root, ".git"), { recursive: true });
       await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/feature/a-very-long-branch-name-for-testing\n");
     }
-    if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
+    if (["completed-turn", "large-edit", "review-panel", "undo-preview"].includes(screen.id)) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
       for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
@@ -70,12 +70,13 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
   if (screen.id === "table-and-code") responses = [{ text: MARKDOWN_ANSWER }];
   let tools = createToolRegistry();
-  if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
+  if (["completed-turn", "large-edit", "review-panel", "undo-preview"].includes(screen.id)) {
     tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);
     responses = [
       { toolCalls: [{ id: "call_fixture_read", name: "read", arguments: { path: "clamp.ts" } }] },
       { toolCalls: [{ id: "fc_fixture1234", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: screen.id === "large-edit" ? Array.from({ length: 13 }, (_, i) => `const step${i} = n;`).join("\n") : "return Math.min(hi, Math.max(lo, n));" }] } }] },
-      ...(screen.id === "completed-turn" ? [{ toolCalls: [{ id: "call_fixture_write", name: "write", arguments: { path: "src/util/range.ts", content: Array.from({ length: 42 }, (_, i) => `// Range line ${i + 1}`).join("\n") + "\n" } }] }] : []),
+      ...(screen.id === "completed-turn" || screen.id === "undo-preview" ? [{ toolCalls: [{ id: "call_fixture_write", name: "write", arguments: { path: "src/util/range.ts", content: Array.from({ length: 42 }, (_, i) => `// Range line ${i + 1}`).join("\n") + "\n" } }] }] : []),
+      ...(screen.id === "undo-preview" ? [{ toolCalls: [{ id: "undo-readme", name: "write", arguments: { path: "README.md", content: "Changes made during the turn.\n" } }] }] : []),
       { toolCalls: [{ id: "b1234", name: "bash", arguments: { command: "printf 'ok\\n'" } }] },
       { text: screen.id === "large-edit" ? "Updated the clamp implementation." : "Fixed clamp so it respects the upper bound." },
     ];
@@ -143,7 +144,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: true });
   const controller = new TuiController(options);
-  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : Promise.resolve(false), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();
@@ -153,7 +154,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     }
   };
   await settle();
-  return { ...terminal, controller, view, session, sessionDirectory, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
+  return { ...terminal, controller, view, session, sessionDirectory, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
     dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); if (temp) await rm(temp, { recursive: true, force: true }); },
   };

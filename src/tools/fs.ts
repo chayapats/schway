@@ -46,13 +46,10 @@ export function filesystemFailure(
   };
 }
 
-/**
- * Replace `path` by writing a same-directory temporary file and renaming it over the destination.
- * Passes cancellation to the temporary write; failures attempt temporary-file cleanup and propagate.
- */
+/** Atomically replace a file with text or bytes via a same-directory temporary file, cleaning up and propagating cancellation or I/O failures. */
 export async function writeFileAtomically(
   path: string,
-  content: string,
+  content: string | Uint8Array,
   signal?: AbortSignal,
 ): Promise<void> {
   const tempPath = `${path}.${crypto.randomUUID()}.tmp`;

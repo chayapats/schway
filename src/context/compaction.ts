@@ -3,7 +3,10 @@ import type {
   ConversationItem,
   SessionRecord,
 } from "../conversation/types.ts";
-import { isCompactionRecord } from "../conversation/types.ts";
+import { isCompactionRecord, isTurnUndoRecord } from "../conversation/types.ts";
+
+// Preserve local origin without adding provider-visible fields to synthetic user notes.
+const undoNotes = new WeakSet<ConversationItem>();
 
 /** Reason a compaction runs; surfaced to presentation clients and events. */
 export type CompactionReason = "pressure" | "manual" | "overflow";
@@ -49,7 +52,7 @@ export function splitIntoTurns(
   const turns: CompactionTurn[] = [];
   let current: ConversationItem[] = [];
   for (const item of items) {
-    if (item.type === "user" && current.length > 0) {
+    if (item.type === "user" && !undoNotes.has(item) && current.length > 0) {
       turns.push({ items: current });
       current = [];
     }
@@ -74,7 +77,7 @@ export function findCompactionBoundary(
     return null;
   }
   const boundary = turns[turns.length - keepTurns];
-  const first = boundary?.items[0];
+  const first = boundary?.items.find(item => !undoNotes.has(item));
   if (!boundary || !first) {
     return null;
   }
@@ -117,17 +120,18 @@ export function getEffectiveSummary(
   return getLatestCompaction(records)?.summary;
 }
 
-/**
- * Return conversation from the latest compaction boundary, excluding compaction markers.
- * Missing boundaries are corruption and never fall back to unrelated records.
- */
+/** Rebuild model conversation with undo notes at their original positions from the latest compaction boundary, rejecting missing boundaries. */
 export function getEffectiveConversation(
   records: readonly SessionRecord[],
 ): ConversationItem[] {
   const conversation: ConversationItem[] = [];
   for (let i = 0; i < records.length; i++) {
     const record = records[i]!;
-    if (!isCompactionRecord(record)) {
+    if (isTurnUndoRecord(record)) {
+      const note: ConversationItem = { type: "user", id: record.id, content: [{ type: "text", text: record.note }] };
+      undoNotes.add(note);
+      conversation.push(note);
+    } else if (!isCompactionRecord(record)) {
       conversation.push(record);
     }
   }

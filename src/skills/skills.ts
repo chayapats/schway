@@ -22,6 +22,7 @@ export const RESERVED_SKILL_NAMES: readonly string[] = [
   "theme",
   "session",
   "changes",
+  "undo",
   "compact",
   "context",
   "branch",

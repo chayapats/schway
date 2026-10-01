@@ -91,6 +91,24 @@ export interface ChangeReview {
   loading: boolean;
 }
 
+/** One undo row with current-to-restored diff and a complete action badge. */
+export interface UndoPreviewFile {
+  path: string;
+  absolutePath: string;
+  action: "restore" | "delete" | "skip";
+  status: string;
+  rows: GitDiffRow[];
+  binary: boolean;
+}
+/** Renderer-independent undo preview or final per-file results. */
+export interface UndoPreview {
+  turnId: string;
+  turnNumber: number;
+  files: UndoPreviewFile[];
+  selected: number;
+  result: boolean;
+}
+
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */
 export interface TuiSnapshot {
   status: TuiStatus;
@@ -98,6 +116,7 @@ export interface TuiSnapshot {
   compactionNotice?: string;
   outcome?: TurnOutcome;
   changeReview?: ChangeReview;
+  undoPreview?: UndoPreview;
   /** Distinguish an unconfigured connection from startup checks, usable models and setup failures. */
   readiness: "loading" | "ready" | "not-connected" | "connect" | "choose-model" | "repair";
   /** A bounded known startup explanation; raw provider diagnostics remain behind recovery details. */

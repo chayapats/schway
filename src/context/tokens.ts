@@ -42,6 +42,7 @@ export function estimateItemTokens(item: ConversationItem): number {
 export function estimateSessionTokens(items: readonly SessionRecord[]): number {
   let total = 0;
   for (const item of items) {
+    if (item.type === "turn_undo") { total += estimateTextTokens(item.note); continue; }
     if (!isConversationItem(item)) {
       continue;
     }

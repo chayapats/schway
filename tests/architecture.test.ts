@@ -19,6 +19,8 @@ test("core modules do not import provider SDKs", async () => {
   const files = [
     "src/text/format.ts",
     "src/text/diff.ts",
+    "src/undo/store.ts",
+    "src/undo/record.ts",
     "src/agent/loop.ts",
     "src/agent/scheduler.ts",
     "src/agent/events.ts",
@@ -75,6 +77,8 @@ test("core modules never import the renderer", async () => {
   const files = [
     "src/text/format.ts",
     "src/text/diff.ts",
+    "src/undo/store.ts",
+    "src/undo/record.ts",
     "src/agent/loop.ts",
     "src/agent/scheduler.ts",
     "src/agent/events.ts",

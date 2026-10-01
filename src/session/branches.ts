@@ -55,7 +55,7 @@ export function pendingCalls(items: readonly SessionRecord[]): string[] {
     if (previous.has(item.id)) throw new Error(`Duplicate session entry ID: ${item.id}`);
     if (item.type === "tool_result") {
       if (!pending.delete(item.toolCallId)) throw new Error(`Unmatched or duplicate tool result: ${item.toolCallId}`);
-    } else if (item.type === "assistant" || item.type === "user") {
+    } else if (item.type === "assistant" || item.type === "user" || item.type === "turn_undo") {
       if (pending.size) throw new Error(`Unsettled tool calls before entry ${item.id}: ${[...pending].join(", ")}`);
       if (item.type === "assistant") {
         for (const block of item.content) {

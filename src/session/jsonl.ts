@@ -14,7 +14,7 @@ import { createSession, type Session } from "./session.ts";
 import { applyBranchOperation, emptyBranchState, branchAncestry, pendingCalls, type BranchOperation, type BranchState, type SessionEntry } from "./branches.ts";
 
 /** Current session format, storing atomic branch operations separately from session-wide metadata. */
-export const SESSION_FORMAT_VERSION = 3;
+export const SESSION_FORMAT_VERSION = 4;
 
 /** Versioned first JSONL record identifying the session and the workspace restored when it is resumed. */
 export interface SessionHeader {
@@ -208,11 +208,13 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
   const session = createSession([], extraRoots, {
     state,
     writeOperation(operation) {
-      const prefix = version < 3 ? JSON.stringify({ type: "session_format", version: 3 }) + "\n" : "";
+      const hasUndo = operation.type === "branch_append" && operation.entries.some(entry => entry.item.type === "turn_undo");
+      const nextVersion = hasUndo ? 4 : Math.max(version, 3);
+      const prefix = version < nextVersion ? JSON.stringify({ type: "session_format", version: nextVersion }) + "\n" : "";
       const committedAt = operation.type === "branch_append" && operation.entries.some(entry => entry.item.type !== "compaction") ? new Date().toISOString() : undefined;
       const line = JSON.stringify({ ...operation, ...(committedAt ? { committedAt } : {}) });
       write(prefix + line + "\n");
-      version = 3;
+      version = nextVersion;
       if (committedAt && operation.type === "branch_append") {
         // All advisory work is fenced after the authoritative append succeeded.
         let temp: string | undefined;
@@ -247,7 +249,7 @@ function loadRecords(text: string): { header: SessionHeader; state: BranchState;
   let first: unknown;
   try { first = JSON.parse(lines[0]?.[1] ?? ""); } catch { throw new Error("Session file is missing a versioned header"); }
   if (!isSessionHeader(first)) throw new Error("Session file is missing a versioned header");
-  if (![1, 2, 3].includes(first.version)) throw new Error(`Unsupported session format version ${first.version}. This Schway build reads versions 1, 2 and 3.`);
+  if (![1, 2, 3, 4].includes(first.version)) throw new Error(`Unsupported session format version ${first.version}. This Schway build reads versions 1, 2, 3 and 4.`);
   let state = emptyBranchState(first.id);
   let version = first.version;
   let extraRoots = [...first.extraRoots];
@@ -264,14 +266,14 @@ function loadRecords(text: string): { header: SessionHeader; state: BranchState;
     }
     if (!isPlainObject(record)) throw malformedRecord();
     if (record.type === "session_format") {
-      if (![2, 3].includes(record.version as number) || (record.version as number) <= version || "id" in record || "parentId" in record) throw new Error("Unsupported or invalid session format transition");
+      if (![2, 3, 4].includes(record.version as number) || (record.version as number) <= version || "id" in record || "parentId" in record) throw new Error("Unsupported or invalid session format transition");
       version = record.version as number;
     } else if (record.type === "workspace_roots") {
       if (record.version !== 1) throw new Error("Unsupported workspace metadata version");
-      if (version < 2) throw new Error("Workspace metadata requires session format 2 or 3");
+      if (version < 2) throw new Error("Workspace metadata requires session format 2, 3 or 4");
       if (!isRootList(record.extraRoots) || "id" in record || "parentId" in record) throw malformedRecord();
       extraRoots = [...record.extraRoots];
-    } else state = version === 3 ? replayBranchRecord(state, record) : replayLegacyRecord(state, record);
+    } else state = version >= 3 ? replayBranchRecord(state, record, version) : replayLegacyRecord(state, record);
   }
   const prefix = text.slice(0, validLength);
   return { header: first, state, extraRoots, version, text: prefix.endsWith("\n") ? prefix : prefix + "\n" };
@@ -283,25 +285,25 @@ function replayLegacyRecord(state: BranchState, record: Record<string, unknown>)
   return applyBranchOperation(state, { type: "branch_append", version: 1, branchId: "main", entries: [{ parentId: record.parentId, item: toSessionRecord(record) }] });
 }
 
-/** Validate each v3 semantic operation before staging its graph and active head changes. */
-function replayBranchRecord(state: BranchState, record: Record<string, unknown>): BranchState {
+/** Validate each branch-capable semantic operation before staging its graph and active head changes. */
+function replayBranchRecord(state: BranchState, record: Record<string, unknown>, formatVersion: number): BranchState {
   if (record.version !== 1 || typeof record.branchId !== "string" || !record.branchId || "id" in record || "parentId" in record) throw new Error("Invalid branch operation version or identity");
   const branchId = record.branchId;
   if (record.type === "branch_fork") {
     if (typeof record.headId !== "string" || (record.name !== undefined && typeof record.name !== "string")) throw new Error("Invalid branch fork head or label");
     return applyBranchOperation(state, { type: "branch_fork", version: 1, branchId, headId: record.headId, ...(record.name === undefined ? {} : { name: record.name as string }) });
   }
-  if (record.type === "branch_append") return applyBranchOperation(state, { type: "branch_append", version: 1, branchId, entries: parseEntries(record.entries) });
-  if (record.type === "branch_select") return applyBranchOperation(state, { type: "branch_select", version: 1, branchId, settlements: parseEntries(record.settlements) });
-  throw new Error("Session format 3 requires a valid branch operation");
+  if (record.type === "branch_append") return applyBranchOperation(state, { type: "branch_append", version: 1, branchId, entries: parseEntries(record.entries, formatVersion) });
+  if (record.type === "branch_select") return applyBranchOperation(state, { type: "branch_select", version: 1, branchId, settlements: parseEntries(record.settlements, formatVersion) });
+  throw new Error(`Session format ${formatVersion} requires a valid branch operation`);
 }
 
 /** Decode entry payloads without accepting malformed IDs, parents, or conversation shapes. */
-function parseEntries(value: unknown): SessionEntry[] {
+function parseEntries(value: unknown, formatVersion: number): SessionEntry[] {
   if (!Array.isArray(value)) throw new Error("Branch operation entries must be an array");
   return value.map(entry => {
     if (!isPlainObject(entry) || typeof entry.parentId !== "string") throw new Error("Branch entry is missing a valid parent ID");
-    return { parentId: entry.parentId, item: toSessionRecord(entry.item) };
+    return { parentId: entry.parentId, item: toSessionRecord(entry.item, formatVersion) };
   });
 }
 
@@ -335,7 +337,7 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-function toSessionRecord(value: unknown): SessionRecord {
+function toSessionRecord(value: unknown, formatVersion = 1): SessionRecord {
   if (!isPlainObject(value) || typeof value.id !== "string" || value.id.length === 0) {
     throw malformedRecord();
   }
@@ -384,6 +386,13 @@ function toSessionRecord(value: unknown): SessionRecord {
       content: value.content,
       isError: value.isError,
     };
+  }
+  if (value.type === "turn_undo") {
+    if (formatVersion < 4 || typeof value.turnId !== "string" || !value.turnId || !Number.isInteger(value.turnNumber) || (value.turnNumber as number) < 1 || typeof value.note !== "string"
+      || !Array.isArray(value.reverted) || !value.reverted.every(entry => isPlainObject(entry) && typeof entry.path === "string" && (entry.action === "restored" || entry.action === "deleted"))
+      || !Array.isArray(value.skipped) || !value.skipped.every(entry => isPlainObject(entry) && typeof entry.path === "string" && (entry.reason === "changed" || entry.reason === "failed"))) throw malformedRecord();
+    return { type: "turn_undo", id: value.id, turnId: value.turnId, turnNumber: value.turnNumber as number,
+      reverted: value.reverted, skipped: value.skipped, note: value.note };
   }
   if (value.type === "compaction") {
     if (
@@ -491,7 +500,7 @@ export async function discoverSessions(directory: string, offset = 0, home?: str
         try { row.hasDraft = !!openDraftStore({ home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).checkpoint; }
         catch { /* Draft recovery errors remain visible when explicitly reopened. */ }
       }
-      if (![1, 2, 3].includes(header.version)) { row.state = "Unsupported history · use a compatible Schway build"; continue; }
+      if (![1, 2, 3, 4].includes(header.version)) { row.state = "Unsupported history · use a compatible Schway build"; continue; }
       try {
         const metadata: unknown = JSON.parse(await readWindow(join(directory, `${name}.meta`), 2048));
         if (!isPlainObject(metadata)) throw new Error("Invalid discovery metadata");

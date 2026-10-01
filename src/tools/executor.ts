@@ -1,3 +1,5 @@
+import type { UndoStore, UndoTurn } from "../undo/store.ts";
+import { resolveToolPath, displayToolPath } from "./path.ts";
 import type { ToolCallContent, ToolResult } from "../conversation/types.ts";
 import type { ExtensionToolHooks } from "../extensions/tool-hooks.ts";
 import type { Workspace } from "../workspace/workspace.ts";
@@ -15,12 +17,7 @@ export interface ExecutedToolCall {
   details?: unknown;
 }
 
-/**
- * Validate and run one accepted tool call.
- * Unknown tools, invalid arguments, and thrown errors become model-visible
- * results instead of crashing the loop. Pre-aborted calls and execution errors
- * associated with cancellation yield cancelled results; a resolved tool result is kept.
- */
+/** Validate, hook, capture and settle an accepted tool call as a bounded model-visible outcome, preserving resolved results through cancellation. */
 export async function executeToolCall(options: {
   registry?: ToolRegistry;
   call: ToolCallContent;
@@ -29,6 +26,8 @@ export async function executeToolCall(options: {
   env?: NodeJS.ProcessEnv;
   onOutput?: (chunk: ToolOutputChunk) => void;
   toolHooks?: ExtensionToolHooks;
+  undo?: UndoStore;
+  undoTurn?: UndoTurn;
 }): Promise<ExecutedToolCall> {
   const hooks = options.toolHooks?.active ? options.toolHooks : undefined;
   const signal = hooks ? AbortSignal.any([hooks.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
@@ -70,6 +69,15 @@ export async function executeToolCall(options: {
   let executedArgs: unknown;
   try { executedArgs = hooks ? structuredClone(args) : args; }
   catch (error) { return failure(options.call, hooks ? hooks.safeText(messageOf(error)) : messageOf(error)); }
+  // Approval decisions belong here, before pre-image capture (#155/#156).
+  let capture: { path: string; created: boolean } | undefined;
+  if (options.undo && options.undoTurn && (options.call.name === "edit" || options.call.name === "write")) {
+    const path = resolveToolPath(options.workspace.root, (args as { path: string }).path);
+    try { capture = { path, ...await options.undo.capture(options.undoTurn, path) }; }
+    catch (error) {
+      return failure(options.call, `Could not save undo data for ${displayToolPath(options.workspace.root, path)}: ${undoFailureReason(error).replace(/\.$/, "")}. The file was not changed.`);
+    }
+  }
   let executed: ExecutedToolCall;
   try {
     const output = await registered.definition.execute(args, {
@@ -88,12 +96,15 @@ export async function executeToolCall(options: {
       signal?.aborted ||
       (error instanceof Error && error.name === "AbortError")
     ) {
-      return cancelled(options.call);
-    }
-    executed = failure(
+      executed = cancelled(options.call);
+    } else executed = failure(
       options.call,
       hooks ? hooks.safeText(messageOf(error)) : messageOf(error),
     );
+  }
+  if (capture) {
+    try { await options.undo!.settle(options.undoTurn!, capture.path, capture.created); }
+    catch (error) { executed = failure(options.call, `Could not save undo data after changing ${displayToolPath(options.workspace.root, capture.path)}: ${undoFailureReason(error)}`); }
   }
   return hooks ? hooks.finish(options.call, registered.definition, executedArgs, executed, signal!) : executed;
 }
@@ -136,4 +147,14 @@ function toolResult(
     content,
     isError,
   };
+}
+
+/** Keep storage internals out of model-visible file-tool failures. */
+function undoFailureReason(error: unknown): string {
+  const reasons: Record<string, string> = {
+    EACCES: "Permission denied", EPERM: "Permission denied", ENOSPC: "No space left on device",
+    EROFS: "Read-only filesystem", ENOENT: "Directory not found", ENOTDIR: "Path is not a directory",
+  };
+  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  return reasons[code] ?? messageOf(error);
 }

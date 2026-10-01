@@ -1,3 +1,4 @@
+import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../config/defaults.ts";
 import type { ToolCallContent } from "../conversation/types.ts";
 import type { ExtensionToolHooks } from "../extensions/tool-hooks.ts";
@@ -13,12 +14,7 @@ import type { RuntimeEvent } from "./events.ts";
 /** Default cap on consecutive parallel-safe tool calls. */
 export { DEFAULT_MAX_CONCURRENT_TOOLS };
 
-/**
- * Run accepted tool calls with parallel overlap around exclusive barriers.
- * Yields `tool.started` / `tool.finished` as work is scheduled and settles.
- * Returns results in source call order even when completion order differs.
- * Cancellation waits for running calls and settles queued calls as cancelled without executing their tools.
- */
+/** Stream parallel-safe tool work around exclusive barriers, settling cancellation and returning outcomes in source order. */
 export async function* scheduleToolCalls(options: {
   calls: readonly ToolCallContent[];
   registry?: ToolRegistry;
@@ -27,6 +23,8 @@ export async function* scheduleToolCalls(options: {
   maxConcurrentTools?: number;
   env?: NodeJS.ProcessEnv;
   toolHooks?: ExtensionToolHooks;
+  undo?: UndoStore;
+  undoTurn?: UndoTurn;
 }): AsyncGenerator<RuntimeEvent, ExecutedToolCall[]> {
   const { calls, registry, workspace, toolHooks } = options;
   const signal = toolHooks?.active ? AbortSignal.any([toolHooks.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
@@ -86,6 +84,8 @@ export async function* scheduleToolCalls(options: {
       signal,
       env: options.env,
       toolHooks,
+      undo: options.undo,
+      undoTurn: options.undoTurn,
       onOutput(chunk) {
         if (chunk.text.length === 0) {
           return;

@@ -1,3 +1,4 @@
+import { formatUndoResult } from "../undo/record.ts";
 import { toolTarget } from "./presentation.ts";
 import type { SessionRecord } from "../conversation/types.ts";
 import type { TuiTranscriptEntry } from "./controller-types.ts";
@@ -160,6 +161,8 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
         pending.delete(item.toolCallId);
         argumentsByCall.delete(item.toolCallId);
       }
+    } else if (item.type === "turn_undo") {
+      transcript.push({ id: nextId("sys"), sessionRecordId: item.id, kind: "system", text: formatUndoResult(item) });
     } else if (item.type === "compaction") {
       transcript.push({
         id: nextId("sys"),
