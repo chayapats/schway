@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-02
+
+### Added
+
+- `/undo` previews and reverts file changes from `edit` and `write`, with an
+  undo stack for earlier turns. Files changed afterwards are skipped; conversation
+  history stays intact (#153, #154).
+- Change review marks shell changes `changed by shell · not undoable`.
+  File undo also works in non-Git workspaces. Startup prunes undo data using
+  `undo.maxAgeDays` (default `30`) and `undo.maxSizeMB` (default `500` MiB)
+  (#154).
+- Approval modes `auto` (default), `ask` and `read-only`. Shift+Tab cycles modes
+  in the TUI; `approval.mode` configures the starting mode and headless
+  `--approval` overrides it. Ask previews tools that can change state before
+  approval; headless ask refuses them without waiting for input (#155, #156).
+- Extension tools can declare `effect: "read-only" | "mutating"` on
+  `ToolDefinition`. Omitted declarations mean `mutating`: interactive ask
+  prompts before execution and read-only refuses execution (#155, #156).
+
+### Changed
+
+- New sessions use `SESSION_FORMAT_VERSION = 4`. Schway 0.6 reads formats 1–4
+  and preserves existing bytes. An older session gains an appended format-4
+  marker immediately before its first `turn_undo` record; ordinary format-3
+  writes do not upgrade it. Schway 0.5 and earlier cannot open format-4 sessions
+  or sessions upgraded to format 4. Downgrade is not supported (#153).
+
 ## [0.5.0] - 2026-10-01
 
 ### Added
