@@ -269,6 +269,11 @@ content, switch away with `/new`, then run `/delete-session <exact-session-id>`.
 Deleting the currently active session is rejected. Manually removing only a JSONL
 file does not perform this draft cleanup; use the command.
 
+Deleting a session with `/delete-session` removes its private undo directory after
+clearing its draft and before deleting the conversation file. If undo removal
+fails, the session file is kept. Age and size retention also clean undo storage
+at startup; see [undo retention](configuration.md#undo-retention).
+
 Checkpoints use private directories (0700), files (0600), exclusive writer locks,
 and same-directory atomic replacement. Encoded checkpoints larger than 4 MiB are
 rejected while the in-memory text and previous checkpoint remain available. Masked

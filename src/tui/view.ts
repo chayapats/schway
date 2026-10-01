@@ -658,7 +658,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const undo = snapshot.undoPreview;
         const selected = undo?.files[undo.selected];
         const review = undo ? { heading: `Undo turn ${undo.turnNumber} · ${undo.result ? "Esc close" : "Enter undo · Esc cancel"}`, selected: undo.selected,
-          rows: [{ sign: " " as const, text: `─ ${selected?.path ?? ""} ─` }, ...(selected?.rows ?? [])], showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
+          rows: [...(undo.shellUnavailable ? [{ sign: " " as const, text: "Shell changes can't be detected here" }] : []), { sign: " " as const, text: `─ ${selected?.path ?? ""} ─` }, ...(selected?.rows ?? [])], showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
         const stacked = !!undo || renderer.width < 80;
         const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: file.source === "shell" ? "shell" : file.added !== undefined || file.removed !== undefined ? `+${file.added ?? 0} −${file.removed ?? 0}` : "" }));
         const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), 20);

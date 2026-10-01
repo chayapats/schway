@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile, writeFile, chmod, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { openUndoStore } from "../src/undo/store.ts";
+import { openUndoStore, pruneUndoStore } from "../src/undo/store.ts";
 import { executeToolCall } from "../src/tools/executor.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { editTool } from "../src/tools/edit.ts";
@@ -198,3 +198,79 @@ for (const [code, reason] of [["ENOSPC", "No space left on device"], ["UNKNOWN_S
     });
   });
 }
+
+
+test("pruning expires old turns and collects only unreferenced session blobs", async () => {
+  await withTempDir(async home => {
+    const store = openUndoStore({ home });
+    const path = join(home, "file");
+    await writeFile(path, "shared");
+    for (const turnId of ["old", "recent"]) {
+      await store.capture({ sessionId: "session", turnId, turnNumber: 1 }, path);
+      const manifestPath = join(home, ".schway/undo/session/turns", `${turnId}.json`);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.createdAt = turnId === "old" ? "2026-01-01T00:00:00Z" : "2026-01-30T00:00:00Z";
+      await writeFile(manifestPath, JSON.stringify(manifest));
+    }
+    const orphan = join(home, ".schway/undo/session/blobs", "f".repeat(64));
+    await writeFile(orphan, "orphan");
+    await pruneUndoStore({ home, maxAgeDays: 14, maxSizeBytes: 100000, now: new Date("2026-02-01T00:00:00Z") });
+    expect((await store.list("session")).map(m => m.turnId)).toEqual(["recent"]);
+    expect((await store.blob("session", Bun.CryptoHasher.hash("sha256", "shared", "hex"))).toString()).toBe("shared");
+    await expect(stat(orphan)).rejects.toThrow();
+  });
+});
+
+
+test("size pruning evicts the globally oldest manifest and accounts for collected blobs", async () => {
+  await withTempDir(async home => {
+    const store = openUndoStore({ home });
+    const path = join(home, "file");
+    await writeFile(path, "x".repeat(10000));
+    await store.capture({ sessionId: "older-session", turnId: "old", turnNumber: 1 }, path);
+    await writeFile(path, "small");
+    await store.capture({ sessionId: "newer-session", turnId: "new", turnNumber: 1 }, path);
+    for (const [session, turn, date] of [["older-session", "old", "2026-01-01"], ["newer-session", "new", "2026-01-02"]]) {
+      const manifestPath = join(home, ".schway", "undo", session!, "turns", `${turn}.json`);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")); manifest.createdAt = `${date}T00:00:00Z`;
+      await writeFile(manifestPath, JSON.stringify(manifest));
+    }
+    await pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1000, now: new Date("2026-01-03T00:00:00Z") });
+    expect(await store.list("older-session")).toEqual([]);
+    expect((await store.list("newer-session"))[0]?.turnId).toBe("new");
+    await expect(stat(join(home, ".schway", "undo", "older-session"))).rejects.toThrow();
+    expect((await store.blob("newer-session", Bun.CryptoHasher.hash("sha256", "small", "hex"))).toString()).toBe("small");
+  });
+});
+
+test("legacy manifests load unavailable shell detection and recovery retains shell attribution", async () => {
+  await withTempDir(async home => {
+    const store = openUndoStore({ home });
+    const turn = { sessionId: "session", turnId: "turn", turnNumber: 1 };
+    const path = join(home, "file");
+    await writeFile(path, "before"); await store.capture(turn, path);
+    const manifestPath = join(home, ".schway", "undo", "session", "turns", "turn.json");
+    const legacy = JSON.parse(await readFile(manifestPath, "utf8")); delete legacy.shell;
+    await writeFile(manifestPath, JSON.stringify(legacy));
+    expect((await store.list("session"))[0]?.shell).toEqual({ detection: "unavailable" });
+    await store.recordShell(turn, { detection: "git", paths: [path, join(home, "shell-a")] });
+    await store.recordShell(turn, { detection: "git", paths: [join(home, "shell-b")] });
+    await store.recordShell(turn, { detection: "unavailable" });
+    expect((await store.list("session"))[0]).toMatchObject({ createdAt: legacy.createdAt, shell: { detection: "git", paths: [join(home, "shell-a"), join(home, "shell-b")] } });
+  });
+});
+
+test("strict age cutoff keeps boundary and incomplete manifests and does not create missing storage", async () => {
+  await withTempDir(async home => {
+    await pruneUndoStore({ home, maxAgeDays: 14, maxSizeBytes: 1000 });
+    await expect(stat(join(home, ".schway"))).rejects.toThrow();
+    const store = openUndoStore({ home }); const path = join(home, "file");
+    await writeFile(path, "before"); await store.capture({ sessionId: "blobs", turnId: "boundary", turnNumber: 1 }, path);
+    const manifestPath = join(home, ".schway", "undo", "blobs", "turns", "boundary.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")); manifest.createdAt = "2026-01-01T00:00:00Z";
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await pruneUndoStore({ home, maxAgeDays: 14, maxSizeBytes: 1000, now: new Date("2026-01-15T00:00:00Z") });
+    expect((await store.list("blobs"))[0]?.files[0]?.after).toBeUndefined();
+    expect((await store.blob("blobs", manifest.files[0].before.sha256)).toString()).toBe("before");
+  });
+});

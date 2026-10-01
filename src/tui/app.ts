@@ -1,3 +1,4 @@
+import { pruneUndoStore } from "../undo/store.ts";
 import { formatCount } from "../text/format.ts";
 import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
@@ -161,6 +162,9 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
   let settings = configEditor.settings;
+  try { await pruneUndoStore({ home, maxAgeDays: settings.undoMaxAgeDays, maxSizeBytes: settings.undoMaxSizeMB * 1024 * 1024 }); }
+  catch { diagnostics.record("undo", "prune_failed", { category: "undo_retention" }, "warn"); }
+
   if (
     hasCliConnectionOptions(io.args) &&
     settings.provider !== "openai-compatible"

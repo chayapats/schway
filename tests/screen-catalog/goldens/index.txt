@@ -23,6 +23,7 @@ failed-turn
 retry-countdown
 review-panel
 undo-preview
+undo-preview-no-git
 recent-work-resume
 compaction
 no-color

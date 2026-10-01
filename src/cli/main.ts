@@ -1,4 +1,4 @@
-import { openUndoStore } from "../undo/store.ts";
+import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
 import { formatDuration } from "../text/format.ts";
 import { resolve } from "node:path";
@@ -231,6 +231,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
+  try { await pruneUndoStore({ home, maxAgeDays: settings.undoMaxAgeDays, maxSizeBytes: settings.undoMaxSizeMB * 1024 * 1024 }); }
+  catch { diagnostics.record("undo", "prune_failed", { category: "undo_retention" }, "warn"); }
   secrets.push(...collectSecrets(undefined, env, settings.credentialEnv));
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
