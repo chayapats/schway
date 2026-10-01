@@ -429,3 +429,39 @@ for (const deny of [false, true]) test(`read-only approval follows beforeTool an
     } finally { setup.runtime.dispose(); }
   });
 });
+
+
+test("ask follows final hook arguments once and denial skips execute and afterTool", async () => withTempDir(async dir => {
+  await Bun.write(join(dir, "note.txt"), "before");
+  const setup = await fixture(dir, [`export const trace = []; export default ctx => {
+    ctx.beforeTool(input => { trace.push('before'); return { arguments: { ...input.arguments, path: 'rewritten.txt' } }; });
+    ctx.afterTool(() => { trace.push('after'); });
+  };`]);
+  let modes = 0;
+  try {
+    const result = await turn(dir, setup.runtime, setup.tools, [call("edit")], { approval: {
+      interactive: true, mode: () => { modes++; expect(setup.modules[0].trace).toEqual(["before"]); return "ask"; },
+      ask: async request => { expect(request.arguments).toEqual({ ...editArgs, path: "rewritten.txt" }); return { kind: "deny", reason: "Denied by the user." }; },
+    } });
+    expect(modes).toBe(1);
+    expect(setup.modules[0].trace).toEqual(["before"]);
+    expect(result.events.find(event => event.type === "tool.denied")).toMatchObject({ mode: "ask", reason: "Denied by the user." });
+    expect(await Bun.file(join(dir, "note.txt")).text()).toBe("before");
+    expect(await Bun.file(join(dir, "rewritten.txt")).exists()).toBe(false);
+  } finally { setup.runtime.dispose(); }
+}));
+
+for (const first of ["invalid", "hook-denied"] as const) test(`source-order approval proceeds past an earlier ${first} call`, async () => withTempDir(async dir => {
+  const runtime = new ExtensionRuntime();
+  runtime.toolHooks.beforeTool("policy", input => { if (input.id === "first") return { deny: "extension denial" }; });
+  const probe: ToolDefinition = { name: "probe", description: "Parallel probe", execution: "parallel", inputSchema: { type: "object", required: ["value"], properties: { value: { type: "string" } } }, execute: async () => ({ content: "ran" }) };
+  const prompts: string[] = [];
+  try {
+    const result = await turn(dir, runtime, createToolRegistry([probe]), [call("first", "probe", first === "invalid" ? {} : { value: "one" }), call("second", "probe", { value: "two" })], {
+      approval: { interactive: true, mode: () => "ask", ask: async request => { prompts.push(request.toolCallId); return { kind: "allow" }; } },
+    });
+    expect(prompts).toEqual(["second"]);
+    expect(result.results[0]?.isError).toBe(true);
+    expect(result.results[1]?.content).toBe("ran");
+  } finally { runtime.dispose(); }
+}));

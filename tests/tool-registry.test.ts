@@ -162,3 +162,55 @@ test("invalid and unknown calls settle before approval; denied writes never capt
     expect(await Bun.file(join(root, "note.txt")).exists()).toBe(false);
   });
 });
+
+
+test("abort between the decision boundary and approval invocation never prompts", async () => withTempDir(async root => {
+  const abort = new AbortController();
+  let prompts = 0;
+  const executed = await executeToolCall({ registry: createToolRegistry([writeTool]), workspace: { root, launchCwd: root, extraRoots: [] }, signal: abort.signal,
+    call: { type: "tool_call", id: "write", name: "write", arguments: { path: "note.txt", content: "after" } },
+    approval: { interactive: true, mode: () => { queueMicrotask(() => abort.abort()); return "ask"; }, ask: async () => { prompts++; return { kind: "allow" }; } },
+  });
+  expect(executed.status).toBe("cancelled");
+  expect(prompts).toBe(0);
+  expect(await Bun.file(join(root, "note.txt")).exists()).toBe(false);
+}));
+
+test("approval arguments are detached and a late allow cannot write after cancellation", async () => withTempDir(async root => {
+  const abort = new AbortController();
+  let approve!: (decision: { kind: "allow" }) => void;
+  let opened!: () => void;
+  const prompt = new Promise<void>(resolve => { opened = resolve; });
+  const args = { path: "note.txt", content: "original" };
+  const running = executeToolCall({ registry: createToolRegistry([writeTool]), workspace: { root, launchCwd: root, extraRoots: [] }, signal: abort.signal,
+    call: { type: "tool_call", id: "write", name: "write", arguments: args }, index: 3,
+    approval: { interactive: true, mode: () => "ask", ask: request => {
+      expect(request).toEqual({ toolCallId: "write", toolName: "write", arguments: args, effect: "mutating", index: 3 });
+      (request.arguments as typeof args).content = "corruption";
+      opened(); return new Promise(resolve => { approve = resolve; });
+    } },
+  });
+  await prompt; abort.abort();
+  expect((await running).status).toBe("cancelled");
+  approve({ kind: "allow" }); await Bun.sleep(1);
+  expect(args.content).toBe("original");
+  expect(await Bun.file(join(root, "note.txt")).exists()).toBe(false);
+}));
+
+test("ask denial captures no undo image and detached preview mutation cannot change an allowed write", async () => withTempDir(async root => {
+  const registry = createToolRegistry([writeTool]);
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const undo = openUndoStore({ home: join(root, "home") });
+  const call = { type: "tool_call" as const, id: "write", name: "write", arguments: { path: "note.txt", content: "original" } };
+  const denied = await executeToolCall({ registry, workspace, call, undo, undoTurn: { sessionId: "session", turnId: "turn", turnNumber: 1 },
+    approval: { interactive: true, mode: () => "ask", ask: async () => ({ kind: "deny", reason: "Denied by the user." }) },
+  });
+  expect(denied.denied).toEqual({ mode: "ask", reason: "Denied by the user." });
+  expect(await undo.list("session")).toEqual([]);
+  expect(await Bun.file(join(root, "note.txt")).exists()).toBe(false);
+  const allowed = await executeToolCall({ registry, workspace, call, approval: { interactive: true, mode: () => "ask", ask: async request => {
+    (request.arguments as typeof call.arguments).content = "corruption"; return { kind: "allow" };
+  } } });
+  expect(allowed.status).toBe("success");
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("original");
+}));

@@ -39,7 +39,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || ["completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const disk = palette || ["approval-command", "approval-edit", "completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -84,6 +84,13 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       { text: screen.id === "large-edit" ? "Updated the clamp implementation." : "Fixed clamp so it respects the upper bound." },
     ];
   }
+  if (screen.id === "approval-command" || screen.id === "approval-edit") {
+    tools = createToolRegistry([editTool, bashTool]);
+    await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
+    responses = [{ toolCalls: [screen.id === "approval-command"
+      ? { id: "approval-command", name: "bash", arguments: { command: "bun test --filter clamp" } }
+      : { id: "approval-edit", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "  return Math.max(lo, n);", newText: "  return Math.min(hi, Math.max(lo, n));" }] } }] }];
+  }
   if (screen.id === "parallel-tools") {
     const names = ["read", "grep", "bash"];
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
@@ -108,6 +115,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
+  if (screen.id === "approval-command" || screen.id === "approval-edit") options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (picker || unconnectedPicker) {
     options.configEditor = new ConfigEditor(picker ? { cli: { provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787/v1", auth: "none" } } : {},
       { user: join(home, "config.json"), project: join(root, "config.json") });

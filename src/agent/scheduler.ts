@@ -35,6 +35,11 @@ export async function* scheduleToolCalls(options: {
   const results: Array<ExecutedToolCall | undefined> = Array.from({
     length: calls.length,
   });
+  const approvalGates = calls.map(() => {
+    let release = () => {};
+    const promise = new Promise<void>(resolve => { release = resolve; });
+    return { promise, release };
+  });
   const running = new Set<number>();
   const queue: RuntimeEvent[] = [];
   let nextIndex = 0;
@@ -86,7 +91,15 @@ export async function* scheduleToolCalls(options: {
       signal,
       env: options.env,
       toolHooks,
-      approval: options.approval,
+      index,
+      onApprovalSettled: approvalGates[index]!.release,
+      approval: options.approval && { interactive: options.approval.interactive, mode: () => options.approval!.mode(),
+        ...(options.approval.ask ? { ask: async (request, approvalSignal) => {
+          await Promise.all(approvalGates.slice(0, index).map(gate => gate.promise));
+          approvalSignal.throwIfAborted();
+          return options.approval!.ask!(request, approvalSignal);
+        } } : {}),
+      },
       undo: options.undo,
       undoTurn: options.undoTurn,
       onOutput(chunk) {
@@ -128,6 +141,7 @@ export async function* scheduleToolCalls(options: {
         });
       })
       .finally(() => {
+        approvalGates[index]!.release();
         running.delete(index);
         wake?.();
       });

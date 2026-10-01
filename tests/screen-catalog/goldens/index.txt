@@ -1,5 +1,8 @@
 first-run
 read-only-mode
+ask-mode
+approval-command
+approval-edit
 sign-in-chooser
 chatgpt-more-options
 grok-more-options

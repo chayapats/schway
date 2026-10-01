@@ -168,6 +168,7 @@ export abstract class CompactionLayer extends SettingsLayer {
         staged = undefined;
         previous?.dispose();
       }
+      this.allowedTools.clear();
       return true;
     } catch (error) {
       if (!this.disposed && this.activeAbort === abort) {

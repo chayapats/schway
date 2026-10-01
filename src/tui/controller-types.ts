@@ -1,3 +1,4 @@
+import type { ToolApproval } from "./tool-approval.ts";
 import type { ApprovalMode } from "../agent/approval.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
 import type { PreferencesSnapshot } from "./preferences.ts";
@@ -132,6 +133,8 @@ export interface TuiSnapshot {
   branchId: string;
   /** Live process approval mode retained across session and model switches. */
   approvalMode: ApprovalMode;
+  /** Pending tool request retained while another panel owns input. */
+  toolApproval?: ToolApproval;
   provider: string;
   modelId: string;
   /** Active named compatible profile, when a selection is live. */

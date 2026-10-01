@@ -32,7 +32,7 @@ export abstract class SettingsLayer extends UndoLayer {
   /** Cancel a pending preview or close preferences without committing it. */
   closePreferences(): void {
     this.preferenceGeneration++;
-    if (this.running) this.cancel();
+    if (this.running && !this.toolApproval) this.cancel();
     this.preferenceTransaction = undefined;
     if (this.preferences?.preview) this.preferences.preview = undefined;
     else this.preferences = undefined;

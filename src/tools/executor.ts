@@ -1,4 +1,4 @@
-import { READ_ONLY_DENIAL, READ_ONLY_HEADLESS_DENIAL, type ApprovalMode, type ApprovalPolicy } from "../agent/approval.ts";
+import { ASK_HEADLESS_DENIAL, READ_ONLY_DENIAL, READ_ONLY_HEADLESS_DENIAL, type ApprovalMode, type ApprovalPolicy } from "../agent/approval.ts";
 import { toolEffect } from "./types.ts";
 import { undoFailureReason } from "../undo/errors.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
@@ -32,6 +32,9 @@ export async function executeToolCall(options: {
   onOutput?: (chunk: ToolOutputChunk) => void;
   toolHooks?: ExtensionToolHooks;
   approval?: ApprovalPolicy;
+  index?: number;
+  /** Release source-order approval waiting once this call has a decision. */
+  onApprovalSettled?: () => void;
   undo?: UndoStore;
   undoTurn?: UndoTurn;
 }): Promise<ExecutedToolCall> {
@@ -72,10 +75,29 @@ export async function executeToolCall(options: {
   if (signal?.aborted) return cancelled(options.call);
 
   const mode = options.approval?.mode() ?? "auto";
-  if (mode === "read-only" && toolEffect(registered.definition) === "mutating") {
-    const reason = options.approval?.interactive ? READ_ONLY_DENIAL : READ_ONLY_HEADLESS_DENIAL;
-    return { ...failure(options.call, reason), denied: { mode, reason } };
-  }
+  const effect = toolEffect(registered.definition);
+  try {
+    if (effect === "mutating") {
+      if (mode === "read-only") {
+        const reason = options.approval?.interactive ? READ_ONLY_DENIAL : READ_ONLY_HEADLESS_DENIAL;
+        return { ...failure(options.call, reason), denied: { mode, reason } };
+      }
+      if (mode === "ask") {
+        const ask = options.approval?.ask;
+        const decision = ask ? await waitForApproval(() => ask.call(options.approval, { toolCallId: options.call.id, toolName: options.call.name,
+          arguments: structuredClone(args), effect, index: options.index ?? 0 }, signal ?? new AbortController().signal), signal)
+          : { kind: "deny" as const, reason: ASK_HEADLESS_DENIAL };
+        if (signal?.aborted) return cancelled(options.call);
+        if (decision.kind === "deny") {
+          const reason = decision.reason ?? "Denied by the user.";
+          return { ...failure(options.call, reason), denied: { mode, reason } };
+        }
+      }
+    }
+  } catch (error) {
+    return signal?.aborted ? cancelled(options.call) : failure(options.call, hooks ? hooks.safeText(messageOf(error)) : messageOf(error));
+  } finally { options.onApprovalSettled?.(); }
+  if (signal?.aborted) return cancelled(options.call);
 
   // Keep invocation arguments for afterTool independent of tool-side input mutation.
   let executedArgs: unknown;
@@ -121,6 +143,17 @@ export async function executeToolCall(options: {
       details: { undoError: hooks ? hooks.safeText(messageOf(error)) : messageOf(error) } }; }
   }
   return hooks ? hooks.finish(options.call, registered.definition, executedArgs, executed, signal!) : executed;
+}
+
+/** Race an approval provider against cancellation and remove the listener after either settles. */
+function waitForApproval<T>(ask: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => { cleanup(); reject(new Error("Tool call cancelled")); };
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    if (signal?.aborted) { abort(); return; }
+    signal?.addEventListener("abort", abort, { once: true });
+    Promise.resolve().then(() => { signal?.throwIfAborted(); return ask(); }).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+  });
 }
 
 /** Render unexpected execution failures without allowing unprintable values to prevent settlement. */

@@ -384,7 +384,8 @@ reading position.
 | --- | --- |
 | Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back |
 | Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+R retries catalog |
-| Credential, callback, approval | Masked entry or external wait, Enter only on entry, Esc cancel |
+| Tool approval | Up/Down choose, Enter choose or send reason, Esc deny, Ctrl+C cancel turn, PageUp/PageDown scroll |
+| Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown |
 | Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer |
 
@@ -676,6 +677,15 @@ Test coverage for this guide: [release verification](release-verification.md#tui
 
 ## Approval mode
 
-Press **Shift+Tab** in the ordinary composer to cycle `auto` → `read-only` → `auto`, including while a turn runs. Calls that have not reached their approval decision use the current mode. In read-only mode the footer keeps a **◆ READ-ONLY** chip to the left of the status pill, including at narrow widths, and the composer hints start with **Shift+Tab read-only**. Failed tool rows expand the denial reason.
+Press **Shift+Tab** in the ordinary composer to cycle `auto` → `ask` → `read-only` → `auto`, including while a turn runs. Calls that have not reached their approval decision use the current mode. In read-only mode the footer keeps a **◆ READ-ONLY** chip to the left of the status pill, including at narrow widths, and the composer hints start with **Shift+Tab read-only**. Failed tool rows expand the denial reason.
 
-Shift+Tab retains its existing scope, inspection, or completion behavior while those views are open; it does not switch modes in panels or search. Launch with `schway --approval read-only` to start in that mode. The process choice survives new/resumed sessions and model changes without writing config or interactive memory.
+Shift+Tab retains its existing scope, inspection, or completion behavior while those views are open; it does not switch modes in panels or search. Launch with `schway --approval ask` or `schway --approval read-only` to start in that mode. The process choice survives new/resumed sessions and model changes without writing config or interactive memory.
+
+
+In **ask** mode the footer shows **◆ ASK**. Read-only tools run without a prompt. A mutating tool opens an `Allow <tool>? · ask mode` panel after `beforeTool` hooks and argument validation. Bash shows the full command; edit and write show the target path, line counts and a numbered diff; other tools show their final arguments as indented JSON. Known secrets are masked. PageUp/PageDown scroll the preview; resizing reflows it.
+
+Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **Deny with reason…**, then Enter. Allow once applies only to the current call. A session allowance applies to later ask-mode calls with the same tool name; it never overrides read-only mode and survives cycling back to ask. Successful session switches through `/new`, `/resume`, `/sessions` or Alt+B clear every allowance. Allowances are not saved across processes.
+
+Esc denies the current call without stopping the turn. **Deny with reason…** opens an entry with `Why? The agent will see this…`; Enter submits the trimmed reason, including an empty denial. The model receives `Denied by the user.` or `Denied by the user: <reason>`. Reason text stays out of prompt history, composer drafts and draft checkpoints. Every exit restores the draft and cursor saved before the panel opened. **Ctrl+C** cancels the whole turn, including queued calls; **Shift+Tab** is ignored while the approval prompt is open.
+
+Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc close to review request` hint show how to reach the request; closing that view opens the approval prompt immediately.

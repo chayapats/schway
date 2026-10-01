@@ -1225,11 +1225,26 @@ test("approval user config and stricter-only project notice apply once and CLI o
 for (const [flags, error] of [
   [["--approval"], "Missing value for --approval"],
   [["--approval="], "Missing value for --approval"],
-  [["--approval", "ask"], "Unknown approval mode: ask. Use auto or read-only."],
-  [["--approval=invalid"], "Unknown approval mode: invalid. Use auto or read-only."],
+  [["--approval=invalid"], "Unknown approval mode: invalid. Use auto, ask, or read-only."],
 ] as const) test(`invalid approval flags ${flags.join(" ")} fail with usage`, async () => {
   const result = await run([...flags]);
   expect(result.exitCode).toBe(1);
   expect(result.stderr).toStartWith(error + "\n");
-  expect(result.stderr).toContain("[--approval <auto|read-only>]");
+  expect(result.stderr).toContain("[--approval <auto|ask|read-only>]");
+});
+
+
+test("headless ask denies a write immediately without input or a failing exit", async () => {
+  await withTempDir(async dir => {
+    const output = await Promise.race([
+      run(["-p", "write it", "--approval", "ask", "--json"], { cwd: dir,
+        model: createScriptedModel({ responses: [{ toolCalls: [{ id: "write-call", name: "write", arguments: { path: "note.txt", content: "changed" } }] }, { text: "done" }] }) }),
+      Bun.sleep(1000).then(() => { throw new Error("headless approval waited for input"); }),
+    ]);
+    expect(output.exitCode, output.stderr).toBe(0);
+    expect(await Bun.file(join(dir, "note.txt")).exists()).toBe(false);
+    const events = output.stdout.trim().split("\n").map(line => JSON.parse(line));
+    expect(events.find(event => event.type === "tool.denied")).toEqual({ type: "tool.denied", toolCallId: "write-call", name: "write", mode: "ask", reason: "approval required; headless cannot ask" });
+    expect(events.find(event => event.type === "tool.finished")).toMatchObject({ status: "error", content: "approval required; headless cannot ask" });
+  });
 });

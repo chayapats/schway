@@ -3,12 +3,24 @@ import { parseArgs, cliOverridesFromArgs } from "../src/cli/args.ts";
 import { withTempDir } from "./helpers.ts";
 import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
+import { dispatchEditorInput } from "../src/tui/commands.ts";
+import { handleSlashCommand } from "../src/tui/app.ts";
+import { sessionsDirectory } from "../src/session/jsonl.ts";
+import { bashTool } from "../src/tools/bash.ts";
+import { writeTool } from "../src/tools/write.ts";
+import { pathToFileURL } from "node:url";
+import type { ScriptedTurnFactory } from "./helpers/scripted-model.ts";
+import { statusPill } from "../src/tui/presentation.ts";
+import { loadExtensions } from "../src/extensions/loader.ts";
+import type { TuiSnapshot } from "../src/tui/controller-types.ts";
+import type { ConversationViewOptions } from "../src/tui/view.ts";
+import { openDraftStore } from "../src/drafts/store.ts";
 import { readTool } from "../src/tools/read.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { TextRenderable } from "@opentui/core";
+import { TextareaRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -19,25 +31,40 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
 /** Render the real app with a deterministic adapter and configurable controller dependencies. */
-async function setup(width = 80, kittyKeyboard = true, overrides: Partial<TuiControllerOptions> = {}) {
-  const terminal = await createTestRenderer({ width, height: 28, kittyKeyboard });
+async function setup(width = 80, kittyKeyboard = true, overrides: Partial<TuiControllerOptions> = {}, viewOptions: Partial<ConversationViewOptions> = {}) {
+  const terminal = await createTestRenderer({ width, height: 28, kittyKeyboard, exitOnCtrlC: false, exitSignals: [] });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({ session: createSession(), workspace, provider: "scripted", modelId: "test-model", sessionId: "test-session",
     model: createScriptedModel(), contextManager: createContextManager(workspace), ...overrides });
-  const view = createConversationView(terminal.renderer, { controller, workspaceRoot: workspace.root, home: "/home/test", env: { SCHWAY_MOTION: "off" },
-    secrets: [], quit() {}, submit: (text, accepted) => controller.submit(text, accepted) });
+  const root = overrides.workspace?.root ?? workspace.root;
+  const home = overrides.home ?? "/home/test";
+  const settings = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") }).settings;
+  const ctx = { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionsDirectory(home), settings: () => settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } };
+  const view = createConversationView(terminal.renderer, { controller, workspaceRoot: root, home, env: { SCHWAY_MOTION: "off" },
+    secrets: [], quit() {}, submit: (text, accepted) => dispatchEditorInput(text, controller, command => handleSlashCommand(command.name, command.args, ctx), accepted), ...viewOptions });
   cleanups.push(() => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); });
   const settle = async () => { await Bun.sleep(5); view.refresh(); await terminal.flush(); };
   await settle();
-  return { ...terminal, controller, view, settle };
+  const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
+    const start = performance.now();
+    while (!predicate(controller.snapshot())) {
+      if (performance.now() - start > 2000) throw new Error(`Approval state timed out\n${terminal.captureCharFrame()}`);
+      await settle();
+    }
+    await settle();
+  };
+  return { ...terminal, controller, view, settle, waitFor, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable };
 }
 
-test("Shift+Tab cycles read-only with a persistent chip and leading hint at every width", async () => {
+test("Shift+Tab cycles auto, ask and read-only with a persistent chip and leading hint at every width", async () => {
   for (const width of [120, 80, 50]) {
     const ui = await setup(width);
     const hints = () => (ui.renderer.root.findDescendantById("hints") as TextRenderable).chunks.map(chunk => chunk.text).join("");
     const autoHints = hints();
     expect(autoHints).not.toContain("Shift+Tab");
+    ui.mockInput.pressTab({ shift: true }); await ui.settle();
+    expect(ui.controller.snapshot().approvalMode).toBe("ask");
+    expect(ui.captureCharFrame()).toContain("◆ ASK");
     ui.mockInput.pressTab({ shift: true }); await ui.settle();
     expect(ui.controller.snapshot().approvalMode).toBe("read-only");
     expect(ui.captureCharFrame()).toContain("◆ READ-ONLY");
@@ -53,8 +80,8 @@ test("Shift+Tab cycles read-only with a persistent chip and leading hint at ever
 test("legacy ESC [ Z cycles approval and preferences retain Shift+Tab scope navigation", async () => {
   const legacy = await setup(80, false);
   await legacy.mockInput.pressKeys(["\x1b[Z"]); await legacy.settle();
-  expect(legacy.controller.snapshot().approvalMode).toBe("read-only");
-  expect(legacy.captureCharFrame()).toContain("◆ READ-ONLY");
+  expect(legacy.controller.snapshot().approvalMode).toBe("ask");
+  expect(legacy.captureCharFrame()).toContain("◆ ASK");
   const editor = new ConfigEditor({ user: { model: "gpt-5.4" } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
   const ui = await setup(80, true, { configEditor: editor });
   ui.mockInput.pressKey("p", { meta: true }); await ui.settle();
@@ -140,7 +167,7 @@ test("switching to read-only between tool rounds denies the next edit and expand
     try {
       await secondRound; await ui.settle();
       expect(ui.controller.running).toBe(true);
-      ui.mockInput.pressTab({ shift: true }); await ui.settle();
+      ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true }); await ui.settle();
       expect(ui.controller.snapshot().approvalMode).toBe("read-only");
     } finally { release(); }
     expect(await turn).toBe(true);
@@ -157,11 +184,302 @@ test("switching to read-only between tool rounds denies the next edit and expand
 
 test("read-only chip survives the smallest footer fallback and disconnected state", async () => {
   const ui = await setup(50);
-  ui.controller.cycleApprovalMode(); await ui.settle();
+  ui.controller.cycleApprovalMode(); ui.controller.cycleApprovalMode(); await ui.settle();
   ui.resize(28, 28); await ui.settle();
   expect(ui.captureCharFrame()).toContain("◆ READ-ONLY");
   const disconnected = await setup(50, true, { model: undefined, modelId: "", provider: "openai" });
-  disconnected.mockInput.pressTab({ shift: true }); await disconnected.settle();
+  disconnected.mockInput.pressTab({ shift: true }); disconnected.mockInput.pressTab({ shift: true }); await disconnected.settle();
   expect(disconnected.captureCharFrame()).toContain("◆ READ-ONLY");
   expect(disconnected.captureCharFrame()).toContain("Shift+Tab read-only");
 });
+
+
+test("ask edit previews exact diff and Esc returns the prescribed denial to the model", async () => {
+  await withTempDir(async root => {
+    await Bun.write(join(root, "clamp.ts"), "function clamp(n, lo, hi) {\n  return Math.max(lo, n);\n}\n");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    let result = "";
+    const model = createScriptedModel({ responses: [
+      { toolCalls: [{ id: "edit-call", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "  return Math.max(lo, n);", newText: "  return Math.min(hi, Math.max(lo, n));" }] } }] },
+      request => { result = request.items.filter(item => item.type === "tool_result").at(-1)?.content ?? ""; return { text: "done" }; },
+    ] });
+    const editor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
+    const ui = await setup(50, true, { configEditor: editor, workspace, model, tools: createToolRegistry([editTool]), contextManager: createContextManager(workspace) });
+    const turn = ui.controller.submit("fix clamp");
+    await ui.waitFor(s => !!s.toolApproval?.diff);
+    expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");
+    expect(ui.captureCharFrame()).toContain("clamp.ts  +1 −1");
+    expect(ui.captureCharFrame()).toContain("2 │-  return Math.max(lo, n);");
+    expect(ui.captureCharFrame()).toContain("2 │+  return Math.min(hi, Math.max(lo, n));");
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(await turn).toBe(true);
+    expect(result).toBe("Denied by the user.");
+    expect(await Bun.file(join(root, "clamp.ts")).text()).toContain("return Math.max(lo, n);");
+  });
+});
+
+/** Start an isolated ask-mode app with real built-in file tools and scripted rounds. */
+async function askSetup(root: string, responses: ScriptedTurnFactory[], overrides: Partial<TuiControllerOptions> = {}, viewOptions: Partial<ConversationViewOptions> = {}) {
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(root, "user-config"), project: join(root, "project-config") });
+  return setup(80, true, { workspace, configEditor, model: createScriptedModel({ responses }), tools: createToolRegistry([editTool, writeTool, bashTool, readTool]), contextManager: createContextManager(workspace), ...overrides }, viewOptions);
+}
+const editCall = (id: string, oldText = "before", newText = "after", path = "note.txt") => ({ id, name: "edit", arguments: { path, edits: [{ oldText, newText }] } });
+
+test("bash allow once runs only the current command and the next call asks again", async () => withTempDir(async root => {
+  const ui = await askSetup(root, [
+    { toolCalls: [{ id: "first", name: "bash", arguments: { command: "printf first > first.txt" } }] },
+    { toolCalls: [{ id: "second", name: "bash", arguments: { command: "printf second > second.txt" } }] }, { text: "done" },
+  ]);
+  const turn = ui.controller.submit("run commands");
+  await ui.waitFor(s => s.toolApproval?.content.includes("printf first") === true);
+  expect(ui.captureCharFrame()).toContain("printf first > first.txt");
+  expect(ui.captureCharFrame()).toContain("› Allow once");
+  ui.mockInput.pressEnter();
+  await ui.waitFor(s => s.toolApproval?.request.toolCallId === "second");
+  expect(await Bun.file(join(root, "first.txt")).text()).toBe("first");
+  expect(await Bun.file(join(root, "second.txt")).exists()).toBe(false);
+  ui.mockInput.pressEnter(); await turn; await ui.settle();
+  expect(await Bun.file(join(root, "second.txt")).text()).toBe("second");
+}));
+
+test("allow edit for this session survives mode cycling, bypasses later asks, and /new clears it", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const ui = await askSetup(root, [
+    { toolCalls: [editCall("first")] }, { toolCalls: [editCall("second", "after", "twice")] }, { text: "done" },
+    { toolCalls: [editCall("read-only", "twice", "forbidden")] }, { text: "done" },
+    { toolCalls: [editCall("allowed", "twice", "third")] }, { text: "done" },
+    { toolCalls: [editCall("new-session", "third", "fourth")] }, { text: "done" },
+  ], { home: join(root, "home") });
+  const turn = ui.controller.submit("edit twice");
+  await ui.waitFor(s => !!s.toolApproval?.diff);
+  ui.mockInput.pressArrow("down"); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("› Allow edit for this session");
+  ui.mockInput.pressEnter(); await turn; await ui.settle();
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("twice");
+  expect(ui.controller.snapshot().toolApproval).toBeUndefined();
+  ui.mockInput.pressTab({ shift: true }); await ui.settle();
+  expect(ui.controller.snapshot().approvalMode).toBe("read-only");
+  await ui.controller.submit("refuse edit");
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("twice");
+  ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true }); await ui.settle();
+  await ui.controller.submit("edit again");
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("third");
+  const previous = ui.controller.snapshot().sessionId;
+  await ui.mockInput.typeText("/new"); ui.mockInput.pressEnter();
+  await ui.waitFor(s => s.sessionId !== previous && !ui.controller.running);
+  expect(ui.controller.snapshot().approvalMode).toBe("ask");
+  const next = ui.controller.submit("edit new session");
+  await ui.waitFor(s => s.toolApproval?.request.toolCallId === "new-session");
+  expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");
+  ui.mockInput.pressEscape(); await next;
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("third");
+}));
+
+test("denial entry trims the reason, restores the exact draft cursor, and checkpoints only the draft", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  let content = "";
+  const home = join(root, "home");
+  await mkdir(home);
+  const ui = await askSetup(root, [{ toolCalls: [editCall("reason")] }, request => {
+    content = request.items.filter(item => item.type === "tool_result").at(-1)?.content ?? ""; return { text: "done" };
+  }], { home }, { draftPersistence: true });
+  await ui.mockInput.typeText("draft stays here"); ui.editor.cursorOffset = 5;
+  const turn = ui.controller.submit("edit");
+  await ui.waitFor(s => !!s.toolApproval?.diff);
+  ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await ui.settle();
+  expect(ui.controller.snapshot().toolApproval?.enteringReason).toBe(true);
+  expect(ui.captureCharFrame()).toContain("Why? The agent will see this…");
+  await ui.mockInput.pasteBracketedText("  use a smaller change  "); await ui.settle();
+  expect(ui.view.flushDraft()).toEqual({ saved: true, failed: false });
+  const saved = () => openDraftStore({ home, workspaceRoot: root, sessionId: "test-session" }).checkpoint?.text;
+  expect(saved()).toBe("draft stays here");
+  ui.mockInput.pressEnter(); await turn; await ui.settle();
+  expect(content).toBe("Denied by the user: use a smaller change");
+  expect(ui.editor.plainText).toBe("draft stays here");
+  expect(ui.editor.cursorOffset).toBe(5);
+  expect(saved()).toBe("draft stays here");
+  ui.mockInput.pressArrow("up"); await ui.settle();
+  expect(ui.editor.plainText).not.toContain("use a smaller change");
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+}));
+
+for (const exit of ["escape", "empty", "cancel", "dispose"] as const) test(`approval ${exit} keeps the draft and leaves files unchanged`, async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const session = createSession();
+  const ui = await askSetup(root, [{ toolCalls: [editCall("first"), editCall("queued")] }, { text: "done" }], { session });
+  await ui.mockInput.typeText("saved draft"); ui.editor.cursorOffset = 3;
+  const turn = ui.controller.submit("edit");
+  await ui.waitFor(s => !!s.toolApproval?.diff);
+  if (exit === "empty") {
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await ui.settle(); ui.mockInput.pressEnter();
+  } else if (exit === "escape") ui.mockInput.pressEscape();
+  else if (exit === "cancel") ui.mockInput.pressKey("c", { ctrl: true });
+  else ui.controller.dispose();
+  if (exit === "escape" || exit === "empty") {
+    await ui.waitFor(s => s.toolApproval?.request.toolCallId === "queued"); ui.mockInput.pressEscape();
+  }
+  await turn; await ui.settle();
+  expect(ui.controller.snapshot().toolApproval).toBeUndefined();
+  expect(ui.editor.plainText).toBe("saved draft");
+  expect(ui.editor.cursorOffset).toBe(3);
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+  const results = session.items.filter(item => item.type === "tool_result");
+  expect(results.map(item => item.content)).toEqual(exit === "cancel" || exit === "dispose" ? ["Tool call cancelled", "Tool call cancelled"] : ["Denied by the user.", "Denied by the user."]);
+  if (exit === "cancel") expect(ui.controller.snapshot().outcome?.reason).toBe("cancelled");
+  if (exit === "dispose") { const release = session.acquireOperation(); release(); }
+}));
+
+test("Shift+Tab cannot change an open request or its ask chip, including after resize", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const ui = await askSetup(root, [{ toolCalls: [editCall("first")] }, { text: "done" }]);
+  const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
+  const request = ui.controller.snapshot().toolApproval;
+  ui.mockInput.pressTab({ shift: true }); ui.resize(50, 28); await ui.settle();
+  expect(ui.controller.snapshot().approvalMode).toBe("ask");
+  expect(ui.controller.snapshot().toolApproval).toEqual(request);
+  expect(ui.captureCharFrame()).toContain("◆ ASK");
+  expect(ui.captureCharFrame()).not.toContain("Esc stops");
+  expect(ui.captureCharFrame()).toContain("Ctrl+C cancel");
+  expect(ui.captureCharFrame()).toContain("Enter choose · Esc deny · Ctrl+C cancel turn");
+  ui.mockInput.pressEscape(); await turn;
+}));
+
+for (const panel of ["model", "preferences", "help", "search"] as const) test(`${panel} stays open while approval waits and Esc opens the request`, async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const ui = await askSetup(root, [{ toolCalls: [editCall("pending")] }, { text: "done" }]);
+  if (panel === "model") ui.mockInput.pressKey("m", { meta: true });
+  if (panel === "preferences") ui.mockInput.pressKey("p", { meta: true });
+  if (panel === "help") ui.mockInput.pressKey("h", { meta: true });
+  if (panel === "search") ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.settle();
+  const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
+  expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
+  expect(statusPill(ui.controller.snapshot())).toMatchObject({ label: "APPROVAL", tone: "stopping" });
+  expect(ui.captureCharFrame()).toContain("APPROVAL");
+  expect(ui.captureCharFrame()).not.toContain("Esc stops");
+  expect(ui.captureCharFrame()).not.toContain("Esc stop");
+  const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
+  expect(hints.plainText).toBe("Esc close to review request");
+  if (panel === "model") expect(ui.controller.snapshot().modelPicker).toBeDefined();
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");
+  ui.mockInput.pressEscape(); await turn;
+}));
+
+test("beforeTool rewritten path is previewed and is the only file changed after approval", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before"); await Bun.write(join(root, "rewritten.txt"), "before");
+  const path = join(root, "rewrite.ts");
+  await Bun.write(path, `export default ctx => ctx.beforeTool(input => ({ arguments: { ...input.arguments, path: 'rewritten.txt' } }));`);
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const loaded = await loadExtensions({ modules: [path], workspace, home: join(root, "home"), tools: createToolRegistry([editTool]) });
+  const ui = await askSetup(root, [{ toolCalls: [editCall("rewritten")] }, { text: "done" }], { tools: loaded.tools, extensions: loaded.runtime });
+  const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
+  expect(ui.captureCharFrame()).toContain("rewritten.txt  +1 −1");
+  expect(ui.captureCharFrame()).not.toContain("note.txt  +1 −1");
+  ui.mockInput.pressEnter(); await turn;
+  expect(await Bun.file(join(root, "rewritten.txt")).text()).toBe("after");
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+}));
+
+test("parallel extension approvals follow source index when beforeTool completes backwards", async () => withTempDir(async root => {
+  const path = join(root, "parallel.ts");
+  await Bun.write(path, `export let release; export let secondReady = false;
+    const gate = new Promise(resolve => { release = resolve; });
+    export default ctx => {
+      for (const name of ['first_tool', 'second_tool']) ctx.registerTool({ name, description: 'Parallel extension', execution: 'parallel', inputSchema: { type: 'object' }, execute: async () => ({ content: 'ran' }) });
+      ctx.beforeTool(async input => { if (input.id === 'first') await gate; else secondReady = true; });
+    };`);
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const loaded = await loadExtensions({ modules: [path], workspace, home: join(root, "home"), tools: createToolRegistry() });
+  const extension = await import(pathToFileURL(path).href);
+  const ui = await askSetup(root, [{ toolCalls: [{ id: "first", name: "first_tool", arguments: { change: "one" } }, { id: "second", name: "second_tool", arguments: { change: "two" } }] }, { text: "done" }], { tools: loaded.tools, extensions: loaded.runtime });
+  const turn = ui.controller.submit("run extensions");
+  await ui.waitFor(() => extension.secondReady);
+  expect(ui.controller.snapshot().toolApproval).toBeUndefined();
+  extension.release(); await ui.waitFor(s => s.toolApproval?.request.toolCallId === "first");
+  expect(ui.captureCharFrame()).toContain("Allow first_tool? · ask mode");
+  expect(ui.captureCharFrame()).toContain('"change": "one"');
+  ui.mockInput.pressEscape(); await ui.waitFor(s => s.toolApproval?.request.toolCallId === "second");
+  expect(ui.captureCharFrame()).toContain("Allow second_tool? · ask mode");
+  ui.mockInput.pressEnter(); await turn;
+}));
+
+
+test("write approval numbers every new line and scrolls the full untruncated preview with masked secrets", async () => withTempDir(async root => {
+  const secret = 'private"key';
+  const path = "a/very/long/nested/path/to/the/new-file.txt";
+  const content = Array.from({ length: 60 }, (_, index) => index === 0 ? secret : `source line ${index + 1}`).join("\n") + "\n";
+  const ui = await askSetup(root, [{ toolCalls: [{ id: "new-write", name: "write", arguments: { path, content } }] }, { text: "done" }], { secrets: [secret] });
+  const turn = ui.controller.submit("write"); await ui.waitFor(s => !!s.toolApproval?.diff);
+  ui.resize(50, 28); await ui.settle();
+  const diff = ui.controller.snapshot().toolApproval?.diff;
+  expect(diff?.rows).toHaveLength(60);
+  expect(diff?.added).toBe(60); expect(diff?.removed).toBe(0);
+  expect(ui.captureCharFrame()).toContain("+60 −0");
+  expect(ui.captureCharFrame()).toContain("1 │+***");
+  expect(ui.captureCharFrame()).not.toContain(secret);
+  expect(ui.captureCharFrame()).not.toContain("source line 60");
+  for (let page = 0; page < 8; page++) await ui.mockInput.pressKeys(["\x1b[6~"]);
+  await ui.settle(); expect(ui.captureCharFrame()).toContain("60 │+source line 60");
+  expect(ui.captureCharFrame()).toContain("Allow write for this session");
+  for (let page = 0; page < 8; page++) await ui.mockInput.pressKeys(["\x1b[5~"]);
+  await ui.settle(); expect(ui.captureCharFrame()).toContain("1 │+***");
+  ui.mockInput.pressEscape(); await turn;
+  expect(await Bun.file(join(root, path)).exists()).toBe(false);
+}));
+
+for (const invalid of ["missing", "unmatched"] as const) test(`edit ${invalid} preview still asks with its path and no diff`, async () => withTempDir(async root => {
+  if (invalid === "unmatched") await Bun.write(join(root, "note.txt"), "different");
+  const ui = await askSetup(root, [{ toolCalls: [editCall("invalid")] }, { text: "done" }]);
+  const turn = ui.controller.submit("edit"); await ui.waitFor(s => s.toolApproval?.path === "note.txt");
+  expect(ui.controller.snapshot().toolApproval?.diff).toBeUndefined();
+  expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");
+  expect(ui.captureCharFrame()).toContain("note.txt");
+  ui.mockInput.pressEscape(); await turn;
+}));
+
+test("write preview compares the current content and command preview wraps every argument without clipping", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "keep\nbefore\n");
+  const command = "printf '" + "long argument ".repeat(20) + "FINAL-MARKER'";
+  const ui = await askSetup(root, [
+    { toolCalls: [{ id: "write", name: "write", arguments: { path: "note.txt", content: "keep\nafter\n" } }] },
+    { toolCalls: [{ id: "bash", name: "bash", arguments: { command } }] }, { text: "done" },
+  ]);
+  const turn = ui.controller.submit("write and run"); await ui.waitFor(s => !!s.toolApproval?.diff);
+  expect(ui.controller.snapshot().toolApproval?.diff).toEqual({ added: 1, removed: 1, rows: [{ line: 2, sign: "-", text: "before" }, { line: 2, sign: "+", text: "after" }] });
+  ui.mockInput.pressEscape(); await ui.waitFor(s => s.toolApproval?.content === command);
+  ui.resize(50, 28); await ui.settle();
+  expect((ui.renderer.root.findDescendantById("tool-approval-text") as TextRenderable).plainText).toBe(command);
+  expect(ui.captureCharFrame()).toContain("FINAL-MARKER");
+  ui.mockInput.pressEscape(); await turn;
+}));
+
+for (const panel of ["inspection", "tree"] as const) test(`${panel} preserves a waiting request until closed`, async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const ui = await askSetup(root, [{ toolCalls: [{ id: "read", name: "read", arguments: { path: "note.txt" } }] }, { text: "done" }, { toolCalls: [editCall("pending")] }, { text: "done" }]);
+  await ui.controller.submit("read"); await ui.settle();
+  if (panel === "inspection") ui.mockInput.pressKey("i", { meta: true });
+  else { await ui.mockInput.typeText("/branch tree"); ui.mockInput.pressEnter(); }
+  await ui.settle();
+  const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
+  expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
+  expect((ui.renderer.root.findDescendantById("hints") as TextRenderable).plainText).toBe("Esc close to review request");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");
+  ui.mockInput.pressEscape(); await turn;
+}));
+
+test("unknown tool arguments mask escaped secrets using controller secrets", async () => withTempDir(async root => {
+  const secret = 'private"key';
+  const path = join(root, "tool.ts");
+  await Bun.write(path, `export default ctx => ctx.registerTool({ name: 'extension_tool', description: 'Extension tool', execution: 'parallel', inputSchema: { type: 'object' }, execute: async () => ({ content: 'ran' }) });`);
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const loaded = await loadExtensions({ modules: [path], workspace, home: root, tools: createToolRegistry() });
+  const ui = await askSetup(root, [{ toolCalls: [{ id: "custom", name: "extension_tool", arguments: { value: secret, nested: [secret] } }] }, { text: "done" }], { tools: loaded.tools, extensions: loaded.runtime, secrets: [secret] });
+  const turn = ui.controller.submit("extension"); await ui.waitFor(s => !!s.toolApproval && !s.toolApproval.loading);
+  const preview = (ui.renderer.root.findDescendantById("tool-approval-text") as TextRenderable).plainText;
+  expect(preview).toContain('"value": "***"');
+  expect(preview).not.toContain("private");
+  ui.mockInput.pressEscape(); await turn;
+}));
