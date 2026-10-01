@@ -31,6 +31,61 @@ Retry progress uses one changing status row and the footer countdown. If retries
 run out or you cancel, any remaining preview is marked “Incomplete response · not
 saved”; completed tool results remain in the session.
 
+## Interactive usage
+
+```bash
+schway
+schway --resume <session-id>
+```
+
+Running without `-p` opens the OpenTUI terminal conversation. It uses the same
+agent loop, sessions, and runtime events as headless mode. The TUI is lazy-loaded;
+headless runs never initialize it.
+
+```text
+/new - start a new session
+/sessions - list saved sessions
+/resume <id> - resume a saved session
+/branch list - show branch IDs, heads, and complete-turn fork points
+/branch fork <entry-id> [name] - create and select a conversation branch
+/branch switch <branch-id> - continue an existing conversation branch
+/add-dir <directory> - attach project context while idle
+/model - open the model/profile picker
+/theme [auto|dark|light] - change appearance for this session
+/session - show session, branch, and workspace details
+/help - show commands and keyboard shortcuts
+/quit - quit schway
+```
+
+The conversation renders Markdown with readable code blocks and tables. Successful
+tool results collapse to a summary; **Ctrl+O** expands all results, and clicking a
+tool heading toggles that result. Errors keep a preview visible. **Enter** sends;
+**Shift+Enter** or **Ctrl+J** adds a newline. Pasted multiline text stays in the
+editor until submitted. **Up/Down** recalls prompts at the editor's first/last
+visual row. Type **/** for command suggestions and **Tab** to complete a selection.
+**Alt+M** opens model selection while keeping your draft. **PageUp/PageDown** scroll
+the conversation; **Ctrl+End** returns to the latest message.
+
+Appearance follows the terminal's light/dark mode when available. `/theme` overrides
+it for the current session; set `SCHWAY_THEME=dark` or `SCHWAY_THEME=light` for a
+launch preference. A nonempty `NO_COLOR` disables semantic colors. Interactive
+launches show a skippable lightning splash the first time each version runs, then
+a nonblocking bolt accent. Set `ui.splash` to `always`, `first-run` (default), or
+`never` in preferences; `never` suppresses both. `SCHWAY_MOTION=reduced` or
+`SCHWAY_MOTION=off` also suppresses startup effects and reduces other animation.
+See [color roles](#color-roles) and [motion and startup splash](#motion-and-startup-splash) for the palette, motion and offline preview.
+
+Esc cancels the running turn through the shared AbortSignal path and returns to
+the input editor. Ctrl+C cancels when running and quits when idle. Quitting
+restores the terminal and releases resources. Resume rebuilds history from the
+saved JSONL without replaying old tool effects. Missing credentials and runtime failures appear as actionable errors. Interactive
+`/login` and `/logout` manage API keys and ChatGPT subscription credentials. Successful
+`/login codex` selects the subscription and an available model for this session without
+editing saved preferences. `/model` fetches that account's model and thinking capabilities
+instead of showing static OpenAI guesses, and `/thinking` shows the model's default and supported levels;
+see [credentials](credentials.md) and
+[subscription login](configuration.md#chatgpt-subscription-codex-oauth).
+
 ## First launch and readiness
 
 A fresh install shows two lines: **Not connected**, then **Sign in to choose a

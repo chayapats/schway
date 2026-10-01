@@ -5,6 +5,47 @@ and user-global `~/.schway/skills/<name>/SKILL.md`. Project definitions take
 precedence over global definitions with the same name. Discovery advertises
 eligible names and descriptions; bodies enter dynamic context only on activation.
 
+## Discover and invoke skills
+
+Skills are reusable instruction packs discovered from project-local
+`.agents/skills/<name>/SKILL.md` and user-global `~/.schway/skills/<name>/SKILL.md`
+files, plus explicitly configured [npm packages](extensions.md#installed-npm-packages). Each `SKILL.md` carries `name`/`description` frontmatter; only that
+metadata reaches the model until you invoke the skill. A project skill overrides
+a global skill of the same name. Skills marked user-only
+(`disable-model-invocation: true`) stay listed for you but are not advertised
+to the model.
+
+List them without calling a model, in the TUI or headlessly:
+
+```text
+/skills
+```
+
+```bash
+schway -p "/skills"
+```
+
+Runnable example — add a project skill, list it, then invoke it with arguments:
+
+```bash
+mkdir -p .agents/skills/greet
+cat > .agents/skills/greet/SKILL.md <<'EOF'
+---
+name: greet
+description: Greet the user warmly.
+---
+Greet the user warmly in pirate voice.
+EOF
+schway -p "/skills"            # lists greet, no model call
+schway -p "/greet Ahoy, crew"  # skill body plus arguments reach the model
+```
+
+In the TUI the same commands apply: `/skills` lists, `/greet Ahoy, crew`
+attaches the skill body to that turn only. The invocation text stays in
+history; later turns and resumed sessions start without the body. Duplicate
+names at one level and names colliding with built-in commands (for example
+`/compact`) are reported in the listing and cannot be invoked.
+
 ## Try a skill
 
 From your project root:

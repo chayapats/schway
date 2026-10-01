@@ -25,6 +25,9 @@
     "docs/diagnostics.md",
     "docs/evals.md",
     "docs/extensions.md",
+    "docs/headless.md",
+    "docs/tools.md",
+    "docs/skills.md",
     "docs/sessions.md",
     "docs/tui.md",
     "docs/workspaces.md",
@@ -40,7 +43,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "screens:update": "SCHWAY_UPDATE_SCREENS=1 bun test tests/screen-catalog.test.ts",
-    "screens:gallery": "bun tests/screen-catalog/gallery.ts"
+    "screens:gallery": "bun tests/screen-catalog/gallery.ts",
+    "demo:record": "vhs docs/demo/demo.tape"
   },
   "engines": {
     "bun": ">=1.2.0"

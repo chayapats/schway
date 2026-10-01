@@ -1,5 +1,15 @@
 # Coding eval
 
+## Graded coding eval
+
+Run `bun run eval --provider scripted` for the isolated offline coding case.
+Paid runs require an explicit provider, model, and `--allow-paid`.
+
+Run `schway --help` for grouped options and examples, or `schway doctor --help`
+for diagnostic options. Both work without configuration or credentials.
+
+## Cases and artifacts
+
 Run the versioned `clamp-bounds@2` task from the Schway source checkout. Version 2 aligns the task with the restricted verification tool: run exactly `bun test test/math.test.ts`, omitting `cwd` and `timeout` arguments. Tool descriptions, schemas and rejection messages advertise the case's exact permitted command, prohibit `cwd`, and bound optional timeouts to 1–5000 ms (default 5000 ms). Cases without a verification command advertise bash as disabled.
 
 ```sh

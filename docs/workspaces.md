@@ -2,6 +2,25 @@
 
 The primary workspace is the nearest Git root, or the launch directory when no Git root exists. Both the primary root and launch directory are canonical real paths. Attaching another project preserves both identities.
 
+## Workspace paths
+
+Tool-relative paths resolve from the primary workspace root: the nearest Git root, otherwise the launch directory. Both are canonicalized through real paths (symlinks resolved) before use.
+
+- `read`, `write`, `edit`, `grep`, `find`, and `ls` resolve `path` against the workspace root.
+- `bash` defaults `cwd` to the workspace root; relative explicit `cwd` operands resolve there too.
+- Launching from a nested subdirectory keeps the Git root as the workspace root; nested `AGENTS.md` files are still discovered when work enters that subtree.
+
+Attach contextual projects with repeatable `--add-dir <directory>` flags, or `/add-dir <directory>` while idle. Operands resolve from the primary root and must identify accessible existing directories; symlink aliases and duplicate roots attach once. An invalid batch leaves roots unchanged. Relative tools and default bash cwd keep using the primary root; attachments are not filesystem permissions.
+
+```sh
+schway --add-dir ../library --add-dir ../service -p "/skills"
+schway --resume <session-id> --add-dir ../library
+```
+
+Attached project instructions apply only after work enters their scope, and attached local skills share primary-local precedence (same-tier duplicates are explicit ambiguities). Roots appear in model environment context, interactive status, and `/config`. Attachments persist session-wide; unavailable saved directories are reported and excluded from usable context while keeping their saved identity. See [attach projects](#attach-projects) for scoping, recovery, public contracts, and a complete runnable example.
+
+## Attach projects
+
 Use repeatable `--add-dir <directory>` flags at startup, including with `--resume`, or `/add-dir <directory>` in an idle interactive session. Relative operands resolve from the **primary root**, even when Schway launched in a nested directory or a previous bash command changed directory. The TUI command treats its entire trailing argument as one path, so spaces do not need shell quotes; quote CLI arguments according to your shell.
 
 ```sh

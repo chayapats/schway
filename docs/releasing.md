@@ -45,7 +45,7 @@ Only reviewed summaries belong in a new top section of
 
 - [ ] Prepare one release PR and merge it to `main`. Set `package.json`
   `version` to `$V`; bump the Schway peer range in
-  `examples/packages/greeting/package.json` and the `README.md`
+  `examples/packages/greeting/package.json` and the `docs/extensions.md`
   `peerDependencies` example to `^$V`.
 - [ ] Package compatibility tests read the installed version from
   `package.json`, rather than hard-coding a previous release.
@@ -63,8 +63,9 @@ Only reviewed summaries belong in a new top section of
 - [ ] `package.json` `files` includes `CHANGELOG.md`; the packaging test
   requires `package/CHANGELOG.md`. This checklist and release-verification
   evidence stay outside the published files.
-- [ ] Demo GIF regeneration (#150): placeholder for its approved generation,
-  review and artifact steps.
+- [ ] Run `bun run demo:record`, check that `docs/demo/schway-demo.gif` is at
+  most 2 MB (2,097,152 bytes), view the GIF, and commit it if it changed.
+  See [demo recording](demo/README.md) for prerequisites and the recording setup.
 - [ ] Session fixture generation (#158): placeholder for its changelog-driven
   generation, validation and artifact steps.
 - [ ] On the actual merge commit, run `bun install --frozen-lockfile`,

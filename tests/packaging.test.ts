@@ -164,7 +164,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/README.md",
       "package/LICENSE",
       "package/CHANGELOG.md",
-      ...["configuration", "credentials", "diagnostics", "doctor", "evals", "extensions", "live-providers", "sessions", "workspaces"]
+      ...["configuration", "credentials", "diagnostics", "doctor", "evals", "extensions", "headless", "live-providers", "sessions", "skills", "tools", "tui", "workspaces"]
         .map((name) => `package/docs/${name}.md`),
     ]) {
       expect(entries.includes(required)).toBe(true);
@@ -181,6 +181,7 @@ test("npm pack installs the public extension API and completes a headless tool r
     expect(entries.includes("package/.travis.yml")).toBe(false);
     expect(entries.includes("package/docs/releasing.md")).toBe(false);
     expect(entries.includes("package/docs/release-verification.md")).toBe(false);
+    expect(entries.some((entry) => entry.startsWith("package/docs/demo/"))).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/.scratch/"))).toBe(false);
 
     // Install the tarball into an isolated directory and run the installed binary.
