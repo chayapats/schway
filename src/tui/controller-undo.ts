@@ -1,8 +1,9 @@
 import { unlink } from "node:fs/promises";
 import type { TurnUndoRecord } from "../conversation/types.ts";
 import { diffLines } from "../text/diff.ts";
-import { filesystemError, writeFileAtomically } from "../tools/fs.ts";
+import { writeFileAtomically } from "../tools/fs.ts";
 import { displayToolPath } from "../tools/path.ts";
+import { undoFailureReason } from "../undo/errors.ts";
 import { buildUndoNote, formatUndoResult } from "../undo/record.ts";
 import { equalUndoHash, hashUndoBytes, openUndoStore, readUndoBytes, type UndoManifest, type UndoStore } from "../undo/store.ts";
 import { ChangesLayer } from "./controller-changes.ts";
@@ -62,17 +63,24 @@ export abstract class UndoLayer extends ChangesLayer {
         const file = target.files.find(file => file.path === row.absolutePath);
         if (!file || row.action === "skip") { skipped.push({ path: row.path, reason: "changed" }); continue; }
         try {
-          // Read the blob before the final hash check, leaving no asynchronous preparation between check and mutation.
           const bytes = file.before ? await store.blob(target.sessionId, file.before.sha256) : null;
-          const current = await readUndoBytes(file.path);
-          if (current === null || file.after === undefined || !equalUndoHash(hashUndoBytes(current), file.after)) {
-            row.action = "skip"; row.status = "changed since · skip"; skipped.push({ path: row.path, reason: "changed" }); continue;
-          }
-          if (bytes === null) await unlink(file.path);
-          else await writeFileAtomically(file.path, bytes);
+          const checkCurrent = async () => {
+            const current = await readUndoBytes(file.path);
+            if (current === null || file.after === undefined || !equalUndoHash(hashUndoBytes(current), file.after)) throw new UndoFileChanged();
+          };
+          // Prepare replacement bytes first; the final check is immediately before rename or unlink.
+          if (bytes === null) { await checkCurrent(); await unlink(file.path); }
+          else await writeFileAtomically(file.path, bytes, undefined, checkCurrent);
           const action = bytes === null ? "deleted" : "restored";
-          reverted.push({ path: row.path, action }); row.status = action;
-        } catch (error) { row.status = `could not restore · ${filesystemError(row.path, error)}`; skipped.push({ path: row.path, reason: "failed" }); }
+          reverted.push({ path: row.path, action }); row.status = bytes === null ? "Deleted" : "Restored";
+        } catch (error) {
+          if (error instanceof UndoFileChanged) {
+            row.action = "skip"; row.status = "changed since · skip"; skipped.push({ path: row.path, reason: "changed" });
+          } else {
+            row.status = `could not restore · ${undoFailureReason(error)}`; skipped.push({ path: row.path, reason: "failed" });
+            this.retainNoticeDetails(`${row.path}: ${messageOf(error)}`);
+          }
+        }
       }
       const failed = skipped.some(file => file.reason === "failed");
       preview.result = true;
@@ -120,5 +128,8 @@ export abstract class UndoLayer extends ChangesLayer {
       rows: binary ? [{ sign: " ", text: "Binary file · restore only" }] : diff.rows, binary };
   }
 }
+
+/** Distinguish a later file save from failed I/O without changing preview eligibility semantics. */
+class UndoFileChanged extends Error {}
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }

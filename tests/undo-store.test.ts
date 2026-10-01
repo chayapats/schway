@@ -175,3 +175,24 @@ test("capture repairs an incomplete content-addressed blob before changing a fil
     expect((await store.blob("session", hash)).toString()).toBe(bytes);
   });
 });
+
+for (const [code, reason] of [["ENOSPC", "No space left on device"], ["UNKNOWN_STORAGE", "File operation failed"]]) {
+  test(`undo capture and settlement ${code} failures keep storage internals out of primary tool output`, async () => {
+    await withTempDir(async root => {
+      const { run, store } = await fixture(root);
+      const path = join(root, "file.txt");
+      const error = Object.assign(new Error(`${code}: internal storage path /private/undo/blob.tmp`), { code });
+      await writeFile(path, "before");
+      const blocked = await run("write", { path: "file.txt", content: "after" }, { undo: { ...store, async capture() { throw error; } } });
+      expect(blocked.status).toBe("error");
+      expect(blocked.result.content).toBe(`Could not save undo data for file.txt: ${reason}. The file was not changed.`);
+      expect(await readFile(path, "utf8")).toBe("before");
+      expect(blocked.details).toMatchObject({ undoError: error.message });
+      const settled = await run("write", { path: "file.txt", content: "after" }, { undo: { ...store, async settle() { throw error; } } });
+      expect(settled.status).toBe("error");
+      expect(settled.result.content).toBe(`Could not save undo data after changing file.txt: ${reason}`);
+      expect(await readFile(path, "utf8")).toBe("after");
+      expect(settled.details).toMatchObject({ undoError: error.message });
+    });
+  });
+}

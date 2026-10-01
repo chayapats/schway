@@ -201,3 +201,40 @@ test("line diffs describe identical, replaced, created, deleted and unterminated
   expect(diffLines("a\nb\n", "")).toEqual({ rows: [{ sign: "-", line: 1, text: "a" }, { sign: "-", line: 2, text: "b" }], added: 0, removed: 2 });
   expect(diffLines("old", "new")).toEqual({ rows: [{ sign: "-", line: 1, text: "old" }, { sign: "+", line: 1, text: "new" }], added: 1, removed: 1 });
 });
+
+
+test("whole-file diffs retain final-newline identity", () => {
+  expect(diffLines("same\n", "same")).toEqual({ rows: [
+    { sign: "-", line: 1, text: "same" }, { sign: "+", line: 1, text: "same" },
+  ], added: 1, removed: 1 });
+  expect(diffLines("same", "same\n")).toEqual({ rows: [
+    { sign: "-", line: 1, text: "same" }, { sign: "+", line: 1, text: "same" },
+  ], added: 1, removed: 1 });
+});
+
+test("whole-file diffs omit unchanged lines between separate edits", () => {
+  expect(diffLines("old\nkeep\nold2\n", "new\nkeep\nnew2\n")).toEqual({ rows: [
+    { sign: "-", line: 1, text: "old" }, { sign: "+", line: 1, text: "new" },
+    { sign: "-", line: 3, text: "old2" }, { sign: "+", line: 3, text: "new2" },
+  ], added: 2, removed: 2 });
+});
+
+test("whole-file diffs number separated insertions and deletions on their own sides", () => {
+  expect(diffLines("a\nremove\nb\nc\n", "a\nb\ninsert\nc\n")).toEqual({ rows: [
+    { sign: "-", line: 2, text: "remove" }, { sign: "+", line: 3, text: "insert" },
+  ], added: 1, removed: 1 });
+});
+
+test("large file diffs preserve sparse common lines and handle unrelated content", () => {
+  const lines = Array.from({ length: 30_000 }, (_, index) => `line ${index}\n`);
+  const changed = [...lines]; changed[1] = "first replacement\n"; changed[29_998] = "last replacement\n";
+  const sparse = diffLines(lines.join(""), changed.join(""));
+  expect(sparse.rows).toHaveLength(4);
+  expect(sparse).toEqual({ rows: [
+    { sign: "-", line: 2, text: "line 1" }, { sign: "+", line: 2, text: "first replacement" },
+    { sign: "-", line: 29_999, text: "line 29998" }, { sign: "+", line: 29_999, text: "last replacement" },
+  ], added: 2, removed: 2 });
+  const unrelated = diffLines("old\n".repeat(15_000), "new\n".repeat(15_000));
+  expect(unrelated.added).toBe(15_000); expect(unrelated.removed).toBe(15_000);
+  expect(unrelated.rows).toHaveLength(30_000);
+});

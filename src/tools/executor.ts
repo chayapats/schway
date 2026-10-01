@@ -1,3 +1,4 @@
+import { undoFailureReason } from "../undo/errors.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import { resolveToolPath, displayToolPath } from "./path.ts";
 import type { ToolCallContent, ToolResult } from "../conversation/types.ts";
@@ -75,7 +76,8 @@ export async function executeToolCall(options: {
     const path = resolveToolPath(options.workspace.root, (args as { path: string }).path);
     try { capture = { path, ...await options.undo.capture(options.undoTurn, path) }; }
     catch (error) {
-      return failure(options.call, `Could not save undo data for ${displayToolPath(options.workspace.root, path)}: ${undoFailureReason(error).replace(/\.$/, "")}. The file was not changed.`);
+      return { ...failure(options.call, `Could not save undo data for ${displayToolPath(options.workspace.root, path)}: ${undoFailureReason(error)}. The file was not changed.`),
+        details: { undoError: hooks ? hooks.safeText(messageOf(error)) : messageOf(error) } };
     }
   }
   let executed: ExecutedToolCall;
@@ -104,7 +106,8 @@ export async function executeToolCall(options: {
   }
   if (capture) {
     try { await options.undo!.settle(options.undoTurn!, capture.path, capture.created); }
-    catch (error) { executed = failure(options.call, `Could not save undo data after changing ${displayToolPath(options.workspace.root, capture.path)}: ${undoFailureReason(error)}`); }
+    catch (error) { executed = { ...failure(options.call, `Could not save undo data after changing ${displayToolPath(options.workspace.root, capture.path)}: ${undoFailureReason(error)}`),
+      details: { undoError: hooks ? hooks.safeText(messageOf(error)) : messageOf(error) } }; }
   }
   return hooks ? hooks.finish(options.call, registered.definition, executedArgs, executed, signal!) : executed;
 }
@@ -147,14 +150,4 @@ function toolResult(
     content,
     isError,
   };
-}
-
-/** Keep storage internals out of model-visible file-tool failures. */
-function undoFailureReason(error: unknown): string {
-  const reasons: Record<string, string> = {
-    EACCES: "Permission denied", EPERM: "Permission denied", ENOSPC: "No space left on device",
-    EROFS: "Read-only filesystem", ENOENT: "Directory not found", ENOTDIR: "Path is not a directory",
-  };
-  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
-  return reasons[code] ?? messageOf(error);
 }

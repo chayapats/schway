@@ -128,7 +128,78 @@ function countLineBreaks(text: string): number {
   return count;
 }
 
-/** Compare whole-file text as numbered deletion and addition rows, excluding common edge context. */
+/** Compare whole-file lines, preserving newline identity and omitting unchanged rows with linear working memory. */
 export function diffLines(oldText: string, newText: string): TextDiff {
-  return buildEditDiff([{ startLine: 1, oldText, newText }]);
+  // Include the terminator in equality, but keep the existing row display shape.
+  const oldLines = oldText.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const newLines = newText.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const diff: TextDiff = { rows: [], added: 0, removed: 0 };
+  const pending = [[0, oldLines.length, 0, newLines.length]];
+  const emit = (sign: "+" | "-", lines: string[], start: number, end: number) => {
+    for (let index = start; index < end; index++) {
+      const text = lines[index]!;
+      diff.rows.push({ sign, line: index + 1, text: text.endsWith("\n") ? text.slice(0, -1) : text });
+    }
+    if (sign === "+") diff.added += end - start;
+    else diff.removed += end - start;
+  };
+  while (pending.length) {
+    let [oldStart, oldEnd, newStart, newEnd] = pending.pop()! as [number, number, number, number];
+    while (oldStart < oldEnd && newStart < newEnd && oldLines[oldStart] === newLines[newStart]) { oldStart++; newStart++; }
+    while (oldStart < oldEnd && newStart < newEnd && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
+    if (oldStart === oldEnd) { emit("+", newLines, newStart, newEnd); continue; }
+    if (newStart === newEnd) { emit("-", oldLines, oldStart, oldEnd); continue; }
+    // Completely unrelated files need no edit-distance search.
+    const candidates = new Set(oldLines.slice(oldStart, oldEnd));
+    const shared = newLines.slice(newStart, newEnd).some(line => candidates.has(line));
+    const split = shared ? bisectLines(oldLines, newLines, oldStart, oldEnd, newStart, newEnd) : undefined;
+    if (!split || (split[0] === oldStart && split[1] === newStart) || (split[0] === oldEnd && split[1] === newEnd)) {
+      emit("-", oldLines, oldStart, oldEnd); emit("+", newLines, newStart, newEnd);
+    } else {
+      pending.push([split[0], oldEnd, split[1], newEnd], [oldStart, split[0], newStart, split[1]]);
+    }
+  }
+  return diff;
+}
+
+/** Find the middle of a shortest edit path using two Myers frontiers rather than a quadratic trace. */
+function bisectLines(oldLines: string[], newLines: string[], oldStart: number, oldEnd: number, newStart: number, newEnd: number): [number, number] | undefined {
+  const n = oldEnd - oldStart, m = newEnd - newStart;
+  const limit = Math.ceil((n + m) / 2), offset = limit + 1;
+  const forward = new Int32Array(2 * limit + 3).fill(-1), backward = new Int32Array(2 * limit + 3).fill(-1);
+  forward[offset + 1] = backward[offset + 1] = 0;
+  const delta = n - m, odd = delta % 2 !== 0;
+  let forwardStart = 0, forwardEnd = 0, backwardStart = 0, backwardEnd = 0;
+  for (let distance = 0; distance <= limit; distance++) {
+    for (let k = -distance + forwardStart; k <= distance - forwardEnd; k += 2) {
+      const index = offset + k;
+      let x = k === -distance || (k !== distance && forward[index - 1]! < forward[index + 1]!) ? forward[index + 1]! : forward[index - 1]! + 1;
+      let y = x - k;
+      while (x < n && y < m && oldLines[oldStart + x] === newLines[newStart + y]) { x++; y++; }
+      forward[index] = x;
+      if (x > n) forwardEnd += 2;
+      else if (y > m) forwardStart += 2;
+      else if (odd) {
+        const opposite = offset + delta - k;
+        if (opposite >= 0 && opposite < backward.length && backward[opposite]! !== -1 && x >= n - backward[opposite]!) return [oldStart + x, newStart + y];
+      }
+    }
+    for (let k = -distance + backwardStart; k <= distance - backwardEnd; k += 2) {
+      const index = offset + k;
+      let x = k === -distance || (k !== distance && backward[index - 1]! < backward[index + 1]!) ? backward[index + 1]! : backward[index - 1]! + 1;
+      let y = x - k;
+      while (x < n && y < m && oldLines[oldEnd - x - 1] === newLines[newEnd - y - 1]) { x++; y++; }
+      backward[index] = x;
+      if (x > n) backwardEnd += 2;
+      else if (y > m) backwardStart += 2;
+      else if (!odd) {
+        const opposite = offset + delta - k;
+        if (opposite >= 0 && opposite < forward.length && forward[opposite]! !== -1 && forward[opposite]! >= n - x) {
+          const middle = forward[opposite]!;
+          return [oldStart + middle, newStart + middle - (delta - k)];
+        }
+      }
+    }
+  }
+  return undefined;
 }

@@ -292,3 +292,126 @@ test("undo command arguments and running turns never touch undo storage", async 
     } finally { ui.controller.cancel(); await ui.dispose(); }
   });
 });
+
+// Fault injection runs in a child so its filesystem hooks cannot affect other tests.
+async function undoFilesystemProbe(root: string, scenario: string) {
+  const source = join(import.meta.dir, "../src");
+  const script = `
+    import { mock } from "bun:test";
+    import { join } from "node:path";
+    const fs = await import("node:fs/promises");
+    const realWrite = fs.writeFile, realUnlink = fs.unlink, realRead = fs.readFile;
+    const root = ${JSON.stringify(root)}, scenario = ${JSON.stringify(scenario)};
+    const path = join(root, "clamp.ts"), created = join(root, "new.ts");
+    let armed = false, preparations = 0, prepared = false;
+    mock.module("node:fs/promises", () => ({ ...fs,
+      writeFile: async (destination, content, options) => {
+        await realWrite(destination, content, options);
+        if (!armed || !String(destination).startsWith(path + ".") || !String(destination).endsWith(".tmp")) return;
+        if (scenario === "delete-failure") return;
+        armed = false; preparations++;
+        if (scenario === "check-failure") { prepared = true; return; }
+        if (scenario.startsWith("prepare")) {
+          await realWrite(path, "later save");
+          if (scenario === "prepare-and-delete-change") await realWrite(created, "later created save");
+        } else {
+          throw Object.assign(new Error(scenario + " internal temp path: " + destination), { code: scenario });
+        }
+      },
+      readFile: async (...args) => {
+        if (prepared && args[0] === path) {
+          prepared = false;
+          throw Object.assign(new Error("EIO internal file read: " + path), { code: "EIO" });
+        }
+        return realRead(...args);
+      },
+      unlink: async destination => {
+        if (armed && scenario === "delete-failure" && destination === created) {
+          armed = false;
+          throw Object.assign(new Error("UNKNOWN_DELETE internal path: " + destination), { code: "UNKNOWN_DELETE" });
+        }
+        return realUnlink(destination);
+      },
+    }));
+    const { TuiController } = await import(${JSON.stringify(join(source, "tui/controller.ts"))});
+    const { createSession } = await import(${JSON.stringify(join(source, "session/session.ts"))});
+    const { createContextManager } = await import(${JSON.stringify(join(source, "context/manager.ts"))});
+    const { openUndoStore } = await import(${JSON.stringify(join(source, "undo/store.ts"))});
+    const session = createSession();
+    session.append({ type: "user", id: "user", content: [{ type: "text", text: "Edit files" }] });
+    const store = openUndoStore({ home: root });
+    const turn = { sessionId: session.rootId, turnId: "user", turnNumber: 1 };
+    await realWrite(path, "before");
+    await store.capture(turn, path); await realWrite(path, "after"); await store.settle(turn, path, true);
+    await store.capture(turn, created); await realWrite(created, "created"); await store.settle(turn, created, true);
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const controller = new TuiController({ session, sessionId: session.rootId, workspace, home: root,
+      provider: "scripted", modelId: "fixture", contextManager: createContextManager(workspace) });
+    try {
+      await controller.undoCommand("");
+      armed = true;
+      await controller.applyUndo();
+      const snapshot = controller.snapshot();
+      const detailsAvailable = controller.inspectNoticeDetails();
+      console.log(JSON.stringify({ preparations, bytes: await fs.readFile(path, "utf8"),
+        createdBytes: await fs.readFile(created, "utf8").catch(() => null),
+        rows: snapshot.undoPreview?.files.map(file => file.status), result: snapshot.undoPreview?.result,
+        record: session.items.find(item => item.type === "turn_undo"), notice: snapshot.transcript.at(-1)?.text,
+        temps: (await fs.readdir(root)).filter(name => name.endsWith(".tmp")), detailsAvailable,
+        details: controller.snapshot().transcript.at(-1)?.text }));
+    } finally { controller.dispose(); }
+  `;
+  const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+  const [output, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  expect(error).toBe(""); expect(code).toBe(0);
+  return JSON.parse(output);
+}
+
+test("a destination saved during restore preparation is skipped, retained and not recorded as restored", async () => {
+  await withTempDir(async root => {
+    const result = await undoFilesystemProbe(root, "prepare-change");
+    expect(result.preparations).toBe(1); expect(result.bytes).toBe("later save");
+    expect(result.createdBytes).toBeNull(); expect(result.temps).toEqual([]);
+    expect(result.record).toMatchObject({ reverted: [{ path: "new.ts", action: "deleted" }], skipped: [{ path: "clamp.ts", reason: "changed" }] });
+  });
+});
+
+test("a later save also guards deletion and all apply-time changes write no undo record", async () => {
+  await withTempDir(async root => {
+    const result = await undoFilesystemProbe(root, "prepare-and-delete-change");
+    expect(result.bytes).toBe("later save"); expect(result.createdBytes).toBe("later created save");
+    expect(result.record).toBeUndefined(); expect(result.temps).toEqual([]);
+    expect(result.notice).toBe("Nothing to undo · every file changed since");
+  });
+});
+
+for (const [code, reason] of [["ENOSPC", "No space left on device"], ["UNKNOWN_STORAGE", "File operation failed"]]) {
+  test(`undo ${code} failures use safe reasons while retaining diagnostics and cleaning prepared files`, async () => {
+    await withTempDir(async root => {
+      const result = await undoFilesystemProbe(root, code!);
+      expect(result.bytes).toBe("after"); expect(result.createdBytes).toBeNull(); expect(result.temps).toEqual([]);
+      expect(result.rows).toEqual([`could not restore · ${reason}`, "Deleted"]); expect(result.result).toBe(true);
+      expect(result.record).toMatchObject({ reverted: [{ path: "new.ts", action: "deleted" }], skipped: [{ path: "clamp.ts", reason: "failed" }] });
+      expect(result.detailsAvailable).toBe(true); expect(result.details).toContain(code);
+      expect(result.details).toContain("internal temp path");
+    });
+  });
+}
+
+test("a deletion failure remains failed and successful restoration uses sentence case", async () => {
+  await withTempDir(async root => {
+    const result = await undoFilesystemProbe(root, "delete-failure");
+    expect(result.bytes).toBe("before"); expect(result.createdBytes).toBe("created");
+    expect(result.rows).toEqual(["Restored", "could not restore · File operation failed"]);
+    expect(result.record).toMatchObject({ reverted: [{ path: "clamp.ts", action: "restored" }], skipped: [{ path: "new.ts", reason: "failed" }] });
+  });
+});
+
+test("I/O failure during the final destination check is failed, rather than changed, and removes the replacement", async () => {
+  await withTempDir(async root => {
+    const result = await undoFilesystemProbe(root, "check-failure");
+    expect(result.preparations).toBe(1); expect(result.bytes).toBe("after"); expect(result.temps).toEqual([]);
+    expect(result.rows).toEqual(["could not restore · Could not read or write file", "Deleted"]);
+    expect(result.record).toMatchObject({ reverted: [{ path: "new.ts", action: "deleted" }], skipped: [{ path: "clamp.ts", reason: "failed" }] });
+  });
+});

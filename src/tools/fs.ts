@@ -46,15 +46,17 @@ export function filesystemFailure(
   };
 }
 
-/** Atomically replace a file with text or bytes via a same-directory temporary file, cleaning up and propagating cancellation or I/O failures. */
+/** Prepare a same-directory replacement, optionally check the destination immediately before rename, and clean up on failure. */
 export async function writeFileAtomically(
   path: string,
   content: string | Uint8Array,
   signal?: AbortSignal,
+  beforeReplace?: () => Promise<void>,
 ): Promise<void> {
   const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
   try {
     await writeFile(tempPath, content, { signal });
+    if (beforeReplace) await beforeReplace();
     await rename(tempPath, path);
   } catch (error) {
     await unlink(tempPath).catch(() => undefined);
