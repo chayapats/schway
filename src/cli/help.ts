@@ -50,10 +50,12 @@ export const CLI_OPTIONS: readonly Option[] = [
   { flags: ["--extension"], value: "<module>", section: "Advanced", description: "Load a local extension (repeatable)", doctor: true, sample: "./extension.ts" },
 ];
 
+/** Align one help label with the shared description column. */
 function row(label: string, description: string): string {
   return `  ${label.padEnd(27)}${description}`;
 }
 
+/** Group the selected command's option rows in the documented section order. */
 function optionSections(doctor: boolean): string[] {
   const lines: string[] = [];
   for (const section of SECTIONS) {
