@@ -25,6 +25,9 @@ Run `bun run eval --provider scripted` for the isolated offline coding case.
 Paid runs require an explicit provider, model, and `--allow-paid`; see [eval commands and artifact contract](docs/evals.md).
 The [installed release gate](https://github.com/chayapats/schway/blob/main/docs/release-verification.md) records offline evidence and outstanding live/human checks.
 
+Run `schway --help` for grouped options and examples, or `schway doctor --help`
+for diagnostic options. Both work without configuration or credentials.
+
 ## Diagnose local readiness
 
 ```bash

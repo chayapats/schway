@@ -196,7 +196,10 @@ test("npm pack installs the public extension API and completes a headless tool r
       {},
     );
     expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("Usage: schway");
+    expect(help.stdout.split("\n")[0]).toBe("schway — a lean, fast coding agent for your terminal");
+    expect(help.stdout).toContain("\nUsage\n");
+    expect(help.stdout).toContain("\nExamples\n");
+    expect(help.stderr).toBe("");
 
     // A consumer uses only the public installed contract, with ordinary Bun types.
     await Bun.write(join(installDir, "greet.ts"), await Bun.file(join(installDir, "node_modules/schway/examples/extensions/greet.ts")).text());

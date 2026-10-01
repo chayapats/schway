@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
 import { runCli, type CliIo } from "../src/cli/main.ts";
+import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
+import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { credentialIdentity, type CredentialStore } from "../src/auth/store.ts";
 import type { Model } from "../src/model/model.ts";
@@ -105,6 +107,79 @@ function valueContains(value: unknown, secret: string): boolean {
   }
   return false;
 }
+
+for (const command of [[], ["doctor"]]) {
+  for (const flag of ["--help", "-h"]) {
+    test(`${["schway", ...command, flag].join(" ")} prints help without setup or files`, async () => {
+      await withTempDir(async (home) => {
+        const result = await run([...command, flag], {
+          env: { HOME: home }, cwd: home,
+          credentialStore: {
+            async get() { throw new Error("Help must not read credentials"); },
+            async set() { throw new Error("Help must not save credentials"); },
+            async delete() { throw new Error("Help must not delete credentials"); },
+          },
+          createModel: async () => { throw new Error("Help must not load a model"); },
+        });
+        expect(result).toEqual({
+          exitCode: 0,
+          stdout: command.length ? formatDoctorHelp() : formatHelp(),
+          stderr: "",
+        });
+        expect(await readdir(home)).toEqual([]);
+      });
+    });
+  }
+}
+
+test("invalid options print only the command-specific error and help hint", async () => {
+  expect(await run(["--bogus"], { env: {} })).toEqual({
+    exitCode: 1, stdout: "",
+    stderr: "Unknown option: --bogus\nRun 'schway --help' for usage.\n",
+  });
+  expect(await run(["doctor", "--bogus"], { env: {} })).toEqual({
+    exitCode: 2, stdout: "",
+    stderr: "Unknown option: --bogus\nRun 'schway doctor --help' for usage.\n",
+  });
+  expect(await run(["doctor", "--max-turns"], { env: {} })).toEqual({
+    exitCode: 2, stdout: "",
+    stderr: "Missing value for --max-turns\nRun 'schway doctor --help' for usage.\n",
+  });
+});
+
+test("help needs neither HOME nor an accessible workspace", async () => {
+  for (const argv of [["--help"], ["-h"], ["doctor", "--help"], ["doctor", "-h"]]) {
+    const stdout = capture();
+    const stderr = capture();
+    expect(await runCli(argv, { stdout, stderr, env: {}, cwd: "/missing-help-workspace" })).toBe(0);
+    expect(stdout.text).toBe(argv[0] === "doctor" ? formatDoctorHelp() : formatHelp());
+    expect(stderr.text).toBe("");
+  }
+});
+
+test("removed-provider notices still print alone for both commands", async () => {
+  for (const command of [[], ["doctor"]]) {
+    expect(await run([...command, "--provider", "anthropic"], { env: {} })).toEqual({
+      exitCode: 1, stdout: "", stderr: `${ANTHROPIC_REMOVED_MESSAGE}\n`,
+    });
+  }
+});
+
+test("provider-option conflicts print a two-line error with the main help hint", async () => {
+  for (const flags of [
+    ["--provider", "openai", "--base-url", "http://localhost/v1"],
+    ["--provider", "xai", "--openai-auth", "auto"],
+    ["--provider", "openai", "--xai-auth", "auto"],
+    ["--base-url", "http://localhost/v1"],
+    ["--xai-auth", "auto"],
+  ]) {
+    const result = await run(["-p", "hello", ...flags], { env: {}, model: createScriptedModel({ text: "unused" }) });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.trimEnd().split("\n")).toHaveLength(2);
+    expect(result.stderr).toEndWith("Run 'schway --help' for usage.\n");
+  }
+});
 
 test("schway -p streams text from the agent loop", async () => {
   const result = await run(["-p", "hello"], {

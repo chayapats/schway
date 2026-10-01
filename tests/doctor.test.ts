@@ -250,12 +250,13 @@ test("doctor help lists diagnostic flags without implying model runs", async () 
     cwd: workspace, env: { HOME: home }, stdout: { write(chunk) { text += chunk; } }, stderr: { write() {} },
   });
   expect(exit).toBe(0);
-  const [doctor, normal] = text.split(" | schway ");
+  const doctor = text;
   for (const flag of ["--api-key", "--openai-auth", "--base-url", "--auth", "--header", "--body", "--env-file", "--add-dir", "--extension"]) {
     expect(doctor).toContain(flag);
   }
   expect(doctor).not.toContain("--model");
-  expect(normal).toContain("--model");
+  expect(doctor).toContain("\nUsage\n  schway doctor [options]\n");
+  expect(doctor).toContain("\nExamples\n");
 });
 
 test("doctor redacts credential sources but keeps ordinary env-number identifiers", async () => {

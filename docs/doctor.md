@@ -2,6 +2,10 @@
 
 Run `schway doctor` before starting a conversation; it does not call a model, open a login browser, install packages or execute extension modules.
 
+Run `schway doctor --help` for grouped diagnostic options and examples. Use
+`schway --help` for the main command, including model and session options.
+Help does not read configuration or run diagnostics.
+
 ```bash
 schway doctor
 schway doctor --json
