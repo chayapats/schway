@@ -143,6 +143,29 @@ Open P0/P1 check date: **2026-10-01**; both queries returned no issues.
 The install/smoke checks do not count as dogfood sessions. No #152 day or session
 has been counted by this release verification.
 
+## Dogfood round 1 (2026-10-01)
+
+Evidence mode: accelerated agent-operated validation; no three-day observation claim.
+
+Round 1: 2026-10-01–2026-10-01 · 8 sessions · routes: ChatGPT, Grok · P0 0 · P1 0 · P2 4
+
+**Validation verdict: passed against the amended #152 criteria.**
+See the [session, friction and operator log](dogfood-log.md#round-1-050).
+Registry-installed 0.5.0 completed file/search/edit/write/test workflows with
+Thai text and primary-root/attached isolation. Three same-ID resumes preserved
+prior JSONL bytes, including Grok → ChatGPT, without replaying writes.
+Typecheck exited 0; the full offline suite passed 1,845 tests across 117 files,
+0 failures (195.92 s, `TMPDIR=/dev/shm`), including deterministic installed
+branch/compaction/resume fixtures. These fixtures are supporting checks, not
+extra live sessions. Installed CLI/loop/session source bytes matched the unchanged
+worktree. No source changes or new API-key spending were needed.
+
+P0/P1 closing check date: **2026-10-01**; both open-label queries were empty.
+No P0/P1 fixes or restart were required. The P2 discoverability follow-up
+[#209](https://github.com/chayapats/schway/issues/209) remains open; the log records
+all four observations. This headless agent validation does not establish
+multi-day reliability or human TUI usability.
+
 ## 0.4.0 release (2026-09-30)
 
 **Verdict: 0.4.0 published.**
