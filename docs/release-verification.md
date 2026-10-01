@@ -28,13 +28,16 @@ init-style descendant reaper to clean up test processes.
 `tests/screen-catalog/goldens`. The inventory includes dark/light at 120, 80
 and 50 columns, declared no-color variants and the additional narrow widths.
 The golden tree at `G` is `34207f099aa1bcc5d4340cf6390816df5509e028`.
-The full offline HTML was supplied for maintainer review. Browser opening in
-the preparation environment was blocked, so browser review remains pending.
+The full offline HTML and a complete mobile-friendly PDF were supplied for
+maintainer review. The PDF contains all 216 variants. Browser opening in the
+preparation environment was blocked; the maintainer approved the supplied
+gallery on 2026-10-01.
 
-**Design sign-off #1: pending maintainer review of every variant.**
-No maintainer change requests have been recorded yet. Record each request
-below before sign-off; a fixed request requires a merged PR and rechecked
-goldens. Do not infer approval from automated checks or representative images.
+Design sign-off #1: approved by chayapats on 2026-10-01 at 9aee12438ce25d152b77273f5f83d503dda5c36b
+
+The maintainer approved the complete gallery without requesting changes.
+The empty request table below records that no change requests were made; the
+approval is the maintainer's decision, not an inference from automated checks.
 
 | Screen | Variant | Request | Merged PR (fixed) or issue (filed) |
 | --- | --- | --- | --- |
@@ -65,13 +68,14 @@ is deferred to its published-version backfill.
 
 ### Gates still pending
 
-- Record the maintainer's actual approval name, date and final reviewed `G`.
 - Merge the reviewed release PR, record actual merge commit `R`, and rerun
   frozen install, typecheck and the full suite on clean `R`.
 - Confirm `git diff --stat G R -- tests/screen-catalog/goldens` is empty, or
   re-review changed screens and update `G`.
 - Run all five live smoke lanes on `R` with approved models/access and spending
-  limits. No paid smoke or full evals have run for this preparation. Full live
+  limits. The approved ceiling is **USD 1 per route**, up to USD 5 across all
+  five routes, with no pooling between routes and no subscription purchase.
+  No paid smoke or full evals have run for this preparation. Full live
   evals are not required for this minor release. Record route, provider,
   model, thinking, auth source, status, reason, tested time and revision for
   each lane; skipped or pending lanes do not pass.
