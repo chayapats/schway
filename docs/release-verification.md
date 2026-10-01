@@ -2,93 +2,146 @@
 
 ## 0.5.0 release (2026-10-01)
 
-**Verdict: 0.5.0 not published; release preparation in progress.**
+**Verdict: 0.5.0 published.**
 
-This section records preparation for [#151](https://github.com/chayapats/schway/issues/151).
-It does not replace the maintainer sign-off or any live/publication gate in the
-[release checklist](releasing.md). Raw test, package and future live reports stay
-private outside Git.
+Published release commit **`R = f6def34943ce0210d8aa84f87ac6f21ab4b96cf2`**,
+annotated tag **`v0.5.0`**, npm version **`schway@0.5.0`**, and stable dist-tag
+**`latest: 0.5.0`**. Release preparation merged through
+[PR #206](https://github.com/chayapats/schway/pull/206).
+This section records the actual release checks for
+[#151](https://github.com/chayapats/schway/issues/151).
+Raw reports remain private, outside Git, in
+`~/schway-release-evidence/0.5.0/local-20261001/`.
 
-### Preconditions and gallery candidate
+### Preconditions and offline verification
 
-On 2026-10-01, GitHub's native dependency list showed all thirteen blockers
-#138–#150 closed. The 0.5 milestone had only #151 and #152 open; open P0 and P1
-queries both returned no issues. The verified main/gallery candidate is
-`G = 9aee12438ce25d152b77273f5f83d503dda5c36b`.
+On 2026-10-01, all thirteen blockers #138–#150 were closed and present in `R`.
+The 0.5 milestone had only #151 and #152 open. Open P0 and P1 queries were empty
+before verification, immediately before publication, and after installation.
+Severity labels P0, P1 and P2 exist.
 
-At clean `G`, `bun install --frozen-lockfile` and `bun run typecheck` exited 0.
-The full offline suite passed **1,845 tests across 117 files; 0 failures**, in
-193.18 seconds, including all screen-catalog golden comparisons. The first
-attempt had three packaging failures from an unavailable default npm-cache
-path; rerunning with a writable cache passed without source changes.
-Tests used Bun 1.4.2, a temporary-memory filesystem for fixtures, and an
-init-style descendant reaper to clean up test processes.
+On a clean local worktree at actual `R`, `bun install --frozen-lockfile`,
+`bun run typecheck` and `bun test` each exited 0. The full suite, including
+screen-catalog goldens, passed **1,845 tests across 117 files; 0 failures**,
+in **160.97 seconds**. This is local actual-R evidence, separate from the
+successful post-merge CI and earlier candidate checks.
 
-`bun run screens:gallery` generated **29 screens and 216 variants** from
-`tests/screen-catalog/goldens`. The inventory includes dark/light at 120, 80
-and 50 columns, declared no-color variants and the additional narrow widths.
-The golden tree at `G` is `34207f099aa1bcc5d4340cf6390816df5509e028`.
-The full offline HTML and a complete mobile-friendly PDF were supplied for
-maintainer review. The PDF contains all 216 variants. Browser opening in the
-preparation environment was blocked; the maintainer approved the supplied
-gallery on 2026-10-01.
+Test fixtures used `TMPDIR=/dev/shm`. The first default-temp attempt was stopped
+after failures because an existing `/tmp/.git` redirected fixture workspace
+discovery to `/tmp`. Changing only the temp location made the isolated
+reproduction pass; the full rerun passed without source changes. The existing
+`/tmp/.git` was preserved. Toolchain: Linux 7.2.5-3-omarchy, Bun 1.4.2,
+Node 26.8.2 and npm 11.19.1.
 
-Design sign-off #1: approved by chayapats on 2026-10-01 at 9aee12438ce25d152b77273f5f83d503dda5c36b
+### Gallery and design sign-off
 
-The maintainer approved the complete gallery without requesting changes.
-The empty request table below records that no change requests were made; the
-approval is the maintainer's decision, not an inference from automated checks.
+The initial approved gallery commit was
+`9aee12438ce25d152b77273f5f83d503dda5c36b`. Its golden tree was
+`34207f099aa1bcc5d4340cf6390816df5509e028`.
+`git diff --stat 9aee12438ce25d152b77273f5f83d503dda5c36b R -- tests/screen-catalog/goldens`
+printed nothing. `bun run screens:gallery` regenerated **29 screens / 216
+variants** at `R`: dark/light at 120, 80 and 50 columns, declared no-color
+variants and additional narrow widths. After the browser connector could not
+open the HTML, the maintainer opened it locally and confirmed complete review,
+with no requested changes. The final reviewed commit is **`G = R`**; the final
+`git diff --stat G R -- tests/screen-catalog/goldens` is also empty.
+
+Design sign-off #1: approved by chayapats on 2026-10-01 at f6def34943ce0210d8aa84f87ac6f21ab4b96cf2
+
+The empty request table records that no changes were requested in either review.
 
 | Screen | Variant | Request | Merged PR (fixed) or issue (filed) |
 | --- | --- | --- | --- |
 
-### Release preparation
+### Release contents and publication
 
-The candidate sets the package version to `0.5.0`, and both the greeting
-package peer range and the extension-guide example to `^0.5.0`. The README
-peer example named by the original ticket was removed by the #150 README
-rewrite; the maintained example is now in `docs/extensions.md`. Package
-compatibility tests already read the installed version from `package.json`.
-The changelog covers the user-visible work from #139–#150, including
-`ui.inlineDiffLines` and `ui.splash`.
+`package.json` is `0.5.0`; the greeting-package peer range and the maintained
+extension-guide example are `^0.5.0`. The README peer example moved to
+`docs/extensions.md` during #150. The changelog covers the user-visible work
+from #139–#150, including `ui.inlineDiffLines` and `ui.splash`.
+The regenerated and visually checked demo GIF is **241,206 bytes**, below
+2,097,152 bytes. #158 remained open, so its published-version fixture backfill
+is deferred as #151 permits.
 
-`bun run demo:record` completed through VHS 0.10.0 on the preparation
-computer. The regenerated GIF is **241,206 bytes**, below the 2,097,152-byte
-limit: 1120×640, 286 frames, 11.44 seconds. Its ready screen, inline diff,
-outcome and two-column review were visually checked; no private paths or
-real provider names appear.
+On clean `R`, `npm pack --dry-run` exited 0 and listed **154 files**, including
+CHANGELOG, the CLI, source, examples and declared user docs. Tests, scratch files
+and release-verification evidence are absent. npm identified `chayapats` with
+`schway: read-write`; the version and tag were unused before publication.
 
-The candidate's `npm pack --dry-run` exited 0 with **154 files**, including
-CHANGELOG, the CLI, source, examples and declared user docs. Tests, scratch
-files, demo assets, the release checklist and this evidence report are absent.
-This is a pre-merge check and must be repeated on `R` before publication.
+After maintainer browser 2FA, `npm publish --access public` exited 0.
+The registry accepted the upload with HTTP 202; its authenticated lifecycle
+status subsequently reported `published`, and public version/latest queries
+then returned `0.5.0`. The registry did not supply `gitHead`.
+The annotated tag was created at `R`, pushed, and its resolved commit verified
+as `f6def34943ce0210d8aa84f87ac6f21ab4b96cf2`.
 
-#158 is still open on 2026-10-01. As #151 permits, session fixture generation
-is deferred to its published-version backfill.
+npm's warning that the bin script name was "invalid and removed" was checked
+before publication: normalization strips `./` from `./bin/schway`, retaining
+`schway → bin/schway`. The source and packed tarball mappings remained intact;
+the published mapping and executable installation were verified below.
 
-### Gates still pending
+### Five-lane live smoke
 
-- Merge the reviewed release PR, record actual merge commit `R`, and rerun
-  frozen install, typecheck and the full suite on clean `R`.
-- Confirm `git diff --stat G R -- tests/screen-catalog/goldens` is empty, or
-  re-review changed screens and update `G`.
-- Run all five live smoke lanes on `R` with approved models/access and spending
-  limits. The approved ceiling is **USD 1 per route**, up to USD 5 across all
-  five routes, with no pooling between routes and no subscription purchase.
-  No paid smoke or full evals have run for this preparation. Full live
-  evals are not required for this minor release. Record route, provider,
-  model, thinking, auth source, status, reason, tested time and revision for
-  each lane; skipped or pending lanes do not pass.
-- Verify the publishing account and 2FA. This preparation environment is not
-  signed in to npm. A registry query on 2026-10-01 returned no 0.5.0 version;
-  `latest` remained `0.4.0`. Absence does not prove publish permission.
-- On clean `R`, verify package contents, publish `schway@0.5.0` publicly,
-  verify version and `latest`, then create/push and verify `v0.5.0` at `R`.
-- Verify the exact registry install with a clean HOME, including grouped help,
-  doctor version, no-model and removed-provider errors, and a completed
-  compatible-endpoint turn. Install the same registry version for daily use.
-- Replace the pending verdict only after every required gate passes. Commit
-  the final evidence and close #151 before counting #152 dogfood sessions.
+The actual-R command selected all five lanes, OpenRouter at
+`https://openrouter.ai/api/v1`, explicit models and `medium` thinking, with a
+120,000 ms per-lane deadline. It exited **0**, aggregate **`passed`**.
+Every lane completed two model rounds and one read-tool result with **zero
+provider retries**. The table's `R` denotes the full release SHA above; the
+shared report timestamp and revision apply to every row.
+
+| Route | Provider | Model | Thinking | Auth source | Status | Reason | Tested at (UTC) | Revision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI key | `openai-api-key` | `gpt-6-luna` | `medium` | `stored` | `passed` | `verified` | `2026-10-01T09:21:47.379Z` | `R` |
+| xAI key | `xai-api-key` | `grok-4.7` | `medium` | `stored` | `passed` | `verified` | `2026-10-01T09:21:47.379Z` | `R` |
+| OpenRouter | `compatible` | `meta/muse-spark-1.3-contributor` | `medium` | `stored` | `passed` | `verified` | `2026-10-01T09:21:47.379Z` | `R` |
+| ChatGPT subscription | `codex` | `gpt-6-sol` | `medium` | `stored-subscription` | `passed` | `verified` | `2026-10-01T09:21:47.379Z` | `R` |
+| Grok subscription | `grok` | `grok-4.7` | `medium` | `stored-subscription` | `passed` | `verified` | `2026-10-01T09:21:47.379Z` | `R` |
+
+These are the maintainer's explicit selections. The initially requested
+`gpt-6.1-sol` was absent from this ChatGPT account catalog; after being shown
+that result, the maintainer explicitly chose `gpt-6-sol medium`.
+No auth route or billing source was substituted.
+
+The approved ceiling remained **USD 1 per route**, up to USD 5 total, without
+pooling or a subscription purchase. API smoke requests cap requested output at
+256 tokens per response and constrain retries, messages and response bytes.
+The initial context was under 1 KiB. A conservative per-run API exposure estimate
+was below USD 0.20 per route, using these limits and current prices, leaving
+compatible-route headroom for the installed turn. This is an estimate, not an exact bill:
+the smoke report does not report token usage or dollar spend.
+No full live eval or subscription purchase ran.
+
+Current public standard input/output prices per million tokens were checked on
+2026-10-01: [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
+USD 0.10/0.50; [Grok 4.7](https://docs.x.ai/developers/models/grok-4.7)
+USD 2/6 below its long-context threshold; and
+[Muse Spark 1.3 Contributor](https://openrouter.ai/meta/muse-spark-1.3-contributor)
+USD 0.10/0.20. These API prices do not establish subscription plan charges.
+
+### Registry installation and daily-use setup
+
+The exact registry version was installed with a separate prefix, empty HOME
+and separate Git workspace. No production login/logout or secure-store mutation
+was performed. The temporary HOME shares the OS secure store, so the compatible
+turn used the existing endpoint-scoped OpenRouter identity.
+
+| Check | Exit | Verified result |
+| --- | --- | --- |
+| Exact registry install | 0 | `schway@0.5.0`; executable exists |
+| Grouped `--help` | 0 | Common, model/auth, sessions, workspace, output/diagnostics, advanced and examples |
+| `doctor --json` | 0 | Version `0.5.0` |
+| No configured model | 1 | Exact no-model guidance from the release checklist; no session created |
+| Compatible headless turn | 0 | `agent.finished.reason=completed`; exactly one session JSONL |
+| Removed Anthropic configuration | 1 | Exact removal message from the release checklist |
+
+The installed turn used the same approved Muse model with `medium` thinking,
+`--max-output 1024` and `--max-turns 1`, within the reserved compatible allowance.
+`npm install -g schway@0.5.0` then exited 0 for daily use, and the installed
+`schway doctor --json` exited 0 with version **`0.5.0`**.
+
+Open P0/P1 check date: **2026-10-01**; both queries returned no issues.
+The install/smoke checks do not count as dogfood sessions. No #152 day or session
+has been counted by this release verification.
 
 ## 0.4.0 release (2026-09-30)
 
