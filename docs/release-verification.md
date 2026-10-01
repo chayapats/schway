@@ -1,5 +1,91 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## 0.5.0 release (2026-10-01)
+
+**Verdict: 0.5.0 not published; release preparation in progress.**
+
+This section records preparation for [#151](https://github.com/chayapats/schway/issues/151).
+It does not replace the maintainer sign-off or any live/publication gate in the
+[release checklist](releasing.md). Raw test, package and future live reports stay
+private outside Git.
+
+### Preconditions and gallery candidate
+
+On 2026-10-01, GitHub's native dependency list showed all thirteen blockers
+#138–#150 closed. The 0.5 milestone had only #151 and #152 open; open P0 and P1
+queries both returned no issues. The verified main/gallery candidate is
+`G = 9aee12438ce25d152b77273f5f83d503dda5c36b`.
+
+At clean `G`, `bun install --frozen-lockfile` and `bun run typecheck` exited 0.
+The full offline suite passed **1,845 tests across 117 files; 0 failures**, in
+193.18 seconds, including all screen-catalog golden comparisons. The first
+attempt had three packaging failures from an unavailable default npm-cache
+path; rerunning with a writable cache passed without source changes.
+Tests used Bun 1.4.2, a temporary-memory filesystem for fixtures, and an
+init-style descendant reaper to clean up test processes.
+
+`bun run screens:gallery` generated **29 screens and 216 variants** from
+`tests/screen-catalog/goldens`. The inventory includes dark/light at 120, 80
+and 50 columns, declared no-color variants and the additional narrow widths.
+The golden tree at `G` is `34207f099aa1bcc5d4340cf6390816df5509e028`.
+The full offline HTML was supplied for maintainer review. Browser opening in
+the preparation environment was blocked, so browser review remains pending.
+
+**Design sign-off #1: pending maintainer review of every variant.**
+No maintainer change requests have been recorded yet. Record each request
+below before sign-off; a fixed request requires a merged PR and rechecked
+goldens. Do not infer approval from automated checks or representative images.
+
+| Screen | Variant | Request | Merged PR (fixed) or issue (filed) |
+| --- | --- | --- | --- |
+
+### Release preparation
+
+The candidate sets the package version to `0.5.0`, and both the greeting
+package peer range and the extension-guide example to `^0.5.0`. The README
+peer example named by the original ticket was removed by the #150 README
+rewrite; the maintained example is now in `docs/extensions.md`. Package
+compatibility tests already read the installed version from `package.json`.
+The changelog covers the user-visible work from #139–#150, including
+`ui.inlineDiffLines` and `ui.splash`.
+
+`bun run demo:record` completed through VHS 0.10.0 on the preparation
+computer. The regenerated GIF is **241,206 bytes**, below the 2,097,152-byte
+limit: 1120×640, 286 frames, 11.44 seconds. Its ready screen, inline diff,
+outcome and two-column review were visually checked; no private paths or
+real provider names appear.
+
+The candidate's `npm pack --dry-run` exited 0 with **154 files**, including
+CHANGELOG, the CLI, source, examples and declared user docs. Tests, scratch
+files, demo assets, the release checklist and this evidence report are absent.
+This is a pre-merge check and must be repeated on `R` before publication.
+
+#158 is still open on 2026-10-01. As #151 permits, session fixture generation
+is deferred to its published-version backfill.
+
+### Gates still pending
+
+- Record the maintainer's actual approval name, date and final reviewed `G`.
+- Merge the reviewed release PR, record actual merge commit `R`, and rerun
+  frozen install, typecheck and the full suite on clean `R`.
+- Confirm `git diff --stat G R -- tests/screen-catalog/goldens` is empty, or
+  re-review changed screens and update `G`.
+- Run all five live smoke lanes on `R` with approved models/access and spending
+  limits. No paid smoke or full evals have run for this preparation. Full live
+  evals are not required for this minor release. Record route, provider,
+  model, thinking, auth source, status, reason, tested time and revision for
+  each lane; skipped or pending lanes do not pass.
+- Verify the publishing account and 2FA. This preparation environment is not
+  signed in to npm. A registry query on 2026-10-01 returned no 0.5.0 version;
+  `latest` remained `0.4.0`. Absence does not prove publish permission.
+- On clean `R`, verify package contents, publish `schway@0.5.0` publicly,
+  verify version and `latest`, then create/push and verify `v0.5.0` at `R`.
+- Verify the exact registry install with a clean HOME, including grouped help,
+  doctor version, no-model and removed-provider errors, and a completed
+  compatible-endpoint turn. Install the same registry version for daily use.
+- Replace the pending verdict only after every required gate passes. Commit
+  the final evidence and close #151 before counting #152 dogfood sessions.
+
 ## 0.4.0 release (2026-09-30)
 
 **Verdict: 0.4.0 published.**
