@@ -150,7 +150,7 @@ export async function undoStoreSize({ home }: { home: string }): Promise<number>
   return (await inventory(join(home, ".schway", "undo"))).reduce((total, file) => total + file.size, 0);
 }
 
-/** Delete expired then globally oldest turns, collecting unreferenced session-local blobs. */
+/** Delete expired then oldest manifests against actual store bytes, collecting unreferenced blobs only afterwards. */
 export async function pruneUndoStore({ home, maxAgeDays, maxSizeBytes, now = new Date() }: {
   home: string; maxAgeDays: number; maxSizeBytes: number; now?: Date;
 }): Promise<void> {
@@ -162,28 +162,24 @@ export async function pruneUndoStore({ home, maxAgeDays, maxSizeBytes, now = new
 /** Inventory and collect while all Schway store mutations are excluded across processes. */
 async function pruneLocked(root: string, maxAgeDays: number, maxSizeBytes: number, now: Date): Promise<void> {
   const files = await inventory(root);
-  const manifests: { path: string; manifest: UndoManifest; removed: boolean }[] = [];
+  let totalBytes = files.reduce((total, file) => total + file.size, 0);
+  const manifests: { path: string; size: number; manifest: UndoManifest; removed: boolean }[] = [];
   for (const file of files) {
     const parts = storeEntry(root, file.path);
     if (parts?.[1] === "turns" && parts[2]!.endsWith(".json")) {
-      manifests.push({ path: file.path, manifest: parseManifest(JSON.parse(await readFile(file.path, "utf8")), parts[0]!, parts[2]!.slice(0, -5)), removed: false });
+      manifests.push({ path: file.path, size: file.size, manifest: parseManifest(JSON.parse(await readFile(file.path, "utf8")), parts[0]!, parts[2]!.slice(0, -5)), removed: false });
     }
   }
   manifests.sort((a, b) => Date.parse(a.manifest.createdAt) - Date.parse(b.manifest.createdAt) || a.path.localeCompare(b.path));
-  const refs = () => new Set(manifests.filter(m => !m.removed).flatMap(({ manifest: m }) => m.files.flatMap(file =>
-    [file.before, file.after].filter(hash => hash != null).map(hash => join(root, m.sessionId, "blobs", hash!.sha256)))));
-  const retainedSize = () => {
-    const referenced = refs(), removed = new Set(manifests.filter(m => m.removed).map(m => m.path));
-    return files.reduce((total, file) => total + (removed.has(file.path) || storeEntry(root, file.path)?.[1] === "blobs" && !referenced.has(file.path) ? 0 : file.size), 0);
-  };
   for (const entry of manifests) if (Date.parse(entry.manifest.createdAt) < now.getTime() - maxAgeDays * 86400000) {
-    await unlink(entry.path); entry.removed = true;
+    await unlink(entry.path); totalBytes -= entry.size; entry.removed = true;
   }
   for (const entry of manifests) {
-    if (retainedSize() <= maxSizeBytes) break;
-    if (!entry.removed) { await unlink(entry.path); entry.removed = true; }
+    if (totalBytes <= maxSizeBytes) break;
+    if (!entry.removed) { await unlink(entry.path); totalBytes -= entry.size; entry.removed = true; }
   }
-  const referenced = refs();
+  const referenced = new Set(manifests.filter(m => !m.removed).flatMap(({ manifest: m }) => m.files.flatMap(file =>
+    [file.before, file.after].filter(hash => hash != null).map(hash => join(root, m.sessionId, "blobs", hash!.sha256)))));
   for (const file of files) if (storeEntry(root, file.path)?.[1] === "blobs" && !referenced.has(file.path)) await unlink(file.path);
   let sessions;
   try { sessions = await readdir(root, { withFileTypes: true }); } catch (error) { if (isErrno(error, "ENOENT")) return; throw error; }

@@ -319,5 +319,5 @@ test("undo-store diagnoses sizes without changing files and compares bytes befor
   expect(check(report, "undo-store")).toMatchObject({ status: "warning", summary: "Undo store: 1.0 MB.", remedy: "Lower undo.maxSizeMB or delete old sessions." });
   expect(JSON.parse(JSON.stringify(report)).checks.some((c: { id: string }) => c.id === "undo-store")).toBe(true);
   expect((await stat(blob)).mtimeMs).toBe(before.mtimeMs);
-  expect(await readdir(join(home, ".schway"))).toEqual(["config.json", "undo"]);
+  expect((await readdir(join(home, ".schway"))).sort()).toEqual(["config.json", "undo"]);
 });

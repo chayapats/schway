@@ -397,6 +397,10 @@ its size limit, and collects unreferenced blobs. It runs before the first turn;
 failures go to the opt-in diagnostics sink and do not block startup. There is no
 pruning timer within a running process. Pruned turns are skipped by `/undo`.
 
+Retention also applies to incomplete manifests for active turns. Startup in
+another process may prune an eligible turn before its file changes settle.
+Settlement then reports missing undo data, and that turn is unavailable for undo.
+
 Undo writes, session-data deletion and pruning share a process lock. If another
 Schway process is updating the store, startup skips pruning and records the failure
 in enabled diagnostics. A file-tool change is refused if its pre-image cannot be

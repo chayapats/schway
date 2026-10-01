@@ -222,7 +222,7 @@ test("pruning expires old turns and collects only unreferenced session blobs", a
 });
 
 
-test("size pruning evicts the globally oldest manifest and accounts for collected blobs", async () => {
+test("size pruning evicts the globally oldest manifest until actual bytes fit before blob collection", async () => {
   await withTempDir(async home => {
     const store = openUndoStore({ home });
     const path = join(home, "file");
@@ -235,13 +235,43 @@ test("size pruning evicts the globally oldest manifest and accounts for collecte
       const manifest = JSON.parse(await readFile(manifestPath, "utf8")); manifest.createdAt = `${date}T00:00:00Z`;
       await writeFile(manifestPath, JSON.stringify(manifest));
     }
-    await pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1000, now: new Date("2026-01-03T00:00:00Z") });
+    // Both blobs still count in phase two; removing only the oldest manifest reaches this exact budget.
+    const maxSizeBytes = 10005 + (await stat(join(home, ".schway", "undo", "newer-session", "turns", "new.json"))).size;
+    await pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes, now: new Date("2026-01-03T00:00:00Z") });
     expect(await store.list("older-session")).toEqual([]);
     expect((await store.list("newer-session"))[0]?.turnId).toBe("new");
     await expect(stat(join(home, ".schway", "undo", "older-session"))).rejects.toThrow();
     expect((await store.blob("newer-session", Bun.CryptoHasher.hash("sha256", "small", "hex"))).toString()).toBe("small");
   });
 });
+
+for (const source of ["orphan", "expired-turn"] as const) {
+  test(`size pruning counts a large ${source} blob until all required manifests are deleted`, async () => {
+    await withTempDir(async home => {
+      const store = openUndoStore({ home }), path = join(home, "file");
+      await writeFile(path, "small");
+      await store.capture({ sessionId: "recent", turnId: "new", turnNumber: 1 }, path);
+      const manifestPath = join(home, ".schway", "undo", "recent", "turns", "new.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")); manifest.createdAt = "2026-01-30T00:00:00Z";
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      if (source === "orphan") {
+        await writeFile(join(home, ".schway", "undo", "recent", "blobs", "f".repeat(64)), "x".repeat(10000));
+      } else {
+        await writeFile(path, "x".repeat(10000));
+        await store.capture({ sessionId: "expired", turnId: "old", turnNumber: 1 }, path);
+        const expiredPath = join(home, ".schway", "undo", "expired", "turns", "old.json");
+        const expired = JSON.parse(await readFile(expiredPath, "utf8")); expired.createdAt = "2026-01-01T00:00:00Z";
+        await writeFile(expiredPath, JSON.stringify(expired));
+      }
+      await pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1000, now: new Date("2026-02-01T00:00:00Z") });
+      expect(await store.list("recent")).toEqual([]);
+      expect(await store.list("expired")).toEqual([]);
+      // Blob bytes alone exceed the limit after the last manifest: stop eviction, then collect them.
+      await expect(stat(join(home, ".schway", "undo", "recent"))).rejects.toThrow();
+      await expect(stat(join(home, ".schway", "undo", "expired"))).rejects.toThrow();
+    });
+  });
+}
 
 test("legacy manifests load unavailable shell detection and recovery retains shell attribution", async () => {
   await withTempDir(async home => {
