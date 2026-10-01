@@ -40,15 +40,17 @@ is made here.
 
 ### Offline candidate verification
 
-These are pre-merge checks, not actual-`R` evidence. The managed worker's handoff
-records the exact checked candidate revision and final documentation revision.
+These are pre-merge checks, not actual-`R` evidence. Frozen install, typecheck,
+the full suite and package dry-run passed on clean candidate
+`201dca08a7b30ea887880d2b0377c959e37fa921`. The subsequent commit only updates
+this evidence document. The managed worker's handoff records the final revision.
 
 | Check | Exit | Result |
 | --- | --- | --- |
 | `bun install --frozen-lockfile` | 0 | 27 installs / 53 packages checked; no changes |
 | `bun run typecheck` | 0 | Candidate typecheck passed |
 | Focused package, session and demo tests | 0 | 98 tests across 5 files; 0 failures |
-| Candidate full `bun test` | Pending | Record full-suite count and revision after the clean candidate run |
+| Candidate full `bun test` | 0 | 2,035 tests across 122 files; 0 failures; 181.45 seconds |
 | `bun run demo:record` | 0 | Scripted offline model; GIF 212,814 bytes, below 2,097,152 bytes |
 | Candidate `npm pack --dry-run --json` | 0 | 160 files; CLI, source, examples, declared user docs and changelog present; tests, scratch and release evidence absent |
 
@@ -63,6 +65,12 @@ No TUI source or screen-catalog goldens changed.
 After merge, rerun frozen install, typecheck and the full suite on clean `R`,
 record its SHA and test count, and inspect `npm pack --dry-run` again on `R`.
 Pre-merge checks do not replace those release gates.
+
+The complete candidate stdout/stderr log is
+`/tmp/v06-20261001T143347Z-issue-157-full-suite.log`, also preserved in the
+private evidence directory. Its final totals and all failure/error sections
+were inspected: no failures or error sections. Toolchain: Linux
+7.2.5-3-omarchy, Bun 1.4.2, Node 26.8.2 and npm 11.19.1.
 
 ### Five-lane live smoke — pending
 
@@ -85,16 +93,32 @@ lanes, and file any failed lane as P1 before release. Full live evals are outsid
 
 ### Publication and clean-HOME upgrade — pending
 
-Maintainer publish identity/rights, unused version, and any required npm 2FA
-must be checked when publication is authorized. No publish, tag or production
-auth/config change was performed by this preparation. Follow
+The coordinator's preliminary registry check at
+`2026-10-01T19:36:55.948610+00:00` observed `npm whoami` = `chayapats`, separate
+package-access evidence = `schway: read-write`, and stable `latest` = `0.5.0`
+(each exit 0). `npm view schway@0.6.0` returned E404 (exit 1); this was checked
+separately from package ownership. Recheck identity/rights, the unused version
+and any required npm 2FA when publication is authorized. No publish, tag or
+production auth/config change was performed by this preparation. Follow
 [the release checklist](releasing.md#4-publish-and-tag) on clean `R`, then the
 specific 0.5-to-0.6 upgrade procedure in #157. A temporary HOME does not isolate
 the OS secure store; keep production accounts unchanged.
 
+Preliminary setup only: a private isolated HOME, Git workspace and installation
+prefix were prepared under the evidence directory's `upgrade-preliminary/`.
+The workspace commits `a.ts` containing `export const x = 1;`.
+Git init/add/commit, exact registry `schway@0.5.0` installation and its
+`doctor --json` each exited 0; doctor reported `0.5.0`. Child-process HOME and
+XDG paths were isolated; the invoking HOME and daily installation were unchanged.
+No login/logout, secure-store mutation, live turn or 0.6.0 registry install ran.
+No session JSONL exists in this preliminary HOME. Setup commands, doctor JSON
+and stdout/stderr remain private beside the preserved workspace and prefix.
+This is preparation for the first upgrade step, not live upgrade or actual-`R`
+evidence.
+
 | Upgrade step from #157 | Exit | Result still required |
 | --- | --- | --- |
-| Set up isolated Git workspace; install registry `schway@0.5.0`; run doctor | Not run | Version `0.5.0` |
+| Set up isolated Git workspace; install registry `schway@0.5.0`; run doctor | 0 (preliminary) | Version `0.5.0` observed; preserve setup for the later live upgrade |
 | Create session A through the selected compatible endpoint; copy `A.before` | Not run | Exit 0; exactly one saved session |
 | Create interactive draft session B; wait 2 seconds and exit | Not run | Record B's ID; `draft survives upgrade` remains unsent |
 | Install registry `schway@0.6.0`; run doctor | Not run | Version `0.6.0` |
