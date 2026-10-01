@@ -91,8 +91,10 @@ test("private modes and invalid identities protect undo storage", async () => {
     const { store, turn, run } = await fixture(root);
     await writeFile(join(root, "file.txt"), "before"); await run("write", { path: "file.txt", content: "after" });
     const manifest = (await store.list("session"))[0]!;
-    for (const suffix of ["", "/session", "/session/blobs", "/session/turns"]) expect((await stat(join(root, ".schway/undo" + suffix))).mode & 0o777).toBe(0o700);
-    for (const suffix of [`turns/user.json`, `blobs/${manifest.files[0]!.before!.sha256}`]) expect((await stat(join(root, ".schway/undo/session", suffix))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      for (const suffix of ["", "/session", "/session/blobs", "/session/turns"]) expect((await stat(join(root, ".schway/undo" + suffix))).mode & 0o777).toBe(0o700);
+      for (const suffix of [`turns/user.json`, `blobs/${manifest.files[0]!.before!.sha256}`]) expect((await stat(join(root, ".schway/undo/session", suffix))).mode & 0o777).toBe(0o600);
+    }
     for (const id of ["", ".", "..", "../escape", "nested/name", "/absolute"]) {
       await expect(store.capture({ ...turn, sessionId: id }, join(root, "file.txt"))).rejects.toThrow("Invalid undo id");
       await expect(store.capture({ ...turn, turnId: id }, join(root, "file.txt"))).rejects.toThrow("Invalid undo id");

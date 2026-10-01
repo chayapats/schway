@@ -438,7 +438,7 @@ test("I/O failure during the final destination check is failed, rather than chan
   });
 });
 
-test("undo restoration creates and publishes owner-only bytes under a permissive umask while ordinary file tools keep their defaults", async () => {
+test.skipIf(process.platform === "win32")("undo restoration creates and publishes owner-only bytes under a permissive umask while ordinary file tools keep their defaults", async () => {
   await withTempDir(async root => {
     const result = await undoFilesystemProbe(root, "private-mode");
     expect(result.preparations).toBe(1);
