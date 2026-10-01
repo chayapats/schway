@@ -29,8 +29,8 @@ cursor 7 27 visible
       /new            Start a new conversation
       /sessions       Open saved work
       /changes        Review changes
+      /undo           Undo the last turn's file…
       /compact        Summarize to free context
-      /resume         Resume a saved session
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › /
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -90,13 +90,13 @@ cursor 7 27 visible
 22 49-50 #ffffff #f7f7f4 -
 23 0-1 #ffffff #f7f7f4 -
 23 1-2 #ffffff #e1e3df -
-23 2-47 #545e6c #e1e3df -
-23 47-49 #ffffff #e1e3df -
+23 2-48 #545e6c #e1e3df -
+23 48-49 #ffffff #e1e3df -
 23 49-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #ffffff #e1e3df -
-24 2-44 #545e6c #e1e3df -
-24 44-49 #ffffff #e1e3df -
+24 2-47 #545e6c #e1e3df -
+24 47-49 #ffffff #e1e3df -
 24 49-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -

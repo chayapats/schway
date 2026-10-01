@@ -1,3 +1,4 @@
+import { openUndoStore } from "../undo/store.ts";
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
 import { formatDuration } from "../text/format.ts";
 import { resolve } from "node:path";
@@ -379,6 +380,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     try {
       for await (const event of runAgentLoop({
+        undo: openUndoStore({ home }),
         session,
         model,
         contextManager,

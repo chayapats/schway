@@ -27,6 +27,7 @@ export class TuiController extends TurnLayer {
       context,
       compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
+      undoPreview: this.undoPreview ? structuredClone(this.undoPreview) : undefined,
       changeReview: this.changeReview ? structuredClone(this.changeReview) : undefined,
       readiness: this.startupAbort ? "loading" : this.isNotConnected() ? "not-connected" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
       ...(!this.model && this.startupDiagnostic ? { readinessDetail:
@@ -74,7 +75,7 @@ export class TuiController extends TurnLayer {
 
   /** True while startup, a turn, compaction or credential input owns interactive execution. */
   get running(): boolean {
-    return this.startupAbort !== undefined || this.activeAbort !== undefined || this.credentialEntry !== undefined || this.endpointUrlEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
+    return this.undoBusy || this.startupAbort !== undefined || this.activeAbort !== undefined || this.credentialEntry !== undefined || this.endpointUrlEntry !== undefined || this.loginCallbackValue !== undefined || this.credentialMutation;
   }
 
   /** Resolve the selected startup adapter without blocking editing or implicitly submitting a task. */
@@ -130,6 +131,7 @@ export class TuiController extends TurnLayer {
     this.gitComparison = undefined;
     this.gitShellPaths = [];
     this.successfulToolPaths.clear();
+    this.closeUndoPreview();
     this.closeChangeReview();
     this.closeModelPicker();
     if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined; this.loginReturn = undefined; }

@@ -473,3 +473,37 @@ test("branch transcript rebuild pairs reused tool IDs within their chronological
     expect(session.entries.filter(entry => entry.item.type === "tool_result")).toHaveLength(3);
   } finally { controller.dispose(); }
 });
+
+
+test("legacy format 3 upgrades once only when an undo is appended, preserving branches", async () => {
+  await withTempDir(async root => {
+    const directory = join(root, "sessions");
+    const initial = await createJsonlSession({ directory, workspace: workspace(root) });
+    const path = join(directory, `${initial.header.id}.jsonl`);
+    const header = { ...initial.header, version: 3 };
+    const original = JSON.stringify(header) + "\n";
+    await writeFile(path, original);
+    const session = await loadJsonlSession({ directory, id: header.id });
+    expect(await readFile(path, "utf8")).toBe(original);
+    session.append(user("legacy-u"), assistant("legacy-a"));
+    expect(await readFile(path, "utf8")).not.toContain('"session_format"');
+    const branch = session.forkBranch("legacy-a");
+    const undo = { type: "turn_undo" as const, id: "undo", turnId: "legacy-u", turnNumber: 1,
+      reverted: [{ path: "note.txt", action: "restored" as const }], skipped: [], note: "Undo note" };
+    session.append(undo);
+    session.append(user("next"), assistant("next-a"));
+    const text = await readFile(path, "utf8");
+    expect(text.split('"type":"session_format","version":4')).toHaveLength(2);
+    expect(text.indexOf('"type":"session_format"')).toBeLessThan(text.indexOf('"type":"turn_undo"'));
+    const resumed = await loadJsonlSession({ directory, id: header.id });
+    expect(resumed.activeBranchId).toBe(branch);
+    expect(resumed.items.find(item => item.id === "undo")).toEqual(undo);
+    await writeFile(path, original + JSON.stringify(append("main", header.id, undo)) + "\n");
+    await expect(loadJsonlSession({ directory, id: header.id })).rejects.toThrow("Session file contains a malformed record");
+    await writeFile(path, JSON.stringify({ ...header, version: 5 }) + "\n");
+    await expect(loadJsonlSession({ directory, id: header.id })).rejects.toThrow("Unsupported session format version 5. This Schway build reads versions 1, 2, 3 and 4.");
+    await writeFile(path, text + '{"type":"branch_append","entries":[{"item":{"type":"turn_undo"');
+    await loadJsonlSession({ directory, id: header.id });
+    expect(await readFile(path, "utf8")).toBe(text);
+  });
+});

@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { TuiSnapshot } from "../../src/tui/controller.ts";
 import type { ScreenHarness } from "./harness.ts";
 
@@ -42,6 +44,11 @@ export const SCREENS: readonly Screen[] = [
   { id: "retry-countdown", title: "Retry countdown", description: "A transient failure waits before the next attempt.", elapsed: 1200, drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.phase === "retry" },
   // Render the loading panel before yielding to Git so scrollbar initialization has a fixed order.
   { id: "review-panel", title: "Review panel", description: "The change review displays the completed clamp fix.", noColor: true, drive: async ui => { await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); }, ready: s => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0 },
+  { id: "undo-preview", title: "Undo preview", description: "Undo previews a restore, a deletion and a file changed afterwards.", drive: async ui => {
+    await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
+    await writeFile(join(ui.root, "README.md"), "Changes made afterwards.\n");
+    await enter(ui, "/undo");
+  }, ready: s => !!s.undoPreview },
   { id: "recent-work-resume", title: "Recent work resume", description: "A saved conversation is offered for resumption.", drive: async ui => { await ui.controller.offerRecentSession(ui.sessionDirectory!); }, ready: s => !!s.recentSession },
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },

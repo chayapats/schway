@@ -249,7 +249,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (target instanceof ScrollBoxRenderable || target === editor) return;
     }
     event.stopPropagation();
-    (controller.snapshot().changeReview ? reviewPanel : controller.snapshot().preferences ? preferencePanel : controller.snapshot().branchTree ? tree : transcript).processMouseEvent(event);
+    (controller.snapshot().undoPreview || controller.snapshot().changeReview ? reviewPanel : controller.snapshot().preferences ? preferencePanel : controller.snapshot().branchTree ? tree : transcript).processMouseEvent(event);
   };
 
   const showInteractionNotice = (text: string) => {
@@ -579,7 +579,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         latest();
         if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; }
       }
-      const externalPanel = snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.changeReview ? "review" : "";
+      const externalPanel = snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : "");
@@ -589,8 +589,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (panelMode === "sessions" && !nextPanel && !sessionChanged) searchRestoreScroll = sessionOriginalScroll;
         if (nextPanel === "tree") { treeOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "tree" && !nextPanel && !sessionChanged) searchRestoreScroll = treeOriginalScroll;
-        if (nextPanel === "review") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
-        if (panelMode === "review" && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
+        if (nextPanel === "review" || nextPanel === "undo") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if ((panelMode === "review" || panelMode === "undo") && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
         if (nextPanel === "help") { helpInserted = false; lastQuery = undefined; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "help" && !nextPanel && !sessionChanged) searchRestoreScroll = helpOriginalScroll;
         panelMode = nextPanel;
@@ -604,9 +604,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       observeDraft(panelMode ? savedDraft : editor.plainText, secretSurface);
       draftStatus.visible = !!durableDraft?.notice;
       draftStatus.content = fitLine(durableDraft?.notice ?? "", width);
-      editor.visible = !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
+      editor.visible = !snapshot.undoPreview && !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
       credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
-      if (snapshot.changeReview) { editor.blur(); }
+      if (snapshot.undoPreview || snapshot.changeReview) { editor.blur(); }
       else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
         editor.blur();
         credential.content = snapshot.endpointUrlEntry
@@ -652,12 +652,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      transcript.visible = !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview;
-      reviewPanel.visible = !!snapshot.changeReview;
-      if (snapshot.changeReview) {
-        const review = snapshot.changeReview;
-        const stacked = renderer.width < 80;
-        const fileRows = review.files.map(file => ({ path: safe(file.path), badge: file.source === "shell" ? "shell" : file.added !== undefined || file.removed !== undefined ? `+${file.added ?? 0} −${file.removed ?? 0}` : "" }));
+      transcript.visible = !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview;
+      reviewPanel.visible = !!snapshot.changeReview || !!snapshot.undoPreview;
+      if (snapshot.changeReview || snapshot.undoPreview) {
+        const undo = snapshot.undoPreview;
+        const selected = undo?.files[undo.selected];
+        const review = undo ? { heading: `Undo turn ${undo.turnNumber} · ${undo.result ? "Esc close" : "Enter undo · Esc cancel"}`, selected: undo.selected,
+          rows: [{ sign: " " as const, text: `─ ${selected?.path ?? ""} ─` }, ...(selected?.rows ?? [])], showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
+        const stacked = !!undo || renderer.width < 80;
+        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: file.source === "shell" ? "shell" : file.added !== undefined || file.removed !== undefined ? `+${file.added ?? 0} −${file.removed ?? 0}` : "" }));
         const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), 20);
         const fileWidth = stacked ? width : Math.min(Math.floor(width * 0.4), longestFile);
         reviewHeading.content = safe(review.heading);
@@ -676,10 +679,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewDivider.visible = !stacked && fileRows.length > 0;
         reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
         reviewText.wrapMode = review.showingDetails ? "word" : "char";
-        const content = JSON.stringify([review.showingDetails, review.detail, review.details, mode]);
+        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode]);
         if (content !== reviewContent) {
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
-            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${row.sign} `}${safe(row.text)}${index < review.rows.length - 1 ? "\n" : ""}`;
+            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${undo ? "│" : ""}${row.sign}${undo ? "" : " "}`}${safe(row.text)}${index < review.rows.length - 1 ? "\n" : ""}`;
             return fg(row.sign === "+" ? theme.success : row.sign === "-" ? theme.error : theme.text)(text);
           }));
           reviewContent = content;
@@ -967,7 +970,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       hints.height = panelMode === "review" ? "auto" : 1;
       hints.wrapMode = panelMode === "review" ? "word" : "none";
-      if (panelMode === "review") {
+      if (panelMode === "undo") {
+        hints.content = "↑↓ select · PgUp/PgDn scroll · Esc close";
+      } else if (panelMode === "review") {
         hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
       } else {
         hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
@@ -994,7 +999,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       return;
     }
     const snapshot = controller.snapshot();
-    if (snapshot.changeReview) return;
+    if (snapshot.undoPreview || snapshot.changeReview) return;
     if (snapshot.readiness === "loading" || snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
       void controller.selectLoginChoice().then(refresh, fail);
@@ -1118,6 +1123,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       void options.submit(`/resume ${snapshot.recentSession.id}`, () => {}).then(refresh, fail); handled(); return;
     }
     if ((key.meta || key.option) && name === "s" && !panelMode && !controller.running) { void options.submit("/sessions", () => {}).then(refresh, fail); handled(); return; }
+    if (snapshot.undoPreview) {
+      if (name === "escape") controller.closeUndoPreview();
+      else if (name === "return" || name === "enter") void controller.applyUndo().then(refresh, fail);
+      else if (name === "up" || name === "down") { controller.selectUndoFile(name === "up" ? -1 : 1); reviewDiff.scrollTo(0); }
+      else if (name === "pageup" || name === "pagedown") reviewDiff.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, reviewDiff.viewport.height - 2));
+      handled(); return;
+    }
     if (snapshot.changeReview) {
       if (key.ctrl && name === "i") { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); handled(); return; }
       if (name === "escape") { if (snapshot.changeReview.showingDetails) { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); } else controller.closeChangeReview(); handled(); return; }

@@ -17,7 +17,7 @@ Use `/branch list` to obtain exact branch IDs, entry IDs, and the empty conversa
 
 Resume rebuilds only the selected ancestry without replaying tool effects. Omit `--branch` to restore the saved active branch; `--branch` requires `--resume`. Interrupted accepted calls receive error results only on the selected ancestry. A syntactically torn final JSON write is repaired while preserving the preceding bytes; valid JSON with invalid ancestry or records is an error, even at the end of the file.
 
-New files use format 3 with atomic branch operations containing semantic `user`, `assistant`, `tool_result`, and `compaction` entries. Formats 1 and 2 load as one `main` branch and gain an append-only upgrade marker when branch data changes. Runtime-only deltas (`model.delta`, `tool.delta`) are never persisted. See [renderer-free source API](#renderer-free-source-api) and [format 3 and recovery](#format-3-and-recovery) for runnable examples, compaction isolation, and recovery details.
+New files use format 4 with atomic branch operations containing semantic `user`, `assistant`, `tool_result`, `compaction`, and `turn_undo` entries. Formats 1 and 2 load as one `main` branch and gain an append-only upgrade marker when branch data changes. Runtime-only deltas (`model.delta`, `tool.delta`) are never persisted. See [renderer-free source API](#renderer-free-source-api) and [format 4 and recovery](#format-4-and-recovery) for runnable examples, compaction isolation, and recovery details.
 
 `--json` streams normalized runtime events as JSONL on stdout for tooling; diagnostics stay on stderr. Runtime JSONL and durable session JSONL are different concepts: the first is transient observability, the second is resumable state.
 
@@ -146,9 +146,9 @@ try {
 
 `append(...records)` validates and persists an entire batch before publishing it in memory. Durable entry IDs must be unique across the entire session; provider tool-call IDs may repeat in later settled groups, but an unresolved group must be unambiguous. `acquireOperation()` returns an idempotent release function and prevents branch changes until release. The agent loop and compaction use this lease through cancellation and tool settlement. Custom asynchronous callers that own the selected ancestry should hold the same lease with `try/finally`.
 
-## Format 3 and recovery
+## Format 4 and recovery
 
-New sessions have a version 3 `session` header retaining the initial workspace, launch directory, and extra roots. Branch operations are versioned semantic records. Their entries wrap conversation data and its exact parent:
+New sessions have a version 4 `session` header retaining the initial workspace, launch directory, and extra roots. Branch operations are versioned semantic records. Their entries wrap conversation data and its exact parent:
 
 ```json
 {"type":"branch_append","version":1,"branchId":"main","entries":[{"parentId":"session-id","item":{"type":"user","id":"A","content":[{"type":"text","text":"Start"}]}},{"parentId":"A","item":{"type":"assistant","id":"B","content":[{"type":"text","text":"Ready"}]}}]}
@@ -171,6 +171,40 @@ Formats 1 and 2, including a format 1 header followed by a format 2 upgrade, loa
 ```
 
 New operations follow that marker; the original header and linear records remain recoverable byte for byte. A crash after the complete marker but before the operation keeps the previous graph; reopening uses format 3 without repeating the marker. Upgrades must increase the version. Repeated, downgraded, and unknown versions are errors. Older Schway builds do not understand upgraded files.
+
+### Durable turn undo
+
+A `turn_undo` entry appends the outcome of `/undo` to the active conversation
+branch. It preserves earlier entries and records display paths, file actions,
+skipped reasons, and the exact note supplied to the next model request:
+
+```json
+{"type":"turn_undo","id":"undo-id","turnId":"user-record-id","turnNumber":7,"reverted":[{"path":"clamp.ts","action":"restored"},{"path":"src/new.ts","action":"deleted"}],"skipped":[{"path":"README.md","reason":"changed"}],"note":"The user undid your file changes from the previous turn: clamp.ts, src/new.ts. README.md was not reverted because it changed afterwards."}
+```
+
+This payload sits inside a normal `branch_append` operation. Reverted actions
+are `restored` or `deleted`; skipped reasons are `changed` or `failed`. The model
+receives the note as a user message at its original position, while compaction
+treats it as part of the preceding accepted turn. Resume displays the saved undo
+result without replaying file operations.
+
+Existing format 1–3 files keep their original bytes. Ordinary format-3 operations
+need no marker. The first operation containing a `turn_undo` writes this marker
+once, immediately before that operation:
+
+```json
+{"type":"session_format","version":4}
+```
+
+Headers and original records remain unchanged. Readers accept header versions
+1–4 and increasing transitions to 2, 3 or 4; undo entries require format 4.
+
+The private pre-image store is `<home>/.schway/undo/<session-id>/`, with raw bytes
+in `blobs/<sha256>` and a first-change-ordered manifest for each accepted user
+record in `turns/<turn-id>.json`. File tools capture original bytes before
+execution and record the settled hash afterwards, including failed or cancelled
+calls that changed a file. Recovery of the same accepted turn joins its existing
+manifest. Undo reads this store on restart and leaves manifests unchanged.
 
 ### Compaction and shared roots
 
@@ -205,7 +239,7 @@ all-workspace and recovery scope (Ctrl+W). It never deletes history. See
 [the TUI guide](tui.md#recent-sessions) for paging and scan limits.
 
 New committed `branch_append` operations carry an optional `committedAt` ISO time.
-Readers that ignore unknown fields remain compatible with formats 1–3. Branch
+Readers that ignore unknown fields remain compatible with formats 1–4. Branch
 selection, fork creation, metadata changes, interrupted-call settlement and
 preview do not advance conversational activity. Historical timestamps are not
 invented from filesystem modification times.

@@ -1,3 +1,4 @@
+import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
 import type { ContextManager, ContextSection, PreparedContext } from "../context/manager.ts";
@@ -34,13 +35,10 @@ export interface AgentLoopOptions {
   toolEnv?: NodeJS.ProcessEnv;
   clock?: AgentClock;
   extensions?: ExtensionRuntime;
+  undo?: UndoStore;
 }
 
-/**
- * Stream runtime events while preparing context, calling the model, and persisting assistant and tool results.
- * Repeats until a final answer, cancellation, failure, or the turn bound;
- * failures emit error events, and accepted tool calls settle before cancellation finishes.
- */
+/** Stream context, model and tool events while persisting accepted outcomes and settling calls before cancellation finishes. */
 export async function* runAgentLoop(
   options: AgentLoopOptions,
 ): AsyncGenerator<RuntimeEvent> {
@@ -56,6 +54,9 @@ export async function* runAgentLoop(
 
 /** Keep authoritative execution independent of extension notification delivery. */
 async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<RuntimeEvent> {
+  const user = options.session.items.findLast(item => item.type === "user");
+  const undoTurn: UndoTurn | undefined = user ? { sessionId: options.session.rootId, turnId: user.id,
+    turnNumber: options.session.items.filter(item => item.type === "user").length } : undefined;
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   const clock = options.clock ?? systemClock();
   let tools = options.tools;
@@ -203,7 +204,6 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         createActivateSkillTool(options.contextManager),
       ]);
     }
-    const user = options.session.items.findLast(item => item.type === "user");
     if (hooks && user?.type === "user") {
       turnContext = await hooks.beginTurn(user, signal!);
     }
@@ -257,6 +257,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         maxConcurrentTools: options.maxConcurrentTools,
         env: options.toolEnv,
         toolHooks,
+        undo: options.undo,
+        undoTurn,
       });
       for (const item of executed) {
         try { options.session.append(item.result); }

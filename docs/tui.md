@@ -299,6 +299,33 @@ same preferences when configuration is available. A valid
 session appearance choice; preferences show its effective source and the saved
 choice beneath it. Schway does not edit terminal, shell or window-manager settings.
 
+## Undo
+
+`/undo` previews the most recent eligible turn's `edit` and `write` changes on
+the selected conversation branch. The panel shows files in first-change order:
+`restore` replaces an edited file with its original bytes, `delete` removes a
+created file, and `changed since · skip` protects later edits. The counts and
+numbered diff describe current content changing back to the original content.
+Binary content shows `Binary file · restore only` without line counts.
+
+Up/Down selects a file; PageUp/PageDown scrolls its diff. Enter rechecks every
+file's hash immediately before restoring or deleting it. Esc cancels without
+changing files and restores the composer draft and cursor. Resize preserves
+selection and keeps action text visible by shortening paths first.
+
+A successful undo appends one durable result and model-visible note; it keeps
+conversation history and the selected branch. Files changed after the preview
+are skipped. Failed operations remain in a result panel until Esc closes it;
+Enter does not retry them. Empty parent directories remain. A turn already undone
+on any conversation branch cannot be undone again. If every file changed since,
+no undo record is written and the turn remains available.
+
+Undo data survives restart, including file changes from a headless `-p` turn
+resumed interactively. Undo covers `edit` and `write` only. It does not revert
+shell or extension tool effects, restore modes or directories, or walk back
+through older turns. `/undo` accepts no arguments and waits until a running turn
+settles like other interactive commands.
+
 ## Interaction
 
 | Action | Control |
@@ -317,6 +344,7 @@ choice beneath it. Schway does not edit terminal, shell or window-manager settin
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
+| Undo the last turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
 | Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one expandable tool result; C copies the selected item; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |

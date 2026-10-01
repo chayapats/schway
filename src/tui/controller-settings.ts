@@ -7,11 +7,11 @@ import { EDITABLE_CONFIG_KEYS, type ConfigScope, type ConfigTransaction } from "
 import { isDeepStrictEqual } from "node:util";
 import { sanitizeBaseUrl } from "./transcript-format.ts";
 import { displaySetting } from "./controller-support.ts";
-import { ChangesLayer } from "./controller-changes.ts";
+import { UndoLayer } from "./controller-undo.ts";
 
 
 /** Preferences, config commands and settings publication. */
-export abstract class SettingsLayer extends ChangesLayer {
+export abstract class SettingsLayer extends UndoLayer {
   /** Return the effective configured appearance before a launch environment override. */
   appearanceMode(): "auto" | "dark" | "light" { return this.configEditor?.settings.appearance ?? "auto"; }
 

@@ -66,8 +66,24 @@ export interface CompactionRecord {
   parentCompactionId?: string;
 }
 
-/** Any durable session entry: model-facing conversation or compaction marker. */
-export type SessionRecord = ConversationItem | CompactionRecord;
+/** Any durable conversation entry, compaction boundary or file undo outcome. */
+export type SessionRecord = ConversationItem | CompactionRecord | TurnUndoRecord;
+
+/** Durable file revert outcome and model-visible note, without rewinding conversation history. */
+export interface TurnUndoRecord {
+  type: "turn_undo";
+  id: string;
+  turnId: string;
+  turnNumber: number;
+  reverted: { path: string; action: "restored" | "deleted" }[];
+  skipped: { path: string; reason: "changed" | "failed" }[];
+  note: string;
+}
+
+/** True for durable turn undo outcomes that become user notes in model context. */
+export function isTurnUndoRecord(value: SessionRecord): value is TurnUndoRecord {
+  return value.type === "turn_undo";
+}
 
 /** True for durable compaction markers. */
 export function isCompactionRecord(
@@ -80,5 +96,5 @@ export function isCompactionRecord(
 export function isConversationItem(
   value: SessionRecord,
 ): value is ConversationItem {
-  return value.type !== "compaction";
+  return value.type !== "compaction" && value.type !== "turn_undo";
 }

@@ -93,6 +93,7 @@ export function branchTreePreviewForRecord(item: SessionRecord | undefined, limi
     return "(reasoning)";
   }
   if (item.type === "tool_result") return oneLine(item.content);
+  if (item.type === "turn_undo") return oneLine(`Undid turn ${item.turnNumber}`);
   return oneLine(`Compacted: ${item.summary}`);
 }
 

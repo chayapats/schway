@@ -667,6 +667,7 @@ export async function handleSlashCommand(
     case "branch": {
       return ctx.controller.branchCommand(args);
     }
+    case "undo": return ctx.controller.undoCommand(args);
     case "changes": {
       return ctx.controller.changesCommand(args);
     }

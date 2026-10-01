@@ -1,3 +1,4 @@
+import { openUndoStore } from "../undo/store.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import { relative } from "node:path";
 import { toolTarget } from "./presentation.ts";
@@ -218,6 +219,7 @@ export abstract class TurnLayer extends CompactionLayer {
   /** Replace retained outcome evidence and start one accepted turn with its own cancellation signal. */
   protected async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
     this.toolStartedAt.clear();
+    this.closeUndoPreview();
     this.closeChangeReview();
     this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
     this.outcomeUserId = this.session.items.findLast(item => item.type === "user")?.id;
@@ -265,6 +267,7 @@ export abstract class TurnLayer extends CompactionLayer {
     if (this.disposed || this.activeAbort?.signal !== signal) return;
     try {
       for await (const event of runAgentLoop({
+        undo: this.home ? openUndoStore({ home: this.home }) : undefined,
         session: this.session,
         // Checked in submit(); kept non-null here for the loop call.
         model: this.model!,

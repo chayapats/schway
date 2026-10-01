@@ -235,6 +235,7 @@ export abstract class CompactionLayer extends SettingsLayer {
     this.outcomeUserId = undefined;
     this.outcomeDiagnostics = undefined;
     this.outcome = undefined;
+    this.closeUndoPreview();
     this.closeChangeReview();
   }
 }

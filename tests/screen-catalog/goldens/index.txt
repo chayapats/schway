@@ -22,6 +22,7 @@ large-edit
 failed-turn
 retry-countdown
 review-panel
+undo-preview
 recent-work-resume
 compaction
 no-color
