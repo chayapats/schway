@@ -1,3 +1,4 @@
+import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, stricterApprovalMode, type ApprovalMode } from "../agent/approval.ts";
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { readFile } from "node:fs/promises";
@@ -52,6 +53,7 @@ export const CONFIG_SETTING_NAMES = [
   "profile",
   "git",
   "undo",
+  "approval",
   "appearance",
   "ui",
 ] as const;
@@ -163,6 +165,7 @@ export const ConfigSchema = Type.Object(
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
     git: Type.Optional(GitConfigSchema),
     undo: Type.Optional(UndoConfigSchema),
+    approval: Type.Optional(Type.Object({ mode: Type.Optional(Type.Union(APPROVAL_MODES.map(mode => Type.Literal(mode)))) }, { additionalProperties: false })),
     appearance: Type.Optional(AppearanceSchema),
     ui: Type.Optional(UiConfigSchema),
   },
@@ -245,6 +248,12 @@ export interface ResolvedSettings {
   credentialIdentity?: string;
   /** Observational Git change-tracking mode; on-demand reads only on explicit inspection. */
   gitChangeTracking: GitChangeTrackingMode;
+  /** Effective tool approval mode after stricter-only project settings and user overrides. */
+  approvalMode: ApprovalMode;
+  /** User-file approval mode, or the default, before project and runtime overrides. */
+  userApprovalMode: ApprovalMode;
+  /** Project approval mode ignored because it is looser than the user-file setting. */
+  ignoredProjectApprovalMode?: ApprovalMode;
   /** Maximum age of stored undo turns in days. */
   undoMaxAgeDays: number;
   /** Maximum private undo store size in MiB. */
@@ -263,6 +272,7 @@ export const BUILTIN_DEFAULTS: ConfigLayer = {
   maxTurns: DEFAULT_MAX_TURNS,
   maxConcurrentTools: DEFAULT_MAX_CONCURRENT_TOOLS,
   git: { changeTracking: DEFAULT_GIT_CHANGE_TRACKING },
+  approval: { mode: DEFAULT_APPROVAL_MODE },
   undo: { maxAgeDays: DEFAULT_UNDO_MAX_AGE_DAYS, maxSizeMB: DEFAULT_UNDO_MAX_SIZE_MB },
   ui: { inlineDiffLines: DEFAULT_INLINE_DIFF_LINES, splash: "first-run" },
 };
@@ -539,6 +549,7 @@ export function resolveSettings(input: {
   /** Stage an uncached OpenRouter or xAI choice for verified discovery before interactive activation. */
   deferUncachedThinking?: boolean;
 }): ResolvedSettings | { error: string } {
+  const approval = resolveApprovalSettings(input);
   const memory = effectiveInteractiveMemory(input);
   const mergedProfiles = mergeProfileMaps(input.user?.profiles, input.project?.profiles, input.cli?.profiles, input.session?.profiles);
   const selection = mergeConfigLayers(
@@ -610,6 +621,7 @@ export function resolveSettings(input: {
       : validateThinking(provider, model, unsetThinking, merged.extraBody, undefined, merged.baseUrl);
     if (unsetThinkingError !== undefined) return { error: unsetThinkingError };
     return finishResolvedSettings({
+      approval,
       provider,
       model: "",
       modelConfigured: false,
@@ -658,6 +670,7 @@ export function resolveSettings(input: {
   }
   const policy = resolveThinkingPolicy({ provider, model, authRoute, baseUrl: merged.baseUrl, capability: listedSelected ? capability ?? null : undefined });
   return finishResolvedSettings({
+    approval,
     provider,
     model,
     modelConfigured: true,
@@ -676,6 +689,7 @@ export function resolveSettings(input: {
 }
 
 function finishResolvedSettings(input: {
+  approval: ReturnType<typeof resolveApprovalSettings>;
   provider: ProviderFamily;
   model: string;
   modelConfigured: boolean;
@@ -692,6 +706,9 @@ function finishResolvedSettings(input: {
   catalog: ModelInfo;
 }): ResolvedSettings {
   return {
+    approvalMode: input.approval.approvalMode,
+    userApprovalMode: input.approval.userApprovalMode,
+    ...(input.approval.ignoredProjectApprovalMode !== undefined ? { ignoredProjectApprovalMode: input.approval.ignoredProjectApprovalMode } : {}),
     provider: input.provider,
     model: input.model,
     modelConfigured: input.modelConfigured,
@@ -859,4 +876,26 @@ function isNotFound(error: unknown): boolean {
 /** Normalize thrown values into a printable error string. */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+
+/** Resolve approval independently of memory, allowing project settings only to tighten the user baseline. */
+export function resolveApprovalSettings(input: { user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer }): {
+  approvalMode: ApprovalMode; userApprovalMode: ApprovalMode; ignoredProjectApprovalMode?: ApprovalMode; origin: string;
+} {
+  const userApprovalMode = input.user?.approval?.mode ?? DEFAULT_APPROVAL_MODE;
+  let approvalMode = userApprovalMode;
+  let origin = input.user?.approval?.mode !== undefined ? "user-global" : "built-in default";
+  const project = input.project?.approval?.mode;
+  const ignoredProjectApprovalMode = project !== undefined && stricterApprovalMode(userApprovalMode, project) !== project ? project : undefined;
+  if (project !== undefined && ignoredProjectApprovalMode === undefined) { approvalMode = project; origin = "project"; }
+  if (input.cli?.approval?.mode !== undefined) { approvalMode = input.cli.approval.mode; origin = "CLI"; }
+  if (input.session?.approval?.mode !== undefined) { approvalMode = input.session.approval.mode; origin = "current-session override"; }
+  return { approvalMode, userApprovalMode, ignoredProjectApprovalMode, origin };
+}
+
+/** Explain an ignored project approval value using its user-file baseline and source path. */
+export function ignoredProjectApprovalNotice(settings: ResolvedSettings, path: string): string | undefined {
+  return settings.ignoredProjectApprovalMode === undefined ? undefined
+    : `Ignored approval.mode "${settings.ignoredProjectApprovalMode}" in ${path}: project config can only make approval stricter than your "${settings.userApprovalMode}" setting.`;
 }

@@ -256,3 +256,47 @@ test("load failures and cross-module duplicates identify the module and preserve
     expect(loaded.get("existing")!.validate).toBe(validator);
   });
 });
+
+
+test("extension effects survive frozen snapshots and enforce read-only approval", async () => {
+  await withTempDir(async dir => {
+    const path = join(dir, "effects.ts");
+    await Bun.write(path, `export default ctx => { ctx.registerTool({ ...${VALID_TOOL}, name: 'reader', effect: 'read-only' }); ctx.registerTool(${VALID_TOOL}); };`);
+    const workspace = await resolveWorkspace(dir);
+    const { tools, runtime } = await loadExtensions({ modules: [path], workspace, tools: createToolRegistry() });
+    try {
+      expect(Object.isFrozen(tools.get("reader")!.definition)).toBe(true);
+      expect(tools.get("reader")!.definition.effect).toBe("read-only");
+      expect(Object.hasOwn(tools.get("custom")!.definition, "effect")).toBe(false);
+      for (const name of ["reader", "custom"]) {
+        const result = await executeToolCall({ registry: tools, workspace, approval: { interactive: true, mode: () => "read-only" },
+          call: { type: "tool_call", id: name, name, arguments: {} } });
+        expect(result.result.content).toBe(name === "reader" ? "ok" : "Read-only mode: file changes and commands are off. The user can switch modes with Shift+Tab.");
+        expect(result.status).toBe(name === "reader" ? "success" : "error");
+      }
+    } finally { runtime.dispose(); }
+  });
+});
+
+for (const effect of [null, 1, "invalid"]) test(`extension rejects invalid effect ${JSON.stringify(effect)} at startup`, async () => {
+  await withTempDir(async dir => {
+    const path = join(dir, "invalid-effect.ts");
+    await Bun.write(path, `export default ctx => ctx.registerTool({ ...${VALID_TOOL}, effect: ${JSON.stringify(effect)} });`);
+    await expect(loadExtensions({ modules: [path], workspace: await resolveWorkspace(dir), tools: createToolRegistry() }))
+      .rejects.toThrow('Tool "custom" effect must be read-only or mutating');
+  });
+});
+
+
+test("extension snapshot reads the declared effect getter only once", async () => {
+  await withTempDir(async dir => {
+    const path = join(dir, "getter.ts");
+    await Bun.write(path, `export let reads = 0; export default ctx => ctx.registerTool({ ...${VALID_TOOL}, get effect() { reads++; return reads === 1 ? 'read-only' : 'invalid'; } });`);
+    const { tools, runtime } = await loadExtensions({ modules: [path], workspace: await resolveWorkspace(dir), tools: createToolRegistry() });
+    try {
+      const module = await import(pathToFileURL(await realpath(path)).href);
+      expect(module.reads).toBe(1);
+      expect(tools.get("custom")!.definition.effect).toBe("read-only");
+    } finally { runtime.dispose(); }
+  });
+});

@@ -5,7 +5,7 @@ import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/stor
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection, type TextChunk } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
-import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
+import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { formatContextWindow } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
@@ -228,7 +228,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
-  let footerParts: { model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; notConnected?: boolean; override?: string } = { model: "", route: "", ctx: "", running: false };
+  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false };
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -415,7 +415,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   /** Render the status pill within terminal width, adding model details only after connection. */
   function paintFooter(at: number) {
     const columns = Math.max(1, renderer.width);
-    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(` ${fitLine(footerParts.override, columns - 2)}`)]); return; }
+    const modeChip = footerParts.approvalMode !== "auto" ? [bold(fg(theme.warning)("◆ READ-ONLY")), fg(theme.muted)(" ")] : [];
+    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
     const fill = mixColor(pillFrom, colors.bg, fade);
@@ -423,7 +424,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const label = ` ${glyph} ${pill.label} `;
     const sweep = ((at / 30) % (label.length + 16)) - 8;
     const pillChunks = [...label].map((char, index) => bold(bg(pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill)(fg(colors.fg)(char))));
-    if (footerParts.notConnected) { footer.content = new StyledText([fg(theme.muted)(" "), ...pillChunks]); return; }
+    const approvalPillChunks = [...modeChip, ...pillChunks];
+    if (footerParts.notConnected) { footer.content = new StyledText([fg(theme.muted)(" "), ...approvalPillChunks]); return; }
     const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
     const thinking = footerParts.thinking ? [bg(tint(theme, theme.violet, theme.surface))(fg(theme.violet)(` ${footerParts.thinking} `))] : [];
     const route = footerParts.route ? [fg(theme.muted)(` ${footerParts.route}`)] : [];
@@ -438,7 +440,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     // Narrow priority: pill, Esc stops and context stay; route then reasoning drop, then the model name is clipped.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
     const build = (modelChunks = model) => ({
-      left: [...pillChunks, fg(theme.muted)(" "), ...modelChunks, ...(include.thinking ? [fg(theme.muted)(" "), ...thinking] : []), ...(include.route ? route : [])],
+      left: [...approvalPillChunks, fg(theme.muted)(" "), ...modelChunks, ...(include.thinking ? [fg(theme.muted)(" "), ...thinking] : []), ...(include.route ? route : [])],
       right: [...esc, ...(esc.length && include.ctx ? gapChunk(2) : []), ...(include.ctx ? ctx : [])],
     });
     let { left, right } = build();
@@ -451,10 +453,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     for (const withContext of [true, false]) {
       if (fits()) break;
       include.ctx = withContext;
-      const room = columns - chunkWidth(pillChunks) - chunkWidth(build([]).right) - 6;
+      const room = columns - chunkWidth(approvalPillChunks) - chunkWidth(build([]).right) - 6;
       ({ left, right } = build(room > 3 ? [bg(theme.surface2)(fg(theme.text)(` ${fitLine(footerParts.model, room - 2)} `))] : []));
     }
-    if (!fits()) { left = pillChunks; right = chunkWidth(pillChunks) + chunkWidth(esc) + 3 <= columns ? esc : []; }
+    if (!fits()) { left = approvalPillChunks; right = chunkWidth(approvalPillChunks) + chunkWidth(esc) + 3 <= columns ? esc : []; }
     footer.content = new StyledText([fg(theme.muted)(" "), ...left, ...gapChunk(columns - chunkWidth(left) - chunkWidth(right) - 2), ...right]);
   }
 
@@ -641,6 +643,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
       footerParts = {
+        approvalMode: snapshot.approvalMode,
         model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", thinking: snapshot.modelId && snapshot.thinking ? safe(snapshot.thinking) : undefined,
         route: snapshot.modelId ? safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`) : "",
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
@@ -975,7 +978,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "review") {
         hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
       } else {
-        hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? "Alt+L sign in · / commands" : `${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        const modeHint = snapshot.approvalMode === "auto" ? "" : `Shift+Tab ${snapshot.approvalMode} · `;
+        hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1320,6 +1324,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if (snapshot.loginChooser && name === "tab") { controller.openLoginMoreOptions(); handled(); return; }
     if (snapshot.branchTree && name === "tab") { controller.toggleBranchTreeAction(); setDraft(""); handled(); return; }
+    if (name === "tab" && key.shift && !panelMode && !searchOpen && !inspection && completions().length === 0) {
+      controller.cycleApprovalMode(); handled(); return;
+    }
     if (name === "tab" && !key.shift) {
       const selected = completions()[completionIndex];
       if (selected?.available) {

@@ -267,6 +267,7 @@ export abstract class TurnLayer extends CompactionLayer {
     if (this.disposed || this.activeAbort?.signal !== signal) return;
     try {
       for await (const event of runAgentLoop({
+        approval: { interactive: true, mode: () => this.currentApprovalMode },
         undo: this.home ? openUndoStore({ home: this.home }) : undefined,
         session: this.session,
         // Checked in submit(); kept non-null here for the loop call.
@@ -418,6 +419,10 @@ export abstract class TurnLayer extends CompactionLayer {
         }
         return;
       }
+      case "tool.denied": {
+        this.toolDenialByCallId.set(event.toolCallId, redactSecrets(event.reason, this.secrets));
+        return;
+      }
       case "tool.finished": {
         if (this.outcome) {
           this.outcome.toolResults++;
@@ -470,7 +475,9 @@ export abstract class TurnLayer extends CompactionLayer {
             display = boundDisplay(formatNumberedEditDiff([hunk], redactSecrets(event.content, this.secrets), text => redactSecrets(text, this.secrets)));
           }
         }
-        const text = event.status === "error" ? `${display}\nTool failed. Inspect this result before continuing.` : display;
+        const deniedReason = this.toolDenialByCallId.get(event.toolCallId);
+        this.toolDenialByCallId.delete(event.toolCallId);
+        const text = deniedReason !== undefined ? boundDisplay(deniedReason) : event.status === "error" ? `${display}\nTool failed. Inspect this result before continuing.` : display;
         if (entry) {
           entry.text = text;
           entry.toolStatus =

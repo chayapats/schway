@@ -57,6 +57,7 @@ export const findTool: ToolDefinition<FindInput> = {
   description:
     'Discover files with a simple glob pattern such as "**/*.ts". Relative paths resolve from the workspace root. Use bash for advanced Unix find syntax.',
   inputSchema: findInputSchema,
+  effect: "read-only",
   execution: "parallel",
   execute: executeFind,
 };

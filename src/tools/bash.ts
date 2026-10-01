@@ -62,6 +62,7 @@ export const bashTool: ToolDefinition<BashInput> = {
   description:
     "Run a shell command in a fresh bash process. Defaults to the workspace root. A non-zero exit code is ordinary result data, not a tool failure. Output is bounded; oversized output is spilled to a temporary file.",
   inputSchema: bashInputSchema,
+  effect: "mutating",
   execution: "exclusive",
   execute: executeBash,
 };

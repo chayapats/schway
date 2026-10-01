@@ -1,3 +1,4 @@
+import type { ApprovalMode } from "./approval.ts";
 import type { CompactionReason } from "../context/compaction.ts";
 import type { ModelUsage } from "../model/model.ts";
 import type { ToolCallStatus } from "../tools/types.ts";
@@ -26,6 +27,7 @@ export type RuntimeEvent =
       delayMs: number;
       message: string;
     }
+  | { type: "tool.denied"; toolCallId: string; name: string; mode: ApprovalMode; reason: string }
   | { type: "tool.started"; toolCallId: string; name: string }
   | {
       type: "tool.delta";

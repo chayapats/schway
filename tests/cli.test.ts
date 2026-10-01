@@ -1189,3 +1189,47 @@ beforeAll(() => {
   }, { preconnect: unguardedFetch.preconnect }) as typeof fetch;
 });
 afterAll(() => { globalThis.fetch = unguardedFetch; });
+
+
+test("headless read-only denial is JSON-visible, ordered, and leaves exit code zero and files unchanged", async () => {
+  await withTempDir(async dir => {
+    const output = await run(["-p", "write it", "--approval", "read-only", "--json"], { cwd: dir,
+      model: createScriptedModel({ responses: [{ toolCalls: [{ id: "write-call", name: "write", arguments: { path: "note.txt", content: "changed" } }] }, { text: "done" }] }) });
+    expect(output.exitCode, output.stderr).toBe(0);
+    expect(await Bun.file(join(dir, "note.txt")).exists()).toBe(false);
+    const events = output.stdout.trim().split("\n").map(line => JSON.parse(line));
+    const index = events.findIndex(event => event.type === "tool.denied");
+    expect(events[index]).toEqual({ type: "tool.denied", toolCallId: "write-call", name: "write", mode: "read-only", reason: "Read-only mode: this tool changes files or runs commands. Run without --approval read-only to allow it." });
+    expect(events[index + 1]).toMatchObject({ type: "tool.finished", status: "error" });
+  });
+});
+
+test("approval user config and stricter-only project notice apply once and CLI overrides both ways", async () => {
+  await withTempDir(async dir => {
+    const home = join(dir, "home"), project = join(dir, "work");
+    await mkdir(join(home, ".schway"), { recursive: true });
+    await mkdir(join(project, ".schway"), { recursive: true });
+    await writeFile(join(home, ".schway/config.json"), JSON.stringify({ approval: { mode: "read-only" } }));
+    await writeFile(join(project, ".schway/config.json"), JSON.stringify({ approval: { mode: "auto" } }));
+    for (const flag of [[], ["--approval=auto"], ["--approval=read-only"]]) {
+      const output = await run(["-p", "write it", "--json", ...flag], { cwd: project, env: { HOME: home },
+        model: createScriptedModel({ responses: [{ toolCalls: [{ id: "write-call", name: "write", arguments: { path: "note.txt", content: "changed" } }] }, { text: "done" }] }) });
+      expect(output.exitCode, output.stderr).toBe(0);
+      const notice = `Ignored approval.mode "auto" in ${join(project, ".schway/config.json")}: project config can only make approval stricter than your "read-only" setting.`;
+      expect(output.stderr.split(notice)).toHaveLength(2);
+      expect(output.stdout.includes('"type":"tool.denied"')).toBe(flag[0] !== "--approval=auto");
+    }
+  });
+});
+
+for (const [flags, error] of [
+  [["--approval"], "Missing value for --approval"],
+  [["--approval="], "Missing value for --approval"],
+  [["--approval", "ask"], "Unknown approval mode: ask. Use auto or read-only."],
+  [["--approval=invalid"], "Unknown approval mode: invalid. Use auto or read-only."],
+] as const) test(`invalid approval flags ${flags.join(" ")} fail with usage`, async () => {
+  const result = await run([...flags]);
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toStartWith(error + "\n");
+  expect(result.stderr).toContain("[--approval <auto|read-only>]");
+});

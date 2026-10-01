@@ -1,3 +1,4 @@
+import { APPROVAL_MODES, type ApprovalMode } from "../agent/approval.ts";
 import { THINKING_LEVELS } from "../model/model.ts";
 import type { ConfigLayer } from "../config/config.ts";
 import { removedProviderMessage } from "../config/removed-provider.ts";
@@ -33,6 +34,8 @@ export type CliThinking = (typeof CLI_THINKING_LEVELS)[number];
 /** Parsed CLI options for headless or interactive runs, with `resume` identifying a session rather than a path. */
 export interface CliArgs {
   prompt?: string;
+  /** Explicit starting approval mode for this process. */
+  approval?: ApprovalMode;
   json: boolean;
   debug?: boolean;
   debugFile?: string;
@@ -69,6 +72,13 @@ export function parseArgs(
     const arg = argv[i]!;
     if (arg === "-h" || arg === "--help") {
       args.help = true;
+      continue;
+    }
+    if (arg === "--approval" || arg.startsWith("--approval=")) {
+      const value = arg === "--approval" ? argv[++i] : arg.slice("--approval=".length);
+      if (!value || value.startsWith("-")) return { error: "Missing value for --approval" };
+      if (!APPROVAL_MODES.includes(value as ApprovalMode)) return { error: `Unknown approval mode: ${value}. Use auto or read-only.` };
+      args.approval = value as ApprovalMode;
       continue;
     }
     if (arg === "--json") {
@@ -496,6 +506,7 @@ export function hasCliConnectionOptions(args: CliArgs): boolean {
 /** Map explicitly provided CLI flags onto a config overlay. Omitted flags stay unset. */
 export function cliOverridesFromArgs(args: CliArgs): ConfigLayer {
   const layer: ConfigLayer = {};
+  if (args.approval !== undefined) layer.approval = { mode: args.approval };
   if (args.provider !== undefined) {
     layer.provider = args.provider;
   }

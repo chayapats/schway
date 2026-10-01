@@ -1,3 +1,4 @@
+import type { ApprovalMode } from "../agent/approval.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
 import type { PreferencesSnapshot } from "./preferences.ts";
 import type { AgentClock } from "../agent/retry.ts";
@@ -129,6 +130,8 @@ export interface TuiSnapshot {
   streamingAssistantId?: string;
   sessionId: string;
   branchId: string;
+  /** Live process approval mode retained across session and model switches. */
+  approvalMode: ApprovalMode;
   provider: string;
   modelId: string;
   /** Active named compatible profile, when a selection is live. */

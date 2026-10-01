@@ -12,13 +12,14 @@ test("main help groups options and examples in the documented order", () => {
   ]);
   expect(lines.slice(3, 6).map((line) => line.trim().split(/ {2,}/))).toEqual([
     ["schway", "Start an interactive session"],
-    ['schway -p "<task>"', "Run one task and print the answer"],
+    ['schway -p "<task>" [--approval <auto|read-only>]', "Run one task"],
     ["schway doctor", "Check your setup"],
   ]);
 });
 
 const EXPECTED_OPTIONS = {
   "-p": { prompt: "explain this project" },
+  "--approval": { approval: "read-only" },
   "-h": { help: true },
   "--provider": { provider: "openai" },
   "--model": { model: "example-model" },

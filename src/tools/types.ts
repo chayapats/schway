@@ -36,15 +36,26 @@ export interface ToolContext {
   onOutput?: (chunk: ToolOutputChunk) => void;
 }
 
+/** State-change declaration used by approval modes, independently of scheduling. */
+export type ToolEffect = "read-only" | "mutating";
+
 /** Public tool contract: schema for the model, execute for the harness. */
 export interface ToolDefinition<TInput = unknown> {
   name: string;
   description: string;
   inputSchema: JsonSchema;
   execution: ToolExecutionMode;
+  /** Declare state changes; an undeclared effect means "mutating". */
+  effect?: ToolEffect;
   /** Execute validated arguments in the supplied workspace; returned errors or rejections are normalized by the harness. */
   execute(input: TInput, ctx: ToolContext): Promise<ToolExecutionResult>;
 }
 
 /** Outcome recorded for an accepted tool call. */
 export type ToolCallStatus = "success" | "error" | "cancelled";
+
+/** Return the declared effect, treating undeclared tools as able to change state. */
+export function toolEffect(definition: ToolDefinition): ToolEffect {
+  const effect = definition.effect;
+  return effect === undefined ? "mutating" : effect;
+}

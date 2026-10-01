@@ -287,6 +287,23 @@ test("npm pack installs the public extension API and completes a headless tool r
       expect(diagnostics.trim().split("\n").every((line) => JSON.parse(line).runId)).toBe(true);
       expect(diagnostics).not.toContain("Hello, Ada!");
       expect(diagnostics).not.toContain("observer fixture failure");
+      const denialServer = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+        const body = await request.json() as { messages: { role: string }[] };
+        const first = !body.messages.some(message => message.role === "tool");
+        const delta = first ? { tool_calls: [{ index: 0, id: "write-call", type: "function", function: { name: "write", arguments: '{"path":"denied.txt","content":"changed"}' } }] } : { content: "done" };
+        return new Response(`data: ${JSON.stringify({ id: "fixture", choices: [{ index: 0, delta, finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "Content-Type": "text/event-stream" } });
+      } });
+      try {
+        const denied = await runCommand([join(installDir, "node_modules/.bin/schway"), "-p", "write a file", "--json", "--approval", "read-only",
+          "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${denialServer.port}/v1`, "--model", "fixture", "--auth", "none"],
+          { cwd: installDir, env: buildIsolatedCliEnv(isolatedHome) });
+        expect(denied.exitCode, denied.stderr).toBe(0);
+        const denialEvents = denied.stdout.trim().split("\n").map(line => JSON.parse(line));
+        const denialIndex = denialEvents.findIndex(event => event.type === "tool.denied");
+        expect(denialEvents[denialIndex]).toMatchObject({ name: "write", mode: "read-only", reason: "Read-only mode: this tool changes files or runs commands. Run without --approval read-only to allow it." });
+        expect(denialEvents[denialIndex + 1]).toMatchObject({ type: "tool.finished", status: "error" });
+        expect(await Bun.file(join(installDir, "denied.txt")).exists()).toBe(false);
+      } finally { denialServer.stop(true); }
       // The installed interactive controller uses the same package initializer and skill path.
       await Bun.write(join(installDir, "interactive-fixture.ts"), `
         import { loadExtensions } from './node_modules/schway/src/extensions/loader.ts';

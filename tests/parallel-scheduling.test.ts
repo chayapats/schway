@@ -459,6 +459,7 @@ function runTurn(options: {
   tools: ToolDefinition[];
   calls: Array<{ id: string; name: string; arguments: unknown }>;
   signal?: AbortSignal;
+  approval?: import("../src/agent/approval.ts").ApprovalPolicy;
   maxConcurrentTools?: number;
 }): Promise<{ session: ReturnType<typeof createSession>; events: RuntimeEvent[] }> {
   const session = createSession([user("go")]);
@@ -474,6 +475,7 @@ function runTurn(options: {
       contextManager: createContextManager(workspace),
       tools: createToolRegistry(options.tools),
       workspace,
+      approval: options.approval,
       signal: options.signal,
       maxConcurrentTools: options.maxConcurrentTools,
     }),
@@ -565,3 +567,21 @@ function finishedIds(events: RuntimeEvent[]): string[] {
     .filter((event) => event.type === "tool.finished")
     .map((event) => event.toolCallId);
 }
+
+
+test("read-only denies mutations while parallel reads overlap and settlements retain source order", async () => {
+  const controller = createController(["a", "b"]);
+  const running = runTurn({
+    tools: [{ ...probeTool("read", "parallel", controller), effect: "read-only" }, probeTool("edit", "parallel", controller)],
+    calls: [call("first", "read", "a"), call("denied", "edit", "x"), call("last", "read", "b")],
+    approval: { interactive: true, mode: () => "read-only" },
+  });
+  await Promise.all([controller.started.get("a")!.promise, controller.started.get("b")!.promise]);
+  expect(startedCount(controller)).toBe(2);
+  controller.gates.get("b")!.open(); controller.gates.get("a")!.open();
+  const { session, events } = await running;
+  expect(resultContents(session)).toEqual(["read:a", "Read-only mode: file changes and commands are off. The user can switch modes with Shift+Tab.", "read:b"]);
+  const denied = events.findIndex(event => event.type === "tool.denied");
+  expect(events[denied]).toEqual({ type: "tool.denied", toolCallId: "denied", name: "edit", mode: "read-only", reason: resultContents(session)[1] });
+  expect(events[denied + 1]?.type).toBe("tool.finished");
+});

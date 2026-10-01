@@ -321,3 +321,16 @@ test("undo-store diagnoses sizes without changing files and compares bytes befor
   expect((await stat(blob)).mtimeMs).toBe(before.mtimeMs);
   expect((await readdir(join(home, ".schway"))).sort()).toEqual(["config.json", "undo"]);
 });
+
+
+test("approval-config diagnoses the file baseline without reading CLI approval", async () => {
+  const { workspace, home } = await fixture();
+  const initial = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, approval: "read-only" }, store: store(null) });
+  expect(check(initial, "approval-config")).toEqual({ id: "approval-config", status: "ok", summary: "Approval mode: auto.", remedy: "None." });
+  await mkdir(join(home, ".schway"), { recursive: true });
+  await mkdir(join(workspace, ".schway"), { recursive: true });
+  await writeFile(join(home, ".schway/config.json"), JSON.stringify({ approval: { mode: "read-only" } }));
+  await writeFile(join(workspace, ".schway/config.json"), JSON.stringify({ approval: { mode: "auto" } }));
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, approval: "auto" }, store: store(null) });
+  expect(check(report, "approval-config")).toEqual({ id: "approval-config", status: "warning", summary: 'Project approval.mode "auto" is looser than your "read-only" and is ignored.', remedy: `Remove approval.mode from ${join(workspace, ".schway/config.json")} or set a stricter mode.` });
+});

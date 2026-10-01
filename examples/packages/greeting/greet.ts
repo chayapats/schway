@@ -11,6 +11,7 @@ export default defineExtension(({ registerTool }) => {
       required: ["name"],
       additionalProperties: false,
     },
+    effect: "read-only",
     execution: "parallel",
     async execute({ name }, context) {
       context.signal?.throwIfAborted();

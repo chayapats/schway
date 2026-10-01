@@ -11,6 +11,7 @@ export function createActivateSkillTool(manager: ContextManager): ToolDefinition
     inputSchema: Type.Object({
       name: Type.String({ minLength: 1, maxLength: SKILL_NAME_MAX_LENGTH }),
     }, { additionalProperties: false }),
+    effect: "read-only",
     execution: "exclusive",
     /** Activate the validated skill with bounded confirmation or error text, preserving cancellation. */
     async execute({ name }, { signal }) {

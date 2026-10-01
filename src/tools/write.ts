@@ -50,6 +50,7 @@ export const writeTool: ToolDefinition<WriteInput> = {
   description:
     "Create a file or replace an existing file entirely. Prefer edit for targeted changes to existing files. Relative paths resolve from the workspace root. Reading the file first is not required.",
   inputSchema: writeInputSchema,
+  effect: "mutating",
   execution: "exclusive",
   execute: executeWrite,
 };
