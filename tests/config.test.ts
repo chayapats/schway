@@ -20,6 +20,15 @@ test("an empty object is a valid config layer", () => {
   expect(parseConfigObject({}, "test")).toEqual({});
 });
 
+test("splash defaults to first-run and rejects unknown modes and ui keys", () => {
+  expect(resolveSettings({})).toMatchObject({ splash: "first-run" });
+  for (const splash of ["always", "first-run", "never"] as const) {
+    expect(parseConfigObject({ ui: { splash } }, "test")).toEqual({ ui: { splash } });
+    expect(resolveSettings({ user: { ui: { splash } } })).toMatchObject({ splash });
+  }
+  for (const ui of [{ splash: "sometimes" }, { splash: true }, { animation: "off" }]) expect(parseConfigObject({ ui }, "test")).toHaveProperty("error");
+});
+
 test("inline diff limits accept nonnegative integers and an empty ui object", () => {
   expect(parseConfigObject({ ui: {} }, "test")).toEqual({ ui: {} });
   for (const inlineDiffLines of [0, 12, 30]) {

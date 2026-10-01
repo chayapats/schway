@@ -74,8 +74,10 @@ the conversation; **Ctrl+End** returns to the latest message.
 Appearance follows the terminal's light/dark mode when available. `/theme` overrides
 it for the current session; set `SCHWAY_THEME=dark` or `SCHWAY_THEME=light` for a
 launch preference. A nonempty `NO_COLOR` disables semantic colors. Interactive
-launches open with a short lightning splash that any key skips;
-`SCHWAY_MOTION=reduced` or `SCHWAY_MOTION=off` tones down or disables animation.
+launches show a skippable lightning splash the first time each version runs, then
+a nonblocking bolt accent. Set `ui.splash` to `always`, `first-run` (default), or
+`never` in preferences; `never` suppresses both. `SCHWAY_MOTION=reduced` or
+`SCHWAY_MOTION=off` also suppresses startup effects and reduces other animation.
 See the [TUI guide](docs/tui.md) for the palette, motion and offline preview.
 
 Esc cancels the running turn through the shared AbortSignal path and returns to

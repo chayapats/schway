@@ -94,6 +94,24 @@ export function fitLine(text: string, columns: number): string {
   return `${result}…`;
 }
 
+/** Fit a workspace path by dropping middle segments before clipping its final grapheme-safe folder name. */
+export function shortenWorkspacePath(path: string, home: string, columns: number): string {
+  const normalizedHome = home.replace(/\/+$/, "") || "/";
+  const underHome = path === normalizedHome || path.startsWith(normalizedHome === "/" ? "/" : `${normalizedHome}/`);
+  const line = displayText(underHome ? `~${normalizedHome === "/" && path !== "/" ? path : path.slice(normalizedHome.length)}` : path).replace(/\s+/g, " ");
+  if (columns <= 0) return "";
+  if (Bun.stringWidth(line) <= columns) return line;
+  const segments = line.split("/").filter(Boolean);
+  const last = segments.at(-1) ?? line;
+  const first = line.startsWith("/") ? `/${segments[0]}` : segments[0];
+  for (let start = 1; start < segments.length; start++) {
+    const candidate = `${first}/…/${segments.slice(start).join("/")}`;
+    if (Bun.stringWidth(candidate) <= columns) return candidate;
+  }
+  const tail = `…/${last}`;
+  return Bun.stringWidth(tail) <= columns ? tail : columns > 2 ? `…/${fitLine(last, columns - 2)}` : fitLine(last, columns);
+}
+
 /** Select a built-in tool target; callers redact it before clipping it for display. */
 export function toolTarget(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== "object") return undefined;

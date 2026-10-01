@@ -182,15 +182,42 @@ types, calls) instead of downloaded parsers; copying still returns the exact cod
 
 ## Motion and startup splash
 
-An interactive launch opens with a 2 second splash: the SCHWAY wordmark appears
-as a ghost, a lightning bolt crosses and ignites it, the screen flashes, the logo
-settles into its cyan-to-violet gradient while the tagline types in, then collapses
-like a CRT into one spark that flies into the top bar's ⚡ and reveals the
-interface. Startup keeps going underneath: the editor already has focus, and any
-key, paste or click skips the splash **and is still delivered** (the first typed
-character lands in the draft). The timeline starts at the first painted frame and
-holds across startup stalls, so no phase is skipped on a slow start. `--resume`
-launches, terminals smaller than 57×16, and reduced or disabled motion skip it.
+The first eligible interactive launch of each installed version opens with a
+2 second lightning splash. The SCHWAY wordmark appears as a ghost, ignites and
+settles into its gradient, then collapses into the top bar's ⚡. Startup keeps
+going underneath: the editor already has focus, and a key, paste or click skips
+the overlay. Typed and pasted text reaches the draft. The timeline starts at the
+first painted frame and holds across startup stalls.
+
+Later launches use a bolt-only accent lasting at most 300 ms. It adds no overlay
+and never blocks typing, pasting or panel clicks. `--resume` also uses the accent;
+terminals smaller than 57×16 fall back to it when a full splash was requested.
+
+In Alt+P preferences, select **ui.splash** and choose **Reset (inherit)**,
+`always`, `first-run` (the default), or `never`. Session, user and project scopes
+are supported. Startup effects are chosen once when the UI opens; save a user or
+project override to change future launches. For example:
+
+```text
+/config set ui {"splash":"never"} --scope user
+```
+
+`never` disables both startup effects. Reduced or disabled motion also suppresses
+both, regardless of the saved splash preference. The interactive UI records
+`{"splashSeenVersion":"<version>"}` in `~/.schway/ui-state.json` only when a full
+splash has painted and is removed, including input skips. A new version, upgrade
+or downgrade, gets the full first-run splash again. A missing, unreadable or
+malformed state file counts as unseen. Writes are atomic and best-effort, with no
+startup error or transcript notice on failure. Accent-only and gated launches
+write nothing, so the next eligible launch still gets the full splash. Headless
+runs and CLI subcommands never read or write this file.
+
+The top bar preserves the repository folder when shortening a workspace path.
+It abbreviates home to `~`, removes whole middle segments with `/…/`, then drops
+the prefix to `…/<folder>` if needed. A branch can use all remaining columns; it
+is clipped only after the path reaches its shortest whole-folder form, and is
+hidden below 40 columns. Only after hiding the branch may an oversized final
+folder be clipped. Resizing wider restores the longer path and branch.
 
 While working, the pill and tool rows show a braille spinner, the pill and
 activity text carry a moving highlight, a streamed answer ends in a blinking `▍`
@@ -200,7 +227,7 @@ decorative: text, layout and keys never depend on it, and the animation timer on
 runs while something is moving.
 
 `SCHWAY_MOTION=full|reduced|off` selects the level. `reduced` keeps spinners and a
-steady caret but removes the splash, highlights, flashes, caret blink and slides;
+steady caret but removes both startup effects, highlights, flashes, caret blink and slides;
 `off` also replaces spinners with a static `●` and drops the caret. `NO_COLOR` or `TERM=dumb` default to `reduced`.
 
 The default is automatic terminal light/dark detection, then `COLORFGBG`, then

@@ -7,6 +7,9 @@ type RGB = [number, number, number];
 /** Total splash length; every phase below fits inside it. */
 export const SPLASH_DURATION_MS = 2000;
 
+/** Maximum bolt-only startup accent duration, measured from the first painted frame. */
+export const SPLASH_ACCENT_DURATION_MS = 300;
+
 /** Phase boundaries in milliseconds from splash start. */
 const T = { boltStart: 140, boltEnd: 620, flashEnd: 800, holdEnd: 1450, exitEnd: 1800, end: SPLASH_DURATION_MS };
 
@@ -28,7 +31,7 @@ export const SPLASH_LOGO: readonly (readonly string[])[] = Array.from({ length: 
 const LW = SPLASH_LOGO[0]!.length;
 const LH = SPLASH_LOGO.length;
 
-/** Smallest terminal that shows the full wordmark with margins; smaller terminals skip the splash. */
+/** Smallest terminal that shows the full wordmark with margins; smaller terminals use the bolt accent. */
 export const SPLASH_MIN_SIZE = { width: LW + 6, height: 16 } as const;
 
 /** Where the closing spark lands: the lightning mark in the top bar. */
@@ -293,6 +296,8 @@ export class SplashRenderable extends Renderable {
     super(ctx, { id: "splash", position: "absolute", left: 0, top: 0, width: "100%", height: "100%", zIndex: 1000 });
     this.scene = createSplashScene(source.seed);
   }
+  /** Report whether the overlay has painted at least one frame before removal. */
+  hasPainted(): boolean { return this.start !== undefined; }
   /** Milliseconds of the timeline actually shown; it starts at the first painted frame and pauses across event-loop stalls. */
   elapsed(): number { return this.start === undefined ? 0 : this.source.now() - this.start; }
   protected override renderSelf(buffer: OptimizedBuffer): void {

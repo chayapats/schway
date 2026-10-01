@@ -36,10 +36,15 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || ["completed-turn", "large-edit", "review-panel", "recent-work-resume"].includes(screen.id);
+  const disk = palette || ["completed-turn", "large-edit", "review-panel", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
+    if (screen.id === "narrow-layout") {
+      root = join(home, "Projects", "very-long-directory-name", "schway");
+      await mkdir(join(root, ".git"), { recursive: true });
+      await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/feature/a-very-long-branch-name-for-testing\n");
+    }
     if (["completed-turn", "large-edit", "review-panel"].includes(screen.id)) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
@@ -138,7 +143,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: true });
   const controller = new TuiController(options);
-  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: false, now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : Promise.resolve(false), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();

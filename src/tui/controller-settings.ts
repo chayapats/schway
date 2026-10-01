@@ -60,7 +60,7 @@ export abstract class SettingsLayer extends ChangesLayer {
     const panel = this.preferences;
     if (!panel || this.running || !this.configEditor) return false;
     const row = panel.rows[panel.selectedIndex]!;
-    if (row.key !== "appearance" && !this.stageSettings) return false;
+    if (!presentationPreference(row.key) && !this.stageSettings) return false;
     const choice = row.choices[panel.choiceIndex];
     if (panel.scope !== "memory" && typeof choice === "string" && choice.startsWith("open model")) {
       this.preferences = undefined;
@@ -70,7 +70,7 @@ export abstract class SettingsLayer extends ChangesLayer {
     if (this.preferenceTransaction && panel.preview) {
       const transaction = this.preferenceTransaction;
       const message = panel.preview.replace("Enter confirms; Esc cancels.", "Applied.");
-      const applied = await this.changeSettings(async () => transaction, () => message, undefined, row.key !== "appearance", row.key === "appearance");
+      const applied = await this.changeSettings(async () => transaction, () => message, undefined, !presentationPreference(row.key), presentationPreference(row.key));
       if (this.preferences === panel) {
         if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment); }
         else panel.error = `Not applied: ${this.settingsFailure ?? "previous settings retained"} Change selection to stage again, or Esc to cancel.`;
@@ -91,17 +91,17 @@ export abstract class SettingsLayer extends ChangesLayer {
             ...(settings.provider === "openai" ? { openaiAuth: this.model?.provider === "codex-subscription" ? "codex" as const : "api-key" as const } : {}),
             ...(settings.profile ? { profile: settings.profile } : {}), ...(settings.thinking ? { thinking: settings.thinking } : {}) } : undefined;
           transaction = await this.configEditor!.prepareMemory(choice);
-        } else transaction = await this.configEditor!.prepare({ scope: panel.scope, key: row.key, value: row.key === "git" && choice !== undefined ? { changeTracking: choice } : choice });
+        } else transaction = await this.configEditor!.prepare({ scope: panel.scope, key: row.key === "ui.splash" ? "ui" : row.key, value: row.key === "ui.splash" ? { splash: choice } : row.key === "git" && choice !== undefined ? { changeTracking: choice } : choice });
         abort.signal.throwIfAborted();
-        if (row.key !== "appearance") {
+        if (!presentationPreference(row.key)) {
           const staged = await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, true);
           abort.signal.throwIfAborted();
           if (!staged.model) throw new Error("The selected model is unavailable; previous settings remain active.");
         }
         if (this.disposed || this.preferences !== panel || generation !== this.preferenceGeneration) return false;
         this.preferenceTransaction = transaction;
-        const origin = row.key === "appearance" && this.appearanceEnvironment ? "environment" : transaction.origins[row.key as keyof ConfigLayer] ?? transaction.origins.model;
-        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : transaction.settings[row.key as keyof ResolvedSettings];
+        const origin = row.key === "appearance" && this.appearanceEnvironment ? "environment" : transaction.origins[(row.key === "ui.splash" ? "ui" : row.key) as keyof ConfigLayer] ?? transaction.origins.model;
+        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : row.key === "ui.splash" ? transaction.settings.splash : transaction.settings[row.key as keyof ResolvedSettings];
         const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin ? ` Saved but not effective: shadowed by ${origin}.` : "";
         panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.key}: ${choice === undefined ? "reset override" : String(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
@@ -133,11 +133,11 @@ export abstract class SettingsLayer extends ChangesLayer {
     let value: unknown = raw;
     if (action === "reset") value = undefined;
     else if (["maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"].includes(key!)) value = Number(raw);
-    else if (key === "git" && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail('Invalid git value. Use JSON like {"changeTracking":"snapshot"}.'); return false; } }
+    else if ((key === "git" || key === "ui") && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail(key === "ui" ? 'Invalid display settings · /config set ui {"splash":"never"} to retry' : 'Invalid git value. Use JSON like {"changeTracking":"snapshot"}.'); return false; } }
     else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted config value."); return false; } }
     return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
       const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
-      const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : this.configEditor!.settings[key as keyof ResolvedSettings];
+      const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : key === "ui" ? { splash: this.configEditor!.settings.splash, inlineDiffLines: this.configEditor!.settings.inlineDiffLines } : this.configEditor!.settings[key as keyof ResolvedSettings];
       const effective = key === "model" && !rawEffective ? "unset" : displaySetting(key!, rawEffective);
       const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
@@ -147,14 +147,14 @@ export abstract class SettingsLayer extends ChangesLayer {
       const shadowed = action === "set" && source !== shownOrigin ? `; shadowed by ${shadowingSource}`
         : action === "reset" && providerSource ? `; ${providerSource} provider selection cleared the model` : "";
       return `${key} (${scope}): ${saved}. Effective: ${effective} [${shownOrigin}]${shadowed}.`;
-    }, undefined, false, key === "appearance");
+    }, undefined, false, key === "ui" ? "ui" : key === "appearance" ? "appearance" : false);
   }
 
   /** Commit staged settings before publishing the runtime and optional success notice. */
-  protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate = false, appearanceOnly = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
+  protected async changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate = false, presentationOnly: false | "appearance" | "ui" = false, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) { this.notice("Busy: settings edits require an idle session. Press Esc to cancel first."); return false; }
-    if (!this.configEditor || (!appearanceOnly && !this.stageSettings)) { this.fail("Interactive settings are unavailable in this session."); return false; }
+    if (!this.configEditor || (!presentationOnly && !this.stageSettings)) { this.fail("Interactive settings are unavailable in this session."); return false; }
     this.settingsFailure = undefined;
     const abort = new AbortController();
     this.activeAbort = abort;
@@ -163,17 +163,17 @@ export abstract class SettingsLayer extends ChangesLayer {
       try {
         const transaction = await prepare();
         abort.signal.throwIfAborted();
-        if (appearanceOnly && !isDeepStrictEqual(
-          { ...this.configEditor!.settings, appearance: undefined },
-          { ...transaction.settings, appearance: undefined },
-        )) throw new Error("Other settings changed outside Schway. Reload before saving appearance.");
-        const staged = appearanceOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate, budgets);
+        if (presentationOnly && !isDeepStrictEqual(
+          { ...this.configEditor!.settings, ...(presentationOnly === "ui" ? { splash: undefined, inlineDiffLines: undefined } : { appearance: undefined }) },
+          { ...transaction.settings, ...(presentationOnly === "ui" ? { splash: undefined, inlineDiffLines: undefined } : { appearance: undefined }) },
+        )) throw new Error("Settings changed outside Schway · Reload with /quit, then restart and retry");
+        const staged = presentationOnly ? undefined : await this.stageSettings!(transaction.settings, abort.signal, this.workspace, this.model, activate, budgets);
         abort.signal.throwIfAborted();
         if (activate && !staged?.model) throw new Error("The selected provider is unavailable. Configure access with /login or choose another model.");
         if (this.disposed || this.activeAbort !== abort) return false;
         await transaction.commit(abort.signal);
         // Once the transaction commits, publish the matching runtime even if cancellation arrives at that boundary.
-        if (appearanceOnly) this.onSettingsCommitted?.(transaction.settings, this.contextManager);
+        if (presentationOnly) this.onSettingsCommitted?.(transaction.settings, this.contextManager);
         else {
           if (staged?.modelCapability) {
             this.configEditor!.setModelCapability(staged.modelCapability);
@@ -242,6 +242,7 @@ export abstract class SettingsLayer extends ChangesLayer {
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
       }));
+      lines.push(`ui: ${JSON.stringify({ splash: settings.splash, inlineDiffLines: settings.inlineDiffLines })} [${origins.ui ?? "built-in default"}]`);
       const gitMode = settings.gitChangeTracking;
       const gitOrigin = origins.git !== undefined ? ` [${origins.git}]` : "";
       if (!lines.some((line) => line.startsWith("git:"))) {
@@ -286,3 +287,6 @@ export abstract class SettingsLayer extends ChangesLayer {
     return redactSecrets(lines.join("\n"), this.secrets);
   }
 }
+
+/** Identify decorative preferences that do not need a configured or activated model. */
+function presentationPreference(key: string): false | "appearance" | "ui" { return key === "ui.splash" ? "ui" : key === "appearance" ? "appearance" : false; }

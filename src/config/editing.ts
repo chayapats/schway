@@ -7,7 +7,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "xaiAuth", "git", "appearance"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "xaiAuth", "git", "appearance", "ui"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -202,6 +202,7 @@ export class ConfigEditor {
       for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "xaiAuth", "thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "appearance"] as const) {
         if (layer?.[key] !== undefined) result[name]![key] = structuredClone(layer[key]);
       }
+      if (layer?.ui?.splash !== undefined) result[name]!["ui.splash"] = layer.ui.splash;
       if (layer?.git?.changeTracking !== undefined) result[name]!.git = layer.git.changeTracking;
     }
     return result;
@@ -381,7 +382,12 @@ export class ConfigEditor {
     const layer = { ...source } as Record<string, unknown>;
     for (const edit of expanded) {
       if (edit.value === undefined) delete layer[edit.key];
-      else layer[edit.key] = edit.value;
+      else if (edit.key === "ui" && edit.value && typeof edit.value === "object" && !Array.isArray(edit.value)) {
+        const ui = { ...source?.ui, ...edit.value } as Record<string, unknown>;
+        for (const key of Object.keys(ui)) if (ui[key] === undefined) delete ui[key];
+        if (Object.keys(ui).length) layer.ui = ui;
+        else delete layer.ui;
+      } else layer[edit.key] = edit.value;
     }
     const parsed = parseConfigObject(layer, scope);
     if ("error" in parsed) throw new Error(parsed.error);
