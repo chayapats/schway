@@ -39,12 +39,16 @@ export async function readUndoBytes(path: string): Promise<Buffer | null> {
 /** Open a private content-addressed store under the supplied home without creating files until capture. */
 export function openUndoStore({ home }: { home: string }): UndoStore {
   const root = join(home, ".schway", "undo");
+  /** Resolve a session directory only after rejecting unsafe identity components. */
   const sessionPath = (id: string) => join(root, validId(id));
+  /** Resolve one accepted turn's manifest beneath its validated session directory. */
   const manifestPath = (turn: UndoTurn) => join(sessionPath(turn.sessionId), "turns", `${validId(turn.turnId)}.json`);
+  /** Read and validate a durable turn, treating only a missing manifest as absent. */
   const load = async (turn: UndoTurn): Promise<UndoManifest | undefined> => {
     try { return parseManifest(JSON.parse(await readFile(manifestPath(turn), "utf8")), turn.sessionId, turn.turnId); }
     catch (error) { if (isErrno(error, "ENOENT")) return undefined; throw error; }
   };
+  /** Publish the complete current manifest through a private atomic replacement. */
   const save = (manifest: UndoManifest) => writePrivateAtomically(manifestPath(manifest), JSON.stringify(manifest));
   return {
     async capture(turn, path) {
@@ -88,12 +92,15 @@ export function openUndoStore({ home }: { home: string }): UndoStore {
   };
 }
 
+/** Reject empty, traversal and multi-component identities before constructing store paths. */
 function validId(id: string): string {
   if (!id || id === "." || id === ".." || basename(id) !== id) throw new Error(`Invalid undo id: ${id}`);
   return id;
 }
+/** Validate manifest structure and identity before accepting durable undo data. */
 function parseManifest(value: unknown, sessionId: string, turnId: string): UndoManifest {
   const m = value as UndoManifest;
+  /** Accept only recorded absence or a complete lowercase SHA-256 identity. */
   const hash = (h: UndoHash | undefined) => h === null || (typeof h === "object" && h !== null && typeof h.sha256 === "string" && /^[a-f0-9]{64}$/.test(h.sha256));
   if (!m || m.version !== 1 || m.sessionId !== validId(sessionId) || m.turnId !== validId(turnId) || !Number.isInteger(m.turnNumber) || m.turnNumber < 1 || typeof m.createdAt !== "string" || !Number.isFinite(Date.parse(m.createdAt)) || !Array.isArray(m.files)
     || !m.files.every(file => file && typeof file.path === "string" && isAbsolute(file.path) && hash(file.before) && (file.after === undefined || hash(file.after)))) throw new Error("Malformed undo manifest");

@@ -135,6 +135,7 @@ export function diffLines(oldText: string, newText: string): TextDiff {
   const newLines = newText.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const diff: TextDiff = { rows: [], added: 0, removed: 0 };
   const pending = [[0, oldLines.length, 0, newLines.length]];
+  /** Append changed lines with original-side numbering and matching addition or deletion totals. */
   const emit = (sign: "+" | "-", lines: string[], start: number, end: number) => {
     for (let index = start; index < end; index++) {
       const text = lines[index]!;

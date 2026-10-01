@@ -64,13 +64,14 @@ export abstract class UndoLayer extends ChangesLayer {
         if (!file || row.action === "skip") { skipped.push({ path: row.path, reason: "changed" }); continue; }
         try {
           const bytes = file.before ? await store.blob(target.sessionId, file.before.sha256) : null;
+          /** Reject later saves immediately before the restore or deletion touches the destination. */
           const checkCurrent = async () => {
             const current = await readUndoBytes(file.path);
             if (current === null || file.after === undefined || !equalUndoHash(hashUndoBytes(current), file.after)) throw new UndoFileChanged();
           };
           // Prepare replacement bytes first; the final check is immediately before rename or unlink.
           if (bytes === null) { await checkCurrent(); await unlink(file.path); }
-          else await writeFileAtomically(file.path, bytes, undefined, checkCurrent);
+          else await writeFileAtomically(file.path, bytes, undefined, checkCurrent, { mode: 0o600 });
           const action = bytes === null ? "deleted" : "restored";
           reverted.push({ path: row.path, action }); row.status = bytes === null ? "Deleted" : "Restored";
         } catch (error) {
@@ -103,6 +104,7 @@ export abstract class UndoLayer extends ChangesLayer {
     finally { release(); this.undoBusy = false; }
   }
 
+  /** Select the latest changed turn on this ancestry unless any branch already recorded its undo. */
   private async undoTarget(store: UndoStore): Promise<UndoManifest | undefined> {
     const users = new Set(this.session.items.filter(item => item.type === "user").map(item => item.id));
     const target = (await store.list(this.session.rootId)).filter(manifest => users.has(manifest.turnId)
@@ -111,6 +113,7 @@ export abstract class UndoLayer extends ChangesLayer {
     return target && !this.session.entries.some(entry => entry.item.type === "turn_undo" && entry.item.turnId === target.turnId) ? target : undefined;
   }
 
+  /** Describe durable pre-images against current bytes without modifying files or session history. */
   private async previewUndoFile(store: UndoStore, manifest: UndoManifest, path: string): Promise<UndoPreviewFile> {
     const file = manifest.files.find(file => file.path === path)!;
     let current: Buffer | null = null, before: Buffer | null = null, readable = true;
@@ -118,6 +121,7 @@ export abstract class UndoLayer extends ChangesLayer {
     catch { readable = false; }
     const eligible = readable && current !== null && file.after !== undefined && equalUndoHash(hashUndoBytes(current), file.after);
     const action = eligible ? file.before === null ? "delete" : "restore" : "skip";
+    /** Decode absent files as empty text and reject binary or invalid UTF-8 content. */
     const decode = (bytes: Buffer | null) => bytes === null ? "" : bytes.includes(0) ? undefined : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     let oldText: string | undefined, newText: string | undefined;
     try { oldText = decode(current); newText = decode(before); } catch { /* Binary or invalid UTF-8 has no textual diff. */ }
@@ -132,4 +136,5 @@ export abstract class UndoLayer extends ChangesLayer {
 /** Distinguish a later file save from failed I/O without changing preview eligibility semantics. */
 class UndoFileChanged extends Error {}
 
+/** Preserve raw failure diagnostics for the existing details surface. */
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }

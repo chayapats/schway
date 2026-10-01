@@ -337,6 +337,7 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
+/** Decode validated session items while rejecting record types unavailable in the active format version. */
 function toSessionRecord(value: unknown, formatVersion = 1): SessionRecord {
   if (!isPlainObject(value) || typeof value.id !== "string" || value.id.length === 0) {
     throw malformedRecord();

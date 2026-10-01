@@ -23,6 +23,7 @@ const responses: ScriptedTurn[] = [
   { text: "Updated the files." },
 ];
 
+/** Create a rendered scripted conversation with real session and undo storage in a temporary workspace. */
 async function setup(root: string, session?: Session, extra: ScriptedTurnFactory[] = [], turns: ScriptedTurnFactory[] = responses) {
   const home = join(root, "home"), directory = join(home, "sessions");
   const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -293,23 +294,29 @@ test("undo command arguments and running turns never touch undo storage", async 
   });
 });
 
-// Fault injection runs in a child so its filesystem hooks cannot affect other tests.
+/** Exercise real undo files in an isolated child with deterministic I/O faults or a permissive umask. */
 async function undoFilesystemProbe(root: string, scenario: string) {
   const source = join(import.meta.dir, "../src");
   const script = `
     import { mock } from "bun:test";
     import { join } from "node:path";
     const fs = await import("node:fs/promises");
-    const realWrite = fs.writeFile, realUnlink = fs.unlink, realRead = fs.readFile;
+    const realWrite = fs.writeFile, realUnlink = fs.unlink, realRead = fs.readFile, realRename = fs.rename;
     const root = ${JSON.stringify(root)}, scenario = ${JSON.stringify(scenario)};
+    if (scenario === "private-mode") process.umask(0o000);
     const path = join(root, "clamp.ts"), created = join(root, "new.ts");
-    let armed = false, preparations = 0, prepared = false;
+    let armed = false, preparations = 0, prepared = false, tempMode, creationMode, beforeRenameMode;
     mock.module("node:fs/promises", () => ({ ...fs,
       writeFile: async (destination, content, options) => {
         await realWrite(destination, content, options);
         if (!armed || !String(destination).startsWith(path + ".") || !String(destination).endsWith(".tmp")) return;
         if (scenario === "delete-failure") return;
         armed = false; preparations++;
+        if (scenario === "private-mode") {
+          tempMode = (await fs.stat(destination)).mode & 0o777;
+          creationMode = options?.mode;
+          return;
+        }
         if (scenario === "check-failure") { prepared = true; return; }
         if (scenario.startsWith("prepare")) {
           await realWrite(path, "later save");
@@ -317,6 +324,10 @@ async function undoFilesystemProbe(root: string, scenario: string) {
         } else {
           throw Object.assign(new Error(scenario + " internal temp path: " + destination), { code: scenario });
         }
+      },
+      rename: async (temporary, destination) => {
+        if (scenario === "private-mode" && destination === path) beforeRenameMode = (await fs.stat(temporary)).mode & 0o777;
+        return realRename(temporary, destination);
       },
       readFile: async (...args) => {
         if (prepared && args[0] === path) {
@@ -341,7 +352,7 @@ async function undoFilesystemProbe(root: string, scenario: string) {
     session.append({ type: "user", id: "user", content: [{ type: "text", text: "Edit files" }] });
     const store = openUndoStore({ home: root });
     const turn = { sessionId: session.rootId, turnId: "user", turnNumber: 1 };
-    await realWrite(path, "before");
+    await realWrite(path, "before", scenario === "private-mode" ? { mode: 0o600 } : undefined);
     await store.capture(turn, path); await realWrite(path, "after"); await store.settle(turn, path, true);
     await store.capture(turn, created); await realWrite(created, "created"); await store.settle(turn, created, true);
     const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -353,7 +364,18 @@ async function undoFilesystemProbe(root: string, scenario: string) {
       await controller.applyUndo();
       const snapshot = controller.snapshot();
       const detailsAvailable = controller.inspectNoticeDetails();
-      console.log(JSON.stringify({ preparations, bytes: await fs.readFile(path, "utf8"),
+      let defaults;
+      if (scenario === "private-mode") {
+        const { writeTool } = await import(${JSON.stringify(join(source, "tools/write.ts"))});
+        const { editTool } = await import(${JSON.stringify(join(source, "tools/edit.ts"))});
+        await writeTool.execute({ path: "ordinary.txt", content: "one" }, { workspace });
+        const write = (await fs.stat(join(root, "ordinary.txt"))).mode & 0o777;
+        await editTool.execute({ path: "ordinary.txt", edits: [{ oldText: "one", newText: "two" }] }, { workspace });
+        defaults = { write, edit: (await fs.stat(join(root, "ordinary.txt"))).mode & 0o777,
+          content: await fs.readFile(join(root, "ordinary.txt"), "utf8") };
+      }
+      console.log(JSON.stringify({ preparations, tempMode, creationMode, beforeRenameMode, defaults,
+        restoredMode: (await fs.stat(path)).mode & 0o777, bytes: await fs.readFile(path, "utf8"),
         createdBytes: await fs.readFile(created, "utf8").catch(() => null),
         rows: snapshot.undoPreview?.files.map(file => file.status), result: snapshot.undoPreview?.result,
         record: session.items.find(item => item.type === "turn_undo"), notice: snapshot.transcript.at(-1)?.text,
@@ -413,5 +435,17 @@ test("I/O failure during the final destination check is failed, rather than chan
     expect(result.preparations).toBe(1); expect(result.bytes).toBe("after"); expect(result.temps).toEqual([]);
     expect(result.rows).toEqual(["could not restore · Could not read or write file", "Deleted"]);
     expect(result.record).toMatchObject({ reverted: [{ path: "new.ts", action: "deleted" }], skipped: [{ path: "clamp.ts", reason: "failed" }] });
+  });
+});
+
+test("undo restoration creates and publishes owner-only bytes under a permissive umask while ordinary file tools keep their defaults", async () => {
+  await withTempDir(async root => {
+    const result = await undoFilesystemProbe(root, "private-mode");
+    expect(result.preparations).toBe(1);
+    expect(result.creationMode).toBe(0o600); expect(result.tempMode).toBe(0o600);
+    expect(result.beforeRenameMode).toBe(0o600); expect(result.restoredMode).toBe(0o600);
+    expect(result.bytes).toBe("before"); expect(result.temps).toEqual([]);
+    expect(result.record.reverted).toEqual([{ path: "clamp.ts", action: "restored" }, { path: "new.ts", action: "deleted" }]);
+    expect(result.defaults).toEqual({ write: 0o666, edit: 0o666, content: "two" });
   });
 });

@@ -46,16 +46,17 @@ export function filesystemFailure(
   };
 }
 
-/** Prepare a same-directory replacement, optionally check the destination immediately before rename, and clean up on failure. */
+/** Create and publish a replacement with an optional creation mode (umask defaults otherwise), checking just before rename and cleaning up failures. */
 export async function writeFileAtomically(
   path: string,
   content: string | Uint8Array,
   signal?: AbortSignal,
   beforeReplace?: () => Promise<void>,
+  options: { mode?: number } = {},
 ): Promise<void> {
   const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
   try {
-    await writeFile(tempPath, content, { signal });
+    await writeFile(tempPath, content, { signal, mode: options.mode });
     if (beforeReplace) await beforeReplace();
     await rename(tempPath, path);
   } catch (error) {
