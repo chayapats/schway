@@ -77,7 +77,7 @@ export function parseArgs(
     if (arg === "--approval" || arg.startsWith("--approval=")) {
       const value = arg === "--approval" ? argv[++i] : arg.slice("--approval=".length);
       if (!value || value.startsWith("-")) return { error: "Missing value for --approval" };
-      if (!APPROVAL_MODES.includes(value as ApprovalMode)) return { error: `Unknown approval mode: ${value}. Use auto or read-only.` };
+      if (!APPROVAL_MODES.includes(value as ApprovalMode)) return { error: `Unknown approval mode: ${value}. Use auto, ask, or read-only.` };
       args.approval = value as ApprovalMode;
       continue;
     }

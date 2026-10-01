@@ -585,3 +585,16 @@ test("read-only denies mutations while parallel reads overlap and settlements re
   expect(events[denied]).toEqual({ type: "tool.denied", toolCallId: "denied", name: "edit", mode: "read-only", reason: resultContents(session)[1] });
   expect(events[denied + 1]?.type).toBe("tool.finished");
 });
+
+
+test("scheduler retains prototype approval accessors and method receivers", async () => {
+  class Policy {
+    readonly configured = true;
+    get interactive() { return this.configured; }
+    mode() { expect(this.configured).toBe(true); return "read-only" as const; }
+  }
+  const controller = createController(["mutation"]);
+  const { session } = await runTurn({ tools: [probeTool("edit", "parallel", controller)], calls: [call("mutation", "edit", "mutation")], approval: new Policy() });
+  expect(resultContents(session)).toEqual(["Read-only mode: file changes and commands are off. The user can switch modes with Shift+Tab."]);
+  expect(controller.executeCount.size).toBe(0);
+});

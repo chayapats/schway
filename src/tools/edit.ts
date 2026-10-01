@@ -153,7 +153,7 @@ interface Replacement {
 }
 
 /** Match every edit against `original` and apply them all, or fail with no changes. */
-function applyEdits(
+export function applyEdits(
   original: string,
   edits: EditInput["edits"],
 ):

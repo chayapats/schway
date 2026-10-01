@@ -315,7 +315,7 @@ The scheduler owns the entire before/execute/after sequence. An exclusive tool
 holds its barrier through both waterfalls; independent parallel calls can run
 their hooks concurrently. Extension authors must coordinate shared mutable
 state and stop asynchronous work when the supplied signal aborts. These trusted
-local hooks provide policy building blocks alongside Schway approval modes; they are not a sandbox. The approval decision runs after `beforeTool` hooks and re-validation, using the final arguments, before undo capture or execution. In read-only mode, mutating tools are refused without running `execute` or `afterTool`. A hook denial takes precedence over the mode denial.
+local hooks provide policy building blocks alongside Schway approval modes; they are not a sandbox. The approval decision runs after `beforeTool` hooks and re-validation, using the final arguments, before undo capture or execution. In ask mode, prompts show the final arguments after `beforeTool`; session allowances live only in the interactive controller and extensions receive no approval or confirm UI API. Headless ask denies mutations immediately. In read-only mode, mutating tools are refused without running `execute` or `afterTool`. A hook denial takes precedence over the mode denial.
 
 Cancellation or runtime disposal before execution prevents execution and skips
 remaining hooks. Cancellation may stop waiting for an uncooperative hook, with

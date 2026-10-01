@@ -18,7 +18,7 @@ import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 import type { CommandChoice } from "./command-catalog.ts";
-import { hasInlineDiff } from "./transcript-format.ts";
+import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -185,6 +185,18 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   reviewPanel.add(reviewHeading);
   reviewPanel.add(reviewColumns);
   body.add(reviewPanel);
+  const toolApprovalPanel = new BoxRenderable(renderer, { id: "tool-approval-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column", backgroundColor: theme.surface2, paddingX: 1 });
+  const toolApprovalHeading = new TextRenderable(renderer, { id: "tool-approval-heading", content: "", fg: theme.text, flexShrink: 0, wrapMode: "word", marginBottom: 1 });
+  const toolApprovalScroll = new ScrollBoxRenderable(renderer, { id: "tool-approval-scroll", flexGrow: 1, minHeight: 1, scrollX: false });
+  const toolApprovalText = new TextRenderable(renderer, { id: "tool-approval-text", content: "", fg: theme.text, wrapMode: "char" });
+  const toolApprovalChoices = new TextRenderable(renderer, { id: "tool-approval-choices", content: "", fg: theme.text, flexShrink: 0, wrapMode: "word", marginTop: 1 });
+  toolApprovalScroll.add(toolApprovalText);
+  toolApprovalPanel.add(toolApprovalHeading);
+  toolApprovalPanel.add(toolApprovalScroll);
+  toolApprovalPanel.add(toolApprovalChoices);
+  body.add(toolApprovalPanel);
+  let toolApprovalIdentity = "";
+  let toolApprovalContent = "";
   const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted, marginTop: 1 });
   body.add(activity);
   const picker = new BoxRenderable(renderer, { id: "picker", flexDirection: "column", flexShrink: 0, backgroundColor: theme.surface2, paddingX: 1, overflow: "hidden", visible: false });
@@ -228,7 +240,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
-  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false };
+  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false };
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -383,6 +395,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     editor.placeholderColor = theme.muted;
     editor.cursorColor = promptMark.fg = focusBar.fg = theme.accent;
     editor.selectionBg = theme.border;
+    toolApprovalPanel.backgroundColor = theme.surface2;
+    toolApprovalHeading.fg = toolApprovalText.fg = toolApprovalChoices.fg = theme.text;
     credential.fg = reviewText.fg = reviewList.fg = reviewHeading.fg = theme.text;
     reviewDivider.fg = theme.border;
     hints.fg = footer.fg = empty.fg = theme.muted;
@@ -415,7 +429,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   /** Render the status pill within terminal width, adding model details only after connection. */
   function paintFooter(at: number) {
     const columns = Math.max(1, renderer.width);
-    const modeChip = footerParts.approvalMode !== "auto" ? [bold(fg(theme.warning)("◆ READ-ONLY")), fg(theme.muted)(" ")] : [];
+    const modeChip = footerParts.approvalMode !== "auto" ? [bold(fg(theme.warning)(footerParts.approvalMode === "ask" ? "◆ ASK" : "◆ READ-ONLY")), fg(theme.muted)(" ")] : [];
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
@@ -435,7 +449,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const ctx = footerParts.ctxPercent === undefined
       ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
       : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
-    const esc = footerParts.running ? keyHintChunks("Esc stops", hintColors(theme.surface)) : [];
+    const esc = footerParts.running ? keyHintChunks(footerParts.toolApproval ? "Ctrl+C cancel" : "Esc stops", hintColors(theme.surface)) : [];
     const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
     // Narrow priority: pill, Esc stops and context stay; route then reasoning drop, then the model name is clipped.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
@@ -584,7 +598,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const externalPanel = snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
-      const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : "");
+      const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && snapshot.toolApproval ? "tool-approval" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) { savedDraft = editor.plainText; savedDraftCursor = editor.cursorOffset; savedDraftRevision = editorRevision; }
         if (nextPanel === "sessions") { sessionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
@@ -606,9 +620,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       observeDraft(panelMode ? savedDraft : editor.plainText, secretSurface);
       draftStatus.visible = !!durableDraft?.notice;
       draftStatus.content = fitLine(durableDraft?.notice ?? "", width);
-      editor.visible = !snapshot.undoPreview && !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
+      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
       credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
-      if (snapshot.undoPreview || snapshot.changeReview) { editor.blur(); }
+      if (snapshot.undoPreview || snapshot.changeReview || panelMode === "tool-approval" && !snapshot.toolApproval?.enteringReason) { editor.blur(); }
       else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
         editor.blur();
         credential.content = snapshot.endpointUrlEntry
@@ -622,7 +636,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -648,6 +662,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         route: snapshot.modelId ? safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`) : "",
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
         running: !!snapshot.activity || snapshot.status === "running",
+        toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
       };
       const tail = entries.at(-1);
@@ -655,7 +670,26 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      transcript.visible = !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview;
+      transcript.visible = panelMode !== "tool-approval" && !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview;
+      toolApprovalPanel.visible = panelMode === "tool-approval";
+      if (toolApprovalPanel.visible && snapshot.toolApproval) {
+        const approval = snapshot.toolApproval;
+        const identity = approval.request.toolCallId;
+        if (identity !== toolApprovalIdentity) { toolApprovalIdentity = identity; toolApprovalScroll.scrollTo(0); }
+        toolApprovalHeading.content = safe(`Allow ${approval.request.toolName}? · ask mode`);
+        const counts = approval.diff ? `  +${approval.diff.added} −${approval.diff.removed}` : "";
+        const target = approval.path ? `${shortenWorkspacePath(safe(approval.path), options.home, Math.max(1, width - 2 - Bun.stringWidth(counts)))}${counts}` : "";
+        const content = JSON.stringify([identity, target, approval.content, approval.diff, mode]);
+        if (content !== toolApprovalContent) {
+          toolApprovalText.content = new StyledText([
+            fg(theme.text)(safe(target || approval.content)),
+            ...(approval.diff ? formatDiffRows(approval.diff.rows).split("\n").map((line, index) => fg(approval.diff!.rows[index]?.sign === "+" ? theme.success : theme.error)(`\n${safe(line)}`)) : []),
+          ]);
+          toolApprovalContent = content;
+        }
+        toolApprovalChoices.content = new StyledText(["Allow once", `Allow ${approval.request.toolName} for this session`, "Deny with reason…"].map((choice, index) =>
+          fg(index === approval.selected ? theme.accent : theme.text)(`${index === approval.selected ? "›" : " "} ${safe(choice)}${index < 2 ? "\n" : ""}`)));
+      }
       reviewPanel.visible = !!snapshot.changeReview || !!snapshot.undoPreview;
       if (snapshot.changeReview || snapshot.undoPreview) {
         const undo = snapshot.undoPreview;
@@ -771,6 +805,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error" } as const)[completed.reason as "completed" | "failed"] ?? "warning" : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
+        : snapshot.toolApproval ? { text: "Approval required · Ctrl+C cancel turn", tone: "warning", glyph: "◌", chips: true }
         : searchOpen ? { text: searchStatus, tone: "accent", glyph: "⌕" }
         : Date.now() < interactionNoticeUntil ? { text: interactionNotice, tone: "muted" }
         : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
@@ -971,9 +1006,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.height = panelMode === "review" ? "auto" : 1;
-      hints.wrapMode = panelMode === "review" ? "word" : "none";
-      if (panelMode === "undo") {
+      hints.height = panelMode === "review" || panelMode === "tool-approval" ? "auto" : 1;
+      hints.wrapMode = panelMode === "review" || panelMode === "tool-approval" ? "word" : "none";
+      if (snapshot.toolApproval && panelMode !== "tool-approval") {
+        hints.content = "Esc close to review request";
+      } else if (panelMode === "tool-approval") {
+        hints.content = new StyledText(keyHintChunks("Enter choose · Esc deny · Ctrl+C cancel turn", hintColors(theme.background)));
+      } else if (panelMode === "undo") {
         hints.content = "↑↓ select · PgUp/PgDn scroll · Esc close";
       } else if (panelMode === "review") {
         hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
@@ -993,6 +1032,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   }
 
   function submit() {
+    if (panelMode === "tool-approval") {
+      if (controller.snapshot().toolApproval?.enteringReason) controller.denyToolApproval(editor.plainText);
+      else controller.chooseToolApproval();
+      refresh(); return;
+    }
     if (panelMode === "help") {
       if (helpInserted) { const command = editor.plainText; controller.commandHelpOpen = false; refresh(); setDraft(command); refresh(); }
       return;
@@ -1112,6 +1156,22 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
+    if (panelMode === "tool-approval" && snapshot.toolApproval) {
+      if (key.ctrl && name === "c") { controller.cancel(); handled(); return; }
+      if (name === "escape") { controller.denyToolApproval(); handled(); return; }
+      if (name === "tab" && key.shift) { handled(); return; }
+      if (name === "pageup" || name === "pagedown") {
+        toolApprovalScroll.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, toolApprovalScroll.viewport.height - 2));
+        handled(); return;
+      }
+      if (name === "return" || name === "kpenter") { submit(); handled(); return; }
+      if (!snapshot.toolApproval.enteringReason) {
+        if (name === "up" || name === "down") controller.moveToolApproval(name === "up" ? -1 : 1);
+        handled(); return;
+      }
+      if (key.meta || key.option || key.ctrl && !["a", "e", "u", "k", "w", "j"].includes(name)) { handled(); return; }
+      return;
+    }
     if ((key.meta || key.option) && name === "d" && !panelMode && options.draftPersistence) {
       if (clearDurableDraft()) { setDraft(""); savedDraft = ""; }
       handled(); return;

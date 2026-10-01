@@ -24,7 +24,7 @@ type Option = {
 /** Describe every accepted CLI option once for main and diagnostic help. */
 export const CLI_OPTIONS: readonly Option[] = [
   { flags: ["-p"], value: "<task>", section: "Common", description: "Run one task without the interactive UI", doctor: false, sample: "explain this project" },
-  { flags: ["--approval"], value: "<mode>", section: "Common", description: "Use auto or read-only for tools", doctor: false, sample: "read-only" },
+  { flags: ["--approval"], value: "<mode>", section: "Common", description: "Use auto, ask, or read-only for tools", doctor: false, sample: "read-only" },
   { flags: ["-h", "--help"], section: "Common", description: "Show this help", doctor: true },
   { flags: ["--provider"], value: "<name>", section: "Model and auth", description: `Use ${CLI_PROVIDERS.join(", ")}`, doctor: true, sample: "openai" },
   { flags: ["--model"], value: "<id>", section: "Model and auth", description: "Choose a model", doctor: false, sample: "example-model" },
@@ -76,7 +76,7 @@ export function formatHelp(): string {
   return [
     "schway — a lean, fast coding agent for your terminal", "", "Usage",
     row("schway", "Start an interactive session"),
-    row('schway -p "<task>" [--approval <auto|read-only>]', "Run one task"),
+    row('schway -p "<task>" [--approval <auto|ask|read-only>]', "Run one task"),
     row("schway doctor", "Check your setup"),
     ...optionSections(false), "", "Examples",
     '  schway -p "explain src/agent" --json',

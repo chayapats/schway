@@ -37,13 +37,13 @@ schway -p "explain this repository" --max-turns 8 --max-output 2048
 
 ## Approval modes
 
-`approval.mode` accepts `auto` (default) or `read-only`; unknown modes, including `ask`, are rejected. Read-only lets tools investigate but refuses tools that can change files or run commands. Skill activation remains available.
+`approval.mode` accepts `auto` (default), `ask`, or `read-only`; unknown modes are rejected. Ask previews mutating tools for an interactive decision; headless ask refuses them immediately with `approval required; headless cannot ask`. A denial alone does not change the exit code. Read-only lets tools investigate but refuses tools that can change files or run commands. Skill activation remains available.
 
 ```json
 { "approval": { "mode": "read-only" } }
 ```
 
-Approval uses a stricter-only rule for project configuration: the user file's mode (or `auto` when unset) is the baseline, and a project mode applies only if it is equally strict or stricter. A looser project value is ignored, with one notice per project config path in a process. CLI `--approval auto|read-only` and session values replace the result in either direction because they are the user's own actions; session values win over CLI flags. Interactive memory never carries approval mode.
+Approval uses a stricter-only rule for project configuration: the user file's mode (or `auto` when unset) is the baseline, and a project mode applies only if it is equally strict or stricter. A looser project value is ignored, with one notice per project config path in a process. The strictness order is `auto` → `ask` → `read-only`. A project `ask` applies over user `auto`; project `auto` or `ask` is ignored under user `read-only`. CLI `--approval auto|ask|read-only` and session values replace the result in either direction because they are the user's own actions; session values win over CLI flags. Interactive memory never carries approval mode.
 
 `/config set approval {"mode":"read-only"}` changes the current session setting. Add `--scope user` or `--scope project` to save a file setting. A looser project edit is saved but ignored under the same rule. Shift+Tab cycles the live process mode without saving configuration; that choice survives `/new`, `/resume`, and model changes in the process.
 

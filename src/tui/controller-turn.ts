@@ -267,7 +267,7 @@ export abstract class TurnLayer extends CompactionLayer {
     if (this.disposed || this.activeAbort?.signal !== signal) return;
     try {
       for await (const event of runAgentLoop({
-        approval: { interactive: true, mode: () => this.currentApprovalMode },
+        approval: { interactive: true, mode: () => this.currentApprovalMode, ask: (request, signal) => this.askTool(request, signal) },
         undo: this.home ? openUndoStore({ home: this.home }) : undefined,
         session: this.session,
         // Checked in submit(); kept non-null here for the loop call.

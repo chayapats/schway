@@ -1,4 +1,5 @@
-import { DEFAULT_APPROVAL_MODE, type ApprovalMode } from "../agent/approval.ts";
+import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, type ApprovalMode, type ApprovalRequest, type ApprovalDecision } from "../agent/approval.ts";
+import { approvalPreview, type ToolApproval } from "./tool-approval.ts";
 import { ignoredProjectApprovalNotice, projectConfigPath } from "../config/config.ts";
 import type { resolveThinkingSelection } from "../model/thinking.ts";
 import { isGrokModel } from "../model/loader.ts";
@@ -63,6 +64,9 @@ export abstract class ControllerCore {
   protected thinking?: string;
   protected configEditor?: ConfigEditor;
   protected currentApprovalMode: ApprovalMode = DEFAULT_APPROVAL_MODE;
+  protected toolApproval?: ToolApproval;
+  protected readonly allowedTools = new Set<string>();
+  private settleToolApproval?: (decision: ApprovalDecision) => void;
   private readonly noticedApprovalPaths = new Set<string>();
   protected readonly appearanceEnvironment?: "dark" | "light";
   protected readonly stageSettings?: TuiControllerOptions["stageSettings"];
@@ -204,9 +208,54 @@ export abstract class ControllerCore {
       this.offerRecovery(category, false, startupRecoveryMessage(category), options.startupError);
     }
   }
-  /** Cycle this process's approval mode without persisting it or waiting for the active turn. */
+  /** Cycle the live approval mode unless a tool request is pending, without saving configuration. */
   cycleApprovalMode(): void {
-    this.currentApprovalMode = this.currentApprovalMode === "auto" ? "read-only" : "auto";
+    if (this.toolApproval) return;
+    this.currentApprovalMode = APPROVAL_MODES[(APPROVAL_MODES.indexOf(this.currentApprovalMode) + 1) % APPROVAL_MODES.length]!;
+  }
+
+  /** Ask once for final tool arguments, retaining session allowances until a successful session switch. */
+  protected askTool(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision> {
+    if (this.disposed || signal.aborted) return Promise.resolve({ kind: "deny" });
+    if (this.allowedTools.has(request.toolName)) return Promise.resolve({ kind: "allow" });
+    const state: ToolApproval = { request: { toolCallId: request.toolCallId, toolName: request.toolName, index: request.index }, selected: 0, enteringReason: false, loading: true, content: "Preparing preview…" };
+    this.toolApproval = state;
+    return new Promise(resolve => {
+      const settle = (decision: ApprovalDecision) => {
+        signal.removeEventListener("abort", abort);
+        if (this.toolApproval === state) { this.toolApproval = undefined; this.settleToolApproval = undefined; }
+        resolve(decision);
+      };
+      const abort = () => settle({ kind: "deny" });
+      this.settleToolApproval = settle;
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) { abort(); return; }
+      void approvalPreview(request, this.workspace!.root, this.secrets).then(preview => {
+        if (!this.disposed && !signal.aborted && this.toolApproval === state) Object.assign(state, preview, { loading: false });
+      }, () => {
+        if (!this.disposed && !signal.aborted && this.toolApproval === state) Object.assign(state, { content: "Preview unavailable", loading: false });
+      });
+    });
+  }
+
+  /** Move the active approval choice without changing the composer draft. */
+  moveToolApproval(delta: number): void {
+    if (this.toolApproval && !this.toolApproval.enteringReason) this.toolApproval.selected = (this.toolApproval.selected + delta + 3) % 3;
+  }
+
+  /** Allow once, remember this tool for the session, or open ephemeral denial entry. */
+  chooseToolApproval(): void {
+    if (!this.toolApproval) return;
+    if (this.toolApproval.selected === 2) { this.toolApproval.enteringReason = true; return; }
+    if (this.toolApproval.loading) return;
+    if (this.toolApproval.selected === 1) this.allowedTools.add(this.toolApproval.request.toolName);
+    this.settleToolApproval?.({ kind: "allow" });
+  }
+
+  /** Deny the current call with the exact trimmed model-visible user explanation. */
+  denyToolApproval(reason = ""): void {
+    const text = reason.trim();
+    this.settleToolApproval?.({ kind: "deny", reason: text ? `Denied by the user: ${text}` : "Denied by the user." });
   }
 
   /** Show a looser project approval warning at most once per config path in this process. */

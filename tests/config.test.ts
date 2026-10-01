@@ -452,10 +452,14 @@ test.each([
   [undefined, "read-only", undefined, undefined, "read-only", undefined],
   ["read-only", "auto", undefined, undefined, "read-only", "auto"],
   ["auto", "auto", undefined, undefined, "auto", undefined],
+  ["auto", "ask", undefined, undefined, "ask", undefined],
+  ["ask", "auto", undefined, undefined, "ask", "auto"],
+  ["ask", "read-only", undefined, undefined, "read-only", undefined],
+  ["read-only", "ask", undefined, undefined, "read-only", "ask"],
   ["read-only", "auto", "auto", undefined, "auto", "auto"],
   ["auto", "read-only", undefined, "auto", "auto", undefined],
 ] as const)("approval precedence user=%s project=%s cli=%s session=%s", (user, project, cli, session, effective, ignored) => {
-  const layer = (mode: "auto" | "read-only" | undefined) => mode ? { approval: { mode } } : undefined;
+  const layer = (mode: "auto" | "ask" | "read-only" | undefined) => mode ? { approval: { mode } } : undefined;
   const settings = resolveSettings({ user: layer(user), project: layer(project), cli: layer(cli), session: layer(session) });
   if ("error" in settings) throw new Error(settings.error);
   expect(settings.approvalMode).toBe(effective);
@@ -463,9 +467,10 @@ test.each([
 });
 
 
-test("approval origins ignore looser project settings and schema rejects ask and unknown keys", async () => {
+test("approval origins ignore looser project settings and schema accepts ask and rejects unknown keys", async () => {
   const { configOrigins } = await import("../src/config/editing.ts");
   expect(configOrigins({ user: { approval: { mode: "read-only" } }, project: { approval: { mode: "auto" } } }).approval).toBe("user-global");
-  for (const approval of [{ mode: "ask" }, { mode: "auto", other: true }, null]) expect(parseConfigObject({ approval }, "test")).toHaveProperty("error");
+  expect(parseConfigObject({ approval: { mode: "ask" } }, "test")).not.toHaveProperty("error");
+  for (const approval of [{ mode: "auto", other: true }, null]) expect(parseConfigObject({ approval }, "test")).toHaveProperty("error");
   expect(resolveSettings({ memory: { approval: { mode: "read-only" } } })).toMatchObject({ approvalMode: "auto" });
 });

@@ -12,7 +12,7 @@ test("main help groups options and examples in the documented order", () => {
   ]);
   expect(lines.slice(3, 6).map((line) => line.trim().split(/ {2,}/))).toEqual([
     ["schway", "Start an interactive session"],
-    ['schway -p "<task>" [--approval <auto|read-only>]', "Run one task"],
+    ['schway -p "<task>" [--approval <auto|ask|read-only>]', "Run one task"],
     ["schway doctor", "Check your setup"],
   ]);
 });

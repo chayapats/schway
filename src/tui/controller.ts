@@ -24,6 +24,12 @@ export class TuiController extends TurnLayer {
     return {
       status: this.status,
       approvalMode: this.currentApprovalMode,
+      toolApproval: this.toolApproval ? { ...structuredClone(this.toolApproval),
+        request: { ...this.toolApproval.request, toolName: redactSecrets(this.toolApproval.request.toolName, this.secrets) },
+        content: redactSecrets(this.toolApproval.content, this.secrets),
+        path: this.toolApproval.path ? redactSecrets(this.toolApproval.path, this.secrets) : undefined,
+        diff: this.toolApproval.diff ? { ...this.toolApproval.diff, rows: this.toolApproval.diff.rows.map(row => ({ ...row, text: redactSecrets(row.text, this.secrets) })) } : undefined,
+      } : undefined,
       streamingAssistantId: this.transcript.find(entry => entry.id === this.currentAssistantId && entry.text.length > 0 && !entry.incomplete)?.id,
       context,
       compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,

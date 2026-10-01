@@ -563,3 +563,59 @@ function resultContent(request: ModelRequest, toolCallId: string): string {
   );
   return match?.content ?? "";
 }
+
+
+test("aborting a never-resolving approval cancels current and queued file calls", async () => {
+  await withTempDir(async root => {
+    const project = { root, launchCwd: root, extraRoots: [] };
+    const session = createSession([user("write files")]);
+    const abort = new AbortController();
+    let asked = () => {};
+    const prompt = new Promise<void>(resolve => { asked = resolve; });
+    let prompts = 0;
+    const running = collect(runAgentLoop({ session, workspace: project, signal: abort.signal,
+      contextManager: createContextManager(project), tools: createToolRegistry([writeTool]),
+      model: createScriptedModel({ toolCalls: [
+        { id: "first", name: "write", arguments: { path: "first.txt", content: "one" } },
+        { id: "second", name: "write", arguments: { path: "second.txt", content: "two" } },
+      ] }),
+      approval: { interactive: true, mode: () => "ask", ask: () => { prompts++; asked(); return new Promise(() => {}); } },
+    }));
+    await Promise.race([prompt, Bun.sleep(100).then(() => { throw new Error("approval did not open"); })]);
+    abort.abort();
+    const events = await running;
+    expect(prompts).toBe(1);
+    expect(events.filter(event => event.type === "tool.finished").map(event => event.status)).toEqual(["cancelled", "cancelled"]);
+    expect(session.items.filter(item => item.type === "tool_result").map(item => item.content)).toEqual(["Tool call cancelled", "Tool call cancelled"]);
+    expect(await Bun.file(join(root, "first.txt")).exists()).toBe(false);
+    expect(await Bun.file(join(root, "second.txt")).exists()).toBe(false);
+    expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "cancelled" });
+  });
+});
+
+
+test("ask never prompts for read-only tools and cancellation settles parallel approval waiters", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const project = { root, launchCwd: root, extraRoots: [] };
+  let prompts = 0;
+  const readSession = createSession([user("read")]);
+  await collect(runAgentLoop({ session: readSession, workspace: project, contextManager: createContextManager(project), tools: createToolRegistry([readTool]),
+    model: createScriptedModel({ responses: [{ toolCalls: [{ id: "read", name: "read", arguments: { path: "note.txt" } }] }, { text: "done" }] }),
+    approval: { interactive: true, mode: () => "ask", ask: async () => { prompts++; return { kind: "deny" }; } },
+  }));
+  expect(prompts).toBe(0);
+  expect(readSession.items.find(item => item.type === "tool_result")?.isError).toBe(false);
+  const session = createSession([user("write")]);
+  const abort = new AbortController();
+  let opened!: () => void;
+  const prompt = new Promise<void>(resolve => { opened = resolve; });
+  const running = collect(runAgentLoop({ session, workspace: project, signal: abort.signal, maxConcurrentTools: 2, contextManager: createContextManager(project),
+    tools: createToolRegistry([{ ...writeTool, execution: "parallel" }]),
+    model: createScriptedModel({ toolCalls: Array.from({ length: 3 }, (_, index) => ({ id: String(index), name: "write", arguments: { path: `file${index}`, content: "after" } })) }),
+    approval: { interactive: true, mode: () => "ask", ask: () => { prompts++; opened(); return new Promise(() => {}); } },
+  }));
+  await prompt; abort.abort(); const events = await running;
+  expect(prompts).toBe(1);
+  expect(events.filter(event => event.type === "tool.finished").map(event => event.status)).toEqual(["cancelled", "cancelled", "cancelled"]);
+  for (let index = 0; index < 3; index++) expect(await Bun.file(join(root, `file${index}`)).exists()).toBe(false);
+}));
