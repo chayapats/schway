@@ -73,6 +73,12 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
       if (mode.startsWith("forget")) { await command("/model forget"); screen += "\n" + terminal.captureCharFrame(); }
       await command("/config show");
       screen += "\n" + terminal.captureCharFrame();
+      // Inspect earlier setting origins when the effective config is taller than the viewport.
+      await terminal.mockInput.pressKeys(["\u001b[5~"]);
+      await terminal.flush();
+      screen += "\n" + terminal.captureCharFrame();
+      await terminal.mockInput.pressKeys(["\u001b[6~"]);
+      await terminal.flush();
       terminal.resize(44, 18);
       await terminal.flush();
       screen += "\n" + terminal.captureCharFrame();

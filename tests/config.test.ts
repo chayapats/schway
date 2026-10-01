@@ -435,3 +435,14 @@ test("parseEnvFile reads assignments and ignores comments", () => {
     OTHER: "plain value",
   });
 });
+
+
+test("undo retention uses positive integers, rejects unknown keys, and resolves defaults", () => {
+  expect(resolveSettings({})).toMatchObject({ undoMaxAgeDays: 30, undoMaxSizeMB: 500 });
+  expect(parseConfigObject({ undo: { maxAgeDays: 14, maxSizeMB: 10 } }, "test")).toEqual({ undo: { maxAgeDays: 14, maxSizeMB: 10 } });
+  expect(resolveSettings({ user: { undo: { maxAgeDays: 14 } } })).toMatchObject({ undoMaxAgeDays: 14, undoMaxSizeMB: 500 });
+  expect(resolveSettings({ user: { undo: { maxAgeDays: 14, maxSizeMB: 10 } }, project: { undo: { maxAgeDays: 7 } } })).toMatchObject({ undoMaxAgeDays: 7, undoMaxSizeMB: 500 });
+  for (const undo of [{ maxAgeDays: 0 }, { maxSizeMB: -1 }, { maxAgeDays: 1.5 }, { maxSizeMB: "10" }, { maxAge: 30 }]) {
+    expect(parseConfigObject({ undo }, "test")).toHaveProperty("error");
+  }
+});

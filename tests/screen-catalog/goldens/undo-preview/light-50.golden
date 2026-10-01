@@ -1,7 +1,7 @@
 schway-screen 1
 screen undo-preview
 title Undo preview
-description Undo previews a restore, a deletion and a file changed afterwards.
+description Undo previews file restores, a deletion and a shell change.
 variant light-50
 size 50x30
 cursor 1 1 hidden
@@ -13,6 +13,7 @@ cursor 1 1 hidden
  › clamp.ts                       +1 −1   restore
    src/util/range.ts               new     delete
    README.md                 changed since · skip
+   gen/out.json   changed by shell · not undoable
 
  ─ clamp.ts ─
    2 │-  return Math.min(hi, Math.max(lo, n));
@@ -29,12 +30,11 @@ cursor 1 1 hidden
 
 
 
-
- ✓ Done · 3 files +44 −1 · Alt+R review
+ ✓ Done · 4 files +44 −1 · Alt+R review
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● Ready   scripted/scripted-model      ctx ~332
+  ● Ready   scripted/scripted-model      ctx ~337
  ↑↓ select · PgUp/PgDn scroll · Esc close
 == styles
 00 0-1 #ffffff #ecedea -
@@ -58,17 +58,19 @@ cursor 1 1 hidden
 06 0-1 #ffffff #f7f7f4 -
 06 1-49 #1d232c #f7f7f4 -
 06 49-50 #ffffff #f7f7f4 -
-07 0-50 #ffffff #f7f7f4 -
-08 0-1 #ffffff #f7f7f4 -
-08 1-13 #1d232c #f7f7f4 -
-08 13-50 #ffffff #f7f7f4 -
+07 0-1 #ffffff #f7f7f4 -
+07 1-49 #1d232c #f7f7f4 -
+07 49-50 #ffffff #f7f7f4 -
+08 0-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
-09 1-46 #a61f16 #f7f7f4 -
-09 46-50 #ffffff #f7f7f4 -
+09 1-13 #1d232c #f7f7f4 -
+09 13-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
-10 1-32 #19612f #f7f7f4 -
-10 32-50 #ffffff #f7f7f4 -
-11 0-50 #ffffff #f7f7f4 -
+10 1-46 #a61f16 #f7f7f4 -
+10 46-50 #ffffff #f7f7f4 -
+11 0-1 #ffffff #f7f7f4 -
+11 1-32 #19612f #f7f7f4 -
+11 32-50 #ffffff #f7f7f4 -
 12 0-50 #ffffff #f7f7f4 -
 13 0-50 #ffffff #f7f7f4 -
 14 0-50 #ffffff #f7f7f4 -

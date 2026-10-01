@@ -91,17 +91,18 @@ export interface ChangeReview {
   loading: boolean;
 }
 
-/** One undo row with current-to-restored diff and a complete action badge. */
+/** One file-tool diff or non-undoable shell row with its action badge. */
 export interface UndoPreviewFile {
   path: string;
   absolutePath: string;
-  action: "restore" | "delete" | "skip";
+  action: "restore" | "delete" | "skip" | "shell";
   status: string;
   rows: GitDiffRow[];
   binary: boolean;
 }
 /** Renderer-independent undo preview or final per-file results. */
 export interface UndoPreview {
+  shellUnavailable?: boolean;
   turnId: string;
   turnNumber: number;
   files: UndoPreviewFile[];

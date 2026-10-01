@@ -295,14 +295,16 @@ export abstract class TurnLayer extends CompactionLayer {
         this.transcript.push(this.systemEntry("Cancelled."));
         await this.captureTurnResult(signal);
         if (this.disposed || this.activeAbort?.signal !== signal) return;
-        this.finishOutcome("cancelled");
+        await this.finishOutcome("cancelled");
+        if (this.disposed || this.activeAbort?.signal !== signal) return;
         this.status = "idle";
         this.offerRecovery("provider", true, "The saved turn was stopped. Completed results remain available; continue when ready.", undefined, operationId, false);
         return;
       }
       await this.captureTurnResult(signal);
       if (this.disposed || this.activeAbort?.signal !== signal) return;
-      this.finishOutcome();
+      await this.finishOutcome();
+      if (this.disposed || this.activeAbort?.signal !== signal) return;
       if (this.status === "running") {
         this.status = "idle";
       }
@@ -316,7 +318,8 @@ export abstract class TurnLayer extends CompactionLayer {
       this.fail(redactSecrets(message, this.secrets));
       await this.captureTurnResult(signal);
       if (this.disposed || this.activeAbort?.signal !== signal) return;
-      this.finishOutcome(signal.aborted ? "cancelled" : "failed");
+      await this.finishOutcome(signal.aborted ? "cancelled" : "failed");
+      if (this.disposed || this.activeAbort?.signal !== signal) return;
     }
   }
 

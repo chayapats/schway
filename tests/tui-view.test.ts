@@ -2859,3 +2859,20 @@ test("Ctrl+I reveals notice diagnostics without changing the draft or session", 
   expect(ui.editor.plainText).toBe("retained draft");
   expect(session.items).toEqual([]);
 });
+
+
+test("undo retention can be set as JSON, shown effectively, and reset", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    expect(await ui.controller.configCommand('set undo {"maxAgeDays":14}')).toBe(true);
+    expect(ui.configEditor.settings).toMatchObject({ undoMaxAgeDays: 14, undoMaxSizeMB: 500 });
+    expect(ui.controller.describeConfig()).toContain('undo: {"maxAgeDays":14,"maxSizeMB":500} [current-session override]');
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain('Effective: {"maxAgeDays":14,"maxSizeMB":500}');
+    expect(await ui.controller.configCommand('set undo {"maxSizeMB":250} --scope user')).toBe(true);
+    expect(await Bun.file(join(ui.home, ".schway/config.json")).json()).toEqual({ undo: { maxSizeMB: 250 } });
+    expect(await ui.controller.configCommand('reset undo')).toBe(true);
+    expect(ui.configEditor.settings).toMatchObject({ undoMaxAgeDays: 30, undoMaxSizeMB: 250 });
+    expect(await ui.controller.configCommand('set undo broken')).toBe(false);
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe('Invalid undo settings · /config set undo {"maxAgeDays":14} retry');
+  });
+});

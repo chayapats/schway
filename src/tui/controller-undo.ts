@@ -31,13 +31,16 @@ export abstract class UndoLayer extends ChangesLayer {
       if (this.disposed || this.session !== session || session.activeBranchId !== branch) return false;
       if (files.every(file => file.action === "skip")) { this.notice("Nothing to undo · every file changed since"); return true; }
       this.closeChangeReview();
-      this.undoPreview = { turnId: target.turnId, turnNumber: target.turnNumber, files, selected: 0, result: false };
+      const shellFiles: UndoPreviewFile[] = target.shell.detection === "git" ? target.shell.paths.map(path => ({
+        path: displayToolPath(this.workspace!.root, path), absolutePath: path, action: "shell" as const, status: "changed by shell · not undoable", rows: [], binary: false,
+      })).sort((a, b) => a.path.localeCompare(b.path)) : [];
+      this.undoPreview = { shellUnavailable: target.shell.detection === "unavailable", turnId: target.turnId, turnNumber: target.turnNumber, files: [...files, ...shellFiles], selected: 0, result: false };
       return true;
     } catch (error) { this.fail("Undo unavailable · /undo retry", messageOf(error)); return false; }
     finally { this.undoBusy = false; }
   }
 
-  /** Move selection through first-change-ordered files without touching durable state. */
+  /** Move selection through file-tool and shell rows without touching durable state. */
   selectUndoFile(delta: number): void {
     const preview = this.undoPreview;
     if (preview) preview.selected = (preview.selected + delta + preview.files.length) % preview.files.length;
@@ -60,6 +63,7 @@ export abstract class UndoLayer extends ChangesLayer {
       const target = await this.undoTarget(store);
       if (!target || target.turnId !== preview.turnId) { this.undoPreview = undefined; this.notice("Nothing to undo"); return; }
       for (const row of preview.files) {
+        if (row.action === "shell") continue;
         const file = target.files.find(file => file.path === row.absolutePath);
         if (!file || row.action === "skip") { skipped.push({ path: row.path, reason: "changed" }); continue; }
         try {
@@ -91,7 +95,7 @@ export abstract class UndoLayer extends ChangesLayer {
         return;
       }
       const record: TurnUndoRecord = { type: "turn_undo", id: crypto.randomUUID(), turnId: target.turnId, turnNumber: target.turnNumber,
-        reverted, skipped, note: buildUndoNote(reverted, skipped) };
+        reverted, skipped, note: buildUndoNote(reverted, skipped, target.turnNumber, this.session.items.findLast(item => item.type === "user")?.id === target.turnId) };
       try {
         this.session.append(record);
         this.transcript.push({ ...this.systemEntry(formatUndoResult(record)), sessionRecordId: record.id });
@@ -107,10 +111,11 @@ export abstract class UndoLayer extends ChangesLayer {
   /** Select the latest changed turn on this ancestry unless any branch already recorded its undo. */
   private async undoTarget(store: UndoStore): Promise<UndoManifest | undefined> {
     const users = new Set(this.session.items.filter(item => item.type === "user").map(item => item.id));
-    const target = (await store.list(this.session.rootId)).filter(manifest => users.has(manifest.turnId)
+    const undone = new Set(this.session.entries.flatMap(entry => entry.item.type === "turn_undo" ? [entry.item.turnId] : []));
+    const target = (await store.list(this.session.rootId)).filter(manifest => users.has(manifest.turnId) && !undone.has(manifest.turnId)
       && manifest.files.some(file => file.after !== undefined && !equalUndoHash(file.before, file.after)))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.turnNumber - a.turnNumber)[0];
-    return target && !this.session.entries.some(entry => entry.item.type === "turn_undo" && entry.item.turnId === target.turnId) ? target : undefined;
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.turnNumber - a.turnNumber)[0];
+    return target;
   }
 
   /** Describe durable pre-images against current bytes without modifying files or session history. */

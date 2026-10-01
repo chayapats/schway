@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { flushDraftOnExit } from "../src/drafts/exit.ts";
@@ -15,6 +16,7 @@ import { loadConfigEditor } from "../src/config/editing.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
+import { openUndoStore } from "../src/undo/store.ts";
 
 async function setup(home: string, resume?: string, submit?: ConversationViewOptions["submit"]) {
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
@@ -142,7 +144,13 @@ test("explicit session deletion removes draft content and stale handles cannot r
   const stale = openDraftStore({ home, workspaceRoot: home, sessionId: id });
   expect(await handleSlashCommand("delete-session", id, ui.ctx)).toBe(false);
   expect(await handleSlashCommand("new", "", ui.ctx)).toBe(true); ui.view.refresh();
+  const undo = join(home, ".schway/undo", id);
+  const other = join(home, ".schway/undo/other");
+  await mkdir(undo, { recursive: true }); await mkdir(other, { recursive: true });
+  await writeFile(join(undo, "retained"), "bytes"); await writeFile(join(other, "retained"), "other bytes");
   expect(await handleSlashCommand("delete-session", id, ui.ctx)).toBe(true);
+  await expect(readdir(undo)).rejects.toThrow();
+  expect(await readFile(join(other, "retained"), "utf8")).toBe("other bytes");
   expect(await artifacts(home)).not.toContain("delete this private draft");
   expect(await readdir(sessionsDirectory(home))).not.toContain(`${id}.jsonl`);
   expect(() => stale.save("resurrection", 1)).toThrow();
@@ -261,4 +269,40 @@ test("cancelling a stalled splash-state read returns without opening the termina
     expect(await child.child.exited).toBe(0);
     expect(await Bun.file(join(home, ".schway/ui-state.json")).exists()).toBe(false);
   } finally { await child.stop(); }
+}));
+
+
+test.skipIf(process.platform === "win32")("failed undo directory removal keeps the session file and reports deletion failure", async () => withTempDir(async home => {
+  const ui = await setup(home); const id = ui.session.header.id;
+  const blocked = join(home, ".schway", "undo", id, "blobs");
+  ui.session.append({ type: "user", id: "accepted", content: [{ type: "text", text: "Saved turn" }] });
+  try {
+    expect(await handleSlashCommand("new", "", ui.ctx)).toBe(true);
+    await mkdir(blocked, { recursive: true }); await writeFile(join(blocked, "data"), "retained"); await chmod(blocked, 0o500);
+    expect(await handleSlashCommand("delete-session", id, ui.ctx)).toBe(false);
+    expect(await Bun.file(join(sessionsDirectory(home), `${id}.jsonl`)).exists()).toBe(true);
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toStartWith("Cannot delete session:");
+  } finally { await chmod(blocked, 0o700); ui.close(); }
+}));
+
+test("busy session deletion shows the required reason and retry command while retaining details", async () => withTempDir(async home => {
+  const ui = await setup(home), id = ui.session.header.id;
+  ui.session.append({ type: "user", id: "accepted", content: [{ type: "text", text: "Saved turn" }] });
+  await openUndoStore({ home }).recordShell({ sessionId: id, turnId: "accepted", turnNumber: 1 }, { detection: "unavailable" });
+  const lock = new Database(join(home, ".schway", "undo.lock"));
+  lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+  try {
+    expect(await handleSlashCommand("new", "", ui.ctx)).toBe(true);
+    ui.view.refresh(); await ui.renderOnce();
+    await ui.mockInput.pasteBracketedText(`/delete-session ${id}`); ui.mockInput.pressEnter(); await ui.submitted();
+    ui.view.refresh(); await ui.renderOnce();
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Cannot delete session: Undo store busy · /delete-session retry · Ctrl+I details");
+    expect(ui.captureCharFrame()).toContain("/delete-session retry");
+    expect(ui.captureCharFrame()).toMatch(/Ctrl\+I\s+(?:▌\s*)?details/);
+    expect(ui.captureCharFrame()).toContain("Cannot delete session: Undo store busy");
+    expect(ui.captureCharFrame()).not.toContain("UNDO_STORE_BUSY");
+    expect(await Bun.file(join(sessionsDirectory(home), `${id}.jsonl`)).exists()).toBe(true);
+    ui.mockInput.pressKey("i", { ctrl: true }); ui.view.refresh(); await ui.renderOnce();
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Details · Esc keep editing\nUndo store busy");
+  } finally { lock.close(); ui.close(); }
 }));

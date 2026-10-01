@@ -13,6 +13,8 @@ import { validateThinking, resolveThinkingPolicy, isOpenRouterEndpoint } from ".
 import { THINKING_LEVELS, type ThinkingLevel } from "../model/model.ts";
 import { removedProviderMessage } from "./removed-provider.ts";
 import {
+  DEFAULT_UNDO_MAX_AGE_DAYS,
+  DEFAULT_UNDO_MAX_SIZE_MB,
   DEFAULT_MAX_CONCURRENT_TOOLS,
   DEFAULT_MAX_TURNS,
   DEFAULT_PROVIDER,
@@ -49,6 +51,7 @@ export const CONFIG_SETTING_NAMES = [
   "profiles",
   "profile",
   "git",
+  "undo",
   "appearance",
   "ui",
 ] as const;
@@ -107,6 +110,12 @@ export type SplashSetting = Static<typeof SplashSettingSchema>;
 
 const PositiveInt = Type.Integer({ minimum: 1 });
 
+/** Retention limits for private undo data; unknown settings are rejected. */
+export const UndoConfigSchema = Type.Object({
+  maxAgeDays: Type.Optional(PositiveInt),
+  maxSizeMB: Type.Optional(PositiveInt),
+}, { additionalProperties: false });
+
 /** Environment-variable names referenced by profiles, never secret values. */
 export const CREDENTIAL_ENV_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$";
 
@@ -153,6 +162,7 @@ export const ConfigSchema = Type.Object(
     profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
     git: Type.Optional(GitConfigSchema),
+    undo: Type.Optional(UndoConfigSchema),
     appearance: Type.Optional(AppearanceSchema),
     ui: Type.Optional(UiConfigSchema),
   },
@@ -235,6 +245,10 @@ export interface ResolvedSettings {
   credentialIdentity?: string;
   /** Observational Git change-tracking mode; on-demand reads only on explicit inspection. */
   gitChangeTracking: GitChangeTrackingMode;
+  /** Maximum age of stored undo turns in days. */
+  undoMaxAgeDays: number;
+  /** Maximum private undo store size in MiB. */
+  undoMaxSizeMB: number;
   /** TUI appearance preference before an explicit environment override. */
   appearance: "auto" | "dark" | "light";
   /** Maximum changed rows shown inline; zero disables inline diffs. */
@@ -249,6 +263,7 @@ export const BUILTIN_DEFAULTS: ConfigLayer = {
   maxTurns: DEFAULT_MAX_TURNS,
   maxConcurrentTools: DEFAULT_MAX_CONCURRENT_TOOLS,
   git: { changeTracking: DEFAULT_GIT_CHANGE_TRACKING },
+  undo: { maxAgeDays: DEFAULT_UNDO_MAX_AGE_DAYS, maxSizeMB: DEFAULT_UNDO_MAX_SIZE_MB },
   ui: { inlineDiffLines: DEFAULT_INLINE_DIFF_LINES, splash: "first-run" },
 };
 
@@ -691,6 +706,8 @@ function finishResolvedSettings(input: {
     maxOutput: input.maxOutput,
     catalog: input.catalog,
     gitChangeTracking: input.merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
+    undoMaxAgeDays: input.merged.undo?.maxAgeDays ?? DEFAULT_UNDO_MAX_AGE_DAYS,
+    undoMaxSizeMB: input.merged.undo?.maxSizeMB ?? DEFAULT_UNDO_MAX_SIZE_MB,
     appearance: input.merged.appearance ?? "auto",
     inlineDiffLines: input.merged.ui?.inlineDiffLines ?? DEFAULT_INLINE_DIFF_LINES,
     splash: input.merged.ui?.splash ?? "first-run",

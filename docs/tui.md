@@ -322,9 +322,24 @@ no undo record is written and the turn remains available.
 
 Undo data survives restart, including file changes from a headless `-p` turn
 resumed interactively. Undo covers `edit` and `write` only. It does not revert
-shell or extension tool effects, restore modes or directories, or walk back
-through older turns. `/undo` accepts no arguments and waits until a running turn
+shell or extension tool effects, or restore modes or directories. `/undo` accepts no arguments and waits until a running turn
 settles like other interactive commands.
+
+Running `/undo` again walks back to the next older eligible turn. Cancelling a
+preview leaves that candidate available; when the stack is empty, Schway shows
+`Nothing to undo`. Shell-only turns, turns without file-tool changes, and pruned
+turns are skipped. A partial undo consumes the turn, including skipped files;
+an older turn still checks each file's current hash before writing.
+
+Detected shell paths follow the file-tool rows in display-path order with
+`changed by shell · not undoable`. Selecting one shows no diff, and Enter leaves
+its bytes in place. Shell detection covers only the primary workspace root;
+file-tool edits under attached roots remain undoable.
+
+Undo works outside Git. The preview shows `Shell changes can't be detected here`
+below the file rows when the workspace is not in Git, change tracking is off,
+status capture failed, or the turn came from headless execution or an older
+manifest. File-tool undo still works in each case.
 
 ## Interaction
 
@@ -344,7 +359,7 @@ settles like other interactive commands.
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
-| Undo the last turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
+| Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
 | Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one expandable tool result; C copies the selected item; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |

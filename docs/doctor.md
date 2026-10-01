@@ -30,3 +30,12 @@ Exit statuses: **0** no required check failed (warnings allowed); **1** diagnose
 ## Grok login status
 
 `schway doctor --provider xai --xai-auth grok` checks only the saved Grok OAuth login for authentication. It reports present, needs refresh (within two minutes of expiry), expired without refresh, invalid, or missing. The check is local: it does not load the Grok adapter, contact xAI, open a browser or read another CLI's cache. Use `/login grok` or `/login grok --device` to repair the login; explicitly select `--xai-auth api-key` if you intend to use API-key billing.
+
+## Undo storage
+
+The stable `undo-store` check reads only file sizes under `~/.schway/undo`.
+It reports `Undo store: <size> MB.` in MiB to one decimal place, including
+`Undo store: 0.0 MB.` when no store exists. It is `ok` within `undo.maxSizeMB`
+(default `500`) and `warning` above it, with the remedy
+`Lower undo.maxSizeMB or delete old sessions.` Doctor never prunes or creates
+undo storage; this check also appears in `--json` output.

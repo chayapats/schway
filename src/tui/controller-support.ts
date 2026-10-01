@@ -49,6 +49,6 @@ export function redactRecoveryDetails(message: string, secrets: readonly string[
 /** Render one resolved setting with secrets masked and structured values summarized. */
 export function displaySetting(key: string, value: unknown): string {
   if (key === "baseUrl" && typeof value === "string") return sanitizeBaseUrl(value);
-  if (key === "git" && typeof value === "object" && value !== null) return JSON.stringify(value);
+  if ((key === "git" || key === "undo") && typeof value === "object" && value !== null) return JSON.stringify(value);
   return value === undefined ? "unset" : String(value);
 }

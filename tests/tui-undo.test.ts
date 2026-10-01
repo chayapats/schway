@@ -6,6 +6,7 @@ import type { TextareaRenderable } from "@opentui/core";
 import { createContextManager } from "../src/context/manager.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import type { Session } from "../src/session/session.ts";
+import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -24,13 +25,13 @@ const responses: ScriptedTurn[] = [
 ];
 
 /** Create a rendered scripted conversation with real session and undo storage in a temporary workspace. */
-async function setup(root: string, session?: Session, extra: ScriptedTurnFactory[] = [], turns: ScriptedTurnFactory[] = responses) {
+async function setup(root: string, session?: Session, extra: ScriptedTurnFactory[] = [], turns: ScriptedTurnFactory[] = responses, changeTracking: "off" | "on-demand" = "off", extraRoots: string[] = []) {
   const home = join(root, "home"), directory = join(home, "sessions");
-  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const workspace = { root, launchCwd: root, extraRoots };
   session ??= await createJsonlSession({ directory, workspace });
   const controller = new TuiController({ session, sessionId: session.rootId, workspace, home, provider: "scripted", modelId: "scripted",
     model: createScriptedModel({ responses: [...turns, ...extra] }), contextManager: createContextManager(workspace, { home }),
-    tools: createToolRegistry([editTool, writeTool]), changeTracking: "off" });
+    tools: createToolRegistry([editTool, writeTool, bashTool]), changeTracking });
   const terminal = await createTestRenderer({ width: 80, height: 30, kittyKeyboard: true });
   const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: root, env: {}, secrets: [], quit() {},
     submit: (value, accepted) => dispatchEditorInput(value, controller, command => command.name === "undo" ? controller.undoCommand(command.args) : Promise.resolve(false), accepted) });
@@ -272,6 +273,9 @@ test("headless file edits can be undone after interactive resume", async () => {
     const ui = await setup(root, await loadJsonlSession({ directory, id }));
     try {
       await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(1);
+      expect(ui.captureCharFrame()).toContain("Shell changes can't be detected here");
+      const { openUndoStore } = await import("../src/undo/store.ts");
+      expect((await openUndoStore({ home }).list(id))[0]?.shell).toEqual({ detection: "unavailable" });
       ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
       expect(await readFile(join(root, "clamp.ts"), "utf8")).toBe(original);
       await expect(access(join(root, "src/new.ts"))).rejects.toThrow();
@@ -447,5 +451,193 @@ test.skipIf(process.platform === "win32")("undo restoration creates and publishe
     expect(result.bytes).toBe("before"); expect(result.temps).toEqual([]);
     expect(result.record.reverted).toEqual([{ path: "clamp.ts", action: "restored" }, { path: "new.ts", action: "deleted" }]);
     expect(result.defaults).toEqual({ write: 0o666, edit: 0o666, content: "two" });
+  });
+});
+
+
+test("rendered repeated undo walks three turns and cancellation preserves the candidate", async () => {
+  await withTempDir(async root => {
+    const turns: ScriptedTurn[] = [];
+    for (let n = 1; n <= 3; n++) {
+      await writeFile(join(root, `${n}.ts`), "before");
+      turns.push({ toolCalls: [{ id: `edit-${n}`, name: "edit", arguments: { path: `${n}.ts`, edits: [{ oldText: "before", newText: "after" }] } }] }, { text: "Done." });
+    }
+    const ui = await setup(root, undefined, [], turns);
+    try {
+      for (let n = 1; n <= 3; n++) await ui.send(`Turn ${n}`);
+      for (let n = 3; n >= 1; n--) {
+        await ui.send("/undo");
+        expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(n);
+        if (n === 2) {
+          ui.mockInput.pressEscape(); await ui.settle(); await ui.send("/undo");
+          expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(2);
+        }
+        ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+        expect(await readFile(join(root, `${n}.ts`), "utf8")).toBe("before");
+        if (n === 2) expect(ui.session.items.filter(item => item.type === "turn_undo").at(-1)?.note).toStartWith("The user undid your file changes from turn 2:");
+      }
+      await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      expect(ui.captureCharFrame()).toContain("Nothing to undo");
+    } finally { await ui.dispose(); }
+  });
+});
+
+
+test("shell paths are previewed without diffs or writes and shell-only turns are skipped", async () => {
+  await withTempDir(async root => {
+    const git = Bun.spawnSync(["git", "init", "-q", "-b", "main"], { cwd: root });
+    expect(git.exitCode).toBe(0);
+    await writeFile(join(root, ".git/info/exclude"), "/home/\n");
+    await writeFile(join(root, "a.ts"), "before");
+    const ui = await setup(root, undefined, [], [
+      { toolCalls: [{ id: "edit", name: "edit", arguments: { path: "a.ts", edits: [{ oldText: "before", newText: "after" }] } },
+        { id: "shell", name: "bash", arguments: { command: "mkdir -p gen; echo x > gen/out.json" } }] }, { text: "Done." },
+      { toolCalls: [{ id: "shell-only", name: "bash", arguments: { command: "echo y > gen/other.json" } }] }, { text: "Done." },
+    ], "on-demand");
+    try {
+      await ui.send("Edit and generate"); await ui.send("Generate another"); await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(1);
+      expect(ui.captureCharFrame()).toContain("gen/out.json");
+      expect(ui.captureCharFrame()).toContain("changed by shell · not undoable");
+      ui.mockInput.pressArrow("down"); await ui.settle();
+      expect(ui.controller.snapshot().undoPreview?.files[1]?.rows).toEqual([]);
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(root, "a.ts"), "utf8")).toBe("before");
+      expect(await readFile(join(root, "gen/out.json"), "utf8")).toBe("x\n");
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("non-Git write undo restores bytes and names unavailable shell detection", async () => {
+  await withTempDir(async root => {
+    await writeFile(join(root, "a.ts"), "before");
+    const ui = await setup(root, undefined, [], [
+      { toolCalls: [{ id: "write", name: "write", arguments: { path: "a.ts", content: "after" } }] }, { text: "Done." },
+    ], "on-demand");
+    try {
+      await ui.send("Write file"); await ui.send("/undo");
+      expect(ui.captureCharFrame()).toContain("Shell changes can't be detected here");
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(root, "a.ts"), "utf8")).toBe("before");
+    } finally { await ui.dispose(); }
+  });
+});
+
+
+test("disposing during delayed shell persistence does not publish cancellation recovery", async () => {
+  await withTempDir(async root => {
+    const script = `
+      import { mock } from "bun:test";
+      const fs = await import("node:fs/promises");
+      const write = fs.writeFile;
+      let saved, release, started;
+      const saving = new Promise(resolve => saved = resolve);
+      const gate = new Promise(resolve => release = resolve);
+      const requesting = new Promise(resolve => started = resolve);
+      mock.module("node:fs/promises", () => ({ ...fs, writeFile: async (...args) => {
+        await write(...args);
+        if (String(args[0]).includes(".json.") && String(args[0]).endsWith(".tmp")) { saved(); await gate; }
+      }}));
+      const { TuiController } = await import(${JSON.stringify(join(import.meta.dir, "../src/tui/controller.ts"))});
+      const { createSession } = await import(${JSON.stringify(join(import.meta.dir, "../src/session/session.ts"))});
+      const { createContextManager } = await import(${JSON.stringify(join(import.meta.dir, "../src/context/manager.ts"))});
+      const { createScriptedModel } = await import(${JSON.stringify(join(import.meta.dir, "helpers/scripted-model.ts"))});
+      const root = ${JSON.stringify(root)}, workspace = { root, launchCwd: root, extraRoots: [] };
+      const controller = new TuiController({ session: createSession(), workspace, home: root, provider: "scripted", modelId: "scripted",
+        model: createScriptedModel({ responses: [() => { started(); return { waitForAbort: true }; }] }),
+        contextManager: createContextManager(workspace), changeTracking: "off" });
+      const turn = controller.submit("Wait");
+      await requesting; controller.cancel(); await saving;
+      controller.dispose(); const before = controller.snapshot().transcript.length;
+      release(); await turn;
+      const snapshot = controller.snapshot();
+      console.log(JSON.stringify({ recovery: snapshot.recovery, outcome: snapshot.outcome, before, after: snapshot.transcript.length }));
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const [output, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(code, error).toBe(0);
+    const result = JSON.parse(output);
+    expect(result.recovery).toBeUndefined(); expect(result.outcome).toBeUndefined(); expect(result.after).toBe(result.before);
+  });
+});
+
+
+test("a partial later undo consumes its turn and older hashes still protect skipped files", async () => {
+  await withTempDir(async root => {
+    for (const path of ["a.ts", "b.ts", "c.ts"]) await writeFile(join(root, path), "before");
+    const call = (path: string, oldText: string, newText: string) => ({ id: path, name: "edit", arguments: { path, edits: [{ oldText, newText }] } });
+    const ui = await setup(root, undefined, [], [
+      { toolCalls: [call("a.ts", "before", "first"), call("b.ts", "before", "first")] }, { text: "First." },
+      { toolCalls: [call("a.ts", "first", "second"), call("c.ts", "before", "second")] }, { text: "Second." },
+    ]);
+    try {
+      await ui.send("First"); await ui.send("Second"); await writeFile(join(root, "a.ts"), "later save");
+      await ui.send("/undo"); ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(root, "c.ts"), "utf8")).toBe("before");
+      await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(1);
+      expect(ui.captureCharFrame()).toContain("changed since · skip");
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(root, "a.ts"), "utf8")).toBe("later save");
+      expect(await readFile(join(root, "b.ts"), "utf8")).toBe("before");
+      expect(ui.session.items.filter(item => item.type === "turn_undo").at(-1)).toMatchObject({ turnNumber: 1, skipped: [{ path: "a.ts", reason: "changed" }] });
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("repeated undo on the same file restores each previous post-image", async () => {
+  await withTempDir(async root => {
+    await writeFile(join(root, "a.ts"), "original");
+    const ui = await setup(root, undefined, [], [
+      { toolCalls: [{ id: "first", name: "write", arguments: { path: "a.ts", content: "first" } }] }, { text: "First." },
+      { toolCalls: [{ id: "second", name: "write", arguments: { path: "a.ts", content: "second" } }] }, { text: "Second." },
+    ]);
+    try {
+      await ui.send("First"); await ui.send("Second");
+      for (const expected of ["first", "original"]) {
+        await ui.send("/undo"); ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+        expect(await readFile(join(root, "a.ts"), "utf8")).toBe(expected);
+      }
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("file-tool writes under an attached root remain undoable", async () => {
+  await withTempDir(async temp => {
+    const root = join(temp, "work"), attached = join(temp, "attached");
+    await mkdir(root); await mkdir(attached); await writeFile(join(attached, "a.ts"), "before");
+    const ui = await setup(root, undefined, [], [
+      { toolCalls: [{ id: "attached", name: "write", arguments: { path: join(attached, "a.ts"), content: "after" } }] }, { text: "Done." },
+    ], "on-demand", [attached]);
+    try {
+      await ui.send("Edit attached file"); await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview?.files[0]?.absolutePath).toBe(join(attached, "a.ts"));
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(attached, "a.ts"), "utf8")).toBe("before");
+    } finally { await ui.dispose(); }
+  });
+});
+
+
+test("pruned turns are silently skipped by the rendered undo stack", async () => {
+  await withTempDir(async root => {
+    const ui = await setup(root, undefined, [], [
+      { toolCalls: [{ id: "first", name: "write", arguments: { path: "a.ts", content: "first" } }] }, { text: "First." },
+      { toolCalls: [{ id: "second", name: "write", arguments: { path: "b.ts", content: "second" } }] }, { text: "Second." },
+    ]);
+    try {
+      await ui.send("First"); await ui.send("Second");
+      const { openUndoStore, pruneUndoStore } = await import("../src/undo/store.ts");
+      const store = openUndoStore({ home: ui.home });
+      const target = (await store.list(ui.session.rootId)).find(m => m.turnNumber === 2)!;
+      target.createdAt = "2000-01-01T00:00:00Z";
+      await writeFile(join(ui.home, ".schway", "undo", ui.session.rootId, "turns", `${target.turnId}.json`), JSON.stringify(target));
+      await pruneUndoStore({ home: ui.home, maxAgeDays: 30, maxSizeBytes: 100000 });
+      await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(1);
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      await expect(access(join(root, "a.ts"))).rejects.toThrow();
+      expect(await readFile(join(root, "b.ts"), "utf8")).toBe("second");
+      await ui.send("/undo"); expect(ui.captureCharFrame()).toContain("Nothing to undo");
+    } finally { await ui.dispose(); }
   });
 });

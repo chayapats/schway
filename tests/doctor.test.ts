@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
@@ -303,4 +303,21 @@ test("doctor reports Grok subscription states without contacting auth or consult
     expect(check(report, "auth")?.status).toBe(state === "present" ? "ok" : state === "refresh" ? "warning" : "error");
     expect(JSON.stringify(report)).not.toContain("private");
   }
+});
+
+
+test("undo-store diagnoses sizes without changing files and compares bytes before rounding", async () => {
+  const { workspace, home } = await fixture();
+  const missing = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(check(missing, "undo-store")).toMatchObject({ status: "ok", summary: "Undo store: 0.0 MB.", remedy: "None." });
+  await mkdir(join(home, ".schway/undo/session/blobs"), { recursive: true });
+  await writeFile(join(home, ".schway/config.json"), JSON.stringify({ undo: { maxSizeMB: 1 } }));
+  const blob = join(home, ".schway/undo/session/blobs/content");
+  await writeFile(blob, Buffer.alloc(1024 * 1024 + 1));
+  const before = await stat(blob);
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(check(report, "undo-store")).toMatchObject({ status: "warning", summary: "Undo store: 1.0 MB.", remedy: "Lower undo.maxSizeMB or delete old sessions." });
+  expect(JSON.parse(JSON.stringify(report)).checks.some((c: { id: string }) => c.id === "undo-store")).toBe(true);
+  expect((await stat(blob)).mtimeMs).toBe(before.mtimeMs);
+  expect((await readdir(join(home, ".schway"))).sort()).toEqual(["config.json", "undo"]);
 });

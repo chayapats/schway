@@ -379,3 +379,30 @@ A SuperGrok account can connect through `/login grok` for browser approval or `/
 After interactive sign-in, headless runs can use `schway --provider xai --xai-auth grok --model <id> -p "…"`. They refresh stored tokens when needed and never open a browser. Missing or revoked logins require interactive sign-in. `/logout grok` removes only the Grok OAuth credential and blocks an active Grok account until sign-in and activation succeed again.
 
 Test coverage for this guide: [release verification](release-verification.md#configuration).
+
+## Undo retention
+
+`undo.maxAgeDays` defaults to `30`; `undo.maxSizeMB` defaults to `500` MiB.
+Both accept positive integers. Unknown keys in the `undo` object are rejected.
+Set them in either config file or interactively:
+
+```text
+/config set undo {"maxAgeDays":14,"maxSizeMB":250}
+```
+
+Like `git`, each higher-precedence `undo` object replaces the lower object;
+omitted members use built-in defaults. Each interactive or headless startup
+prunes expired turns, then the oldest turns across sessions until the store fits
+its size limit, and collects unreferenced blobs. It runs before the first turn;
+failures go to the opt-in diagnostics sink and do not block startup. There is no
+pruning timer within a running process. Pruned turns are skipped by `/undo`.
+
+Retention also applies to incomplete manifests for active turns. Startup in
+another process may prune an eligible turn before its file changes settle.
+Settlement then reports missing undo data, and that turn is unavailable for undo.
+
+Undo writes, session-data deletion and pruning share a process lock. If another
+Schway process is updating the store, startup skips pruning and records the failure
+in enabled diagnostics. A file-tool change is refused if its pre-image cannot be
+saved. The private lock file stays outside the undo directory and does not count
+toward retention or the doctor's size check.

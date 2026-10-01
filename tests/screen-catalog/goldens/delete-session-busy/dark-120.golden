@@ -1,0 +1,109 @@
+schway-screen 1
+screen delete-session-busy
+title Session deletion retry
+description A busy session deletion names its reason, retry command and details action.
+variant dark-120
+size 120x30
+cursor 36 27 visible
+== text
+ ⚡ schway  ~/demo
+
+  ▌ ! Error
+  ▌ Cannot delete session: Undo store busy · /delete-session retry · Ctrl+I details
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › /delete-session saved-session
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ! Attention   scripted/scripted-model                                                                          ctx ~0
+  Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-18 #8b95a7 #161b24 -
+00 18-120 #ffffff #161b24 -
+01 0-120 #ffffff #0e1117 -
+02 0-2 #ffffff #0e1117 -
+02 2-3 #f79d9d #2a2227 -
+02 3-4 #ffffff #2a2227 -
+02 4-11 #f79d9d #2a2227 b
+02 11-117 #ffffff #2a2227 -
+02 117-120 #ffffff #0e1117 -
+03 0-2 #ffffff #0e1117 -
+03 2-3 #f79d9d #2a2227 -
+03 3-4 #ffffff #2a2227 -
+03 4-83 #f79d9d #2a2227 -
+03 83-117 #ffffff #2a2227 -
+03 117-120 #ffffff #0e1117 -
+04 0-120 #ffffff #0e1117 -
+05 0-120 #ffffff #0e1117 -
+06 0-120 #ffffff #0e1117 -
+07 0-120 #ffffff #0e1117 -
+08 0-120 #ffffff #0e1117 -
+09 0-120 #ffffff #0e1117 -
+10 0-120 #ffffff #0e1117 -
+11 0-120 #ffffff #0e1117 -
+12 0-120 #ffffff #0e1117 -
+13 0-120 #ffffff #0e1117 -
+14 0-120 #ffffff #0e1117 -
+15 0-120 #ffffff #0e1117 -
+16 0-120 #ffffff #0e1117 -
+17 0-120 #ffffff #0e1117 -
+18 0-120 #ffffff #0e1117 -
+19 0-120 #ffffff #0e1117 -
+20 0-120 #ffffff #0e1117 -
+21 0-120 #ffffff #0e1117 -
+22 0-120 #ffffff #0e1117 -
+23 0-120 #ffffff #0e1117 -
+24 0-120 #ffffff #0e1117 -
+25 0-2 #ffffff #0e1117 -
+25 2-118 #161b24 #1e2430 -
+25 118-120 #ffffff #0e1117 -
+26 0-2 #ffffff #0e1117 -
+26 2-3 #f79d9d #161b24 -
+26 3-6 #7cc4ff #161b24 -
+26 6-35 #e6eaf0 #161b24 -
+26 35-118 #ffffff #161b24 -
+26 118-120 #ffffff #0e1117 -
+27 0-2 #ffffff #0e1117 -
+27 2-118 #161b24 #0e1117 -
+27 118-120 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-14 #0e1117 #f79d9d b
+28 14-15 #8b95a7 #161b24 -
+28 15-40 #e6eaf0 #1e2430 -
+28 40-119 #8b95a7 #161b24 -
+28 119-120 #ffffff #0e1117 -
+29 0-2 #ffffff #0e1117 -
+29 2-7 #e6eaf0 #293140 b
+29 7-15 #8b95a7 #0e1117 -
+29 15-21 #e6eaf0 #293140 b
+29 21-29 #8b95a7 #0e1117 -
+29 29-34 #e6eaf0 #293140 b
+29 34-45 #8b95a7 #0e1117 -
+29 45-51 #e6eaf0 #293140 b
+29 51-60 #8b95a7 #0e1117 -
+29 60-61 #e6eaf0 #293140 b
+29 61-70 #8b95a7 #0e1117 -
+29 70-120 #ffffff #0e1117 -

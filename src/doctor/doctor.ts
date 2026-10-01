@@ -1,3 +1,5 @@
+import { undoStoreSize } from "../undo/store.ts";
+import { DEFAULT_UNDO_MAX_SIZE_MB } from "../config/defaults.ts";
 import { formatCount } from "../text/format.ts";
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -135,6 +137,14 @@ export async function diagnose(input: {
   }
   const invalidConfig = checks.some(c => c.id.startsWith("config.") && c.status === "error");
   const settings = resolveSettings({ user, project, cli: cliOverridesFromArgs(input.args) });
+  if (home) {
+    try {
+      const bytes = await undoStoreSize({ home });
+      const limit = ("error" in settings ? DEFAULT_UNDO_MAX_SIZE_MB : settings.undoMaxSizeMB) * 1024 * 1024;
+      const warning = bytes > limit;
+      add("undo-store", warning ? "warning" : "ok", `Undo store: ${(bytes / (1024 * 1024)).toFixed(1)} MB.`, warning ? "Lower undo.maxSizeMB or delete old sessions." : "None.");
+    } catch { add("undo-store", "warning", "Undo store unavailable.", "Check undo store permissions, then rerun doctor."); }
+  }
   if (invalidConfig) add("provider", "warning", "Provider selection may change after invalid configuration is fixed.", "Fix configuration, then rerun doctor.");
   else if ("error" in settings) {
     add("provider", "error", "Provider or profile settings cannot be resolved (unknown profile, incompatible mode, or missing endpoint).", "Check --profile, --provider and --base-url against configured profiles.");

@@ -1,6 +1,7 @@
 import { formatCount } from "../text/format.ts";
 import { redactSecrets } from "../auth/secrets.ts";
-import { relative } from "node:path";
+import { openUndoStore } from "../undo/store.ts";
+import { relative, resolve } from "node:path";
 import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../config/config.ts";
 import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import type { TurnOutcome } from "./controller-types.ts";
@@ -161,7 +162,8 @@ export abstract class ChangesLayer extends BranchesLayer {
   }
 
   /** Settle duration, retained diagnostics, and observed file evidence for the latest accepted turn. */
-  protected finishOutcome(reason?: TurnOutcome["reason"]): void {
+  protected async finishOutcome(reason?: TurnOutcome["reason"]): Promise<void> {
+    const owner = this.activeAbort;
     this.compactionNotice = undefined;
     if (!this.outcome || this.disposed) return;
     if (reason) this.outcome.reason = reason;
@@ -169,6 +171,13 @@ export abstract class ChangesLayer extends BranchesLayer {
     this.outcome.elapsedMs = this.activity ? Math.max(0, this.activityClock() - this.activity.startedAt) : 0;
     this.outcome.files = this.outcome.files.filter(file => file.source === "tool");
     this.outcome.files.push(...this.gitShellPaths.map(path => ({ path, source: "shell" as const })));
+    if (this.home && this.workspace && this.outcomeUserId) {
+      try {
+        await openUndoStore({ home: this.home }).recordShell({ sessionId: this.session.rootId, turnId: this.outcomeUserId,
+          turnNumber: this.session.items.filter(item => item.type === "user").findIndex(item => item.id === this.outcomeUserId) + 1 },
+        this.gitComparison ? { detection: "git", paths: this.outcome.files.filter(file => file.source === "shell").map(file => resolve(this.workspace!.root, file.path)) } : { detection: "unavailable" });
+      } catch (error) { if (!this.disposed && this.activeAbort === owner) this.retainNoticeDetails(`Could not save undo shell detection: ${error instanceof Error ? error.message : String(error)}`); }
+    }
   }
 
   /** Capture a snapshot baseline for the owning turn signal, dropping stale results after replacement. */
