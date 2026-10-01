@@ -44,12 +44,12 @@ import {
   cliOverridesFromArgs,
   hasCliConnectionOptions,
   parseArgs,
-  USAGE,
   type CliArgs,
   type CliAuthMode,
   type CliOpenAIAuth,
   type CliThinking,
 } from "./args.ts";
+import { formatDoctorHelp, formatHelp } from "./help.ts";
 
 /** Minimal writer used so tests can capture CLI output. */
 export interface CliWriter {
@@ -91,11 +91,7 @@ export interface CliIo {
   }) => Promise<Model>;
 }
 
-/**
- * Dispatch CLI arguments to a persisted headless run or a lazily loaded interactive terminal.
- * `doctor` runs diagnostics; otherwise `-p` runs headless and no prompt opens the interactive terminal.
- * Returns 0 on success, 1 on diagnosed/handled failures, or 2 if doctor cannot complete; unhandled non-doctor setup/I/O failures can reject.
- */
+/** Dispatch help, diagnostics or a session; return 0 on success, 1 on failure, or 2 when doctor cannot complete. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv[0] === "doctor") {
     const parsedDoctor = parseArgs(argv.slice(1));
@@ -104,11 +100,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       return 1;
     }
     if ("error" in parsedDoctor || parsedDoctor.args.prompt || parsedDoctor.args.resume || parsedDoctor.args.branch) {
-      io.stderr.write(`Invalid doctor options. ${"error" in parsedDoctor ? "Check doctor flags." : "Doctor does not accept prompts or session resume."}\n${USAGE}\n`);
+      io.stderr.write(`Invalid doctor options. ${"error" in parsedDoctor ? "Check doctor flags." : "Doctor does not accept prompts or session resume."}\nRun 'schway doctor --help' for usage.\n`);
       return 2;
     }
     if (parsedDoctor.args.help) {
-      io.stdout.write(`${USAGE}\n`);
+      io.stdout.write(formatDoctorHelp());
       return 0;
     }
     try {
@@ -122,12 +118,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
-    io.stderr.write(parsed.error === ANTHROPIC_REMOVED_MESSAGE ? `${parsed.error}\n` : `${parsed.error}\n${USAGE}\n`);
+    io.stderr.write(parsed.error === ANTHROPIC_REMOVED_MESSAGE ? `${parsed.error}\n` : `${parsed.error}\nRun 'schway --help' for usage.\n`);
     return 1;
   }
 
   if (parsed.args.help) {
-    io.stdout.write(`${USAGE}\n`);
+    io.stdout.write(formatHelp());
     return 0;
   }
 
@@ -220,15 +216,15 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   ) {
     diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write(
-      `OpenAI-compatible connection options require --provider openai-compatible\n${USAGE}\n`,
+      `OpenAI-compatible connection options require --provider openai-compatible\nRun 'schway --help' for usage.\n`,
     );
     return 1;
   }
-  if (parsed.args.xaiAuth !== undefined && settings.provider !== "xai") { io.stderr.write("xAI auth preference requires --provider xai\n"); return 1; }
+  if (parsed.args.xaiAuth !== undefined && settings.provider !== "xai") { io.stderr.write("xAI auth preference requires --provider xai\nRun 'schway --help' for usage.\n"); return 1; }
   if (parsed.args.openaiAuth !== undefined && settings.provider !== "openai") {
     diagnostics.record("config", "invalid_configuration", { category: "provider_option_conflict" }, "error");
     io.stderr.write(
-      `OpenAI auth preference requires --provider openai\n${USAGE}\n`,
+      `OpenAI auth preference requires --provider openai\nRun 'schway --help' for usage.\n`,
     );
     return 1;
   }

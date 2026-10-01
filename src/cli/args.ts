@@ -1,23 +1,34 @@
-import { isThinkingLevel, type ThinkingLevel } from "../model/model.ts";
+import { THINKING_LEVELS } from "../model/model.ts";
 import type { ConfigLayer } from "../config/config.ts";
 import { removedProviderMessage } from "../config/removed-provider.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 
-/** Usage synopsis printed for help and invalid command-line arguments. */
-export const USAGE =
-  "Usage: schway doctor [--json] [--provider <name>] [--profile <name>] [--thinking <off|minimal|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <required|optional|none>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>] | schway [-p <prompt>] [--json] [--debug] [--debug-file <path>] [--provider <name>] [--model <id>] [--profile <name>] [--thinking <off|minimal|low|medium|high|xhigh|max|ultra>] [--api-key <key>] [--openai-auth <auto|codex|api-key>] [--xai-auth <auto|grok|api-key>] [--resume <session-id>] [--branch <branch-id>] [--base-url <url>] [--header <name:value>] [--body <json>] [--auth <mode>] [--max-turns <n>] [--max-output <n>] [--context-window <n>] [--max-concurrent-tools <n>] [--env-file <path>] [--extension <local-module>] [--add-dir <directory>]";
+/** Provider families accepted by the CLI without loading a provider adapter. */
+export const CLI_PROVIDERS = ["openai", "xai", "openai-compatible"] as const;
+
+/** Reasoning levels accepted by the CLI in increasing strength. */
+export const CLI_THINKING_LEVELS = THINKING_LEVELS;
+
+/** OpenAI credential preferences accepted by the CLI. */
+export const CLI_OPENAI_AUTH_MODES = ["auto", "codex", "api-key"] as const;
+
+/** xAI credential preferences accepted by the CLI. */
+export const CLI_XAI_AUTH_MODES = ["auto", "grok", "api-key"] as const;
+
+/** Authentication policies accepted for compatible endpoints. */
+export const CLI_AUTH_MODES = ["required", "optional", "none"] as const;
 
 /** Built-in provider families selectable for headless or interactive CLI runs. */
-export type CliProvider = "openai" | "xai" | "openai-compatible";
+export type CliProvider = (typeof CLI_PROVIDERS)[number];
 
 /** Authentication mode for OpenAI-compatible endpoints. */
-export type CliAuthMode = "required" | "optional" | "none";
+export type CliAuthMode = (typeof CLI_AUTH_MODES)[number];
 
 /** OpenAI credential preference selecting subscription login, API key, or automatic headless-safe choice. */
-export type CliOpenAIAuth = "auto" | "codex" | "api-key";
+export type CliOpenAIAuth = (typeof CLI_OPENAI_AUTH_MODES)[number];
 
 /** Provider-independent reasoning level selectable from config and the CLI. */
-export type CliThinking = ThinkingLevel;
+export type CliThinking = (typeof CLI_THINKING_LEVELS)[number];
 
 /** Parsed CLI options for headless or interactive runs, with `resume` identifying a session rather than a path. */
 export interface CliArgs {
@@ -38,7 +49,7 @@ export interface CliArgs {
   extraBody?: Record<string, unknown>;
   auth?: CliAuthMode;
   openaiAuth?: CliOpenAIAuth;
-  xaiAuth?: "auto" | "grok" | "api-key";
+  xaiAuth?: (typeof CLI_XAI_AUTH_MODES)[number];
   maxTurns?: number;
   maxConcurrentTools?: number;
   contextWindow?: number;
@@ -298,8 +309,8 @@ export function parseArgs(
     if (arg === "--xai-auth" || arg.startsWith("--xai-auth=")) {
       const value = arg === "--xai-auth" ? argv[++i] : arg.slice("--xai-auth=".length);
       if (value === undefined || value.startsWith("-")) return { error: "Missing value for --xai-auth" };
-      if (value !== "auto" && value !== "grok" && value !== "api-key") return { error: `Unknown xAI auth preference: ${value} · Use auto, grok, or api-key` };
-      args.xaiAuth = value; continue;
+      if (!CLI_XAI_AUTH_MODES.includes(value as NonNullable<CliArgs["xaiAuth"]>)) return { error: `Unknown xAI auth preference: ${value} · Use auto, grok, or api-key` };
+      args.xaiAuth = value as NonNullable<CliArgs["xaiAuth"]>; continue;
     }
     const intFlag = parseIntegerFlag(arg, argv, i);
     if (intFlag !== undefined) {
@@ -360,8 +371,8 @@ function parseProvider(value: string): CliProvider | { error: string } {
   if (removed !== undefined) {
     return { error: removed };
   }
-  if (value === "openai" || value === "xai" || value === "openai-compatible") {
-    return value;
+  if (CLI_PROVIDERS.includes(value as CliProvider)) {
+    return value as CliProvider;
   }
   return { error: `Unknown provider: ${value}` };
 }
@@ -403,8 +414,8 @@ function parseExtraBody(
 
 /** Accept required, optional, or none authentication for compatible endpoints. */
 function parseAuth(value: string): CliAuthMode | { error: string } {
-  if (value === "required" || value === "optional" || value === "none") {
-    return value;
+  if (CLI_AUTH_MODES.includes(value as CliAuthMode)) {
+    return value as CliAuthMode;
   }
   return {
     error: `Unknown auth mode: ${value} · Use required, optional, or none`,
@@ -414,8 +425,8 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
 /** Accept the OpenAI credential preference separately from compatible auth modes. */
 function parseOpenAIAuth(value: string): CliOpenAIAuth | { error: string } {
   const preference = value.trim().toLowerCase();
-  if (preference === "auto" || preference === "codex" || preference === "api-key") {
-    return preference;
+  if (CLI_OPENAI_AUTH_MODES.includes(preference as CliOpenAIAuth)) {
+    return preference as CliOpenAIAuth;
   }
   return {
     error: `Unknown OpenAI auth preference: ${value} · Use auto, codex, or api-key`,
@@ -425,8 +436,8 @@ function parseOpenAIAuth(value: string): CliOpenAIAuth | { error: string } {
 /** Validate a provider-independent thinking level without assuming identical wire semantics. */
 function parseThinking(value: string): CliThinking | { error: string } {
   const level = value.trim().toLowerCase();
-  if (isThinkingLevel(level)) {
-    return level;
+  if (CLI_THINKING_LEVELS.includes(level as CliThinking)) {
+    return level as CliThinking;
   }
   return {
     error: `Unknown thinking level: ${value} · Use off, minimal, low, medium, high, xhigh, max, or ultra`,

@@ -3,7 +3,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseConfigObject, resolveSettings, describeEffectiveThinking, validateThinking } from "../src/config/config.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
-import { cliOverridesFromArgs, parseArgs, USAGE } from "../src/cli/args.ts";
+import { formatHelp } from "../src/cli/help.ts";
+import { CLI_THINKING_LEVELS, cliOverridesFromArgs, parseArgs } from "../src/cli/args.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { createSession } from "../src/session/session.ts";
@@ -199,10 +200,11 @@ test("--thinking parses all supported syntax and rejects unknown levels", () => 
   expect("error" in missing).toBe(true);
 });
 
-test("cliOverridesFromArgs maps thinking onto a config layer and USAGE documents it", () => {
+test("cliOverridesFromArgs maps thinking onto a config layer and help lists every supported level", () => {
   expect(cliOverridesFromArgs({ json: false, help: false, thinking: "low" as const }).thinking).toBe("low");
   expect(cliOverridesFromArgs({ json: false, help: false }).thinking).toBeUndefined();
-  expect(USAGE).toContain("--thinking");
+  const thinking = formatHelp().split("\n").find((line) => line.startsWith("  --thinking "));
+  for (const level of CLI_THINKING_LEVELS) expect(thinking).toContain(level);
 });
 
 test("isThinkingLevel guards provider-independent levels", () => {
