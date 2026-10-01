@@ -17,11 +17,17 @@ test("the offline README demo fixes clamp, runs its test and renders review with
   await withTempDir(async root => {
     const { home, workspace: cwd } = await createDemoWorkspace(root);
     const workspace = await resolveWorkspace(cwd);
+    const isolatedBash: typeof bashTool = {
+      ...bashTool,
+      execute: (input, context) => bashTool.execute(input, {
+        ...context, env: { HOME: home, PATH: process.env.PATH },
+      }),
+    };
     const controller = new TuiController({
       session: createSession(), sessionId: "readme-demo", workspace, home,
       provider: "demo", modelId: "offline-model", model: createDemoModel(),
       contextManager: createContextManager(workspace, { home }),
-      tools: createToolRegistry([readTool, editTool, bashTool]),
+      tools: createToolRegistry([readTool, editTool, isolatedBash]),
     });
     const terminal = await createTestRenderer({ width: 120, height: 32 });
     const view = createConversationView(terminal.renderer, {
