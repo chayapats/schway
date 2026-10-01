@@ -64,6 +64,7 @@ export const readTool: ToolDefinition<ReadInput> = {
   description:
     "Read a file from the workspace with optional offset and limit. Relative paths resolve from the workspace root. Output is line-numbered and bounded.",
   inputSchema: readInputSchema,
+  effect: "read-only",
   execution: "parallel",
   execute: executeRead,
 };

@@ -1,3 +1,4 @@
+import type { ApprovalPolicy } from "./approval.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../config/defaults.ts";
 import type { ToolCallContent } from "../conversation/types.ts";
@@ -23,6 +24,7 @@ export async function* scheduleToolCalls(options: {
   maxConcurrentTools?: number;
   env?: NodeJS.ProcessEnv;
   toolHooks?: ExtensionToolHooks;
+  approval?: ApprovalPolicy;
   undo?: UndoStore;
   undoTurn?: UndoTurn;
 }): AsyncGenerator<RuntimeEvent, ExecutedToolCall[]> {
@@ -84,6 +86,7 @@ export async function* scheduleToolCalls(options: {
       signal,
       env: options.env,
       toolHooks,
+      approval: options.approval,
       undo: options.undo,
       undoTurn: options.undoTurn,
       onOutput(chunk) {
@@ -101,6 +104,7 @@ export async function* scheduleToolCalls(options: {
     })
       .then((executed) => {
         results[index] = executed;
+        if (executed.denied) emit({ type: "tool.denied", toolCallId: call.id, name: call.name, ...executed.denied });
         emit({
           type: "tool.finished",
           toolCallId: call.id,

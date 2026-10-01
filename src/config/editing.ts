@@ -1,5 +1,5 @@
 import { InteractiveMemory, type InteractiveChoice } from "./interactive-memory.ts";
-import { effectiveInteractiveMemory, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { effectiveInteractiveMemory, resolveApprovalSettings, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
 import { getThinkingSupport, type ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
@@ -7,7 +7,7 @@ import { readFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** Settings that can be applied immediately without reloading executable extensions or accepting arbitrary secrets. */
-export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "xaiAuth", "git", "undo", "appearance", "ui"] as const;
+export const EDITABLE_CONFIG_KEYS = ["provider", "model", "thinking", "profile", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "baseUrl", "auth", "openaiAuth", "xaiAuth", "git", "undo", "approval", "appearance", "ui"] as const;
 
 /** Writable scopes ordered below CLI and current-session overrides. */
 export type ConfigScope = "user" | "project" | "session";
@@ -106,6 +106,7 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
   origins.xaiAuth ??= "built-in default";
   origins.profile ??= selectedName !== undefined ? origins.profile ?? "built-in default" : origins.profile;
   origins.appearance ??= "built-in default";
+  origins.approval = resolveApprovalSettings(layers).origin;
   return { origins, modelFallbackSource };
 }
 

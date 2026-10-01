@@ -1,3 +1,4 @@
+import { toolEffect } from "../tools/types.ts";
 import { realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -112,7 +113,7 @@ function snapshotTool(tool: ToolDefinition): ToolDefinition {
   if (!tool || typeof tool !== "object") {
     throw new Error("Expected a tool definition object");
   }
-  const { name, description, execution, execute } = tool;
+  const { name, description, execution, execute, effect } = tool;
   if (typeof name !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(name)) {
     throw new Error("Tool name must contain 1–64 letters, digits, underscores, or hyphens");
   }
@@ -128,7 +129,12 @@ function snapshotTool(tool: ToolDefinition): ToolDefinition {
   if (typeof execute !== "function") {
     throw new Error(`Tool "${name}" requires an execute function`);
   }
-  return Object.freeze({ name, description, execution, execute, inputSchema: freezeJson(toPlainJsonSchema(tool.inputSchema)) });
+  const definition: ToolDefinition = { name, description, execution, execute, inputSchema: tool.inputSchema, ...(effect !== undefined ? { effect } : {}) };
+  const declaredEffect = toolEffect(definition);
+  if (declaredEffect !== "read-only" && declaredEffect !== "mutating") {
+    throw new Error(`Tool "${name}" effect must be read-only or mutating`);
+  }
+  return Object.freeze({ ...definition, inputSchema: freezeJson(toPlainJsonSchema(definition.inputSchema)) });
 }
 
 /** Freeze detached JSON metadata so later mutation cannot diverge from the compiled validator. */

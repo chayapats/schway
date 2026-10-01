@@ -9,7 +9,7 @@ import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
-import { loadResolvedSettings, type ResolvedSettings } from "../config/config.ts";
+import { loadResolvedSettings, ignoredProjectApprovalNotice, projectConfigPath, type ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { createContextManager } from "../context/manager.ts";
 import {
@@ -121,6 +121,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
     io.stderr.write(parsed.error === ANTHROPIC_REMOVED_MESSAGE ? `${parsed.error}\n` : `${parsed.error}\nRun 'schway --help' for usage.\n`);
+    if (parsed.error.includes("approval")) io.stderr.write(formatHelp());
     return 1;
   }
 
@@ -230,6 +231,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     return 1;
   }
+
+  const approvalNotice = ignoredProjectApprovalNotice(settings, projectConfigPath(workspace.root));
+  if (approvalNotice) io.stderr.write(`${approvalNotice}\n`);
 
   try { await pruneUndoStore({ home, maxAgeDays: settings.undoMaxAgeDays, maxSizeBytes: settings.undoMaxSizeMB * 1024 * 1024 }); }
   catch { diagnostics.record("undo", "prune_failed", { category: "undo_retention" }, "warn"); }
@@ -380,8 +384,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         dir: skillTurn.skill.dir,
       });
     }
+    const approvalSettings = settings;
     try {
       for await (const event of runAgentLoop({
+        approval: { interactive: false, mode: () => approvalSettings.approvalMode },
         undo: openUndoStore({ home }),
         session,
         model,
@@ -485,6 +491,7 @@ function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEv
   if (event.type === "error" || event.type === "model.retry") {
     return { ...event, message: redactSecrets(event.message, secrets) };
   }
+  if (event.type === "tool.denied") return { ...event, reason: redactSecrets(event.reason, secrets) };
   if (event.type === "tool.finished") {
     return {
       ...event,

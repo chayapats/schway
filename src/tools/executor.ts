@@ -1,3 +1,5 @@
+import { READ_ONLY_DENIAL, READ_ONLY_HEADLESS_DENIAL, type ApprovalMode, type ApprovalPolicy } from "../agent/approval.ts";
+import { toolEffect } from "./types.ts";
 import { undoFailureReason } from "../undo/errors.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import { resolveToolPath, displayToolPath } from "./path.ts";
@@ -16,9 +18,11 @@ export interface ExecutedToolCall {
   result: ToolResult;
   status: ToolCallStatus;
   details?: unknown;
+  /** Approval denial emitted immediately before settlement. */
+  denied?: { mode: ApprovalMode; reason: string };
 }
 
-/** Validate, hook, capture and settle an accepted tool call as a bounded model-visible outcome, preserving resolved results through cancellation. */
+/** Validate, hook and approve before undo capture and execution, settling a bounded outcome through cancellation. */
 export async function executeToolCall(options: {
   registry?: ToolRegistry;
   call: ToolCallContent;
@@ -27,6 +31,7 @@ export async function executeToolCall(options: {
   env?: NodeJS.ProcessEnv;
   onOutput?: (chunk: ToolOutputChunk) => void;
   toolHooks?: ExtensionToolHooks;
+  approval?: ApprovalPolicy;
   undo?: UndoStore;
   undoTurn?: UndoTurn;
 }): Promise<ExecutedToolCall> {
@@ -66,11 +71,17 @@ export async function executeToolCall(options: {
   }
   if (signal?.aborted) return cancelled(options.call);
 
+  const mode = options.approval?.mode() ?? "auto";
+  if (mode === "read-only" && toolEffect(registered.definition) === "mutating") {
+    const reason = options.approval?.interactive ? READ_ONLY_DENIAL : READ_ONLY_HEADLESS_DENIAL;
+    return { ...failure(options.call, reason), denied: { mode, reason } };
+  }
+
   // Keep invocation arguments for afterTool independent of tool-side input mutation.
   let executedArgs: unknown;
   try { executedArgs = hooks ? structuredClone(args) : args; }
   catch (error) { return failure(options.call, hooks ? hooks.safeText(messageOf(error)) : messageOf(error)); }
-  // Approval decisions belong here, before pre-image capture (#155/#156).
+  // Approval has already completed before pre-image capture.
   let capture: { path: string; created: boolean } | undefined;
   if (options.undo && options.undoTurn && (options.call.name === "edit" || options.call.name === "write")) {
     const path = resolveToolPath(options.workspace.root, (args as { path: string }).path);

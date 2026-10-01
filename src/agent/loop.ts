@@ -1,3 +1,4 @@
+import type { ApprovalPolicy } from "./approval.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
@@ -35,6 +36,8 @@ export interface AgentLoopOptions {
   toolEnv?: NodeJS.ProcessEnv;
   clock?: AgentClock;
   extensions?: ExtensionRuntime;
+  /** Consult the live approval mode after tool hooks; omission preserves automatic execution. */
+  approval?: ApprovalPolicy;
   undo?: UndoStore;
 }
 
@@ -257,6 +260,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         maxConcurrentTools: options.maxConcurrentTools,
         env: options.toolEnv,
         toolHooks,
+        approval: options.approval,
         undo: options.undo,
         undoTurn,
       });

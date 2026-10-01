@@ -1,4 +1,5 @@
 first-run
+read-only-mode
 sign-in-chooser
 chatgpt-more-options
 grok-more-options

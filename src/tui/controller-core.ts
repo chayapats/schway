@@ -1,3 +1,5 @@
+import { DEFAULT_APPROVAL_MODE, type ApprovalMode } from "../agent/approval.ts";
+import { ignoredProjectApprovalNotice, projectConfigPath } from "../config/config.ts";
 import type { resolveThinkingSelection } from "../model/thinking.ts";
 import { isGrokModel } from "../model/loader.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
@@ -60,6 +62,8 @@ export abstract class ControllerCore {
   protected profile?: string;
   protected thinking?: string;
   protected configEditor?: ConfigEditor;
+  protected currentApprovalMode: ApprovalMode = DEFAULT_APPROVAL_MODE;
+  private readonly noticedApprovalPaths = new Set<string>();
   protected readonly appearanceEnvironment?: "dark" | "light";
   protected readonly stageSettings?: TuiControllerOptions["stageSettings"];
   protected readonly onSettingsCommitted?: TuiControllerOptions["onSettingsCommitted"];
@@ -112,6 +116,7 @@ export abstract class ControllerCore {
   protected recovery?: TuiRecovery & { sessionId: string; branchId: string; userId?: string; details?: string; model?: Model;
     provider: string; modelId: string; profile?: string; openaiAuth?: string; xaiAuth?: string };
   protected recoveryRepair = false;
+  protected toolDenialByCallId = new Map<string, string>();
   protected toolEntryByCallId = new Map<string, TuiTranscriptEntry>();
   protected extensions?: ExtensionRuntime;
   protected readonly home?: string;
@@ -180,6 +185,7 @@ export abstract class ControllerCore {
     this.extensions = options.extensions;
     this.home = options.home;
     this.configEditor = options.configEditor;
+    this.currentApprovalMode = options.configEditor?.settings.approvalMode ?? DEFAULT_APPROVAL_MODE;
     this.appearanceEnvironment = options.appearanceEnvironment;
     this.credentials = options.credentials;
     this.explicitChangeTracking = options.changeTracking;
@@ -192,11 +198,25 @@ export abstract class ControllerCore {
     this.loadWorkspaceExtensions = options.loadWorkspaceExtensions;
     this.detachDiagnostics = this.extensions?.attachDiagnostics((message) => this.notice(message));
     this.transcript = buildTranscriptFromSession(options.session.items);
+    this.noticeIgnoredProjectApproval();
     if (options.startupError) {
       const category = this.startupRecoveryCategory;
       this.offerRecovery(category, false, startupRecoveryMessage(category), options.startupError);
     }
   }
+  /** Cycle this process's approval mode without persisting it or waiting for the active turn. */
+  cycleApprovalMode(): void {
+    this.currentApprovalMode = this.currentApprovalMode === "auto" ? "read-only" : "auto";
+  }
+
+  /** Show a looser project approval warning at most once per config path in this process. */
+  protected noticeIgnoredProjectApproval(): void {
+    if (!this.configEditor || !this.workspace) return;
+    const path = projectConfigPath(this.workspace.root);
+    const notice = ignoredProjectApprovalNotice(this.configEditor.settings, path);
+    if (notice && !this.noticedApprovalPaths.has(path)) { this.noticedApprovalPaths.add(path); this.notice(notice); }
+  }
+
   /** Identify an unconfigured connection without an adapter, startup check or diagnostic. */
   protected isNotConnected(): boolean {
     return !this.startupAbort && !this.model && !this.modelId.trim() && !this.startupDiagnostic;

@@ -78,6 +78,7 @@ export const grepTool: ToolDefinition<GrepInput> = {
   description:
     "Search file contents with a regular expression. Returns path:line:text locations for follow-up reads. Relative paths resolve from the workspace root. Requires ripgrep (rg).",
   inputSchema: grepInputSchema,
+  effect: "read-only",
   execution: "parallel",
   execute: executeGrep,
 };

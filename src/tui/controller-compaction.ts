@@ -221,6 +221,7 @@ export abstract class CompactionLayer extends SettingsLayer {
     this.modelAttemptStarted = false;
     this.retryNoticeId = undefined;
     this.toolEntryByCallId.clear();
+    this.toolDenialByCallId.clear();
     this.invalidateBranchTreeCache();
     if (this.branchTreeOpen) {
       const head = this.activeHeadId() ?? this.session.rootId;

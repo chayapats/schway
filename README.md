@@ -10,6 +10,8 @@ A lean, fast coding agent for your terminal.
 2. Run `schway`, press **Alt+L**, and pick a sign-in method.
 3. Type a task in the editor and press **Enter**; headless: `schway -p "<task>"`.
 
+Use `--approval <auto|read-only>` to choose the starting tool approval mode. In the TUI, **Shift+Tab** cycles modes; read-only allows investigation and refuses tools that can change state.
+
 ## Learn more
 
 - [Use the terminal interface](https://github.com/chayapats/schway/blob/main/docs/tui.md)

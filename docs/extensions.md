@@ -77,6 +77,7 @@ export default defineExtension(({ registerTool }) => {
       required: ["name"],
       additionalProperties: false,
     },
+    effect: "read-only",
     execution: "parallel",
     async execute({ name }, ctx) {
       ctx.signal?.throwIfAborted();
@@ -88,7 +89,9 @@ export default defineExtension(({ registerTool }) => {
 ```
 
 `defineExtension` only supplies typing; a default function typed as `Extension`
-works too. The registration context exposes `registerTool`, `registerCommand`,
+works too. Tool registration accepts optional `effect: "read-only" | "mutating"`; an omitted effect means `"mutating"`. Invalid declarations fail startup. Declare read-only only for tools that do not change state. The declaration is public extension metadata and never reaches a provider.
+
+The registration context exposes `registerTool`, `registerCommand`,
 `registerPrompt`, `beforeAgent`, `context`, `beforeModel`, `onRuntimeEvent`,
 `onDispose`, and a runtime lifetime `signal`. Await all
 initialization work before returning; registration closes when initialization
@@ -312,8 +315,7 @@ The scheduler owns the entire before/execute/after sequence. An exclusive tool
 holds its barrier through both waterfalls; independent parallel calls can run
 their hooks concurrently. Extension authors must coordinate shared mutable
 state and stop asynchronous work when the supplied signal aborts. These trusted
-local hooks provide policy building blocks, not a sandbox or a built-in
-permission framework.
+local hooks provide policy building blocks alongside Schway approval modes; they are not a sandbox. The approval decision runs after `beforeTool` hooks and re-validation, using the final arguments, before undo capture or execution. In read-only mode, mutating tools are refused without running `execute` or `afterTool`. A hook denial takes precedence over the mode denial.
 
 Cancellation or runtime disposal before execution prevents execution and skips
 remaining hooks. Cancellation may stop waiting for an uncooperative hook, with

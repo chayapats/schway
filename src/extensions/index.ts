@@ -60,7 +60,7 @@ export type AfterToolHook = (input: AfterToolInput) => void | ToolExecutionResul
 
 /** Public JSON Schema and invocation contracts shared with native tools. */
 export type {
-  JsonSchema, ToolContext, ToolDefinition, ToolExecutionMode,
+  JsonSchema, ToolContext, ToolDefinition, ToolEffect, ToolExecutionMode,
   ToolExecutionResult, ToolOutputChunk,
 } from "../tools/types.ts";
 /** Canonical primary workspace and launch paths supplied to tool invocations. */

@@ -133,11 +133,13 @@ export abstract class SettingsLayer extends UndoLayer {
     let value: unknown = raw;
     if (action === "reset") value = undefined;
     else if (["maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput"].includes(key!)) value = Number(raw);
-    else if ((key === "git" || key === "ui" || key === "undo") && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail(key === "undo" ? 'Invalid undo settings · /config set undo {"maxAgeDays":14} retry' : key === "ui" ? 'Invalid display settings · /config set ui {"splash":"never"} to retry' : 'Invalid Git settings · Use JSON like {"changeTracking":"snapshot"}'); return false; } }
+    else if ((key === "git" || key === "ui" || key === "undo" || key === "approval") && raw?.trim()) { try { value = JSON.parse(raw); } catch { this.fail(key === "approval" ? 'Invalid approval settings · /config set approval {"mode":"read-only"} retry' : key === "undo" ? 'Invalid undo settings · /config set undo {"maxAgeDays":14} retry' : key === "ui" ? 'Invalid display settings · /config set ui {"splash":"never"} to retry' : 'Invalid Git settings · Use JSON like {"changeTracking":"snapshot"}'); return false; } }
     else if (raw?.startsWith('"')) { try { value = JSON.parse(raw); } catch { this.fail("Invalid quoted value · Use valid JSON text"); return false; } }
     return this.changeSettings(() => this.configEditor!.prepare({ scope, key: key!, value }), () => {
+      if (key === "approval") this.currentApprovalMode = this.configEditor!.settings.approvalMode;
+      this.noticeIgnoredProjectApproval();
       const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
-      const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "git" ? this.configEditor!.settings.gitChangeTracking : key === "undo" ? { maxAgeDays: this.configEditor!.settings.undoMaxAgeDays, maxSizeMB: this.configEditor!.settings.undoMaxSizeMB } : key === "ui" ? { splash: this.configEditor!.settings.splash, inlineDiffLines: this.configEditor!.settings.inlineDiffLines } : this.configEditor!.settings[key as keyof ResolvedSettings];
+      const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "approval" ? { mode: this.configEditor!.settings.approvalMode } : key === "git" ? this.configEditor!.settings.gitChangeTracking : key === "undo" ? { maxAgeDays: this.configEditor!.settings.undoMaxAgeDays, maxSizeMB: this.configEditor!.settings.undoMaxSizeMB } : key === "ui" ? { splash: this.configEditor!.settings.splash, inlineDiffLines: this.configEditor!.settings.inlineDiffLines } : this.configEditor!.settings[key as keyof ResolvedSettings];
       const effective = key === "model" && !rawEffective ? "unset" : displaySetting(key!, rawEffective);
       const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
@@ -210,6 +212,7 @@ export abstract class SettingsLayer extends UndoLayer {
     this.explicitContextWindow = next.explicitContextWindow; this.explicitMaxOutput = next.explicitMaxOutput;
     this.baseUrl = next.baseUrl; this.auth = next.auth; this.openaiAuth = next.openaiAuth; this.xaiAuth = next.xaiAuth; this.profile = next.profile;
     this.thinking = next.thinking;
+    this.noticeIgnoredProjectApproval();
     this.subscriptionReactivationRequired = false;
     this.grokReactivationRequired = false;
     this.grokPending = false;
@@ -242,6 +245,7 @@ export abstract class SettingsLayer extends UndoLayer {
         }
         return `${key}: ${displaySetting(key, (settings as unknown as Record<string, unknown>)[key])} [${origins[key as keyof ConfigLayer]}${(key === "contextWindow" || key === "maxOutput") && origins[key as keyof ConfigLayer] !== "catalog" ? "; explicit limit" : ""}]`;
       }));
+      lines.push(`approval: ${JSON.stringify({ mode: settings.approvalMode })} [${origins.approval}]`);
       lines.push(`ui: ${JSON.stringify({ splash: settings.splash, inlineDiffLines: settings.inlineDiffLines })} [${origins.ui ?? "built-in default"}]`);
       lines.push(`undo: ${JSON.stringify({ maxAgeDays: settings.undoMaxAgeDays, maxSizeMB: settings.undoMaxSizeMB })} [${origins.undo ?? "built-in default"}]`);
       const gitMode = settings.gitChangeTracking;

@@ -39,3 +39,7 @@ It reports `Undo store: <size> MB.` in MiB to one decimal place, including
 (default `500`) and `warning` above it, with the remedy
 `Lower undo.maxSizeMB or delete old sessions.` Doctor never prunes or creates
 undo storage; this check also appears in `--json` output.
+
+## Approval configuration
+
+The stable `approval-config` check reports the effective file-configured approval mode. A looser project `approval.mode` produces a warning and names the config path to repair. Doctor ignores `--approval`; it diagnoses the saved user/project baseline rather than a run-time mode override.

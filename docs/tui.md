@@ -673,3 +673,9 @@ its filesystem effects were undone. After a forced kill, only the last completed
 checkpoint is promised. See [retention, deletion and storage limits](sessions.md#unsent-draft-checkpoints).
 
 Test coverage for this guide: [release verification](release-verification.md#tui).
+
+## Approval mode
+
+Press **Shift+Tab** in the ordinary composer to cycle `auto` → `read-only` → `auto`, including while a turn runs. Calls that have not reached their approval decision use the current mode. In read-only mode the footer keeps a **◆ READ-ONLY** chip to the left of the status pill, including at narrow widths, and the composer hints start with **Shift+Tab read-only**. Failed tool rows expand the denial reason.
+
+Shift+Tab retains its existing scope, inspection, or completion behavior while those views are open; it does not switch modes in panels or search. Launch with `schway --approval read-only` to start in that mode. The process choice survives new/resumed sessions and model changes without writing config or interactive memory.

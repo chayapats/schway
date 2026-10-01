@@ -1,5 +1,5 @@
 import { compileValidator, type SchemaValidator } from "./schema.ts";
-import type { ToolDefinition } from "./types.ts";
+import { toolEffect, type ToolDefinition } from "./types.ts";
 
 /** A registered tool plus the validator compiled at registration. */
 export interface RegisteredTool {
@@ -9,7 +9,7 @@ export interface RegisteredTool {
 
 /** Name-indexed set of tools available to the agent loop. */
 export interface ToolRegistry {
-  /** Compile and store a tool's schema, throwing for duplicate names or unsupported schemas. */
+  /** Validate the effect and compile the schema, rejecting duplicate names or invalid declarations. */
   register(definition: ToolDefinition): void;
   /** Return the registered definition and validator, or undefined for an unknown name. */
   get(name: string): RegisteredTool | undefined;
@@ -17,7 +17,7 @@ export interface ToolRegistry {
   definitions(): readonly ToolDefinition[];
 }
 
-/** Create a registry seeded in order, throwing if an initial tool has a duplicate name or invalid schema. */
+/** Create a registry seeded in order, rejecting duplicate names, invalid effects or unsupported schemas. */
 export function createToolRegistry(
   definitions: readonly ToolDefinition[] = [],
 ): ToolRegistry {
@@ -43,6 +43,9 @@ function registryFromEntries(tools: Map<string, RegisteredTool>): ToolRegistry {
     register(definition) {
       if (tools.has(definition.name)) {
         throw new Error(`Tool already registered: ${definition.name}`);
+      }
+      if (!["read-only", "mutating"].includes(toolEffect(definition))) {
+        throw new Error(`Invalid effect for tool "${definition.name}": expected read-only or mutating`);
       }
       try {
         const validate = compileValidator(definition.inputSchema);

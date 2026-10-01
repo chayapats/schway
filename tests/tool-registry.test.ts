@@ -1,3 +1,9 @@
+import { executeToolCall } from "../src/tools/executor.ts";
+import { openUndoStore } from "../src/undo/store.ts";
+import { withTempDir } from "./helpers.ts";
+import { join } from "node:path";
+import { createActivateSkillTool } from "../src/skills/activate.ts";
+import { createContextManager } from "../src/context/manager.ts";
 import { expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import { bashTool } from "../src/tools/bash.ts";
@@ -7,7 +13,7 @@ import { grepTool } from "../src/tools/grep.ts";
 import { lsTool } from "../src/tools/ls.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
-import type { ToolDefinition } from "../src/tools/types.ts";
+import { toolEffect, type ToolDefinition } from "../src/tools/types.ts";
 import { writeTool } from "../src/tools/write.ts";
 
 /** Minimal tool used to exercise schema registration. */
@@ -118,4 +124,41 @@ test("malformed supported schema keywords fail at registration", () => {
   ]) {
     expect(() => createToolRegistry([stub(schema)])).toThrow("Invalid schema");
   }
+});
+
+
+test("tool effects distinguish built-in reads from mutations and default undeclared tools to mutating", () => {
+  for (const tool of [readTool, grepTool, findTool, lsTool, createActivateSkillTool(createContextManager({ root: "/tmp", launchCwd: "/tmp", extraRoots: [] }))]) expect(toolEffect(tool)).toBe("read-only");
+  for (const tool of [editTool, writeTool, bashTool, stub(Type.Object({}))]) expect(toolEffect(tool)).toBe("mutating");
+  for (const effect of [null, 1, "invalid"]) expect(() => createToolRegistry([{ ...readTool, effect: effect as never }])).toThrow('Invalid effect for tool "read": expected read-only or mutating');
+});
+
+
+test("toolEffect reads a getter once and defaults only undefined", () => {
+  let reads = 0;
+  const tool = { ...stub(Type.Object({})), get effect() { reads++; return reads === 1 ? "read-only" as const : "mutating" as const; } };
+  expect(toolEffect(tool)).toBe("read-only");
+  expect(reads).toBe(1);
+});
+
+
+test("invalid and unknown calls settle before approval; denied writes never capture undo data", async () => {
+  await withTempDir(async root => {
+    const registry = createToolRegistry([writeTool]);
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const undo = openUndoStore({ home: join(root, "home") });
+    let decisions = 0;
+    const approval = { interactive: true, mode: () => { decisions++; return "read-only" as const; } };
+    const call = { type: "tool_call" as const, id: "write-call", name: "write", arguments: { path: "note.txt", content: "changed" } };
+    const unknown = await executeToolCall({ registry, workspace, approval, call: { ...call, name: "missing" } });
+    expect(unknown.result.content).toBe("Unknown tool: missing");
+    const invalid = await executeToolCall({ registry, workspace, approval, call: { ...call, arguments: { path: 1 } } });
+    expect(invalid.result.content).toStartWith("Invalid arguments for tool write:");
+    expect(decisions).toBe(0);
+    const denied = await executeToolCall({ registry, workspace, approval, call, undo, undoTurn: { sessionId: "session", turnId: "turn", turnNumber: 1 } });
+    expect(decisions).toBe(1);
+    expect(denied.status).toBe("error");
+    expect(await undo.list("session")).toEqual([]);
+    expect(await Bun.file(join(root, "note.txt")).exists()).toBe(false);
+  });
 });

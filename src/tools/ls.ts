@@ -55,6 +55,7 @@ export const lsTool: ToolDefinition<LsInput> = {
   description:
     "List a directory with an explicit depth instead of dumping the whole tree. Relative paths resolve from the workspace root. Depth defaults to 1.",
   inputSchema: lsInputSchema,
+  effect: "read-only",
   execution: "parallel",
   execute: executeLs,
 };

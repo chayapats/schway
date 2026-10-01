@@ -9,7 +9,7 @@ import { platform } from "node:os";
 import { version } from "../../package.json";
 import { COMPATIBLE_API_KEY_ENV, credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, LEGACY_ANTHROPIC_ACCOUNT, LEGACY_ANTHROPIC_REMOVAL_COMMAND, type CredentialStore } from "../auth/store.ts";
-import { readConfigFile, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
+import { readConfigFile, resolveApprovalSettings, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
 import { inspectPackages } from "../packages/packages.ts";
 import { discoverSkills } from "../skills/skills.ts";
 import { sessionsDirectory } from "../session/jsonl.ts";
@@ -136,7 +136,10 @@ export async function diagnose(input: {
     }
   }
   const invalidConfig = checks.some(c => c.id.startsWith("config.") && c.status === "error");
-  const settings = resolveSettings({ user, project, cli: cliOverridesFromArgs(input.args) });
+  const settings = resolveSettings({ user, project, cli: cliOverridesFromArgs({ ...input.args, approval: undefined }) });
+  const approval = resolveApprovalSettings({ user, project });
+  if (approval.ignoredProjectApprovalMode !== undefined) add("approval-config", "warning", `Project approval.mode "${approval.ignoredProjectApprovalMode}" is looser than your "${approval.userApprovalMode}" and is ignored.`, `Remove approval.mode from ${projectConfigPath(workspace!)} or set a stricter mode.`);
+  else add("approval-config", "ok", `Approval mode: ${approval.approvalMode}.`);
   if (home) {
     try {
       const bytes = await undoStoreSize({ home });

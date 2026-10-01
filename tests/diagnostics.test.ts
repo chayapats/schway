@@ -262,3 +262,13 @@ test("userinfo with embedded @ and signed credential query are masked", async ()
   expect(text).not.toMatch(/alice|p@ss|signature-secret|socket-secret|unknown-secret|ftp-secret|ftp-token/);
   expect(text).toContain("host.test");
 }));
+
+
+test("tool denial diagnostics record mode and redact reason without tool arguments", async () => temporary(async home => {
+  const sink = createDiagnosticSink({ home, enabled: true, secrets: ["denial-secret"] });
+  sink.runtime({ type: "tool.denied", toolCallId: "write-call", name: "write", mode: "read-only", reason: "Read-only denial-secret" });
+  await sink.close();
+  const record = JSON.parse((await readFile(diagnosticPath(home), "utf8")).trim());
+  expect(record).toMatchObject({ event: "tool.denied", fields: { name: "write", toolCallId: "write-call", mode: "read-only", reason: "Read-only ***" } });
+  expect(record.fields).not.toHaveProperty("arguments");
+}));

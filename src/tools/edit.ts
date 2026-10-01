@@ -70,6 +70,7 @@ export const editTool: ToolDefinition<EditInput> = {
   description:
     "Apply exact text replacements to an existing file. Each oldText must match exactly once in the original file. Multiple edits are matched against the original content, not sequentially. Overlapping edits are rejected and no partial changes are written. Prefer this over write for targeted changes.",
   inputSchema: editInputSchema,
+  effect: "mutating",
   execution: "exclusive",
   execute: executeEdit,
 };

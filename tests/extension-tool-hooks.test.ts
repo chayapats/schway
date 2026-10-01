@@ -12,6 +12,7 @@ import type { BeforeToolInput } from "../src/extensions/index.ts";
 import type { ModelRequest } from "../src/model/model.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { createSession } from "../src/session/session.ts";
+import { writeTool } from "../src/tools/write.ts";
 import { editTool, type EditInput } from "../src/tools/edit.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
@@ -32,7 +33,7 @@ async function fixture(dir: string, bodies: string[], secrets: string[] = []) {
   }
   const workspace = await resolveWorkspace(dir);
   const home = join(dir, "home");
-  const loaded = await loadExtensions({ modules: paths, workspace, home, secrets, tools: createToolRegistry([editTool]) });
+  const loaded = await loadExtensions({ modules: paths, workspace, home, secrets, tools: createToolRegistry([editTool, writeTool]) });
   const modules = await Promise.all(paths.map(path => import(pathToFileURL(path).href)));
   return { ...loaded, modules, workspace, home };
 }
@@ -44,6 +45,7 @@ function call(id: string, name = "edit", args: unknown = editArgs): ToolCallCont
 
 /** Run one scripted tool round, asserting exactly one source-ordered result per call and optional durable reload parity. */
 async function turn(dir: string, runtime: ExtensionRuntime, tools: ReturnType<typeof createToolRegistry>, calls: ToolCallContent[], options: {
+  approval?: import("../src/agent/approval.ts").ApprovalPolicy;
   signal?: AbortSignal; maxConcurrentTools?: number; events?: RuntimeEvent[]; durable?: boolean;
 } = {}) {
   const workspace = await resolveWorkspace(dir);
@@ -125,7 +127,7 @@ test("unknown tools and invalid original arguments are rejected before any inter
     runtime.toolHooks.beforeTool("policy", () => { hooks++; return { arguments: editArgs }; });
     runtime.toolHooks.afterTool("policy", () => { hooks++; });
     try {
-      const result = await turn(dir, runtime, createToolRegistry([editTool]), [call("unknown", "missing"), call("invalid", "edit", {})], { durable: true });
+      const result = await turn(dir, runtime, createToolRegistry([editTool, writeTool]), [call("unknown", "missing"), call("invalid", "edit", {})], { durable: true });
       expect(result.results[0]!.content).toContain("Unknown tool");
       expect(result.results[1]!.content).toContain("Invalid arguments");
       expect(hooks).toBe(0);
@@ -144,7 +146,7 @@ test("ignored mutations and retained return references cannot alter execution or
     runtime.toolHooks.afterTool("first", () => { details = { kept: true }; return { content: "kept", details }; });
     runtime.toolHooks.afterTool("second", input => { details!.kept = false; expect(input.outcome.details).toEqual({ kept: true }); input.outcome.content = "ignored"; });
     try {
-      const result = await turn(dir, runtime, createToolRegistry([editTool]), [call("one")]);
+      const result = await turn(dir, runtime, createToolRegistry([editTool, writeTool]), [call("one")]);
       expect(await Bun.file(join(dir, "note.txt")).text()).toBe("after");
       expect(result.results[0]).toMatchObject({ content: "kept", toolCallId: "one", isError: false });
       expect(result.events.find(event => event.type === "tool.finished")).toMatchObject({ details: { kept: true } });
@@ -404,5 +406,26 @@ test("post-hook failure retains an executed error's details and never leaks a bo
         afterToolFailure: true, execution: { status: "error", isError: true, details: { reason: "***" } },
       } });
     } finally { runtime.dispose(); }
+  });
+});
+
+
+for (const deny of [false, true]) test(`read-only approval follows beforeTool and preserves hook denial=${deny}`, async () => {
+  await withTempDir(async dir => {
+    const setup = await fixture(dir, [`export const trace = []; export default ctx => {
+      ctx.beforeTool(input => { trace.push('before'); return ${deny ? "{ deny: 'Extension says no' }" : "{ arguments: { ...input.arguments, path: 'rewritten.txt' } }"}; });
+      ctx.afterTool(() => { trace.push('after'); });
+    };`]);
+    try {
+      let decisions = 0;
+      const result = await turn(dir, setup.runtime, setup.tools, [call("write-call", "write", { path: "original.txt", content: "changed" })],
+        { approval: { interactive: true, mode: () => { decisions++; return "read-only"; } } });
+      expect(setup.modules[0].trace).toEqual(["before"]);
+      expect(decisions).toBe(deny ? 0 : 1);
+      expect(result.results[0]).toMatchObject({ isError: true, content: deny ? `Extension "${join(dir, "extension-0.ts")}" beforeTool: Denied: Extension says no. Check this extension or disable it.` : "Read-only mode: file changes and commands are off. The user can switch modes with Shift+Tab." });
+      expect(await Bun.file(join(dir, "original.txt")).exists()).toBe(false);
+      expect(await Bun.file(join(dir, "rewritten.txt")).exists()).toBe(false);
+      expect(result.events.filter(event => event.type === "tool.denied")).toHaveLength(deny ? 0 : 1);
+    } finally { setup.runtime.dispose(); }
   });
 });

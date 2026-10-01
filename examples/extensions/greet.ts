@@ -9,6 +9,7 @@ const greet: ToolDefinition<{ name: string }> = {
     required: ["name"],
     additionalProperties: false,
   },
+  effect: "read-only",
   execution: "parallel",
   async execute({ name }, ctx) {
     ctx.signal?.throwIfAborted();
