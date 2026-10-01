@@ -1,5 +1,7 @@
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, unlink, writeFile, rm, stat } from "node:fs/promises";
+import { openSync, closeSync } from "node:fs";
+import { mkdir, readFile, readdir, rename, unlink, writeFile, rm, rmdir, stat } from "node:fs/promises";
 import { basename, join, isAbsolute, relative, sep } from "node:path";
 import { isErrno } from "../tools/fs.ts";
 
@@ -19,7 +21,7 @@ export interface UndoStore {
   capture(turn: UndoTurn, path: string): Promise<{ created: boolean }>;
   /** Record current bytes after execution, dropping newly captured no-op entries. */
   settle(turn: UndoTurn, path: string, created: boolean): Promise<void>;
-  /** Atomically retain shell attribution without replacing original file pre-images. */
+  /** Atomically record latest detection, merging available paths without replacing original file pre-images. */
   recordShell(turn: UndoTurn, shell: UndoShell): Promise<void>;
   /** Read all durable manifests for one validated session identity. */
   list(sessionId: string): Promise<UndoManifest[]>;
@@ -58,37 +60,45 @@ export function openUndoStore({ home }: { home: string }): UndoStore {
     async capture(turn, path) {
       manifestPath(turn);
       if (!isAbsolute(path)) throw new Error("Undo paths must be absolute");
-      const existing = await load(turn);
-      if (existing?.files.some(file => file.path === path)) { await save(existing); return { created: false }; }
-      const bytes = await readUndoBytes(path);
-      const before = hashUndoBytes(bytes);
-      await mkdir(join(sessionPath(turn.sessionId), "blobs"), { recursive: true, mode: 0o700 });
-      await mkdir(join(sessionPath(turn.sessionId), "turns"), { recursive: true, mode: 0o700 });
-      if (before && bytes) {
-        await writePrivateAtomically(join(sessionPath(turn.sessionId), "blobs", before.sha256), bytes);
-      }
-      const manifest: UndoManifest = existing ?? { version: 1, ...turn, createdAt: new Date().toISOString(), files: [], shell: { detection: "unavailable" } };
-      manifest.files.push({ path, before });
-      await save(manifest);
-      return { created: true };
+      return withStoreLock(home, async () => {
+        const existing = await load(turn);
+        if (existing?.files.some(file => file.path === path)) { await save(existing); return { created: false }; }
+        const bytes = await readUndoBytes(path);
+        const before = hashUndoBytes(bytes);
+        await mkdir(join(sessionPath(turn.sessionId), "blobs"), { recursive: true, mode: 0o700 });
+        await mkdir(join(sessionPath(turn.sessionId), "turns"), { recursive: true, mode: 0o700 });
+        if (before && bytes) {
+          await writePrivateAtomically(join(sessionPath(turn.sessionId), "blobs", before.sha256), bytes);
+        }
+        const manifest: UndoManifest = existing ?? { version: 1, ...turn, createdAt: new Date().toISOString(), files: [], shell: { detection: "unavailable" } };
+        manifest.files.push({ path, before });
+        await save(manifest);
+        return { created: true };
+      });
     },
     async settle(turn, path, created) {
-      const manifest = await load(turn);
-      const file = manifest?.files.find(file => file.path === path);
-      if (!manifest || !file) throw new Error("Undo pre-image is missing");
-      const after = hashUndoBytes(await readUndoBytes(path));
-      if (created && equalUndoHash(after, file.before)) manifest.files = manifest.files.filter(entry => entry !== file);
-      else file.after = after;
-      await save(manifest);
+      manifestPath(turn);
+      return withStoreLock(home, async () => {
+        const manifest = await load(turn);
+        const file = manifest?.files.find(file => file.path === path);
+        if (!manifest || !file) throw new Error("Undo pre-image is missing");
+        const after = hashUndoBytes(await readUndoBytes(path));
+        if (created && equalUndoHash(after, file.before)) manifest.files = manifest.files.filter(entry => entry !== file);
+        else file.after = after;
+        await save(manifest);
+      });
     },
     async recordShell(turn, shell) {
-      const manifest = await load(turn) ?? { version: 1, ...turn, createdAt: new Date().toISOString(), files: [], shell: { detection: "unavailable" } };
-      const toolPaths = new Set(manifest.files.map(file => file.path));
-      manifest.shell = shell.detection === "git" ? { detection: "git", paths: [...new Set([
-        ...(manifest.shell.detection === "git" ? manifest.shell.paths : []), ...shell.paths,
-      ])].filter(path => !toolPaths.has(path)) } : manifest.shell;
-      await mkdir(join(sessionPath(turn.sessionId), "turns"), { recursive: true, mode: 0o700 });
-      await save(manifest);
+      manifestPath(turn);
+      return withStoreLock(home, async () => {
+        const manifest = await load(turn) ?? { version: 1, ...turn, createdAt: new Date().toISOString(), files: [], shell: { detection: "unavailable" } };
+        const toolPaths = new Set(manifest.files.map(file => file.path));
+        manifest.shell = shell.detection === "git" ? { detection: "git", paths: [...new Set([
+          ...(manifest.shell.detection === "git" ? manifest.shell.paths : []), ...shell.paths,
+        ])].filter(path => !toolPaths.has(path)) } : { detection: "unavailable" };
+        await mkdir(join(sessionPath(turn.sessionId), "turns"), { recursive: true, mode: 0o700 });
+        await save(manifest);
+      });
     },
     async list(sessionId) {
       const directory = join(sessionPath(sessionId), "turns");
@@ -141,6 +151,12 @@ export async function pruneUndoStore({ home, maxAgeDays, maxSizeBytes, now = new
   home: string; maxAgeDays: number; maxSizeBytes: number; now?: Date;
 }): Promise<void> {
   const root = join(home, ".schway", "undo");
+  if (!await storeExists(root)) return;
+  return withStoreLock(home, () => pruneLocked(root, maxAgeDays, maxSizeBytes, now));
+}
+
+/** Inventory and collect while all Schway store mutations are excluded across processes. */
+async function pruneLocked(root: string, maxAgeDays: number, maxSizeBytes: number, now: Date): Promise<void> {
   const files = await inventory(root);
   const manifests: { path: string; manifest: UndoManifest; removed: boolean }[] = [];
   for (const file of files) {
@@ -171,10 +187,49 @@ export async function pruneUndoStore({ home, maxAgeDays, maxSizeBytes, now = new
     const directory = join(root, session.name);
     for (const name of ["blobs", "turns"]) {
       const child = join(directory, name);
-      try { if (!(await readdir(child)).length) await rm(child, { recursive: true }); } catch (error) { if (!isErrno(error, "ENOENT")) throw error; }
+      await removeEmptyDirectory(child);
     }
-    if (!(await readdir(directory)).length) await rm(directory, { recursive: true });
+    await removeEmptyDirectory(directory);
   }
+}
+
+/** Remove one session's undo data under the same cross-process exclusion as publication and pruning. */
+export async function deleteUndoSession({ home, sessionId }: { home: string; sessionId: string }): Promise<void> {
+  const path = join(home, ".schway", "undo", validId(sessionId));
+  if (!await storeExists(join(home, ".schway", "undo"))) return;
+  return withStoreLock(home, () => rm(path, { recursive: true, force: true }));
+}
+
+/** Remove only an empty directory, leaving content created since enumeration intact. */
+async function removeEmptyDirectory(path: string): Promise<void> {
+  try { await rmdir(path); }
+  catch (error) { if (!isErrno(error, "ENOENT") && !isErrno(error, "ENOTEMPTY") && !isErrno(error, "EEXIST")) throw error; }
+}
+
+/** Check storage without creating it, preserving missing-store startup and deletion behavior. */
+async function storeExists(root: string): Promise<boolean> {
+  try { await stat(root); return true; }
+  catch (error) { if (isErrno(error, "ENOENT")) return false; throw error; }
+}
+
+/** Exclude concurrent store mutations with an OS-released lock and immediate, fail-safe contention. */
+async function withStoreLock<T>(home: string, operation: () => Promise<T>): Promise<T> {
+  const directory = join(home, ".schway");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  // This inode stays outside the collectible store and is never removed or counted by retention/doctor.
+  // Only SQLite opens an existing lock inode: unrelated POSIX closes can release process locks.
+  const path = join(directory, "undo.lock");
+  try { closeSync(openSync(path, "wx", 0o600)); }
+  catch (error) { if (!isErrno(error, "EEXIST")) throw error; }
+  const lock = new Database(path);
+  try {
+    try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
+    catch (error) {
+      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw new Error("Undo store is updating · Retry when finished");
+      throw error;
+    }
+    return await operation();
+  } finally { lock.close(); }
 }
 
 /** Enumerate regular files and sizes while ignoring absent directories and symbolic links. */

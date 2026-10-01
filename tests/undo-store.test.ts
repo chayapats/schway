@@ -255,8 +255,11 @@ test("legacy manifests load unavailable shell detection and recovery retains she
     expect((await store.list("session"))[0]?.shell).toEqual({ detection: "unavailable" });
     await store.recordShell(turn, { detection: "git", paths: [path, join(home, "shell-a")] });
     await store.recordShell(turn, { detection: "git", paths: [join(home, "shell-b")] });
-    await store.recordShell(turn, { detection: "unavailable" });
     expect((await store.list("session"))[0]).toMatchObject({ createdAt: legacy.createdAt, shell: { detection: "git", paths: [join(home, "shell-a"), join(home, "shell-b")] } });
+    await store.recordShell(turn, { detection: "unavailable" });
+    expect((await store.list("session"))[0]).toMatchObject({ createdAt: legacy.createdAt, files: legacy.files, shell: { detection: "unavailable" } });
+    await store.recordShell(turn, { detection: "git", paths: [join(home, "shell-c")] });
+    expect((await store.list("session"))[0]?.shell).toEqual({ detection: "git", paths: [join(home, "shell-c")] });
   });
 });
 

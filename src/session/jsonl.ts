@@ -1,6 +1,7 @@
 import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
-import { mkdir, open, readFile, readdir, rename, unlink, writeFile, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { openDraftStore } from "../drafts/store.ts";
+import { deleteUndoSession } from "../undo/store.ts";
 import { basename, join } from "node:path";
 import type {
   AssistantContent,
@@ -555,14 +556,14 @@ function safeTaskText(text: string): string {
   return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-/** Delete an explicitly selected saved session after clearing its private draft content. */
+/** Delete a selected saved session after clearing its draft and synchronized undo data. */
 export async function deleteJsonlSession(options: { directory: string; id: string; home: string }): Promise<void> {
   const path = sessionFilePath(options.directory, options.id);
   const firstLine = await readFirstLine(path);
   const header: unknown = JSON.parse(firstLine ?? "null");
   if (!isSessionHeader(header) || header.id !== options.id) throw new Error("Cannot delete an invalid session header");
   openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
-  await rm(join(options.home, ".schway", "undo", header.id), { recursive: true, force: true });
+  await deleteUndoSession({ home: options.home, sessionId: header.id });
   await unlink(path);
   try { await unlink(`${path}.meta`); } catch (error) { if (!isNotFound(error)) throw error; }
 }

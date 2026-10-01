@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { withTempDir } from "./helpers.ts";
 
-for (const mode of ["interactive", "headless"]) for (const failure of [false, true]) {
-  test(`${mode} startup prunes before work and ${failure ? "records failures without blocking" : "retains once-only process scope"}`, async () => {
+for (const mode of ["interactive", "headless"]) for (const failure of [false, true, "contention"] as const) {
+  test(`${mode} startup prunes before work and ${failure === "contention" ? "diagnoses lock contention without blocking" : failure ? "records failures without blocking" : "retains once-only process scope"}`, async () => {
     await withTempDir(async home => {
       const script = `
         import { mock } from "bun:test";
@@ -11,7 +11,7 @@ for (const mode of ["interactive", "headless"]) for (const failure of [false, tr
         import { pathToFileURL } from "node:url";
         import { mkdir, readFile, writeFile } from "node:fs/promises";
         const home = ${JSON.stringify(home)}, source = ${JSON.stringify(join(import.meta.dir, "../src"))};
-        const mode = ${JSON.stringify(mode)}, failure = ${failure};
+        const mode = ${JSON.stringify(mode)}, failure = ${Boolean(failure)};
         const load = path => import(pathToFileURL(join(source, path)).href);
         const { openUndoStore } = await load("undo/store.ts");
         const { diagnosticPath } = await load("diagnostics/sink.ts");
@@ -25,7 +25,13 @@ for (const mode of ["interactive", "headless"]) for (const failure of [false, tr
           await writeFile(manifest, JSON.stringify(value));
         };
         await captureExpired();
-        if (failure) await writeFile(manifest, "invalid manifest");
+        if (${failure === true}) await writeFile(manifest, "invalid manifest");
+        let lock;
+        if (${failure === "contention"}) {
+          const { Database } = await import("bun:sqlite");
+          lock = new Database(join(home, ".schway", "undo.lock"));
+          lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+        }
         let requests = 0;
         const assert = (value, message) => { if (!value) throw new Error(message); };
         const model = { provider: "scripted", id: "fixture", async *stream() {
@@ -71,6 +77,12 @@ for (const mode of ["interactive", "headless"]) for (const failure of [false, tr
         const log = (await readFile(diagnosticPath(home), "utf8")).trim().split("\\n").map(line => JSON.parse(line));
         assert(log.filter(entry => entry.component === "undo" && entry.event === "prune_failed").length === (failure ? 1 : 0), "unexpected retention diagnostics");
         assert(requests === (mode === "interactive" ? 2 : 1), "model work did not complete");
+        if (lock) {
+          try { await store.recordShell(turn, { detection: "unavailable" }); throw new Error("Contender released the original lock"); }
+          catch (error) { assert(error.message.includes("Undo store is updating"), error.message); }
+          lock.close();
+          await store.recordShell(turn, { detection: "unavailable" });
+        }
         console.log("UNDO_STARTUP_OK");
       `;
       const child = Bun.spawn([process.execPath, "--eval", script], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });

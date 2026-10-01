@@ -396,3 +396,9 @@ prunes expired turns, then the oldest turns across sessions until the store fits
 its size limit, and collects unreferenced blobs. It runs before the first turn;
 failures go to the opt-in diagnostics sink and do not block startup. There is no
 pruning timer within a running process. Pruned turns are skipped by `/undo`.
+
+Undo writes, session-data deletion and pruning share a process lock. If another
+Schway process is updating the store, startup skips pruning and records the failure
+in enabled diagnostics. A file-tool change is refused if its pre-image cannot be
+saved. The private lock file stays outside the undo directory and does not count
+toward retention or the doctor's size check.
