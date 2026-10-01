@@ -1,5 +1,11 @@
 # Local readiness diagnostics
 
+## Diagnose local readiness
+
+Doctor reports runtime, workspace, shell/search, session storage, configuration,
+selected authentication and enabled skill/extension metadata without starting a
+model or executing extensions.
+
 Run `schway doctor` before starting a conversation; it does not call a model, open a login browser, install packages or execute extension modules.
 
 Run `schway doctor --help` for grouped diagnostic options and examples. Use
@@ -12,6 +18,8 @@ schway doctor --json
 schway doctor --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none
 schway doctor --provider openai --openai-auth codex
 ```
+
+## Options and exit status
 
 The CLI reads the selected configuration from `~/.schway/config.json` and the canonical primary workspace's `.schway/config.json`. CLI provider, profile, authentication, connection and extension flags override or augment configuration, as in a normal run. `--env-file` is read only if explicitly requested; process `HOME` must already be set and cannot be relocated by a `HOME` entry in that file (matching ordinary runs). Doctor never prints API key contents, stored subscription tokens, HTTP headers or native store exceptions. Its checks only read metadata and key presence; a healthy local result does **not** prove connectivity, provider billing or a successful refresh. Subscription expiry/refresh warnings come from locally stored token timestamps, not a network validation.
 

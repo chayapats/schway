@@ -1,5 +1,54 @@
 # Interactive models and configuration
 
+## Configuration files
+
+Schway does not select a model before you configure or sign in. Interactive launch with neither config nor a remembered model choice shows no model and will not send until one is usable. Headless runs need `--model` or a model in config; `--provider` is optional when using the default OpenAI provider. Config files are never created automatically.
+
+Precedence, later wins:
+
+1. built-in defaults
+2. `~/.schway/config.json`
+3. `<workspace-root>/.schway/config.json`
+4. CLI flags
+
+Project config is read from the workspace root (nearest Git root, otherwise the launch directory), not from a nested launch cwd. The `packages` enablement lists are scope-specific and additive across user/project files; they do not follow scalar-setting replacement.
+
+```json
+{
+  "provider": "openai-compatible",
+  "model": "<id>",
+  "maxTurns": 16,
+  "maxConcurrentTools": 4,
+  "contextWindow": 128000,
+  "maxOutput": 4096,
+  "baseUrl": "http://127.0.0.1:11434/v1",
+  "headers": { "X-Test": "ok" },
+  "extraBody": { "temperature": 0.2 },
+  "auth": "optional"
+}
+```
+
+Unknown or misspelled settings fail with an actionable error. `baseUrl`, `headers`, `extraBody`, and `auth` apply only when the selected provider is `openai-compatible`.
+
+```bash
+schway -p "explain this repository" --env-file ~/.config/my-ai.env
+schway -p "explain this repository" --max-turns 8 --max-output 2048
+```
+
+## Project instructions
+
+Schway loads `AGENTS.md` from general to specific:
+
+- `~/.schway/AGENTS.md`
+- applicable primary or attached project roots
+- nested directories on the current turn’s launch path or latest tool `path` / `cwd` targets
+
+Nested files are discovered when work enters that subtree. Sibling directories are not loaded.
+
+Replace the base system prompt with `~/.schway/SYSTEM.md` and append with `~/.schway/APPEND_SYSTEM.md`. Project-local `SYSTEM.md` is ignored; put project instructions in `AGENTS.md`.
+
+## Interactive configuration
+
 Start Schway with `bun run start` (or `schway` after installation). Set the selected provider's API key in the environment or pass `--api-key` at launch. Configuration does not store API keys.
 
 A fresh install names no model. The screen shows `Not connected; Sign in to choose a model · Alt+L`, and sending stays unavailable until a model is usable. Typed text is kept. Headless runs do not invent a model: without a provider and model in config or `--provider` and `--model`, Schway exits non-zero with `No model configured · Pass --provider and --model, or set them in config`

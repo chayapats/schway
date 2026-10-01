@@ -2,6 +2,25 @@
 
 Sessions use append-only semantic JSONL under `~/.schway/sessions`. Each session has a conversation root, globally unique entry IDs, saved branch IDs and heads, and one active branch. `main` is the default branch. A branch head identifies a path through parent entries back to the root; sibling entries remain saved but never enter the selected branch's model context. Runtime events and dynamic environment, instruction, and skill bodies are not session records.
 
+## Sessions: save, branch, and resume
+
+Headless and interactive runs persist versioned JSONL sessions under `~/.schway/sessions`. Config files are never created automatically, but sessions are written so work can resume.
+
+```bash
+schway -p "start the migration"
+schway -p "continue the migration" --resume <session-id>
+schway --resume <session-id>   # interactive resume
+schway --resume <session-id> --branch <branch-id>
+```
+
+Use `/branch list` to obtain exact branch IDs, entry IDs, and the empty conversation root ID. While idle, `/branch fork <entry-id> [name]` creates and selects an independent head at a complete user-turn boundary; `/branch switch <branch-id>` selects an existing head. Names are labels, so duplicate names are allowed and cannot select a branch. Each new reply advances only the selected branch. Branching changes conversation context; it does not undo file changes. Workspace attachments stay shared across branches.
+
+Resume rebuilds only the selected ancestry without replaying tool effects. Omit `--branch` to restore the saved active branch; `--branch` requires `--resume`. Interrupted accepted calls receive error results only on the selected ancestry. A syntactically torn final JSON write is repaired while preserving the preceding bytes; valid JSON with invalid ancestry or records is an error, even at the end of the file.
+
+New files use format 3 with atomic branch operations containing semantic `user`, `assistant`, `tool_result`, and `compaction` entries. Formats 1 and 2 load as one `main` branch and gain an append-only upgrade marker when branch data changes. Runtime-only deltas (`model.delta`, `tool.delta`) are never persisted. See [renderer-free source API](#renderer-free-source-api) and [format 3 and recovery](#format-3-and-recovery) for runnable examples, compaction isolation, and recovery details.
+
+`--json` streams normalized runtime events as JSONL on stdout for tooling; diagnostics stay on stderr. Runtime JSONL and durable session JSONL are different concepts: the first is transient observability, the second is resumable state.
+
 ## Starting new work or resuming
 
 An ordinary interactive launch starts fresh and offers **Alt+B** to restore the
@@ -166,6 +185,18 @@ Accepted attachments append independent metadata:
 This record has no entry ID or parent, advances no branch, and never becomes model conversation. The last metadata snapshot across the entire file supplies `Session.metadata.extraRoots`. The initial header remains unchanged. A format 1 session's first root-only change still appends `session_format` version 2 before the roots snapshot; it upgrades to version 3 later when branch data changes.
 
 `setExtraRoots` writes before publishing metadata; repeated accepted lists are a no-op. Resume callers use current `session.metadata.extraRoots`, not initial `header.extraRoots`, and validate availability through `restoreWorkspace`. Missing roots remain saved while runtime context excludes them. See [workspaces](workspaces.md).
+
+## Compaction
+
+Long sessions compact context instead of failing when pressure builds.
+
+- Automatic pressure compaction triggers at 80% of the resolved context window and retains the 10 most recent complete turns plus the running summary.
+- Context overflow (`context_length_exceeded` / `prompt-too-long`) forces one compaction and retries once; repeated overflow terminates with a clear error instead of looping.
+- Compaction never splits a tool-call/result group: the retained window starts at a turn boundary.
+- Oversized tool output is pruned only for summarization input; raw history keeps the full records.
+- The summary plus retained records reconstruct identically after `--resume`.
+
+Interactive `/compact` runs the same context manager's manual compaction path. Automatic pressure and overflow recovery also apply in headless and interactive runs.
 
 ## Discovery metadata
 
