@@ -3,9 +3,9 @@
 Schway owns its agent loop, model abstraction, session format, tool execution,
 and context assembly. It does not depend on an orchestration framework.
 
-Choose a provider and model with `--provider` and `--model "<id>"`, or save
-them in [configuration](configuration.md#configuration-files), before running a
-task. Replace `<id>` with a model available to your account or endpoint. Commands
+Choose a model with `--model "<id>"`, or save it in
+[configuration](configuration.md#configuration-files), before running a task.
+Use `--provider` to override the default OpenAI provider. Replace `<id>` with a model available to your account or endpoint. Commands
 without those flags use your saved configuration. Headless mode ignores the TUI's
 remembered workspace model choice.
 

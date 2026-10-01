@@ -34,7 +34,7 @@ Alt+r
 Wait+Screen /Review · turn 1/
 Sleep 4s
 Escape
-Wait+Screen /Alt\+R review/
+Wait+Screen /Fixed clamp so it respects the upper bound/
 Sleep 1s
 Hide
 Ctrl+c

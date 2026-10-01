@@ -2,7 +2,7 @@
 
 ## Configuration files
 
-Schway does not select a model before you configure or sign in. Interactive launch with no config shows no model and will not send until one is usable. Headless runs need `--provider` and `--model`, or the same fields in config. Config files are never created automatically.
+Schway does not select a model before you configure or sign in. Interactive launch with neither config nor a remembered model choice shows no model and will not send until one is usable. Headless runs need `--model` or a model in config; `--provider` is optional when using the default OpenAI provider. Config files are never created automatically.
 
 Precedence, later wins:
 
