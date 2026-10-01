@@ -31,7 +31,8 @@ import { bashTool } from "../src/tools/bash.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}, submitOverride?: ConversationViewOptions["submit"], viewEnv: Record<string, string> = {}) {
+/** Build a real disposable conversation renderer with optional workspace and view dependencies. */
+async function setup(width = 80, height = 28, credentialEnv: Record<string, string> = {}, codexLogin?: CodexLoginRunner, overrides: Partial<TuiControllerOptions> = {}, submitOverride?: ConversationViewOptions["submit"], viewEnv: Record<string, string> = {}, viewOptions: Partial<ConversationViewOptions> = {}) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
   const session = overrides.session ?? createSession();
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
@@ -49,6 +50,7 @@ async function setup(width = 80, height = 28, credentialEnv: Record<string, stri
   terminal.renderer.copyToClipboardOSC52 = text => { copied.push(text); return true; };
   const view = createConversationView(terminal.renderer, {
     controller, workspaceRoot: "/project", home: "/home/test", env: viewEnv, secrets: ["secret-sentinel"],
+    ...viewOptions,
     quit: () => { quit = true; },
     openUrl: async url => { opened.push(url); },
     submit: submitOverride ?? ((value, accepted) => dispatchEditorInput(value, controller, async command => {
@@ -2753,4 +2755,93 @@ test("fresh review has exactly its empty message and no files", async () => {
   expect(ui.captureCharFrame()).toContain("No turn to review yet");
   ui.mockInput.pressEscape(); await settle(ui);
   expect(ui.controller.snapshot().changeReview).toBeUndefined();
+});
+
+
+test("header shrinks the path before the branch and restores both on resize", async () => {
+  await withTempDir(async temp => {
+    const home = join(temp, "home", "test");
+    const root = join(home, "Projects", "very-long-directory-name", "schway");
+    await mkdir(join(root, ".git"), { recursive: true });
+    const branch = "feature/a-very-long-branch-name-for-testing";
+    await writeFile(join(root, ".git/HEAD"), `ref: refs/heads/${branch}\n`);
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const ui = await setup(120, 28, {}, undefined, { workspace }, undefined, {}, { home });
+    const headers = new Map<number, string>();
+    for (const width of [120, 80, 50, 40, 39, 120]) {
+      ui.resize(width, 28); await settle(ui);
+      const line = ui.captureCharFrame().split("\n")[0]!.trimEnd();
+      expect(line).toContain("schway  ");
+      expect(line.match(/schway/g)).toHaveLength(2);
+      expect(Bun.stringWidth(line)).toBeLessThanOrEqual(width);
+      if (width >= 80) expect(line).toContain(` on ${branch}`);
+      if (width === 50 || width === 40) { expect(line).toContain("…/schway on feature/"); expect(line).toEndWith("…"); }
+      if (width < 40) expect(line).not.toContain(" on ");
+      if (headers.has(width)) expect(line).toBe(headers.get(width)!);
+      headers.set(width, line);
+    }
+    expect(headers.get(120)).toContain("~/Projects/very-long-directory-name/schway");
+  });
+});
+
+test("detached SHA and wide Unicode branch stay whole when the header has room", async () => {
+  for (const head of ["1234567abcdef1234567abcdef1234567abcdef1234", "ref: refs/heads/งาน/資料庫"]) await withTempDir(async home => {
+    const root = join(home, "Projects", "ทดสอบ");
+    await mkdir(join(root, ".git"), { recursive: true });
+    await writeFile(join(root, ".git/HEAD"), head + "\n");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const ui = await setup(80, 28, {}, undefined, { workspace }, undefined, {}, { home });
+    const line = ui.captureCharFrame().split("\n")[0]!;
+    expect(line).toContain("~/Projects/ทดสอบ");
+    expect(line).toContain(head.startsWith("ref:") ? " on งาน/資料庫" : " on 1234567");
+  });
+});
+
+test("splash preferences set and reset session and user fields without losing inline diff limits or loading a model", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, { model: undefined, stageSettings: async () => { throw new Error("Display settings must not load a model"); } });
+    for (const scope of ["session", "user"] as const) {
+      expect(await ui.controller.configCommand(`set ui {"inlineDiffLines":7} --scope ${scope}`)).toBe(true);
+      ui.controller.openPreferences();
+      if (scope === "user") { ui.controller.movePreference(1, "scope"); ui.controller.movePreference(1, "scope"); }
+      const rows = ui.controller.snapshot().preferences!.rows;
+      const index = rows.findIndex(row => row.key === "ui.splash");
+      expect(rows[index]!.choices).toEqual([undefined, "always", "first-run", "never"]);
+      ui.controller.movePreference(index);
+      ui.controller.movePreference(3, "choice");
+      expect(await ui.controller.selectPreference()).toBe(true);
+      expect(await ui.controller.selectPreference()).toBe(true);
+      if (scope === "session") expect(ui.configEditor.settings).toMatchObject({ splash: "never", inlineDiffLines: 7 });
+      else expect(await Bun.file(join(ui.home, ".schway/config.json")).json()).toEqual({ ui: { splash: "never", inlineDiffLines: 7 } });
+      ui.controller.movePreference(1, "choice");
+      expect(await ui.controller.selectPreference()).toBe(true);
+      expect(await ui.controller.selectPreference()).toBe(true);
+      if (scope === "session") expect(ui.configEditor.settings).toMatchObject({ splash: "first-run", inlineDiffLines: 7 });
+      else expect(await Bun.file(join(ui.home, ".schway/config.json")).json()).toEqual({ ui: { inlineDiffLines: 7 } });
+      ui.controller.closePreferences();
+    }
+    expect(await ui.controller.configCommand('set ui {"splash":"never"}')).toBe(true);
+    expect(ui.configEditor.settings).toMatchObject({ splash: "never", inlineDiffLines: 7 });
+    expect(ui.controller.describeConfig()).toContain('ui: {"splash":"never","inlineDiffLines":7}');
+    expect(await ui.controller.configCommand('set ui {"splash":"sometimes"}')).toBe(false);
+  });
+});
+
+
+test("narrow header hides a detached SHA rather than shortening its identity", async () => {
+  await withTempDir(async home => {
+    const root = join(home, "Projects", "abcdefghijklmnop");
+    await mkdir(join(root, ".git"), { recursive: true });
+    await writeFile(join(root, ".git/HEAD"), "1234567abcdef1234567abcdef1234567abcdef1234\n");
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const ui = await setup(120, 28, {}, undefined, { workspace }, undefined, {}, { home });
+    for (const width of [40, 44, 120, 40]) {
+      ui.resize(width, 28); await settle(ui);
+      const header = ui.captureCharFrame().split("\n")[0]!;
+      expect(header).toContain("abcdefghijklmnop");
+      if (width === 40) expect(header).not.toContain(" on ");
+      else expect(header).toContain(" on 1234567");
+      expect(header).not.toContain("1234…");
+    }
+  });
 });

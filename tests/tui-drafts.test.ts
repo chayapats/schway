@@ -251,3 +251,14 @@ test("unexpected exit writer rejection still restores terminal and never reports
     expect(await child.child.exited).toBe(0);
   } finally { await child.stop(); }
 }));
+
+
+test("cancelling a stalled splash-state read returns without opening the terminal", async () => withTempDir(async home => {
+  const child = await runProcess(home, "splash-read-abort");
+  try {
+    const result = await child.next();
+    expect(result).toMatchObject({ code: 0, stopped: false, destroyed: false, splashReads: 1, stderr: "" });
+    expect(await child.child.exited).toBe(0);
+    expect(await Bun.file(join(home, ".schway/ui-state.json")).exists()).toBe(false);
+  } finally { await child.stop(); }
+}));

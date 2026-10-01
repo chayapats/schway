@@ -6,11 +6,12 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry } from "./controller.ts";
 import { formatContextWindow } from "./model-picker.ts";
-import { activityDetail, displayText, fitLine, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
+import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
 import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
-import { SPLASH_DURATION_MS, SPLASH_MIN_SIZE, SplashRenderable } from "./splash.ts";
+import { SPLASH_DURATION_MS, SPLASH_ACCENT_DURATION_MS, SPLASH_MIN_SIZE, SplashRenderable } from "./splash.ts";
+import type { SplashPolicy } from "./splash-policy.ts";
 import { readGitHead } from "./git-head.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
@@ -32,8 +33,10 @@ export interface ConversationViewOptions {
   openUrl?(url: string): Promise<void>;
   /** Decorative motion policy; omitted means off so renderer fixtures stay frame-stable. */
   motion?: MotionMode;
-  /** Play the startup lightning splash when motion is full and the terminal is large enough. */
-  splash?: boolean;
+  /** Startup decoration policy; full falls back to accent below the splash minimum size. */
+  splash?: SplashPolicy;
+  /** Notify once after a painted full splash is removed, including input skips. */
+  onSplashPlayed?(): void;
   /** Animation clock in milliseconds; defaults to performance.now. */
   now?: () => number;
   /** Version shown beneath the splash wordmark. */
@@ -230,6 +233,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pickerOpenedAt: number | undefined;
   let rowsAnimating = false;
   let splash: SplashRenderable | undefined;
+  const fullSplash = options.splash === "full" && motion === "full" && renderer.width >= SPLASH_MIN_SIZE.width && renderer.height >= SPLASH_MIN_SIZE.height;
+  let accentPending = motion === "full" && (options.splash === "accent" || options.splash === "full" && !fullSplash);
+  let accentStartedAt: number | undefined;
+  let headerPath = "", headerBranch = "";
   let gitHead: { root: string; at: number; value?: string } | undefined;
   let pickerWasVisible = false;
   let bodyPadding = 2;
@@ -465,11 +472,23 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     activity.content = new StyledText([...lead, ...(chunkWidth(chunks) + (glyph ? 2 : 0) <= width ? chunks : [fg(color)(text)])]);
   }
 
+  /** Paint cached header text while only the bolt changes during the startup accent. */
+  function paintHeader(at: number) {
+    const k = accentStartedAt === undefined ? 0 : progress(at, accentStartedAt, SPLASH_ACCENT_DURATION_MS);
+    const bolt = accentPending || accentStartedAt !== undefined ? mixColor(theme.text, theme.bolt, k) : theme.bolt;
+    header.content = new StyledText([
+      bold(fg(bolt)("⚡")), fg(theme.text)(" "), bold(fg(theme.text)("schway")), fg(theme.muted)(headerPath ? `  ${headerPath}` : ""),
+      ...(headerBranch ? [fg(theme.muted)(" on "), fg(theme.violet)(headerBranch)] : []),
+    ]);
+  }
+
   /** Advance decorative motion without recomputing the transcript model. */
   function animate() {
     if (destroyed) return;
     const at = now();
     if (splash && (splash.elapsed() >= SPLASH_DURATION_MS || renderer.width < SPLASH_MIN_SIZE.width || renderer.height < SPLASH_MIN_SIZE.height)) endSplash();
+    if (accentStartedAt !== undefined && at - accentStartedAt >= SPLASH_ACCENT_DURATION_MS) accentStartedAt = undefined;
+    paintHeader(at);
     paintFooter(at);
     paintActivity(at);
     rowsAnimating = false;
@@ -483,12 +502,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     renderer.requestRender();
   }
 
-  const ticker = createTicker(animate, () => !destroyed && motion !== "off" && (!!splash || pill.spinning || rowsAnimating || pickerOpenedAt !== undefined || now() - pillChangedAt < 200));
+  const ticker = createTicker(animate, () => !destroyed && motion !== "off" && (!!splash || accentPending || accentStartedAt !== undefined || pill.spinning || rowsAnimating || pickerOpenedAt !== undefined || now() - pillChangedAt < 200));
 
   function endSplash() {
     if (!splash) return;
+    const painted = splash.hasPainted();
     splash.destroyRecursively();
     splash = undefined;
+    if (painted) options.onSplashPlayed?.();
     editor.showCursor = true;
     renderer.dropLive();
   }
@@ -600,16 +621,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
       editor.placeholder = panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
-      let path = workspace?.root ?? options.workspaceRoot;
-      if (path === options.home || path.startsWith(`${options.home}/`)) path = `~${path.slice(options.home.length)}`;
+      const workspacePath = workspace?.root ?? options.workspaceRoot;
+      const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
       const headRoot = workspace?.root ?? options.workspaceRoot;
       if (!gitHead || gitHead.root !== headRoot || Date.now() - gitHead.at > 2000) gitHead = { root: headRoot, at: Date.now(), value: readGitHead(headRoot) };
       const branchLabel = gitHead.value ? safe(gitHead.value) : "";
-      const pathRoom = Math.max(4, renderer.width - 14 - (branchLabel ? Bun.stringWidth(branchLabel) + 4 : 0));
-      header.content = new StyledText([
-        bold(fg(theme.bolt)("⚡")), fg(theme.text)(" "), bold(fg(theme.text)("schway")), fg(theme.muted)(`  ${fitLine(safe(path), pathRoom)}`),
-        ...(branchLabel && renderer.width >= 40 ? [fg(theme.muted)(" on "), fg(theme.violet)(fitLine(branchLabel, 24))] : []),
-      ]);
+      const room = Math.max(0, renderer.width - 2 - Bun.stringWidth("⚡ schway  "));
+      const final = safe(path).split("/").filter(Boolean).at(-1) ?? path;
+      const shortest = shortenWorkspacePath(safe(workspacePath), options.home, Bun.stringWidth(`…/${final}`));
+      const branchRoom = renderer.width >= 40 ? Math.max(0, room - Bun.stringWidth(shortest) - 4) : 0;
+      // A shortened detached commit is an identity, not a label we can abbreviate again.
+      const shortSha = /^[0-9a-f]{7}$/.test(branchLabel);
+      headerBranch = branchRoom > 0 && (!shortSha || branchRoom >= 7) ? fitLine(branchLabel, branchRoom) : "";
+      headerPath = shortenWorkspacePath(safe(workspacePath), options.home, room - (headerBranch ? Bun.stringWidth(headerBranch) + 4 : 0));
+      paintHeader(now());
       const nextPill = statusPill(snapshot, width < 32);
       if (nextPill.tone !== pill.tone) { pillFrom = pillColors(pill.tone).bg; pillChangedAt = now(); }
       pill = nextPill;
@@ -1322,6 +1347,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     transcript.scrollTo(targetTop + visualLine - Math.floor(transcript.viewport.height / 2));
   };
   const onFrame = () => {
+    if (accentPending) { accentPending = false; accentStartedAt = now(); ticker.ensure(); }
     if (preferenceScrollToEnd) { preferenceScrollToEnd = false; preferencePanel.scrollTo(preferencePanel.scrollHeight); }
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
@@ -1347,7 +1373,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const activityTimer = setInterval(() => { if (!destroyed && controller.snapshot().activity) refresh(); }, 250);
   const onPaste = () => { if (splash) { endSplash(); refresh(); } };
   renderer.keyInput.on("paste", onPaste);
-  if (options.splash && motion === "full" && renderer.width >= SPLASH_MIN_SIZE.width && renderer.height >= SPLASH_MIN_SIZE.height) {
+  if (fullSplash) {
     splash = new SplashRenderable(renderer, { now, theme: () => theme, version: options.version, seed: (Math.random() * 2 ** 32) >>> 0 });
     splash.onMouseDown = () => { endSplash(); refresh(); };
     renderer.root.add(splash);

@@ -256,7 +256,7 @@ export abstract class ControllerCore {
   protected abstract abortActiveTurn(): void;
   abstract applyEvent(event: RuntimeEvent, operationId?: number): void;
   abstract cancel(): void;
-  protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate?: boolean, appearanceOnly?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean>;
+  protected abstract changeSettings(prepare: () => Promise<ConfigTransaction>, message: () => string | undefined, failureMessage?: string, activate?: boolean, presentationOnly?: false | "appearance" | "ui", budgets?: { contextWindow?: number; maxOutput?: number }): Promise<boolean>;
   abstract closeModelPicker(): void;
   abstract describeThinking(): string;
   protected abstract thinkingSelection(): ReturnType<typeof resolveThinkingSelection>;

@@ -93,6 +93,18 @@ export const GitConfigSchema = Type.Object(
 /** Saved TUI appearance; auto follows terminal background detection. */
 export const AppearanceSchema = Type.Union([Type.Literal("auto"), Type.Literal("dark"), Type.Literal("light")]);
 
+/** Startup decoration preference; motion restrictions take precedence in the interactive UI. */
+export const SplashSettingSchema = Type.Union([Type.Literal("always"), Type.Literal("first-run"), Type.Literal("never")]);
+
+/** Validated interactive display settings; unknown keys are rejected. */
+export const UiConfigSchema = Type.Object({
+  inlineDiffLines: Type.Optional(Type.Integer({ minimum: 0 })),
+  splash: Type.Optional(SplashSettingSchema),
+}, { additionalProperties: false });
+
+/** User-selected startup decoration policy, before terminal motion and resume gates. */
+export type SplashSetting = Static<typeof SplashSettingSchema>;
+
 const PositiveInt = Type.Integer({ minimum: 1 });
 
 /** Environment-variable names referenced by profiles, never secret values. */
@@ -142,10 +154,7 @@ export const ConfigSchema = Type.Object(
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
     git: Type.Optional(GitConfigSchema),
     appearance: Type.Optional(AppearanceSchema),
-    ui: Type.Optional(Type.Object(
-      { inlineDiffLines: Type.Optional(Type.Integer({ minimum: 0 })) },
-      { additionalProperties: false },
-    )),
+    ui: Type.Optional(UiConfigSchema),
   },
   { additionalProperties: false },
 );
@@ -230,6 +239,8 @@ export interface ResolvedSettings {
   appearance: "auto" | "dark" | "light";
   /** Maximum changed rows shown inline; zero disables inline diffs. */
   inlineDiffLines: number;
+  /** Effective startup decoration preference; defaults to the first launch of each installed version. */
+  splash: SplashSetting;
 }
 
 /** Lowest-precedence settings. Files and CLI override these; nothing writes them. */
@@ -238,7 +249,7 @@ export const BUILTIN_DEFAULTS: ConfigLayer = {
   maxTurns: DEFAULT_MAX_TURNS,
   maxConcurrentTools: DEFAULT_MAX_CONCURRENT_TOOLS,
   git: { changeTracking: DEFAULT_GIT_CHANGE_TRACKING },
-  ui: { inlineDiffLines: DEFAULT_INLINE_DIFF_LINES },
+  ui: { inlineDiffLines: DEFAULT_INLINE_DIFF_LINES, splash: "first-run" },
 };
 
 const SECRET_KEY_ALIASES = new Set([
@@ -682,6 +693,7 @@ function finishResolvedSettings(input: {
     gitChangeTracking: input.merged.git?.changeTracking ?? DEFAULT_GIT_CHANGE_TRACKING,
     appearance: input.merged.appearance ?? "auto",
     inlineDiffLines: input.merged.ui?.inlineDiffLines ?? DEFAULT_INLINE_DIFF_LINES,
+    splash: input.merged.ui?.splash ?? "first-run",
     openaiAuth: input.merged.openaiAuth ?? "auto",
     xaiAuth: input.merged.xaiAuth ?? "auto",
     ...(input.merged.contextWindow !== undefined ? { explicitContextWindow: input.merged.contextWindow } : {}),

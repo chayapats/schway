@@ -24,6 +24,16 @@ function capture() {
   };
 }
 
+test("headless prompts, JSON output and subcommands never create interactive splash state", async () => {
+  await withTempDir(async home => {
+    for (const args of [["--model", "test-model", "-p", "hello"], ["--model", "test-model", "-p", "hello", "--json"], ["--help"]]) {
+      const result = await run(args, { env: { HOME: home, SCHWAY_MOTION: "full", OPENAI_API_KEY: "fixture-key" }, model: createScriptedModel({ text: "hello" }) });
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(await Bun.file(join(home, ".schway/ui-state.json")).exists()).toBe(false);
+    }
+  });
+});
+
 /** Run `runCli` against an in-memory IO harness. */
 async function run(
   argv: string[],

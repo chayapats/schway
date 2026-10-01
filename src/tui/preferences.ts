@@ -45,12 +45,13 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
     maxOutput: [undefined, 1024, 4096, 8192, 16384, 32768],
     git: [undefined, "off", "on-demand", "snapshot"],
     appearance: [undefined, "auto", "dark", "light"],
+    "ui.splash": [undefined, "always", "first-run", "never"],
   };
   if (scope === "memory") return [{ key: "workspace choice", value: safe(`${settings.provider}/${settings.model} (${settings.provider === "xai" ? settings.xaiAuth : settings.openaiAuth ?? settings.auth})`), origin: editor.origins.model ?? "built-in default",
     saved: layers.memory?.model ? safe(`${layers.memory.provider}/${layers.memory.model} (${(layers.memory.provider === "xai" ? layers.memory.xaiAuth : layers.memory.openaiAuth) ?? "provider auth"}); thinking ${layers.memory.thinking ?? "default"}; profile ${layers.memory.profile ?? "none"}`) : "unset",
     reset: "Reset removes only workspace memory; explicit config and session overrides remain.", choices: ["remember active choice", "reset workspace memory"] }];
-  return ["thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "git", "provider", "model", "profile", "auth", "openaiAuth", "xaiAuth", "appearance"].map(key => {
-    const origin = safe(editor.origins[key as keyof typeof editor.origins] ?? "built-in default");
+  return ["thinking", "maxTurns", "maxConcurrentTools", "contextWindow", "maxOutput", "git", "provider", "model", "profile", "auth", "openaiAuth", "xaiAuth", "appearance", "ui.splash"].map(key => {
+    const origin = safe(editor.origins[(key === "ui.splash" ? "ui" : key) as keyof typeof editor.origins] ?? "built-in default");
     const originScope = origin === "CLI" ? undefined : origin === "interactive memory" ? "memory" : origin === "user-global" ? "user" : origin === "project" ? "project" : origin === "current-session override" ? "session" : undefined;
     const memoryConflict = ["session", "cli", "project", "user"].flatMap(name => {
       const layer = layers[name], memory = layers.memory;
@@ -58,7 +59,7 @@ export function preferenceRows(editor: ConfigEditor, scope: PreferencesSnapshot[
       const conflict = ["provider", "profile", "openaiAuth", "xaiAuth"].find(field => layer[field] !== undefined && (layer[field] ?? undefined) !== memory[field]);
       return conflict ? [`${labels[name]} ${conflict} selection shadows workspace memory; reset that ${labels[name]} override to restore it.`] : [];
     })[0];
-    return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(describeEffectiveThinking(settings.provider, settings.thinking, settings.model, context))})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,
+    return { key, value: key === "thinking" ? `${safe(settings.thinking)} (effective: ${safe(describeEffectiveThinking(settings.provider, settings.thinking, settings.model, context))})` : safe(key === "appearance" && appearanceEnvironment ? appearanceEnvironment : key === "git" ? settings.gitChangeTracking : key === "ui.splash" ? settings.splash : settings[key as keyof typeof settings]), origin: key === "appearance" && appearanceEnvironment ? "environment" : origin,
       saved: Object.entries(layers).filter(([, layer]) => layer[key] !== undefined).map(([name, layer]) => `${labels[name]}=${safe(layer[key])}`).join("; ") || "No saved override",
       reset: key === "appearance" && appearanceEnvironment ? "SCHWAY_THEME overrides saved appearance. Remove it to use the saved preference; reset a scope to inherit auto." : memoryConflict ?? (origin.startsWith("profile ") ? "The selected profile supplies this value; reset its selection on the profile row or edit the named profile configuration." : origin === "CLI" ? "CLI shadows lower values: remove the launch flag to inherit." : originScope ? `Reset in ${labels[originScope]} to inherit lower values.` : "Inherited default; reset the selected scope to inherit."),
       choices: choices[key] ?? [undefined, "open model + route picker (activates and remembers)"] };

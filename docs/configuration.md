@@ -26,6 +26,8 @@ Textual commands remain available:
 /config reset model --scope project
 /config set appearance dark --scope user
 /config reset appearance --scope user
+/config set ui {"splash":"never"} --scope user
+/config reset ui --scope user
 ```
 
 `/config` (or Alt+P) opens keyboard preferences; `/config show` prints the textual inspection. Both show effective values and their origins: built-in default, interactive memory, user-global, project, CLI, or current-session override. Context/output limits show `catalog` when derived from model metadata (including conservative unknown-model fallback), and `explicit limit` when a layer supplies the limit. Connection headers and extra request bodies are shown as configured with values hidden; URLs omit credentials, queries and fragments, and known API keys are redacted.
@@ -43,7 +45,7 @@ Thinking choices come from supported model capabilities (verified account metada
 
 Malformed files, unavailable models, cancellation, and changes made by another writer retain the previous working state. Confirmation commits the transaction prepared for that preview, so a file changed between preview and confirmation is not overwritten. A lower value saved beneath CLI/session overrides is labeled **saved but not effective** with its overriding source.
 
-Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`, plus `git` and `appearance`. Appearance accepts `auto`, `dark`, or `light`; the launch environment `SCHWAY_THEME=dark|light` wins over every config scope. Animation is an environment choice only: `SCHWAY_MOTION=full|reduced|off` (see [TUI motion](tui.md#motion-and-startup-splash)). Limits must be positive integers. Providers are `openai`, `xai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
+Editable keys are `provider`, `model`, `thinking`, `profile`, `maxTurns`, `maxConcurrentTools`, `contextWindow`, `maxOutput`, `baseUrl`, `auth`, and `openaiAuth`, plus `git`, `appearance`, and `ui`. Appearance accepts `auto`, `dark`, or `light`; the launch environment `SCHWAY_THEME=dark|light` wins over every config scope. The `ui.splash` preference accepts `always`, `first-run` (default), or `never`. `SCHWAY_MOTION=full|reduced|off` controls motion, and reduced or off suppresses both splash and bolt accent regardless of `ui.splash` (see [TUI motion](tui.md#motion-and-startup-splash)). Limits must be positive integers. Providers are `openai`, `xai`, and `openai-compatible`; compatible endpoints require a `baseUrl`, and accept auth modes `required`, `optional`, or `none`. OpenAI accepts the separate credential preference `openaiAuth` (`auto`, `codex`, or `api-key`; see ChatGPT subscription below). Thinking syntax accepts `off`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; each provider/model only accepts verified supported levels. Codex levels come from the signed-in account's catalog. Model IDs, profile names, and URLs must be nonempty. Use double-quoted JSON strings when needed. Unsupported keys, including API-key/token fields, are rejected. Existing `headers`, `extraBody`, `profiles`, and `packages` are preserved but `headers`/`extraBody`/`profiles` definitions cannot be edited live; change those supported file settings outside the TUI and restart. `/config set profile <name>` and `/config reset profile` switch or clear the active profile. `/config set thinking medium` and `/config reset thinking` switch or clear reasoning; `/thinking` shows requested and effective levels with provider/model.
 
 Saving `baseUrl` with `--scope user` or `--scope project` requires an absolute URL without userinfo (`user:password@`) or a query string. All query strings are runtime-only, including non-secret parameters. Use session scope for those URLs; errors do not echo the rejected value. For example, `/config set baseUrl https://example.test/v1 --scope project` is supported, while `/config set baseUrl https://example.test/v1?region=test` applies only to the current session. Existing files are not automatically migrated: edits to other keys preserve their existing URL. Use `/config reset baseUrl --scope project` (or `--scope user`) or save a safe replacement to remove that file's URL override.
 
@@ -63,13 +65,30 @@ Then `/config set maxTurns 12 --scope project` saves 12 but reports that CLI val
 
 The renderer delegates operations to `TuiController` (`openModelPicker`, `searchModels`, `moveModelPicker`, `selectPickerModel`, `selectModel`, `selectProfile`, `thinkingCommand`, and `configCommand`). `loadConfigEditor` loads layers without creating files; `prepare`, `prepareModel`, and `prepareProfile` return validated transactions that change nothing until `commit`. `forWorkspace` stages the project layer for a session switch. `stageInteractiveSettings` constructs a changed provider adapter and matching context budget, reusing the current adapter for unrelated edits. This lets a session without startup credentials set a compatible endpoint URL before selecting its optional-auth provider.
 
+## Startup splash
+
+`ui.splash` chooses `always`, `first-run`, or `never`; the default is `first-run`.
+Alt+P exposes a **ui.splash** row with these choices and **Reset (inherit)**.
+Reset on that row removes only `splash` from the selected layer, preserving
+`ui.inlineDiffLines`. `/config set ui {"splash":"never"}` also preserves sibling
+keys in that same layer. `/config reset ui` deliberately removes the entire
+selected `ui` override. Across layers, the `ui` object still follows ordinary
+whole-object replacement precedence. Unknown `ui` keys and modes are rejected.
+
+The preference is read at launch. The first full splash of a version is recorded
+in `~/.schway/ui-state.json`; subsequent launches use a nonblocking bolt accent.
+Changing the installed version triggers another first-run splash. `never`,
+reduced/off motion and resume never play the full splash; small terminals use
+only the accent. See [startup behavior](tui.md#motion-and-startup-splash) for gates
+and best-effort state persistence.
+
 ## Inline file diffs
 
 Set `ui.inlineDiffLines` in user or project config to control how many changed rows appear beneath successful edits and newly created files. The default is `12`; `0` disables inline diffs. The value must be a non-negative integer. Larger diffs keep their result summary and expand through the tool details controls. Existing-file writes show their overwritten line count without a diff.
 
 ```json
 {
-  "ui": { "inlineDiffLines": 12 }
+  "ui": { "inlineDiffLines": 12, "splash": "first-run" }
 }
 ```
 

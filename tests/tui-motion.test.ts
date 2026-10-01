@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { BoxRenderable, RGBA, TextareaRenderable, type TextChunk } from "@opentui/core";
+import { BoxRenderable, RGBA, TextareaRenderable, TextRenderable, type TextChunk } from "@opentui/core";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createConversationView } from "../src/tui/view.ts";
@@ -10,7 +10,7 @@ import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
-import { SPLASH_DURATION_MS, SPLASH_LOGO, SPLASH_MIN_SIZE, SPLASH_TAGLINE, SplashCanvas, createSplashScene, renderSplashFrame } from "../src/tui/splash.ts";
+import { SPLASH_DURATION_MS, SPLASH_ACCENT_DURATION_MS, SPLASH_LOGO, SPLASH_MIN_SIZE, SPLASH_TAGLINE, SplashCanvas, createSplashScene, renderSplashFrame } from "../src/tui/splash.ts";
 import { resolveMotion } from "../src/tui/motion-policy.ts";
 import { shimmer, spinnerFrame } from "../src/tui/motion.ts";
 import { highlightCode } from "../src/tui/highlight.ts";
@@ -25,7 +25,8 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 const text = (chunks: readonly TextChunk[]) => chunks.map(chunk => chunk.text).join("");
 const theme = TUI_THEMES.dark;
 
-async function view(options: { width?: number; height?: number; splash?: boolean; motion?: "full" | "reduced" | "off" } = {}) {
+/** Build a disposable real renderer with an injected animation clock and observable startup lifecycle. */
+async function view(options: { width?: number; height?: number; splash?: "full" | "accent" | "none"; onSplashPlayed?: () => void; beforePaint?: boolean; motion?: "full" | "reduced" | "off" } = {}) {
   const terminal = await createTestRenderer({ width: options.width ?? 90, height: options.height ?? 26, kittyKeyboard: true });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({
@@ -33,15 +34,20 @@ async function view(options: { width?: number; height?: number; splash?: boolean
     model: createScriptedModel({ responses: [] }), contextManager: createContextManager(workspace), secrets: [],
     credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) },
   });
+  let liveCalls = 0;
+  const requestLive = terminal.renderer.requestLive.bind(terminal.renderer);
+  terminal.renderer.requestLive = () => { liveCalls++; requestLive(); };
   const clock = { now: 10_000 };
+  if (options.beforePaint) terminal.renderer.requestLive = () => {};
   const ui = createConversationView(terminal.renderer, {
     controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: [], quit() {}, submit: async () => {},
-    motion: options.motion ?? "full", splash: options.splash ?? true, now: () => clock.now, version: "9.9.9",
+    motion: options.motion ?? "full", splash: options.splash ?? "full", onSplashPlayed: options.onSplashPlayed, now: () => clock.now, version: "9.9.9",
   });
   cleanups.push(() => { ui.destroy(); controller.dispose(); terminal.renderer.destroy(); });
-  await terminal.renderOnce();
+  if (options.beforePaint) ui.destroy();
+  else await terminal.renderOnce();
   const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
-  return { ...terminal, ui, clock, editor, splash: () => terminal.renderer.root.findDescendantById("splash") };
+  return { ...terminal, ui, clock, editor, liveCalls: () => liveCalls, splash: () => terminal.renderer.root.findDescendantById("splash") };
 }
 
 test("splash scenes are deterministic per seed and cover the screen until the radial reveal", () => {
@@ -83,14 +89,14 @@ test("splash overlays startup, forwards the skipping key to the editor, and neve
   timed.ui.refresh();
   expect(timed.splash()).toBeUndefined();
 
-  for (const gated of [await view({ width: SPLASH_MIN_SIZE.width - 1 }), await view({ height: SPLASH_MIN_SIZE.height - 1 }), await view({ motion: "reduced" }), await view({ splash: false })]) {
+  for (const gated of [await view({ width: SPLASH_MIN_SIZE.width - 1 }), await view({ height: SPLASH_MIN_SIZE.height - 1 }), await view({ motion: "reduced" }), await view({ splash: "none" })]) {
     expect(gated.splash()).toBeUndefined();
     expect(gated.captureCharFrame()).not.toContain("███████╗");
   }
 });
 
 test("status bar shows one colored state pill with model and context, and the composer is a raised block", async () => {
-  const ui = await view({ splash: false, motion: "off" });
+  const ui = await view({ splash: "none", motion: "off" });
   const frame = ui.captureCharFrame();
   expect(frame).toContain("● READY");
   expect(frame).toContain("scripted/test-model");
@@ -222,4 +228,55 @@ test("a streaming answer shows a blinking caret outside code fences and none onc
   await terminal.renderOnce();
   expect(terminal.captureCharFrame()).toContain("Done.");
   expect(terminal.captureCharFrame()).not.toContain("▍");
+});
+
+
+test("bolt accent forwards input immediately, paints no overlay and settles within 300 ms", async () => {
+  const ui = await view({ splash: "accent" });
+  const header = ui.renderer.root.findDescendantById("header") as TextRenderable;
+  const color = () => header.chunks[0]!.fg!;
+  expect(ui.splash()).toBeUndefined();
+  expect(ui.editor.focused).toBe(true);
+  expect(ui.liveCalls()).toBe(0);
+  await ui.mockMouse.click(ui.editor.x + 1, ui.editor.y);
+  expect(color().equals(RGBA.fromHex(theme.bolt))).toBe(false);
+  await ui.mockInput.typeText("h");
+  await ui.mockInput.pasteBracketedText("ello");
+  expect(ui.editor.plainText).toBe("hello");
+  ui.clock.now += 300;
+  ui.ui.refresh();
+  await ui.renderOnce();
+  expect(color().equals(RGBA.fromHex(theme.bolt))).toBe(true);
+  expect(SPLASH_ACCENT_DURATION_MS).toBeLessThanOrEqual(300);
+  let requested = 0;
+  const requestRender = ui.renderer.requestRender.bind(ui.renderer);
+  ui.renderer.requestRender = () => { requested++; requestRender(); };
+  await Bun.sleep(80);
+  const settled = requested;
+  await Bun.sleep(80);
+  expect(requested).toBe(settled);
+  expect(ui.liveCalls()).toBe(0);
+});
+
+test("full splash completion is recorded once only if an overlay has painted", async () => {
+  for (const skip of ["time", "key", "paste", "click"] as const) {
+    let recorded = 0;
+    const ui = await view({ onSplashPlayed: () => { recorded++; } });
+    expect(recorded).toBe(0);
+    if (skip === "time") { ui.clock.now += SPLASH_DURATION_MS + 1; ui.ui.refresh(); }
+    else if (skip === "key") await ui.mockInput.typeText("h");
+    else if (skip === "paste") await ui.mockInput.pasteBracketedText("hello");
+    else await ui.mockMouse.click(2, 2);
+    await ui.renderOnce();
+    expect(ui.splash()).toBeUndefined();
+    expect(recorded).toBe(1);
+    ui.ui.destroy();
+    expect(recorded).toBe(1);
+  }
+  for (const options of [{ motion: "off" as const }, { motion: "reduced" as const }, { width: 40, height: 12 }, { splash: "none" as const }, { splash: "accent" as const }, { beforePaint: true }]) {
+    let recorded = 0;
+    const ui = await view({ ...options, onSplashPlayed: () => { recorded++; } });
+    ui.ui.destroy();
+    expect(recorded, JSON.stringify(options)).toBe(0);
+  }
 });

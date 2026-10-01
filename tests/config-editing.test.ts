@@ -4,6 +4,20 @@ import { join } from "node:path";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
 
+test("ui splash setting and field reset preserve sibling keys in session and disk layers", async () => {
+  await withTempDir(async home => {
+    const editor = await loadConfigEditor({ home, workspaceRoot: join(home, "project") });
+    for (const scope of ["user", "session"] as const) {
+      await (await editor.prepare({ scope, key: "ui", value: { inlineDiffLines: 7 } })).commit();
+      await (await editor.prepare({ scope, key: "ui", value: { splash: "never" } })).commit();
+      expect(editor.settings).toMatchObject({ splash: "never", inlineDiffLines: 7 });
+      await (await editor.prepare({ scope, key: "ui", value: { splash: undefined } })).commit();
+      expect(editor.settings).toMatchObject({ splash: "first-run", inlineDiffLines: 7 });
+      if (scope === "user") expect(await Bun.file(join(home, ".schway/config.json")).json()).toEqual({ ui: { inlineDiffLines: 7 } });
+    }
+  });
+});
+
 test("config edits preserve provenance and reset to lower precedence without creating files", async () => {
   await withTempDir(async (dir) => {
     const home = join(dir, "home");

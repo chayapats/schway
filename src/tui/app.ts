@@ -1,6 +1,8 @@
 import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
 import { version } from "../../package.json";
+import { resolveSplash, type SplashPolicy } from "./splash-policy.ts";
+import { readSplashSeenVersion, recordSplashSeenVersion } from "./ui-state.ts";
 import { resolveMotion } from "./motion-policy.ts";
 import { createContextManager, type ContextManager } from "../context/manager.ts";
 import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
@@ -384,6 +386,10 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
     for (const diagnostic of workspaceDiagnostics) controller.notice(diagnostic);
     try {
+      const motion = resolveMotion(env);
+      const seen = settings.splash === "first-run" && motion === "full" && !io.args.resume
+        ? await readSplashSeenVersion(home, io.signal) : undefined;
+      if (io.signal?.aborted) return 0;
       await runTuiRenderer({
         controller,
         initialize: settings.model.length > 0 && !model && !startupError ? () => controller.initializeStartup(initialize) : undefined,
@@ -400,7 +406,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
         signal: io.signal,
         stderr: io.stderr,
         diagnostics,
-        splash: !io.args.resume,
+        splash: resolveSplash(settings.splash, motion, seen, version, !!io.args.resume),
       });
     } catch (error) {
       diagnostics.record("tui", "renderer_failed", { category: "terminal_setup" }, "error");
@@ -447,6 +453,7 @@ export async function stageInteractiveSettings(
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
+/** Own renderer lifecycle and bounded decorative persistence around interactive input. */
 async function runTuiRenderer(options: {
   controller: TuiController;
   initialize?: () => Promise<void>;
@@ -463,8 +470,8 @@ async function runTuiRenderer(options: {
   signal?: AbortSignal;
   stderr: TuiWriter;
   diagnostics: DiagnosticSink;
-  /** Offer the startup splash; resumed sessions skip it to return to work immediately. */
-  splash?: boolean;
+  /** Startup decoration policy resolved from interactive settings, version state and resume intent. */
+  splash: SplashPolicy;
 }): Promise<void> {
   const { createCliRenderer } = await loadCredentialSafeTui();
   const { createConversationView } = await import("./view.ts");
@@ -478,6 +485,7 @@ async function runTuiRenderer(options: {
   });
   let quit = false;
   let quitting = false;
+  let splashRecording: Promise<void> | undefined;
   let view: ReturnType<typeof createConversationView> | undefined;
   const onAbort = () => {
     quit = true;
@@ -499,6 +507,7 @@ async function runTuiRenderer(options: {
       env: options.env, secrets: options.secrets, quit: finishQuit,
       openUrl: openBrowserUrl,
       motion: resolveMotion(options.env), splash: options.splash, version,
+      onSplashPlayed: () => { splashRecording = recordSplashSeenVersion(options.home, version); },
       submit: (value, accepted) => dispatchEditorInput(value, options.controller, async (command, onAccepted) => {
         return handleSlashCommand(command.name, command.args, {
           controller: options.controller,
@@ -549,6 +558,13 @@ async function runTuiRenderer(options: {
       renderer.destroy();
     } catch (error) {
       options.stderr.write(`Failed to restore terminal: ${messageOf(error)}\n`);
+    }
+    // Restore the terminal first; a best-effort decorative write cannot hold exit open.
+    if (splashRecording) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([splashRecording, new Promise<void>(resolve => { timer = setTimeout(resolve, 100); })]);
+      } finally { clearTimeout(timer); }
     }
     if (draft && "timedOut" in draft && draft.timedOut) options.stderr.write("Draft checkpoint timed out; unsaved input was not confirmed saved.\n");
     else if (draft?.failed) options.stderr.write("Draft checkpoint failed; unsaved input was not confirmed saved.\n");

@@ -38,7 +38,7 @@ async function setup(width = 110, height = 60, model: Model = createScriptedMode
     credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model }) },
   });
   const view = createConversationView(terminal.renderer, { controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: [],
-    motion: "reduced", splash: false, now: () => 0, quit: () => {}, submit: value => controller.submit(value),
+    motion: "reduced", splash: "none", now: () => 0, quit: () => {}, submit: value => controller.submit(value),
   });
   cleanups.push(() => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); });
   const transcript = terminal.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
