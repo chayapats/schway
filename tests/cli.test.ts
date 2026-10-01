@@ -139,7 +139,11 @@ test("invalid options print only the command-specific error and help hint", asyn
   });
   expect(await run(["doctor", "--bogus"], { env: {} })).toEqual({
     exitCode: 2, stdout: "",
-    stderr: "Invalid doctor options. Check doctor flags.\nRun 'schway doctor --help' for usage.\n",
+    stderr: "Unknown option: --bogus\nRun 'schway doctor --help' for usage.\n",
+  });
+  expect(await run(["doctor", "--max-turns"], { env: {} })).toEqual({
+    exitCode: 2, stdout: "",
+    stderr: "Missing value for --max-turns\nRun 'schway doctor --help' for usage.\n",
   });
 });
 

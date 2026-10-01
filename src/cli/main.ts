@@ -100,7 +100,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       return 1;
     }
     if ("error" in parsedDoctor || parsedDoctor.args.prompt || parsedDoctor.args.resume || parsedDoctor.args.branch) {
-      io.stderr.write(`Invalid doctor options. ${"error" in parsedDoctor ? "Check doctor flags." : "Doctor does not accept prompts or session resume."}\nRun 'schway doctor --help' for usage.\n`);
+      const error = "error" in parsedDoctor ? parsedDoctor.error : "Invalid doctor options. Doctor does not accept prompts or session resume.";
+      io.stderr.write(`${error}\nRun 'schway doctor --help' for usage.\n`);
       return 2;
     }
     if (parsedDoctor.args.help) {
