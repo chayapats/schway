@@ -69,7 +69,7 @@ test("pruning excludes concurrent manifest publication and a retried turn keeps 
       `;
       const contender = Bun.spawn([process.execPath, "--eval", script], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
       const [code, output] = await Promise.all([contender.exited, new Response(contender.stdout).text()]);
-      expect(code).toBe(0); expect(output).toContain("Undo store is updating");
+      expect(code).toBe(0); expect(output).toContain("Undo store busy");
       paused.release(); expect(await paused.child.exited, await paused.error).toBe(0);
       await store.capture({ sessionId: "session", turnId: "new", turnNumber: 2 }, join(home, "new-file"));
       const manifest = (await store.list("session")).find(m => m.turnId === "new")!;
@@ -160,7 +160,7 @@ test("a session without undo data can be deleted while an unrelated store operat
       await deleteJsonlSession({ directory, home, id: session.header.id });
       expect(await Bun.file(join(directory, session.header.id + ".jsonl")).exists()).toBe(false);
       expect((await store.list("session"))[0]?.turnId).toBe("seed");
-      await expect(deleteUndoSession({ home, sessionId: "session" })).rejects.toThrow("Undo store is updating");
+      await expect(deleteUndoSession({ home, sessionId: "session" })).rejects.toThrow("Undo store busy");
       paused.release(); expect(await paused.child.exited, await paused.error).toBe(0);
     } finally { await paused.stop(); }
   });
@@ -183,9 +183,9 @@ test("in-flight blob publication excludes pruning and every other store mutation
         () => store.recordShell(seed, { detection: "unavailable" }),
         () => deleteUndoSession({ home, sessionId: "session" }),
       ];
-      for (const operation of operations) await expect(operation()).rejects.toThrow("Undo store is updating");
+      for (const operation of operations) await expect(operation()).rejects.toThrow("Undo store busy");
       // A failed contender must not release the holder's lock in this or another process.
-      await expect(pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1 })).rejects.toThrow("Undo store is updating");
+      await expect(pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1 })).rejects.toThrow("Undo store busy");
       paused.release(); expect(await paused.child.exited, await paused.error).toBe(0);
       await pruneUndoStore({ home, maxAgeDays: 30, maxSizeBytes: 1000000 });
       const manifests = await store.list("session"); expect(manifests).toHaveLength(2);

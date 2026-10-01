@@ -229,7 +229,7 @@ async function withStoreLock<T>(home: string, operation: () => Promise<T>): Prom
   try {
     try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
     catch (error) {
-      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw Object.assign(new Error("Undo store is updating · Retry when finished"), { code: "UNDO_STORE_BUSY" });
+      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw Object.assign(new Error("Undo store busy"), { code: "UNDO_STORE_BUSY" });
       throw error;
     }
     return await operation();

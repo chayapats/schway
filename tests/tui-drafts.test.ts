@@ -285,7 +285,7 @@ test.skipIf(process.platform === "win32")("failed undo directory removal keeps t
   } finally { await chmod(blocked, 0o700); ui.close(); }
 }));
 
-test("busy session deletion shows a retry command and retains its storage reason only in details", async () => withTempDir(async home => {
+test("busy session deletion shows the required reason and retry command while retaining details", async () => withTempDir(async home => {
   const ui = await setup(home), id = ui.session.header.id;
   ui.session.append({ type: "user", id: "accepted", content: [{ type: "text", text: "Saved turn" }] });
   await openUndoStore({ home }).recordShell({ sessionId: id, turnId: "accepted", turnNumber: 1 }, { detection: "unavailable" });
@@ -296,12 +296,13 @@ test("busy session deletion shows a retry command and retains its storage reason
     ui.view.refresh(); await ui.renderOnce();
     await ui.mockInput.pasteBracketedText(`/delete-session ${id}`); ui.mockInput.pressEnter(); await ui.submitted();
     ui.view.refresh(); await ui.renderOnce();
-    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Cannot delete session · /delete-session retry · Ctrl+I details");
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Cannot delete session: Undo store busy · /delete-session retry · Ctrl+I details");
     expect(ui.captureCharFrame()).toContain("/delete-session retry");
-    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
-    expect(ui.captureCharFrame()).not.toContain("Undo store is updating");
+    expect(ui.captureCharFrame()).toMatch(/Ctrl\+I\s+(?:▌\s*)?details/);
+    expect(ui.captureCharFrame()).toContain("Cannot delete session: Undo store busy");
+    expect(ui.captureCharFrame()).not.toContain("UNDO_STORE_BUSY");
     expect(await Bun.file(join(sessionsDirectory(home), `${id}.jsonl`)).exists()).toBe(true);
     ui.mockInput.pressKey("i", { ctrl: true }); ui.view.refresh(); await ui.renderOnce();
-    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Undo store is updating · Retry when finished");
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Details · Esc keep editing\nUndo store busy");
   } finally { lock.close(); ui.close(); }
 }));

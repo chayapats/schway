@@ -79,7 +79,7 @@ for (const mode of ["interactive", "headless"]) for (const failure of [false, tr
         assert(requests === (mode === "interactive" ? 2 : 1), "model work did not complete");
         if (lock) {
           try { await store.recordShell(turn, { detection: "unavailable" }); throw new Error("Contender released the original lock"); }
-          catch (error) { assert(error.message.includes("Undo store is updating"), error.message); }
+          catch (error) { assert(error.message.includes("Undo store busy"), error.message); }
           lock.close();
           await store.recordShell(turn, { detection: "unavailable" });
         }

@@ -630,7 +630,7 @@ export async function handleSlashCommand(
       if (id === ctx.controller.snapshot().sessionId) { ctx.controller.fail("Switch away with /new before deleting this session."); return false; }
       try { await deleteJsonlSession({ directory: ctx.sessionsDir, home: ctx.home, id }); ctx.controller.notice("Session and draft deleted · /sessions browse"); return true; }
       catch (error) {
-        if (isErrno(error, "UNDO_STORE_BUSY")) ctx.controller.fail("Cannot delete session · /delete-session retry · Ctrl+I details", messageOf(error));
+        if (isErrno(error, "UNDO_STORE_BUSY")) ctx.controller.fail("Cannot delete session: Undo store busy · /delete-session retry · Ctrl+I details", messageOf(error));
         else ctx.controller.fail(`Cannot delete session: ${messageOf(error)}`);
         return false;
       }

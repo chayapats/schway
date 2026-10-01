@@ -52,7 +52,7 @@ export const SCREENS: readonly Screen[] = [
   { id: "undo-preview-no-git", title: "Undo without Git", description: "Undo restores file-tool changes when shell detection is unavailable.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); await enter(ui, "/undo");
   }, ready: s => !!s.undoPreview },
-  { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion keeps its reason in details and names the retry command.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session ·")) },
+  { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion names its reason, retry command and details action.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session: Undo store busy ·")) },
   { id: "recent-work-resume", title: "Recent work resume", description: "A saved conversation is offered for resumption.", drive: async ui => { await ui.controller.offerRecentSession(ui.sessionDirectory!); }, ready: s => !!s.recentSession },
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },

@@ -1,7 +1,7 @@
 schway-screen 1
 screen delete-session-busy
 title Session deletion retry
-description A busy session deletion keeps its reason in details and names the retry command.
+description A busy session deletion names its reason, retry command and details action.
 variant dark-50
 size 50x30
 cursor 35 27 visible
@@ -9,8 +9,8 @@ cursor 35 27 visible
  ⚡ schway  ~/demo
 
  ▌ ! Error
- ▌ Cannot delete session · /delete-session
- ▌ retry · Ctrl+I details
+ ▌ Cannot delete session: Undo store busy · /
+ ▌ delete-session retry · Ctrl+I details
 
 
 
@@ -53,14 +53,14 @@ cursor 35 27 visible
 03 0-1 #ffffff #0e1117 -
 03 1-2 #f79d9d #2a2227 -
 03 2-3 #ffffff #2a2227 -
-03 3-43 #f79d9d #2a2227 -
-03 43-48 #ffffff #2a2227 -
+03 3-45 #f79d9d #2a2227 -
+03 45-48 #ffffff #2a2227 -
 03 48-50 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
 04 1-2 #f79d9d #2a2227 -
 04 2-3 #ffffff #2a2227 -
-04 3-25 #f79d9d #2a2227 -
-04 25-48 #ffffff #2a2227 -
+04 3-40 #f79d9d #2a2227 -
+04 40-48 #ffffff #2a2227 -
 04 48-50 #ffffff #0e1117 -
 05 0-50 #ffffff #0e1117 -
 06 0-50 #ffffff #0e1117 -
