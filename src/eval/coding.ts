@@ -72,8 +72,12 @@ export interface CodingEvalResult {
   sourceRevision: string;
   provider: string;
   model: string;
+  /** Billing route, independent of provider conversation names. */
+  billing: "usage" | "subscription";
+  /** Safe prerequisite reason for unavailable subscription routes. */
+  reason?: "not_signed_in";
   settings: EvalSettings;
-  outcome: "success" | "grader_failure" | "model_failure" | "harness_error" | "timeout" | "skipped_prerequisites" | "skipped_spend_cap";
+  outcome: "success" | "grader_failure" | "model_failure" | "harness_error" | "timeout" | "skipped_prerequisites" | "skipped_spend_cap" | "skipped";
   /** Estimated USD spend for this case, set by the eval runner from recorded usage and the route price. */
   spendUsd?: number;
   /** False when some attempts reported no usage, making `spendUsd` a lower bound. */
@@ -190,7 +194,7 @@ export async function runCodingEval(options: {
   return {
     runId, case: { id: selected?.id ?? CODING_CASE.id, version: selected?.version ?? CODING_CASE.version },
     sourceRevision: options.sourceRevision, provider: options.model.provider, model: options.model.id,
-    settings, outcome, durationMs: Math.round(performance.now() - start), grader, metrics,
+    billing: "usage", settings, outcome, durationMs: Math.round(performance.now() - start), grader, metrics,
     ...(selected?.id === "parallel-read" ? { readOverlap } : {}),
   };
 }
@@ -302,7 +306,7 @@ export function failedCodingEval(provider: string, model: string, sourceRevision
 function unstartedEval(provider: string, model: string, sourceRevision: string, settings: EvalSettings, outcome: "harness_error" | "skipped_prerequisites" | "skipped_spend_cap", caseId?: string): CodingEvalResult {
   const selected = DAILY_CASES.find(item => item.id === caseId);
   return { runId: crypto.randomUUID(), case: { id: selected?.id ?? CODING_CASE.id, version: selected?.version ?? CODING_CASE.version },
-    sourceRevision, provider, model, settings, outcome,
+    sourceRevision, provider, model, billing: "usage", settings, outcome,
     durationMs: 0, grader: null, metrics: createEvalMetricsPlaceholder() };
 }
 

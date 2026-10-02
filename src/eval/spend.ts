@@ -2,6 +2,7 @@ import type { EvalMetrics } from "./metrics.ts";
 
 /** USD per million tokens for one model. */
 export interface TokenPrice {
+  billing?: "subscription";
   inputPerMillion: number;
   outputPerMillion: number;
 }
@@ -15,14 +16,18 @@ export interface SpendEstimate {
 /** Price of routes that never bill per token. */
 export const FREE: TokenPrice = { inputPerMillion: 0, outputPerMillion: 0 };
 
+/** Flat-rate routes consume plan quota without per-token USD charges. */
+export const SUBSCRIPTION: TokenPrice = { ...FREE, billing: "subscription" };
+
 /** Published API-key list prices; models absent here need explicit prices. */
 const PRICES: Record<string, TokenPrice> = {
   "openai:gpt-5": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "openai:gpt-5-mini": { inputPerMillion: 0.25, outputPerMillion: 2 },
 };
 
-/** Resolve a route's price: explicit flags win, offline and subscription routes are free, unknown paid models are `undefined`. */
+/** Resolve flat-rate routes first, then explicit or known API prices; unknown paid models are `undefined`. */
 export function resolvePrice(provider: string, model: string, explicit?: TokenPrice): TokenPrice | undefined {
+  if (provider === "codex" || provider === "grok") return SUBSCRIPTION;
   if (provider === "scripted" || provider === "subscription") return FREE;
   if (explicit) return explicit;
   return PRICES[`${provider}:${model}`];
@@ -30,6 +35,7 @@ export function resolvePrice(provider: string, model: string, explicit?: TokenPr
 
 /** Convert reported token totals to USD, marking missing or interrupted usage as a lower bound. */
 export function estimateSpendUsd(metrics: Pick<EvalMetrics, "inputTokens" | "outputTokens" | "unknownInputAttempts" | "unknownOutputAttempts" | "incompleteAttempts">, price: TokenPrice): SpendEstimate {
+  if (price.billing === "subscription") return { usd: 0, exact: true };
   const usd = ((metrics.inputTokens ?? 0) * price.inputPerMillion + (metrics.outputTokens ?? 0) * price.outputPerMillion) / 1_000_000;
   return { usd: roundUsd(usd), exact: metrics.unknownInputAttempts === 0 && metrics.unknownOutputAttempts === 0 && metrics.incompleteAttempts === 0 && metrics.inputTokens !== null && metrics.outputTokens !== null };
 }
