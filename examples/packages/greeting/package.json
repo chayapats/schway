@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "files": ["greet.ts", "skills"],
-  "peerDependencies": { "schway": "^0.6.0" },
+  "peerDependencies": { "schway": "^1.0.0-rc.1" },
   "schway": {
     "extensions": ["greet.ts"],
     "skills": ["skills/greeting"]
