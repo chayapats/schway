@@ -47,7 +47,7 @@ export const CODEX_RESPONSES_URL =
 /** Codex backend catalog used for account-scoped subscription model choices. */
 export const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
 /** Codex CLI protocol version verified against the subscription catalog; not Schway's package version. */
-export const CODEX_CATALOG_CLIENT_VERSION = "0.156.1";
+export const CODEX_CATALOG_CLIENT_VERSION = "0.160.0";
 /** Account header carrying the verified JWT chatgpt_account_id alongside the Bearer token. */
 export const CODEX_ACCOUNT_HEADER = "ChatGPT-Account-Id";
 /** JWT claim namespace whose chatgpt_account_id identifies the billed ChatGPT account. */
