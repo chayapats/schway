@@ -1,5 +1,186 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## 0.6.0 release (2026-10-02)
+
+**Verdict: release preparation pending.**
+
+This section tracks offline preparation for
+[#157](https://github.com/chayapats/schway/issues/157). It does not establish
+publication or actual-merge-commit verification. `R` is pending the release PR's
+merge to `main`; tag `v0.6.0`, npm publication and the stable dist-tag check are
+pending. Raw reports remain private, outside Git, in
+`~/schway-release-evidence/0.6.0/v06-20261001T143347Z-issue-157/`.
+Rebased-candidate reports use its `resume2/` subdirectory; earlier reports are
+retained as historical evidence.
+
+### Preconditions and candidate contents
+
+On 2026-10-02 (Asia/Bangkok), #152, #153, #154, #155 and #156 were closed.
+Their integrated contracts were inspected at pinned base
+`50c9eccda0a032731e1696d888d0cc53a220c67b`.
+`gh issue list --milestone 0.6 --state open` listed only #157; open P0 and P1
+queries were both empty. Round 1 in [the dogfood log](dogfood-log.md#friction)
+reported P0 0 / P1 0, so no round-1 P0/P1 fixes were required. Recheck these
+queries before publication.
+
+The release branch was rebased onto the coordinator's exact updated main,
+`9fa79aa0a7316d000585d76ae2a532c29e0dc941`. Both original release-preparation
+commits were retained with unchanged patches. This main also includes
+PR #217 (Codex device sign-in, #216), PR #218 (headless saved-session
+discovery, #209), and PR #219 (exact, secret-safe session ID preambles).
+#209 was round-1 P2 friction, not a P0/P1 release blocker. The changelog's new
+Fixed entries cover these later changes; they do not invent round-1 P0/P1 fixes.
+
+The candidate sets `package.json` to `0.6.0` and both the greeting-package peer
+range and the maintained extension-guide example to `^0.6.0`. The README peer
+example moved to `docs/extensions.md` in #150. The changelog describes file undo,
+shell changes, non-Git workspaces, retention defaults, approval modes, the
+extension tool effect declaration and these newly merged user-visible changes.
+Headless JSON emits the exact persisted ID through `session.ready`; the preamble
+is suppressed if that ID would expose a collected secret. Device sign-in now
+uses the current ChatGPT device authorization flow. Its protocol tests are
+offline evidence; this preparation does not claim a new live device approval.
+
+The session policy follows the persisted implementation: new sessions use
+format 4; formats 1–4 remain readable. Ordinary format-3 writes do not upgrade
+the file. The first operation containing `turn_undo` appends a format-4 marker
+before that operation, preserving prior bytes. Schway 0.5 and earlier reject
+format-4 files, including upgraded sessions. Downgrade is not supported.
+Reading a 0.5 session does not create undo pre-images for its old turns.
+
+#158 remained open at preparation time. As #157 permits, #158 must backfill the
+0.6.0 session fixture from npm after publication; no fixture-generation claim
+is made here.
+
+### Offline candidate verification
+
+These are pre-merge checks, not actual-`R` evidence. Frozen install, typecheck,
+the full suite and package dry-run passed on clean rebased source candidate
+`bd95142801f1029e034d485dd6542f28982c7b48`. The subsequent commit only updates
+this evidence document. The managed worker's updated handoff records the final
+documentation revision.
+
+The earlier clean candidate `201dca08a7b30ea887880d2b0377c959e37fa921` passed
+frozen install, typecheck, 2,035 tests across 122 files (0 failures, 181.45 seconds)
+and package dry-run before PRs #217–#219 were included. Those retained results
+do not verify the updated source candidate.
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| Rebased `bun install --frozen-lockfile` | 0 | 27 installs / 53 packages checked; no changes |
+| Rebased `bun run typecheck` | 0 | Updated candidate typecheck passed |
+| Rebased focused CLI, Codex and demo tests | 0 | 124 tests across 3 files; 0 failures; 1.74 seconds |
+| Rebased candidate full `bun test` | 0 | 2,040 tests across 122 files; 0 failures; 183.62 seconds |
+| `bun run demo:record` | 0 | Scripted offline model; GIF 212,814 bytes, below 2,097,152 bytes |
+| Rebased candidate `npm pack --dry-run --json` | 0 | 160 files; CLI, source, examples, declared user docs and changelog present; tests, scratch and release evidence absent |
+
+The demo was recorded with task-local VHS 0.10.0, ttyd 1.7.7 and DejaVu Sans
+Mono through a temporary fontconfig file. Frame review confirmed the ready
+screen, inline diff, outcome and two-column review, with no splash, private
+paths or real provider names. The coordinator independently inspected the
+final GIF at 0, 4, 8 and 10.5 seconds and confirmed visual QA passed. Its SHA256
+is `bdd51b4838fe227c84492016687ffd41f29511fcd4dcbce3cef260378fbe6474`.
+PRs #217–#219 do not change the demo fixture, tape or rendered conversation and
+review surfaces. The approved GIF and hash remain unchanged. This release
+preparation changes no TUI source or screen-catalog goldens.
+
+After merge, rerun frozen install, typecheck and the full suite on clean `R`,
+record its SHA and test count, and inspect `npm pack --dry-run` again on `R`.
+Pre-merge checks do not replace those release gates.
+
+The complete updated candidate stdout/stderr log is
+`/tmp/v06-issue157-resume2-full-suite.log`, also preserved under `resume2/`
+in the private evidence directory. All failure/error sections and final totals
+were inspected: no failures or error sections. The complete earlier log is
+`/tmp/v06-20261001T143347Z-issue-157-full-suite.log`, also preserved in the
+private evidence directory. Its final totals and all failure/error sections
+were inspected: no failures or error sections. Toolchain: Linux
+7.2.5-3-omarchy, Bun 1.4.2, Node 26.8.2 and npm 11.19.1.
+
+### Five-lane live smoke — pending
+
+The operator selected the five models below with `medium` reasoning and
+`https://openrouter.ai/api/v1` as the compatible endpoint, authorizing USD 1 per
+route and USD 5 total, including the compatible upgrade within its route's
+allowance. No live smoke ran for 0.6.0. Catalog-only preflight found all selected
+models; the authorized routine Grok refresh and subsequent catalog both returned
+HTTP 200, with `grok-4.7` advertising `medium`. Credentials remained in the native
+secure store. Catalog access is not inference evidence and must be rechecked on
+the actual release commit.
+
+The following rows are selected-run placeholders, not runner output; no live
+auth source, timestamp or revision has been observed for 0.6.0. Run the
+all-provider smoke from [the release checklist](releasing.md#3-live-verification-on-the-release-commit)
+on `R`, with the operator's explicit selections, and replace these rows with
+actual evidence. Every lane must pass; repair access and rerun pending/skipped
+lanes, and file any failed lane as P1 before release. Full live evals are outside
+#157's scope.
+
+| Route | Provider (smoke lane) | Model | Thinking | Auth source | Status | Reason | Tested at (UTC) | Revision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ChatGPT subscription | `codex` | `gpt-6-sol` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| Grok subscription | `grok` | `grok-4.7` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| OpenAI key | `openai-api-key` | `gpt-6-luna` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| xAI key | `xai-api-key` | `grok-4.7` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| Compatible endpoint | `compatible` | `meta/muse-spark-1.3-contributor` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+
+### Publication and clean-HOME upgrade — pending
+
+The coordinator's preliminary registry check at
+`2026-10-01T19:36:55.948610+00:00` observed `npm whoami` = `chayapats`, separate
+package-access evidence = `schway: read-write`, and stable `latest` = `0.5.0`
+(each exit 0). `npm view schway@0.6.0` returned E404 (exit 1); this was checked
+separately from package ownership. Recheck identity/rights, the unused version
+and any required npm 2FA when publication is authorized. On 2026-10-02, the
+coordinator reported renewed npm authentication with `npm whoami` = `chayapats`.
+This does not replace the remaining publish checks. No publish or tag was
+performed by the worker; its only credential write was the explicitly authorized
+routine refresh of the existing Grok identity during runtime preflight. Follow
+[the release checklist](releasing.md#4-publish-and-tag) on clean `R`, then the
+specific 0.5-to-0.6 upgrade procedure in #157. A temporary HOME does not isolate
+the OS secure store; keep production accounts unchanged.
+
+Preliminary setup only: a private isolated HOME, Git workspace and installation
+prefix were prepared under the evidence directory's `upgrade-preliminary/`.
+The workspace commits `a.ts` containing `export const x = 1;`.
+Git init/add/commit, exact registry `schway@0.5.0` installation and its
+`doctor --json` each exited 0; doctor reported `0.5.0`. Child-process HOME and
+XDG paths were isolated; the invoking HOME and daily installation were unchanged.
+No login/logout, secure-store mutation, live turn or 0.6.0 registry install ran.
+No session JSONL exists in this preliminary HOME. Setup commands, doctor JSON
+and stdout/stderr remain private beside the preserved workspace and prefix.
+This is preparation for the first upgrade step, not live upgrade or actual-`R`
+evidence.
+
+| Upgrade step from #157 | Exit | Result still required |
+| --- | --- | --- |
+| Set up isolated Git workspace; install registry `schway@0.5.0`; run doctor | 0 (preliminary) | Version `0.5.0` observed; preserve setup for the later live upgrade |
+| Create session A through the selected compatible endpoint; copy `A.before` | Not run | Exit 0; exactly one saved session |
+| Create interactive draft session B; wait 2 seconds and exit | Not run | Record B's ID; `draft survives upgrade` remains unsent |
+| Install registry `schway@0.6.0`; run doctor | Not run | Version `0.6.0` |
+| Resume A through the selected endpoint; compare prior byte prefix | Not run | Exit 0; answer refers to `a.ts`; `cmp` exit 0 |
+| Resume B interactively | Not run | Composer restores `draft survives upgrade` without sending |
+| Open `/undo` in A; inspect default approval status | Not run | `Nothing to undo`; no approval chip in default `auto` |
+
+Record every actual step's result and exit code after publication. Deterministic
+candidate tests do not replace this published-version live upgrade check.
+
+The generic clean-registry checks in `docs/releasing.md` also remain pending,
+in a separate fresh installation HOME: help, doctor version, no-model guidance,
+one compatible `OK` turn and the removed-Anthropic configuration error. Reserve
+at most USD 0.10 for that extra bounded turn within the same compatible USD 1
+allowance, including smoke and upgrade calls, with no pooling. Compare errors
+against the current source on `R`. The runtime preflight records exact commands
+and limits; these checks have not run.
+
+### Remaining release gates
+
+The coordinator owns the release PR, current-HEAD CodeRabbit review and merge.
+After actual-`R` offline checks, five passing live lanes, publish/tag verification
+and the complete clean-HOME upgrade, replace the pending verdict with the
+published verdict required by #157. Commit the completed evidence section to
+`main`, link it on #157 and close the issue. Until then, #157 remains open.
+
 ## 0.5.0 release (2026-10-01)
 
 **Verdict: 0.5.0 published.**
