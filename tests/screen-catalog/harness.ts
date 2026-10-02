@@ -39,7 +39,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || ["approval-command", "approval-edit", "completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const disk = palette || screen.id.startsWith("model-picker") || ["approval-command", "approval-edit", "completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });

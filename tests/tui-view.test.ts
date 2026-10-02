@@ -93,11 +93,11 @@ test("not-connected copy and neutral pill survive no-color, narrow widths and re
       expect(ui.captureCharFrame()).toContain("○ Not connected");
       if (height >= 10) expect(ui.captureCharFrame()).toContain("Alt+L sign in");
       const empty = ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable;
-      expect(empty.chunks.map(chunk => chunk.text).join("")).toContain("Not connected\nSign in to choose a model · Alt+L");
+      expect(empty.chunks.map(chunk => chunk.text).join("")).toContain("Not connected\nConnect a provider · Alt+L");
       if (height < 10) expect(empty.chunks.map(chunk => chunk.text).join("")).toStartWith("/project\n");
       if (width >= 44) {
         expect(ui.captureCharFrame()).toContain("Not connected");
-        expect(ui.captureCharFrame()).toContain("Sign in to choose a model · Alt+L");
+        expect(ui.captureCharFrame()).toContain("Connect a provider · Alt+L");
       }
       for (const copy of ["gpt-", "openai/", "claude", "anthropic", "No model yet", "Ready", "Attention", "ctx", "Ctrl+I failure details", "Enter send"]) expect(ui.captureCharFrame()).not.toContain(copy);
     }
@@ -691,17 +691,18 @@ test("model picker preserves draft, owns navigation, and closes before cancellin
   expect(ui.editor.plainText).toBe("my draft\nsecond line");
 });
 
-test("model picker shows fixed route order and sign-in actions at narrow widths", async () => {
+test("model picker hides disconnected routes and offers one connection action at narrow widths", async () => {
   for (const width of [80, 44]) {
     const ui = await setup(width, 28, { OPENAI_API_KEY: "picker-secret" });
     ui.controller.openModelPicker();
     await settle(ui);
-    expect(ui.controller.snapshot().modelPicker!.entries[0]).toMatchObject({ groupLabel: "ChatGPT subscription", kind: "sign-in" });
+    expect(ui.controller.snapshot().modelPicker!.entries.some(entry => entry.kind === "sign-in" || entry.authRoute === "codex")).toBe(false);
+    expect(ui.controller.snapshot().modelPicker!.entries.filter(entry => entry.kind === "connect")).toHaveLength(1);
     expect(ui.captureCharFrame()).toContain("API key");
     expect(ui.captureCharFrame()).not.toContain("picker-secret");
     ui.controller.searchModels("gpt-4o");
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("gpt-4o");
+    expect(ui.captureCharFrame()).toContain("GPT-4o");
   }
 });
 
@@ -710,9 +711,10 @@ test("keyboard connection at 44×18 restores the picker search and ordinary draf
   await ui.mockInput.pasteBracketedText("ordinary draft");
   ui.mockInput.pressKey("m", { meta: true });
   await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.accessLoading, "model access discovery");
+  ui.mockInput.pressEnter(); await settle(ui);
   await ui.mockInput.typeText("OpenAI API key");
   await settle(ui);
-  expect(ui.captureCharFrame()).toContain("Sign in");
+  expect(ui.captureCharFrame()).toContain("Connect a provider");
   ui.mockInput.pressEnter();
   await waitForUiState(ui, () => !!ui.controller.snapshot().credentialEntry, "credential entry");
   await ui.mockInput.pasteBracketedText("masked-route-secret");
@@ -2528,6 +2530,7 @@ for (const route of ["codex", "grok"] as const) for (const browserSettled of [tr
   try {
     ui.mockInput.pressKey("m", { meta: true }); await settle(ui);
     while (ui.controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+    ui.mockInput.pressEnter(); await settle(ui);
     ui.controller.searchModels(label); await settle(ui);
     const picker = ui.controller.snapshot().modelPicker!;
     const identity = picker.entries[picker.selectedIndex]!.identity;
@@ -2544,7 +2547,7 @@ for (const route of ["codex", "grok"] as const) for (const browserSettled of [tr
     expect(ui.controller.snapshot().modelPicker?.query).toBe(label);
     const restored = ui.controller.snapshot().modelPicker!;
     expect(restored.entries[restored.selectedIndex]!.identity).toBe(identity);
-    expect(ui.captureCharFrame()).toContain("Choose model");
+    expect(ui.captureCharFrame()).toContain("Connect a provider");
     expect(ui.captureCharFrame()).not.toContain("· more options");
     expect(ui.controller.snapshot().modelId).toBe("gpt-5.4"); expect(ui.controller.snapshot().provider).toBe("openai");
     while (ui.controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
@@ -2560,7 +2563,7 @@ for (const route of ["codex", "grok"] as const) for (const browserSettled of [tr
     ui.mockInput.pressEscape(); await settle(ui);
     deferred[retryIndex + 1]!.resolve({ ok: true, status: "Late retry result" }); await settle(ui);
     expect(ui.controller.snapshot().loginChooser).toBeUndefined(); expect(ui.controller.snapshot().modelPicker?.query).toBe(label);
-    expect(ui.captureCharFrame()).toContain("Choose model"); expect(ui.controller.snapshot().modelId).toBe("gpt-5.4");
+    expect(ui.captureCharFrame()).toContain("Connect a provider"); expect(ui.controller.snapshot().modelId).toBe("gpt-5.4");
   } finally { for (const call of deferred) call.resolve({ ok: true, status: "Stopped" }); await ui.controller.waitForIdle(); }
 });
 
@@ -2635,7 +2638,7 @@ test("ephemeral endpoint URL never enters a durable draft checkpoint or deferred
 });
 
 
-for (const width of [120, 80, 50, 24]) test(`grouped model picker preserves model IDs, metadata and viewport at ${width} columns`, async () => {
+for (const width of [120, 80, 50, 24]) test(`short model picker keeps route identity and details within the viewport at ${width} columns`, async () => {
   await withTempDir(async root => {
     const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
     const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: {
@@ -2652,29 +2655,34 @@ for (const width of [120, 80, 50, 24]) test(`grouped model picker preserves mode
     ui.controller.openModelPicker(); await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "grouped picker"); await settle(ui);
     const frame = ui.captureCharFrame();
     if (width >= 50) {
-      expect(frame).toContain("OpenAI-compatible · localhost:8787"); expect(frame).toContain("gpt-6-astra"); expect(frame).toContain("fake-coder");
-      expect(frame).toContain("32k");
-      if (width >= 80) expect(frame).toMatch(/gpt-6-astra +1\.05M · reasoning +✓/);
+      expect(frame).toContain("API · localhost:8787"); expect(frame).toContain("GPT-6 Astra"); expect(frame).toContain("fake-coder");
+      expect(frame).not.toContain("32k");
+      expect(frame).not.toContain("reasoning");
+      expect(frame).toContain("ChatGPT subscription");
+      expect(frame).toContain("Ctrl+I details");
       expect(frame).not.toContain("✓ current");
       expect(frame).not.toContain("Ctrl+R retry");
     } else {
-      expect(frame).toContain("Choose model"); expect(frame).toContain("gpt-6-astra"); expect(frame).toContain("✓");
+      expect(frame).toContain("Choose model");
+      expect(ui.controller.snapshot().modelPicker!.entries.find(entry => entry.active)?.modelId).toBe("gpt-6-astra");
       expect(frame).toContain("Ready"); expect(frame.split("\n").filter(line => line.trim()).length).toBeLessThanOrEqual(8);
     }
     ui.controller.searchModels("coder"); await settle(ui);
     const picker = ui.controller.snapshot().modelPicker!;
-    expect(picker.entries.map(entry => [entry.kind, entry.modelId])).toEqual([["header", ""], ["model", "fake-coder"]]);
-    expect(ui.captureCharFrame()).toContain("fake-coder"); expect(ui.captureCharFrame().split("Choose model")[1]!.split("▄")[0]).not.toContain("gpt-6-astra");
+    expect(picker.entries.filter(entry => entry.kind === "model").map(entry => entry.modelId)).toEqual(["fake-coder"]);
+    if (width >= 50) expect(ui.captureCharFrame()).toContain("fake-coder");
+    expect(ui.captureCharFrame().split("Choose model")[1]!.split("▄")[0]).not.toContain("GPT-6 Astra");
   });
 });
 
-test("failed route list status renders once on its header and route-free details count only choices", async () => {
+test("failed route list offers retry while capacity stays behind details", async () => {
   const ui = await setup(120, 30, {}, undefined, { provider: "openai", modelId: "gpt-5.4",
     credentials: { store: fakeCredentialStore(), env: { OPENAI_API_KEY: "fixture-key" }, reload: async () => ({ error: "unused" }), listRouteModels: async () => { throw Error("offline"); } } });
   ui.controller.openModelPicker(); await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "failed list");
   ui.controller.searchModels("gpt-5.4"); await settle(ui);
-  const frame = ui.captureCharFrame(); expect(frame.match(/list unavailable/g)).toHaveLength(1);
-  expect(frame).toContain("1/1 · 256,000 context · 16,384 output");
+  const frame = ui.captureCharFrame(); expect(frame.match(/Some models unavailable/g)).toHaveLength(1);
+  expect(frame).not.toContain("256,000 context");
+  expect(frame).toContain("Ctrl+R retry");
   expect(ui.controller.snapshot().modelPicker!.entries.filter(entry => entry.kind === "model")).toHaveLength(1);
 });
 

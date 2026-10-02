@@ -89,8 +89,7 @@ see [credentials](credentials.md) and
 
 ## First launch and readiness
 
-A fresh install shows two lines: **Not connected**, then **Sign in to choose a
-model · Alt+L**. Its hint row reads **Alt+L sign in · / commands**; narrow widths
+A fresh install shows two lines: **Not connected**, then **Connect a provider · Alt+L**. Its hint row reads **Alt+L sign in · / commands**; narrow widths
 keep the sign-in action. Enter leaves an ordinary draft and its cursor unchanged
 until a model is active.
 
@@ -362,7 +361,7 @@ manifest. File-tool undo still works in each case.
 | Dismiss suggestions | Esc |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
-| Model picker | `/model` or Alt+M; Up/Down skips headers, Enter uses a model or starts sign-in, Ctrl+R retries a failed account catalog, Esc goes back |
+| Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, Ctrl+I shows details, Ctrl+R retries discovery, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
@@ -390,7 +389,7 @@ reading position.
 | Panel | Navigation and action |
 | --- | --- |
 | Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back |
-| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+R retries catalog |
+| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, Ctrl+I shows details, Ctrl+R retries discovery |
 | Tool approval | Up/Down choose, Enter choose or send reason, Esc deny, Ctrl+C cancel turn, PageUp/PageDown scroll |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown |
@@ -482,24 +481,30 @@ for clipping, wheel handling and sticky scroll state.
 
 Esc first closes an open sign-in, model or branch picker or command suggestion
 list. The underlying prompt and cursor are restored after a picker closes.
-The model picker groups choices in a fixed order: ChatGPT subscription, Grok
-subscription, OpenAI API key, xAI API key, then the configured OpenAI-compatible
-endpoint and named profiles in config order. Each endpoint header shows only its
-host and port. Model rows lead with their ID, followed by compact context capacity,
-reasoning support and a checkmark for the active model. The active model is
-highlighted when the picker opens; it does not move within its group.
+The model picker opens with at most eight model rows: the current choice, user-wide
+favorites, then recent successful choices, deduplicated by exact model, auth route,
+endpoint and profile identity. Only connected routes appear. With no favorites or
+history, it offers a small provider-supported selection. Readable names lead each
+row, followed by its subscription or API route; endpoint labels show host and port,
+and profiles include their name. ✓ marks the current choice and ★ marks a favorite.
+Ctrl+P pins or unpins the highlighted model. Pins and recents survive restart and
+are shared across workspaces; disconnected favorites stay saved but hidden.
 
-Search ignores case and matches model IDs, provider/model IDs and group labels
-using exact, prefix, substring and subsequence matches. Headers are informational;
-Up/Down skips them. A disconnected route has one `Sign in · Enter` row and no
-model rows. Sign-in returns to the same query with the route's first matching
-model highlighted, without applying a picker choice. Esc returns to the sign-in
-row; during custom endpoint setup, Esc from key entry returns to the typed URL
-first. The model and settings stay unchanged when setup is cancelled before saving.
-A failed model list shows `list unavailable` once on its header, with fallback
-choices still selectable. Ctrl+R is offered only for an empty, offline or failed
-account catalog. The detail line counts selectable rows and shows full context
-and output budgets without naming the route.
+Search immediately covers the complete connected catalog, including models outside
+the shortlist. It ignores case and matches readable names, exact model IDs,
+provider/model IDs and route labels using exact, prefix, substring and subsequence
+matches. Up/Down selects a row. Enter uses a model, opens **Browse all models**, or
+opens **Connect a provider**. Browse shows all connected models; Esc returns to the
+shortlist before closing. Connect reveals routes and configured endpoint/profile
+targets. Cancelling connection restores the target and query; Esc from custom
+endpoint key entry first returns to the typed URL. A successful connection returns
+to matching models without replacing an already selected model.
+
+Ctrl+I reveals the exact ID and context/output budgets. Ctrl+R retries failed
+catalog or access discovery. Reopening can display cached lists while access is
+checked, and search and pinning remain available during refresh. A disappearing
+highlight cannot silently select another billing route. Pins and recents store
+bounded model IDs and hashed route identities, never endpoint URLs or credentials.
 
 The footer shows the active route. Configured API-key and endpoint access does
 not prove a remote service accepts requests. Subscription model rows appear after

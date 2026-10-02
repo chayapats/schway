@@ -132,7 +132,7 @@ test("picker primary listing and credential entry never borrow the active profil
     });
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(requests).toEqual([]); controller.searchModels("OpenAI-compatible");
+      expect(requests).toEqual([]); controller.connectPickerProviders(); controller.searchModels("OpenAI-compatible");
       const initial = controller.snapshot().modelPicker!;
       const signIn = initial.entries.findIndex(entry => entry.kind === "sign-in" && entry.provider === "openai-compatible" && entry.profile === undefined);
       controller.moveModelPicker(signIn - initial.selectedIndex);

@@ -36,6 +36,7 @@ test("resuming another workspace uses its configured route after an API-key choi
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const picker = controller.snapshot().modelPicker!;
       const index = picker.entries.findIndex(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-5.4");
       expect(index).toBeGreaterThanOrEqual(0);
@@ -74,6 +75,7 @@ test("an API-key row clears subscription-only thinking without blocking activati
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const picker = controller.snapshot().modelPicker!;
       const index = picker.entries.findIndex(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-5.4");
       expect(index).toBeGreaterThanOrEqual(0);
@@ -146,7 +148,7 @@ test("connecting a missing route returns to its search and identity without sele
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("OpenAI API key");
+      controller.connectPickerProviders(); controller.searchModels("OpenAI API key");
       const identity = controller.snapshot().modelPicker!.entries[0]!.identity;
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot().credentialEntry).toBeDefined();
@@ -269,6 +271,7 @@ test("failed activation emits no remembered choice and keeps the previous billin
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const picker = controller.snapshot().modelPicker!;
       const index = picker.entries.findIndex(entry => entry.authRoute === "codex" && entry.modelId === "gpt-5.4");
       controller.moveModelPicker(index - picker.selectedIndex);
@@ -298,7 +301,7 @@ test("ChatGPT connection returns to account discovery without silently activatin
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("ChatGPT");
+      controller.connectPickerProviders(); controller.searchModels("ChatGPT");
       expect(controller.snapshot().modelPicker?.entries[0]).toMatchObject({ kind: "sign-in", authRoute: "codex" });
       expect(await controller.selectPickerModel()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
@@ -383,7 +386,7 @@ test("a credential-read timeout is labelled as access discovery, not catalog fai
       const started = Date.now();
       while (controller.snapshot().modelPicker?.loading && Date.now() - started < 7_000) await Bun.sleep(20);
       expect(controller.snapshot().modelPicker?.loading).toBe(false);
-      expect(controller.snapshot().modelPicker?.error).toContain("Model access discovery");
+      expect(controller.snapshot().modelPicker?.error).toBe("Connections unavailable · Ctrl+R retry · Esc back");
       expect(controller.snapshot().modelPicker?.error).not.toContain("ChatGPT catalog");
     } finally { controller.dispose(); }
   });
@@ -406,7 +409,7 @@ for (const route of ["codex", "grok"] as const) test(`${route} picker Esc restor
     let first: Promise<boolean> | undefined, second: Promise<boolean> | undefined;
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels(label);
+      controller.connectPickerProviders(); controller.searchModels(label);
       const identity = controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity;
       const settings = editor.settings;
       first = controller.selectPickerModel(); expect(calls).toHaveLength(1);
@@ -444,7 +447,7 @@ for (const route of ["codex", "grok"] as const) test(`${route} picker connection
     });
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      const query = route === "codex" ? "ChatGPT" : "Grok subscription"; controller.searchModels(query);
+      const query = route === "codex" ? "ChatGPT" : "Grok subscription"; controller.connectPickerProviders(); controller.searchModels(query);
       expect(await controller.selectPickerModel()).toBe(true); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const picker = controller.snapshot().modelPicker!;
       expect(picker.query).toBe(query); expect(picker.entries[picker.selectedIndex]?.modelId).toBe(route === "codex" ? "account-first" : "grok-first");
@@ -464,7 +467,7 @@ test("picker endpoint key Esc restores its origin and saving preserves the usabl
       stageSettings: async settings => { activated.push(settings.model); return { model: createScriptedModel({ id: settings.model }), contextManager: createContextManager(workspace) }; },
     });
     try {
-      controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1); controller.searchModels("OpenAI-compatible");
+      controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1); controller.connectPickerProviders(); controller.searchModels("OpenAI-compatible");
       const settings = editor.settings, identity = controller.snapshot().modelPicker!.entries[0]!.identity;
       expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787"); expect(controller.submitEndpointUrl()).toBe(true);
       controller.enterCredentialText("cancelled-secret"); controller.cancel();
@@ -500,7 +503,7 @@ for (const target of ["xai", "profile"] as const) test(`${target} picker key ent
     });
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      const query = target === "xai" ? "xAI API key" : "remote"; controller.searchModels(query);
+      const query = target === "xai" ? "xAI API key" : "remote"; controller.connectPickerProviders(); controller.searchModels(query);
       const identity = controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity, settings = editor.settings;
       expect(await controller.selectPickerModel()).toBe(true); controller.enterCredentialText("cancelled-key"); controller.cancel();
       expect(controller.snapshot().modelPicker?.query).toBe(query); expect(controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity).toBe(identity);

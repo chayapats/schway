@@ -58,7 +58,7 @@ for (const route of ["codex", "grok"] as const) for (const committed of [true, f
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const query = route === "codex" ? "ChatGPT" : "Grok subscription";
-      controller.searchModels(query); pending = controller.selectPickerModel(); await writing.promise;
+      controller.connectPickerProviders(); controller.searchModels(query); pending = controller.selectPickerModel(); await writing.promise;
       expect(requests).toBe(route === "codex" ? 3 : 2); expect(controller.snapshot().loginChooser).toBeDefined();
       controller.cancel(); expect(signal?.aborted).toBe(true); controller.cancel();
       expect(controller.snapshot().modelPicker).toBeUndefined(); expect(controller.snapshot().loginChooser).toBeDefined();
@@ -248,7 +248,7 @@ afterAll(() => { globalThis.fetch = unguardedFetch; });
   try {
     expect(await controller.login("grok --code forbidden")).toBe(false); expect(controller.snapshot().transcript.at(-1)?.text).toBe(LOGIN_USAGE);
     controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-    controller.searchModels("Grok subscription");
+    controller.connectPickerProviders(); controller.searchModels("Grok subscription");
     const picker = controller.snapshot().modelPicker!;
     const index = picker.entries.findIndex(entry => entry.authRoute === "grok"); expect(index).toBeGreaterThanOrEqual(0);
     controller.moveModelPicker(index - picker.selectedIndex);

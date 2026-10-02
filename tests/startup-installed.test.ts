@@ -167,7 +167,7 @@ void (async () => {
   }
   const startupAction = scenario.startsWith("returning") ? "Type a task · Enter sends"
     : scenario === "denied" ? "Unlock credential storage"
-    : scenario.startsWith("invalid-model") ? "Choose a model" : "Sign in to choose a model";
+    : scenario.startsWith("invalid-model") ? "Choose a model" : "Connect a provider";
   await settle(() => terminal.renderer.root.findDescendantById("prompt")?.focused && screenIncludes(startupAction), "startup readiness");
   const editor = terminal.renderer.root.findDescendantById("prompt");
   const initial = terminal.captureCharFrame();
@@ -197,7 +197,7 @@ void (async () => {
     await settle(() => terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "failure details");
     assert(terminal.captureCharFrame().replace(/\\s+/g, " ").includes(scenario === "denied" ? "secure store" : "not available in this ChatGPT account"), "actual failure unavailable");
   } else {
-    assert(initial.includes("Not connected") && initial.includes("Sign in to choose a model"), "fresh connect action missing");
+    assert(initial.includes("Not connected") && initial.includes("Connect a provider"), "fresh connect action missing");
     assert(!initial.includes("gpt-"), "fresh install named a model");
     const draft = "ตรวจงานนี้\\nอธิบายภาษาไทย";
     await terminal.mockInput.pasteBracketedText(draft);

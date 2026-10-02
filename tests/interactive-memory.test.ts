@@ -190,7 +190,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
     const override = await run("override");
     expect(override.requests).toEqual([]);
     expect(override.screen).toContain("○ Not connected");
-    expect(override.screen).toContain("Sign in to choose a model · Alt+L");
+    expect(override.screen).toContain("Connect a provider · Alt+L");
     expect(await readFile(join(stateDirectory, stateFile), "utf8")).toBe(saved);
     expect(await readdir(project)).toEqual([]);
   });
