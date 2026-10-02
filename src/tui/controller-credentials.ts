@@ -364,7 +364,10 @@ export abstract class CredentialsLayer extends ControllerCore {
       false,
       listed,
     );
-    if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "compatible" ? "provider" : "api-key" }, !suppressSuccessNotice);
+    if (applied) await this.emitModelActivated({ provider: this.provider, modelId: this.modelId,
+      authRoute: route === "compatible" ? "provider" : "api-key",
+      ...(route === "compatible" && this.configEditor.settings.profile ? { profile: this.configEditor.settings.profile } : {}),
+    }, !suppressSuccessNotice);
     return applied;
   }
 

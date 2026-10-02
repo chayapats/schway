@@ -41,6 +41,19 @@ test("recent history is bounded while favorites remain pinned", async () => {
   });
 });
 
+test("SQLite rolls back a mutation that exceeds the favorite limit before closing", async () => {
+  await withTempDir(async home => {
+    const store = new ModelPreferences(home);
+    for (let n = 0; n < 128; n++) store.pin(identity(String(n)), true);
+    store.used(identity("recent"));
+    const before = store.read();
+    expect(() => store.pin(identity("overflow"), true, { modelId: "overflow", groupIdentity: identity("") })).toThrow("Favorite limit reached");
+    expect(new ModelPreferences(home).read()).toEqual(before);
+    store.pin(identity("0"), false);
+    expect(store.pin(identity("replacement"), true).favorites).toHaveLength(128);
+  });
+});
+
 test("malformed state fails closed and never replaces the database", async () => {
   await withTempDir(async home => {
     const store = new ModelPreferences(home); store.read();
