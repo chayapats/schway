@@ -1,12 +1,13 @@
 import { resolveSubscriptionRoute } from "../auth/subscription-route.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
-import type { FetchLike } from "../model/loader.ts";
+import type { ProviderLoaderInput, FetchLike } from "../model/loader.ts";
 import { execFile } from "node:child_process";
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { Model } from "../model/model.ts";
+import { isThinkingLevel, THINKING_LEVELS, type Model } from "../model/model.ts";
+import { prepareModelThinking } from "../model/thinking-preflight.ts";
 import { loadProviderModel } from "../model/loader.ts";
 import { CODING_CASE, failedCodingEval, resolveEvalSettings, runCodingEval, skippedCodingEval, spendCapSkippedEval, type CodingEvalResult, type EvalSettings } from "./coding.ts";
 import { DAILY_CASES } from "./cases.ts";
@@ -16,7 +17,7 @@ const exec = promisify(execFile);
 /** Accepted eval route names shared by argument validation and help. */
 export const EVAL_PROVIDERS = ["scripted", "openai", "openai-compatible", "xai", "codex", "grok"] as const;
 
-const USAGE = `Usage: bun run eval (--provider PROVIDER [--model ID --allow-paid] | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]\nProviders: ${EVAL_PROVIDERS.join(" | ")}\nNon-scripted routes require --model and --allow-paid.`;
+const USAGE = `Usage: bun run eval (--provider PROVIDER [--model ID --allow-paid] | --matrix provider:model[,provider:model...] [--allow-paid]) [--thinking LEVEL] [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]\nProviders: ${EVAL_PROVIDERS.join(" | ")}\nNon-scripted routes require --model and --allow-paid.\n--thinking LEVEL: ${THINKING_LEVELS.join(" | ")}. Omit to keep provider defaults.\nApply one thinking level to every matrix entry; reject unsupported choices before inference.\nCompatible endpoints require advertised support; generic endpoints cannot map explicit effort.`;
 
 /** Exit code when budget or incomplete usage prevents all selected paid cases from starting. */
 export const SPEND_CAP_EXIT_CODE = 3;
@@ -30,10 +31,14 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--allow-paid") { allowPaid = true; continue; }
-    if (!["--provider", "--model", "--matrix", "--case", "--base-url", "--output", "--max-turns", "--timeout-ms", "--max-output-tokens", "--max-spend", "--input-price", "--output-price"].includes(arg) || !argv[i + 1] || argv[i + 1]!.startsWith("--") || values.has(arg)) {
+    if (!["--thinking", "--provider", "--model", "--matrix", "--case", "--base-url", "--output", "--max-turns", "--timeout-ms", "--max-output-tokens", "--max-spend", "--input-price", "--output-price"].includes(arg) || !argv[i + 1] || argv[i + 1]!.startsWith("--") || values.has(arg)) {
       console.error(USAGE); return 2;
     }
     values.set(arg, argv[++i]!);
+  }
+  const thinking = values.get("--thinking");
+  if (thinking !== undefined && !isThinkingLevel(thinking)) {
+    console.error("Invalid thinking level · Run bun run eval --help for choices"); return 2;
   }
   const matrix = values.get("--matrix");
   const entries = matrix ? matrix.split(",").map(value => {
@@ -54,7 +59,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   const integer = (key: string, fallback: number) => values.has(key) ? Number(values.get(key)) : fallback;
   let settings: EvalSettings;
   try {
-    settings = resolveEvalSettings({ maxTurns: integer("--max-turns", 8),
+    settings = resolveEvalSettings({ thinking, maxTurns: integer("--max-turns", 8),
       timeoutMs: integer("--timeout-ms", 30_000), maxOutputTokens: integer("--max-output-tokens", 4096) });
   } catch {
     console.error("Invalid eval bounds"); return 2;
@@ -88,6 +93,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
     const results: CodingEvalResult[] = [];
     let subscriptionStore: CredentialStore | undefined;
     const subscriptionEntries = new Map<number, Awaited<ReturnType<typeof resolveSubscriptionRoute>>>();
+    const thinkingEntries = new Map<number, { input?: ProviderLoaderInput; reason?: Awaited<ReturnType<typeof prepareModelThinking>> }>();
     let spent = 0, spendUnknown = false;
     let stopReason: "usage_unknown" | "spend_cap" | null = null;
     const highestCase = entries.map(() => 0);
@@ -103,7 +109,19 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
           store: subscriptionStore ??= (deps.createStore ?? createNativeCredentialStore)(), env, refresh: true, fetch: deps.fetch, signal: AbortSignal.timeout(settings.timeoutMs) }));
       }
       const subscription = subscriptionEntries.get(entryIndex);
-      const startable = subscription ? "input" in subscription : provider === "scripted" || (!!apiKey && (provider !== "openai-compatible" || validEndpoint(baseUrl)));
+      const configured = subscription ? "input" in subscription : provider === "scripted" || (!!apiKey && (provider !== "openai-compatible" || validEndpoint(baseUrl)));
+      // Bind capability evidence to this entry once; adapters still refresh credentials on every turn.
+      if (configured && !thinkingEntries.has(entryIndex)) {
+        const input: ProviderLoaderInput | undefined = provider === "scripted" ? undefined
+          : subscription && "input" in subscription ? { ...subscription.input, thinking }
+          : { provider: provider as "openai" | "xai" | "openai-compatible", model: modelId,
+            apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens, thinking };
+        const reason = input ? await prepareModelThinking(input, deps.fetch ?? globalThis.fetch, AbortSignal.timeout(settings.timeoutMs))
+          : thinking !== undefined ? "unsupported_thinking" as const : undefined;
+        thinkingEntries.set(entryIndex, { input, reason });
+      }
+      const prepared = thinkingEntries.get(entryIndex);
+      const startable = configured && !prepared?.reason;
       // Soft cap: a paid case is assumed to cost as much as that route's costliest case so far (the first runs unless the cap is spent),
       // and unreported usage stops further paid cases. Free routes never spend, so they always run; unstartable routes stay prerequisite skips.
       if (startable && paid && (spendUnknown || spent >= capUsd || spent + highestCase[entryIndex]! > capUsd)) {
@@ -115,13 +133,16 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       let result: CodingEvalResult;
       if (!startable) {
         result = skippedCodingEval(provider, modelId, sourceRevision, settings, id);
-        if (subscription) { result.outcome = "skipped"; result.reason = "not_signed_in"; }
+        if (prepared?.reason) {
+          result.reason = prepared.reason;
+          result.nextAction = prepared.reason === "unsupported_thinking"
+            ? "Choose an advertised thinking level or omit --thinking."
+            : "Retry capability discovery or omit --thinking to keep provider defaults.";
+        } else if (subscription) { result.outcome = "skipped"; result.reason = "not_signed_in"; }
       } else {
         try {
           const model: Model = deps.model ? deps.model(provider, modelId, id) : provider === "scripted" ? offlineModel(id)
-            : subscription && "input" in subscription ? await loadProviderModel(subscription.input, deps.fetch)
-            : await loadProviderModel({ provider: provider as "openai" | "xai" | "openai-compatible", model: modelId,
-              apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
+            : await loadProviderModel(prepared!.input!, deps.fetch);
           result = await runCodingEval({ model, sourceRevision, settings, caseId: id });
         } catch {
           result = failedCodingEval(provider, modelId, sourceRevision, settings, id);
@@ -138,7 +159,8 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       spent += spend.usd;
       highestCase[entryIndex] = Math.max(highestCase[entryIndex]!, spend.usd);
       results.push(result);
-      if (result.reason === "not_signed_in") console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: skipped/not_signed_in`);
+      if (result.nextAction) console.log(`${id} ${provider}/${modelId}: Thinking unavailable · ${result.nextAction}`);
+      else if (result.reason === "not_signed_in") console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: skipped/not_signed_in`);
       else console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}; spend=${result.billing === "subscription" ? "subscription" : `${spend.exact ? "" : "≥"}${formatUsd(spend.usd)}`}`);
     }
     const casesRun = results.filter(result => result.outcome !== "skipped" && result.outcome !== "skipped_spend_cap" && result.outcome !== "skipped_prerequisites").length;
