@@ -4,7 +4,7 @@ import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
 import { modelPickerEntries, modelPickerIdentity, modelPickerName, presentModelPicker, rememberedPickerModels } from "../src/tui/model-picker.ts";
 import { ModelPreferences } from "../src/config/model-preferences.ts";
-import { loadConfigEditor } from "../src/config/editing.ts";
+import { ConfigEditor, loadConfigEditor } from "../src/config/editing.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createConversationView } from "../src/tui/view.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -101,6 +101,49 @@ test("controller favorites, manual recents and browsing survive restart across w
       next.openModelPicker(); await settled(next);
       expect(next.snapshot().modelPicker!.entries.map(row => row.kind)).toEqual(["connect"]);
     } finally { next.dispose(); }
+  });
+});
+
+test("profile current overrides and remembered choices retain exact model and endpoint across restart", async () => {
+  await withTempDir(async home => {
+    const profile = { baseUrl: "https://openrouter.ai/api/v1", model: "profile-default", auth: "none" as const,
+      credentialIdentity: "profile-key", headers: { "X-Route": "local" }, contextWindow: 64000, maxOutput: 4000 };
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    /** Reopen one profile with an explicit active model, sharing only persisted picker preferences. */
+    function profileFixture(model: string) {
+      const configEditor = new ConfigEditor({ user: { profiles: { local: profile }, profile: "local" }, session: { model } },
+        { user: join(home, "config.json"), project: join(home, "project.json") });
+      configEditor.setEndpointCapabilities(profile.baseUrl, [{ id: "custom-active", baseUrl: profile.baseUrl, supportedThinking: ["low", "high"], defaultThinking: "low" }]);
+      const controller = new TuiController({ home, workspace, configEditor, session: createSession(), sessionId: "profile",
+        provider: "openai-compatible", modelId: model, model: createScriptedModel({ provider: "openai-compatible", id: model }),
+        contextManager: createContextManager(workspace), credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listRouteModels: async () => [] },
+        stageSettings: async settings => ({ model: createScriptedModel({ provider: "openai-compatible", id: settings.model }), contextManager: createContextManager(workspace) }),
+      });
+      return { controller, configEditor };
+    }
+    const identity = modelPickerIdentity({ provider: "openai-compatible", authRoute: "provider", profile: "local", modelId: "custom-active" }, profile.baseUrl, profile.credentialIdentity);
+    const first = profileFixture("custom-active");
+    try {
+      first.controller.openModelPicker(); await settled(first.controller);
+      expect(first.controller.snapshot().modelPicker!.entries.filter(row => row.active).map(row => [row.modelId, row.identity])).toEqual([["custom-active", identity]]);
+      expect(first.controller.togglePickerFavorite()).toBe(true);
+      expect(await first.controller.selectPickerModel()).toBe(true);
+      expect(first.configEditor.settings).toMatchObject({ ...profile, profile: "local", model: "custom-active" });
+      expect(first.configEditor.settings.reasoningCapability).toMatchObject({ id: "custom-active", baseUrl: profile.baseUrl, supportedThinking: ["low", "high"] });
+      expect(new ModelPreferences(home).read()).toMatchObject({ favorites: [identity], recents: [identity] });
+      expect(await first.controller.selectModel("profile:local")).toBe(true);
+      expect(first.configEditor.settings.model).toBe("profile-default");
+    } finally { first.controller.dispose(); }
+    const next = profileFixture("profile-default");
+    try {
+      next.controller.openModelPicker(); await settled(next.controller);
+      expect(next.controller.snapshot().modelPicker!.entries.filter(row => row.kind === "model").map(row => row.modelId)).toEqual(["profile-default", "custom-active"]);
+      next.controller.searchModels("custom-active");
+      expect(next.controller.snapshot().modelPicker!.entries[0]?.identity).toBe(identity);
+      expect(await next.controller.selectPickerModel()).toBe(true);
+      expect(next.configEditor.settings).toMatchObject({ ...profile, profile: "local", model: "custom-active" });
+      expect(next.configEditor.settings.reasoningCapability).toMatchObject({ id: "custom-active", baseUrl: profile.baseUrl, supportedThinking: ["low", "high"] });
+    } finally { next.controller.dispose(); }
   });
 });
 
@@ -220,5 +263,36 @@ test("Connect clears a model search and Back restores it without changing the ac
       expect(controller.snapshot().modelPicker?.query).toBe("no such model");
       expect(controller.snapshot().modelId).toBe("model-0");
     } finally { controller.dispose(); }
+  });
+});
+
+for (const connected of [false, true]) test(`picker header and footer agree on ${connected ? "Browse and Back" : "Connect"} Enter actions`, async () => {
+  await withTempDir(async home => {
+    const { controller, store } = await fixture(home);
+    if (!connected) await store.delete(credentialIdentity({ provider: "openai" }));
+    const terminal = await createTestRenderer({ width: 50, height: 30, kittyKeyboard: true });
+    const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: home, env: { NO_COLOR: "1", SCHWAY_MOTION: "off" }, secrets: [], quit() {}, submit: async () => {} });
+    try {
+      terminal.mockInput.pressKey("m", { meta: true }); await settled(controller);
+      if (connected) {
+        const picker = controller.snapshot().modelPicker!;
+        controller.moveModelPicker(picker.entries.findIndex(entry => entry.kind === "browse") - picker.selectedIndex);
+      }
+      view.refresh(); await terminal.flush();
+      expect(terminal.captureCharFrame()).toContain("Choose model · Enter open · Esc back");
+      expect(terminal.captureCharFrame()).toContain("↑↓ select · Enter open · Esc back");
+      terminal.mockInput.pressEnter(); view.refresh(); await terminal.flush();
+      if (connected) {
+        expect(terminal.captureCharFrame()).toContain("Choose model · Enter use · Esc back");
+        const picker = controller.snapshot().modelPicker!;
+        controller.moveModelPicker(picker.entries.findIndex(entry => entry.kind === "browse") - picker.selectedIndex);
+        view.refresh(); await terminal.flush();
+        expect(terminal.captureCharFrame()).toContain("Choose model · Enter open · Esc back");
+        expect(terminal.captureCharFrame()).toContain("↑↓ select · Enter open · Esc back");
+      } else {
+        expect(terminal.captureCharFrame()).toContain("Connect a provider · Enter connect · Esc back");
+        expect(terminal.captureCharFrame()).toContain("↑↓ select · Enter connect · Esc back");
+      }
+    } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
   });
 });

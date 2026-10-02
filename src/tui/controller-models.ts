@@ -430,7 +430,10 @@ export abstract class ModelsLayer extends CommandsLayer {
       return this.connectPickerRoute(selection);
     }
     let applied: boolean;
-    if (selection.profile !== undefined) applied = await this.selectProfile(selection.profile);
+    if (selection.profile !== undefined) {
+      applied = await this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId, selection.profile),
+        () => `Using ${this.modelId} · ${selection.profile} · Enter send`, undefined, true);
+    }
     else if (selection.authRoute === "codex") {
       if (!selection.listUnavailable && !this.subscriptionModels?.includes(selection.modelId)) {
         this.fail("Model unavailable · Ctrl+R refresh models");
@@ -450,7 +453,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     } else {
       applied = await this.selectModel(`${selection.provider}/${selection.modelId}`, this.listedBudgets(selection));
     }
-    if (applied && (selection.authRoute === "codex" || selection.authRoute === "grok" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
+    if (applied && (selection.profile !== undefined || selection.authRoute === "codex" || selection.authRoute === "grok" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
   }
 

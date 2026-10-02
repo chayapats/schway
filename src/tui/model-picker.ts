@@ -76,6 +76,11 @@ export interface ModelPickerSnapshot {
   catalogState?: "loading" | "ready" | "empty" | "offline" | "failed";
 }
 
+/** Name Enter's action for the selected model, navigation row or connection target. */
+export function modelPickerAction(entry?: ModelPickerEntry): "use" | "open" | "connect" {
+  return entry?.kind === "model" ? "use" : entry?.kind === "sign-in" ? "connect" : "open";
+}
+
 /** Present connected choices as a small shortlist or a full searchable catalog. */
 export function presentModelPicker(entries: ModelPickerEntry[], options: { query: string; browsing?: boolean; connecting?: boolean; favorites: readonly string[]; recents: readonly string[] }): ModelPickerEntry[] {
   if (options.connecting) return entries.filter(entry => entry.kind === "header" || entry.kind === "sign-in").map(entry => ({ ...entry, kind: "sign-in", identity: `sign-in:${entry.groupIdentity}` }));
@@ -108,7 +113,7 @@ export function rememberedPickerModels(entries: ModelPickerEntry[], models: Reco
     if (createHash("sha256").update(JSON.stringify([saved.groupIdentity, saved.modelId])).digest("hex") !== identity) continue;
     const route = routes.find(entry => entry.groupIdentity === saved.groupIdentity && entry.kind === "header");
     // Account subscription catalogs are authoritative; do not revive removed account models.
-    if (!route || route.authRoute === "codex" || route.authRoute === "grok" || route.profile !== undefined || [saved.modelId, modelPickerName(saved.modelId), `${route.provider}/${saved.modelId}`, route.groupLabel].every(candidate => fuzzyRank(query, candidate) === undefined)) continue;
+    if (!route || route.authRoute === "codex" || route.authRoute === "grok" || [saved.modelId, modelPickerName(saved.modelId), `${route.provider}/${saved.modelId}`, route.groupLabel].every(candidate => fuzzyRank(query, candidate) === undefined)) continue;
     result.push({ ...route, ...budgets(route.provider, saved.modelId, limits), kind: "model", modelId: saved.modelId, identity, custom: true, listUnavailable: false });
   }
   return result;
@@ -189,17 +194,18 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   for (const [name, profile] of Object.entries(profiles)) {
     const model = profile.model?.trim() || "gpt-4o";
 
-    entries.push({
-      identity: modelPickerIdentity({ provider: "openai-compatible", authRoute: "provider", profile: name, modelId: model }, profile.baseUrl, profile.credentialIdentity),
+    const activeProfile = provider === "openai-compatible" && options?.activeProfile === name;
+    for (const profileModel of new Set([model, ...(activeProfile && modelId ? [modelId] : [])])) entries.push({
+      identity: modelPickerIdentity({ provider: "openai-compatible", authRoute: "provider", profile: name, modelId: profileModel }, profile.baseUrl, profile.credentialIdentity),
       provider: "openai-compatible",
-      modelId: model,
+      modelId: profileModel,
       authRoute: "provider",
-      ...budgets("openai-compatible", model, {
+      ...budgets("openai-compatible", profileModel, {
         contextWindow: profile.contextWindow ?? limits.contextWindow,
         maxOutput: profile.maxOutput ?? limits.maxOutput,
       }),
-      active: options?.activeProfile === name,
-      custom: false,
+      active: activeProfile && modelId === profileModel,
+      custom: profileModel !== model,
       profile: name,
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });

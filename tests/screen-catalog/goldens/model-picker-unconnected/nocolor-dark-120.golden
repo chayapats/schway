@@ -28,7 +28,7 @@ cursor 7 27 visible
 
 
 
-   Choose model · Enter use · Esc back
+   Choose model · Enter open · Esc back
    › Connect a provider
    ↑↓ select · Enter open · Esc back
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -71,8 +71,8 @@ cursor 7 27 visible
 21 0-120 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -
-22 3-38 #e6eaf0 #1e2430 -
-22 38-118 #ffffff #1e2430 -
+22 3-39 #e6eaf0 #1e2430 -
+22 39-118 #ffffff #1e2430 -
 22 118-120 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -

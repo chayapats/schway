@@ -6,7 +6,7 @@ import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
-import { modelPickerName } from "./model-picker.ts";
+import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
@@ -895,7 +895,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const models = snapshot.modelPicker;
           if (editor.plainText !== models.query) setDraft(models.query);
           const room = Math.max(1, width - 2);
-          textRow(picker, fitLine(models.connecting ? "Connect a provider · Enter connect · Esc back" : "Choose model · Enter use · Esc back", room), theme.accent);
+          textRow(picker, fitLine(`${models.connecting ? "Connect a provider" : "Choose model"} · Enter ${modelPickerAction(models.entries[models.selectedIndex])} · Esc back`, room), theme.accent);
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
           models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
             const selected = start + offset === models.selectedIndex;
@@ -982,7 +982,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "review") {
         hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
       } else if (snapshot.modelPicker) {
-        hints.content = fittedHints(`↑↓ select · Enter ${snapshot.modelPicker.connecting ? "connect" : snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex]?.kind === "model" ? "use" : "open"} · Esc back`, width);
+        hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
         const modeHint = snapshot.approvalMode === "auto" ? "" : `Shift+Tab ${snapshot.approvalMode} · `;
         hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
