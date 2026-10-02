@@ -301,6 +301,8 @@ test("model preference actions open the picker without editing configuration", a
     const before = controller.describeConfig();
     for (const key of ["provider", "model", "profile", "auth", "openaiAuth", "xaiAuth"]) {
       expect(controller.openPreferences()).toBe(true);
+      controller.movePreference(controller.snapshot().preferences!.rows.findIndex(row => row.action === "advanced"));
+      expect(await controller.selectPreference()).toBe(true);
       const index = controller.snapshot().preferences!.rows.findIndex(row => row.key === key);
       controller.movePreference(index);
       controller.movePreference(1, "choice");

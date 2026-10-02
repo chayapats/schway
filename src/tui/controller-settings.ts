@@ -1,4 +1,4 @@
-import { preferenceRows, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
+import { preferenceRows, preferenceChoice, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
@@ -35,7 +35,12 @@ export abstract class SettingsLayer extends UndoLayer {
     if (this.running && !this.toolApproval) this.cancel();
     this.preferenceTransaction = undefined;
     if (this.preferences?.preview) this.preferences.preview = undefined;
-    else this.preferences = undefined;
+    else if (this.preferences?.page === "advanced") {
+      this.preferences.page = "basic";
+      if (this.preferences.scope === "memory") this.preferences.scope = "session";
+      this.preferences.rows = preferenceRows(this.configEditor!, this.preferences.scope, this.secrets, this.appearanceEnvironment);
+      this.preferences.selectedIndex = 0; this.preferences.choiceIndex = 0; this.preferences.error = undefined;
+    } else this.preferences = undefined;
   }
 
   /** Move a bounded preference, value or explicit persistence scope and discard stale previews. */
@@ -46,9 +51,9 @@ export abstract class SettingsLayer extends UndoLayer {
     this.preferenceTransaction = undefined; panel.preview = undefined; panel.error = undefined;
     const wrap = (index: number, count: number) => (index + delta + count) % count;
     if (kind === "scope") {
-      const scopes = Object.keys(PREFERENCE_SCOPES) as PreferencesSnapshot["scope"][];
+      const scopes = (Object.keys(PREFERENCE_SCOPES) as PreferencesSnapshot["scope"][]).filter(scope => panel.page === "advanced" || scope !== "memory");
       panel.scope = scopes[wrap(scopes.indexOf(panel.scope), scopes.length)]!;
-      panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment);
+      panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment, panel.page);
       panel.selectedIndex = 0; panel.choiceIndex = 0;
     } else if (kind === "row") {
       panel.selectedIndex = wrap(panel.selectedIndex, panel.rows.length); panel.choiceIndex = 0;
@@ -60,19 +65,31 @@ export abstract class SettingsLayer extends UndoLayer {
     const panel = this.preferences;
     if (!panel || this.running || !this.configEditor) return false;
     const row = panel.rows[panel.selectedIndex]!;
-    if (!presentationPreference(row.key) && !this.stageSettings) return false;
     const choice = row.choices[panel.choiceIndex];
+    if (row.action === "basic" || row.action === "advanced") {
+      panel.page = row.action;
+      if (panel.page === "basic" && panel.scope === "memory") panel.scope = "session";
+      panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment, panel.page);
+      panel.selectedIndex = 0; panel.choiceIndex = 0; panel.preview = undefined; panel.error = undefined;
+      this.preferenceTransaction = undefined;
+      return true;
+    }
+    if (row.action === "connections") {
+      this.preferences = undefined;
+      return this.openLoginChooser();
+    }
     if (panel.scope !== "memory" && row.action === "choose-model" && choice !== undefined) {
       this.preferences = undefined;
       this.notice("Choose a model · Enter use · Esc back");
       return this.openModelPicker();
     }
+    if (!presentationPreference(row.key) && !this.stageSettings) return false;
     if (this.preferenceTransaction && panel.preview) {
       const transaction = this.preferenceTransaction;
       const message = panel.preview.replace("Enter confirms; Esc cancels.", "Applied.");
       const applied = await this.changeSettings(async () => transaction, () => message, undefined, !presentationPreference(row.key), presentationPreference(row.key));
       if (this.preferences === panel) {
-        if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment); }
+        if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment, panel.page); }
         else panel.error = `Not applied: ${this.settingsFailure ?? "previous settings retained"} Change selection to stage again, or Esc to cancel.`;
       }
       return applied;
@@ -104,7 +121,7 @@ export abstract class SettingsLayer extends UndoLayer {
         const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : row.key === "ui.splash" ? transaction.settings.splash : transaction.settings[row.key as keyof ResolvedSettings];
         const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin ? ` Saved but not effective: shadowed by ${origin}.` : "";
-        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.key}: ${choice === undefined ? "reset override" : String(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
+        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
         panel.error = undefined;
         return true;
       } catch (error) {

@@ -1249,6 +1249,7 @@ test("Ctrl+L resets terminal output without losing the draft, scrollback or pick
 });
 
 
+/** Build isolated preferences with a scripted model and real keyboard renderer. */
 async function preferenceFixture(root: string, extra: Partial<TuiControllerOptions> = {}, cli: Parameters<typeof loadConfigEditor>[0]["cli"] = {}, viewEnv: Record<string, string> = {}) {
   const home = join(root, "home"), workspaceRoot = join(root, "workspace");
   await mkdir(workspaceRoot, { recursive: true });
@@ -1261,6 +1262,7 @@ async function preferenceFixture(root: string, extra: Partial<TuiControllerOptio
   return { ...ui, home, workspaceRoot, configEditor };
 }
 
+/** Press Enter and wait for preference staging or confirmation to settle. */
 async function preferenceEnter(ui: Awaited<ReturnType<typeof preferenceFixture>>) {
   ui.mockInput.pressEnter();
   // Renderer-idle passes do not wait for filesystem fsync/rename or model staging.
@@ -1270,13 +1272,99 @@ async function preferenceEnter(ui: Awaited<ReturnType<typeof preferenceFixture>>
   await ui.flush();
 }
 
+/** Open Advanced through the same keyboard action available to users. */
+async function advancedPreferences(ui: Awaited<ReturnType<typeof preferenceFixture>>) {
+  const panel = ui.controller.snapshot().preferences!;
+  const index = panel.rows.findIndex(row => row.action === "advanced");
+  for (let n = panel.selectedIndex; n < index; n++) ui.mockInput.pressArrow("down");
+  await preferenceEnter(ui);
+  expect(ui.controller.snapshot().preferences?.page).toBe("advanced");
+}
+
+test("basic preferences list ordinary settings and open model or connections before login", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, { model: undefined, stageSettings: undefined }, {}, { NO_COLOR: "1" });
+    await ui.mockInput.pasteBracketedText("keep this task ไทย");
+    ui.editor.cursorOffset = 4;
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    const frame = ui.captureCharFrame();
+    for (const label of ["Model", "Thinking", "Connections", "Appearance", "Welcome screen", "Advanced"]) expect(frame).toContain(label);
+    for (const key of ["maxOutput", "openaiAuth", "xaiAuth", "maxTurns", "profile"]) expect(frame).not.toContain(key);
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().modelPicker).toBeDefined();
+    ui.mockInput.pressEscape(); await settle(ui);
+    ui.mockInput.pressKey("p", { meta: true });
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); await preferenceEnter(ui);
+    expect(ui.controller.snapshot().loginChooser).toBeDefined();
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("keep this task ไทย"); expect(ui.editor.cursorOffset).toBe(4);
+    ui.mockInput.pressKey("p", { meta: true });
+    for (let n = 0; n < 3; n++) ui.mockInput.pressArrow("down");
+    ui.mockInput.pressArrow("right"); ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    expect(ui.configEditor.settings.appearance).toBe("auto");
+    await preferenceEnter(ui);
+    expect(ui.configEditor.settings.appearance).toBe("dark");
+    expect(await readdir(ui.workspaceRoot)).toEqual([]);
+  });
+});
+
+test("basic Thinking previews and applies a supported effort without duplicating model rows", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4" });
+    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressArrow("down"); await settle(ui);
+    const panel = ui.controller.snapshot().preferences!;
+    const row = panel.rows[panel.selectedIndex]!;
+    expect(row.key).toBe("thinking");
+    expect(panel.rows.filter(item => item.key === "model")).toHaveLength(1);
+    const low = row.choices.indexOf("low");
+    expect(low).toBeGreaterThan(0);
+    for (let n = 0; n < low; n++) ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Thinking: low");
+    expect(ui.configEditor.settings.thinking).toBeUndefined();
+    await preferenceEnter(ui);
+    expect(ui.configEditor.settings.thinking).toBe("low");
+    expect(ui.captureCharFrame()).toContain("Saved here: low");
+    for (let n = 0; n < low; n++) ui.mockInput.pressArrow("left");
+    await preferenceEnter(ui); await preferenceEnter(ui);
+    expect(ui.configEditor.settings.thinking).toBeUndefined();
+  });
+});
+
+test("advanced preferences return to basic and keep numeric settings out of the basic list", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    ui.mockInput.pressKey("p", { meta: true });
+    await advancedPreferences(ui);
+    ui.mockInput.pressArrow("down"); await settle(ui);
+    expect(ui.captureCharFrame()).toContain("› Turn limit");
+    expect(ui.controller.snapshot().preferences?.rows.some(row => row.key === "maxOutput")).toBe(true);
+    ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("memory");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.page).toBe("basic");
+    expect(ui.controller.snapshot().preferences?.scope).toBe("session");
+    for (const scope of ["user", "project", "session"] as const) {
+      ui.mockInput.pressTab(); await settle(ui);
+      expect(ui.controller.snapshot().preferences?.scope).toBe(scope);
+      expect(ui.controller.snapshot().preferences?.rows[0]?.label).toBe("Model");
+    }
+    ui.mockInput.pressTab({ shift: true }); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("project");
+    expect(ui.controller.snapshot().preferences?.rows.some(row => row.key === "maxOutput")).toBe(false);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().preferences).toBeUndefined();
+  });
+});
+
 test("appearance preference persists across launch and environment override keeps its source visible", async () => {
   await withTempDir(async root => {
     const ui = await preferenceFixture(root);
     await ui.mockInput.pasteBracketedText("ไทย 中文 👩‍💻 e\u0301 draft");
     ui.editor.cursorOffset = 4;
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
-    ui.mockInput.pressTab(); ui.mockInput.pressTab(); await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
     const rowIndex = ui.controller.snapshot().preferences?.rows.findIndex(row => row.key === "appearance");
     expect(rowIndex).toBeGreaterThanOrEqual(0);
     for (let index = 0; index < rowIndex!; index++) ui.mockInput.pressArrow("down");
@@ -1296,7 +1384,7 @@ test("appearance preference persists across launch and environment override keep
     reopened.mockInput.pressKey("p", { meta: true }); await settle(reopened);
     const appearance = reopened.controller.snapshot().preferences?.rows.find(row => row.key === "appearance");
     expect(appearance).toMatchObject({ value: "light", origin: "environment", saved: expect.stringContaining("user config=dark") });
-    reopened.mockInput.pressTab(); reopened.mockInput.pressTab();
+    reopened.mockInput.pressTab();
     for (let index = 0; index < rowIndex!; index++) reopened.mockInput.pressArrow("down");
     await preferenceEnter(reopened); await preferenceEnter(reopened);
     expect(JSON.parse(await readFile(join(reopened.home, ".schway/config.json"), "utf8")).appearance).toBeUndefined();
@@ -1318,14 +1406,14 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     ui.resize(32, 12);
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
     const frame = ui.captureCharFrame();
-    expect(frame).toContain("› thinking");
-    expect(frame).toContain("Choice:");
+    expect(frame).toContain("› Model");
+    expect(frame).toContain("Enter open");
     ui.mockInput.pressArrow("down"); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("› maxTurns");
+    expect(ui.captureCharFrame()).toContain("› Thinking");
     ui.resize(80, 24); await settle(ui);
     ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
     ui.resize(32, 12); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("› maxTurns");
+    expect(ui.captureCharFrame()).toContain("› Thinking");
     expect(ui.captureCharFrame()).toContain("Enter saves");
     ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("draft 日本語");
@@ -1348,8 +1436,8 @@ test("long configured values do not hide the keyboard choice on the smallest pan
     const modelIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "model");
     for (let index = 0; index < modelIndex; index++) ui.mockInput.pressArrow("down");
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("› model");
-    expect(ui.captureCharFrame()).toContain("Choice:");
+    expect(ui.captureCharFrame()).toContain("› Model");
+    expect(ui.captureCharFrame()).toContain("Enter open");
   });
 });
 
@@ -1359,11 +1447,11 @@ test("compact preferences show project scope and confirmation before a write", a
     ui.resize(24, 8);
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
     ui.mockInput.pressTab(); await settle(ui);
-    expect(ui.controller.snapshot().preferences?.scope).toBe("memory");
-    ui.mockInput.pressTab(); ui.mockInput.pressTab(); await settle(ui);
+    expect(ui.controller.snapshot().preferences?.scope).toBe("user");
+    ui.mockInput.pressTab(); await settle(ui);
     expect(ui.controller.snapshot().preferences?.scope).toBe("project");
     expect(ui.captureCharFrame()).toContain("project");
-    ui.mockInput.pressArrow("right");
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.preview).toContain("Enter confirms");
     expect(ui.captureCharFrame()).toContain("Enter saves");
@@ -1384,7 +1472,7 @@ test("appearance edit rejects externally changed runtime settings", async () => 
     expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Reload");
     ui.resize(24, 8);
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
-    ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    ui.mockInput.pressTab(); ui.mockInput.pressTab();
     const appearanceIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
     for (let index = 0; index < appearanceIndex; index++) ui.mockInput.pressArrow("down");
     ui.mockInput.pressArrow("right"); ui.mockInput.pressArrow("right");
@@ -1412,7 +1500,7 @@ test("session theme command and preferences share the effective source without r
       value: "dark", origin: "environment", saved: expect.stringContaining("session=light"),
     });
     expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).settings.appearance).toBe("auto");
-    ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    ui.mockInput.pressTab();
     const appearanceIndex = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
     for (let index = 0; index < appearanceIndex; index++) ui.mockInput.pressArrow("down");
     for (let index = 0; index < 3; index++) ui.mockInput.pressArrow("right");
@@ -1426,7 +1514,7 @@ test("preferences real keyboard scopes preview save reset and restart preserve t
     const ui = await preferenceFixture(root, {}, { maxTurns: 7 });
     await ui.mockInput.pasteBracketedText("pending\nThai ไทย draft");
     ui.editor.cursorOffset = 4;
-    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); await settle(ui);
     expect(ui.captureCharFrame()).toContain("Preferences");
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
@@ -1454,12 +1542,12 @@ test("preferences real keyboard scopes preview save reset and restart preserve t
     }
     ui.resize(36, 16); await settle(ui);
     expect(ui.editor.y + ui.editor.height).toBeLessThanOrEqual(16);
-    ui.mockInput.pressEscape(); await settle(ui);
+    ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("pending\nThai ไทย draft"); expect(ui.editor.cursorOffset).toBe(4);
     expect(ui.editor.focused).toBe(true);
-    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); await settle(ui);
     expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "maxTurns")).toMatchObject({ value: "7", origin: "CLI" });
-    ui.mockInput.pressEscape(); await settle(ui);
+    ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toContain("Thai ไทย");
   });
 });
@@ -1468,7 +1556,7 @@ test("preferences memory shares the complete choice with new workspaces and rese
   await withTempDir(async root => {
     const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4" });
     await ui.controller.configCommand("set thinking low");
-    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); ui.mockInput.pressTab();
     await preferenceEnter(ui);
     expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice).toBeUndefined();
     await preferenceEnter(ui);
@@ -1494,7 +1582,7 @@ test("preferences staged conflict malformed files unavailable model and Escape r
       return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace!) };
     } });
     await ui.mockInput.pasteBracketedText("never discard");
-    ui.mockInput.pressKey("p", { meta: true });
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui);
     ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
@@ -1516,7 +1604,7 @@ test("preferences staged conflict malformed files unavailable model and Escape r
     unavailable = false; await preferenceEnter(ui);
     ui.mockInput.pressEscape(); await settle(ui);
     expect(await readFile(path, "utf8")).toBe('{}');
-    ui.mockInput.pressEscape(); await settle(ui);
+    ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("never discard");
     expect(ui.configEditor.settings.maxTurns).toBe(32);
   });
@@ -1531,9 +1619,9 @@ test("preferences cancellation during provider staging never commits or loses th
       return { model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace!) };
     } });
     await ui.mockInput.pasteBracketedText("cancel me safely");
-    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     ui.mockInput.pressEnter(); await waitForUiState(ui, () => ui.controller.running, "active turn");
-    ui.mockInput.pressEscape(); release(); await ui.controller.waitForIdle(); await settle(ui);
+    ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); release(); await ui.controller.waitForIdle(); await settle(ui);
     expect(ui.configEditor.settings.maxTurns).toBe(32);
     expect(ui.editor.plainText).toBe("cancel me safely");
     expect(ui.controller.snapshot().preferences).toBeUndefined();
@@ -1550,7 +1638,7 @@ test("preferences inspect actual origins and lower memory while omitting connect
     await memory.write({ provider: "openai", openaiAuth: "api-key", model: "gpt-5.4", thinking: "low" });
     const ui = await preferenceFixture(root, {}, { maxTurns: 17, baseUrl: "https://fixture-user:fixture-password@example.com", headers: { Authorization: "Bearer header-secret" }, extraBody: { token: "body-secret" } });
     await ui.controller.configCommand("set maxTurns 19");
-    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); await settle(ui);
     const rows = ui.controller.snapshot().preferences!.rows;
     expect(rows.find(row => row.key === "maxTurns")).toMatchObject({ value: "19", origin: "current-session override", saved: "user config=11; project config=13; CLI=17; session=19" });
     expect(rows.find(row => row.key === "model")).toMatchObject({ value: "gpt-5.4", origin: "interactive memory" });
@@ -1570,7 +1658,7 @@ test("preferences inspect actual origins and lower memory while omitting connect
 test("preferences memory conflicts preserve the newer workspace choice and expose the specific failure", async () => {
   await withTempDir(async root => {
     const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-4o" });
-    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); ui.mockInput.pressTab();
     await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.preview).toContain(`${ui.configEditor.settings.provider}/${ui.configEditor.settings.model}`);
     const concurrent = await InteractiveMemory.load(ui.home, ui.workspaceRoot);
@@ -1586,8 +1674,8 @@ test("preferences picker has no guessed Codex effort and never saves credential 
   await withTempDir(async root => {
     const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4", openaiAuth: "codex" });
     ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
-    expect(ui.controller.snapshot().preferences!.rows[0]!.choices).toEqual([undefined]);
-    ui.mockInput.pressTab(); ui.mockInput.pressTab(); ui.mockInput.pressTab();
+    expect(ui.controller.snapshot().preferences!.rows.find(row => row.key === "thinking")!.choices).toEqual([undefined]);
+    ui.mockInput.pressTab(); ui.mockInput.pressTab();
     const path = join(ui.workspaceRoot, ".schway/config.json");
     await mkdir(join(ui.workspaceRoot, ".schway")); await writeFile(path, '{"apiKey":"secret-not-loaded"}');
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
@@ -1629,7 +1717,7 @@ test("preferences reset inherits the latest remembered model and preserves unrel
   await withTempDir(async root => {
     const ui = await preferenceFixture(root);
     expect(await ui.controller.selectModel("openai/gpt-5.4-mini")).toBe(true);
-    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressKey("p", { meta: true }); await advancedPreferences(ui); await settle(ui);
     expect(ui.controller.snapshot().preferences?.rows.find(row => row.key === "model")?.saved).toContain("workspace memory=gpt-5.4-mini");
     // Model is row eight; reset current-session model using the bounded reset action.
     for (let n = 0; n < 7; n++) ui.mockInput.pressArrow("down");
@@ -2803,7 +2891,7 @@ test("splash preferences set and reset session and user fields without losing in
     for (const scope of ["session", "user"] as const) {
       expect(await ui.controller.configCommand(`set ui {"inlineDiffLines":7} --scope ${scope}`)).toBe(true);
       ui.controller.openPreferences();
-      if (scope === "user") { ui.controller.movePreference(1, "scope"); ui.controller.movePreference(1, "scope"); }
+      if (scope === "user") { ui.controller.movePreference(1, "scope"); }
       const rows = ui.controller.snapshot().preferences!.rows;
       const index = rows.findIndex(row => row.key === "ui.splash");
       expect(rows[index]!.choices).toEqual([undefined, "always", "first-run", "never"]);

@@ -182,10 +182,11 @@ void (async () => {
       assert(canvas.backgroundColor.equals(core.RGBA.fromHex(expected)), "installed appearance or environment precedence wrong");
       terminal.mockInput.pressKey("p", { meta: true });
       await settle(() => screenIncludes("Preferences"), "installed appearance preferences");
-      terminal.mockInput.pressTab(); terminal.mockInput.pressTab();
-      for (let index = 0; index < 12; index++) terminal.mockInput.pressArrow("down");
-      await settle(() => screenIncludes("appearance"), "installed appearance row");
-      assert(screenIncludes(scenario.endsWith("-env") ? "environment" : "user-global"), "appearance source hidden");
+      terminal.mockInput.pressTab();
+      for (let index = 0; index < 3; index++) terminal.mockInput.pressArrow("down");
+      await settle(() => screenIncludes("› Appearance"), "installed appearance row");
+      assert(screenIncludes("All workspaces") && screenIncludes("Saved here: dark"), "saved appearance hidden");
+      assert(screenIncludes(scenario.endsWith("-env") ? "Effective now: light" : "Effective now: dark"), "effective appearance hidden");
       terminal.mockInput.pressEscape();
       await settle(() => editor.focused && !screenIncludes("Preferences"), "appearance panel return");
     }
