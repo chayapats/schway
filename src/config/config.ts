@@ -1,5 +1,6 @@
+import { applyConfigDeprecations, CONFIG_DEPRECATIONS, type ConfigDeprecation, type ConfigDeprecationWarning } from "./deprecations.ts";
 import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, stricterApprovalMode, type ApprovalMode } from "../agent/approval.ts";
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static, type TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -295,16 +296,45 @@ export function projectConfigPath(workspaceRoot: string): string {
   return join(workspaceRoot, ".schway", "config.json");
 }
 
-/** Validate a parsed JSON value as a config layer and name the source in errors. */
+/** Preserve parsed settings compatibility while exposing non-persisted deprecation diagnostics. */
+export type ParsedConfigLayer = ConfigLayer & { readonly deprecationWarnings?: readonly ConfigDeprecationWarning[] };
+
+/** Validate migrated settings and return source-specific warnings without changing the input object. */
 export function parseConfigObject(
   value: unknown,
   source: string,
-): ConfigLayer | { error: string } {
+  deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS,
+): ParsedConfigLayer | { error: string } {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return { error: `Invalid config at ${source}: expected a JSON object` };
   }
 
-  const record = value as Record<string, unknown>;
+  let migrated: ReturnType<typeof applyConfigDeprecations>;
+  try { migrated = applyConfigDeprecations(value as Record<string, unknown>, source, deprecations); }
+  catch (error) { return { error: errorMessage(error) }; }
+  value = migrated.value;
+  const record = migrated.value;
+  for (const entry of deprecations) {
+    if (entry.replacement) continue;
+    const parts = entry.key.split(".");
+    let schema: TSchema | undefined = ConfigSchema;
+    let parent: Record<string, unknown> | undefined = record;
+    const ancestors: Array<{ parent: Record<string, unknown>; key: string; schema?: TSchema }> = [];
+    for (const part of parts.slice(0, -1)) {
+      schema = schema?.properties?.[part];
+      if (parent && Object.hasOwn(parent, part)) ancestors.push({ parent, key: part, schema });
+      const next: unknown = parent && Object.hasOwn(parent, part) ? parent[part] : undefined;
+      parent = next && typeof next === "object" && !Array.isArray(next) ? next as Record<string, unknown> : undefined;
+    }
+    const key = parts.at(-1)!;
+    if (!schema?.properties?.[key] && parent && Object.hasOwn(parent, key)) {
+      delete parent[key];
+      for (const ancestor of ancestors.reverse()) {
+        if (ancestor.schema || Object.keys(ancestor.parent[ancestor.key] as object).length) break;
+        delete ancestor.parent[ancestor.key];
+      }
+    }
+  }
   const keys = Object.keys(record);
   const secretKey = keys.find((key) =>
     SECRET_KEY_ALIASES.has(normalizeKey(key)),
@@ -375,7 +405,7 @@ export function parseConfigObject(
       error: `Invalid config at ${source}: profile must be a nonempty string.`,
     };
   }
-  return layer;
+  return Object.defineProperty(layer, "deprecationWarnings", { value: migrated.warnings, enumerable: false }) as ParsedConfigLayer;
 }
 
 /** Find secret-like keys inside profile definitions before schema validation. */
@@ -779,15 +809,18 @@ export async function loadResolvedSettings(input: {
   deferOpenAIThinking?: boolean;
   /** Headless runs must name a provider and model in config or CLI flags. */
   requireExplicitModel?: boolean;
+  configDeprecations?: readonly ConfigDeprecation[];
+  onDeprecation?: (warning: ConfigDeprecationWarning) => void;
 }): Promise<ResolvedSettings | { error: string }> {
-  const user = await readConfigFile(userConfigPath(input.home));
+  const user = await readConfigFile(userConfigPath(input.home), input.configDeprecations);
   if (user && "error" in user) {
     return user;
   }
-  const project = await readConfigFile(projectConfigPath(input.workspaceRoot));
+  const project = await readConfigFile(projectConfigPath(input.workspaceRoot), input.configDeprecations);
   if (project && "error" in project) {
     return project;
   }
+  for (const warning of [...(user?.deprecationWarnings ?? []), ...(project?.deprecationWarnings ?? [])]) input.onDeprecation?.(warning);
   const resolved = resolveSettings({
     user,
     project,
@@ -805,7 +838,8 @@ export async function loadResolvedSettings(input: {
 /** Read one config.json. Missing files are skipped; invalid files are errors. */
 export async function readConfigFile(
   path: string,
-): Promise<ConfigLayer | { error: string } | undefined> {
+  deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS,
+): Promise<ParsedConfigLayer | { error: string } | undefined> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -826,7 +860,7 @@ export async function readConfigFile(
   } catch {
     return { error: `Invalid config at ${path}: malformed JSON` };
   }
-  return parseConfigObject(parsed, path);
+  return parseConfigObject(parsed, path, deprecations);
 }
 
 /** Trim string fields after schema validation, including profile selections and definitions. */

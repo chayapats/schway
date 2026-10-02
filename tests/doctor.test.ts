@@ -334,3 +334,21 @@ test("approval-config diagnoses the file baseline without reading CLI approval",
   const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, approval: "auto" }, store: store(null) });
   expect(check(report, "approval-config")).toEqual({ id: "approval-config", status: "warning", summary: 'Project approval.mode "auto" is looser than your "read-only" and is ignored.', remedy: `Remove approval.mode from ${join(workspace, ".schway/config.json")} or set a stricter mode.` });
 });
+
+test("doctor JSON carries the shared deprecation text and exits zero for warnings", async () => {
+  const { workspace, home } = await fixture();
+  await mkdir(join(home, ".schway"));
+  const path = join(home, ".schway/config.json");
+  await writeFile(path, JSON.stringify({ oldModel: "local", provider: "openai-compatible", baseUrl: "http://localhost:1234/v1", auth: "none" }));
+  const configDeprecations = [{ key: "oldModel", replacement: "model", since: "1.1.0", removeIn: "2.0" }];
+  let stdout = "", stderr = "";
+  const code = await runCli(["doctor", "--json"], { cwd: workspace, env: { HOME: home }, credentialStore: store(null), configDeprecations,
+    stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } } });
+  expect(code, stdout + stderr).toBe(0); expect(stderr).toBe("");
+  const report = JSON.parse(stdout);
+  expect(report.checks.filter((entry: { id: string }) => entry.id.startsWith("config.deprecated."))).toEqual([{
+    id: "config.deprecated.oldModel", status: "warning",
+    summary: `Config: "oldModel" in ${path} is deprecated; use "model". It will be removed in 2.0.`,
+    remedy: `Replace "oldModel" with "model" in ${path}.`,
+  }]);
+});

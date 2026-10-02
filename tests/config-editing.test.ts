@@ -194,3 +194,25 @@ test("Grok and xAI API-key model staging commit explicit distinct billing routes
     await expect(editor.prepare({ scope: "session", key: "xaiAuth", value: "bogus" })).rejects.toThrow("Unknown xAI auth preference: bogus. Use auto, grok, or api-key.");
   });
 });
+
+test("saving unrelated and sibling settings preserves legacy JSON keys and repeats warnings on a later load", async () => {
+  await withTempDir(async home => {
+    const configDeprecations = [
+      { key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" },
+      { key: "ui.oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" },
+    ];
+    const path = join(home, ".schway/config.json");
+    await mkdir(join(home, ".schway"));
+    await writeFile(path, JSON.stringify({ oldTurns: 7, ui: { oldSplash: "never" } }));
+    const input = { home, workspaceRoot: join(home, "work"), configDeprecations };
+    const editor = await loadConfigEditor(input);
+    expect(editor.settings).toMatchObject({ maxTurns: 7, splash: "never" });
+    expect(editor.deprecationWarnings).toHaveLength(2);
+    await (await editor.prepare({ scope: "user", key: "appearance", value: "dark" })).commit();
+    await (await editor.prepare({ scope: "user", key: "ui", value: { inlineDiffLines: 3 } })).commit();
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ oldTurns: 7, ui: { oldSplash: "never", inlineDiffLines: 3 }, appearance: "dark" });
+    const reloaded = await loadConfigEditor(input);
+    expect(reloaded.deprecationWarnings).toEqual(editor.deprecationWarnings);
+    expect(reloaded.settings).toMatchObject({ maxTurns: 7, splash: "never", inlineDiffLines: 3, appearance: "dark" });
+  });
+});

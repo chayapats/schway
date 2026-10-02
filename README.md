@@ -33,3 +33,5 @@ bun run typecheck
 bun run dev
 ```
 [Run coding evals](https://github.com/chayapats/schway/blob/main/docs/evals.md)
+
+See the [stability policy](docs/stability.md) for compatibility promises.

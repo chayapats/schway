@@ -1,3 +1,4 @@
+import type { ConfigDeprecation } from "../config/deprecations.ts";
 import { toolEffect } from "../tools/types.ts";
 import { realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -16,6 +17,7 @@ const NATIVE_TOOL_NAMES = new Set(["read", "write", "edit", "bash", "grep", "fin
 
 /** Atomically load enabled global/project package modules then explicit modules, returning tools and their separately owned runtime. */
 export async function loadExtensions(options: {
+  configDeprecations?: readonly ConfigDeprecation[];
   modules: readonly string[];
   workspace: Workspace;
   tools: ToolRegistry;
@@ -25,7 +27,7 @@ export async function loadExtensions(options: {
   onDiagnostic?: (message: string) => void;
 }): Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }> {
   options.signal?.throwIfAborted();
-  const packages = await discoverPackages({ workspaceRoot: options.workspace.root, home: options.home, signal: options.signal });
+  const packages = await discoverPackages({ workspaceRoot: options.workspace.root, home: options.home, signal: options.signal, configDeprecations: options.configDeprecations });
   const declarations: Array<{ path: string; source: string; packageName?: string }> = [
     ...packages.flatMap(pkg => pkg.extensions.map(path => ({ path, source: `${pkg.source}: ${path}`, packageName: pkg.name }))),
     ...options.modules.map(path => ({ path: resolve(options.workspace.root, path), source: `CLI module "${path}"` })),

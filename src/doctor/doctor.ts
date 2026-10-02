@@ -1,3 +1,4 @@
+import type { ConfigDeprecation } from "../config/deprecations.ts";
 import { undoStoreSize } from "../undo/store.ts";
 import { DEFAULT_UNDO_MAX_SIZE_MB } from "../config/defaults.ts";
 import { formatCount } from "../text/format.ts";
@@ -42,6 +43,7 @@ export interface DoctorReport {
 
 /** Diagnose the installed runtime without starting a model, logging in, or loading extension code. */
 export async function diagnose(input: {
+  configDeprecations?: readonly ConfigDeprecation[];
   cwd: string;
   env: Record<string, string | undefined>;
   args: CliArgs;
@@ -124,9 +126,10 @@ export async function diagnose(input: {
     ...(workspace ? [["project", projectConfigPath(workspace)] as const] : []),
   ]) {
     try {
-      const config = await readConfigFile(path);
+      const config = await readConfigFile(path, input.configDeprecations);
       if (config && "error" in config) add(`config.${scope}`, "error", `Invalid ${scope} configuration.`, `Correct or remove ${path}; validate JSON and setting names.`);
       else {
+        for (const warning of config?.deprecationWarnings ?? []) add(`config.deprecated.${warning.key}`, "warning", warning.message, warning.replacement ? `Replace "${warning.key}" with "${warning.replacement}" in ${warning.path}.` : `Remove "${warning.key}" from ${warning.path}.`);
         if (scope === "user") user = config;
         else project = config;
         add(`config.${scope}`, "ok", config ? `${scope} configuration valid.` : `${scope} configuration not present; defaults apply.`);
@@ -247,7 +250,7 @@ export async function diagnose(input: {
 
   if (workspace) {
     try {
-      const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal });
+      const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal, configDeprecations: input.configDeprecations });
       add("packages", "ok", `${legacyDoctorCount(inspected.packages.length, "enabled package manifest")} valid.`);
       // Bound identifiers and redact only known credential sources: ordinary env/header values are not keys.
       const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", COMPATIBLE_API_KEY_ENV,

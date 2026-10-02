@@ -1,3 +1,4 @@
+import type { ConfigDeprecation } from "../config/deprecations.ts";
 import {
   discoverAgentsInstructions,
   formatAgentsInstructions,
@@ -62,6 +63,8 @@ export type CompactionOutcome = "completed" | "noop" | "failed" | "cancelled";
 
 /** Options for creating a context manager with explicit budget overrides. */
 export interface ContextManagerOptions {
+  /** Use the settings reader’s legacy keys during package-backed skill discovery. */
+  configDeprecations?: readonly ConfigDeprecation[];
   home?: string;
   /** Explicit context window that outranks catalog and unknown defaults. */
   contextWindow?: number;
@@ -151,7 +154,7 @@ export function createContextManager(
           content: formatAgentsInstructions(instructions),
         });
       }
-      const discovered = await discoverSkillsSafe(workspace, options.home);
+      const discovered = await discoverSkillsSafe(workspace, options.home, options.configDeprecations);
       const modelSkills = discovered.filter((skill) => !skill.userOnly);
       if (modelSkills.length > 0) {
         base.push({
@@ -238,6 +241,7 @@ export function createContextManager(
       activationOptions.signal?.throwIfAborted();
       const scope = activationScope;
       const invocation = await prepareSkillInvocation({
+        configDeprecations: options.configDeprecations,
         workspaceRoot: workspace.root,
         extraRoots: workspace.extraRoots,
         home: options.home,
@@ -346,9 +350,10 @@ export function createContextManager(
 async function discoverSkillsSafe(
   workspace: Workspace,
   home: string | undefined,
+  configDeprecations?: readonly ConfigDeprecation[],
 ): Promise<SkillMetadata[]> {
   try {
-    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home });
+    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations });
     return discovered.skills;
   } catch {
     return [];

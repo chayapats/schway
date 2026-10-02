@@ -1,3 +1,4 @@
+import type { ConfigDeprecation } from "../config/deprecations.ts";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { satisfies, validRange } from "semver";
@@ -25,6 +26,8 @@ export interface PackageIssue {
 
 /** Resolve enabled packages, retaining the first error as the runtime loader always has. */
 export async function discoverPackages(options: {
+  /** Use the same supported legacy keys as the settings reader. */
+  configDeprecations?: readonly ConfigDeprecation[];
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
@@ -36,6 +39,8 @@ export async function discoverPackages(options: {
 
 /** Inspect each configured package independently without evaluating extension entrypoints. */
 export async function inspectPackages(options: {
+  /** Use the same supported legacy keys as the settings reader. */
+  configDeprecations?: readonly ConfigDeprecation[];
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
@@ -49,7 +54,7 @@ export async function inspectPackages(options: {
   ];
   for (const { scope, root, config } of scopes) {
     options.signal?.throwIfAborted();
-    const layer = await readConfigFile(config);
+    const layer = await readConfigFile(config, options.configDeprecations);
     if (layer && "error" in layer) {
       diagnostics.push(layer.error);
       issues.push({ scope, kind: "configuration" });

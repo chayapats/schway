@@ -1,3 +1,4 @@
+import { CONFIG_DEPRECATIONS, type ConfigDeprecation, type ConfigDeprecationWarning } from "./deprecations.ts";
 import { InteractiveMemory, type InteractiveChoice } from "./interactive-memory.ts";
 import { effectiveInteractiveMemory, resolveApprovalSettings, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
@@ -112,6 +113,8 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
 
 /** Own validated config layers and prepare edits without publishing partially staged settings. */
 export class ConfigEditor {
+  /** Startup warnings retained independently of mutable settings layers. */
+  readonly deprecationWarnings: readonly ConfigDeprecationWarning[];
   private layers: Layers;
   private revision = 0;
   private committing = false;
@@ -120,7 +123,8 @@ export class ConfigEditor {
   memoryProblem?: string;
 
   /** Initialize from validated layers without reading or writing configuration files. */
-  constructor(layers: Layers, private readonly paths: { user: string; project: string }, capabilities?: readonly ModelCapability[], private memory?: InteractiveMemory, private home?: string) {
+  constructor(layers: Layers, private readonly paths: { user: string; project: string }, capabilities?: readonly ModelCapability[], private memory?: InteractiveMemory, private home?: string, private readonly configDeprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS, warnings: readonly ConfigDeprecationWarning[] = []) {
+    this.deprecationWarnings = warnings;
     this.layers = structuredClone(layers);
     this.modelCapabilities = capabilities === undefined ? undefined : structuredClone(capabilities);
     // A saved Codex effort can be resolved after login, without blocking interactive recovery.
@@ -240,11 +244,11 @@ export class ConfigEditor {
   /** Stage a workspace's project layer, retaining session overrides only within the same primary workspace. */
   async forWorkspace(workspaceRoot: string): Promise<ConfigEditor> {
     const path = projectConfigPath(workspaceRoot);
-    const project = await readConfigFile(path);
+    const project = await readConfigFile(path, this.configDeprecations);
     if (project && "error" in project) throw new Error(project.error);
     const same = path === this.paths.project;
     const memory = same ? this.memory : this.home && this.memory ? await InteractiveMemory.load(this.home, workspaceRoot) : undefined;
-    return new ConfigEditor({ ...this.layers, memory: memory?.choice, project, session: same ? this.layers.session : undefined }, { ...this.paths, project: path }, same ? this.modelCapabilities : undefined, memory, this.home);
+    return new ConfigEditor({ ...this.layers, memory: memory?.choice, project, session: same ? this.layers.session : undefined }, { ...this.paths, project: path }, same ? this.modelCapabilities : undefined, memory, this.home, this.configDeprecations, this.deprecationWarnings);
   }
 
   /** Block unavailable memory only when explicit settings do not independently select a complete connection. */
@@ -309,7 +313,7 @@ export class ConfigEditor {
     await this.memory.write();
     const session = { ...this.layers.session };
     for (const key of ["provider", "model", "thinking", "profile", "openaiAuth", "xaiAuth"] as const) delete session[key];
-    return new ConfigEditor({ ...this.layers, memory: undefined, session }, this.paths, this.modelCapabilities, this.memory, this.home);
+    return new ConfigEditor({ ...this.layers, memory: undefined, session }, this.paths, this.modelCapabilities, this.memory, this.home, this.configDeprecations, this.deprecationWarnings);
   }
 
   /** Stage one validated setting edit, retaining the previous settings until commit. */
@@ -378,6 +382,7 @@ export class ConfigEditor {
     ]);
   }
 
+  /** Stage edits against original JSON while validating the resolved replacement settings. */
   private async prepareChanges(scope: ConfigScope, changes: Array<{ key: string; value?: unknown }>): Promise<ConfigTransaction> {
     for (const edit of changes) if (!(EDITABLE_CONFIG_KEYS as readonly string[]).includes(edit.key)) throw new Error(`Unsupported or secret setting. Editable keys: ${EDITABLE_CONFIG_KEYS.join(", ")}. API-key/token fields are not ordinary configuration.`);
     // A session reset of profile records the cleared marker so file and CLI selections stay cleared.
@@ -393,7 +398,7 @@ export class ConfigEditor {
       let json: unknown;
       try { json = before === undefined ? {} : JSON.parse(before); }
       catch { throw new Error(`Invalid config at ${path}: malformed JSON. Repair this file before editing; it was not changed.`); }
-      const checked = parseConfigObject(json, path);
+      const checked = parseConfigObject(json, path, this.configDeprecations);
       if ("error" in checked) throw new Error(`${checked.error}. Repair this file before editing; it was not changed.`);
       source = json as ConfigLayer;
     }
@@ -407,7 +412,7 @@ export class ConfigEditor {
         else delete layer.ui;
       } else layer[edit.key] = edit.value;
     }
-    const parsed = parseConfigObject(layer, scope);
+    const parsed = parseConfigObject(layer, path ?? scope, this.configDeprecations);
     if ("error" in parsed) throw new Error(parsed.error);
     for (const edit of expanded) if ((edit.key === "model" || edit.key === "baseUrl" || edit.key === "profile") && typeof edit.value === "string" && !parsed[edit.key]?.trim()) throw new Error(`${edit.key} must be a nonempty string.`);
     if (scope !== "session" && expanded.some(edit => edit.key === "baseUrl" && edit.value !== undefined)) validatePersistedBaseUrl(parsed.baseUrl!);
@@ -421,7 +426,8 @@ export class ConfigEditor {
         const saved = { ...source } as Record<string, unknown>;
         for (const edit of expanded) {
           if (edit.value === undefined) delete saved[edit.key];
-          else saved[edit.key] = parsed[edit.key as keyof ConfigLayer];
+          else saved[edit.key] = this.configDeprecations.some(entry => entry.key === edit.key || entry.key.startsWith(`${edit.key}.`))
+            ? layer[edit.key] : parsed[edit.key as keyof ConfigLayer];
         }
         if (path && !(before === undefined && Object.keys(parsed).length === 0)) await atomicWrite(path, saved, before, signal);
         else signal?.throwIfAborted();
@@ -491,14 +497,14 @@ async function atomicWrite(path: string, layer: ConfigLayer, before: string | un
 }
 
 /** Load editable settings from the explicit home and primary workspace without creating files. */
-export async function loadConfigEditor(input: { home: string; workspaceRoot: string; cli?: ConfigLayer; interactiveMemory?: boolean }): Promise<ConfigEditor> {
+export async function loadConfigEditor(input: { home: string; workspaceRoot: string; cli?: ConfigLayer; interactiveMemory?: boolean; configDeprecations?: readonly ConfigDeprecation[] }): Promise<ConfigEditor> {
   const paths = { user: userConfigPath(input.home), project: projectConfigPath(input.workspaceRoot) };
-  const user = await readConfigFile(paths.user);
+  const user = await readConfigFile(paths.user, input.configDeprecations);
   if (user && "error" in user) throw new Error(user.error);
-  const project = await readConfigFile(paths.project);
+  const project = await readConfigFile(paths.project, input.configDeprecations);
   if (project && "error" in project) throw new Error(project.error);
   const memory = input.interactiveMemory ? await InteractiveMemory.load(input.home, input.workspaceRoot) : undefined;
-  return new ConfigEditor({ memory: memory?.choice, user, project, cli: input.cli }, paths, undefined, memory, input.home);
+  return new ConfigEditor({ memory: memory?.choice, user, project, cli: input.cli }, paths, undefined, memory, input.home, input.configDeprecations, [...(user?.deprecationWarnings ?? []), ...(project?.deprecationWarnings ?? [])]);
 }
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */
