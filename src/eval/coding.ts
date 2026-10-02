@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { AgentClock } from "../agent/retry.ts";
 import { createContextManager } from "../context/manager.ts";
-import type { Model } from "../model/model.ts";
+import { isThinkingLevel, type Model, type ThinkingLevel } from "../model/model.ts";
 import { createJsonlSession } from "../session/jsonl.ts";
 import { createEvalTools } from "./tools.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
@@ -45,6 +45,8 @@ export const CODING_CASE = {
 
 /** Bounded settings captured without storing any credential or provider request body. */
 export interface EvalSettings {
+  /** Explicit requested effort; omission retains provider defaults. */
+  thinking?: ThinkingLevel;
   maxTurns: number;
   timeoutMs: number;
   maxOutputTokens: number;
@@ -52,7 +54,9 @@ export interface EvalSettings {
 
 /** Apply and validate bounded settings consistently for the API and CLI. */
 export function resolveEvalSettings(overrides: Partial<EvalSettings> = {}): EvalSettings {
+  if (overrides.thinking !== undefined && !isThinkingLevel(overrides.thinking)) throw new Error("Invalid thinking level; run bun run eval --help for choices.");
   const settings: EvalSettings = {
+    ...(overrides.thinking !== undefined ? { thinking: overrides.thinking } : {}),
     maxTurns: overrides.maxTurns ?? 8,
     timeoutMs: overrides.timeoutMs ?? 30_000,
     maxOutputTokens: overrides.maxOutputTokens ?? 4096,
@@ -74,8 +78,10 @@ export interface CodingEvalResult {
   model: string;
   /** Billing route, independent of provider conversation names. */
   billing: "usage" | "subscription";
-  /** Safe prerequisite reason for unavailable subscription routes. */
-  reason?: "not_signed_in";
+  /** Credential-free prerequisite reason for unavailable sign-in or reasoning support. */
+  reason?: "not_signed_in" | "unsupported_thinking" | "thinking_capability_unavailable";
+  /** Action to resolve a refused thinking selection without exposing catalog errors. */
+  nextAction?: string;
   settings: EvalSettings;
   outcome: "success" | "grader_failure" | "model_failure" | "harness_error" | "timeout" | "skipped_prerequisites" | "skipped_spend_cap" | "skipped";
   /** Estimated USD spend for this case, set by the eval runner from recorded usage and the route price. */
