@@ -236,6 +236,39 @@ test("npm pack installs the public extension API and completes a headless tool r
     expect(nodeNext.exitCode, nodeNext.stdout + nodeNext.stderr).toBe(0);
     expect(nodeNext.stdout + nodeNext.stderr).toBe("");
 
+    // The public contract also works with standard libraries and no ambient type packages.
+    await Bun.write(join(installDir, "no-ambient.ts"), `
+import { defineExtension, type ToolContext } from "schway/extensions";
+const env: NonNullable<ToolContext["env"]> = { PATH: "/bin", OPTIONAL: undefined };
+const value: string | undefined = env.OPTIONAL;
+// @ts-expect-error Environment values must remain strings or undefined.
+env.INVALID = 42;
+export default defineExtension(ctx => ctx.registerTool({
+  name: "environment", description: "Read an environment value", effect: "read-only",
+  execution: "parallel", inputSchema: { type: "object" },
+  async execute(_input, toolContext) {
+    toolContext.signal?.throwIfAborted();
+    return { content: toolContext.env?.PATH ?? value ?? "missing" };
+  },
+}));
+`);
+    await Bun.write(join(installDir, "tsconfig.no-ambient.json"), JSON.stringify({
+      compilerOptions: {
+        noEmit: true, strict: true, listFiles: true, types: [], lib: ["ESNext", "DOM"],
+        module: "ESNext", moduleResolution: "bundler", target: "ESNext",
+      },
+      files: ["no-ambient.ts"],
+    }));
+    const noAmbient = await runCommand([
+      join(import.meta.dir, "../node_modules/.bin/tsc"), "--project", "tsconfig.no-ambient.json",
+    ], { cwd: installDir });
+    expect(noAmbient.exitCode, noAmbient.stdout + noAmbient.stderr).toBe(0);
+    expect(noAmbient.stderr).toBe("");
+    expect(noAmbient.stdout).not.toMatch(/error TS\d+:/);
+    expect(noAmbient.stdout).toContain("node_modules/schway/dist/types/extensions/index.d.ts");
+    expect(noAmbient.stdout).not.toContain("node_modules/schway/src/");
+    expect(noAmbient.stdout).not.toMatch(/node_modules\/(?:@types\/|bun-types\/)/);
+
     // Missing renderer and unused SDK packages prove the installed headless path stays lazy.
     for (const dependency of ["@opentui", "openai", "@anthropic-ai/sdk"]) {
       await rm(join(installDir, "node_modules", dependency), { recursive: true, force: true });

@@ -147,8 +147,7 @@ test("public API inventory lists each documented reachable export exactly once",
   const names = [...section.matchAll(/^\| `(\w+)` \| .+ \|$/gm)].map(match => match[1]!);
   expect(names.length).toBe(new Set(names).size);
   expect(names.sort()).toEqual(exportsIn(report).sort());
-  // The sole ambient namespace is deliberate: ToolContext.env uses Node's environment contract.
-  expect([...report.matchAll(/\b(?:NodeJS|Bun)\.\w+/g)].map(match => match[0])).toEqual(["NodeJS.ProcessEnv"]);
+  expect(report).not.toMatch(/\b(?:NodeJS|Bun)\./);
 });
 
 test("registration method documentation matches ExtensionContext in both directions", async () => {

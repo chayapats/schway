@@ -317,7 +317,7 @@ export type ToolCallStatus = "success" | "error" | "cancelled";
 
 // @public
 export interface ToolContext {
-    env?: NodeJS.ProcessEnv;
+    env?: Record<string, string | undefined>;
     onOutput?: (chunk: ToolOutputChunk) => void;
     // (undocumented)
     signal?: AbortSignal;

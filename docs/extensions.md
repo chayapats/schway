@@ -39,9 +39,12 @@ export default defineExtension((extension) => {
 
 Only exports from `schway/extensions` are public and semver-versioned. All other
 imports are private. The package ships emitted `.d.ts` declarations; consumers
-need no `allowImportingTsExtensions` setting. Install `@types/bun` for the ambient
-runtime types, including `NodeJS.ProcessEnv` used by `ToolContext.env`. Both
-TypeScript `bundler` and `nodenext` module resolution are supported.
+need no `allowImportingTsExtensions` setting or ambient Node/Bun type package.
+The standard TypeScript `ESNext` and `DOM` libraries supply the required types,
+including `AbortSignal`. `ToolContext.env` is a string-keyed map of strings or
+`undefined`. Extensions that use Bun APIs in their own code still need
+`@types/bun` for those APIs. Both TypeScript `bundler` and `nodenext` module
+resolution are supported.
 
 The checked-in [API report](../api/extensions.api.md) guards the complete reachable
 surface. Run `bun scripts/extension-api-report.ts` to check it or append `--update`
