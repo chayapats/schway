@@ -18,11 +18,14 @@ import {
   CODEX_ACCOUNT_CLAIM,
   CODEX_AUTHORIZE_URL,
   CODEX_CLIENT_ID,
+  CODEX_DEVICE_REDIRECT_URI,
   CODEX_DEVICE_TIMEOUT_MS,
+  CODEX_DEVICE_TOKEN_URL,
   CODEX_REDIRECT_URI,
   CODEX_REFRESH_TIMEOUT_MS,
   CODEX_RESPONSES_URL,
   CODEX_SCOPE,
+  CODEX_TOKEN_URL,
   accountIdFromAccessToken,
   buildCodexAuthorizeUrl,
   clearPendingBrowserAttempt,
@@ -357,77 +360,130 @@ test("browser login times out actionably when the callback never settles", async
   expect(await loadSubscriptionTokens(store)).toBeNull();
 });
 
-test("device flow reports the user code then persists approved tokens", async () => {
+test("device usercode parse accepts device_auth_id without device_code and string interval", async () => {
+  const expiresAt = new Date(Date.now() + 900_000).toISOString();
+  const authorization = await requestDeviceAuthorization({
+    fetch: (async (_input, init) => {
+      expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({ client_id: CODEX_CLIENT_ID });
+      return Response.json({
+        device_auth_id: "auth-id-1",
+        user_code: "ABCD-1234",
+        interval: "2",
+        expires_at: expiresAt,
+      });
+    }) satisfies CodexFetchLike,
+  });
+  expect(authorization).toMatchObject({
+    deviceAuthId: "auth-id-1",
+    userCode: "ABCD-1234",
+    verificationUri: "https://auth.openai.com/codex/device",
+    interval: 2,
+  });
+  expect(authorization.expiresIn).toBeGreaterThan(800);
+  expect(authorization.expiresIn).toBeLessThanOrEqual(900);
+  await expect(
+    requestDeviceAuthorization({
+      fetch: (async () => Response.json({ user_code: "ONLY-CODE", interval: "1" })) satisfies CodexFetchLike,
+    }),
+  ).rejects.toThrow(/incomplete authorization/i);
+});
+
+test("device flow polls device_auth_id, exchanges with device redirect, and persists tokens", async () => {
   const store = fakeCredentialStore();
   const progress: string[] = [];
+  const seen: Array<{ url: string; body: string }> = [];
   let polls = 0;
   const tokens = await loginWithDeviceFlow({
     store,
     pollIntervalMs: 1,
     deps: {
-      fetch: (async (input, _init) => {
-        if (String(input).includes("usercode")) {
-          return new Response(
-            JSON.stringify({
-              user_code: "ABCD-1234",
-              verification_uri: "https://auth.openai.com/codex/device",
-              device_code: "device-1",
-              expires_in: 900,
-              interval: 1,
-            }),
-            { headers: { "Content-Type": "application/json" } },
-          );
-        }
-        polls += 1;
-        if (polls === 1) {
-          return new Response(JSON.stringify({ error: "authorization_pending" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
+      fetch: (async (input, init) => {
+        const url = String(input);
+        const body = String(init?.body ?? "");
+        seen.push({ url, body });
+        if (url.includes("usercode")) {
+          return Response.json({
+            device_auth_id: "device-auth-1",
+            user_code: "ABCD-1234",
+            interval: "1",
+            expires_at: new Date(Date.now() + 900_000).toISOString(),
           });
         }
-        return new Response(
-          JSON.stringify({
-            access_token: jwtWithAccount("acct-device"),
-            refresh_token: "refresh-device",
-            expires_in: 3600,
-          }),
-          { headers: { "Content-Type": "application/json" } },
-        );
+        if (url === CODEX_DEVICE_TOKEN_URL || url.includes("deviceauth/token")) {
+          polls += 1;
+          const payload = JSON.parse(body) as Record<string, unknown>;
+          expect(payload).toEqual({
+            client_id: CODEX_CLIENT_ID,
+            device_auth_id: "device-auth-1",
+            user_code: "ABCD-1234",
+          });
+          expect(payload).not.toHaveProperty("grant_type");
+          expect(payload).not.toHaveProperty("device_code");
+          if (polls === 1) {
+            return new Response(
+              JSON.stringify({
+                error: { code: "deviceauth_authorization_pending", message: "waiting" },
+              }),
+              { status: 403, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          return Response.json({
+            status: "success",
+            authorization_code: "device-auth-code",
+            code_challenge: "device-challenge",
+            code_verifier: "device-verifier",
+          });
+        }
+        expect(url).toBe(CODEX_TOKEN_URL);
+        const form = new URLSearchParams(body);
+        expect(form.get("grant_type")).toBe("authorization_code");
+        expect(form.get("client_id")).toBe(CODEX_CLIENT_ID);
+        expect(form.get("code")).toBe("device-auth-code");
+        expect(form.get("code_verifier")).toBe("device-verifier");
+        expect(form.get("redirect_uri")).toBe(CODEX_DEVICE_REDIRECT_URI);
+        return Response.json({
+          access_token: jwtWithAccount("acct-device"),
+          refresh_token: "refresh-device",
+          expires_in: 3600,
+        });
       }) satisfies CodexFetchLike,
       onProgress: (message) => progress.push(message),
     },
   });
   expect(tokens.accountId).toBe("acct-device");
   expect(progress.some((message) => message.includes("ABCD-1234"))).toBe(true);
+  expect(progress.some((message) => message.includes("https://auth.openai.com/codex/device"))).toBe(true);
   expect(JSON.stringify(progress)).not.toContain(tokens.accessToken);
   expect((await loadSubscriptionTokens(store))?.accessToken).toBe(tokens.accessToken);
+  expect(seen.some((entry) => entry.url === CODEX_TOKEN_URL)).toBe(true);
 });
 
-test("device polling maps denial, expiry, and cancellation distinctly", async () => {
+test("device polling maps nested pending, denial, expiry, and cancellation distinctly", async () => {
   const denied: CodexFetchLike = async () =>
-    new Response(JSON.stringify({ error: "access_denied" }), {
+    new Response(JSON.stringify({ error: { code: "access_denied", message: "no" } }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
-  await expect(pollDeviceAuthorization({ deviceCode: "d", pollIntervalMs: 1, fetch: denied })).rejects.toThrow(
-    /denied/i,
-  );
+  await expect(
+    pollDeviceAuthorization({ deviceAuthId: "d", userCode: "u", pollIntervalMs: 1, fetch: denied }),
+  ).rejects.toThrow(/denied/i);
   const expired: CodexFetchLike = async () =>
-    new Response(JSON.stringify({ error: "expired_token" }), {
+    new Response(JSON.stringify({ error: { code: "expired_token", message: "gone" } }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
-  await expect(pollDeviceAuthorization({ deviceCode: "d", pollIntervalMs: 1, fetch: expired })).rejects.toThrow(
-    /expired/i,
-  );
+  await expect(
+    pollDeviceAuthorization({ deviceAuthId: "d", userCode: "u", pollIntervalMs: 1, fetch: expired }),
+  ).rejects.toThrow(/expired/i);
   const slow: CodexFetchLike = async () =>
-    new Response(JSON.stringify({ error: "authorization_pending" }), {
-      status: 400,
+    new Response(JSON.stringify({ error: { code: "deviceauth_authorization_pending", message: "wait" } }), {
+      status: 403,
       headers: { "Content-Type": "application/json" },
     });
   const controller = new AbortController();
   const pending = pollDeviceAuthorization({
-    deviceCode: "d",
+    deviceAuthId: "d",
+    userCode: "u",
     pollIntervalMs: 50,
     fetch: slow,
     signal: controller.signal,
@@ -435,12 +491,18 @@ test("device polling maps denial, expiry, and cancellation distinctly", async ()
   controller.abort();
   await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   const immediate: CodexFetchLike = async () =>
-    new Response(JSON.stringify({ error: "authorization_pending" }), {
-      status: 400,
+    new Response(JSON.stringify({ error: { code: "deviceauth_authorization_pending", message: "wait" } }), {
+      status: 403,
       headers: { "Content-Type": "application/json" },
     });
   await expect(
-    pollDeviceAuthorization({ deviceCode: "d", timeoutMs: 0, pollIntervalMs: 1, fetch: immediate }),
+    pollDeviceAuthorization({
+      deviceAuthId: "d",
+      userCode: "u",
+      timeoutMs: 0,
+      pollIntervalMs: 1,
+      fetch: immediate,
+    }),
   ).rejects.toThrow(/timed out|900s/);
   expect(CODEX_DEVICE_TIMEOUT_MS).toBe(900_000);
 });
@@ -453,6 +515,36 @@ test("device authorization request failures stay actionable without leaking tran
       }) satisfies CodexFetchLike,
     }),
   ).rejects.toThrow(/device sign-in failed/);
+});
+
+test("browser code exchange keeps the localhost redirect while device exchange uses deviceauth callback", async () => {
+  const browserSeen: Array<{ url: string; body: string }> = [];
+  await exchangeCodeForTokens({
+    code: "browser-code",
+    verifier: "browser-verifier",
+    fetch: tokenEndpoint(
+      { access_token: jwtWithAccount("acct-browser"), refresh_token: "r", expires_in: 3600 },
+      200,
+      browserSeen,
+    ),
+  });
+  const browserBody = new URLSearchParams(browserSeen[0]?.body ?? "");
+  expect(browserBody.get("redirect_uri")).toBe(CODEX_REDIRECT_URI);
+  expect(browserBody.get("redirect_uri")).not.toBe(CODEX_DEVICE_REDIRECT_URI);
+
+  const deviceSeen: Array<{ url: string; body: string }> = [];
+  await exchangeCodeForTokens({
+    code: "device-code",
+    verifier: "device-verifier",
+    redirectUri: CODEX_DEVICE_REDIRECT_URI,
+    fetch: tokenEndpoint(
+      { access_token: jwtWithAccount("acct-device-x"), refresh_token: "r", expires_in: 3600 },
+      200,
+      deviceSeen,
+    ),
+  });
+  const deviceBody = new URLSearchParams(deviceSeen[0]?.body ?? "");
+  expect(deviceBody.get("redirect_uri")).toBe(CODEX_DEVICE_REDIRECT_URI);
 });
 
 test("stored tokens distinguish missing, expired, revoked, and transient refresh failures", async () => {
@@ -1248,10 +1340,27 @@ test("controller device approval keeps the user code ephemeral and saves only af
           fetch: async input => {
             if (String(input).includes("usercode")) {
               presented.resolve();
-              return Response.json({ user_code: "DEVICE-SECRET-CODE", verification_uri: "https://auth.openai.com/codex/device", device_code: "device-private", interval: 0 });
+              return Response.json({
+                device_auth_id: "device-private",
+                user_code: "DEVICE-SECRET-CODE",
+                verification_uri: "https://auth.openai.com/codex/device",
+                interval: "0",
+              });
             }
-            await grant.promise;
-            return Response.json({ access_token: jwtWithAccount("acct-device-controller"), refresh_token: "refresh-device-private", expires_in: 3600 });
+            if (String(input).includes("deviceauth/token")) {
+              await grant.promise;
+              return Response.json({
+                status: "success",
+                authorization_code: "device-ctrl-code",
+                code_challenge: "device-ctrl-challenge",
+                code_verifier: "device-ctrl-verifier",
+              });
+            }
+            return Response.json({
+              access_token: jwtWithAccount("acct-device-controller"),
+              refresh_token: "refresh-device-private",
+              expires_in: 3600,
+            });
           } }) },
     });
     try {
@@ -1281,7 +1390,12 @@ test("controller cancels a live device poll before saving and clears the approva
         codexLogin: createCodexLoginRunner({ store, secrets: [],
           fetch: async (input, init) => {
             if (String(input).includes("usercode")) {
-              return Response.json({ user_code: "CANCEL-CODE", verification_uri: "https://auth.openai.com/codex/device", device_code: "device-private" });
+              return Response.json({
+                device_auth_id: "device-private",
+                user_code: "CANCEL-CODE",
+                verification_uri: "https://auth.openai.com/codex/device",
+                interval: "0",
+              });
             }
             polling.resolve();
             return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
