@@ -1,16 +1,16 @@
 schway-screen 1
 screen model-picker-unconnected
-title Model picker, sign-in routes
-description Disconnected routes each offer one sign-in action.
+title Model picker, connect a provider
+description An empty model list offers one action to connect a provider.
 variant nocolor-dark-80
 size 80x30
 cursor 7 27 visible
 == text
- ⚡ schway  /project
+ ⚡ schway  ~/demo
 
 
   Not connected
-  Sign in to choose a model · Alt+L
+  Connect a provider · Alt+L
 
 
 
@@ -24,34 +24,34 @@ cursor 7 27 visible
 
 
 
-   Choose model · ↑↓ select · Enter use · Esc back
-   › ChatGPT subscription                                     Sign in · Enter
-     Grok subscription                                        Sign in · Enter
-     OpenAI API key                                           Sign in · Enter
-     xAI API key                                              Sign in · Enter
-     OpenAI-compatible                                        Sign in · Enter
-   1/5
+
+
+
+
+   Choose model · Enter open · Esc back
+   › Connect a provider
+   ↑↓ select · Enter open · Esc back
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Search models or type provider/model…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
   ○ Not connected
-  Enter confirm · Esc back
+  ↑↓ select · Enter open · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #e6eaf0 #161b24 b
 00 3-4 #e6eaf0 #161b24 -
 00 4-10 #e6eaf0 #161b24 b
-00 10-20 #8b95a7 #161b24 -
-00 20-80 #ffffff #161b24 -
+00 10-18 #8b95a7 #161b24 -
+00 18-80 #ffffff #161b24 -
 01 0-80 #ffffff #0e1117 -
 02 0-80 #ffffff #0e1117 -
 03 0-2 #ffffff #0e1117 -
 03 2-15 #e6eaf0 #0e1117 b
 03 15-80 #ffffff #0e1117 -
 04 0-2 #ffffff #0e1117 -
-04 2-30 #8b95a7 #0e1117 -
-04 30-35 #e6eaf0 #293140 b
-04 35-80 #ffffff #0e1117 -
+04 2-23 #8b95a7 #0e1117 -
+04 23-28 #e6eaf0 #293140 b
+04 28-80 #ffffff #0e1117 -
 05 0-80 #ffffff #0e1117 -
 06 0-80 #ffffff #0e1117 -
 07 0-80 #ffffff #0e1117 -
@@ -65,40 +65,24 @@ cursor 7 27 visible
 15 0-80 #ffffff #0e1117 -
 16 0-80 #ffffff #0e1117 -
 17 0-80 #ffffff #0e1117 -
-18 0-2 #ffffff #0e1117 -
-18 2-3 #ffffff #1e2430 -
-18 3-50 #e6eaf0 #1e2430 -
-18 50-78 #ffffff #1e2430 -
-18 78-80 #ffffff #0e1117 -
-19 0-2 #ffffff #0e1117 -
-19 2-3 #ffffff #1e2430 -
-19 3-77 #e6eaf0 #4a505a -
-19 77-78 #ffffff #1e2430 -
-19 78-80 #ffffff #0e1117 -
-20 0-2 #ffffff #0e1117 -
-20 2-3 #ffffff #1e2430 -
-20 3-77 #e6eaf0 #1e2430 -
-20 77-78 #ffffff #1e2430 -
-20 78-80 #ffffff #0e1117 -
-21 0-2 #ffffff #0e1117 -
-21 2-3 #ffffff #1e2430 -
-21 3-77 #e6eaf0 #1e2430 -
-21 77-78 #ffffff #1e2430 -
-21 78-80 #ffffff #0e1117 -
+18 0-80 #ffffff #0e1117 -
+19 0-80 #ffffff #0e1117 -
+20 0-80 #ffffff #0e1117 -
+21 0-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -
-22 3-77 #e6eaf0 #1e2430 -
-22 77-78 #ffffff #1e2430 -
+22 3-39 #e6eaf0 #1e2430 -
+22 39-78 #ffffff #1e2430 -
 22 78-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
-23 3-77 #e6eaf0 #1e2430 -
-23 77-78 #ffffff #1e2430 -
+23 3-23 #e6eaf0 #4a505a -
+23 23-78 #ffffff #1e2430 -
 23 78-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -
-24 3-6 #8b95a7 #1e2430 -
-24 6-78 #ffffff #1e2430 -
+24 3-36 #8b95a7 #1e2430 -
+24 36-78 #ffffff #1e2430 -
 24 78-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -
@@ -115,8 +99,10 @@ cursor 7 27 visible
 28 1-18 #8b95a7 #303641 b
 28 18-80 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
-29 2-7 #e6eaf0 #293140 b
-29 7-18 #8b95a7 #0e1117 -
-29 18-21 #e6eaf0 #293140 b
-29 21-26 #8b95a7 #0e1117 -
-29 26-80 #ffffff #0e1117 -
+29 2-4 #e6eaf0 #293140 b
+29 4-14 #8b95a7 #0e1117 -
+29 14-19 #e6eaf0 #293140 b
+29 19-27 #8b95a7 #0e1117 -
+29 27-30 #e6eaf0 #293140 b
+29 30-35 #8b95a7 #0e1117 -
+29 35-80 #ffffff #0e1117 -

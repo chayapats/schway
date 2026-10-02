@@ -36,6 +36,7 @@ test("resuming another workspace uses its configured route after an API-key choi
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const picker = controller.snapshot().modelPicker!;
       const index = picker.entries.findIndex(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-5.4");
       expect(index).toBeGreaterThanOrEqual(0);
@@ -74,6 +75,7 @@ test("an API-key row clears subscription-only thinking without blocking activati
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const picker = controller.snapshot().modelPicker!;
       const index = picker.entries.findIndex(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-5.4");
       expect(index).toBeGreaterThanOrEqual(0);
@@ -146,7 +148,7 @@ test("connecting a missing route returns to its search and identity without sele
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("OpenAI API key");
+      controller.connectPickerProviders(); controller.searchModels("OpenAI API key");
       const identity = controller.snapshot().modelPicker!.entries[0]!.identity;
       expect(await controller.selectPickerModel()).toBe(true);
       expect(controller.snapshot().credentialEntry).toBeDefined();
@@ -251,6 +253,87 @@ test("catalog failure, empty result and retry never invent a subscription row", 
   });
 });
 
+for (const outcome of ["failed", "pending", "failed-pending", "disconnected", "empty", "empty-pending-api"] as const) for (const input of ["text", "row"] as const) test(`subscription ${input} selection after empty then ${outcome} discovery preserves catalog authority and billing`, async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "account-token");
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "account-current", openaiAuth: "codex" } });
+    const pending = Promise.withResolvers<readonly { id: string; supportedThinking: [] }[]>();
+    const retryStarted = Promise.withResolvers<void>();
+    const pendingStarted = Promise.withResolvers<void>();
+    const isPending = outcome === "pending" || outcome === "failed-pending";
+    const eligible = !outcome.startsWith("empty") && outcome !== "disconnected";
+    const apiPending = Promise.withResolvers<[]>();
+    let apiCalls = 0;
+    let calls = 0;
+    const activated: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "catalog-authority", workspace, configEditor: editor,
+      provider: "openai", modelId: "account-current", openaiAuth: "codex", model: createScriptedModel({ provider: "codex-subscription", id: "account-current" }),
+      contextManager: createContextManager(workspace),
+      credentials: { store, env: outcome === "empty-pending-api" ? { OPENAI_API_KEY: "other-billing-key" } : {},
+        listRouteModels: async () => ++apiCalls === 2 ? apiPending.promise : [],
+        reload: async () => { throw Error("No billing fallback"); }, listSubscriptionCatalog: async () => {
+        calls++;
+        if (calls === 1) return [];
+        if (calls === 2) {
+          retryStarted.resolve();
+          if (outcome === "failed" || outcome === "failed-pending" || outcome === "disconnected") throw Error("network offline");
+          if (outcome === "pending") return pending.promise;
+          return [];
+        }
+        if (calls === 3 && outcome === "failed-pending") { pendingStarted.resolve(); return pending.promise; }
+        return [{ id: "gpt-5.4", supportedThinking: [] }];
+      } },
+      stageSettings: async settings => {
+        expect(settings.openaiAuth).toBe("codex");
+        activated.push(settings.model);
+        return { model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+    });
+    try {
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      expect(controller.snapshot().modelPicker?.catalogState).toBe("empty");
+      expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
+      expect(calls).toBe(1);
+      if (outcome === "disconnected") await store.delete(codexSubscriptionIdentity());
+      expect(controller.retryModelPickerCatalog()).toBe(true);
+      await retryStarted.promise;
+      if (outcome === "empty-pending-api") {
+        while (controller.snapshot().modelPicker?.catalogState === "loading") await Bun.sleep(1);
+        expect(controller.snapshot().modelPicker).toMatchObject({ catalogState: "empty", loading: true });
+      } else if (outcome !== "pending") while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      if (outcome === "failed-pending") {
+        expect(controller.retryModelPickerCatalog()).toBe(true);
+        await pendingStarted.promise;
+        expect(controller.snapshot().modelPicker?.catalogState).toBe("loading");
+      }
+      if (input === "row" && isPending) {
+        pending.resolve([{ id: "gpt-5.4", supportedThinking: [] }]);
+        while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      }
+      if (input === "text") expect(await controller.selectModel("openai/gpt-5.4")).toBe(eligible);
+      else {
+        controller.searchModels("gpt-5.4");
+        const picker = controller.snapshot().modelPicker!;
+        const index = picker.entries.findIndex(row => row.kind === "model" && row.authRoute === "codex" && row.modelId === "gpt-5.4");
+        if (!eligible) expect(index).toBe(-1);
+        else {
+          expect(index).toBeGreaterThanOrEqual(0);
+          while (controller.snapshot().modelPicker!.selectedIndex !== index) controller.moveModelPicker(1);
+          expect(await controller.selectPickerModel()).toBe(true);
+        }
+      }
+      expect(calls).toBe(2 + Number(outcome === "failed-pending") + Number(isPending && input === "text"));
+      expect(activated).toEqual(eligible ? ["gpt-5.4"] : []);
+      expect(controller.snapshot()).toMatchObject({ provider: "openai", openaiAuth: "codex", modelId: eligible ? "gpt-5.4" : "account-current" });
+      expect(editor.settings.openaiAuth).toBe("codex");
+    } finally { pending.resolve([]); apiPending.resolve([]); controller.dispose(); }
+  });
+});
+
 test("failed activation emits no remembered choice and keeps the previous billing route", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
@@ -269,6 +352,7 @@ test("failed activation emits no remembered choice and keeps the previous billin
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const picker = controller.snapshot().modelPicker!;
       const index = picker.entries.findIndex(entry => entry.authRoute === "codex" && entry.modelId === "gpt-5.4");
       controller.moveModelPicker(index - picker.selectedIndex);
@@ -298,7 +382,7 @@ test("ChatGPT connection returns to account discovery without silently activatin
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels("ChatGPT");
+      controller.connectPickerProviders(); controller.searchModels("ChatGPT");
       expect(controller.snapshot().modelPicker?.entries[0]).toMatchObject({ kind: "sign-in", authRoute: "codex" });
       expect(await controller.selectPickerModel()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
@@ -383,7 +467,7 @@ test("a credential-read timeout is labelled as access discovery, not catalog fai
       const started = Date.now();
       while (controller.snapshot().modelPicker?.loading && Date.now() - started < 7_000) await Bun.sleep(20);
       expect(controller.snapshot().modelPicker?.loading).toBe(false);
-      expect(controller.snapshot().modelPicker?.error).toContain("Model access discovery");
+      expect(controller.snapshot().modelPicker?.error).toBe("Connections unavailable · Ctrl+R retry · Esc back");
       expect(controller.snapshot().modelPicker?.error).not.toContain("ChatGPT catalog");
     } finally { controller.dispose(); }
   });
@@ -406,7 +490,7 @@ for (const route of ["codex", "grok"] as const) test(`${route} picker Esc restor
     let first: Promise<boolean> | undefined, second: Promise<boolean> | undefined;
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      controller.searchModels(label);
+      controller.connectPickerProviders(); controller.searchModels(label);
       const identity = controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity;
       const settings = editor.settings;
       first = controller.selectPickerModel(); expect(calls).toHaveLength(1);
@@ -444,7 +528,7 @@ for (const route of ["codex", "grok"] as const) test(`${route} picker connection
     });
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      const query = route === "codex" ? "ChatGPT" : "Grok subscription"; controller.searchModels(query);
+      const query = route === "codex" ? "ChatGPT" : "Grok subscription"; controller.connectPickerProviders(); controller.searchModels(query);
       expect(await controller.selectPickerModel()).toBe(true); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const picker = controller.snapshot().modelPicker!;
       expect(picker.query).toBe(query); expect(picker.entries[picker.selectedIndex]?.modelId).toBe(route === "codex" ? "account-first" : "grok-first");
@@ -464,7 +548,7 @@ test("picker endpoint key Esc restores its origin and saving preserves the usabl
       stageSettings: async settings => { activated.push(settings.model); return { model: createScriptedModel({ id: settings.model }), contextManager: createContextManager(workspace) }; },
     });
     try {
-      controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1); controller.searchModels("OpenAI-compatible");
+      controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1); controller.connectPickerProviders(); controller.searchModels("OpenAI-compatible");
       const settings = editor.settings, identity = controller.snapshot().modelPicker!.entries[0]!.identity;
       expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787"); expect(controller.submitEndpointUrl()).toBe(true);
       controller.enterCredentialText("cancelled-secret"); controller.cancel();
@@ -478,7 +562,10 @@ test("picker endpoint key Esc restores its origin and saving preserves the usabl
       expect(editor.settings).toEqual(settings);
       expect(controller.snapshot().modelId).toBe("gpt-5.4"); expect(activated).toEqual([]);
       const picker = controller.snapshot().modelPicker!; expect(picker.query).toBe("OpenAI-compatible");
-      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "sign-in", provider: "openai-compatible" });
+      expect(picker.connecting).toBe(false);
+      // Saving the key does not configure or activate an endpoint; model search offers navigation only.
+      expect(picker.entries.map(row => row.kind)).toEqual(["browse", "connect"]);
+      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "browse" });
       expect(controller.snapshot().transcript.at(-1)?.text).toContain("/config set baseUrl http://localhost:8787");
       expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787" }))).toBe("endpoint-secret");
       expect(await controller.submit("keep using the current connection")).toBe(true);
@@ -500,7 +587,7 @@ for (const target of ["xai", "profile"] as const) test(`${target} picker key ent
     });
     try {
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      const query = target === "xai" ? "xAI API key" : "remote"; controller.searchModels(query);
+      const query = target === "xai" ? "xAI API key" : "remote"; controller.connectPickerProviders(); controller.searchModels(query);
       const identity = controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity, settings = editor.settings;
       expect(await controller.selectPickerModel()).toBe(true); controller.enterCredentialText("cancelled-key"); controller.cancel();
       expect(controller.snapshot().modelPicker?.query).toBe(query); expect(controller.snapshot().modelPicker!.entries[controller.snapshot().modelPicker!.selectedIndex]!.identity).toBe(identity);

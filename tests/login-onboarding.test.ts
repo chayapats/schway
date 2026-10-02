@@ -12,8 +12,51 @@ import { withTempDir } from "./helpers.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
+import { ModelPreferences } from "../src/config/model-preferences.ts";
+import { modelPickerIdentity } from "../src/tui/model-picker.ts";
 
 type Route = "codex" | "grok";
+
+test("profile login records its activated profile rather than a standalone endpoint with the same credential alias", async () => {
+  await withTempDir(async home => {
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    const connection = { baseUrl: "https://same.example/v1", credentialIdentity: "shared-alias", auth: "required" as const };
+    const editor = await loadConfigEditor({ home, workspaceRoot: home,
+      cli: { provider: "openai-compatible", ...connection, profiles: { local: connection } } });
+    const store = fakeCredentialStore();
+    const activations: unknown[] = [];
+    const controller = new TuiController({ home, workspace, session: createSession(), sessionId: "profile-login",
+      provider: "openai-compatible", modelId: "", configEditor: editor, contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "No unrelated route reload" }),
+        listRouteModels: async () => [{ id: "profile-model", recommended: true }] },
+      stageSettings: async settings => {
+        expect(settings).toMatchObject({ provider: "openai-compatible", profile: "local", ...connection });
+        return { model: createScriptedModel({ provider: "openai-compatible", id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+      onModelActivated: choice => { activations.push(choice); },
+    });
+    try {
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.connectPickerProviders(); controller.searchModels("local");
+      const picker = controller.snapshot().modelPicker!;
+      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "sign-in", provider: "openai-compatible", profile: "local", authRoute: "provider" });
+      expect(await controller.selectPickerModel()).toBe(true);
+      controller.enterCredentialText("profile-key");
+      expect(await controller.submitCredential()).toBe(true);
+      expect(controller.snapshot()).toMatchObject({ provider: "openai-compatible", modelId: "profile-model", readiness: "ready" });
+      const choice = { provider: "openai-compatible", modelId: "profile-model", authRoute: "provider" as const, profile: "local" };
+      const identity = modelPickerIdentity(choice, connection.baseUrl, connection.credentialIdentity);
+      const standalone = modelPickerIdentity({ ...choice, profile: undefined }, connection.baseUrl, connection.credentialIdentity);
+      expect(activations).toEqual([choice]);
+      const preferences = new ModelPreferences(home).read();
+      expect(preferences.recents).toEqual([identity]);
+      expect(preferences.recents).not.toContain(standalone);
+      expect(preferences.models?.[identity]).toEqual({ modelId: choice.modelId,
+        groupIdentity: modelPickerIdentity({ ...choice, modelId: "" }, connection.baseUrl, connection.credentialIdentity) });
+    } finally { controller.dispose(); }
+  });
+});
 
 /** Run a subscription login journey with isolated credentials and scripted account models. */
 async function withLogin(route: Route, run: (controller: TuiController) => Promise<void>, existing = false, outcome: "success" | "denied" | "cancel" = "success") {
@@ -100,7 +143,11 @@ async function signIn(controller: TuiController, route: Route, picker: boolean) 
   if (!picker) return controller.login(route);
   controller.openModelPicker();
   while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+  controller.connectPickerProviders();
   controller.searchModels(route === "codex" ? "ChatGPT" : "Grok subscription");
+  const pickerState = controller.snapshot().modelPicker!;
+  expect(pickerState.entries[pickerState.selectedIndex]).toMatchObject({ kind: "sign-in", authRoute: route,
+    provider: route === "codex" ? "openai" : "xai" });
   return controller.selectPickerModel();
 }
 
@@ -129,10 +176,13 @@ for (const provider of ["openai", "xai", "openai-compatible"] as const) for (con
         if (picker) {
           controller.openModelPicker();
           while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+          controller.connectPickerProviders();
           const entries = controller.snapshot().modelPicker!.entries;
           const index = entries.findIndex(row => row.kind === "sign-in" && row.provider === provider && row.authRoute !== "codex" && row.authRoute !== "grok");
           expect(index).toBeGreaterThanOrEqual(0);
           while (controller.snapshot().modelPicker!.selectedIndex !== index) controller.moveModelPicker(1);
+          expect(controller.snapshot().modelPicker!.entries[index]).toMatchObject({ kind: "sign-in", provider,
+            authRoute: provider === "openai-compatible" ? "provider" : "api-key" });
           expect(await controller.selectPickerModel()).toBe(true);
         } else expect(await controller.login(provider)).toBe(true);
         controller.enterCredentialText("fixture-key");

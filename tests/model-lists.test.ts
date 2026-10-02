@@ -65,7 +65,7 @@ test("a fresh install names no model, keeps typed text, and will not send", asyn
   try {
     await terminal.flush();
     const frame = terminal.captureCharFrame();
-    for (const copy of ["○ Not connected", "Not connected", "Sign in to choose a model · Alt+L", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
+    for (const copy of ["○ Not connected", "Not connected", "Connect a provider · Alt+L", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
     for (const copy of ["Ctrl+I failure details", "Enter send", "No model yet", "Ready", "Attention", "anthropic", "ctx"]) expect(frame).not.toContain(copy);
     expect(controller.snapshot().readiness).toBe("not-connected");
     let accepted = false;
@@ -150,6 +150,7 @@ test("picker rows come from the model list, and a failed list stays selectable",
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const entries = controller.snapshot().modelPicker?.entries ?? [];
       const astra = entries.find(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-6-astra");
       const custom = entries.find(entry => entry.modelId === "listed-only");
@@ -171,9 +172,10 @@ test("picker rows come from the model list, and a failed list stays selectable",
     try {
       failed.openModelPicker();
       while (failed.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      failed.browsePickerModels();
       const frameEntries = failed.snapshot().modelPicker?.entries ?? [];
-      expect(frameEntries.filter(entry => entry.kind === "header" && entry.listUnavailable)).toHaveLength(1);
-      expect(frameEntries.find(entry => entry.kind === "header" && entry.listUnavailable)?.groupLabel).toBe("OpenAI API key");
+      expect(failed.snapshot().modelPicker?.error).toContain("Ctrl+R retry");
+      expect(frameEntries.filter(entry => entry.kind === "model").every(entry => entry.groupLabel === "OpenAI API key")).toBe(true);
       const fallback = frameEntries.find(entry => entry.listUnavailable && entry.modelId === "gpt-5.4");
       expect(fallback?.kind).toBe("model");
       const index = frameEntries.findIndex(entry => entry.identity === fallback?.identity);
@@ -514,6 +516,7 @@ test("a slow sign-in does not overwrite a newer picker choice or remember that l
       while (calls < 1) await Bun.sleep(1);
       expect(controller.openModelPicker()).toBe(true);
       while (controller.snapshot().modelPicker?.accessLoading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const entries = controller.snapshot().modelPicker?.entries ?? [];
       const target = entries.find(entry => entry.authRoute === "api-key" && entry.modelId === "gpt-4.1");
       expect(target).toBeDefined();

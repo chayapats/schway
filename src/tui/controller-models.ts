@@ -1,20 +1,86 @@
 import { isOpenRouterEndpoint, resolveThinkingSelection } from "../model/thinking.ts";
 import { openRouterModelCapabilities } from "../model/model-list.ts";
-import { isOpenAIAuthPreference } from "../auth/credentials.ts";
+import { isOpenAIAuthPreference, resolveProviderCredential } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
-import type { ModelCapability } from "../model/catalog.ts";
+import { listCatalog, type ModelCapability } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import { describeEffectiveThinking } from "../config/config.ts";
 import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
 import { filterXaiModels, type ListedModel } from "../model/model-list.ts";
-import { modelPickerEntries, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
+import { modelPickerEntries, modelPickerIdentity, presentModelPicker, rememberedPickerModels, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
+import { ModelPreferences, type ModelPreferencesSnapshot } from "../config/model-preferences.ts";
 import { loadModelPickerAccess } from "./model-access.ts";
+import type { ModelAccess } from "./model-access.ts";
 import { CommandsLayer } from "./controller-commands.ts";
 
 
 /** Model picker, auth-route selection, profiles and thinking-level actions. */
 export abstract class ModelsLayer extends CommandsLayer {
+  private pickerPreferences: ModelPreferencesSnapshot = { favorites: [], recents: [] };
+  private pickerCacheKey?: string;
+  private pickerCachedAccess?: typeof this.modelPickerAccess;
+  private pickerActiveAccess?: ModelAccess;
+  private pickerReturnView?: { browsing?: boolean; connecting?: boolean };
+  private pickerModelQuery = "";
+  private pickerBrowseQuery = "";
+
+  /** Use user-wide storage only when an explicit home is available. */
+  private preferenceStore(): ModelPreferences | undefined { return this.home ? new ModelPreferences(this.home) : undefined; }
+
+  /** Hide unverified routes while access discovery is pending or has failed. */
+  private unavailablePickerAccess(): NonNullable<typeof this.modelPickerAccess> {
+    return { providers: { openai: "Login required", xai: "Login required", "openai-compatible": "Login required" },
+      profiles: Object.fromEntries(Object.keys(this.configEditor?.profiles ?? {}).map(name => [name, "Login required" as const])),
+      subscription: "Login required", grok: "Login required", openaiApiKey: "Login required", xaiApiKey: "Login required" };
+  }
+
+  /** Toggle the highlighted exact route's user-wide favorite independently of discovery. */
+  togglePickerFavorite(): boolean {
+    const picker = this.modelPicker;
+    const entry = picker?.entries[picker.selectedIndex];
+    if (!picker || entry?.kind !== "model") return false;
+    try {
+      const pinned = !this.pickerPreferences.favorites.includes(entry.identity);
+      this.pickerPreferences = this.preferenceStore()?.pin(entry.identity, pinned, entry) ?? { ...this.pickerPreferences,
+        favorites: pinned ? [entry.identity, ...this.pickerPreferences.favorites] : this.pickerPreferences.favorites.filter(id => id !== entry.identity),
+        models: { ...this.pickerPreferences.models, [entry.identity]: { modelId: entry.modelId, groupIdentity: entry.groupIdentity } } };
+      if (picker.error === "Favorite not saved · Ctrl+P retry · Esc back") picker.error = undefined;
+      this.pickerSelectionTouched = true;
+      this.searchModels(picker.query, true);
+      return true;
+    } catch (error) { picker.error = "Favorite not saved · Ctrl+P retry · Esc back"; this.notice(picker.error, String(error)); return false; }
+  }
+
+  /** Open the complete connected catalog, restoring the previous search when returning. */
+  browsePickerModels(): void {
+    const picker = this.modelPicker;
+    if (!picker) return;
+    if (!picker.browsing) this.pickerBrowseQuery = picker.query;
+    picker.browsing = !picker.browsing;
+    picker.selectedIndex = -1;
+    this.pickerPreferredIdentity = undefined;
+    this.pickerSelectionTouched = false;
+    this.searchModels(picker.browsing ? "" : this.pickerBrowseQuery);
+  }
+
+  /** Reveal exact connection targets, including configured endpoints and profiles. */
+  connectPickerProviders(): void {
+    if (!this.modelPicker) return;
+    this.pickerModelQuery = this.modelPicker.query;
+    this.modelPicker.connecting = true;
+    this.searchModels("");
+  }
+
+  /** Reveal the selected model's exact ID and capacity on demand. */
+  togglePickerDetails(): void { if (this.modelPicker) this.modelPicker.details = !this.modelPicker.details; }
+
+  /** Return from browsing before closing and restoring the composer draft. */
+  backModelPicker(): void {
+    if (this.modelPicker?.connecting) { this.modelPicker.connecting = false; this.searchModels(this.pickerModelQuery); }
+    else if (this.modelPicker?.browsing) this.browsePickerModels();
+    else this.closeModelPicker();
+  }
   protected apiModels?: readonly ListedModel[];
   protected apiModelsUnavailable = false;
   protected compatibleModels?: readonly ListedModel[];
@@ -41,6 +107,17 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (this.running || this.disposed) { this.notice("Wait for this turn · Esc stop"); return false; }
     this.preferences = undefined; this.preferenceTransaction = undefined; this.preferenceGeneration++;
     this.closeModelPicker();
+    const cacheKey = JSON.stringify([this.configEditor?.settings, this.configEditor?.profiles, this.configEditor?.standaloneEndpoint, this.provider, this.baseUrl]);
+    if (cacheKey === this.pickerCacheKey) this.modelPickerAccess = this.pickerCachedAccess;
+    else {
+      this.subscriptionModels = undefined; this.apiModels = undefined; this.compatibleModels = undefined;
+      this.xaiModels = undefined; this.grokModels = undefined;
+      this.pickerCachedAccess = undefined;
+      this.pickerActiveAccess = undefined;
+    }
+    this.pickerCacheKey = cacheKey;
+    try { this.pickerPreferences = this.preferenceStore()?.read() ?? this.pickerPreferences; }
+    catch (error) { this.notice("Favorites unavailable · /model retry · Ctrl+I details", String(error)); }
     this.pickerSelectionTouched = false;
     this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() || this.credentials ? { loading: true, catalogState: "loading" } : {}),
       ...(this.credentials ? { accessLoading: true } : {}) };
@@ -72,37 +149,52 @@ export abstract class ModelsLayer extends CommandsLayer {
           activeProfile: settings?.profile ?? this.profile, profiles: this.configEditor?.profiles,
         }));
         if (!current()) return;
+        if (settings?.profile && settings.baseUrl) {
+          const credential = await this.boundedPickerTask(signal, resolveProviderCredential({ ...this.credentials,
+            provider: "openai-compatible", profile: settings.profile, baseUrl: settings.baseUrl,
+            auth: settings.auth, credentialEnv: settings.credentialEnv, credentialIdentity: settings.credentialIdentity,
+            runtimeApiKey: this.credentials.runtimeProvider === undefined || this.credentials.runtimeProvider === "openai-compatible" ? this.credentials.runtimeApiKey : undefined,
+          }));
+          if (!current()) return;
+          this.pickerActiveAccess = "error" in credential ? "Login required" : credential.source === "none" ? "No key required" : "API key";
+        }
         this.modelPickerAccess = access;
+        this.pickerCachedAccess = access;
         picker.accessLoading = false;
         this.searchModels(picker.query, true);
       }
       discoveryStage = "catalog";
-      if (this.subscriptionSelected() || this.modelPickerAccess?.subscription === "ChatGPT") {
-        if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) {
-          throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
+      const routeLists = this.loadRouteModelLists(signal, current);
+      try {
+        if (this.subscriptionSelected() || this.modelPickerAccess?.subscription === "ChatGPT") {
+          if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) {
+            throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
+          }
+          const models = await this.boundedPickerTask(signal, this.loadAccountCatalog(signal));
+          if (!current()) return;
+          this.subscriptionModels = models.map(model => model.id);
+          this.subscriptionListUnavailable = false;
+          picker.catalogState = models.length ? "ready" : "empty";
+          if (!models.length) picker.error = "No ChatGPT models found · Ctrl+R retry · Esc back";
+        } else {
+          picker.catalogState = "empty";
         }
-        const models = await this.boundedPickerTask(signal, this.loadAccountCatalog(signal));
-        if (!current()) return;
-        this.subscriptionModels = models.map(model => model.id);
-        this.subscriptionListUnavailable = false;
-        picker.catalogState = models.length ? "ready" : "empty";
-        if (!models.length) picker.error = "No ChatGPT models found · Ctrl+R retry · Esc back";
-      } else {
-        picker.catalogState = "empty";
-      }
-      await this.loadRouteModelLists(signal, current);
+      } finally { await routeLists; }
     } catch (error) {
       if (current()) {
         picker.accessLoading = false;
+        if (discoveryStage === "access") { this.modelPickerAccess = this.unavailablePickerAccess(); this.pickerCachedAccess = undefined; this.pickerActiveAccess = "Login required"; }
         if (discoveryStage === "catalog") this.subscriptionListUnavailable = true;
         const message = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350);
         picker.catalogState = /offline|network|fetch|timeout|aborted/i.test(message) ? "offline" : "failed";
-        picker.error = `${discoveryStage === "access" ? "Model access discovery" : "ChatGPT catalog"} ${picker.catalogState}: ${message}. Press Ctrl+R to retry or Esc to cancel.`;
-        if (discoveryStage === "catalog") await this.loadRouteModelLists(signal, current);
+        picker.error = `${discoveryStage === "access" ? "Connections" : "Models"} unavailable · Ctrl+R retry · Esc back`;
       }
     } finally {
       if (current()) {
         picker.loading = false;
+        if (!picker.error && (this.apiModelsUnavailable || this.compatibleModelsUnavailable || this.xaiModelsUnavailable || this.grokModelsUnavailable)) {
+          picker.error = "Some models unavailable · Ctrl+R retry · Esc back"; picker.catalogState = "failed";
+        }
         this.searchModels(picker.query, true);
       }
     }
@@ -116,8 +208,8 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (load && this.modelPickerAccess?.openaiApiKey === "API key") {
       tasks.push((async () => {
         try {
-          this.apiModels = await this.boundedPickerTask(signal, load("api-key", signal));
-          if (current()) this.apiModelsUnavailable = false;
+          const models = await this.boundedPickerTask(signal, load("api-key", signal));
+          if (current()) { this.apiModels = models; this.apiModelsUnavailable = false; }
         } catch {
           if (current()) { this.apiModels = undefined; this.apiModelsUnavailable = true; }
         }
@@ -128,8 +220,9 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (load && baseUrl && compatibleAccess && compatibleAccess !== "Login required") {
       tasks.push((async () => {
         try {
-          this.compatibleModels = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl, standalone: true }));
+          const models = await this.boundedPickerTask(signal, load("compatible", signal, { baseUrl, standalone: true }));
           if (current()) {
+            this.compatibleModels = models;
             this.compatibleModelsUnavailable = false;
             if (isOpenRouterEndpoint(baseUrl)) this.configEditor?.setEndpointCapabilities("https://openrouter.ai/api/v1", openRouterModelCapabilities(this.compatibleModels));
           }
@@ -162,7 +255,9 @@ export abstract class ModelsLayer extends CommandsLayer {
         catch (error) { if (current()) { this.grokModels = undefined; this.grokModelsUnavailable = true; if (error instanceof Error && error.message.startsWith("Your Grok plan")) this.fail(error.message); } }
       })());
     }
-    await Promise.all(tasks);
+    await Promise.all(tasks.map(task => task.finally(() => {
+      if (current() && this.modelPicker) this.searchModels(this.modelPicker.query, true);
+    })));
   }
 
   /** Enforce the picker deadline even when a credential store or catalog ignores cancellation. */
@@ -185,6 +280,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     const abort = new AbortController();
     this.modelCatalogAbort = abort;
     picker.loading = true;
+    picker.accessLoading = true;
     picker.error = undefined;
     picker.catalogState = "loading";
     void this.refreshModelPicker(picker, abort);
@@ -223,28 +319,40 @@ export abstract class ModelsLayer extends CommandsLayer {
   searchModels(query: string, refresh = false): void {
     if (!this.modelPicker || this.running) return;
     const picker = this.modelPicker;
-    const selectedIdentity = this.pickerPreferredIdentity ?? (!refresh || this.pickerSelectionTouched ? picker.entries[picker.selectedIndex]?.identity : undefined);
-    if (!refresh && picker.query !== query) this.pickerSelectionTouched = true;
+    const queryChanged = !refresh && picker.query !== query;
+    if (queryChanged) { this.pickerPreferredIdentity = undefined; this.pickerSelectionTouched = false; }
+    const selected = picker.entries[picker.selectedIndex];
+    const selectedIdentity = queryChanged ? selected?.kind === "model" ? selected.identity : undefined : this.pickerPreferredIdentity ??
+      (!refresh || this.pickerSelectionTouched || selected?.active || query.trim() && selected?.kind === "model" ? selected?.identity : undefined);
     picker.query = query;
     const settings = this.configEditor?.settings;
     const endpoint = this.configEditor?.standaloneEndpoint;
-    picker.entries = modelPickerEntries(query, this.provider, this.modelId, { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput }, {
+    const options = {
       profiles: this.configEditor?.profiles, activeProfile: settings?.profile ?? this.profile,
+      activeConnection: settings?.profile && settings.baseUrl ? { baseUrl: settings.baseUrl, auth: settings.auth,
+        credentialIdentity: settings.credentialIdentity, credentialEnv: settings.credentialEnv,
+        contextWindow: settings.contextWindow, maxOutput: settings.maxOutput } : undefined,
+      activeConnectionAccess: this.pickerActiveAccess ?? (this.credentials ? "Login required" : undefined),
       activeRoute: this.grokSelected() ? "grok" : this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
       baseUrl: endpoint ? endpoint.baseUrl : this.baseUrl, credentialIdentity: endpoint?.credentialIdentity,
-      subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess,
+      subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess ?? (this.credentials ? this.unavailablePickerAccess() : undefined),
       apiModels: this.apiModels, apiModelsUnavailable: this.apiModelsUnavailable, compatibleModels: this.compatibleModels,
       compatibleModelsUnavailable: this.compatibleModelsUnavailable, subscriptionUnavailable: this.subscriptionListUnavailable,
       grokModels: this.grokModels, grokModelsUnavailable: this.grokModelsUnavailable,
       xaiModels: this.xaiModels, xaiModelsUnavailable: this.xaiModelsUnavailable,
-    });
+    } satisfies NonNullable<Parameters<typeof modelPickerEntries>[4]>;
+    const limits = { contextWindow: this.explicitContextWindow, maxOutput: this.explicitMaxOutput };
+    const entries = modelPickerEntries(query, this.provider, this.modelId, limits, options);
+    const routes = query && this.pickerPreferences.models ? modelPickerEntries("", this.provider, this.modelId, limits, options) : entries;
+    picker.entries = presentModelPicker(rememberedPickerModels(entries, this.pickerPreferences.models, query, routes, limits), { query, browsing: picker.browsing, connecting: picker.connecting, ...this.pickerPreferences });
     const preferred = this.pickerPreferredRoute;
     const connectedIndex = preferred ? picker.entries.findIndex(entry => entry.kind === "model" &&
       entry.provider === preferred.provider && entry.authRoute === preferred.authRoute && entry.profile === preferred.profile) : -1;
     const identityIndex = selectedIdentity ? picker.entries.findIndex(entry => entry.kind !== "header" && entry.identity === selectedIdentity) : -1;
-    const activeIndex = !this.pickerSelectionTouched ? picker.entries.findIndex(entry => entry.kind === "model" && entry.active) : -1;
+    if (refresh && selectedIdentity && identityIndex < 0) this.pickerPreferredIdentity = selectedIdentity;
+    const activeIndex = !query && !this.pickerSelectionTouched ? picker.entries.findIndex(entry => entry.kind === "model" && entry.active) : -1;
     const firstIndex = picker.entries.findIndex(entry => entry.kind !== "header");
-    picker.selectedIndex = connectedIndex >= 0 ? connectedIndex : identityIndex >= 0 ? identityIndex : activeIndex >= 0 ? activeIndex : Math.max(0, firstIndex);
+    picker.selectedIndex = connectedIndex >= 0 ? connectedIndex : identityIndex >= 0 ? identityIndex : refresh && selectedIdentity ? -1 : activeIndex >= 0 ? activeIndex : Math.max(0, firstIndex);
     if (connectedIndex >= 0 && !picker.loading) {
       this.pickerPreferredRoute = undefined;
       this.pickerSelectionTouched = true;
@@ -270,6 +378,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     const picker = this.modelPicker;
     if (!picker || !this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     const returning = { query: picker.query, identity: selection.identity, route: { provider: selection.provider, authRoute: selection.authRoute, profile: selection.profile }, access: this.modelPickerAccess };
+    this.pickerReturnView = { browsing: picker.browsing, connecting: picker.connecting };
     this.pickerReturn = returning;
     let started: boolean;
     if (selection.authRoute === "grok" || selection.authRoute === "codex") {
@@ -278,7 +387,9 @@ export abstract class ModelsLayer extends CommandsLayer {
       return started;
     }
     if (selection.profile) {
-      const profile = this.configEditor?.profiles[selection.profile];
+      const settings = this.configEditor?.settings;
+      const profile = settings?.profile === selection.profile && selection.groupIdentity === modelPickerIdentity({ ...selection, modelId: "" }, settings.baseUrl, settings.credentialIdentity)
+        ? settings : this.configEditor?.profiles[selection.profile];
       started = !!profile && this.beginCredentialTarget({ provider: "openai-compatible", profile: selection.profile,
         baseUrl: profile.baseUrl, credentialIdentity: profile.credentialIdentity });
     } else if (selection.provider === "openai-compatible") {
@@ -296,6 +407,8 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (!returning || this.disposed) return;
     this.loginChooserState = undefined;
     this.openModelPicker();
+    if (this.modelPicker) Object.assign(this.modelPicker, { browsing: this.pickerReturnView?.browsing, connecting: connected ? false : this.pickerReturnView?.connecting });
+    this.pickerReturnView = undefined;
     if (connected) this.pickerPreferredRoute = returning.route;
     else { this.pickerPreferredIdentity = returning.identity; this.modelPickerAccess = returning.access; }
     this.searchModels(returning.query);
@@ -306,14 +419,9 @@ export abstract class ModelsLayer extends CommandsLayer {
     this.modelCatalogAbort?.abort();
     this.modelCatalogAbort = undefined;
     this.modelPickerAccess = undefined;
-    this.subscriptionModels = undefined;
-    this.apiModels = undefined;
     this.apiModelsUnavailable = false;
-    this.compatibleModels = undefined;
     this.compatibleModelsUnavailable = false;
-    this.xaiModels = undefined;
     this.xaiModelsUnavailable = false;
-    this.grokModels = undefined;
     this.grokModelsUnavailable = false;
     this.subscriptionListUnavailable = false;
     this.modelPicker = undefined;
@@ -331,14 +439,24 @@ export abstract class ModelsLayer extends CommandsLayer {
 
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
-    if (this.modelPicker?.accessLoading) { this.notice("Checking sign-in · Wait or Esc back"); return false; }
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
     if (!selection || selection.kind === "header") return false;
+    if (selection.kind === "browse") { this.browsePickerModels(); return true; }
+    if (selection.kind === "connect") { this.connectPickerProviders(); return true; }
+    if (this.modelPicker?.accessLoading) { this.notice("Checking sign-in · Wait or Esc back"); return false; }
     if (selection.kind === "sign-in") {
       return this.connectPickerRoute(selection);
     }
     let applied: boolean;
-    if (selection.profile !== undefined) applied = await this.selectProfile(selection.profile);
+    if (selection.profile !== undefined) {
+      const settings = this.configEditor!.settings;
+      const effectiveRoute = settings.provider === selection.provider && settings.profile === selection.profile && selection.groupIdentity ===
+        modelPickerIdentity({ ...selection, modelId: "" }, settings.baseUrl, settings.credentialIdentity);
+      applied = await this.changeSettings(() => effectiveRoute
+        ? this.configEditor!.prepare({ scope: "session", key: "model", value: selection.modelId })
+        : this.configEditor!.prepareModel(selection.provider, selection.modelId, selection.profile),
+        () => `Using ${this.modelId} · ${selection.profile} · Enter send`, undefined, true);
+    }
     else if (selection.authRoute === "codex") {
       if (!selection.listUnavailable && !this.subscriptionModels?.includes(selection.modelId)) {
         this.fail("Model unavailable · Ctrl+R refresh models");
@@ -358,13 +476,23 @@ export abstract class ModelsLayer extends CommandsLayer {
     } else {
       applied = await this.selectModel(`${selection.provider}/${selection.modelId}`, this.listedBudgets(selection));
     }
-    if (applied && (selection.authRoute === "codex" || selection.authRoute === "grok" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
+    if (applied && (selection.profile !== undefined || selection.authRoute === "codex" || selection.authRoute === "grok" || selection.authRoute === "api-key")) await this.emitModelActivated(selection);
     return applied;
   }
 
   /** Remember an activated route and notify consumers, retaining warnings when success notices are suppressed. */
   protected async emitModelActivated(choice: Pick<ModelPickerEntry, "provider" | "modelId" | "authRoute" | "profile">, notifySuccess = true): Promise<void> {
     if (!this.model) return;
+    try {
+      const settings = this.configEditor?.settings;
+      const endpoint = choice.provider === "openai-compatible" ? settings?.baseUrl ?? this.baseUrl : undefined;
+      const credential = choice.provider === "openai-compatible" ? settings?.credentialIdentity : undefined;
+      const identity = modelPickerIdentity(choice, endpoint, credential);
+      const model = { modelId: choice.modelId, groupIdentity: modelPickerIdentity({ ...choice, modelId: "" }, endpoint, credential) };
+      this.pickerPreferences = this.preferenceStore()?.used(identity, model) ?? { ...this.pickerPreferences,
+        models: { ...this.pickerPreferences.models, [identity]: model },
+        recents: [identity, ...this.pickerPreferences.recents.filter(id => id !== identity)].slice(0, 32) };
+    } catch (error) { this.notice("Recent choice not saved · Ctrl+I details", String(error)); }
     try {
       if (await this.configEditor?.rememberChoice(choice.authRoute) && notifySuccess) this.notice("Choice remembered · /model forget reset");
       this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
@@ -416,7 +544,15 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     if (this.subscriptionSelected() && selection.provider === "openai") {
       try {
-        const available = this.subscriptionModels ?? (await this.loadAccountCatalog(AbortSignal.timeout(5_000))).map(model => model.id);
+        const picker = this.modelPicker;
+        // Account discovery settles before other route lists; its empty result is authoritative.
+        const settled = picker && picker.catalogState !== "loading" && !picker.accessLoading;
+        let available = settled ? this.subscriptionModels : undefined;
+        if (settled && this.subscriptionListUnavailable && !available?.length) {
+          available = this.modelPickerAccess?.subscription === "ChatGPT"
+            ? listCatalog().filter(model => model.provider === "openai").map(model => model.id) : [];
+        }
+        available ??= (await this.loadAccountCatalog(AbortSignal.timeout(5_000))).map(model => model.id);
         if (!available?.includes(selection.modelId)) {
           this.fail(`Model unavailable: ${selection.modelId} · /model choose another`);
           return false;

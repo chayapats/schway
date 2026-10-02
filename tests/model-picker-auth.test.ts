@@ -84,12 +84,13 @@ test("opening the picker discovers a saved Codex login from another provider and
     });
     try {
       controller.openModelPicker();
-      expect(await controller.selectPickerModel()).toBe(false);
+      expect(controller.snapshot().modelPicker!.entries.filter(entry => entry.kind === "model")).toHaveLength(0);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      controller.browsePickerModels();
       const entries = controller.snapshot().modelPicker!.entries;
       expect(entries.filter(entry => entry.kind === "model").slice(0, 2).map(entry => [entry.modelId, entry.access])).toEqual([["account-first", "ChatGPT"], ["account-second", "ChatGPT"]]);
       expect(entries.filter(entry => entry.kind === "model" && entry.authRoute === "codex")).toHaveLength(2);
-      expect(entries.some(entry => entry.provider === "openai" && entry.authRoute === "api-key")).toBe(true);
+      expect(entries.some(entry => entry.provider === "openai" && entry.authRoute === "api-key")).toBe(false);
       expect(await controller.selectPickerModel()).toBe(true);
       expect(configEditor.settings).toMatchObject({ provider: "openai", openaiAuth: "codex", model: "account-first" });
     } finally { controller.dispose(); }
@@ -107,7 +108,7 @@ test("reopening the picker refreshes saved credentials and preserves search rank
     try {
       controller.openModelPicker();
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(controller.snapshot().modelPicker!.entries[0]!.access).toBe("Login required");
+      expect(controller.snapshot().modelPicker!.entries.map(entry => entry.kind)).toEqual(["connect"]);
       controller.closeModelPicker();
       await store.set(credentialIdentity({ provider: "openai" }), "new-key");
       controller.openModelPicker();

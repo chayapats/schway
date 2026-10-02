@@ -6,7 +6,7 @@ import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
-import { formatContextWindow } from "./model-picker.ts";
+import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
@@ -743,7 +743,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       empty.content = snapshot.readiness === "not-connected" ? new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
         bold(fg(theme.text)("Not connected")), fg(theme.muted)("\n"),
-        ...keyHintChunks("Sign in to choose a model · Alt+L", hintColors(theme.background)),
+        ...keyHintChunks("Connect a provider · Alt+L", hintColors(theme.background)),
       ]) : new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
         bold(fg(theme.text)(safe(connection))),
@@ -893,38 +893,28 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           textRow(picker, fitLine(width < 60 ? "↑↓ Enter Esc ^W ^L" : `↑↓ preview · PgUp/PgDn page · Enter resume · Esc restore · ${sessions.total ? sessions.offset + sessions.selectedIndex + 1 : 0}/${sessions.total}`, width - 2), theme.muted);
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
-          const retry = !!models.error && ["empty", "offline", "failed"].includes(models.catalogState ?? "");
-          textRow(picker, fitLine(`Choose model · ↑↓ select · Enter use · Esc back${retry ? " · Ctrl+R retry" : ""}`, width - 2), theme.accent);
+          if (editor.plainText !== models.query) setDraft(models.query);
           const room = Math.max(1, width - 2);
-          const choices = models.entries.filter(entry => entry.kind !== "header");
-          const modelRows = choices.filter(entry => entry.kind === "model");
-          const contextWidth = Math.max(0, ...modelRows.map(entry => formatContextWindow(entry.contextWindow).length));
-          const modelWidth = Math.max(0, ...modelRows.map(entry => Bun.stringWidth(entry.modelId + (entry.custom ? " (typed)" : ""))));
-          const reasoningWidth = 12;
-          const showReasoning = modelRows.some(entry => entry.reasoning) && modelWidth + contextWidth + reasoningWidth + 7 <= room;
-          const showContext = modelWidth + contextWidth + (showReasoning ? reasoningWidth : 0) + 7 <= room;
+          textRow(picker, fitLine(`${models.connecting ? "Connect a provider" : "Choose model"} · Enter ${modelPickerAction(models.entries[models.selectedIndex])} · Esc back`, room), theme.accent);
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
           models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
-            const index = start + offset;
-            const selected = index === models.selectedIndex && entry.kind !== "header";
-            const prefix = entry.kind === "header" ? "  " : `${selected ? "›" : " "} `;
-            let line: string;
-            if (entry.kind !== "model") {
-              const detail = entry.kind === "sign-in" ? "Sign in · Enter" : entry.listUnavailable ? "list unavailable" : "";
-              const label = fitLine(entry.groupLabel, room - 2);
-              const gap = room - 2 - Bun.stringWidth(label) - Bun.stringWidth(detail);
-              line = `${prefix}${label}${detail && gap >= 2 ? " ".repeat(gap) + detail : ""}`;
-            } else {
-              const metadata = `${showContext ? "  " + formatContextWindow(entry.contextWindow).padStart(contextWidth) : ""}${showReasoning ? entry.reasoning ? " · reasoning" : " ".repeat(reasoningWidth) : ""}  ${entry.active ? "✓" : " "}`;
-              const label = fitLine(entry.modelId + (entry.custom ? " (typed)" : ""), room - 2 - metadata.length);
-              line = `${prefix}${label}${" ".repeat(Math.max(0, room - 2 - Bun.stringWidth(label) - metadata.length))}${metadata}`;
+            const selected = start + offset === models.selectedIndex;
+            const prefix = `${selected ? "›" : " "} `;
+            let line = entry.groupLabel;
+            if (entry.kind === "model") {
+              const route = entry.provider === "openai-compatible" ? `API · ${entry.groupLabel.replace(/^OpenAI-compatible · /, "")}` : entry.groupLabel;
+              const marks = `${entry.active ? "✓" : ""}${entry.favorite ? "★" : ""}`;
+              const label = modelPickerName(entry.modelId);
+              const suffix = ` · ${route}${marks ? " " + marks : ""}`;
+              line = fitLine(label, Math.max(4, room - 2 - Bun.stringWidth(suffix))) + suffix;
             }
-            textRow(picker, line, selected ? theme.accent : entry.kind === "header" ? theme.muted : theme.text);
+            textRow(picker, fitLine(prefix + line, room), selected ? theme.accent : theme.text);
           });
           const selected = models.entries[models.selectedIndex];
-          const ordinal = selected ? choices.findIndex(entry => entry.identity === selected.identity) + 1 : 0;
-          const detail = selected ? `${ordinal}/${choices.length}${selected.kind === "model" ? ` · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output` : ""}` : "No models found · Type provider/model";
-          textRow(picker, fitLine(models.error ?? (models.loading ? `Loading ChatGPT catalog… ${detail}` : detail), width - 2), models.error ? theme.error : theme.muted);
+          const detail = models.details && selected?.kind === "model"
+            ? `${selected.modelId} · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`
+            : models.connecting ? "Type to search · ↑↓ select · Esc back" : selected?.kind === "model" ? `Type to search · Ctrl+P ${selected.favorite ? "unpin" : "pin"} · Ctrl+I details` : "↑↓ select · Enter open · Esc back";
+          textRow(picker, fitLine(models.error ?? detail, room), models.error ? theme.error : theme.muted);
         } else if (browsing) {
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
           const start = Math.max(0, Math.min(selectedRow - Math.floor(maxRows / 2), commandRows.length - maxRows));
@@ -991,6 +981,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = "↑↓ select · PgUp/PgDn scroll · Esc close";
       } else if (panelMode === "review") {
         hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
+      } else if (snapshot.modelPicker) {
+        hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
         const modeHint = snapshot.approvalMode === "auto" ? "" : `Shift+Tab ${snapshot.approvalMode} · `;
         hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
@@ -1310,6 +1302,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else showInteractionNotice("Nothing to inspect · Enter send a task");
       handled(); return;
     }
+    if (snapshot.modelPicker && key.ctrl && name === "p") { controller.togglePickerFavorite(); handled(); return; }
+    if (snapshot.modelPicker && key.ctrl && name === "i") { controller.togglePickerDetails(); handled(); return; }
     if (snapshot.modelPicker?.error && name === "r" && key.ctrl && !key.meta && !key.option &&
       ["empty", "offline", "failed"].includes(snapshot.modelPicker.catalogState ?? "")) {
       controller.retryModelPickerCatalog(); handled(); return;
@@ -1323,7 +1317,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if (name === "escape") {
       if (snapshot.loginChooser) controller.cancel();
-      else if (snapshot.modelPicker) controller.closeModelPicker();
+      else if (snapshot.modelPicker) controller.backModelPicker();
       else if (snapshot.branchTree) controller.closeBranchTree();
       else if (discoveryOpen) dismissedQuery = editor.plainText;
       else if (controller.cancelPendingSignInListing()) { /* Esc cancels the sign-in listing without changing the saved credential. */ }
