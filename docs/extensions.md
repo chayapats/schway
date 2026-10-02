@@ -35,6 +35,87 @@ export default defineExtension((extension) => {
 });
 ```
 
+## Public API
+
+Only exports from `schway/extensions` are public and semver-versioned. All other
+imports are private. The package ships emitted `.d.ts` declarations; consumers
+need no `allowImportingTsExtensions` setting or ambient Node/Bun type package.
+The standard TypeScript `ESNext` and `DOM` libraries supply the required types,
+including `AbortSignal`. `ToolContext.env` is a string-keyed map of strings or
+`undefined`. Extensions that use Bun APIs in their own code still need
+`@types/bun` for those APIs. Both TypeScript `bundler` and `nodenext` module
+resolution are supported.
+
+The checked-in [API report](../api/extensions.api.md) guards the complete reachable
+surface. Run `bun scripts/extension-api-report.ts` to check it or append `--update`
+after an intentional public contract change.
+
+| Export | Contract |
+| --- | --- |
+| `AfterToolHook` | Transform settled output; returned isError sets terminal status, outcome.status stays original, and execution is never replayed. |
+| `AfterToolInput` | Settled execution status with the current model-facing presentation, copied for each afterTool handler. |
+| `ApprovalMode` | User-selected handling of tools that can change state. |
+| `AssistantContent` | Allowed assistant content block: text, reasoning, or a requested tool invocation. |
+| `AssistantMessage` | Assembled assistant output with ordered content blocks and opaque metadata retained for adapter replay. |
+| `BeforeAgentHook` | Append turn-only sections, deny the turn, or leave the preceding hook's result unchanged. |
+| `BeforeAgentInput` | Detached user input and accumulated turn-only context, supplied once per submitted turn. |
+| `BeforeModelHook` | Replace ephemeral request data, deny the request, or retain the preceding hook's result. |
+| `BeforeToolHook` | Replace tool arguments in load order, deny with an explanation, or leave the invocation unchanged. |
+| `BeforeToolInput` | Detached validated invocation metadata; only an explicit arguments return may change execution input. |
+| `CompactionReason` | Reason a compaction runs; surfaced to presentation clients and events. |
+| `ContextHook` | Transform prepared dynamic sections in order while preserving each existing section's name. |
+| `ContextSection` | Named block of volatile context sent with a model request. |
+| `ConversationItem` | Provider-independent message or tool outcome that may be included in model context. |
+| `DeepReadonly` | Preserve event shapes while making every nested property readonly. |
+| `defineExtension` | Type-check and return an extension initializer without running it. |
+| `Extension` | Default module initializer that registers capabilities without replacing harness infrastructure. |
+| `ExtensionCommand` | Declare an interactive slash command with a raw trailing-argument handler and optional help usage. |
+| `ExtensionCommandContext` | Limited capabilities for an idle interactive command; a queued prompt runs after successful completion. |
+| `ExtensionContext` | Capabilities available while an explicitly enabled extension initializes, owned until runtime disposal. |
+| `ExtensionDenial` | Deny an agent turn or model request with a nonempty explanation shown to the user. |
+| `ExtensionEvent` | Recursively readonly event data, detached from authoritative runtime and session objects. |
+| `ExtensionEventListener` | Observe native runtime events sequentially, using the signal to stop work on unsubscribe or session disposal. |
+| `ExtensionModelRequest` | Detached provider-independent request with a cancellation signal owned by Schway. |
+| `JsonSchema` | JSON Schema object used as a public tool input contract. |
+| `ModelRequest` | Provider-independent model request built by the agent loop. |
+| `ModelTool` | Tool description sent to a provider adapter. |
+| `ModelUsage` | Reported token counts for one provider attempt; null means that dimension was not reported. |
+| `ProviderMetadata` | Opaque adapter-owned data preserved alongside Schway's provider-independent conversation records. |
+| `RuntimeEvent` | Normalized runtime events for TUI, headless `--json`, and diagnostics. |
+| `TextContent` | Plain text carried in a user or assistant message. |
+| `ThinkingContent` | Assistant reasoning text with optional opaque metadata needed for provider replay. |
+| `ThinkingLevel` | User-facing reasoning level shared by all providers without assuming identical wire semantics. |
+| `ToolCallContent` | Requested tool invocation whose id links its result and whose arguments require tool-schema validation. |
+| `ToolCallStatus` | Outcome recorded for an accepted tool call. |
+| `ToolContext` | Per-invocation context passed into every tool. |
+| `ToolDefinition` | Public tool contract: schema for the model, execute for the harness. |
+| `ToolEffect` | State-change declaration used by approval modes, independently of scheduling. |
+| `ToolExecutionMode` | Declare whether sibling calls may overlap or must run behind an exclusive barrier. |
+| `ToolExecutionResult` | Result of a single tool `execute` call, before it is stored on the session. |
+| `ToolOutputChunk` | A stdout or stderr chunk emitted while a tool is running. |
+| `ToolResult` | Model-facing outcome linked to a tool-call id, with errors marked explicitly. |
+| `UserContent` | Content accepted in user messages, currently limited to plain text. |
+| `UserMessage` | Identified user input stored in session history and sent to the model. |
+| `Workspace` | Workspace directories whose primary root anchors relative tool paths, with launch location and optional extra roots. |
+
+## Registration methods
+
+`ExtensionContext` provides these methods during initialization, plus the readonly
+runtime lifetime `signal`. Await initialization work before returning.
+
+| Method | Contract |
+| --- | --- |
+| `registerPrompt` | Add one named dynamic section to normal requests. |
+| `beforeAgent` | Add context or deny once per submitted turn. |
+| `context` | Transform assembled dynamic sections in order. |
+| `beforeModel` | Transform or deny a native model request. |
+| `beforeTool` | Rewrite validated arguments or deny a tool call. |
+| `afterTool` | Transform settled tool output without replaying execution. |
+| `registerTool` | Register a schema and executable tool before initialization ends. |
+| `registerCommand` | Register an idle interactive slash command. |
+| `onRuntimeEvent` | Subscribe to detached events and return an unsubscribe function. |
+| `onDispose` | Register cleanup for failed initialization or runtime disposal. |
+
 ## Local TypeScript extensions
 
 Explicitly enable local extension modules with repeatable `--extension` flags. Both
@@ -92,7 +173,7 @@ export default defineExtension(({ registerTool }) => {
 works too. Tool registration accepts optional `effect: "read-only" | "mutating"`; an omitted effect means `"mutating"`. Invalid declarations fail startup. Declare read-only only for tools that do not change state. The declaration is public extension metadata and never reaches a provider.
 
 The registration context exposes `registerTool`, `registerCommand`,
-`registerPrompt`, `beforeAgent`, `context`, `beforeModel`, `onRuntimeEvent`,
+`registerPrompt`, `beforeAgent`, `context`, `beforeModel`, `beforeTool`, `afterTool`, `onRuntimeEvent`,
 `onDispose`, and a runtime lifetime `signal`. Await all
 initialization work before returning; registration closes when initialization
 finishes. A thrown initializer, invalid tool/schema, duplicate name, or even a
@@ -269,6 +350,28 @@ not change the submitted durable user message.
 
 ## Tool argument and result hooks
 
+For each tool call, evaluation follows this order:
+
+1. Validate the original tool name and arguments.
+2. Run the `beforeTool` waterfall, validating every returned argument replacement.
+3. Make the approval decision using the final arguments. For `effect: "mutating"`
+   or an omitted `effect`, `read-only` denies, `ask` prompts interactively (unless
+   a session allowance applies) or denies headless, and `auto` allows.
+   Tools declaring `effect: "read-only"` can execute in all three modes.
+4. Execute the approved call.
+5. Run the `afterTool` waterfall on the settled result.
+
+An extension tool that declares no `effect` is treated as able to change state.
+Neither approval denials nor read-only denials run `execute` or `afterTool`.
+With parallel calls in `ask` mode, later calls' `beforeTool` hooks can run before
+earlier approvals resolve; approval requests themselves are presented in source
+order. Exclusive barriers and the concurrency limit still apply.
+
+These contracts are pinned by `tests/extension-tool-hooks.test.ts` (read-only
+checks after rewrites, ask denial skips execution and result hooks, and omitted
+effects), `tests/tool-registry.test.ts` (effect defaults), and
+`tests/tui-approval.test.ts` (parallel hooks with ordered approvals).
+
 `beforeTool(hook)` and `afterTool(hook)` cover every registered executable,
 including native file tools and `activate_skill`. Public types are
 `BeforeToolInput`, `BeforeToolHook`, `AfterToolInput`, and `AfterToolHook`.
@@ -289,7 +392,7 @@ running the tool or `afterTool`.
 `afterTool` additionally receives `outcome: { status, content, isError, details? }`
 and the arguments actually passed to execution. It runs after executed successes,
 returned tool errors, and thrown execution errors. It does not run after rejected
-original inputs, before-hook failures, or cancelled execution. Return
+original inputs, before-hook failures, approval or read-only denials, or cancelled execution. Return
 `{ content: "replacement", isError?, details? }` to replace the presentation.
 Omitting `isError` preserves its preceding value; omitting `details` removes
 preceding details. `outcome.status` always reports the original execution status,

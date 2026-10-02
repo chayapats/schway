@@ -9,7 +9,7 @@
   },
   "exports": {
     "./extensions": {
-      "types": "./src/extensions/index.ts",
+      "types": "./dist/types/extensions/index.d.ts",
       "default": "./src/extensions/index.ts"
     }
   },
@@ -33,7 +33,8 @@
     "docs/workspaces.md",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "dist/types"
   ],
   "scripts": {
     "dev": "bun --no-env-file src/cli/main.ts",
@@ -44,7 +45,8 @@
     "typecheck": "tsc --noEmit",
     "screens:update": "SCHWAY_UPDATE_SCREENS=1 bun test tests/screen-catalog.test.ts",
     "screens:gallery": "bun tests/screen-catalog/gallery.ts",
-    "demo:record": "vhs docs/demo/demo.tape"
+    "demo:record": "vhs docs/demo/demo.tape",
+    "prepack": "bun scripts/build-extension-types.ts"
   },
   "engines": {
     "bun": ">=1.2.0"
@@ -58,6 +60,7 @@
     "semver": "^7.8.5"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.59.3",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }

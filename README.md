@@ -20,7 +20,7 @@ Use `--approval <auto|ask|read-only>` or `approval.mode` to choose the starting 
 - [Save, branch, and resume sessions](https://github.com/chayapats/schway/blob/main/docs/sessions.md)
 - [Attach workspaces](https://github.com/chayapats/schway/blob/main/docs/workspaces.md)
 - [Use Agent Skills](https://github.com/chayapats/schway/blob/main/docs/skills.md)
-- [Add skills and extensions](https://github.com/chayapats/schway/blob/main/docs/extensions.md)
+- [Add skills and extensions](https://github.com/chayapats/schway/blob/main/docs/extensions.md) · [Public extension API](docs/extensions.md#public-api)
 - [Diagnose local readiness](https://github.com/chayapats/schway/blob/main/docs/doctor.md)
 - [Run headless tasks](https://github.com/chayapats/schway/blob/main/docs/headless.md)
 - [Read tool output](https://github.com/chayapats/schway/blob/main/docs/tools.md)

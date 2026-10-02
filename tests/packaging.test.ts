@@ -152,6 +152,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/src/cli/main.ts",
       "package/src/tui/app.ts",
       "package/src/extensions/index.ts",
+      "package/dist/types/extensions/index.d.ts",
       "package/src/extensions/loader.ts",
       "package/examples/extensions/greet.ts",
       "package/examples/extensions/commands-and-events.ts",
@@ -185,7 +186,7 @@ test("npm pack installs the public extension API and completes a headless tool r
     expect(entries.some((entry) => entry.startsWith("package/.scratch/"))).toBe(false);
 
     // Install the tarball into an isolated directory and run the installed binary.
-    // This step needs registry access for the runtime dependencies.
+    // This step needs registry access for runtime dependencies unless npm's offline cache is populated.
     const installDir = join(dir, "install");
     const installed = await runCommand(
       ["npm", "install", "--prefix", installDir, "--no-audit", "--no-fund", "--silent", join(dir, tarball), "@types/bun@1.4.2"],
@@ -217,13 +218,56 @@ test("npm pack installs the public extension API and completes a headless tool r
     expect(packageInstall.exitCode).toBe(0);
     await Bun.write(join(installDir, ".schway/config.json"), JSON.stringify({ packages: ["schway-example-greeting"] }));
     const checked = await runCommand([
-      join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict", "--skipLibCheck",
+      join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict", "--listFiles",
       "--moduleResolution", "bundler", "--module", "esnext", "--target", "esnext",
-      "--allowImportingTsExtensions", "--types", "bun", "greet.ts", "commands-and-events.ts", "context.ts", "tool-policy.ts",
+      "--types", "bun", "greet.ts", "commands-and-events.ts", "context.ts", "tool-policy.ts",
       "node_modules/schway-example-greeting/greet.ts",
     ], { cwd: installDir });
-    expect(checked.stdout + checked.stderr).toBe("");
-    expect(checked.exitCode).toBe(0);
+    expect(checked.exitCode, checked.stdout + checked.stderr).toBe(0);
+    expect(checked.stderr).toBe("");
+    expect(checked.stdout).not.toMatch(/error TS\d+:/);
+    expect(checked.stdout).toContain("node_modules/schway/dist/types/extensions/index.d.ts");
+    expect(checked.stdout).not.toContain("node_modules/schway/src/");
+    const nodeNext = await runCommand([
+      join(import.meta.dir, "../node_modules/.bin/tsc"), "--noEmit", "--strict",
+      "--module", "nodenext", "--moduleResolution", "nodenext", "--target", "esnext",
+      "--types", "bun", "greet.ts",
+    ], { cwd: installDir });
+    expect(nodeNext.exitCode, nodeNext.stdout + nodeNext.stderr).toBe(0);
+    expect(nodeNext.stdout + nodeNext.stderr).toBe("");
+
+    // The public contract also works with standard libraries and no ambient type packages.
+    await Bun.write(join(installDir, "no-ambient.ts"), `
+import { defineExtension, type ToolContext } from "schway/extensions";
+const env: NonNullable<ToolContext["env"]> = { PATH: "/bin", OPTIONAL: undefined };
+const value: string | undefined = env.OPTIONAL;
+// @ts-expect-error Environment values must remain strings or undefined.
+env.INVALID = 42;
+export default defineExtension(ctx => ctx.registerTool({
+  name: "environment", description: "Read an environment value", effect: "read-only",
+  execution: "parallel", inputSchema: { type: "object" },
+  async execute(_input, toolContext) {
+    toolContext.signal?.throwIfAborted();
+    return { content: toolContext.env?.PATH ?? value ?? "missing" };
+  },
+}));
+`);
+    await Bun.write(join(installDir, "tsconfig.no-ambient.json"), JSON.stringify({
+      compilerOptions: {
+        noEmit: true, strict: true, listFiles: true, types: [], lib: ["ESNext", "DOM"],
+        module: "ESNext", moduleResolution: "bundler", target: "ESNext",
+      },
+      files: ["no-ambient.ts"],
+    }));
+    const noAmbient = await runCommand([
+      join(import.meta.dir, "../node_modules/.bin/tsc"), "--project", "tsconfig.no-ambient.json",
+    ], { cwd: installDir });
+    expect(noAmbient.exitCode, noAmbient.stdout + noAmbient.stderr).toBe(0);
+    expect(noAmbient.stderr).toBe("");
+    expect(noAmbient.stdout).not.toMatch(/error TS\d+:/);
+    expect(noAmbient.stdout).toContain("node_modules/schway/dist/types/extensions/index.d.ts");
+    expect(noAmbient.stdout).not.toContain("node_modules/schway/src/");
+    expect(noAmbient.stdout).not.toMatch(/node_modules\/(?:@types\/|bun-types\/)/);
 
     // Missing renderer and unused SDK packages prove the installed headless path stays lazy.
     for (const dependency of ["@opentui", "openai", "@anthropic-ai/sdk"]) {

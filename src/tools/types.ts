@@ -31,7 +31,7 @@ export interface ToolContext {
   workspace: Workspace;
   signal?: AbortSignal;
   /** Optional subprocess environment supplied by a restricted harness; ordinary tools inherit the process environment. */
-  env?: NodeJS.ProcessEnv;
+  env?: Record<string, string | undefined>;
   /** Live output for runtime events. Tools may call this as chunks arrive. */
   onOutput?: (chunk: ToolOutputChunk) => void;
 }

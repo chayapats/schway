@@ -7,9 +7,19 @@ import type { ModelRequest } from "../model/model.ts";
 /** Named native dynamic context retained separately from the stable system prompt. */
 export type { ContextSection } from "../context/manager.ts";
 /** Native conversation and tool descriptions accepted by request hooks, without provider wire types. */
-export type { ConversationItem, UserMessage } from "../conversation/types.ts";
-/** Executable-free descriptions that request hooks may select without changing their definitions. */
-export type { ModelTool } from "../model/model.ts";
+export type {
+  AssistantContent, AssistantMessage, ConversationItem, ProviderMetadata, TextContent,
+  ThinkingContent, ToolCallContent, ToolResult, UserContent, UserMessage,
+} from "../conversation/types.ts";
+/** Native request, tool selection, reasoning, and usage contracts exposed to hooks and observers. */
+export type { ModelRequest, ModelTool, ModelUsage, ThinkingLevel } from "../model/model.ts";
+
+/** Native event variants delivered to extension observers. */
+export type { RuntimeEvent } from "../agent/events.ts";
+/** Approval modes identified by tool denial events. */
+export type { ApprovalMode } from "../agent/approval.ts";
+/** Causes identified by compaction lifecycle events. */
+export type { CompactionReason } from "../context/compaction.ts";
 
 /** Deny an agent turn or model request with a nonempty explanation shown to the user. */
 export interface ExtensionDenial { deny: string }
@@ -60,7 +70,7 @@ export type AfterToolHook = (input: AfterToolInput) => void | ToolExecutionResul
 
 /** Public JSON Schema and invocation contracts shared with native tools. */
 export type {
-  JsonSchema, ToolContext, ToolDefinition, ToolEffect, ToolExecutionMode,
+  JsonSchema, ToolCallStatus, ToolContext, ToolDefinition, ToolEffect, ToolExecutionMode,
   ToolExecutionResult, ToolOutputChunk,
 } from "../tools/types.ts";
 /** Canonical primary workspace and launch paths supplied to tool invocations. */
@@ -69,7 +79,8 @@ export type { Workspace } from "../workspace/workspace.ts";
 /** Recursively readonly event data, detached from authoritative runtime and session objects. */
 export type ExtensionEvent = DeepReadonly<RuntimeEvent>;
 
-type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
+/** Preserve event shapes while making every nested property readonly. */
+export type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
 
 /** Observe native runtime events sequentially, using the signal to stop work on unsubscribe or session disposal. */
 export type ExtensionEventListener = (event: ExtensionEvent, context: { readonly signal: AbortSignal }) => void | Promise<void>;
