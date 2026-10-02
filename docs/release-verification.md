@@ -10,6 +10,8 @@ publication or actual-merge-commit verification. `R` is pending the release PR's
 merge to `main`; tag `v0.6.0`, npm publication and the stable dist-tag check are
 pending. Raw reports remain private, outside Git, in
 `~/schway-release-evidence/0.6.0/v06-20261001T143347Z-issue-157/`.
+Rebased-candidate reports use its `resume2/` subdirectory; earlier reports are
+retained as historical evidence.
 
 ### Preconditions and candidate contents
 
@@ -18,14 +20,26 @@ Their integrated contracts were inspected at pinned base
 `50c9eccda0a032731e1696d888d0cc53a220c67b`.
 `gh issue list --milestone 0.6 --state open` listed only #157; open P0 and P1
 queries were both empty. Round 1 in [the dogfood log](dogfood-log.md#friction)
-reported P0 0 / P1 0, so no round-1 P0/P1 fixes or Fixed changelog entries were
-required. Recheck these queries before publication.
+reported P0 0 / P1 0, so no round-1 P0/P1 fixes were required. Recheck these
+queries before publication.
+
+The release branch was rebased onto the coordinator's exact updated main,
+`9fa79aa0a7316d000585d76ae2a532c29e0dc941`. Both original release-preparation
+commits were retained with unchanged patches. This main also includes
+PR #217 (Codex device sign-in, #216), PR #218 (headless saved-session
+discovery, #209), and PR #219 (exact, secret-safe session ID preambles).
+#209 was round-1 P2 friction, not a P0/P1 release blocker. The changelog's new
+Fixed entries cover these later changes; they do not invent round-1 P0/P1 fixes.
 
 The candidate sets `package.json` to `0.6.0` and both the greeting-package peer
 range and the maintained extension-guide example to `^0.6.0`. The README peer
 example moved to `docs/extensions.md` in #150. The changelog describes file undo,
-shell changes, non-Git workspaces, retention defaults, approval modes and the
-extension tool effect declaration.
+shell changes, non-Git workspaces, retention defaults, approval modes, the
+extension tool effect declaration and these newly merged user-visible changes.
+Headless JSON emits the exact persisted ID through `session.ready`; the preamble
+is suppressed if that ID would expose a collected secret. Device sign-in now
+uses the current ChatGPT device authorization flow. Its protocol tests are
+offline evidence; this preparation does not claim a new live device approval.
 
 The session policy follows the persisted implementation: new sessions use
 format 4; formats 1–4 remain readable. Ordinary format-3 writes do not upgrade
@@ -40,19 +54,23 @@ is made here.
 
 ### Offline candidate verification
 
-These are pre-merge checks, not actual-`R` evidence. Frozen install, typecheck,
-the full suite and package dry-run passed on clean candidate
-`201dca08a7b30ea887880d2b0377c959e37fa921`. The subsequent commit only updates
-this evidence document. The managed worker's handoff records the final revision.
+These are pre-merge checks, not actual-`R` evidence. Verification of the rebased
+source candidate is pending below. The managed worker's updated handoff records
+the exact tested commit and final documentation revision.
+
+The earlier clean candidate `201dca08a7b30ea887880d2b0377c959e37fa921` passed
+frozen install, typecheck, 2,035 tests across 122 files (0 failures, 181.45 seconds)
+and package dry-run before PRs #217–#219 were included. Those retained results
+do not verify the updated source candidate.
 
 | Check | Exit | Result |
 | --- | --- | --- |
-| `bun install --frozen-lockfile` | 0 | 27 installs / 53 packages checked; no changes |
-| `bun run typecheck` | 0 | Candidate typecheck passed |
-| Focused package, session and demo tests | 0 | 98 tests across 5 files; 0 failures |
-| Candidate full `bun test` | 0 | 2,035 tests across 122 files; 0 failures; 181.45 seconds |
+| Rebased `bun install --frozen-lockfile` | Pending | Rerun on the clean updated candidate |
+| Rebased `bun run typecheck` | Pending | Rerun on the clean updated candidate |
+| Rebased focused CLI, Codex and demo tests | 0 | 124 tests across 3 files; 0 failures; 1.74 seconds |
+| Rebased candidate full `bun test` | Pending | Record exact tested commit and full-suite results |
 | `bun run demo:record` | 0 | Scripted offline model; GIF 212,814 bytes, below 2,097,152 bytes |
-| Candidate `npm pack --dry-run --json` | 0 | 160 files; CLI, source, examples, declared user docs and changelog present; tests, scratch and release evidence absent |
+| Rebased candidate `npm pack --dry-run --json` | Pending | Inspect updated package contents |
 
 The demo was recorded with task-local VHS 0.10.0, ttyd 1.7.7 and DejaVu Sans
 Mono through a temporary fontconfig file. Frame review confirmed the ready
@@ -60,13 +78,15 @@ screen, inline diff, outcome and two-column review, with no splash, private
 paths or real provider names. The coordinator independently inspected the
 final GIF at 0, 4, 8 and 10.5 seconds and confirmed visual QA passed. Its SHA256
 is `bdd51b4838fe227c84492016687ffd41f29511fcd4dcbce3cef260378fbe6474`.
-No TUI source or screen-catalog goldens changed.
+PRs #217–#219 do not change the demo fixture, tape or rendered conversation and
+review surfaces. The approved GIF and hash remain unchanged. This release
+preparation changes no TUI source or screen-catalog goldens.
 
 After merge, rerun frozen install, typecheck and the full suite on clean `R`,
 record its SHA and test count, and inspect `npm pack --dry-run` again on `R`.
 Pre-merge checks do not replace those release gates.
 
-The complete candidate stdout/stderr log is
+The complete earlier candidate stdout/stderr log is
 `/tmp/v06-20261001T143347Z-issue-157-full-suite.log`, also preserved in the
 private evidence directory. Its final totals and all failure/error sections
 were inspected: no failures or error sections. Toolchain: Linux
@@ -74,10 +94,18 @@ were inspected: no failures or error sections. Toolchain: Linux
 
 ### Five-lane live smoke — pending
 
-Operator model/reasoning selections, compatible endpoint and paid-smoke consent
-remain pending. No live smoke ran for 0.6.0. The following rows are checklist
-placeholders, not runner output; no model, auth source, timestamp or revision
-has been observed. Run the all-provider smoke from [the release checklist](releasing.md#3-live-verification-on-the-release-commit)
+The operator selected the five models below with `medium` reasoning and
+`https://openrouter.ai/api/v1` as the compatible endpoint, authorizing USD 1 per
+route and USD 5 total, including the compatible upgrade within its route's
+allowance. No live smoke ran for 0.6.0. Catalog-only preflight found all selected
+models; the authorized routine Grok refresh and subsequent catalog both returned
+HTTP 200, with `grok-4.7` advertising `medium`. Credentials remained in the native
+secure store. Catalog access is not inference evidence and must be rechecked on
+the actual release commit.
+
+The following rows are selected-run placeholders, not runner output; no live
+auth source, timestamp or revision has been observed for 0.6.0. Run the
+all-provider smoke from [the release checklist](releasing.md#3-live-verification-on-the-release-commit)
 on `R`, with the operator's explicit selections, and replace these rows with
 actual evidence. Every lane must pass; repair access and rerun pending/skipped
 lanes, and file any failed lane as P1 before release. Full live evals are outside
@@ -85,11 +113,11 @@ lanes, and file any failed lane as P1 before release. Full live evals are outsid
 
 | Route | Provider (smoke lane) | Model | Thinking | Auth source | Status | Reason | Tested at (UTC) | Revision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ChatGPT subscription | `codex` | Pending selection | Pending selection | Not observed | Pending | Not run; selections and consent pending | — | — |
-| Grok subscription | `grok` | Pending selection | Pending selection | Not observed | Pending | Not run; selections and consent pending | — | — |
-| OpenAI key | `openai-api-key` | Pending selection | Pending selection | Not observed | Pending | Not run; selections and consent pending | — | — |
-| xAI key | `xai-api-key` | Pending selection | Pending selection | Not observed | Pending | Not run; selections and consent pending | — | — |
-| Compatible endpoint | `compatible` | Pending selection | Pending selection | Not observed | Pending | Not run; endpoint, selections and consent pending | — | — |
+| ChatGPT subscription | `codex` | `gpt-6-sol` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| Grok subscription | `grok` | `grok-4.7` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| OpenAI key | `openai-api-key` | `gpt-6-luna` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| xAI key | `xai-api-key` | `grok-4.7` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
+| Compatible endpoint | `compatible` | `meta/muse-spark-1.3-contributor` | `medium` | Not observed | Pending | Awaiting actual-`R` checks and runtime go-ahead | — | — |
 
 ### Publication and clean-HOME upgrade — pending
 
@@ -98,8 +126,11 @@ The coordinator's preliminary registry check at
 package-access evidence = `schway: read-write`, and stable `latest` = `0.5.0`
 (each exit 0). `npm view schway@0.6.0` returned E404 (exit 1); this was checked
 separately from package ownership. Recheck identity/rights, the unused version
-and any required npm 2FA when publication is authorized. No publish, tag or
-production auth/config change was performed by this preparation. Follow
+and any required npm 2FA when publication is authorized. On 2026-10-02, the
+coordinator reported renewed npm authentication with `npm whoami` = `chayapats`.
+This does not replace the remaining publish checks. No publish or tag was
+performed by the worker; its only credential write was the explicitly authorized
+routine refresh of the existing Grok identity during runtime preflight. Follow
 [the release checklist](releasing.md#4-publish-and-tag) on clean `R`, then the
 specific 0.5-to-0.6 upgrade procedure in #157. A temporary HOME does not isolate
 the OS secure store; keep production accounts unchanged.
