@@ -40,7 +40,7 @@ test("the curated built-in order covers descriptions and the slash-command union
   const coversSlashCommands: Exclude<SlashCommandName, typeof BUILT_IN_COMMAND_ORDER[number]> extends never ? true : false = true;
   expect(coversSlashCommands).toBe(true);
   expect(BUILT_IN_COMMAND_ORDER).toEqual([
-    "model", "new", "sessions", "changes", "undo", "compact", "resume", "branch", "thinking", "context", "skills",
+    "model", "new", "clear", "sessions", "changes", "undo", "compact", "resume", "branch", "thinking", "context", "skills",
     "add-dir", "config", "theme", "session", "login", "logout", "help", "quit", "delete-session",
   ]);
   expect(Object.keys(COMMAND_DESCRIPTIONS).sort()).toEqual([...BUILT_IN_COMMAND_ORDER].sort());
@@ -197,6 +197,8 @@ test("command owners collide with built-ins, skills and each other independent o
     const declaration = (name: string) => `export default ctx => ctx.registerCommand({ name: '${name}', description: 'Command', execute() {} });`;
     await Bun.write(join(dir, "core.ts"), declaration("help"));
     await expect(loadExtensions({ modules: ["core.ts"], workspace, tools: createToolRegistry() })).rejects.toThrow("Schway built-in /help");
+    await Bun.write(join(dir, "clear.ts"), declaration("clear"));
+    await expect(loadExtensions({ modules: ["clear.ts"], workspace, tools: createToolRegistry() })).rejects.toThrow("Schway built-in /clear");
     for (const file of ["first.ts", "second.ts"]) await Bun.write(join(dir, file), declaration("duplicate"));
     for (const modules of [["first.ts", "second.ts"], ["second.ts", "first.ts"]]) {
       const result = loadExtensions({ modules, workspace, tools: createToolRegistry() });

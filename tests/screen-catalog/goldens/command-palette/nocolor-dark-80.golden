@@ -27,10 +27,10 @@ cursor 8 27 visible
 
    ›   /model          Choose model
        /new            Start a new conversation
+       /clear          Start a new conversation
        /sessions       Open saved work
        /changes        Review changes
        /undo           Undo the last turn's file edits
-       /compact        Summarize to free context
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › /
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -80,23 +80,23 @@ cursor 8 27 visible
 20 78-80 #ffffff #0e1117 -
 21 0-2 #ffffff #0e1117 -
 21 2-3 #ffffff #1e2430 -
-21 3-38 #8b95a7 #1e2430 -
-21 38-78 #ffffff #1e2430 -
+21 3-47 #8b95a7 #1e2430 -
+21 47-78 #ffffff #1e2430 -
 21 78-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -
-22 3-37 #8b95a7 #1e2430 -
-22 37-78 #ffffff #1e2430 -
+22 3-38 #8b95a7 #1e2430 -
+22 38-78 #ffffff #1e2430 -
 22 78-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
-23 3-54 #8b95a7 #1e2430 -
-23 54-78 #ffffff #1e2430 -
+23 3-37 #8b95a7 #1e2430 -
+23 37-78 #ffffff #1e2430 -
 23 78-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -
-24 3-48 #8b95a7 #1e2430 -
-24 48-78 #ffffff #1e2430 -
+24 3-54 #8b95a7 #1e2430 -
+24 54-78 #ffffff #1e2430 -
 24 78-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -
