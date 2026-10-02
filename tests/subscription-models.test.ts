@@ -362,18 +362,26 @@ test("re-login cannot send a turn through the previous account adapter when disc
   });
 });
 
-test("Codex catalog uses a compatible client version rather than Schway's package version", async () => {
+test("Codex catalog requests verified 0.160.0 compatibility and retains gpt-6.1-sol medium thinking", async () => {
   const store = fakeCredentialStore();
   await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", expiresAt: Date.now() + 600_000 }));
   const seen: string[] = [];
-  const models = await fetchSubscriptionModels({ store, fetch: async url => {
+  const models = await fetchSubscriptionCatalog({ store, fetch: async url => {
     const clientVersion = new URL(String(url)).searchParams.get("client_version") ?? "";
     seen.push(clientVersion);
-    // The real backend returned zero models for Schway 0.1.0, but visible models for Codex 0.156.1.
-    return Response.json(clientVersion === "0.156.1" ? catalog : { models: [] });
+    // Same-account verification on 2026-10-02: 0.156.1 omitted this model; 0.160.0 exposed it.
+    return Response.json({ models: [
+      ...catalog.models,
+      ...(clientVersion === "0.160.0" ? [{ slug: "gpt-6.1-sol", visibility: "list",
+        supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }, { effort: "xhigh" }, { effort: "max" }, { effort: "ultra" }] }] : []),
+    ] });
   } });
-  expect(seen).toEqual(["0.156.1"]);
-  expect(models).toEqual(["real-codex"]);
+  expect(seen).toEqual(["0.160.0"]);
+  expect(models.map(model => model.id)).toEqual(["real-codex", "gpt-6.1-sol"]);
+  const selected = models.find(model => model.id === "gpt-6.1-sol")!;
+  expect(selected).toEqual({ id: "gpt-6.1-sol", authRoute: "codex",
+    supportedThinking: ["low", "medium", "high", "xhigh", "max", "ultra"] });
+  expect(resolveCodexReasoning("medium", selected.id, selected)).toEqual({ effort: "medium", summary: "auto" });
 });
 
 test("local /skills works without subscription credentials or catalog access", async () => {

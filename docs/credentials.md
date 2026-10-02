@@ -142,6 +142,23 @@ working secure storage. ChatGPT subscription OAuth uses a separate stored
 identity; see [subscription login](configuration.md#chatgpt-subscription-codex-oauth).
 Credentials are never migrated from another CLI.
 
+## ChatGPT catalog protocol compatibility
+
+Schway pins the catalog request's `client_version` to the verified Codex protocol
+version `0.160.0`, independently of Schway's package version. Same-account,
+read-only verification on 2026-10-02 showed that `0.156.1` omitted `gpt-6.1-sol`,
+while changing only this query version to `0.160.0` returned it with `medium`
+reasoning support. Schway does not need Codex installed or read its credentials
+or model cache at runtime.
+
+When updating the pin, verify the candidate against an official Codex release and
+repeat Schway's read-only catalog fetch with the same subscription account,
+endpoint, headers and parser, changing only `client_version`. Confirm the selected
+model and reasoning levels in both the raw response and parsed catalog without
+sending an inference request; retain sanitized evidence without credentials.
+Update the literal version regression in `tests/subscription-models.test.ts`
+alongside the pin. Account visibility and authentication checks still apply.
+
 ## Grok subscription
 
 `/login grok` opens browser approval; `/login grok --device` shows a temporary verification address and code. OAuth tokens live only at `grok-subscription:xai` in the OS secure store, separate from `api-key:xai`. Schway does not read another CLI's credentials. Device codes stay in the approval panel and never enter session history or saved drafts.
