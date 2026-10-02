@@ -3,7 +3,7 @@ import { openRouterModelCapabilities } from "../model/model-list.ts";
 import { isOpenAIAuthPreference, resolveProviderCredential } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
-import type { ModelCapability } from "../model/catalog.ts";
+import { listCatalog, type ModelCapability } from "../model/catalog.ts";
 import type { Model } from "../model/model.ts";
 import { describeEffectiveThinking } from "../config/config.ts";
 import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
@@ -544,7 +544,15 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     if (this.subscriptionSelected() && selection.provider === "openai") {
       try {
-        const available = (this.modelPicker ? this.subscriptionModels : undefined) ?? (await this.loadAccountCatalog(AbortSignal.timeout(5_000))).map(model => model.id);
+        const picker = this.modelPicker;
+        // Account discovery settles before other route lists; its empty result is authoritative.
+        const settled = picker && picker.catalogState !== "loading" && !picker.accessLoading;
+        let available = settled ? this.subscriptionModels : undefined;
+        if (settled && this.subscriptionListUnavailable && !available?.length) {
+          available = this.modelPickerAccess?.subscription === "ChatGPT"
+            ? listCatalog().filter(model => model.provider === "openai").map(model => model.id) : [];
+        }
+        available ??= (await this.loadAccountCatalog(AbortSignal.timeout(5_000))).map(model => model.id);
         if (!available?.includes(selection.modelId)) {
           this.fail(`Model unavailable: ${selection.modelId} · /model choose another`);
           return false;

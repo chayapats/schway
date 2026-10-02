@@ -253,6 +253,87 @@ test("catalog failure, empty result and retry never invent a subscription row", 
   });
 });
 
+for (const outcome of ["failed", "pending", "failed-pending", "disconnected", "empty", "empty-pending-api"] as const) for (const input of ["text", "row"] as const) test(`subscription ${input} selection after empty then ${outcome} discovery preserves catalog authority and billing`, async () => {
+  await withTempDir(async root => {
+    const workspace = { root, launchCwd: root, extraRoots: [] };
+    const store = fakeCredentialStore();
+    await store.set(codexSubscriptionIdentity(), "account-token");
+    const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
+      cli: { provider: "openai", model: "account-current", openaiAuth: "codex" } });
+    const pending = Promise.withResolvers<readonly { id: string; supportedThinking: [] }[]>();
+    const retryStarted = Promise.withResolvers<void>();
+    const pendingStarted = Promise.withResolvers<void>();
+    const isPending = outcome === "pending" || outcome === "failed-pending";
+    const eligible = !outcome.startsWith("empty") && outcome !== "disconnected";
+    const apiPending = Promise.withResolvers<[]>();
+    let apiCalls = 0;
+    let calls = 0;
+    const activated: string[] = [];
+    const controller = new TuiController({ session: createSession(), sessionId: "catalog-authority", workspace, configEditor: editor,
+      provider: "openai", modelId: "account-current", openaiAuth: "codex", model: createScriptedModel({ provider: "codex-subscription", id: "account-current" }),
+      contextManager: createContextManager(workspace),
+      credentials: { store, env: outcome === "empty-pending-api" ? { OPENAI_API_KEY: "other-billing-key" } : {},
+        listRouteModels: async () => ++apiCalls === 2 ? apiPending.promise : [],
+        reload: async () => { throw Error("No billing fallback"); }, listSubscriptionCatalog: async () => {
+        calls++;
+        if (calls === 1) return [];
+        if (calls === 2) {
+          retryStarted.resolve();
+          if (outcome === "failed" || outcome === "failed-pending" || outcome === "disconnected") throw Error("network offline");
+          if (outcome === "pending") return pending.promise;
+          return [];
+        }
+        if (calls === 3 && outcome === "failed-pending") { pendingStarted.resolve(); return pending.promise; }
+        return [{ id: "gpt-5.4", supportedThinking: [] }];
+      } },
+      stageSettings: async settings => {
+        expect(settings.openaiAuth).toBe("codex");
+        activated.push(settings.model);
+        return { model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+    });
+    try {
+      controller.openModelPicker();
+      while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      expect(controller.snapshot().modelPicker?.catalogState).toBe("empty");
+      expect(await controller.selectModel("openai/gpt-5.4")).toBe(false);
+      expect(calls).toBe(1);
+      if (outcome === "disconnected") await store.delete(codexSubscriptionIdentity());
+      expect(controller.retryModelPickerCatalog()).toBe(true);
+      await retryStarted.promise;
+      if (outcome === "empty-pending-api") {
+        while (controller.snapshot().modelPicker?.catalogState === "loading") await Bun.sleep(1);
+        expect(controller.snapshot().modelPicker).toMatchObject({ catalogState: "empty", loading: true });
+      } else if (outcome !== "pending") while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      if (outcome === "failed-pending") {
+        expect(controller.retryModelPickerCatalog()).toBe(true);
+        await pendingStarted.promise;
+        expect(controller.snapshot().modelPicker?.catalogState).toBe("loading");
+      }
+      if (input === "row" && isPending) {
+        pending.resolve([{ id: "gpt-5.4", supportedThinking: [] }]);
+        while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+      }
+      if (input === "text") expect(await controller.selectModel("openai/gpt-5.4")).toBe(eligible);
+      else {
+        controller.searchModels("gpt-5.4");
+        const picker = controller.snapshot().modelPicker!;
+        const index = picker.entries.findIndex(row => row.kind === "model" && row.authRoute === "codex" && row.modelId === "gpt-5.4");
+        if (!eligible) expect(index).toBe(-1);
+        else {
+          expect(index).toBeGreaterThanOrEqual(0);
+          while (controller.snapshot().modelPicker!.selectedIndex !== index) controller.moveModelPicker(1);
+          expect(await controller.selectPickerModel()).toBe(true);
+        }
+      }
+      expect(calls).toBe(2 + Number(outcome === "failed-pending") + Number(isPending && input === "text"));
+      expect(activated).toEqual(eligible ? ["gpt-5.4"] : []);
+      expect(controller.snapshot()).toMatchObject({ provider: "openai", openaiAuth: "codex", modelId: eligible ? "gpt-5.4" : "account-current" });
+      expect(editor.settings.openaiAuth).toBe("codex");
+    } finally { pending.resolve([]); apiPending.resolve([]); controller.dispose(); }
+  });
+});
+
 test("failed activation emits no remembered choice and keeps the previous billing route", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
