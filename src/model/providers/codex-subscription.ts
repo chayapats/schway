@@ -39,6 +39,8 @@ export const CODEX_DEVICE_VERIFY_URL = "https://auth.openai.com/codex/device";
 /** Device-code polling endpoint for the headless beta login flow. */
 export const CODEX_DEVICE_TOKEN_URL =
   "https://auth.openai.com/api/accounts/deviceauth/token";
+/** OAuth redirect used only for device-auth PKCE exchange; browser login keeps localhost. */
+export const CODEX_DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback";
 /** Model-only Responses endpoint owned by the Schway loop; never a delegated agent run. */
 export const CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
@@ -113,8 +115,8 @@ export interface CodexDeviceDeps {
 export interface CodexDeviceAuthorization {
   userCode: string;
   verificationUri: string;
-  /** Opaque poll token echoed back while polling for the grant. */
-  deviceCode: string;
+  /** Opaque device-auth id echoed back while polling for approval. */
+  deviceAuthId: string;
   /** Seconds until the user code expires, when the server reports it. */
   expiresIn?: number;
   /** Suggested poll interval in seconds, when the server reports it. */
@@ -357,6 +359,8 @@ export function formatSubscriptionStatus(tokens: CodexTokens): string {
 export async function exchangeCodeForTokens(input: {
   code: string;
   verifier: string;
+  /** Defaults to the browser localhost callback; device flow must pass CODEX_DEVICE_REDIRECT_URI. */
+  redirectUri?: string;
   fetch?: CodexFetchLike;
   signal?: AbortSignal;
 }): Promise<CodexTokens> {
@@ -365,7 +369,7 @@ export async function exchangeCodeForTokens(input: {
     grant_type: "authorization_code",
     client_id: CODEX_CLIENT_ID,
     code: input.code,
-    redirect_uri: CODEX_REDIRECT_URI,
+    redirect_uri: input.redirectUri ?? CODEX_REDIRECT_URI,
     code_verifier: input.verifier,
   });
   const response = await (input.fetch ?? fetch)(CODEX_TOKEN_URL, {
@@ -771,25 +775,28 @@ export async function requestDeviceAuthorization(input: {
     throw new Error(`Starting device sign-in failed (HTTP ${response.status}). Retry /login codex --device.`);
   }
   const userCode = typeof payload.user_code === "string" ? payload.user_code.trim() : "";
-  const deviceCode = typeof payload.device_code === "string" ? payload.device_code.trim() : "";
-  if (!userCode || !deviceCode) {
+  const deviceAuthId = typeof payload.device_auth_id === "string" ? payload.device_auth_id.trim() : "";
+  if (!userCode || !deviceAuthId) {
     throw new Error("Starting device sign-in returned an incomplete authorization. Retry /login codex --device.");
   }
   const verificationUri = typeof payload.verification_uri === "string" && payload.verification_uri.trim()
     ? payload.verification_uri.trim()
     : CODEX_DEVICE_VERIFY_URL;
-  const expiresIn = typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in)
-    ? payload.expires_in
-    : undefined;
-  const interval = typeof payload.interval === "number" && Number.isFinite(payload.interval)
-    ? payload.interval
-    : undefined;
-  return { userCode, verificationUri, deviceCode, expiresIn, interval };
+  const expiresIn = parseDeviceExpiresIn(payload);
+  const interval = parseDeviceIntervalSeconds(payload.interval);
+  return {
+    userCode,
+    verificationUri,
+    deviceAuthId,
+    ...(expiresIn !== undefined ? { expiresIn } : {}),
+    ...(interval !== undefined ? { interval } : {}),
+  };
 }
 
 /** Poll the device grant until approval, denial, expiry, timeout, or cancellation. */
 export async function pollDeviceAuthorization(input: {
-  deviceCode: string;
+  deviceAuthId: string;
+  userCode: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   pollIntervalMs?: number;
@@ -809,7 +816,11 @@ export async function pollDeviceAuthorization(input: {
       response = await runFetch(CODEX_DEVICE_TOKEN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: CODEX_CLIENT_ID, device_code: input.deviceCode, grant_type: "device_code" }),
+        body: JSON.stringify({
+          client_id: CODEX_CLIENT_ID,
+          device_auth_id: input.deviceAuthId,
+          user_code: input.userCode,
+        }),
         signal: input.signal,
       });
     } catch {
@@ -823,23 +834,50 @@ export async function pollDeviceAuthorization(input: {
     } catch {
       throw new Error("Device sign-in polling returned an unreadable response. Retry /login codex --device.");
     }
-    if (response.ok) {
-      return toCodexTokens(payload);
+    const authorizationCode = typeof payload.authorization_code === "string" ? payload.authorization_code.trim() : "";
+    const codeVerifier = typeof payload.code_verifier === "string" ? payload.code_verifier.trim() : "";
+    const success = response.ok && (
+      payload.status === "success"
+      || (authorizationCode.length > 0 && codeVerifier.length > 0)
+    );
+    if (success) {
+      if (!authorizationCode || !codeVerifier) {
+        throw new Error("Device sign-in polling returned an incomplete authorization. Retry /login codex --device.");
+      }
+      try {
+        return await exchangeCodeForTokens({
+          code: authorizationCode,
+          verifier: codeVerifier,
+          redirectUri: CODEX_DEVICE_REDIRECT_URI,
+          fetch: runFetch,
+          signal: input.signal,
+        });
+      } catch (error) {
+        throwIfAborted(input.signal);
+        const message = messageOf(error);
+        if (/^The sign-in code expired/.test(message)) {
+          throw new Error("The device sign-in code expired before it was exchanged. Restart /login codex --device for a fresh code.");
+        }
+        if (/^(ChatGPT sign-in was denied|The sign-in response has no access token|The sign-in endpoint|Exchanging the sign-in code failed)/.test(message)) {
+          throw error instanceof Error ? error : new Error(message);
+        }
+        throw new Error(`Device sign-in code exchange failed (${message}). Retry /login codex --device.`);
+      }
     }
-    const error = typeof payload.error === "string" ? payload.error : `http_${response.status}`;
-    if (error === "authorization_pending") {
+    const error = devicePollErrorCode(payload, response.status);
+    if (isDevicePendingError(error)) {
       await sleepCancellable(intervalMs, input.signal);
       continue;
     }
-    if (error === "slow_down") {
+    if (isDeviceSlowDownError(error)) {
       intervalMs += 5_000;
       await sleepCancellable(intervalMs, input.signal);
       continue;
     }
-    if (error === "access_denied") {
+    if (isDeviceDeniedError(error)) {
       throw new Error(codexDeniedError());
     }
-    if (error === "expired_token") {
+    if (isDeviceExpiredError(error)) {
       throw new Error(codexExpiredCodeError());
     }
     throw new Error(`Device sign-in polling failed (${error}). Retry /login codex --device.`);
@@ -860,10 +898,12 @@ export async function loginWithDeviceFlow(input: {
   deps.onProgress?.(`Enter this code at ${authorization.verificationUri}: ${authorization.userCode}`);
   throwIfAborted(input.signal);
   const tokens = await pollDeviceAuthorization({
-    deviceCode: authorization.deviceCode,
+    deviceAuthId: authorization.deviceAuthId,
+    userCode: authorization.userCode,
     signal: input.signal,
     timeoutMs: input.timeoutMs,
-    pollIntervalMs: input.pollIntervalMs,
+    pollIntervalMs: input.pollIntervalMs
+      ?? (authorization.interval !== undefined ? Math.max(0, authorization.interval) * 1000 : undefined),
     fetch: deps.fetch,
   });
   throwIfAborted(input.signal);
@@ -1417,6 +1457,72 @@ function mapTokenEndpointError(status: number, payload: Record<string, unknown>)
     return codexRevokedSessionError();
   }
   return `Exchanging the sign-in code failed (HTTP ${status}). Start a fresh sign-in attempt.`;
+}
+
+/** Parse a deviceauth usercode interval that may arrive as a number or numeric string. */
+function parseDeviceIntervalSeconds(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+/** Prefer expires_in seconds; otherwise derive remaining lifetime from expires_at. */
+function parseDeviceExpiresIn(payload: Record<string, unknown>): number | undefined {
+  if (typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in)) {
+    return payload.expires_in;
+  }
+  if (typeof payload.expires_in === "string" && payload.expires_in.trim()) {
+    const parsed = Number(payload.expires_in.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (typeof payload.expires_at === "string" && payload.expires_at.trim()) {
+    const at = Date.parse(payload.expires_at);
+    if (Number.isFinite(at)) return Math.max(0, Math.floor((at - Date.now()) / 1000));
+  }
+  if (typeof payload.expires_at === "number" && Number.isFinite(payload.expires_at)) {
+    const at = payload.expires_at > 1e12 ? payload.expires_at : payload.expires_at * 1000;
+    return Math.max(0, Math.floor((at - Date.now()) / 1000));
+  }
+  return undefined;
+}
+
+/** Read flat or nested deviceauth poll error codes from the live OpenAI API shape. */
+function devicePollErrorCode(payload: Record<string, unknown>, status: number): string {
+  if (typeof payload.error === "string" && payload.error.trim()) {
+    return payload.error.trim();
+  }
+  if (payload.error && typeof payload.error === "object" && !Array.isArray(payload.error)) {
+    const nested = payload.error as Record<string, unknown>;
+    if (typeof nested.code === "string" && nested.code.trim()) {
+      return nested.code.trim();
+    }
+  }
+  return `http_${status}`;
+}
+
+function normalizeDeviceErrorCode(code: string): string {
+  return code.trim().toLowerCase().replace(/^deviceauth_/, "");
+}
+
+function isDevicePendingError(code: string): boolean {
+  return normalizeDeviceErrorCode(code) === "authorization_pending";
+}
+
+function isDeviceSlowDownError(code: string): boolean {
+  return normalizeDeviceErrorCode(code) === "slow_down";
+}
+
+function isDeviceDeniedError(code: string): boolean {
+  const normalized = normalizeDeviceErrorCode(code);
+  return normalized === "access_denied" || normalized === "denied";
+}
+
+function isDeviceExpiredError(code: string): boolean {
+  const normalized = normalizeDeviceErrorCode(code);
+  return normalized === "expired_token" || normalized === "expired" || normalized === "token_expired";
 }
 
 /** Normalize a token endpoint payload into stored subscription tokens. */

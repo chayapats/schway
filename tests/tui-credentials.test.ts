@@ -26,8 +26,19 @@ for (const route of ["codex", "grok"] as const) for (const committed of [true, f
     const { GROK_DEVICE_AUTHORIZATION_URL } = await import("../src/model/providers/grok-subscription.ts");
     const fetchFixture = async (input: string | URL | Request) => {
       requests++;
-      if (String(input).includes("usercode") || String(input) === GROK_DEVICE_AUTHORIZATION_URL) {
-        return Response.json({ user_code: "FIXTURE-CODE", verification_uri: "https://approval.example/device", device_code: "fixture-device", interval: route === "grok" ? 1 : 0 });
+      const url = String(input);
+      if (url.includes("usercode") || url === GROK_DEVICE_AUTHORIZATION_URL) {
+        return Response.json(route === "grok"
+          ? { user_code: "FIXTURE-CODE", verification_uri: "https://approval.example/device", device_code: "fixture-device", interval: 1 }
+          : { device_auth_id: "fixture-device-auth", user_code: "FIXTURE-CODE", verification_uri: "https://approval.example/device", interval: "0" });
+      }
+      if (route === "codex" && url.includes("deviceauth/token")) {
+        return Response.json({
+          status: "success",
+          authorization_code: "fixture-auth-code",
+          code_challenge: "fixture-challenge",
+          code_verifier: "fixture-verifier",
+        });
       }
       return Response.json({ access_token: "fixture-account-access", refresh_token: "fixture-refresh", expires_in: 3600 });
     };
@@ -48,7 +59,7 @@ for (const route of ["codex", "grok"] as const) for (const committed of [true, f
       controller.openModelPicker(); while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
       const query = route === "codex" ? "ChatGPT" : "Grok subscription";
       controller.searchModels(query); pending = controller.selectPickerModel(); await writing.promise;
-      expect(requests).toBe(2); expect(controller.snapshot().loginChooser).toBeDefined();
+      expect(requests).toBe(route === "codex" ? 3 : 2); expect(controller.snapshot().loginChooser).toBeDefined();
       controller.cancel(); expect(signal?.aborted).toBe(true); controller.cancel();
       expect(controller.snapshot().modelPicker).toBeUndefined(); expect(controller.snapshot().loginChooser).toBeDefined();
       expect(controller.running).toBe(true); expect(await controller.logout(route)).toBe(false); expect(deletes).toBe(0);
