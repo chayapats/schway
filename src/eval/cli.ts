@@ -87,6 +87,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   try {
     const results: CodingEvalResult[] = [];
     let subscriptionStore: CredentialStore | undefined;
+    const subscriptionEntries = new Map<number, Awaited<ReturnType<typeof resolveSubscriptionRoute>>>();
     let spent = 0, spendUnknown = false;
     let stopReason: "usage_unknown" | "spend_cap" | null = null;
     const highestCase = entries.map(() => 0);
@@ -96,9 +97,12 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       const price = prices[entryIndex] ?? FREE;
       const paid = price.inputPerMillion > 0 || price.outputPerMillion > 0;
       const apiKey = keyFor(provider);
-      const subscription = provider === "codex" || provider === "grok"
-        ? await resolveSubscriptionRoute({ provider, model: modelId, maxTokens: settings.maxOutputTokens,
-          store: subscriptionStore ??= (deps.createStore ?? createNativeCredentialStore)(), env, refresh: true, fetch: deps.fetch, signal: AbortSignal.timeout(settings.timeoutMs) }) : undefined;
+      // Preflight once per entry, including failures; store-backed adapters retain responsibility for later refreshes.
+      if ((provider === "codex" || provider === "grok") && !subscriptionEntries.has(entryIndex)) {
+        subscriptionEntries.set(entryIndex, await resolveSubscriptionRoute({ provider, model: modelId, maxTokens: settings.maxOutputTokens,
+          store: subscriptionStore ??= (deps.createStore ?? createNativeCredentialStore)(), env, refresh: true, fetch: deps.fetch, signal: AbortSignal.timeout(settings.timeoutMs) }));
+      }
+      const subscription = subscriptionEntries.get(entryIndex);
       const startable = subscription ? "input" in subscription : provider === "scripted" || (!!apiKey && (provider !== "openai-compatible" || validEndpoint(baseUrl)));
       // Soft cap: a paid case is assumed to cost as much as that route's costliest case so far (the first runs unless the cap is spent),
       // and unreported usage stops further paid cases. Free routes never spend, so they always run; unstartable routes stay prerequisite skips.

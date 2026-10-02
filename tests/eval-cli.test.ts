@@ -227,3 +227,59 @@ test("failed subscription refresh skips safely and continues the matrix", async 
     expect(artifact.results.slice(0, 2).every((r: { reason: string }) => r.reason === "not_signed_in")).toBe(true);
   });
 });
+
+
+for (const provider of ["codex", "grok"]) {
+  test(`${provider} failed preflight runs once per matrix entry across all seven cases`, async () => {
+    await withTempDir(async dir => {
+      const output = join(dir, "bounded-refresh.json");
+      let fetches = 0;
+      const log = spyOn(console, "log").mockImplementation(() => {});
+      try {
+        expect(await runEvalCli(["--matrix", `${provider}:first,${provider}:second,scripted:offline-v1`, "--allow-paid", "--case", "all", "--output", output], {}, {
+          createStore: () => subscriptionStore(JSON.stringify({ accessToken: "old", refreshToken: "fixture-refresh", expiresAt: 1, obtainedAt: 1 })),
+          fetch: async () => { fetches++; return Response.json({ error: "invalid_grant" }, { status: 401 }); },
+        })).toBe(1);
+        const artifact = JSON.parse(await readFile(output, "utf8"));
+        expect(fetches).toBe(2);
+        expect(artifact.results).toHaveLength(21);
+        for (const [index, model] of ["first", "second"].entries()) {
+          const results = artifact.results.slice(index * 7, (index + 1) * 7);
+          expect(new Set(results.map((result: { case: { id: string } }) => result.case.id)).size).toBe(7);
+          for (const result of results) expect(result).toMatchObject({ provider, model, outcome: "skipped", reason: "not_signed_in" });
+          expect(log.mock.calls.filter(([line]) => String(line).includes(`${provider}/${model}: skipped/not_signed_in`))).toHaveLength(7);
+        }
+        expect(artifact.summary).toMatchObject({ skipped: 14, success: 7 });
+      } finally { log.mockRestore(); }
+    });
+  });
+
+  test(`${provider} successful preflight persists refresh and caches readiness separately per entry`, async () => {
+    await withTempDir(async dir => {
+      const output = join(dir, "cached-refresh.json");
+      let raw = JSON.stringify({ accessToken: "old", refreshToken: "fixture-refresh", expiresAt: 1, obtainedAt: 1 });
+      let reads = 0, writes = 0, fetches = 0;
+      const observations: Array<{ model: string; reads: number }> = [];
+      expect(await runEvalCli(["--matrix", `${provider}:first,${provider}:second`, "--allow-paid", "--case", "all", "--output", output], {}, {
+        createStore: () => ({ get: async () => { reads++; return raw; }, set: async (_identity, value) => { writes++; raw = value; }, delete: async () => false }),
+        fetch: async () => { fetches++; return Response.json({ access_token: "renewed-fixture", expires_in: 3600, token_type: "Bearer" }); },
+        model: (_provider, model) => {
+          expect(JSON.parse(raw).accessToken).toBe("renewed-fixture");
+          observations.push({ model, reads });
+          // Deliberately leave tasks unsolved: this test measures readiness, not coding grades.
+          return createScriptedModel({ text: "Done" });
+        },
+      })).toBe(1);
+      expect(fetches).toBe(1); expect(writes).toBe(1);
+      expect(JSON.parse(raw)).toMatchObject({ accessToken: "renewed-fixture", refreshToken: "fixture-refresh" });
+      expect(observations).toHaveLength(14);
+      const firstReads = observations[0]!.reads, secondReads = observations[7]!.reads;
+      expect(secondReads).toBeGreaterThan(firstReads);
+      expect(observations.slice(0, 7)).toEqual(Array(7).fill({ model: "first", reads: firstReads }));
+      expect(observations.slice(7)).toEqual(Array(7).fill({ model: "second", reads: secondReads }));
+      const artifact = JSON.parse(await readFile(output, "utf8"));
+      expect(artifact.spend.casesRun).toBe(14);
+      expect(artifact.summary.skipped).toBe(0);
+    });
+  });
+}

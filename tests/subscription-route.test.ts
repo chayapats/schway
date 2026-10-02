@@ -12,6 +12,7 @@ for (const provider of ["codex", "grok"] as const) {
     const result = await resolveSubscriptionRoute({ provider, model: "fixture", maxTokens: 100, store, refresh: true,
       fetch: async () => { fetches++; return Response.json({ access_token: "new-fixture-token", expires_in: 3600, token_type: "Bearer" }); } });
     expect(result).toHaveProperty("input");
+    if ("input" in result) expect(provider === "codex" ? result.input.codexStore : result.input.grokStore).toBe(store);
     expect(JSON.parse(raw)).toMatchObject({ accessToken: "new-fixture-token", refreshToken: "fixture-refresh" });
     expect(fetches).toBe(1); expect(writes).toBe(1);
     expect(new Set(identities)).toEqual(new Set([provider === "codex" ? "codex-subscription:chatgpt" : "grok-subscription:xai"]));
