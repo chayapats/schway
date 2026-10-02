@@ -100,7 +100,11 @@ async function signIn(controller: TuiController, route: Route, picker: boolean) 
   if (!picker) return controller.login(route);
   controller.openModelPicker();
   while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+  controller.connectPickerProviders();
   controller.searchModels(route === "codex" ? "ChatGPT" : "Grok subscription");
+  const pickerState = controller.snapshot().modelPicker!;
+  expect(pickerState.entries[pickerState.selectedIndex]).toMatchObject({ kind: "sign-in", authRoute: route,
+    provider: route === "codex" ? "openai" : "xai" });
   return controller.selectPickerModel();
 }
 
@@ -129,10 +133,13 @@ for (const provider of ["openai", "xai", "openai-compatible"] as const) for (con
         if (picker) {
           controller.openModelPicker();
           while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
+          controller.connectPickerProviders();
           const entries = controller.snapshot().modelPicker!.entries;
           const index = entries.findIndex(row => row.kind === "sign-in" && row.provider === provider && row.authRoute !== "codex" && row.authRoute !== "grok");
           expect(index).toBeGreaterThanOrEqual(0);
           while (controller.snapshot().modelPicker!.selectedIndex !== index) controller.moveModelPicker(1);
+          expect(controller.snapshot().modelPicker!.entries[index]).toMatchObject({ kind: "sign-in", provider,
+            authRoute: provider === "openai-compatible" ? "provider" : "api-key" });
           expect(await controller.selectPickerModel()).toBe(true);
         } else expect(await controller.login(provider)).toBe(true);
         controller.enterCredentialText("fixture-key");

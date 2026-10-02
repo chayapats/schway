@@ -481,7 +481,10 @@ test("picker endpoint key Esc restores its origin and saving preserves the usabl
       expect(editor.settings).toEqual(settings);
       expect(controller.snapshot().modelId).toBe("gpt-5.4"); expect(activated).toEqual([]);
       const picker = controller.snapshot().modelPicker!; expect(picker.query).toBe("OpenAI-compatible");
-      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "sign-in", provider: "openai-compatible" });
+      expect(picker.connecting).toBe(false);
+      // Saving the key does not configure or activate an endpoint; model search offers navigation only.
+      expect(picker.entries.map(row => row.kind)).toEqual(["browse", "connect"]);
+      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "browse" });
       expect(controller.snapshot().transcript.at(-1)?.text).toContain("/config set baseUrl http://localhost:8787");
       expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787" }))).toBe("endpoint-secret");
       expect(await controller.submit("keep using the current connection")).toBe(true);
