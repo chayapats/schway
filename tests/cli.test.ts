@@ -1024,6 +1024,32 @@ test("headless -p saves a session that --resume continues with workspace identit
   });
 });
 
+test("--json keeps exact session IDs and suppresses session.ready when an ID would leak a secret", async () => {
+  await withTempDir(async (home) => {
+    const exact = await run(["-p", "hello", "--json"], {
+      env: { HOME: home, OPENAI_API_KEY: "sk-fixture-key" },
+      model: createScriptedModel({ text: "ok" }),
+    });
+    expect(exact.exitCode).toBe(0);
+    const ready = JSON.parse(exact.stdout.split("\n")[0]!) as { type: string; sessionId: string };
+    expect(ready).toEqual({ type: "session.ready", sessionId: expect.any(String) });
+    expect(ready.sessionId.includes("***")).toBe(false);
+    expect(await Bun.file(join(home, ".schway", "sessions", `${ready.sessionId}.jsonl`)).exists()).toBe(true);
+
+    // A secret that is a UUID hyphen would previously mangled every sessionId via redactSecrets.
+    const colliding = await run(["-p", "hello", "--json"], {
+      env: { HOME: home, OPENAI_API_KEY: "-" },
+      model: createScriptedModel({ text: "ok" }),
+    });
+    expect(colliding.exitCode).toBe(0);
+    const lines = colliding.stdout.trim().split("\n").filter(Boolean);
+    expect(lines.some((line) => JSON.parse(line).type === "session.ready")).toBe(false);
+    expect(lines[0] && JSON.parse(lines[0]).type).toBe("agent.started");
+    const files = (await readdir(join(home, ".schway", "sessions"))).filter((name) => name.endsWith(".jsonl"));
+    expect(files.length).toBeGreaterThan(1);
+  });
+});
+
 test("--json exposes a resumable session ID after a failed turn with saved history", async () => {
   await withTempDir(async (home) => {
     const prompt = "private task text";
