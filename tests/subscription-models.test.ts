@@ -120,7 +120,7 @@ test("subscription activation preserves compatible thinking and shadows unsuppor
   });
 });
 
-test("explicit Codex login activates the account model and reasoning only in this session", async () => {
+test("Codex login without a usable model activates account reasoning only in this session", async () => {
   await withTempDir(async root => {
     const home = join(root, "home");
     await mkdir(join(home, ".schway"), { recursive: true });
@@ -132,7 +132,7 @@ test("explicit Codex login activates the account model and reasoning only in thi
     await store.set(codexSubscriptionIdentity(), "test-store-value");
     const controller = new TuiController({ session: createSession(), sessionId: "auto-login", workspace,
       configEditor: editor, provider: editor.settings.provider, modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "openai-compatible" }), contextManager: createContextManager(workspace),
+      contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel({ provider: "codex-subscription" }) }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }), listSubscriptionCatalog: async () => [capability] },
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model }), contextManager: createContextManager(workspace) }),
     });
@@ -174,7 +174,7 @@ test("denied login never switches provider or fetches subscription models", asyn
   });
 });
 
-test("cancelling post-login discovery leaves the previous provider active and retains sign-in", async () => {
+test("cancelling first-login discovery retains the provider choice and sign-in", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
@@ -182,7 +182,7 @@ test("cancelling post-login discovery leaves the previous provider active and re
     const requested = new Promise<void>(resolve => { begin = resolve; });
     const controller = new TuiController({ session: createSession(), sessionId: "cancel-discovery", workspace,
       configEditor: editor, provider: "openai", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
+      contextManager: createContextManager(workspace),
       credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), codexLogin: async () => ({ ok: true as const, status: "Signed in" }),
         listSubscriptionCatalog: signal => { begin(); return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })); } },
       stageSettings: async () => { throw Error("unexpected adapter change"); },
@@ -243,7 +243,7 @@ test("a signed-in account can retry discovery in /model without repeating OAuth"
     const store = fakeCredentialStore();
     const controller = new TuiController({ session: createSession(), sessionId: "retry-catalog", workspace,
       configEditor: editor, provider: "openai", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
+      contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: async ({ onSaved }) => {
         oauthAttempts++;
         await store.set(codexSubscriptionIdentity(), "saved-account-credential");
@@ -280,7 +280,7 @@ test("activation failure keeps saved credentials and gives a redacted model retr
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
     const controller = new TuiController({ session: createSession(), sessionId: "activation-failure", workspace,
       configEditor: editor, provider: "openai", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace),
+      contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
         codexLogin: async ({ onSaved }) => {
           await store.set(codexSubscriptionIdentity(), "saved-credential-secret");
@@ -300,7 +300,7 @@ test("activation failure keeps saved credentials and gives a redacted model retr
   });
 });
 
-test("failed Codex activation does not turn the active API-key model into a subscription for /thinking", async () => {
+test("adding Codex does not discover or change the active API-key model's thinking", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root,
@@ -315,11 +315,11 @@ test("failed Codex activation does not turn the active API-key model into a subs
         listSubscriptionCatalog: async () => { discoveries++; throw Error("Catalog unavailable"); } },
     });
     try {
-      expect(await controller.login("codex")).toBe(false);
-      expect(discoveries).toBe(1);
+      expect(await controller.login("codex")).toBe(true);
+      expect(discoveries).toBe(0);
       expect(await controller.thinkingCommand("")).toBe(true);
       expect(await controller.thinkingCommand("high")).toBe(true);
-      expect(discoveries).toBe(1);
+      expect(discoveries).toBe(0);
       expect(controller.describeThinking()).not.toContain("Choose thinking · /model open choices");
       expect(controller.describeThinking()).toContain("high");
     } finally { controller.dispose(); }

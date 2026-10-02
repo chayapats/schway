@@ -31,11 +31,29 @@ opens **Device code**. Esc returns one level. Callback and API key entry are mas
 stay outside prompt recall and session history, and return to their originating
 chooser row on Esc. Your composer draft and cursor survive every step.
 
+Your first connection works the same from `/login` and `/model`: after saving the
+credential, Schway lists the route's models and activates a provider-marked default,
+a known supported model present in the list, or the only listed model. The composer
+returns ready to type, with the selected model and access/billing route visible.
+No task is sent during sign-in. If discovery fails, returns no models, or has no
+reliable default, use `/model` to choose or retry. The credential stays saved;
+Alt+L lets you sign in again.
+
+Adding a connection while another model is usable keeps that model and its billing
+route. Use `/model` when you want to switch. Reconnecting an active ChatGPT or Grok
+subscription refreshes its adapter while retaining its selected model. If that model
+is no longer available, choose another explicitly. Authentication, quota and model
+discovery failures never switch to another model or API-key billing automatically.
+
 OpenAI-compatible asks for an **Endpoint URL**, then a masked API key. Nothing is
-saved until you submit the key. The new URL replaces a selected compatible profile
-for this session only; user and project config files stay unchanged. After saving,
-Schway lists that endpoint's models and selects the recommended model. If listing
-or activation fails, the saved session URL remains available through `/model`.
+saved until you submit the key. With no usable model, the new URL replaces a selected
+compatible profile for this session only; user and project config files stay unchanged.
+Schway lists that endpoint's models and selects a reliable default. If listing or
+activation fails, the saved session URL remains available through `/model`.
+With a usable model, only the endpoint's key is saved; the active settings stay intact.
+To make that endpoint available for selection, set its URL with
+`/config set baseUrl <url>`, then use `/model` to choose its model. This explicit
+setting change can change the endpoint used by an active compatible connection.
 To keep the URL, run `/config set baseUrl <url> --scope user`. Esc from key entry
 returns to the typed URL; another Esc returns to the compatible chooser row.
 The direct `/login openai-compatible` command keeps its key-only behavior against

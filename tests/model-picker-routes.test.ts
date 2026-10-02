@@ -453,7 +453,7 @@ for (const route of ["codex", "grok"] as const) test(`${route} picker connection
   });
 });
 
-test("picker endpoint key Esc returns to URL, URL Esc restores the sign-in row, and save does not activate a selected model", async () => {
+test("picker endpoint key Esc restores its origin and saving preserves the usable model and route", async () => {
   await withTempDir(async root => {
     const workspace = { root, launchCwd: root, extraRoots: [] }, store = fakeCredentialStore();
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", model: "gpt-5.4" } });
@@ -475,12 +475,13 @@ test("picker endpoint key Esc returns to URL, URL Esc restores the sign-in row, 
       expect(await controller.selectPickerModel()).toBe(true); controller.enterEndpointUrlText("http://localhost:8787"); expect(controller.submitEndpointUrl()).toBe(true);
       controller.enterCredentialText("endpoint-secret"); expect(await controller.submitCredential()).toBe(true);
       while (controller.snapshot().modelPicker?.loading) await Bun.sleep(1);
-      expect(editor.settings.baseUrl).toBe("http://localhost:8787"); expect(editor.settings.provider).toBe("openai-compatible");
+      expect(editor.settings).toEqual(settings);
       expect(controller.snapshot().modelId).toBe("gpt-5.4"); expect(activated).toEqual([]);
       const picker = controller.snapshot().modelPicker!; expect(picker.query).toBe("OpenAI-compatible");
-      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "model", modelId: "fake-coder", groupLabel: "OpenAI-compatible · localhost:8787" });
+      expect(picker.entries[picker.selectedIndex]).toMatchObject({ kind: "sign-in", provider: "openai-compatible" });
+      expect(controller.snapshot().transcript.at(-1)?.text).toContain("/config set baseUrl http://localhost:8787");
       expect(await store.get(credentialIdentity({ provider: "openai-compatible", baseUrl: "http://localhost:8787" }))).toBe("endpoint-secret");
-      expect(await controller.submit("old adapter must not run")).toBe(false);
+      expect(await controller.submit("keep using the current connection")).toBe(true);
     } finally { controller.dispose(); }
   });
 });
