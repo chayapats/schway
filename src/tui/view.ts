@@ -1,5 +1,5 @@
 import { formatCount } from "../text/format.ts";
-import { PREFERENCE_SCOPES } from "./preferences.ts";
+import { preferenceLines, preferenceHint } from "./preferences-view.ts";
 import type { ExitDraftCheckpoint } from "../drafts/exit.ts";
 import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/store.ts";
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection, type TextChunk } from "@opentui/core";
@@ -79,7 +79,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let savedDraftCursor = 0;
   let savedDraftRevision = 0;
   let panelFingerprint = "";
-  let preferenceScrollToEnd = false;
   let treePreviewKey = "";
   let treePreview: readonly TuiTranscriptEntry[] = [];
   let historyIndex = -1;
@@ -848,34 +847,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         clear(preferencePanel);
         if (snapshot.preferences) {
           const panel = snapshot.preferences;
-          const row = panel.rows[panel.selectedIndex]!;
-          const choice = row.choices[panel.choiceIndex];
           const compact = renderer.width < 45 || renderer.height < 16;
-          const selected = `${panel.selectedIndex + 1}/${panel.rows.length}`;
-          const compactHeader = renderer.width < 32
-            ? `Prefs ${panel.scope} ${selected}`
-            : `Preferences · ${panel.scope} · ${selected}`;
-          const compactChoice = panel.error
-            ? `! Not saved: ${choice === undefined ? "Reset" : String(choice)}`
-            : panel.preview
-              ? `Enter saves · ${choice === undefined ? "Reset" : String(choice)}`
-              : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)}`;
-          const lines = [
-            compact ? fitLine(compactHeader, width) : `Preferences · ${panel.scope} · ${selected}`,
-            compact ? fitLine(`› ${row.key}: ${row.value}`, width) : `› ${row.key}: ${row.value} [${row.origin}]`,
-            compact ? fitLine(compactChoice, width) : `Choice: ${choice === undefined ? "Reset (inherit)" : String(choice)} (${panel.choiceIndex + 1}/${row.choices.length})`,
-            panel.error ?? panel.preview ?? "Enter previews; no changes yet.",
-            compact ? "↑↓ field · ←→ choice · Tab scope · Enter accept · Esc back" : "↑/↓ field · ←/→ choice · Tab scope",
-            ...(compact ? [] : ["Enter preview/confirm · Esc back · PgUp/PgDn scroll"]),
-            PREFERENCE_SCOPES[panel.scope],
-            ...(compact ? [`Effective source: ${row.origin}`] : []),
-            `Saved: ${row.saved}`,
-            row.reset,
-          ];
-          // Wrap details, including scope/confirmation, instead of silently clipping at narrow widths.
-          for (const line of lines) textRow(preferencePanel, safe(line), theme.text).wrapMode = "word";
-          if ((panel.preview || panel.error) && !compact) preferenceScrollToEnd = true;
-          else { preferenceScrollToEnd = false; preferencePanel.scrollTo(0); }
+          const lines = preferenceLines(panel, compact);
+          for (const [index, line] of lines.entries()) textRow(preferencePanel, safe(compact && index < 3 ? fitLine(line, width) : line), theme.text).wrapMode = "word";
+          preferencePanel.scrollTo(0);
         } else if (snapshot.loginChooser) {
           const panel = snapshot.loginChooser;
           const title = panel.level === "main" ? "Sign in" : `${panel.level === "chatgpt" ? "ChatGPT" : "Grok"} · more options`;
@@ -1018,7 +993,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
       } else {
         const modeHint = snapshot.approvalMode === "auto" ? "" : `Shift+Tab ${snapshot.approvalMode} · `;
-        hints.content = fittedHints(snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1429,7 +1404,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   };
   const onFrame = () => {
     if (accentPending) { accentPending = false; accentStartedAt = now(); ticker.ensure(); }
-    if (preferenceScrollToEnd) { preferenceScrollToEnd = false; preferencePanel.scrollTo(preferencePanel.scrollHeight); }
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;

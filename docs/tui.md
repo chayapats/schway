@@ -255,8 +255,8 @@ Later launches use a bolt-only accent lasting at most 300 ms. It adds no overlay
 and never blocks typing, pasting or panel clicks. `--resume` also uses the accent;
 terminals smaller than 57×16 fall back to it when a full splash was requested.
 
-In Alt+P preferences, select **ui.splash** and choose **Reset (inherit)**,
-`always`, `first-run` (the default), or `never`. Session, user and project scopes
+In Alt+P preferences, select **Welcome screen** and choose **Reset (inherit)**,
+**Always**, **First launch** (the default), or **Never**. Session, user and project scopes
 are supported. Startup effects are chosen once when the UI opens; save a user or
 project override to change future launches. For example:
 
@@ -296,8 +296,8 @@ steady caret but removes both startup effects, highlights, flashes, caret blink 
 `off` also replaces spinners with a static `●` and drops the caret. `NO_COLOR` or `TERM=dumb` default to `reduced`.
 
 The default is automatic terminal light/dark detection, then `COLORFGBG`, then
-dark. In `/config` (Alt+P), select **appearance** and choose **Reset (inherit)**,
-`auto`, `dark`, or `light`. Tab selects session, user or project scope; Enter
+dark. In `/config` (Alt+P), select **Appearance** and choose **Reset (inherit)**,
+**Automatic**, `dark`, or `light`. Tab selects session, user or project scope; Enter
 previews and a second Enter saves. User and project choices survive restart.
 `auto` follows terminal detection; Reset removes only the selected scope's
 override. `/theme auto|dark|light` changes the session appearance through the
@@ -361,7 +361,7 @@ manifest. File-tool undo still works in each case.
 | Complete command | Type `/`, Up/Down to select, Tab to insert |
 | Dismiss suggestions | Esc |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
-| Preferences | `/config` or Alt+P; Up/Down field, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
+| Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
 | Model picker | `/model` or Alt+M; Up/Down skips headers, Enter uses a model or starts sign-in, Ctrl+R retries a failed account catalog, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
@@ -398,14 +398,16 @@ reading position.
 
 Open preferences from the task composer. If another panel is open, Escape returns
 to the task before Alt+P; preferences likewise keep ownership of input until closed
-(or their explicit model-picker action is selected). Repeated Alt+P preserves the
+(or their Model or Connections action is selected). Repeated Alt+P preserves the
 current preference selection and preview.
 
-Preferences show effective values, their origins, and separately saved lower values.
+Basic preferences show effective values and the value saved in the selected scope; Advanced includes origins and separately saved lower values.
 Session edits disappear on restart; workspace memory, user config and project
 config are distinct explicit scopes, explained before confirmation. Project scope
 writes only after the second Enter. Credential material is excluded; model-route
 selection is a separate action that activates and remembers a successful choice.
+The basic list shows Model, Thinking, Connections, Appearance, Track file changes and Welcome screen together. Basic cycles This session, All workspaces and This project as save scopes. Advanced also offers remembered workspace choice/reset alongside limits, profile/access overrides and saved-layer details; Escape returns to Basic. Model and Connections work before a model is active, and appearance can be changed before login.
+
 Textual `/config set`, `/config reset` and `/config show` remain available.
 
 The conversation follows new output until you scroll back. Streaming then keeps
