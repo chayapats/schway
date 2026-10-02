@@ -79,7 +79,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let savedDraftCursor = 0;
   let savedDraftRevision = 0;
   let panelFingerprint = "";
-  let preferenceScrollToEnd = false;
   let treePreviewKey = "";
   let treePreview: readonly TuiTranscriptEntry[] = [];
   let historyIndex = -1;
@@ -851,7 +850,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const compact = renderer.width < 45 || renderer.height < 16;
           const lines = preferenceLines(panel, compact);
           for (const [index, line] of lines.entries()) textRow(preferencePanel, safe(compact && index < 3 ? fitLine(line, width) : line), theme.text).wrapMode = "word";
-          preferenceScrollToEnd = false;
           preferencePanel.scrollTo(0);
         } else if (snapshot.loginChooser) {
           const panel = snapshot.loginChooser;
@@ -1406,7 +1404,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   };
   const onFrame = () => {
     if (accentPending) { accentPending = false; accentStartedAt = now(); ticker.ensure(); }
-    if (preferenceScrollToEnd) { preferenceScrollToEnd = false; preferencePanel.scrollTo(preferencePanel.scrollHeight); }
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;
