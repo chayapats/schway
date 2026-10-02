@@ -24,56 +24,98 @@ export class InteractiveMemory {
   choice?: InteractiveChoice;
   problem?: string;
 
-  private constructor(private readonly path: string) {}
+  private constructor(private readonly path: string, private readonly globalPath: string) {}
 
   /** Read user-owned state using the same canonical primary-workspace identity as execution. */
   static async load(home: string, workspaceRoot: string): Promise<InteractiveMemory> {
     const workspace = await resolveWorkspace(workspaceRoot);
     const key = createHash("sha256").update(workspace.root).digest("hex");
-    const memory = new InteractiveMemory(join(home, ".schway", "interactive", `${key}.json`));
+    const directory = join(home, ".schway", "interactive");
+    const memory = new InteractiveMemory(join(directory, `${key}.json`), join(directory, "global", "latest.json"));
     try {
       memory.before = await readOptional(memory.path);
       if (memory.before !== undefined) {
-        const record = JSON.parse(memory.before) as RecordState;
-        if (record.version !== 1 || typeof record.revision !== "string") throw new Error("Invalid state");
-        memory.choice = record.choice === undefined ? undefined : validateChoice(record.choice);
+        memory.choice = readChoice(memory.before);
+      } else {
+        const global = await readOptional(memory.globalPath);
+        if (global !== undefined) {
+          const choice = readChoice(global);
+          if (choice && !isPortableChoice(choice)) throw new Error("Invalid global choice");
+          memory.choice = choice;
+        }
       }
     } catch { memory.problem = "Remembered interactive choice could not be read. Use /model forget to reset it, or choose a model to repair it."; }
     return memory;
   }
 
-  /** Atomically replace or forget this workspace's choice only if its observed revision remains current. */
-  async write(choice?: InteractiveChoice, signal?: AbortSignal): Promise<void> {
+  /** Replace this workspace's observed revision and optionally publish an eligible successful choice for new workspaces. */
+  async write(choice?: InteractiveChoice, signal?: AbortSignal, share = false): Promise<void> {
     signal?.throwIfAborted();
-    if (choice) validateChoice(choice);
+    if (choice) choice = validateChoice(choice);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const lockPath = `${this.path}.lock`;
-    // SQLite's process lock survives asynchronous file work but is released by the OS on exit.
-    // Keep its inode: deleting a lock database would let a contender lock a different file.
-    // Never open/close an existing lock inode outside SQLite: POSIX may release this process's locks.
-    try { closeSync(openSync(lockPath, "wx", 0o600)); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-    const lock = new Database(lockPath);
-    try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
-    catch { lock.close(); throw new Error("Workspace choice is updating · Retry when finished"); }
+    const lock = acquireLock(this.path);
     const temporary = `${this.path}.${crypto.randomUUID()}.tmp`;
+    const globalTemporary = `${this.globalPath}.${crypto.randomUUID()}.tmp`;
+    let global: Database | undefined;
     try {
       if (await readOptional(this.path) !== this.before) throw new Error("Workspace choice changed · Reopen before choosing again");
       const record: RecordState = { version: 1, revision: crypto.randomUUID(), ...(choice ? { choice } : {}) };
       const text = JSON.stringify(record) + "\n";
-      const file = await open(temporary, "wx", 0o600);
-      try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
+      if (share && choice && isPortableChoice(choice)) {
+        await mkdir(dirname(this.globalPath), { recursive: true, mode: 0o700 });
+        global = acquireLock(this.globalPath);
+        await stageRecord(globalTemporary, text);
+      }
+      await stageRecord(temporary, text);
       signal?.throwIfAborted();
       await rename(temporary, this.path);
+      // The workspace rename is the commit point. Adopt its revision even if global publication fails.
       this.before = text;
       this.choice = choice;
       this.problem = undefined;
+      if (global) {
+        try { await rename(globalTemporary, this.globalPath); }
+        catch (cause) { throw new Error("Workspace choice saved · Retry to update new workspaces", { cause }); }
+      }
     } finally {
-      try { await rm(temporary, { force: true }); } finally { lock.close(); }
+      try { await Promise.all([rm(temporary, { force: true }), ...(global ? [rm(globalTemporary, { force: true })] : [])]); }
+      finally { global?.close(); lock.close(); }
     }
   }
 }
 
+/** Validate a versioned record and return its choice, or undefined for a reset record. */
+function readChoice(text: string): InteractiveChoice | undefined {
+  const record = JSON.parse(text) as RecordState;
+  if (!record || record.version !== 1 || typeof record.revision !== "string") throw new Error("Invalid state");
+  return record.choice === undefined ? undefined : validateChoice(record.choice);
+}
+
+/** Acquire exclusive writer ownership until the returned database closes or the process exits. */
+function acquireLock(path: string): Database {
+  const lockPath = `${path}.lock`;
+  // Keep the inode, and never open/close an existing lock outside SQLite: POSIX can drop our locks.
+  // The OS releases ownership on process exit, including SIGKILL.
+  try { closeSync(openSync(lockPath, "wx", 0o600)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+  const lock = new Database(lockPath);
+  try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
+  catch { lock.close(); throw new Error("Workspace choice is updating · Retry when finished"); }
+  return lock;
+}
+
+/** Create and sync a private temporary record before its atomic rename. */
+async function stageRecord(path: string, text: string): Promise<void> {
+  const file = await open(path, "wx", 0o600);
+  try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
+}
+
+/** Accept only choices whose provider and explicit billing route need no project endpoint definition. */
+function isPortableChoice(choice: InteractiveChoice): boolean {
+  return choice.provider !== "openai-compatible" && (choice.provider !== "xai" || choice.xaiAuth !== undefined);
+}
+
+/** Return an isolated selection tuple after rejecting invalid routes and unexpected fields. */
 function validateChoice(value: unknown): InteractiveChoice {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid choice");
   const choice = value as InteractiveChoice;
@@ -84,6 +126,7 @@ function validateChoice(value: unknown): InteractiveChoice {
   return structuredClone(choice);
 }
 
+/** Read a record as text, treating only a missing file as absent state. */
 async function readOptional(path: string): Promise<string | undefined> {
   try { return await readFile(path, "utf8"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }

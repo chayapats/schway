@@ -220,7 +220,7 @@ export class ConfigEditor {
       if (revision !== this.revision || this.committing) throw new Error("Settings changed · Reopen and retry the edit");
       this.committing = true;
       try {
-        await this.memory!.write(choice, signal);
+        await this.writeMemory(choice, signal, !settings.baseUrl);
         this.layers = layers;
         this.current = settings;
         this.memoryProblem = undefined;
@@ -279,11 +279,28 @@ export class ConfigEditor {
       ...(current.provider === "xai" ? { xaiAuth: authRoute === "grok" ? "grok" as const : "api-key" as const } : {}),
       ...(current.profile ? { profile: current.profile } : {}),
       ...(current.thinking ? { thinking: current.thinking } : {}) };
-    await this.memory.write(choice);
+    await this.writeMemory(choice, undefined, !current.baseUrl);
     this.layers.memory = choice;
     this.revision++;
     this.memoryProblem = undefined;
     return true;
+  }
+
+  /** Persist a choice and retain the committed workspace revision if global publication fails. */
+  private async writeMemory(choice: InteractiveChoice | undefined, signal: AbortSignal | undefined, share: boolean): Promise<void> {
+    const previous = this.memory!.choice;
+    try { await this.memory!.write(choice, signal, share); }
+    catch (error) {
+      // A global publication failure can follow a committed workspace rename. Keep the editor
+      // aligned with that durable choice, so a retry uses the new revision rather than going stale.
+      if (this.memory!.choice !== previous) {
+        this.layers = { ...this.layers, memory: this.memory!.choice };
+        this.current = resolved(this.layers, this.modelCapabilities);
+        this.memoryProblem = this.memory!.problem;
+        this.revision++;
+      }
+      throw error;
+    }
   }
 
   /** Forget only this workspace's memory and session selection, retaining explicit inherited settings. */
