@@ -23,6 +23,33 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 const user = { type: "user" as const, id: "user", content: [{ type: "text" as const, text: "go" }] };
 const editArgs = { path: "note.txt", edits: [{ oldText: "before", newText: "after" }] };
 
+test("an extension tool with omitted effect is denied in read-only after beforeTool", async () => {
+  await withTempDir(async dir => {
+    const setup = await fixture(dir, [`
+      export const trace = [];
+      export default ctx => {
+        ctx.registerTool({ name: 'unspecified', description: 'Undeclared effect',
+          inputSchema: { type: 'object' }, execution: 'parallel',
+          execute: async () => { trace.push('execute'); return { content: 'ran' }; } });
+        ctx.beforeTool(() => { trace.push('before'); });
+        ctx.afterTool(() => { trace.push('after'); });
+      }
+    `]);
+    try {
+      const result = await turn(dir, setup.runtime, setup.tools, [call("unspecified", "unspecified", {})], {
+        approval: { interactive: true, mode: () => "read-only" },
+      });
+      expect(setup.modules[0].trace).toEqual(["before"]);
+      expect(result.results[0]?.isError).toBe(true);
+      expect(result.events.filter(event => event.type === "tool.denied")).toMatchObject([
+        { name: "unspecified", mode: "read-only" },
+      ]);
+    } finally {
+      setup.runtime.dispose();
+    }
+  });
+});
+
 /** Load isolated extension modules through canonical paths with the native edit tool and optional credential redaction. */
 async function fixture(dir: string, bodies: string[], secrets: string[] = []) {
   const paths: string[] = [];
