@@ -4,6 +4,13 @@ import type { ModelUsage } from "../model/model.ts";
 import type { ToolCallStatus } from "../tools/types.ts";
 
 /**
+ * Headless `--json` CLI preamble announcing the persisted session ID for
+ * discoverability / `--resume`. Not part of the shared RuntimeEvent stream
+ * observed by extensions or the TUI controller.
+ */
+export type HeadlessSessionReadyEvent = { type: "session.ready"; sessionId: string };
+
+/**
  * Normalized runtime events for TUI, headless `--json`, and diagnostics.
  * This is not the durable session record.
  */

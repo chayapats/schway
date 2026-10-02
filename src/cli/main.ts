@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { createDiagnosticSink } from "../diagnostics/sink.ts";
 import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
-import type { RuntimeEvent } from "../agent/events.ts";
+import type { HeadlessSessionReadyEvent, RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
@@ -363,6 +363,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       diagnosticSessionId = session.header.id;
     }
     diagnostics.record("session", "ready", { resumed: !!parsed.args.resume });
+    if (parsed.args.json && session.persisted) {
+      const event: HeadlessSessionReadyEvent = { type: "session.ready", sessionId: session.header.id };
+      io.stdout.write(`${JSON.stringify(redactHeadlessSessionReady(event, secrets))}\n`);
+    }
     session.append({
       type: "user",
       id: crypto.randomUUID(),
@@ -484,6 +488,14 @@ function collectSecrets(
     if (profileKey) secrets.push(profileKey);
   }
   return secrets;
+}
+
+/** Redact secrets from the headless session.ready JSONL preamble. */
+function redactHeadlessSessionReady(
+  event: HeadlessSessionReadyEvent,
+  secrets: readonly string[],
+): HeadlessSessionReadyEvent {
+  return { ...event, sessionId: redactSecrets(event.sessionId, secrets) };
 }
 
 /** Redact configured secrets from event fields that can reach stdout. */

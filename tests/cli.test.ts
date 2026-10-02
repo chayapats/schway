@@ -201,6 +201,7 @@ test("--json streams normalized runtime events as JSONL on stdout", async () => 
     .split("\n")
     .map((line) => JSON.parse(line) as { type: string });
   expect(events.map((event) => event.type)).toEqual([
+    "session.ready",
     "agent.started",
     "model.started",
     "model.delta",
@@ -213,7 +214,7 @@ test("--json streams normalized runtime events as JSONL on stdout", async () => 
 });
 
 test("missing credentials exit non-zero without interactive login", async () => {
-  const result = await run(["-p", "hello", "--provider", "openai", "--model", "gpt-5.4"], { env: {} });
+  const result = await run(["-p", "hello", "--json", "--provider", "openai", "--model", "gpt-5.4"], { env: {} });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toContain("Missing OpenAI API key");
@@ -976,7 +977,9 @@ test("headless -p saves a session that --resume continues with workspace identit
       (name) => name.endsWith(".jsonl"),
     );
     expect(files).toHaveLength(1);
-    const sessionId = files[0]!.slice(0, -".jsonl".length);
+    const sessionId = JSON.parse(first.stdout.split("\n")[0]!) as { type: string; sessionId: string };
+    expect(sessionId.type).toBe("session.ready");
+    expect(sessionId.sessionId).toBe(files[0]!.slice(0, -".jsonl".length));
     const records = (await Bun.file(join(home, ".schway", "sessions", files[0]!)).text())
       .split("\n")
       .filter((line) => line.length > 0)
@@ -991,7 +994,7 @@ test("headless -p saves a session that --resume continues with workspace identit
     expect(JSON.stringify(records).includes("agent.started")).toBe(false);
 
     const second = await run(
-      ["-p", "remind me", "--resume", sessionId, "--json"],
+      ["-p", "remind me", "--resume", sessionId.sessionId, "--json"],
       {
         env: { HOME: home, OPENAI_API_KEY: "sk-test" },
         cwd: other,
@@ -1013,10 +1016,40 @@ test("headless -p saves a session that --resume continues with workspace identit
       },
     );
     expect(second.exitCode).toBe(0);
+    expect(JSON.parse(second.stdout.split("\n")[0]!)).toEqual(sessionId);
     expect(second.stdout).toContain("from-saved-workspace");
     const savedRoot = await realpath(project);
     expect(second.stdout).toContain(`Workspace root: ${savedRoot}`);
     expect(second.stdout.includes(await realpath(other))).toBe(false);
+  });
+});
+
+test("--json exposes a resumable session ID after a failed turn with saved history", async () => {
+  await withTempDir(async (home) => {
+    const prompt = "private task text";
+    const secret = "sk-private-token";
+    const first = await run(["-p", prompt, "--json", "--api-key", secret], {
+      env: { HOME: home, OPENAI_API_KEY: secret },
+      model: createScriptedModel({ error: `Authentication failed: ${secret}`, status: 401 }),
+    });
+    expect(first.exitCode).toBe(1);
+    const events = first.stdout.trim().split("\n").map(line => JSON.parse(line));
+    expect(events[0]).toEqual({ type: "session.ready", sessionId: expect.any(String) });
+    expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "error" });
+    expect(first.stdout).not.toContain(prompt);
+    expect(first.stdout).not.toContain(secret);
+    expect(first.stderr).not.toContain(secret);
+
+    const id = events[0].sessionId as string;
+    const saved = (await Bun.file(join(home, ".schway", "sessions", `${id}.jsonl`)).text())
+      .split("\n").filter(Boolean).flatMap(decodeStoredLine);
+    expect(saved.map(record => record.type)).toEqual(["session", "user"]);
+    const resumed = await run(["-p", "continue", "--resume", id, "--json"], {
+      env: { HOME: home, OPENAI_API_KEY: secret },
+      model: createScriptedModel({ text: "done" }),
+    });
+    expect(resumed.exitCode).toBe(0);
+    expect(JSON.parse(resumed.stdout.split("\n")[0]!)).toEqual(events[0]);
   });
 });
 
