@@ -212,7 +212,11 @@ test("headless JSONL and controller observers receive the same native events, wi
       stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } },
     })).toBe(0);
     const output = stdout.trim().split("\n").map(line => JSON.parse(line));
-    expect(module.observed).toEqual(output);
+    expect(output[0]).toEqual({ type: "session.ready", sessionId: expect.any(String) });
+    expect((output[0] as { sessionId: string }).sessionId.length).toBeGreaterThan(0);
+    // session.ready is a headless JSONL CLI preamble, not an extension/TUI RuntimeEvent.
+    const agentEvents = output.filter(event => event.type !== "session.ready");
+    expect(module.observed).toEqual(agentEvents);
     expect(output.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
     expect(stderr).toContain("observe.ts");
     expect(stderr).toContain("diagnostic ***");
@@ -228,7 +232,7 @@ test("headless JSONL and controller observers receive the same native events, wi
       model: createScriptedModel({ text: "original" }),
     });
     await controller.submit("hello");
-    expect(module.observed).toEqual(output);
+    expect(module.observed).toEqual(agentEvents);
     expect(controller.snapshot().status).toBe("idle");
     expect(controller.snapshot().transcript.some(entry => entry.text.includes("diagnostic ***"))).toBe(true);
     controller.dispose();
