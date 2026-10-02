@@ -1,0 +1,13 @@
+{
+  "sessionId": "91c273af-6c49-40d3-8b10-c4e1e330867f",
+  "mainBranchId": "main",
+  "alternateBranchId": "f68d100f-aeb1-4175-86de-495784b22fae",
+  "version": 4,
+  "markers": {
+    "main": "FIXTURE_MAIN",
+    "alternate": "FIXTURE_ALT",
+    "summary": "FIXTURE_SUMMARY"
+  },
+  "hasUndo": true,
+  "undoNote": "The user undid your file changes from the previous turn: changed.txt."
+}

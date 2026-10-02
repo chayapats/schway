@@ -1,3 +1,4 @@
+import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/deprecations.ts";
 import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
 import { formatDuration } from "../text/format.ts";
@@ -66,6 +67,8 @@ type FetchLike = (
 
 /** Process inputs, output sinks, and optional model/transport overrides for a CLI invocation. */
 export interface CliIo {
+  /** Override the supported deprecated keys for deterministic embedding tests. */
+  configDeprecations?: readonly ConfigDeprecation[];
   stdout: CliWriter;
   stderr: CliWriter;
   env: Record<string, string | undefined>;
@@ -110,7 +113,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       return 0;
     }
     try {
-      const report = await diagnose({ cwd: io.cwd, env: io.env, args: parsedDoctor.args, store: io.credentialStore, signal: io.signal });
+      const report = await diagnose({ cwd: io.cwd, env: io.env, args: parsedDoctor.args, store: io.credentialStore, signal: io.signal, configDeprecations: io.configDeprecations });
       io.stdout.write(parsedDoctor.args.json ? `${JSON.stringify(report)}\n` : formatDoctor(report));
       return doctorExitCode(report);
     } catch {
@@ -200,8 +203,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
+  const warned = new Set<string>();
+  const deprecationOptions = { configDeprecations: io.configDeprecations, onDeprecation: (warning: ConfigDeprecationWarning) => {
+    if (!warned.has(warning.message)) { warned.add(warning.message); io.stderr.write(`${warning.message}\n`); }
+  } };
   const cliLayer = cliOverridesFromArgs(parsed.args);
-  let settings = await loadResolvedSettings({
+  let settings = await loadResolvedSettings({ ...deprecationOptions,
     home,
     workspaceRoot: workspace.root,
     cli: cliLayer,
@@ -242,7 +249,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   let extensions: ExtensionRuntime;
   try {
     const loaded = await loadExtensions({
-      modules: parsed.args.extensions ?? [], workspace, secrets, home, signal: io.signal,
+      modules: parsed.args.extensions ?? [], workspace, secrets, home, signal: io.signal, configDeprecations: io.configDeprecations,
       onDiagnostic: (message) => io.stderr.write(`${message}\n`),
       tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
     });
@@ -258,7 +265,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const slash = splitSlashCommand(parsed.args.prompt);
     let skillTurn: { skill: SkillMetadata; body: string } | undefined;
     if (slash && slash.name === "skills") {
-      const discovery = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home });
+      const discovery = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations: io.configDeprecations });
       io.stdout.write(`${formatSkillsListing(discovery)}\n`);
       return 0;
     }
@@ -268,6 +275,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         extraRoots: workspace.extraRoots,
         home,
         name: slash.name,
+        configDeprecations: io.configDeprecations,
       });
       if (!prepared.ok) {
         io.stderr.write(`${prepared.error}\n`);
@@ -290,7 +298,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           if (parsed.args.model && parsed.args.model !== selected) {
             throw new Error(`Model "${parsed.args.model}" is not available for this ChatGPT subscription. Select one with /model in interactive mode.`);
           }
-          const chosen = await loadResolvedSettings({ home, workspaceRoot: workspace.root,
+          const chosen = await loadResolvedSettings({ ...deprecationOptions, home, workspaceRoot: workspace.root,
             cli: { ...cliLayer, openaiAuth: "codex", model: selected }, modelCapabilities: capabilities });
           if ("error" in chosen) throw new Error(chosen.error);
           if (settings.model !== selected) io.stderr.write(`Selected account-available ChatGPT subscription model ${selected} for this run; saved configuration is unchanged.\n`);
@@ -300,7 +308,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           return 1;
         }
       } else {
-        const validated = await loadResolvedSettings({ home, workspaceRoot: workspace.root, cli: cliLayer });
+        const validated = await loadResolvedSettings({ ...deprecationOptions, home, workspaceRoot: workspace.root, cli: cliLayer });
         if ("error" in validated) { io.stderr.write(`${validated.error}\n`); return 1; }
         settings = validated;
       }
@@ -317,7 +325,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         const models = selected.transport === "grok"
           ? await (await import("../model/providers/grok-subscription.ts")).fetchSubscriptionModels({ store, fetch: io.fetch, signal: io.signal })
           : requireXaiModels(await fetchProviderModelList({ url: XAI_MODELS_URL, apiKey: credential?.apiKey, fetch: io.fetch, signal: io.signal, label: "xAI" }));
-        const chosen = await loadResolvedSettings({
+        const chosen = await loadResolvedSettings({ ...deprecationOptions,
           home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: xaiModelCapabilities(models, selected.transport === "grok" ? "grok" : "api-key"),
         });
         if ("error" in chosen) throw new Error(chosen.error);
@@ -337,7 +345,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         const { fetchProviderModelList, openRouterModelCapabilities } = await import("../model/model-list.ts");
         const models = await fetchProviderModelList({ url: "https://openrouter.ai/api/v1/models", apiKey: credential.apiKey,
           headers: settings.headers, fetch: io.fetch, signal: io.signal, label: "OpenRouter" });
-        const chosen = await loadResolvedSettings({ home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: openRouterModelCapabilities(models) });
+        const chosen = await loadResolvedSettings({ ...deprecationOptions, home, workspaceRoot: workspace.root, cli: cliLayer, modelCapabilities: openRouterModelCapabilities(models) });
         if ("error" in chosen) throw new Error(chosen.error);
         settings = chosen;
       } catch (error) { io.stderr.write(`${redactSecrets(errorMessage(error), secrets)}\n`); return 1; }
@@ -379,6 +387,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     let failed = false;
     let printedText = false;
     const contextManager = createContextManager(workspace, {
+      configDeprecations: io.configDeprecations,
       home,
       contextWindow: settings.contextWindow,
     });
@@ -659,6 +668,7 @@ async function runInteractive(args: CliArgs, io: CliIo): Promise<number> {
     credentialStore: io.credentialStore,
     fetch: io.fetch,
     createModel: io.createModel,
+    configDeprecations: io.configDeprecations,
   });
 }
 

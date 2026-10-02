@@ -430,3 +430,21 @@ Schway process is updating the store, startup skips pruning and records the fail
 in enabled diagnostics. A file-tool change is refused if its pre-image cannot be
 saved. The private lock file stays outside the undo directory and does not count
 toward retention or the doctor's size check.
+
+See the [stability policy](stability.md) for compatibility promises.
+
+## Deprecated keys
+
+There are currently no deprecated config keys (`CONFIG_DEPRECATIONS` is empty).
+A deprecated key remains supported until the next major version. When a
+replacement exists, Schway resolves the old value as the new key before
+validation. If both keys are present in the same file, the replacement wins.
+
+Each warning identifies the absolute file path, replacement (if any), and removal
+major version. Interactive startup shows it as a notice; headless runs print it
+once to stderr, keeping `--json` stdout as JSONL. `schway doctor --json` includes
+one `config.deprecated.<key>` warning check per deprecated key found. Warnings
+alone do not make doctor fail.
+
+Saving another setting preserves the deprecated key as written. Edit the key in
+the named config file to stop its warning; saving does not silently migrate it.

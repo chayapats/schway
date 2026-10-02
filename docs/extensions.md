@@ -626,3 +626,5 @@ See [the runnable mixed package](../examples/packages/greeting/package.json) and
 [installation and enablement instructions](#installed-npm-packages).
 
 Test coverage for this guide: [release verification](release-verification.md#extensions).
+
+See the [stability policy](stability.md) for compatibility promises.

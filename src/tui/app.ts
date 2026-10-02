@@ -1,3 +1,4 @@
+import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/deprecations.ts";
 import { pruneUndoStore } from "../undo/store.ts";
 import { isErrno } from "../tools/fs.ts";
 import { formatCount } from "../text/format.ts";
@@ -73,6 +74,8 @@ type FetchLike = (
 
 /** Process I/O passed from the CLI entrypoint into the interactive session. */
 export interface InteractiveIo {
+  /** Supply a deprecation table for deterministic startup tests. */
+  configDeprecations?: readonly ConfigDeprecation[];
   stdout: TuiWriter;
   stderr: TuiWriter;
   env: Record<string, string | undefined>;
@@ -156,7 +159,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 
   let configEditor: ConfigEditor;
   try {
-    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args), interactiveMemory: true });
+    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args), interactiveMemory: true, configDeprecations: io.configDeprecations });
   } catch (error) {
     diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");
     io.stderr.write(`${messageOf(error)}\n`);
@@ -187,14 +190,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools });
   const credentialStore = io.credentialStore ?? createNativeCredentialStore();
   const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
-    modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal,
+    modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal, configDeprecations: io.configDeprecations,
     tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
   });
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   try {
     const loaded = await loadExtensions({
-      modules: io.args.extensions ?? [], workspace, secrets, home, signal: io.signal,
+      modules: io.args.extensions ?? [], workspace, secrets, home, signal: io.signal, configDeprecations: io.configDeprecations,
       onDiagnostic: (message) => io.stderr.write(`${message}\n`),
       tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
     });
@@ -241,13 +244,14 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     };
 
     let controller: TuiController;
-    const managerOptions = contextManagerOptions(home, settings.explicitContextWindow);
-    const skillScope: { manager?: ContextManager; workspaceRoot: string } = {
+    const managerOptions = contextManagerOptions(home, settings.explicitContextWindow, io.configDeprecations);
+    const skillScope: { manager?: ContextManager; workspaceRoot: string; configDeprecations?: readonly ConfigDeprecation[] } = {
+      configDeprecations: io.configDeprecations,
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
     };
     const stageSettings = (next: ResolvedSettings, signal: AbortSignal, nextWorkspace?: Workspace, currentModel?: Model, activate?: boolean, budgets?: { contextWindow?: number; maxOutput?: number }) => stageInteractiveSettings(next, settings, {
       forceLoad: activate, model: currentModel, workspace: nextWorkspace ?? controller.workspaceIdentity() ?? workspace,
-      signal, home, runtimeApiKey: runtimeKeyFor(next.provider), env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
+      signal, home, configDeprecations: io.configDeprecations, runtimeApiKey: runtimeKeyFor(next.provider), env, fetch: io.fetch, createModel: io.createModel, secrets, credentialStore,
       ...(next.explicitContextWindow === undefined && budgets?.contextWindow ? { fetchedContextWindow: budgets.contextWindow } : {}),
       ...(next.explicitMaxOutput === undefined && budgets?.maxOutput ? { fetchedMaxOutput: budgets.maxOutput } : {}),
     });
@@ -387,6 +391,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     }
 
     if (!io.args.resume) void controller.offerRecentSession(directory);
+    noticeConfigDeprecations(controller, configEditor.deprecationWarnings);
     if (configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(configEditor.memoryNotice);
     if (startupError && !configEditor.memoryProblem && configEditor.memoryNotice) controller.notice(`Remembered choice could not activate: ${redactSecrets(startupError, secrets).slice(0, 500)} Use /model to repair it or /model forget; no alternate billing route was selected.`);
     diagnostics.record("session", "ready", { resumed: !!io.args.resume });
@@ -437,7 +442,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
 export async function stageInteractiveSettings(
   next: ResolvedSettings,
   previous: ResolvedSettings,
-  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal; fetchedContextWindow?: number; fetchedMaxOutput?: number },
+  options: Parameters<typeof loadInteractiveModel>[2] & { forceLoad?: boolean; model?: Model; workspace: Workspace; home: string; signal: AbortSignal; fetchedContextWindow?: number; fetchedMaxOutput?: number; configDeprecations?: readonly ConfigDeprecation[] },
 ): Promise<{ model?: Model; contextManager: ContextManager; modelCapability?: import("../model/catalog.ts").ModelCapability }> {
   const adapterKeys = ["provider", "model", "maxOutput", "baseUrl", "headers", "extraBody", "auth", "openaiAuth", "xaiAuth", "thinking", "effectiveThinking", "supportedThinking", "profile", "credentialEnv", "credentialIdentity"] as const;
   let model = options.model;
@@ -455,7 +460,7 @@ export async function stageInteractiveSettings(
     modelCapability = loaded.capability;
   }
   options.signal.throwIfAborted();
-  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow ?? options.fetchedContextWindow)) };
+  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow ?? options.fetchedContextWindow, options.configDeprecations)) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
@@ -465,7 +470,7 @@ async function runTuiRenderer(options: {
   initialize?: () => Promise<void>;
   home: string;
   workspaceRoot: string;
-  skillScope: { manager?: ContextManager; workspaceRoot: string };
+  skillScope: { manager?: ContextManager; workspaceRoot: string; configDeprecations?: readonly ConfigDeprecation[] };
   sessionsDir: string;
   settings: () => ResolvedSettings;
   env: Record<string, string | undefined>;
@@ -588,7 +593,7 @@ export async function handleSlashCommand(
     controller: TuiController;
     home: string;
     workspaceRoot: string;
-    skillScope: { manager?: ContextManager; workspaceRoot: string };
+    skillScope: { manager?: ContextManager; workspaceRoot: string; configDeprecations?: readonly ConfigDeprecation[] };
     sessionsDir: string;
     settings: () => ResolvedSettings;
     env: Record<string, string | undefined>;
@@ -607,7 +612,7 @@ export async function handleSlashCommand(
     ctx.controller.notice("Wait for this turn · Esc stop");
     return false;
   }
-  const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow);
+  const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow, ctx.skillScope.configDeprecations);
   switch (name) {
     case "new": {
       const workspace = await resolveWorkspace(ctx.workspaceRoot);
@@ -693,6 +698,7 @@ export async function handleSlashCommand(
     case "skills": {
       const discovery = await discoverSkills({
         workspaceRoot: ctx.skillScope.workspaceRoot,
+        configDeprecations: ctx.skillScope.configDeprecations,
         extraRoots: ctx.controller.workspaceIdentity()?.extraRoots,
         home: ctx.home,
       });
@@ -736,7 +742,7 @@ export async function invokeSkillTurn(
   ctx: {
     controller: TuiController;
     home: string;
-    skillScope: { manager?: ContextManager; workspaceRoot: string };
+    skillScope: { manager?: ContextManager; workspaceRoot: string; configDeprecations?: readonly ConfigDeprecation[] };
   },
   accepted: () => void = () => {},
 ): Promise<boolean> {
@@ -753,6 +759,7 @@ export async function invokeSkillTurn(
   const workspaceIdentity = ctx.controller.workspaceIdentity();
   const prepared = await prepareSkillInvocation({
     workspaceRoot: ctx.skillScope.workspaceRoot,
+    configDeprecations: ctx.skillScope.configDeprecations,
     extraRoots: workspaceIdentity?.extraRoots,
     home: ctx.home,
     name: invocation.name,
@@ -784,8 +791,8 @@ export async function invokeSkillTurn(
 }
 
 /** Build context-manager options so catalog budgets follow model switches unless overridden. */
-function contextManagerOptions(home: string, explicitContextWindow?: number): { home: string; contextWindow?: number } {
-  return explicitContextWindow !== undefined ? { home, contextWindow: explicitContextWindow } : { home };
+function contextManagerOptions(home: string, explicitContextWindow?: number, configDeprecations?: readonly ConfigDeprecation[]): { home: string; contextWindow?: number; configDeprecations?: readonly ConfigDeprecation[] } {
+  return { home, configDeprecations, ...(explicitContextWindow !== undefined ? { contextWindow: explicitContextWindow } : {}) };
 }
 
 /** Report whether branch-tree input must take the slash-command path instead of becoming a fork name. */
@@ -1084,4 +1091,17 @@ export async function loadInteractiveModel(
 /** Normalize thrown values into a printable error string. */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const noticedConfigDeprecations = new WeakMap<TuiController, Set<string>>();
+
+/** Publish each source-specific startup warning once for a controller, including after reloads. */
+export function noticeConfigDeprecations(controller: TuiController, warnings: readonly ConfigDeprecationWarning[]): void {
+  const seen = noticedConfigDeprecations.get(controller) ?? new Set<string>();
+  noticedConfigDeprecations.set(controller, seen);
+  for (const warning of warnings) {
+    if (seen.has(warning.message)) continue;
+    seen.add(warning.message);
+    controller.notice(warning.message);
+  }
 }

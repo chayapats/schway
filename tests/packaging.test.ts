@@ -165,6 +165,7 @@ test("npm pack installs the public extension API and completes a headless tool r
       "package/README.md",
       "package/LICENSE",
       "package/CHANGELOG.md",
+      "package/docs/stability.md",
       ...["configuration", "credentials", "diagnostics", "doctor", "evals", "extensions", "headless", "live-providers", "sessions", "skills", "tools", "tui", "workspaces"]
         .map((name) => `package/docs/${name}.md`),
     ]) {

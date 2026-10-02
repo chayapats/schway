@@ -51,7 +51,7 @@ Only reviewed summaries belong in a new top section of
   `package.json`, rather than hard-coding a previous release.
 - [ ] Update `CHANGELOG.md`. Keep `# Changelog`, `## [Unreleased]`, then
   `## [$V] - <YYYY-MM-DD>` in that order. Use `### Breaking`, `### Added`,
-  `### Changed` and `### Fixed` where needed. Future entries retain this
+  `### Changed`, `### Fixed` and `### Deprecations` where needed. Future entries retain this
   heading format for the session-fixture generator (#158). The 0.4.0 entry
   states that earlier versions were not published to npm.
 - [ ] Describe breaking changes with exact migration/error messages.
@@ -66,8 +66,15 @@ Only reviewed summaries belong in a new top section of
 - [ ] Run `bun run demo:record`, check that `docs/demo/schway-demo.gif` is at
   most 2 MB (2,097,152 bytes), view the GIF, and commit it if it changed.
   See [demo recording](demo/README.md) for prerequisites and the recording setup.
-- [ ] Session fixture generation (#158): placeholder for its changelog-driven
-  generation, validation and artifact steps.
+- [ ] On the release commit, run `npm pack`, then
+  `bun scripts/session-fixture.ts --from ./<packed>.tgz` using that exact tarball.
+  Review and commit `tests/fixtures/sessions/<version>/` before `npm publish`.
+  Run `bun test tests/session-contract.test.ts`; every changelog release from
+  0.4.0 onwards needs a fixture, and the package version needs a changelog entry.
+  Fixtures use installed release code with a scripted model and an isolated HOME.
+  Only the temporary workspace path is replaced in the recorded JSONL bytes.
+  If the fixture commit changes `R`, repack and run the release checks on that
+  final commit before publishing.
 - [ ] On the actual merge commit, run `bun install --frozen-lockfile`,
   `bun run typecheck` and `bun test`. Record the test count and commit SHA
   as `R`. Pre-merge results do not substitute for this gate.

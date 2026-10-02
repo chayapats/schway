@@ -1,0 +1,12 @@
+{
+  "sessionId": "71683c09-fb65-4efa-8176-6eb0baa6e2e0",
+  "mainBranchId": "main",
+  "alternateBranchId": "030b1f4f-f7b4-4265-9a60-8543c18f77f2",
+  "version": 3,
+  "markers": {
+    "main": "FIXTURE_MAIN",
+    "alternate": "FIXTURE_ALT",
+    "summary": "FIXTURE_SUMMARY"
+  },
+  "hasUndo": false
+}

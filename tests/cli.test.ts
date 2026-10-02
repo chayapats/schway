@@ -1307,3 +1307,28 @@ test("headless ask denies a write immediately without input or a failing exit", 
     expect(events.find(event => event.type === "tool.finished")).toMatchObject({ status: "error", content: "approval required; headless cannot ask" });
   });
 });
+
+test("headless deprecation warning stays on stderr once across OpenAI config reloads", async () => {
+  await withTempDir(async home => {
+    await mkdir(join(home, ".schway"));
+    const path = join(home, ".schway/config.json");
+    await writeFile(path, JSON.stringify({ oldModel: "gpt-4.1", provider: "openai", openaiAuth: "api-key" }));
+    await mkdir(join(home, ".schway/skills/example"), { recursive: true });
+    await writeFile(join(home, ".schway/skills/example/SKILL.md"), "---\nname: example\ndescription: DEPRECATED_CONFIG_SKILL\n---\nDo a task.\n");
+    const stdout = capture(), stderr = capture();
+    const exit = await runCli(["-p", "hello", "--json"], {
+      cwd: home, env: { HOME: home, OPENAI_API_KEY: "fixture-key" }, stdout, stderr,
+      configDeprecations: [{ key: "oldModel", replacement: "model", since: "1.1.0", removeIn: "2.0" }],
+      credentialStore: fakeCredentialStore(),
+      fetch: async (_url, init) => {
+        expect(String(init?.body)).toContain("DEPRECATED_CONFIG_SKILL");
+        return new Response(encodeOpenAISse(OPENAI_TEXT), { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    expect(exit, stderr.text + stdout.text).toBe(0);
+    expect(stderr.text).toBe(`Config: "oldModel" in ${path} is deprecated; use "model". It will be removed in 2.0.\n`);
+    expect(stdout.text).not.toContain("deprecated");
+    const events = stdout.text.trim().split("\n").map(line => JSON.parse(line));
+    expect(events.some(event => event.type === "agent.finished")).toBe(true);
+  });
+});

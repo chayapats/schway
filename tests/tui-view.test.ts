@@ -1,3 +1,4 @@
+import { noticeConfigDeprecations } from "../src/tui/app.ts";
 import { beforeAll, afterAll, afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { BoxRenderable, RGBA, TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
@@ -3019,4 +3020,17 @@ test("undo retention can be set as JSON, shown effectively, and reset", async ()
     expect(await ui.controller.configCommand('set undo broken')).toBe(false);
     expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe('Invalid undo settings · /config set undo {"maxAgeDays":14} retry');
   });
+});
+
+test("rendered config startup notice appears once even when configuration is reloaded", async () => {
+  const ui = await setup(120, 40);
+  const parsed = (await import("../src/config/config.ts")).parseConfigObject({ oldTurns: 7 }, "/config.json", [{ key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" }]);
+  if ("error" in parsed) throw Error(parsed.error);
+  noticeConfigDeprecations(ui.controller, parsed.deprecationWarnings!);
+  noticeConfigDeprecations(ui.controller, structuredClone(parsed.deprecationWarnings!));
+  await settle(ui);
+  const text = parsed.deprecationWarnings![0]!.message;
+  expect(ui.controller.snapshot().transcript.filter(entry => entry.text === text)).toHaveLength(1);
+  expect(ui.captureCharFrame()).toContain('Config: "oldTurns" in /config.json is deprecated; use "maxTurns".');
+  expect(ui.captureCharFrame()).toContain("It will be removed in 2.0.");
 });

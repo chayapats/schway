@@ -300,3 +300,5 @@ a durable session exists. Interrupted tools may already have changed files; resu
 marks pending tool calls interrupted and never replays them or claims to undo them.
 
 Test coverage for this guide: [release verification](release-verification.md#sessions).
+
+See the [stability policy](stability.md) for compatibility promises.

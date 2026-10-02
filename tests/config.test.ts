@@ -474,3 +474,44 @@ test("approval origins ignore looser project settings and schema accepts ask and
   for (const approval of [{ mode: "auto", other: true }, null]) expect(parseConfigObject({ approval }, "test")).toHaveProperty("error");
   expect(resolveSettings({ memory: { approval: { mode: "read-only" } } })).toMatchObject({ approvalMode: "auto" });
 });
+
+for (const [old, modern, key, replacement] of [
+  [{ oldTurns: 7 }, { maxTurns: 7 }, "oldTurns", "maxTurns"],
+  [{ ui: { oldSplash: "never" } }, { ui: { splash: "never" } }, "ui.oldSplash", "ui.splash"],
+  [{ legacy: { splash: "never" } }, { ui: { splash: "never" } }, "legacy.splash", "ui.splash"],
+] as const) test(`deprecated ${key} resolves exactly like ${replacement} without mutating input`, () => {
+  const original = structuredClone(old);
+  const parsed = parseConfigObject(old, "/home/test/config.json", [{ key, replacement, since: "1.1.0", removeIn: "2.0" }]);
+  const expected = parseConfigObject(modern, "/home/test/config.json");
+  expect("error" in parsed).toBe(false); expect("error" in expected).toBe(false);
+  if ("error" in parsed || "error" in expected) throw Error("Invalid fixture");
+  expect(resolveSettings({ user: parsed })).toEqual(resolveSettings({ user: expected }));
+  expect(parsed.deprecationWarnings?.map(w => w.message)).toEqual([`Config: "${key}" in /home/test/config.json is deprecated; use "${replacement}". It will be removed in 2.0.`]);
+  expect(old).toEqual(original);
+  expect(JSON.stringify(parsed)).toBe(JSON.stringify(modern));
+});
+
+test("explicit replacements win, even when the ignored legacy value fails the replacement schema", () => {
+  const parsed = parseConfigObject({ ui: { oldSplash: 42, splash: "never" } }, "/config.json", [{ key: "ui.oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }]);
+  if ("error" in parsed) throw Error(parsed.error);
+  expect(parsed.ui?.splash).toBe("never");
+  expect(parsed.deprecationWarnings?.[0]?.message).toBe('Config: "ui.oldSplash" in /config.json is deprecated; use "ui.splash". It will be removed in 2.0. "ui.oldSplash" is ignored because "ui.splash" is set.');
+});
+
+test("deprecations without replacements retain supported behavior and accept retired no-op keys", () => {
+  for (const [value, key] of [[{ maxTurns: 7 }, "maxTurns"], [{ ui: { splash: "never" } }, "ui.splash"], [{ legacy: true }, "legacy"], [{ ui: { legacy: true } }, "ui.legacy"], [{ retired: { toggle: true } }, "retired.toggle"]] as const) {
+    const parsed = parseConfigObject(value, "/config.json", [{ key, since: "1.1.0", removeIn: "2.0" }]);
+    if ("error" in parsed) throw Error(parsed.error);
+    expect(parsed.deprecationWarnings?.[0]?.message).toBe(`Config: "${key}" in /config.json is deprecated and has no replacement. It will be removed in 2.0.`);
+    if (key === "maxTurns") expect(parsed.maxTurns).toBe(7);
+    if (key === "ui.splash") expect(parsed.ui?.splash).toBe("never");
+  }
+  expect(parseConfigObject({ legacy: true }, "/config.json", [])).toMatchObject({ error: expect.stringContaining('unknown setting "legacy"') });
+  expect(parseConfigObject({ oldTurns: "invalid" }, "/config.json", [{ key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" }])).toMatchObject({ error: expect.stringContaining("maxTurns") });
+});
+
+test("retired nested settings cannot hide unknown siblings or malformed replacement parents", () => {
+  const table = [{ key: "retired.toggle", since: "1.1.0", removeIn: "2.0" }];
+  expect(parseConfigObject({ retired: { toggle: true, typo: true } }, "/config.json", table)).toMatchObject({ error: expect.stringContaining('unknown setting "retired"') });
+  expect(parseConfigObject({ oldSplash: "never", ui: false }, "/config.json", [{ key: "oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }])).toEqual({ error: "Invalid config at /config.json: ui must be an object" });
+});
