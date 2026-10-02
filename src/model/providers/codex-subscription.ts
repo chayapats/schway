@@ -855,7 +855,10 @@ export async function pollDeviceAuthorization(input: {
       } catch (error) {
         throwIfAborted(input.signal);
         const message = messageOf(error);
-        if (/^(ChatGPT sign-in was denied|The sign-in code expired|The sign-in response has no access token|The sign-in endpoint|Exchanging the sign-in code failed)/.test(message)) {
+        if (/^The sign-in code expired/.test(message)) {
+          throw new Error("The device sign-in code expired before it was exchanged. Restart /login codex --device for a fresh code.");
+        }
+        if (/^(ChatGPT sign-in was denied|The sign-in response has no access token|The sign-in endpoint|Exchanging the sign-in code failed)/.test(message)) {
           throw error instanceof Error ? error : new Error(message);
         }
         throw new Error(`Device sign-in code exchange failed (${message}). Retry /login codex --device.`);

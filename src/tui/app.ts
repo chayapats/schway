@@ -907,7 +907,7 @@ export function createCodexLoginRunner(options: {
         throw error instanceof Error ? error : new DOMException("Aborted", "AbortError");
       }
       const message = messageOf(error);
-      const actionable = /^(ChatGPT sign-in was denied|The sign-in code expired|The sign-in response has no access token|No active browser sign-in attempt|The callback state does not match|The pasted callback URL|The pasted code is empty|The callback URL has no authorization code|The localhost|ChatGPT sign-in timed out|The sign-in endpoint|Exchanging the sign-in code failed|Starting device sign-in|Device sign-in|Cannot save credential)/.test(message);
+      const actionable = /^(ChatGPT sign-in was denied|The sign-in code expired|The sign-in response has no access token|No active browser sign-in attempt|The callback state does not match|The pasted callback URL|The pasted code is empty|The callback URL has no authorization code|The localhost|ChatGPT sign-in timed out|The sign-in endpoint|Exchanging the sign-in code failed|Starting device sign-in|The device sign-in|Device sign-in|Cannot save credential)/.test(message);
       return { ok: false as const, message: actionable
         ? redactSecrets(message, options.secrets)
         : "ChatGPT sign-in could not complete. Check the connection and OS secure store, then retry from the sign-in chooser." };

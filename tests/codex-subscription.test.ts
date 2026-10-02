@@ -517,6 +517,54 @@ test("device authorization request failures stay actionable without leaking tran
   ).rejects.toThrow(/device sign-in failed/);
 });
 
+test("device exchange expiry remaps to restart with --device and stays actionable", async () => {
+  const expiredExchange: CodexFetchLike = async (input) => {
+    const url = String(input);
+    if (url === CODEX_DEVICE_TOKEN_URL || url.includes("deviceauth/token")) {
+      return Response.json({
+        status: "success",
+        authorization_code: "stale-auth-code",
+        code_verifier: "device-verifier",
+      });
+    }
+    return new Response(JSON.stringify({ error: "invalid_grant" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  await expect(
+    pollDeviceAuthorization({ deviceAuthId: "d", userCode: "u", pollIntervalMs: 1, fetch: expiredExchange }),
+  ).rejects.toThrow(/Restart \/login codex --device/);
+
+  const store = fakeCredentialStore();
+  const runner = createCodexLoginRunner({
+    store,
+    secrets: [],
+    fetch: (async (input) => {
+      const url = String(input);
+      if (url.includes("usercode")) {
+        return Response.json({
+          device_auth_id: "d",
+          user_code: "ABCD-1234",
+          interval: "1",
+          expires_at: new Date(Date.now() + 900_000).toISOString(),
+        });
+      }
+      return expiredExchange(input);
+    }) satisfies CodexFetchLike,
+  });
+  const result = await runner({
+    device: true,
+    signal: new AbortController().signal,
+    onProgress: () => {},
+  });
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.message).toMatch(/Restart \/login codex --device/);
+    expect(result.message).not.toMatch(/could not complete/);
+  }
+});
+
 test("browser code exchange keeps the localhost redirect while device exchange uses deviceauth callback", async () => {
   const browserSeen: Array<{ url: string; body: string }> = [];
   await exchangeCodeForTokens({
