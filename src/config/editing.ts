@@ -286,6 +286,7 @@ export class ConfigEditor {
     return true;
   }
 
+  /** Persist a choice and retain the committed workspace revision if global publication fails. */
   private async writeMemory(choice: InteractiveChoice | undefined, signal: AbortSignal | undefined, share: boolean): Promise<void> {
     const previous = this.memory!.choice;
     try { await this.memory!.write(choice, signal, share); }

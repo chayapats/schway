@@ -10,6 +10,7 @@ test("existing workspaces keep their choices while a new workspace inherits the 
     const home = join(root, "home");
     const [a, b, c] = ["a", "b", "c"].map(name => join(root, name));
     for (const path of [a!, b!, c!]) await mkdir(path);
+    /** Open interactive settings against the test's isolated home and selected workspace. */
     const load = (workspaceRoot: string) => loadConfigEditor({ home, workspaceRoot, interactiveMemory: true });
     const first = await load(a!);
     await (await first.prepareOpenAIApiModel("gpt-4o")).commit();
@@ -30,6 +31,7 @@ test("explicit layers outrank inherited choices and opening, staging and resumin
   await withTempDir(async root => {
     const home = join(root, "home"), a = join(root, "a"), b = join(root, "b"), c = join(root, "c");
     for (const path of [a, b, c]) await mkdir(path);
+    /** Resolve interactive settings with explicit CLI overrides in the isolated test home. */
     const load = (workspaceRoot: string, cli = {}) => loadConfigEditor({ home, workspaceRoot, cli, interactiveMemory: true });
     const first = await load(a);
     await (await first.prepareOpenAIApiModel("gpt-5.4")).commit();
@@ -99,6 +101,7 @@ test("forget and reset suppress fallback only for that workspace and legacy reco
     for (const path of paths) await mkdir(path);
     const [legacy, seed, forgotten, reset, fresh] = paths as [string, string, string, string, string];
     await (await InteractiveMemory.load(home, legacy)).write({ provider: "openai", model: "gpt-4o", openaiAuth: "api-key" });
+    /** Open interactive settings against the test's isolated home and selected workspace. */
     const load = (workspaceRoot: string) => loadConfigEditor({ home, workspaceRoot, interactiveMemory: true });
     const editor = await load(seed);
     await (await editor.prepareOpenAIApiModel("gpt-5.4")).commit(); await editor.rememberChoice("api-key");
@@ -120,6 +123,7 @@ test("project compatible profiles never bind the global choice to a different en
         baseUrl: `https://${endpoint}.example/v1`, model: "custom", auth: "none", headers: { "x-secret": "private-endpoint-secret" },
       } } }));
     }
+    /** Open interactive settings against the test's isolated home and selected workspace. */
     const load = (workspaceRoot: string) => loadConfigEditor({ home, workspaceRoot, interactiveMemory: true });
     const first = await load(a);
     await (await first.prepareProfile("local")).commit(); await first.rememberChoice("none");
@@ -160,6 +164,7 @@ test("a global writer excludes other workspaces and process death preserves the 
   await withTempDir(async root => {
     const home = join(root, "home"), a = join(root, "a"), b = join(root, "b"), c = join(root, "c");
     for (const path of [a, b, c]) await mkdir(path);
+    /** Open interactive settings against the test's isolated home and selected workspace. */
     const load = (workspaceRoot: string) => loadConfigEditor({ home, workspaceRoot, interactiveMemory: true });
     const seed = await load(a);
     await (await seed.prepareOpenAIApiModel("gpt-5.4")).commit(); await seed.rememberChoice("api-key");
@@ -191,6 +196,7 @@ test("malformed global state can be forgotten locally or repaired by a successfu
     for (const path of [a, b, c]) await mkdir(path);
     const directory = join(home, ".schway/interactive/global"); await mkdir(directory, { recursive: true });
     await writeFile(join(directory, "latest.json"), "{broken");
+    /** Open interactive settings against the test's isolated home and selected workspace. */
     const load = (workspaceRoot: string) => loadConfigEditor({ home, workspaceRoot, interactiveMemory: true });
     const broken = await load(a);
     expect(broken.memoryActivationError).toContain("could not be read");

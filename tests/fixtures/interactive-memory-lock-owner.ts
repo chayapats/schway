@@ -9,12 +9,14 @@ let held = false;
 const fault = process.argv[3];
 let injectFault = false;
 mock.module("node:fs/promises", () => ({ ...filesystem,
+  /** Fail one requested global staging operation while preserving ordinary file opens. */
   open: async (...args: Parameters<typeof filesystem.open>) => {
     if (injectFault && fault === "global-stage" && String(args[0]).includes("/global/")) {
       injectFault = false; throw new Error("fixture global staging failure");
     }
     return openFile(...args);
   },
+  /** Inject one publication failure or hold the workspace commit boundary for contention checks. */
   rename: async (source: string, destination: string) => {
     if (fault) {
       if (injectFault && ((fault === "global-rename" && destination.includes("/global/")) ||
@@ -37,6 +39,7 @@ if (fault) {
   const home = process.env.HOME!, root = process.argv[2]!;
   const a = join(root, "a"), b = join(root, "b");
   await filesystem.mkdir(a); await filesystem.mkdir(b);
+  /** Open interactive settings against the fixture's isolated home and selected workspace. */
   const load = (workspaceRoot: string) => loadConfigEditor({ home, workspaceRoot, interactiveMemory: true });
   const seed = await load(a);
   await (await seed.prepareOpenAIApiModel("gpt-4o")).commit(); await seed.rememberChoice("api-key");
@@ -44,6 +47,7 @@ if (fault) {
   const choice = { provider: "openai" as const, model: "gpt-5.4", openaiAuth: "api-key" as const };
   const staged = process.argv[4] === "prepare";
   if (!staged) await (await editor.prepareOpenAIApiModel(choice.model)).commit();
+  /** Exercise the chosen persistence entry point before and after the injected failure. */
   const save = async () => staged ? (await editor.prepareMemory(choice)).commit() : editor.rememberChoice("api-key");
   injectFault = true;
   let error: string | undefined;
@@ -60,6 +64,7 @@ const { TuiController } = await import("../../src/tui/controller.ts");
 const { resolveWorkspace } = await import("../../src/workspace/workspace.ts");
 const { createScriptedModel } = await import("../helpers/scripted-model.ts");
 const workspace = await resolveWorkspace(process.argv[2]!);
+/** Create an isolated scripted controller that uses real workspace preference storage. */
 async function createController() {
   const editor = await loadConfigEditor({ home: process.env.HOME!, workspaceRoot: workspace.root, interactiveMemory: true });
   return new TuiController({ session: createSession(), sessionId: "lock-owner", workspace,
@@ -68,6 +73,7 @@ async function createController() {
     stageSettings: async next => ({ model: createScriptedModel({ provider: next.provider, id: next.model }), contextManager: createContextManager(workspace) }),
   });
 }
+/** Verify that a second controller cannot bypass the active writer in the same process. */
 attemptLocalContention = async () => {
   const contender = await createController();
   await contender.selectModel("openai/gpt-5.4");

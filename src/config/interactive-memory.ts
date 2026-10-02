@@ -84,12 +84,14 @@ export class InteractiveMemory {
   }
 }
 
+/** Validate a versioned record and return its choice, or undefined for a reset record. */
 function readChoice(text: string): InteractiveChoice | undefined {
   const record = JSON.parse(text) as RecordState;
   if (!record || record.version !== 1 || typeof record.revision !== "string") throw new Error("Invalid state");
   return record.choice === undefined ? undefined : validateChoice(record.choice);
 }
 
+/** Acquire exclusive writer ownership until the returned database closes or the process exits. */
 function acquireLock(path: string): Database {
   const lockPath = `${path}.lock`;
   // Keep the inode, and never open/close an existing lock outside SQLite: POSIX can drop our locks.
@@ -102,15 +104,18 @@ function acquireLock(path: string): Database {
   return lock;
 }
 
+/** Create and sync a private temporary record before its atomic rename. */
 async function stageRecord(path: string, text: string): Promise<void> {
   const file = await open(path, "wx", 0o600);
   try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
 }
 
+/** Accept only choices whose provider and explicit billing route need no project endpoint definition. */
 function isPortableChoice(choice: InteractiveChoice): boolean {
   return choice.provider !== "openai-compatible" && (choice.provider !== "xai" || choice.xaiAuth !== undefined);
 }
 
+/** Return an isolated selection tuple after rejecting invalid routes and unexpected fields. */
 function validateChoice(value: unknown): InteractiveChoice {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid choice");
   const choice = value as InteractiveChoice;
@@ -121,6 +126,7 @@ function validateChoice(value: unknown): InteractiveChoice {
   return structuredClone(choice);
 }
 
+/** Read a record as text, treating only a missing file as absent state. */
 async function readOptional(path: string): Promise<string | undefined> {
   try { return await readFile(path, "utf8"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
