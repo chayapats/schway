@@ -20,6 +20,7 @@ import { createScriptedModel, type ScriptedTurnFactory } from "./helpers/scripte
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 
+/** Build an isolated persisted session with scripted model responses and real slash-command dispatch. */
 async function fixture(home: string, responses: ScriptedTurnFactory[]) {
   const workspace = await resolveWorkspace(home);
   const directory = join(home, "sessions");
