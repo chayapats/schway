@@ -1,3 +1,6 @@
+import { resolveSubscriptionRoute } from "../auth/subscription-route.ts";
+import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
+import type { FetchLike } from "../model/loader.ts";
 import { execFile } from "node:child_process";
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,14 +13,17 @@ import { DAILY_CASES } from "./cases.ts";
 import { estimateSpendUsd, formatUsd, FREE, resolvePrice, roundUsd, type TokenPrice } from "./spend.ts";
 
 const exec = promisify(execFile);
-const USAGE = "Usage: bun run eval (--provider scripted | --provider openai|xai|openai-compatible --model ID --allow-paid | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]";
+/** Accepted eval route names shared by argument validation and help. */
+export const EVAL_PROVIDERS = ["scripted", "openai", "openai-compatible", "xai", "codex", "grok"] as const;
+
+const USAGE = `Usage: bun run eval (--provider PROVIDER [--model ID --allow-paid] | --matrix provider:model[,provider:model...] [--allow-paid]) [--case ID|all] [--base-url URL] [--output PATH] [--max-turns N] [--timeout-ms N] [--max-output-tokens N] [--max-spend USD] [--input-price USD_PER_M --output-price USD_PER_M]\nProviders: ${EVAL_PROVIDERS.join(" | ")}\nNon-scripted routes require --model and --allow-paid.`;
 
 /** Exit code when budget or incomplete usage prevents all selected paid cases from starting. */
 export const SPEND_CAP_EXIT_CODE = 3;
 
 /** Run the selected evals under a spend cap and write a credential-free JSON artifact; `deps.model` is a test seam. */
 export async function runEvalCli(argv: string[], env: Record<string, string | undefined> = process.env,
-    deps: { model?: (provider: string, model: string, caseId: string) => Model } = {}): Promise<number> {
+    deps: { createStore?: () => CredentialStore; fetch?: FetchLike; model?: (provider: string, model: string, caseId: string) => Model } = {}): Promise<number> {
   if (argv.includes("--help")) { console.log(USAGE); return 0; }
   const values = new Map<string, string>();
   let allowPaid = false;
@@ -39,7 +45,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   if (entries.length < 1 || entries.length > 8 || caseIds.some(id => id !== CODING_CASE.id && !DAILY_CASES.some(item => item.id === id)) ||
       (matrix !== undefined && (values.has("--provider") || values.has("--model"))) ||
       (!matrix && values.get("--provider") !== "scripted" && !values.has("--model")) ||
-      entries.some(entry => !["scripted", "openai", "xai", "openai-compatible"].includes(entry.provider) || !entry.model ||
+      entries.some(entry => !(EVAL_PROVIDERS as readonly string[]).includes(entry.provider) || !entry.model ||
         (entry.provider === "scripted" ? (entry.model !== "offline-v1" || (allowPaid && !matrix)) : !allowPaid)) ||
       (entries.some(entry => entry.provider === "openai-compatible") !== values.has("--base-url")) ||
       (!matrix && !values.has("--provider"))) {
@@ -80,6 +86,8 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
   catch { console.error("Cannot reserve eval artifact path (it must be a new file in an existing directory)."); return 2; }
   try {
     const results: CodingEvalResult[] = [];
+    let subscriptionStore: CredentialStore | undefined;
+    const subscriptionEntries = new Map<number, Awaited<ReturnType<typeof resolveSubscriptionRoute>>>();
     let spent = 0, spendUnknown = false;
     let stopReason: "usage_unknown" | "spend_cap" | null = null;
     const highestCase = entries.map(() => 0);
@@ -89,7 +97,13 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       const price = prices[entryIndex] ?? FREE;
       const paid = price.inputPerMillion > 0 || price.outputPerMillion > 0;
       const apiKey = keyFor(provider);
-      const startable = provider === "scripted" || (!!apiKey && (provider !== "openai-compatible" || validEndpoint(baseUrl)));
+      // Preflight once per entry, including failures; store-backed adapters retain responsibility for later refreshes.
+      if ((provider === "codex" || provider === "grok") && !subscriptionEntries.has(entryIndex)) {
+        subscriptionEntries.set(entryIndex, await resolveSubscriptionRoute({ provider, model: modelId, maxTokens: settings.maxOutputTokens,
+          store: subscriptionStore ??= (deps.createStore ?? createNativeCredentialStore)(), env, refresh: true, fetch: deps.fetch, signal: AbortSignal.timeout(settings.timeoutMs) }));
+      }
+      const subscription = subscriptionEntries.get(entryIndex);
+      const startable = subscription ? "input" in subscription : provider === "scripted" || (!!apiKey && (provider !== "openai-compatible" || validEndpoint(baseUrl)));
       // Soft cap: a paid case is assumed to cost as much as that route's costliest case so far (the first runs unless the cap is spent),
       // and unreported usage stops further paid cases. Free routes never spend, so they always run; unstartable routes stay prerequisite skips.
       if (startable && paid && (spendUnknown || spent >= capUsd || spent + highestCase[entryIndex]! > capUsd)) {
@@ -101,9 +115,11 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       let result: CodingEvalResult;
       if (!startable) {
         result = skippedCodingEval(provider, modelId, sourceRevision, settings, id);
+        if (subscription) { result.outcome = "skipped"; result.reason = "not_signed_in"; }
       } else {
         try {
           const model: Model = deps.model ? deps.model(provider, modelId, id) : provider === "scripted" ? offlineModel(id)
+            : subscription && "input" in subscription ? await loadProviderModel(subscription.input, deps.fetch)
             : await loadProviderModel({ provider: provider as "openai" | "xai" | "openai-compatible", model: modelId,
               apiKey, baseUrl, auth: "required", maxTokens: settings.maxOutputTokens });
           result = await runCodingEval({ model, sourceRevision, settings, caseId: id });
@@ -111,7 +127,10 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
           result = failedCodingEval(provider, modelId, sourceRevision, settings, id);
         }
       }
-      const started = result.outcome !== "skipped_prerequisites";
+      result.provider = provider;
+      result.model = modelId;
+      result.billing = price.billing ?? "usage";
+      const started = result.outcome !== "skipped_prerequisites" && result.outcome !== "skipped";
       const spend = started ? estimateSpendUsd(result.metrics, price) : { usd: 0, exact: true };
       if (started && paid && !spend.exact) spendUnknown = true;
       result.spendUsd = spend.usd;
@@ -119,9 +138,10 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
       spent += spend.usd;
       highestCase[entryIndex] = Math.max(highestCase[entryIndex]!, spend.usd);
       results.push(result);
-      console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}; spend=${spend.exact ? "" : "≥"}${formatUsd(spend.usd)}`);
+      if (result.reason === "not_signed_in") console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: skipped/not_signed_in`);
+      else console.log(`${result.case.id}@${result.case.version} ${provider}/${modelId}: ${result.outcome} (${result.durationMs}ms); grader=${result.grader?.exitCode ?? "n/a"}; tokens=${result.metrics.inputTokens ?? "unknown"}/${result.metrics.outputTokens ?? "unknown"}${result.metrics.unknownInputAttempts || result.metrics.unknownOutputAttempts ? " (incomplete usage)" : ""}; spend=${result.billing === "subscription" ? "subscription" : `${spend.exact ? "" : "≥"}${formatUsd(spend.usd)}`}`);
     }
-    const casesRun = results.filter(result => result.outcome !== "skipped_spend_cap" && result.outcome !== "skipped_prerequisites").length;
+    const casesRun = results.filter(result => result.outcome !== "skipped" && result.outcome !== "skipped_spend_cap" && result.outcome !== "skipped_prerequisites").length;
     const spendSummary = { totalUsd: roundUsd(spent), capUsd, casesRun, casesTotal: total, exact: results.every(result => result.spendExact !== false), stoppedBySpendCap: stopReason !== null, stopReason };
     if (stopReason === "usage_unknown") console.log("stopped: usage incomplete; reconcile provider billing before starting more paid cases");
     else if (stopReason === "spend_cap") console.log(`stopped: spend cap reached (${formatUsd(capUsd)})`);
@@ -139,7 +159,7 @@ export async function runEvalCli(argv: string[], env: Record<string, string | un
 
 /** Count every measured outcome, including failures and unavailable providers, without inferring missing evidence. */
 export function summarizeEvalResults(results: readonly CodingEvalResult[]): Record<CodingEvalResult["outcome"], number> {
-  return Object.fromEntries(["success", "grader_failure", "model_failure", "harness_error", "timeout", "skipped_prerequisites", "skipped_spend_cap"].map(outcome =>
+  return Object.fromEntries(["success", "grader_failure", "model_failure", "harness_error", "timeout", "skipped_prerequisites", "skipped_spend_cap", "skipped"].map(outcome =>
     [outcome, results.filter(result => result.outcome === outcome).length])) as Record<CodingEvalResult["outcome"], number>;
 }
 

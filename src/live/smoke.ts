@@ -1,10 +1,11 @@
+import { resolveSubscriptionRoute } from "../auth/subscription-route.ts";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
-import { resolveProviderCredential, selectOpenAITransport } from "../auth/credentials.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
+import { resolveProviderCredential } from "../auth/credentials.ts";
+import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { createContextManager } from "../context/manager.ts";
 import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
 import { loadProviderModel, type FetchLike, type ProviderLoaderInput } from "../model/loader.ts";
@@ -307,37 +308,11 @@ async function resolveInput(selection: SmokeSelection, provider: SmokeProvider, 
   }
   const store = provider === "compatible" && selection.compatible?.auth === "none"
     ? undefined : (deps.createStore ?? createNativeCredentialStore)();
-  if (provider === "grok") {
-    let raw: string | null;
-    try { raw = await store!.get(grokSubscriptionIdentity()); }
-    catch { result.status = "pending"; result.reason = "credential_store_unavailable"; return; }
-    if (!raw?.trim()) { result.status = "pending"; result.reason = "missing_subscription"; return; }
-    const integration = await import("../model/providers/grok-subscription.ts");
-    try {
-      const tokens = integration.parseSubscriptionTokens(raw);
-      if (integration.subscriptionAccessExpired(tokens) && !tokens.refreshToken) throw new Error("login required");
-    } catch { result.status = "pending"; result.reason = "subscription_requires_login"; return; }
+  if (provider === "codex" || provider === "grok") {
+    const resolved = await resolveSubscriptionRoute({ provider, model, maxTokens: MAX_TOKENS, store: store!, env: selection.env });
+    if ("reason" in resolved) { result.status = "pending"; result.reason = resolved.reason; return; }
     result.authSource = "stored-subscription";
-    return { provider: "xai", xaiAuth: "grok", model, maxTokens: MAX_TOKENS, grokStore: store };
-  }
-  if (provider === "codex") {
-    const selected = await selectOpenAITransport({ openaiAuth: "codex", env: selection.env, store: store! });
-    if ("error" in selected) { result.status = "pending"; result.reason = selected.error.startsWith("No ChatGPT") ? "missing_subscription" : "credential_store_unavailable"; return; }
-    let integration: typeof import("../model/providers/codex-subscription.ts");
-    try { integration = await import("../model/providers/codex-subscription.ts"); }
-    catch { result.status = "pending"; result.reason = "integration_unavailable"; return; }
-    // Separate an unavailable OS keychain from malformed/expired stored login data.
-    let raw: string | null;
-    try { raw = await store!.get(codexSubscriptionIdentity()); }
-    catch { result.status = "pending"; result.reason = "credential_store_unavailable"; return; }
-    let tokens;
-    try { tokens = raw?.trim() ? integration.parseSubscriptionTokens(raw) : null; }
-    catch { result.status = "pending"; result.reason = "subscription_requires_login"; return; }
-    if (!tokens || (integration.subscriptionAccessExpired(tokens) && !tokens.refreshToken)) {
-      result.status = "pending"; result.reason = "subscription_requires_login"; return;
-    }
-    result.authSource = "stored-subscription";
-    return { provider: "openai", openaiAuth: "codex", model, maxTokens: MAX_TOKENS, codexStore: store };
+    return resolved.input;
   }
   const family = provider === "compatible" ? "openai-compatible" : provider === "xai-api-key" ? "xai" : "openai";
   const credential = await resolveProviderCredential({
