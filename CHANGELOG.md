@@ -2,6 +2,61 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-10-02
+
+### Added
+
+- Stability policy for 1.0 and later: forward-only, append-only session and
+  undo pre-image compatibility; config deprecation support until the next major;
+  semver for `schway/extensions`; and major-version protection for core tool
+  semantics. Published-version session fixtures enforce discovery, resume,
+  branches, compaction and undo history (#158).
+- The public extension API now also exports `AssistantContent`,
+  `AssistantMessage`, `ProviderMetadata`, `TextContent`, `ThinkingContent`,
+  `ToolCallContent`, `ToolResult`, `UserContent`, `ModelRequest`, `ModelUsage`,
+  `ThinkingLevel`, `RuntimeEvent`, `ApprovalMode`, `CompactionReason`,
+  `ToolCallStatus` and `DeepReadonly`. No public exports were removed. Published
+  declarations and an API report guard the documented surface (#159).
+- `/clear` starts a fresh conversation, like `/new`, keeping login, model and
+  settings. The prior session and its unsent draft remain resumable; file edits
+  stay in place (PR #227).
+- ChatGPT and Grok subscription eval routes (`codex` and `grok`) use existing
+  Schway sign-ins, record subscription billing and zero usage-billed spend,
+  and report unavailable sign-ins as skips rather than successes. They never
+  start login or fall back to API keys (#167, PR #232).
+- Eval `--thinking` validates explicit reasoning selections against the chosen
+  route and model and records the requested value in reports. Unsupported or
+  unavailable capabilities skip without inference or fallback; omission keeps
+  provider defaults (#235, PR #236).
+
+### Changed
+
+- Successful eligible interactive model choices become defaults for new
+  workspaces, without replacing existing workspace choices or affecting
+  headless runs. Model, billing route and thinking stay together; endpoint and
+  profile choices remain workspace-only (PR #228).
+- Connecting a provider prepares a usable model when none is active, while
+  preserving an existing active model and billing route (PR #229).
+- Preferences show common settings first, explicit save scopes and an Advanced
+  view for limits, connection overrides and saved-layer details (PR #230).
+- The model picker starts with current, favorite and recent choices, searches
+  all connected models, and offers separate browse/connect actions. Ctrl+P
+  manages user-wide favorites; Ctrl+I shows model details (PR #231).
+- `ToolContext.env` uses the self-contained
+  `Record<string, string | undefined>` shape, removing its ambient
+  `NodeJS.ProcessEnv` dependency (#159).
+
+### Fixed
+
+- Updated the Codex account-catalog protocol compatibility pin so model
+  discovery uses the supported client version (#237, PR #238).
+
+### Deprecations
+
+- Config deprecation infrastructure preserves old keys, applies replacement
+  precedence and surfaces warnings in the TUI, headless stderr and `doctor`.
+  No config keys are deprecated in this release (#158).
+
 ## [0.6.0] - 2026-10-02
 
 ### Added
