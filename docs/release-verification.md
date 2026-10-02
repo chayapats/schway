@@ -54,9 +54,11 @@ is made here.
 
 ### Offline candidate verification
 
-These are pre-merge checks, not actual-`R` evidence. Verification of the rebased
-source candidate is pending below. The managed worker's updated handoff records
-the exact tested commit and final documentation revision.
+These are pre-merge checks, not actual-`R` evidence. Frozen install, typecheck,
+the full suite and package dry-run passed on clean rebased source candidate
+`bd95142801f1029e034d485dd6542f28982c7b48`. The subsequent commit only updates
+this evidence document. The managed worker's updated handoff records the final
+documentation revision.
 
 The earlier clean candidate `201dca08a7b30ea887880d2b0377c959e37fa921` passed
 frozen install, typecheck, 2,035 tests across 122 files (0 failures, 181.45 seconds)
@@ -65,12 +67,12 @@ do not verify the updated source candidate.
 
 | Check | Exit | Result |
 | --- | --- | --- |
-| Rebased `bun install --frozen-lockfile` | Pending | Rerun on the clean updated candidate |
-| Rebased `bun run typecheck` | Pending | Rerun on the clean updated candidate |
+| Rebased `bun install --frozen-lockfile` | 0 | 27 installs / 53 packages checked; no changes |
+| Rebased `bun run typecheck` | 0 | Updated candidate typecheck passed |
 | Rebased focused CLI, Codex and demo tests | 0 | 124 tests across 3 files; 0 failures; 1.74 seconds |
-| Rebased candidate full `bun test` | Pending | Record exact tested commit and full-suite results |
+| Rebased candidate full `bun test` | 0 | 2,040 tests across 122 files; 0 failures; 183.62 seconds |
 | `bun run demo:record` | 0 | Scripted offline model; GIF 212,814 bytes, below 2,097,152 bytes |
-| Rebased candidate `npm pack --dry-run --json` | Pending | Inspect updated package contents |
+| Rebased candidate `npm pack --dry-run --json` | 0 | 160 files; CLI, source, examples, declared user docs and changelog present; tests, scratch and release evidence absent |
 
 The demo was recorded with task-local VHS 0.10.0, ttyd 1.7.7 and DejaVu Sans
 Mono through a temporary fontconfig file. Frame review confirmed the ready
@@ -86,7 +88,10 @@ After merge, rerun frozen install, typecheck and the full suite on clean `R`,
 record its SHA and test count, and inspect `npm pack --dry-run` again on `R`.
 Pre-merge checks do not replace those release gates.
 
-The complete earlier candidate stdout/stderr log is
+The complete updated candidate stdout/stderr log is
+`/tmp/v06-issue157-resume2-full-suite.log`, also preserved under `resume2/`
+in the private evidence directory. All failure/error sections and final totals
+were inspected: no failures or error sections. The complete earlier log is
 `/tmp/v06-20261001T143347Z-issue-157-full-suite.log`, also preserved in the
 private evidence directory. Its final totals and all failure/error sections
 were inspected: no failures or error sections. Toolchain: Linux
@@ -159,6 +164,14 @@ evidence.
 
 Record every actual step's result and exit code after publication. Deterministic
 candidate tests do not replace this published-version live upgrade check.
+
+The generic clean-registry checks in `docs/releasing.md` also remain pending,
+in a separate fresh installation HOME: help, doctor version, no-model guidance,
+one compatible `OK` turn and the removed-Anthropic configuration error. Reserve
+at most USD 0.10 for that extra bounded turn within the same compatible USD 1
+allowance, including smoke and upgrade calls, with no pooling. Compare errors
+against the current source on `R`. The runtime preflight records exact commands
+and limits; these checks have not run.
 
 ### Remaining release gates
 
