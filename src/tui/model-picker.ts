@@ -60,7 +60,7 @@ export interface ModelPickerEntry {
   listUnavailable?: boolean;
 }
 
-type ModelChoice = Omit<ModelPickerEntry, "kind" | "groupIdentity" | "groupLabel">;
+type ModelChoice = Omit<ModelPickerEntry, "kind" | "groupIdentity" | "groupLabel"> & { groupIdentity?: string };
 
 /** Renderable keyboard picker state; selectedIndex selects from the filtered entries. */
 export interface ModelPickerSnapshot {
@@ -133,7 +133,7 @@ export function modelPickerIdentity(entry: Pick<ModelPickerEntry, "provider" | "
 }
 
 /** Build fuzzy-matched auth-route groups in fixed order, hiding model rows until their route has configured access. */
-export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "grok" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess; apiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; apiModelsUnavailable?: boolean; compatibleModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[] }[]; compatibleModelsUnavailable?: boolean; xaiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; xaiModelsUnavailable?: boolean; subscriptionUnavailable?: boolean; grokModels?: readonly import("../model/model-list.ts").ListedModel[]; grokModelsUnavailable?: boolean }): ModelPickerEntry[] {
+export function modelPickerEntries(query: string, provider: string, modelId: string, limits: { contextWindow?: number; maxOutput?: number }, options?: { profiles?: Record<string, CompatibleProfile>; activeProfile?: string; activeConnection?: CompatibleProfile; activeConnectionAccess?: ModelAccess; subscriptionModels?: readonly string[]; subscriptionCapabilities?: readonly ModelCapability[]; subscriptionMode?: boolean; activeRoute?: "codex" | "grok" | "api-key"; baseUrl?: string; credentialIdentity?: string; access?: ModelPickerAccess; apiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; apiModelsUnavailable?: boolean; compatibleModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[] }[]; compatibleModelsUnavailable?: boolean; xaiModels?: readonly { id: string; contextWindow?: number; maxOutput?: number; supportedThinking?: readonly string[]; defaultThinking?: string }[]; xaiModelsUnavailable?: boolean; subscriptionUnavailable?: boolean; grokModels?: readonly import("../model/model-list.ts").ListedModel[]; grokModelsUnavailable?: boolean }): ModelPickerEntry[] {
   const activeRoute = options?.activeRoute ?? (options?.subscriptionMode ? "codex" : "api-key");
   const staticUnavailable = (entryProvider: string) => entryProvider === "openai" ? options?.apiModelsUnavailable : entryProvider === "xai" ? options?.xaiModelsUnavailable : options?.compatibleModelsUnavailable;
   const entries: ModelChoice[] = listCatalog().filter(entry => {
@@ -192,23 +192,25 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   }
   const profiles = options?.profiles ?? {};
   for (const [name, profile] of Object.entries(profiles)) {
-    const model = profile.model?.trim() || "gpt-4o";
-
     const activeProfile = provider === "openai-compatible" && options?.activeProfile === name;
-    for (const profileModel of new Set([model, ...(activeProfile && modelId ? [modelId] : [])])) entries.push({
-      identity: modelPickerIdentity({ provider: "openai-compatible", authRoute: "provider", profile: name, modelId: profileModel }, profile.baseUrl, profile.credentialIdentity),
-      provider: "openai-compatible",
-      modelId: profileModel,
-      authRoute: "provider",
-      ...budgets("openai-compatible", profileModel, {
-        contextWindow: profile.contextWindow ?? limits.contextWindow,
-        maxOutput: profile.maxOutput ?? limits.maxOutput,
-      }),
-      active: activeProfile && modelId === profileModel,
-      custom: profileModel !== model,
-      profile: name,
-      ...(options?.subscriptionMode ? { otherProvider: true } : {}),
-    });
+    const connection = activeProfile ? options?.activeConnection ?? profile : profile;
+    const currentIdentity = modelPickerIdentity({ provider: "openai-compatible", authRoute: "provider", profile: name, modelId }, connection.baseUrl, connection.credentialIdentity);
+    const choices = [{ connection: profile, model: profile.model?.trim() || "gpt-4o" },
+      ...(activeProfile && modelId ? [{ connection, model: modelId }] : [])];
+    for (const { connection: target, model } of choices) {
+      const choice = { provider: "openai-compatible", authRoute: "provider" as const, profile: name, modelId: model };
+      const identity = modelPickerIdentity(choice, target.baseUrl, target.credentialIdentity);
+      const row = { ...choice, identity,
+        groupIdentity: modelPickerIdentity({ ...choice, modelId: "" }, target.baseUrl, target.credentialIdentity),
+        ...budgets("openai-compatible", model, { contextWindow: target.contextWindow ?? limits.contextWindow, maxOutput: target.maxOutput ?? limits.maxOutput }),
+        active: activeProfile && identity === currentIdentity,
+        custom: model !== profile.model,
+        ...(options?.subscriptionMode ? { otherProvider: true } : {}),
+      };
+      const existing = entries.findIndex(entry => entry.identity === identity);
+      if (existing >= 0) entries[existing] = row;
+      else entries.push(row);
+    }
   }
   const grok: readonly import("../model/model-list.ts").ListedModel[] = options?.grokModels ?? (options?.grokModelsUnavailable ? [] : [{ id: ROUTE_FALLBACK_MODELS.xai }]);
   for (const listed of grok) {
@@ -243,7 +245,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       if (fuzzyRank(query, label) !== undefined) groups.push({ ...common, kind: "sign-in", identity: `sign-in:${groupIdentity}`, modelId: "" });
       return;
     }
-    const choices = entries.filter(entry => entry.provider === provider && entry.authRoute === authRoute && entry.profile === profile);
+    const choices = entries.filter(entry => entry.provider === provider && entry.authRoute === authRoute && entry.profile === profile && (!entry.groupIdentity || entry.groupIdentity === groupIdentity));
     const matching = choices.map((entry, order) => {
       const scores = [entry.modelId, modelPickerName(entry.modelId), `${provider}/${entry.modelId}`, label].map(candidate => fuzzyRank(query, candidate))
         .filter((score): score is number => score !== undefined).map(score => score === 3 ? 2 : score === 4 ? 3 : score);
@@ -252,7 +254,7 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
     matching.sort((a, b) => Number(a.entry.custom) - Number(b.entry.custom) || a.rank - b.rank || a.order - b.order);
     if (!matching.length) return;
     groups.push({ ...common, kind: "header", identity: `header:${groupIdentity}`, modelId: "", listUnavailable: choices.some(entry => entry.listUnavailable) });
-    for (const { entry } of matching) groups.push({ ...entry, kind: "model", groupIdentity, groupLabel: label,
+    for (const { entry } of matching) groups.push({ ...entry, access, kind: "model", groupIdentity, groupLabel: label,
       reasoning: !!entry.supportedThinking?.some(level => level !== "off") || getThinkingSupport(provider, entry.modelId).supported.some(level => level !== "off") });
   };
   for (const route of MODEL_PICKER_ROUTE_GROUPS) {
@@ -268,6 +270,14 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
   }
   for (const [name, profile] of Object.entries(profiles)) addGroup("openai-compatible", "provider", `${name} · ${endpointHost(profile.baseUrl)}`,
     options?.access?.profiles[name], profile.baseUrl, name, profile.credentialIdentity);
+  if (options?.activeProfile && options.activeConnection && provider === "openai-compatible") {
+    const connection = options.activeConnection;
+    const identity = modelPickerIdentity({ provider, authRoute: "provider", profile: options.activeProfile, modelId: "" }, connection.baseUrl, connection.credentialIdentity);
+    // Resolve the active endpoint separately even when its profile name also names a configured route.
+    for (let index = groups.length - 1; index >= 0; index--) if (groups[index]!.groupIdentity === identity) groups.splice(index, 1);
+    addGroup(provider, "provider", `${options.activeProfile} · ${endpointHost(connection.baseUrl)}`, options.activeConnectionAccess,
+      connection.baseUrl, options.activeProfile, connection.credentialIdentity);
+  }
   return groups;
 }
 

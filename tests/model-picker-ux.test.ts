@@ -104,6 +104,51 @@ test("controller favorites, manual recents and browsing survive restart across w
   });
 });
 
+test("current profile uses the effective endpoint and preserves session connection overrides on selection", async () => {
+  await withTempDir(async home => {
+    const profile = { baseUrl: "https://target.example/v1", model: "profile-default", auth: "required" as const,
+      contextWindow: 64000, maxOutput: 4000 };
+    const overrides = { model: "custom-active", baseUrl: "https://override.example/v1", auth: "none" as const, contextWindow: 32000, maxOutput: 2000 };
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    const configEditor = new ConfigEditor({ user: { profiles: { local: profile }, profile: "local" }, session: overrides },
+      { user: join(home, "config.json"), project: join(home, "project.json") });
+    const store = fakeCredentialStore();
+    await store.set(credentialIdentity({ provider: "openai-compatible", profile: "local", baseUrl: profile.baseUrl }), "configured-key");
+    const staged: string[] = [];
+    const controller = new TuiController({ home, workspace, configEditor, session: createSession(), sessionId: "override",
+      provider: "openai-compatible", modelId: overrides.model, model: createScriptedModel({ provider: "openai-compatible", id: overrides.model }),
+      contextManager: createContextManager(workspace), credentials: { store, env: {}, reload: async () => ({ error: "unused" }), listRouteModels: async () => [] },
+      stageSettings: async settings => {
+        staged.push(settings.baseUrl!);
+        return { model: createScriptedModel({ provider: "openai-compatible", id: settings.model }), contextManager: createContextManager(workspace) };
+      },
+    });
+    const choice = { provider: "openai-compatible", authRoute: "provider" as const, profile: "local", modelId: overrides.model };
+    const identity = modelPickerIdentity(choice, overrides.baseUrl);
+    try {
+      controller.openModelPicker(); await settled(controller);
+      const current = controller.snapshot().modelPicker!.entries.find(row => row.active)!;
+      expect(current).toMatchObject({ identity, modelId: overrides.model, groupLabel: "local · override.example", contextWindow: 32000, maxOutput: 2000, access: "No key required" });
+      expect(current.identity).not.toBe(modelPickerIdentity(choice, profile.baseUrl));
+      expect(controller.togglePickerFavorite()).toBe(true);
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(configEditor.settings).toMatchObject({ ...overrides, profile: "local" });
+      expect(staged).toEqual([overrides.baseUrl]);
+      expect(new ModelPreferences(home).read()).toMatchObject({ favorites: [identity], recents: [identity] });
+      controller.openModelPicker(); await settled(controller);
+      expect(controller.snapshot().modelPicker!.entries.find(row => row.active)?.identity).toBe(identity);
+      // Selecting the configured profile row deliberately applies its connection defaults.
+      controller.searchModels("profile-default");
+      expect(controller.snapshot().modelPicker!.entries[0]).toMatchObject({ groupLabel: "local · target.example", active: false });
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(configEditor.settings).toMatchObject({ ...profile, profile: "local" });
+      expect(staged).toEqual([overrides.baseUrl, profile.baseUrl]);
+      controller.openModelPicker(); await settled(controller);
+      expect(controller.snapshot().modelPicker!.entries.some(row => row.identity === identity)).toBe(false);
+    } finally { controller.dispose(); }
+  });
+});
+
 test("profile current overrides and remembered choices retain exact model and endpoint across restart", async () => {
   await withTempDir(async home => {
     const profile = { baseUrl: "https://openrouter.ai/api/v1", model: "profile-default", auth: "none" as const,

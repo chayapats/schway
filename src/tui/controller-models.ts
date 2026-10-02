@@ -1,6 +1,6 @@
 import { isOpenRouterEndpoint, resolveThinkingSelection } from "../model/thinking.ts";
 import { openRouterModelCapabilities } from "../model/model-list.ts";
-import { isOpenAIAuthPreference } from "../auth/credentials.ts";
+import { isOpenAIAuthPreference, resolveProviderCredential } from "../auth/credentials.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { ModelCapability } from "../model/catalog.ts";
@@ -11,6 +11,7 @@ import { filterXaiModels, type ListedModel } from "../model/model-list.ts";
 import { modelPickerEntries, modelPickerIdentity, presentModelPicker, rememberedPickerModels, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
 import { ModelPreferences, type ModelPreferencesSnapshot } from "../config/model-preferences.ts";
 import { loadModelPickerAccess } from "./model-access.ts";
+import type { ModelAccess } from "./model-access.ts";
 import { CommandsLayer } from "./controller-commands.ts";
 
 
@@ -19,6 +20,7 @@ export abstract class ModelsLayer extends CommandsLayer {
   private pickerPreferences: ModelPreferencesSnapshot = { favorites: [], recents: [] };
   private pickerCacheKey?: string;
   private pickerCachedAccess?: typeof this.modelPickerAccess;
+  private pickerActiveAccess?: ModelAccess;
   private pickerReturnView?: { browsing?: boolean; connecting?: boolean };
   private pickerModelQuery = "";
   private pickerBrowseQuery = "";
@@ -111,6 +113,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       this.subscriptionModels = undefined; this.apiModels = undefined; this.compatibleModels = undefined;
       this.xaiModels = undefined; this.grokModels = undefined;
       this.pickerCachedAccess = undefined;
+      this.pickerActiveAccess = undefined;
     }
     this.pickerCacheKey = cacheKey;
     try { this.pickerPreferences = this.preferenceStore()?.read() ?? this.pickerPreferences; }
@@ -146,6 +149,15 @@ export abstract class ModelsLayer extends CommandsLayer {
           activeProfile: settings?.profile ?? this.profile, profiles: this.configEditor?.profiles,
         }));
         if (!current()) return;
+        if (settings?.profile && settings.baseUrl) {
+          const credential = await this.boundedPickerTask(signal, resolveProviderCredential({ ...this.credentials,
+            provider: "openai-compatible", profile: settings.profile, baseUrl: settings.baseUrl,
+            auth: settings.auth, credentialEnv: settings.credentialEnv, credentialIdentity: settings.credentialIdentity,
+            runtimeApiKey: this.credentials.runtimeProvider === undefined || this.credentials.runtimeProvider === "openai-compatible" ? this.credentials.runtimeApiKey : undefined,
+          }));
+          if (!current()) return;
+          this.pickerActiveAccess = "error" in credential ? "Login required" : credential.source === "none" ? "No key required" : "API key";
+        }
         this.modelPickerAccess = access;
         this.pickerCachedAccess = access;
         picker.accessLoading = false;
@@ -171,7 +183,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     } catch (error) {
       if (current()) {
         picker.accessLoading = false;
-        if (discoveryStage === "access") { this.modelPickerAccess = this.unavailablePickerAccess(); this.pickerCachedAccess = undefined; }
+        if (discoveryStage === "access") { this.modelPickerAccess = this.unavailablePickerAccess(); this.pickerCachedAccess = undefined; this.pickerActiveAccess = "Login required"; }
         if (discoveryStage === "catalog") this.subscriptionListUnavailable = true;
         const message = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350);
         picker.catalogState = /offline|network|fetch|timeout|aborted/i.test(message) ? "offline" : "failed";
@@ -317,6 +329,10 @@ export abstract class ModelsLayer extends CommandsLayer {
     const endpoint = this.configEditor?.standaloneEndpoint;
     const options = {
       profiles: this.configEditor?.profiles, activeProfile: settings?.profile ?? this.profile,
+      activeConnection: settings?.profile && settings.baseUrl ? { baseUrl: settings.baseUrl, auth: settings.auth,
+        credentialIdentity: settings.credentialIdentity, credentialEnv: settings.credentialEnv,
+        contextWindow: settings.contextWindow, maxOutput: settings.maxOutput } : undefined,
+      activeConnectionAccess: this.pickerActiveAccess ?? (this.credentials ? "Login required" : undefined),
       activeRoute: this.grokSelected() ? "grok" : this.model?.provider === "codex-subscription" || this.openaiAuth === "codex" ? "codex" : "api-key",
       baseUrl: endpoint ? endpoint.baseUrl : this.baseUrl, credentialIdentity: endpoint?.credentialIdentity,
       subscriptionMode: this.subscriptionSelected(), subscriptionModels: this.subscriptionModels, subscriptionCapabilities: this.subscriptionCapabilities, access: this.modelPickerAccess ?? (this.credentials ? this.unavailablePickerAccess() : undefined),
@@ -371,7 +387,9 @@ export abstract class ModelsLayer extends CommandsLayer {
       return started;
     }
     if (selection.profile) {
-      const profile = this.configEditor?.profiles[selection.profile];
+      const settings = this.configEditor?.settings;
+      const profile = settings?.profile === selection.profile && selection.groupIdentity === modelPickerIdentity({ ...selection, modelId: "" }, settings.baseUrl, settings.credentialIdentity)
+        ? settings : this.configEditor?.profiles[selection.profile];
       started = !!profile && this.beginCredentialTarget({ provider: "openai-compatible", profile: selection.profile,
         baseUrl: profile.baseUrl, credentialIdentity: profile.credentialIdentity });
     } else if (selection.provider === "openai-compatible") {
@@ -431,7 +449,12 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     let applied: boolean;
     if (selection.profile !== undefined) {
-      applied = await this.changeSettings(() => this.configEditor!.prepareModel(selection.provider, selection.modelId, selection.profile),
+      const settings = this.configEditor!.settings;
+      const effectiveRoute = settings.provider === selection.provider && settings.profile === selection.profile && selection.groupIdentity ===
+        modelPickerIdentity({ ...selection, modelId: "" }, settings.baseUrl, settings.credentialIdentity);
+      applied = await this.changeSettings(() => effectiveRoute
+        ? this.configEditor!.prepare({ scope: "session", key: "model", value: selection.modelId })
+        : this.configEditor!.prepareModel(selection.provider, selection.modelId, selection.profile),
         () => `Using ${this.modelId} · ${selection.profile} · Enter send`, undefined, true);
     }
     else if (selection.authRoute === "codex") {
