@@ -365,7 +365,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     diagnostics.record("session", "ready", { resumed: !!parsed.args.resume });
     if (parsed.args.json && session.persisted) {
       const event: HeadlessSessionReadyEvent = { type: "session.ready", sessionId: session.header.id };
-      io.stdout.write(`${JSON.stringify(redactHeadlessSessionReady(event, secrets))}\n`);
+      const ready = headlessSessionReadyPreamble(event, secrets);
+      if (ready) {
+        io.stdout.write(`${JSON.stringify(ready)}\n`);
+      }
     }
     session.append({
       type: "user",
@@ -490,12 +493,21 @@ function collectSecrets(
   return secrets;
 }
 
-/** Redact secrets from the headless session.ready JSONL preamble. */
-function redactHeadlessSessionReady(
+/**
+ * Emit the exact persisted session ID for --resume.
+ * If that ID would expose a collected secret substring, suppress the preamble
+ * instead of mangling the ID (e.g. OPENAI_API_KEY="-" vs UUID hyphens).
+ */
+function headlessSessionReadyPreamble(
   event: HeadlessSessionReadyEvent,
   secrets: readonly string[],
-): HeadlessSessionReadyEvent {
-  return { ...event, sessionId: redactSecrets(event.sessionId, secrets) };
+): HeadlessSessionReadyEvent | null {
+  for (const secret of secrets) {
+    if (secret.length > 0 && event.sessionId.includes(secret)) {
+      return null;
+    }
+  }
+  return event;
 }
 
 /** Redact configured secrets from event fields that can reach stdout. */
