@@ -410,7 +410,8 @@ export class ConfigEditor {
         for (const key of Object.keys(ui)) if (ui[key] === undefined) delete ui[key];
         if (Object.keys(ui).length) layer.ui = ui;
         else delete layer.ui;
-      } else layer[edit.key] = edit.value;
+      } else layer[edit.key] = preserveDeprecatedDescendants(source?.[edit.key as keyof ConfigLayer], edit.value,
+        this.configDeprecations.filter(entry => entry.key.startsWith(`${edit.key}.`)).map(entry => entry.key.slice(edit.key.length + 1).split(".")));
     }
     const parsed = parseConfigObject(layer, path ?? scope, this.configDeprecations);
     if ("error" in parsed) throw new Error(parsed.error);
@@ -437,6 +438,35 @@ export class ConfigEditor {
       } finally { this.committing = false; }
     } };
   }
+}
+
+/** Retain only omitted legacy paths in partial object edits; explicit values and empty-object resets win. */
+function preserveDeprecatedDescendants(previous: unknown, supplied: unknown, paths: readonly string[][]): unknown {
+  if (!isConfigObject(previous) || !isConfigObject(supplied) || !Object.keys(supplied).length || !paths.length) return supplied;
+  const result = { ...supplied };
+  for (const path of paths) preserveDeprecatedPath(previous, result, path);
+  return result;
+}
+
+/** Copy one omitted legacy leaf through cloned ancestors without reviving an explicitly reset subtree. */
+function preserveDeprecatedPath(previous: Record<string, unknown>, result: Record<string, unknown>, [key, ...rest]: readonly string[]): void {
+  if (key === undefined || !Object.hasOwn(previous, key)) return;
+  const present = Object.hasOwn(result, key);
+  if (!rest.length) {
+    if (!present) Object.defineProperty(result, key, { value: structuredClone(previous[key]), enumerable: true, configurable: true, writable: true });
+    return;
+  }
+  if (!isConfigObject(previous[key])) return;
+  const current = result[key];
+  if (present && (!isConfigObject(current) || !Object.keys(current).length)) return;
+  const child = present ? { ...current as Record<string, unknown> } : {};
+  preserveDeprecatedPath(previous[key], child, rest);
+  if (Object.keys(child).length) Object.defineProperty(result, key, { value: child, enumerable: true, configurable: true, writable: true });
+}
+
+/** Recognize object-valued config settings without treating arrays or null as partial edits. */
+function isConfigObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Clear stale connection keys when a session profile switch would otherwise inherit them. */
