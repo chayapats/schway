@@ -44,6 +44,7 @@ headless runs never initialize it.
 
 ```text
 /new - start a new session
+/clear - start a new conversation (same as /new)
 /sessions - list saved sessions
 /resume <id> - resume a saved session
 /branch list - show branch IDs, heads, and complete-turn fork points
@@ -120,6 +121,12 @@ startup exit before the terminal opens. Headless execution keeps its existing
 configuration and credential path and does not read interactive choice memory.
 
 ## Returning to recent work
+
+Use `/clear` or `/new` to start a new conversation with empty model conversation
+context. Both keep your login, selected model and settings. The previous session
+remains available through `/sessions` or `/resume`; file edits stay in place.
+Ordinary unsent drafts stay with their original session and return when you resume
+it. Run either command after the current turn finishes, or press Esc to stop it first.
 
 Ordinary launch opens a new conversation. When this workspace has saved work,
 **Alt+B resume** appears above the conversation with its task preview. One press
@@ -546,8 +553,8 @@ reader's scroll position.
 
 ## Discover commands and skills
 
-Type `/` to browse commands in a fixed order: `/model`, `/new`, `/sessions`,
-`/changes`, `/compact`, then the remaining built-ins. User-invokable project and
+Type `/` to browse commands in a fixed order: `/model`, `/new`, `/clear`, `/sessions`,
+`/changes`, `/undo`, `/compact`, then the remaining built-ins. User-invokable project and
 global skills, including user-only skills, follow under **Skills**, then active
 extension commands under **Extensions**. Empty groups have no header. Extension
 rows show their package name, or the module filename for `--extension` modules.

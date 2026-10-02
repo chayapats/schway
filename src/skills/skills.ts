@@ -14,6 +14,7 @@ export const ACTIVE_SKILL_SECTION_NAME = "active-skill";
 /** Built-in slash names a skill must not shadow; the TUI dispatcher owns behavior, this list owns collision detection. */
 export const RESERVED_SKILL_NAMES: readonly string[] = [
   "new",
+  "clear",
   "sessions",
   "delete-session",
   "resume",

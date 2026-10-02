@@ -207,6 +207,18 @@ test("built-in command collisions are explained and never silently shadow", asyn
   });
 });
 
+test("clear is reserved against skill discovery and activation", async () => {
+  await withTempDir(async dir => {
+    const skills = await projectSkillsDir(dir);
+    await writeSkill(skills, "clear", "name: clear\ndescription: Conflicting skill.", "Do not activate.");
+    const discovery = await discoverSkills({ workspaceRoot: dir });
+    expect(discovery.skills).toEqual([]);
+    expect(discovery.collisions).toMatchObject([{ name: "clear", command: "/clear" }]);
+    const invocation = await prepareSkillInvocation({ workspaceRoot: dir, name: "clear" });
+    expect(invocation).toMatchObject({ ok: false, error: expect.stringContaining("collides with built-in /clear") });
+  });
+});
+
 test("user-only skills stay listed for users but out of the model-facing section", async () => {
   await withTempDir(async (dir) => {
     const skills = await projectSkillsDir(dir);
