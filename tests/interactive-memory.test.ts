@@ -80,7 +80,7 @@ test("canonical Git roots, subdirectories, symlink aliases and non-Git directori
     for (const path of [a, join(a, "nested"), join(root, "alias", "nested")]) {
       const reopened = await launch(home, path); expect(reopened.editor.settings.model).toBe("gpt-4o"); reopened.controller.dispose();
     }
-    const nonGit = await launch(home, plain); expect(nonGit.editor.settings.model).toBe("");
+    const nonGit = await launch(home, plain); expect(nonGit.editor.settings.model).toBe("gpt-4o");
     await nonGit.controller.selectModel("openai/gpt-5.4-mini"); nonGit.controller.dispose();
     const reopened = await launch(home, plain); expect(reopened.editor.settings.model).toBe("gpt-5.4-mini"); reopened.controller.dispose();
     const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
@@ -100,6 +100,8 @@ test("failed and cancelled activation preserve memory while storage failure leav
     cancelled.controller.cancel(); release();
     expect(await pending).toBe(false); cancelled.controller.dispose();
     const preserved = await launch(home, root); expect(preserved.editor.settings.model).toBe("gpt-4o"); preserved.controller.dispose();
+    const fresh = join(root, "fresh"); await mkdir(fresh);
+    const inherited = await launch(home, fresh); expect(inherited.editor.settings.model).toBe("gpt-4o"); inherited.controller.dispose();
     const brokenHome = join(root, "broken-home"); await mkdir(join(brokenHome, ".schway"), { recursive: true });
     await writeFile(join(brokenHome, ".schway/interactive"), "not a directory");
     const broken = await launch(brokenHome, root);

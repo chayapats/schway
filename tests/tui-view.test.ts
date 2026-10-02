@@ -1464,7 +1464,7 @@ test("preferences real keyboard scopes preview save reset and restart preserve t
   });
 });
 
-test("preferences workspace memory is an explicit complete choice, isolated and reset without clearing session", async () => {
+test("preferences memory shares the complete choice with new workspaces and resets locally without clearing session", async () => {
   await withTempDir(async root => {
     const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4" });
     await ui.controller.configCommand("set thinking low");
@@ -1475,11 +1475,12 @@ test("preferences workspace memory is an explicit complete choice, isolated and 
     const memory = await InteractiveMemory.load(ui.home, ui.workspaceRoot);
     expect(memory.choice).toMatchObject({ provider: ui.configEditor.settings.provider, model: ui.configEditor.settings.model });
     const other = join(root, "other"); await mkdir(other);
-    expect((await InteractiveMemory.load(ui.home, other)).choice).toBeUndefined();
+    expect((await InteractiveMemory.load(ui.home, other)).choice).toEqual(memory.choice);
     expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot, interactiveMemory: true })).origins.model).toBe("interactive memory");
     expect((await loadConfigEditor({ home: ui.home, workspaceRoot: ui.workspaceRoot })).origins.model).toBeUndefined();
     ui.mockInput.pressArrow("right"); await preferenceEnter(ui); await preferenceEnter(ui);
     expect((await InteractiveMemory.load(ui.home, ui.workspaceRoot)).choice).toBeUndefined();
+    expect((await InteractiveMemory.load(ui.home, other)).choice).toEqual(memory.choice);
     expect(await readdir(ui.workspaceRoot)).toEqual([]);
     expect(ui.configEditor.settings.thinking).toBe("low");
   });
