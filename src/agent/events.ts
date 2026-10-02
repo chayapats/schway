@@ -8,6 +8,7 @@ import type { ToolCallStatus } from "../tools/types.ts";
  * This is not the durable session record.
  */
 export type RuntimeEvent =
+  | { type: "session.ready"; sessionId: string }
   | { type: "agent.started" }
   | {
       type: "agent.finished";

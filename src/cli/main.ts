@@ -363,6 +363,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       diagnosticSessionId = session.header.id;
     }
     diagnostics.record("session", "ready", { resumed: !!parsed.args.resume });
+    if (parsed.args.json && session.persisted) {
+      const event: RuntimeEvent = { type: "session.ready", sessionId: session.header.id };
+      io.stdout.write(`${JSON.stringify(redactEvent(event, secrets))}\n`);
+    }
     session.append({
       type: "user",
       id: crypto.randomUUID(),
@@ -488,6 +492,7 @@ function collectSecrets(
 
 /** Redact configured secrets from event fields that can reach stdout. */
 function redactEvent(event: RuntimeEvent, secrets: readonly string[]): RuntimeEvent {
+  if (event.type === "session.ready") return { ...event, sessionId: redactSecrets(event.sessionId, secrets) };
   if (event.type === "error" || event.type === "model.retry") {
     return { ...event, message: redactSecrets(event.message, secrets) };
   }
