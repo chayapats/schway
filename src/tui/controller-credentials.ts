@@ -2,8 +2,7 @@ import { formatCount } from "../text/format.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
-import { listCatalog, ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
-import { filterXaiModels, recommendedListedModel, xaiModelCapabilities, type ListedModel } from "../model/model-list.ts";
+import { filterXaiModels, reliableListedModel, xaiModelCapabilities, type ListedModel } from "../model/model-list.ts";
 import { validateThinking } from "../model/thinking.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
@@ -369,12 +368,10 @@ export abstract class CredentialsLayer extends ControllerCore {
     return applied;
   }
 
-  /** Choose only a marked default, a known supported model, or the sole listed model. */
-  private signedInDefault(route: "api-key" | "compatible" | "xai" | "codex" | "grok", models: readonly ListedModel[]): string {
-    const id = recommendedListedModel(route, models);
-    const provider = route === "compatible" ? "openai-compatible" : route === "xai" || route === "grok" ? "xai" : "openai";
-    const supportedDefault = id === ROUTE_FALLBACK_MODELS[provider] || listCatalog().some(entry => entry.provider === provider && entry.id === id);
-    if (models.some(model => model.id === id && (model.recommended || models.length === 1 || supportedDefault))) return id;
+  /** Require a reliable model default so the login flow can offer selection when none exists. */
+  private signedInDefault(route: Parameters<typeof reliableListedModel>[0], models: readonly ListedModel[]): string {
+    const id = reliableListedModel(route, models);
+    if (id) return id;
     throw new Error("Choose a model from the available account models.");
   }
 
