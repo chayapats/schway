@@ -5,9 +5,9 @@ export function preferenceLines(panel: PreferencesSnapshot, compact: boolean): s
   const row = panel.rows[panel.selectedIndex]!;
   const choice = preferenceChoice(row.choices[panel.choiceIndex]);
   const advanced = panel.page === "advanced";
-  const action = row.action && (panel.page !== "advanced" || row.action !== "choose-model");
+  const action = opensPreferenceAction(panel);
   const scope = { session: "This session", memory: "This workspace", user: "All workspaces", project: "This project" }[panel.scope];
-  const value = (item: typeof row) => item.key === "thinking" ? item.value.match(/effective: (.*)\)$/)?.[1] ?? item.value : preferenceChoice(item.value);
+  const value = (item: typeof row) => preferenceChoice(advanced ? item.value : item.effectiveValue ?? item.value);
   const selected = `› ${row.label}: ${value(row)}`;
   const hint = action ? "Enter open · Esc back" : "←→ change · Enter preview · Esc back";
   const state = panel.error ? `! Not saved: ${choice}` : panel.preview ? `Enter saves · ${choice}` : action ? hint : `Choice: ${choice}`;
@@ -34,8 +34,13 @@ export function preferenceLines(panel: PreferencesSnapshot, compact: boolean): s
 export function preferenceHint(panel: PreferencesSnapshot): string {
   if (panel.error) return "←→ change · Esc back";
   if (panel.preview) return "Enter confirm · Esc cancel";
-  const row = panel.rows[panel.selectedIndex]!;
-  return row.action && (row.action !== "choose-model" || row.choices[panel.choiceIndex] !== undefined)
+  return opensPreferenceAction(panel)
     ? "↑↓ select · Enter open · Esc back"
     : "←→ change · Enter preview · Esc back";
+}
+
+/** Distinguish navigation choices from scoped reset choices on the same row. */
+function opensPreferenceAction(panel: PreferencesSnapshot): boolean {
+  const row = panel.rows[panel.selectedIndex]!;
+  return !!row.action && (row.action !== "choose-model" || row.choices[panel.choiceIndex] !== undefined);
 }

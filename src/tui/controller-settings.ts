@@ -120,8 +120,11 @@ export abstract class SettingsLayer extends UndoLayer {
         const origin = row.key === "appearance" && this.appearanceEnvironment ? "environment" : transaction.origins[(row.key === "ui.splash" ? "ui" : row.key) as keyof ConfigLayer] ?? transaction.origins.model;
         const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : row.key === "ui.splash" ? transaction.settings.splash : transaction.settings[row.key as keyof ResolvedSettings];
         const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
-        const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin ? ` Saved but not effective: shadowed by ${origin}.` : "";
-        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)} [${origin}].${shadowing} Enter confirms; Esc cancels.`, this.secrets);
+        const advanced = panel.page === "advanced";
+        const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin
+          ? advanced ? ` Saved but not effective: shadowed by ${origin}.` : ` Saved but not effective: overridden by ${friendlyPreferenceOrigin(origin)}.` : "";
+        const evidence = advanced ? ` [${origin}]` : "";
+        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing} Enter confirms; Esc cancels.`, this.secrets);
         panel.error = undefined;
         return true;
       } catch (error) {
@@ -312,3 +315,8 @@ export abstract class SettingsLayer extends UndoLayer {
 
 /** Identify decorative preferences that do not need a configured or activated model. */
 function presentationPreference(key: string): false | "appearance" | "ui" { return key === "ui.splash" ? "ui" : key === "appearance" ? "appearance" : false; }
+
+/** Explain a higher-priority source in Basic without exposing layer identifiers. */
+function friendlyPreferenceOrigin(origin: string | undefined): string {
+  return ({ CLI: "launch options", "current-session override": "this session", project: "this project", "user-global": "all workspaces", "interactive memory": "the remembered workspace choice", environment: "the launch environment", catalog: "model defaults", "built-in default": "defaults" } as Record<string, string>)[origin ?? ""] ?? "the connection profile";
+}

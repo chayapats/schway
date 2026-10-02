@@ -1332,6 +1332,54 @@ test("basic Thinking previews and applies a supported effort without duplicating
   });
 });
 
+test("Basic preview explains ineffective saves plainly while Advanced keeps source evidence", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { appearance: "dark" });
+    ui.mockInput.pressKey("p", { meta: true }); ui.mockInput.pressTab();
+    for (let n = 0; n < 3; n++) ui.mockInput.pressArrow("down");
+    for (let n = 0; n < 3; n++) ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    const preview = ui.controller.snapshot().preferences?.preview;
+    expect(preview).toContain("Save for all workspaces");
+    expect(preview).toContain("Appearance: light");
+    expect(preview).toContain("Effective after save: dark");
+    expect(preview).toContain("Saved but not effective: overridden by launch options");
+    for (const raw of ["CLI", "user-global", "current-session override", "["]) expect(preview).not.toContain(raw);
+    expect(ui.configEditor.settings.appearance).toBe("dark");
+    ui.mockInput.pressEscape();
+    await advancedPreferences(ui);
+    const index = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "appearance");
+    for (let n = 0; n < index; n++) ui.mockInput.pressArrow("down");
+    for (let n = 0; n < 3; n++) ui.mockInput.pressArrow("right");
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Effective after save: dark [CLI]");
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Saved but not effective: shadowed by CLI");
+  });
+});
+
+test("advanced model choice agrees with panel and footer hints while reset previews", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root, {}, { provider: "openai", model: "gpt-5.4" });
+    ui.mockInput.pressKey("p", { meta: true });
+    await advancedPreferences(ui);
+    const index = ui.controller.snapshot().preferences!.rows.findIndex(row => row.key === "model");
+    for (let n = 0; n < index; n++) ui.mockInput.pressArrow("down");
+    await settle(ui);
+    expect(ui.captureCharFrame().match(/Enter preview/g)?.length).toBeGreaterThanOrEqual(2);
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Reset (inherit)");
+    expect(ui.controller.snapshot().modelPicker).toBeUndefined();
+    ui.mockInput.pressEscape(); ui.mockInput.pressArrow("right"); await settle(ui);
+    const frame = ui.captureCharFrame();
+    expect(frame.match(/Enter open/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(frame).not.toContain("Enter preview");
+    await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences).toBeUndefined();
+    expect(ui.controller.snapshot().modelPicker).toBeDefined();
+    expect(ui.configEditor.settings.model).toBe("gpt-5.4");
+  });
+});
+
 test("advanced preferences return to basic and keep numeric settings out of the basic list", async () => {
   await withTempDir(async root => {
     const ui = await preferenceFixture(root);
