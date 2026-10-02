@@ -1304,8 +1304,8 @@ test("controller browser callback saves a credential, discovers account models a
     });
     const controller = new TuiController({
       session: createSession(), sessionId: "browser-journey", workspace, configEditor: editor,
-      provider: "openai", modelId: editor.settings.model,
-      model: createScriptedModel({ provider: "openai" }), contextManager: createContextManager(workspace), secrets,
+      provider: "openai", modelId: "",
+      contextManager: createContextManager(workspace), secrets,
       credentials: { store, env: {}, reload: async () => ({ error: "unused" }), codexLogin: runner,
         listSubscriptionCatalog: async () => [{ id: "account-model", contextWindow: 100000, supportedThinking: ["low"] }] },
       stageSettings: async settings => ({ model: createScriptedModel({ provider: "codex-subscription", id: settings.model,

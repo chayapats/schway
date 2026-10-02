@@ -107,6 +107,10 @@ mock.module("./node_modules/schway/src/model/loader.ts", () => ({ bindGrokModel:
   } };
 } }));
 globalThis.fetch = async (url, init) => {
+  if (scenario === "fresh" && String(url) === "https://api.openai.com/v1/models") {
+    if (new Headers(init.headers).get("authorization") !== "Bearer installed-fixture-key") throw new Error("Wrong model-list credential");
+    return Response.json({ data: [{ id: "gpt-6-astra" }] });
+  }
   if (scenario.startsWith("invalid-model") && String(url).includes("/models?")) {
     catalogRequests++;
     if (init.headers.Authorization !== "Bearer fixture-subscription") throw new Error("Wrong catalog route");

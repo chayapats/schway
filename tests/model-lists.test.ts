@@ -11,7 +11,7 @@ import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { lookupModel, ROUTE_FALLBACK_MODELS } from "../src/model/catalog.ts";
 import { stageInteractiveSettings } from "../src/tui/app.ts";
-import { fetchProviderModelList, filterXaiModels, ModelListTooLargeError, parseModelList, recommendedListedModel, requireOpenAIApiKeyModels, requireXaiModels, xaiModelCapabilities } from "../src/model/model-list.ts";
+import { fetchProviderModelList, filterXaiModels, ModelListTooLargeError, parseModelList, recommendedListedModel, reliableListedModel, requireOpenAIApiKeyModels, requireXaiModels, xaiModelCapabilities } from "../src/model/model-list.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createConversationView } from "../src/tui/view.ts";
@@ -21,6 +21,33 @@ import { preferenceRows } from "../src/tui/preferences.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
+
+for (const [route, supported] of [
+  ["api-key", "gpt-6-astra"], ["codex", "gpt-6-astra"], ["compatible", "gpt-4o"],
+  ["xai", "grok-4.7"], ["grok", "grok-4.7"],
+] as const) test(`${route} reliable defaults share recommendation policy without picker fallbacks`, () => {
+  expect(reliableListedModel(route, [])).toBeUndefined();
+  expect(recommendedListedModel(route, [])).toBe(supported);
+  const custom = [{ id: "custom-a" }, { id: "custom-b" }];
+  expect(reliableListedModel(route, custom)).toBeUndefined();
+  expect(recommendedListedModel(route, custom)).toBe("custom-a");
+  expect(reliableListedModel(route, [custom[0]!])).toBe("custom-a");
+  expect(recommendedListedModel(route, [custom[0]!])).toBe("custom-a");
+  const listed = [...custom, { id: supported }];
+  expect(reliableListedModel(route, listed)).toBe(supported);
+  expect(recommendedListedModel(route, listed)).toBe(supported);
+  const marked = [...listed, { id: "marked-default", recommended: true }];
+  expect(reliableListedModel(route, marked)).toBe("marked-default");
+  expect(recommendedListedModel(route, marked)).toBe("marked-default");
+});
+
+for (const [route, known] of [["api-key", "gpt-5.4"], ["codex", "gpt-5.4"], ["compatible", "gpt-4o-mini"]] as const) {
+  test(`${route} reliable defaults accept listed catalog models without the route default`, () => {
+    const models = [{ id: "custom-a" }, { id: known }];
+    expect(reliableListedModel(route, models)).toBe(known);
+    expect(recommendedListedModel(route, models)).toBe(known);
+  });
+}
 
 test("a fresh install names no model, keeps typed text, and will not send", async () => {
   const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true });

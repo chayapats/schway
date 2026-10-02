@@ -190,13 +190,13 @@ test("Grok sign-in activates its recommended model, emits billing route, and log
     await store.set(credentialIdentity({ provider: "xai" }), "billing-key");
     const editor = await loadConfigEditor({ home, workspaceRoot: root, cli: { provider: "openai", model: "gpt-6-astra" }, interactiveMemory: true });
     const activated: string[] = [];
-    const controller = new TuiController({ session: createSession(), sessionId: "grok", workspace, home, configEditor: editor, provider: "openai", modelId: "gpt-6-astra", model: createScriptedModel(), contextManager: createContextManager(workspace),
+    const controller = new TuiController({ session: createSession(), sessionId: "grok", workspace, home, configEditor: editor, provider: "openai", modelId: "", contextManager: createContextManager(workspace),
       credentials: { store, env: { XAI_API_KEY: "environment-key" }, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved }) => { await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "approved", obtainedAt: 0 })); onSaved?.(); return { ok: true, status: "Saved" }; }, listGrokModels: async () => [{ id: "grok-other" }, { id: "grok-4.7", recommended: true }] },
       stageSettings: async next => ({ model: bindGrokModel(createScriptedModel({ provider: "xai", id: next.model })), contextManager: createContextManager(workspace) }), onModelActivated: choice => { activated.push(choice.authRoute); },
     });
     try {
       expect(await controller.login("grok")).toBe(true); expect(editor.settings.xaiAuth).toBe("grok"); expect(controller.snapshot().modelId).toBe("grok-4.7"); expect(activated).toEqual(["grok"]);
-      expect(controller.snapshot().transcript.some(entry => entry.text === "Signed in · Using xai/grok-4.7 · Enter send")).toBe(true);
+      expect(controller.snapshot().transcript.some(entry => entry.text === "Grok model active · grok-4.7 · Enter send")).toBe(true);
       expect(await controller.logout("grok")).toBe(true); expect(await store.get(grokSubscriptionIdentity())).toBeNull(); expect(await store.get(credentialIdentity({ provider: "xai" }))).toBe("billing-key");
       expect(controller.snapshot().transcript.some(entry => entry.text.includes("Grok disconnected · Alt+L reconnect this account"))).toBe(true); expect(await controller.submit("Do not bill an API key")).toBe(false);
     } finally { controller.dispose(); }
@@ -210,7 +210,9 @@ test("Grok plan rejection preserves the saved login and other routes but blocks 
     const controller = new TuiController({ session: createSession(), sessionId: "grok", workspace, configEditor: editor, provider: previous, xaiAuth: previous === "xai" ? "grok" : "auto", modelId: "previous-model", model: createScriptedModel({ provider: previous, id: "previous-model" }), contextManager: createContextManager(workspace),
       credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved }) => { await store.set(grokSubscriptionIdentity(), "saved"); onSaved?.(); return { ok: true, status: "Saved" }; }, listGrokModels: async () => { throw Error("Your Grok plan doesn't include API access. Use an xAI API key instead."); } }, stageSettings: async () => { throw Error("must not activate"); },
     });
-    try { expect(await controller.login("grok")).toBe(false); expect(controller.snapshot().modelId).toBe("previous-model"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved"); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L"); expect(await controller.submit("Use the retained route if its credentials are unchanged")).toBe(previous !== "xai"); }
+    try { expect(await controller.login("grok")).toBe(previous !== "xai"); expect(controller.snapshot().modelId).toBe("previous-model"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved");
+      if (previous === "xai") expect(controller.snapshot().transcript.at(-1)?.text).toBe("Models unavailable; sign-in saved · /model retry · Alt+L sign in · Ctrl+I details");
+      expect(await controller.submit("Use the retained route if its credentials are unchanged")).toBe(previous !== "xai"); }
     finally { controller.dispose(); }
   });
 });
@@ -410,7 +412,7 @@ test("endpoint URL prefill accepts only the same valid HTTP(S) URLs as profiles,
   }
 });
 
-for (const outcome of ["success", "list-failure", "activation-failure"] as const) test(`endpoint key save replaces a current profile in session scope through ${outcome}`, async () => {
+for (const outcome of ["success", "list-failure", "activation-failure"] as const) test(`endpoint key save replaces an unavailable profile in session scope through ${outcome}`, async () => {
   await withTempDir(async root => {
     const home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] }, store = fakeCredentialStore();
     const editor = await loadConfigEditor({ home, workspaceRoot: root, interactiveMemory: true, cli: {
@@ -418,7 +420,7 @@ for (const outcome of ["success", "list-failure", "activation-failure"] as const
     } });
     const session = createSession(); const listings: unknown[] = []; const staged: string[] = [];
     const controller = chooserController({ session, home, workspace, configEditor: editor, provider: editor.settings.provider, modelId: editor.settings.model,
-      profile: "old", baseUrl: editor.settings.baseUrl, auth: editor.settings.auth, model: createScriptedModel({ provider: "openai-compatible", id: "old-model" }),
+      profile: "old", baseUrl: editor.settings.baseUrl, auth: editor.settings.auth,
       credentials: { store, env: {}, reload: async () => { throw Error("the old endpoint must not reload"); }, listRouteModels: async (route, _signal, options) => {
         listings.push({ route, options }); if (outcome === "list-failure") throw Error("Offline"); return [{ id: "other" }, { id: "endpoint-model", recommended: true }];
       } }, stageSettings: async settings => { staged.push(settings.baseUrl!); if (outcome === "activation-failure") throw Error("Offline");
@@ -455,7 +457,7 @@ test("URL and key Esc retain the typed endpoint while an empty key saves nothing
     controller.enterEndpointUrlText("http://localhost:8787"); controller.submitEndpointUrl(); controller.enterCredentialText("cancelled-key");
     controller.cancel(); expect(controller.snapshot().endpointUrlEntry).toEqual({ value: "http://localhost:8787" });
     expect(controller.submitEndpointUrl()).toBe(true); expect(await controller.submitCredential()).toBe(false);
-    expect(controller.snapshot().transcript.at(-1)?.text).toBe("API key is empty; nothing saved.");
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Key not saved · Alt+L retry · /model choose model");
     expect(controller.snapshot().loginChooser).toBeUndefined();
   } finally { controller.dispose(); }
 });
@@ -501,7 +503,7 @@ for (const existing of [false, true]) test(`${existing ? "replacement" : "first"
   });
 });
 
-for (const source of ["api-high", "api-off", "router-high", "router-same-high", "router-new-model-high"] as const) for (const outcome of ["success", "list-failure", "activation-failure"] as const) test(`endpoint replacement from ${source} retains only applicable reasoning through ${outcome}`, async () => {
+for (const source of ["api-high", "api-off", "router-high", "router-same-high", "router-new-model-high"] as const) for (const outcome of ["success", "list-failure", "activation-failure"] as const) test(`endpoint activation from unavailable ${source} retains only applicable reasoning through ${outcome}`, async () => {
   await withTempDir(async root => {
     const router = source.startsWith("router"), home = join(root, "home"), workspace = { root, launchCwd: root, extraRoots: [] };
     const configEditor = new ConfigEditor({ cli: router
@@ -518,7 +520,6 @@ for (const source of ["api-high", "api-off", "router-high", "router-same-high", 
     const listings: string[] = [], staged: unknown[] = [];
     const controller = chooserController({ home, workspace, configEditor, provider: initial.provider, modelId: initial.model,
       profile: initial.profile, baseUrl: initial.baseUrl, thinking: initial.thinking,
-      model: createScriptedModel({ provider: initial.provider, id: initial.model }),
       credentials: { store: fakeCredentialStore(), env: {}, reload: async () => { throw Error("the old adapter must not reload"); }, listRouteModels: async (_route, _signal, options) => {
         listings.push(options!.baseUrl!); if (outcome === "list-failure") throw Error("Offline"); return [{ id: selectedModel, recommended: true }];
       } },

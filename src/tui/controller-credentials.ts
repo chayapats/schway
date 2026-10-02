@@ -2,8 +2,7 @@ import { formatCount } from "../text/format.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
 import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
-import { ROUTE_FALLBACK_MODELS } from "../model/catalog.ts";
-import { filterXaiModels, recommendedListedModel, xaiModelCapabilities } from "../model/model-list.ts";
+import { filterXaiModels, reliableListedModel, xaiModelCapabilities, type ListedModel } from "../model/model-list.ts";
 import { validateThinking } from "../model/thinking.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
@@ -237,20 +236,27 @@ export abstract class CredentialsLayer extends ControllerCore {
   /** Remove the last secret character without involving normal editor undo or recall. */
   backspaceCredential(): void { this.credentialEntry?.backspace(); }
 
-  /** Commit one submitted key and refresh the active adapter, waiting for non-abortable storage. */
+  /** Save one key, preserving usable choices or completing first-connection activation. */
   async submitCredential(): Promise<boolean> {
     const entry = this.credentialEntry;
     const target = this.credentialTarget;
     if (!entry || !target || this.credentialMutation) return false;
     const initialConnection = this.isNotConnected();
     const endpointUrl = this.endpointInputUrl !== undefined ? target.baseUrl : undefined;
+    const preserveSelection = !!this.model;
+    const selectDefault = !this.modelId.trim() || !!endpointUrl || target.provider !== this.provider || target.profile !== this.profile;
     let savedNotice: string | undefined;
     this.credentialMutation = true;
     const task = (async () => {
       const result = await entry.submit();
+      if (!result.ok) { this.fail("Key not saved · Alt+L retry · /model choose model", result.message); return false; }
       this.notice(result.message);
       savedNotice = this.transcript.at(-1)?.id;
-      if (!result.ok) { this.status = "error"; return false; }
+      if (endpointUrl && preserveSelection) {
+        await this.refreshCredentialModel(credentialIdentity(target));
+        this.notice(`Sign-in saved · /config set baseUrl ${endpointUrl} to choose this endpoint · /model choose model`);
+        return true;
+      }
       if (endpointUrl && this.configEditor) {
         const previous = this.configEditor.settings;
         await this.resetUnsupportedEndpointThinking(endpointUrl, previous.model);
@@ -290,10 +296,13 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.credentialMutation = false;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
     }
-    if (saved && (!this.modelId.trim() || endpointUrl && !this.pickerReturn)) {
-      const activated = await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target, initialConnection, !!endpointUrl);
+    if (saved && !preserveSelection && !this.model && selectDefault) {
+      const activated = await this.activateSignedInModel(target.provider === "openai" ? "api-key" : target.provider === "xai" ? "xai" : "compatible", target, initialConnection, !!endpointUrl || !!this.modelId.trim());
       // The ready empty state confirms setup; retain earlier history and credential override warnings.
-      if (activated && initialConnection) this.transcript = this.transcript.filter(entry => entry.id !== savedNotice);
+      if (activated) {
+        this.pickerReturn = undefined;
+        if (initialConnection) this.transcript = this.transcript.filter(entry => entry.id !== savedNotice);
+      }
     }
     if (this.pickerReturn) this.restorePickerAfterConnection(saved);
     return saved;
@@ -313,36 +322,32 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Select the route's recommended model after sign-in and remember it for the next interactive launch. */
   protected async activateSignedInModel(route: "api-key" | "compatible" | "xai", target: CredentialTarget, suppressSuccessNotice = false, replaceActive = false): Promise<boolean> {
-    if (!this.configEditor || !this.stageSettings || this.disposed) return false;
+    if (this.disposed) return false;
+    if (!this.configEditor || !this.stageSettings) { this.notice("Sign-in saved · /model choose model"); return false; }
     const generation = this.selectionGeneration;
     const provider = this.provider;
     const profile = this.profile;
     const listing = new AbortController();
     this.signInListAbort = listing;
-    const fallback = route === "compatible" ? ROUTE_FALLBACK_MODELS["openai-compatible"] : route === "xai" ? ROUTE_FALLBACK_MODELS.xai : ROUTE_FALLBACK_MODELS.openai;
-    let modelId: string = fallback;
+    let modelId: string;
     let listed: { contextWindow?: number; maxOutput?: number } | undefined;
     try {
       const listedModels = await this.credentials?.listRouteModels?.(route, AbortSignal.any([listing.signal, AbortSignal.timeout(5_000)]), { baseUrl: target.baseUrl });
       const models = route === "xai" && listedModels ? filterXaiModels(listedModels) : listedModels;
-      if (route === "xai" && listedModels && !models?.length) throw new Error("xAI model list returned no selectable models.");
+      if (!models?.length) throw new Error("No selectable models were returned.");
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile, replaceActive)) return false;
-      if (models?.length) {
-        if (route === "xai") this.installXaiCapabilities(models);
-        modelId = recommendedListedModel(route, models);
-        const chosen = models.find(model => model.id === modelId);
-        if (chosen && (chosen.contextWindow || chosen.maxOutput)) listed = { contextWindow: chosen.contextWindow, maxOutput: chosen.maxOutput };
-      }
+      if (route === "xai") this.installXaiCapabilities(models);
+      modelId = this.signedInDefault(route, models);
+      const chosen = models.find(model => model.id === modelId);
+      if (chosen && (chosen.contextWindow || chosen.maxOutput)) listed = { contextWindow: chosen.contextWindow, maxOutput: chosen.maxOutput };
     } catch {
       if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile, replaceActive)) return false;
-      if (replaceActive) {
-        this.fail("Sign-in saved · /model choose a model");
-        return false;
-      }
       if (route === "xai") this.clearXaiCapabilities("api-key");
-      modelId = fallback;
+      this.fail("Sign-in saved · /model choose a model · Alt+L sign in");
+      return false;
     } finally {
       if (this.signInListAbort === listing) this.signInListAbort = undefined;
+      if (listing.signal.aborted && !this.disposed) this.notice("Activation cancelled; sign-in saved · /model choose model");
     }
     if (listing.signal.aborted || this.signInSelectionStale(generation, provider, profile, replaceActive)) return false;
     if (replaceActive && route === "compatible") {
@@ -355,12 +360,19 @@ export abstract class CredentialsLayer extends ControllerCore {
         : this.configEditor!.prepareModel(target.provider, modelId, target.profile),
       () => suppressSuccessNotice ? undefined : `Signed in · Using ${target.provider}/${this.modelId} · Enter send`,
       "Sign-in saved · /model choose a model",
-      false,
+      true,
       false,
       listed,
     );
     if (applied) await this.emitModelActivated({ provider: target.provider, modelId: this.modelId, authRoute: route === "compatible" ? "provider" : "api-key" }, !suppressSuccessNotice);
     return applied;
+  }
+
+  /** Require a reliable model default so the login flow can offer selection when none exists. */
+  private signedInDefault(route: Parameters<typeof reliableListedModel>[0], models: readonly ListedModel[]): string {
+    const id = reliableListedModel(route, models);
+    if (id) return id;
+    throw new Error("Choose a model from the available account models.");
   }
 
   /** True when a newer choice, disposal, or an active turn makes the pending sign-in activation unsafe. */
@@ -444,6 +456,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (target.provider === "openai-compatible" && this.auth === "none") return "Automatic authentication is disabled by auth none; the saved key is not sent.";
   }
 
+  /** Refresh only the selected API-key identity without switching its billing route. */
   protected async refreshCredentialModel(identity: CredentialIdentity): Promise<void> {
     if (this.disposed || !this.credentials) return;
     const settings = this.configEditor?.settings;
@@ -456,11 +469,14 @@ export abstract class CredentialsLayer extends ControllerCore {
         : {}),
     });
     if (identity.account === credentialIdentity({ provider: "xai" }).account) this.clearXaiCapabilities("api-key");
-    if (identity.account !== active.account || this.grokSelected()) return;
+    if (identity.account !== active.account || this.grokSelected() || this.model?.provider === "codex-subscription" || (!this.model && this.provider === "openai" && this.openaiAuth === "codex")) return;
     // A removed/replaced saved key must never survive in a previously constructed adapter.
     this.model = undefined;
     try {
-      const loaded = await this.credentials.reload();
+      const loaded = await this.credentials.reload(settings ? { ...settings,
+        ...(this.provider === "openai" ? { openaiAuth: "api-key" as const } : {}),
+        ...(this.provider === "xai" ? { xaiAuth: "api-key" as const } : {}),
+      } : undefined);
       if (this.disposed) return;
       if ("error" in loaded) { this.fail(loaded.error); return; }
       this.model = loaded.model;
@@ -494,21 +510,25 @@ export abstract class CredentialsLayer extends ControllerCore {
 
   /** Block an old subscription adapter and discard catalog data after a credential replacement. */
   protected invalidateSubscriptionAdapter(): void {
-    if (this.model?.provider === "codex-subscription") {
+    if (this.model?.provider === "codex-subscription" || (!this.model && this.provider === "openai" && this.openaiAuth === "codex")) {
       this.model = undefined;
       this.subscriptionReactivationRequired = true;
+      this.configEditor?.setModelCapabilities([]);
+    } else {
+      this.configEditor?.replaceRouteCapabilities([], [], "codex");
     }
     this.subscriptionModels = undefined;
     this.subscriptionCapabilities = undefined;
-    this.configEditor?.setModelCapabilities([]);
     this.subscriptionPending = true;
   }
 
-  /** Save an explicit Grok login, discover its models and atomically activate its billing route. */
+  /** Save Grok credentials, activating only a first connection or the selected subscription. */
   protected async runGrokLogin(target: { device: boolean }, accepted: () => void = () => {}): Promise<boolean> {
     if (this.disposed || this.running) { this.notice("Wait for this turn · Esc stop"); return false; }
     const runner = this.credentials?.grokLogin;
     if (!runner) { this.fail("Grok sign-in unavailable · Restart Schway to connect"); return false; }
+    const reconnectModel = this.grokSelected() ? this.modelId : undefined;
+    const activate = !this.model || this.grokSelected();
     this.closeModelPicker(); this.loginChooserState = undefined;
     const abort = new AbortController(); let saved = false;
     const generation = ++this.loginGeneration;
@@ -527,24 +547,27 @@ export abstract class CredentialsLayer extends ControllerCore {
         });
         abort.signal.throwIfAborted(); if (this.disposed) return false;
         if (!result.ok) { this.fail(result.message); return false; }
+        // Secure storage has settled; discovery is cancellable, including from the picker.
+        this.loginSaving = false; this.loginAbort = undefined; this.credentialMutation = false;
         this.loginChooserState = undefined;
         if (!saved) this.invalidateGrokAdapter();
         saved = true; this.grokPending = true;
-        if (this.pickerReturn) { this.notice(result.status); return true; }
-        if (!this.credentials?.listGrokModels || !this.configEditor || !this.stageSettings) { this.notice(result.status); return true; }
+        if (!activate) { this.notice("Sign-in saved · /model choose model"); return true; }
+        if (!this.credentials?.listGrokModels || !this.configEditor || !this.stageSettings) { this.notice("Sign-in saved · /model choose model"); return true; }
         const models = filterXaiModels(await this.credentials.listGrokModels(AbortSignal.any([abort.signal, AbortSignal.timeout(5_000)])));
         abort.signal.throwIfAborted(); if (this.disposed) return false;
         this.grokModels = models; this.installXaiCapabilities(models, "grok");
-        const preferred = recommendedListedModel("grok", models) || ROUTE_FALLBACK_MODELS.xai;
+        if (!models.length || reconnectModel && !models.some(model => model.id === reconnectModel)) throw new Error("Choose an available Grok model.");
+        const preferred = reconnectModel || this.signedInDefault("grok", models);
         // Settings staging requires an idle controller; the abort still guards the preceding sign-in and list.
         this.activeAbort = undefined; this.loginAbort = undefined; this.credentialMutation = false; this.status = "idle";
-        const applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(preferred), () => `Signed in · Using xai/${this.modelId} · Enter send`, undefined, true);
-        if (applied) { this.grokPending = false; this.grokReactivationRequired = false; await this.emitModelActivated({ provider: "xai", modelId: this.modelId, authRoute: "grok" }); }
+        const applied = await this.changeSettings(() => this.configEditor!.prepareGrokModel(preferred), () => `Grok model active · ${this.modelId} · Enter send`, "Sign-in saved · /model choose model · Alt+L sign in", true);
+        if (applied) { this.pickerReturn = undefined; this.grokPending = false; this.grokReactivationRequired = false; await this.emitModelActivated({ provider: "xai", modelId: this.modelId, authRoute: "grok" }); }
         return applied;
       } catch (error) {
         if (this.loginGeneration !== generation) return false;
         if (abort.signal.aborted) this.notice(saved ? "Sign-in saved; activation cancelled · /model choose model" : "Sign-in cancelled · Alt+L retry");
-        else this.fail(redactSecrets(error instanceof Error ? error.message : "Grok sign-in failed · Alt+L retry", this.secrets));
+        else this.fail(saved ? "Models unavailable; sign-in saved · /model retry · Alt+L sign in · Ctrl+I details" : "Grok sign-in failed · Alt+L retry · /model choose model", redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
         return false;
       }
     })();
@@ -583,6 +606,8 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (!this.credentials) { this.fail("Sign-in unavailable · Restart Schway to connect"); return false; }
     const runner = this.credentials.codexLogin;
     if (!runner) { this.fail("ChatGPT sign-in unavailable · Restart Schway to connect"); return false; }
+    const reconnectModel = this.model?.provider === "codex-subscription" || (!this.model && this.provider === "openai" && this.openaiAuth === "codex") ? this.modelId : undefined;
+    const activate = !this.model || reconnectModel !== undefined;
     this.closeModelPicker();
     this.loginApproval = target.device ? "Starting device approval · Esc cancel" : "Approve in your browser · Esc cancel";
     const abort = new AbortController();
@@ -629,24 +654,30 @@ export abstract class CredentialsLayer extends ControllerCore {
         }
         this.notice("Sign-in saved · /model choose model · Ctrl+I details", result.status);
         // Test runners may omit onSaved; production also invalidates at the store commit point.
-        this.invalidateSubscriptionAdapter();
-        if (this.pickerReturn) { this.status = "idle"; return true; }
+        if (!credentialSaved) this.invalidateSubscriptionAdapter();
+        credentialSaved = true;
+        if (!activate) { this.status = "idle"; return true; }
         if (this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog) {
           this.subscriptionPending = true;
           this.status = "idle";
           this.notice("Sign-in saved · Finding models · Esc cancel");
           return true;
         }
-        if (this.provider !== "openai") {
+        if (!reconnectModel) {
           this.status = "idle";
           this.notice("Sign-in saved · /model activate a model");
           return true;
         }
         this.model = undefined;
-        const loaded = await this.credentials!.reload(this.configEditor?.settings);
+        const settings = this.configEditor?.settings;
+        const loaded = await this.credentials!.reload(settings ? { ...settings, openaiAuth: "codex" } : undefined);
         if (this.disposed || this.activeAbort !== abort) return false;
         if ("error" in loaded) {
           this.fail(loaded.error);
+          return false;
+        }
+        if (loaded.model.provider !== "codex-subscription") {
+          this.fail("Sign-in saved · /model choose model · Alt+L sign in");
           return false;
         }
         this.model = loaded.model;
@@ -683,26 +714,23 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.loginReturn = undefined;
     }
     if (signedIn) this.loginChooserState = undefined;
-    if (signedIn && this.pickerReturn) {
-      this.restorePickerAfterConnection();
-      return true;
-    }
     if (!signedIn && this.pickerReturn && (!this.loginChooserState || abort.signal.aborted)) this.restorePickerAfterConnection(false);
-    if (signedIn && this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog && !this.disposed) {
+    if (signedIn && activate && this.configEditor && this.stageSettings && this.credentials?.listSubscriptionCatalog && !this.disposed) {
       const discovery = new AbortController();
       this.activeAbort = discovery;
       this.status = "running";
       let preferred: string;
       try {
         const models = await this.loadAccountCatalog(AbortSignal.any([discovery.signal, AbortSignal.timeout(5_000)]));
-        preferred = (this.modelId && models.some(model => model.id === this.modelId) ? this.modelId : undefined)
-          ?? recommendedListedModel("codex", models.map(model => ({ id: model.id, ...(model.recommended ? { recommended: true } : {}) })));
-        if (!preferred) throw new Error("No selectable models were returned for this ChatGPT subscription.");
+        if (!models.length || reconnectModel && !models.some(model => model.id === reconnectModel)) throw new Error("Choose an available ChatGPT model.");
+        preferred = reconnectModel || this.signedInDefault("codex", models);
         discovery.signal.throwIfAborted();
         this.notice(`Found ${formatCount(models.length, "model")} · Activating ${preferred} · Esc cancel`);
       } catch (error) {
         if (discovery.signal.aborted) this.notice("Activation cancelled; sign-in saved · /model retry · Ctrl+I details", this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model.");
         else this.fail("Models unavailable; sign-in saved · /model retry · Ctrl+I details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model without signing in again.\n${error instanceof Error ? error.message : String(error)}`);
+        if (this.activeAbort === discovery) this.activeAbort = undefined;
+        if (this.pickerReturn) this.restorePickerAfterConnection();
         return false;
       } finally {
         if (this.activeAbort === discovery) this.activeAbort = undefined;
@@ -710,11 +738,13 @@ export abstract class CredentialsLayer extends ControllerCore {
       }
       const applied = await this.changeSettings(() => this.configEditor!.prepareSubscriptionModel(preferred),
         () => `ChatGPT model active · Enter send · ${this.modelId}`,
-        "Model activation failed · /model retry");
-      if (applied) { this.subscriptionPending = false; await this.emitModelActivated({ provider: "openai", modelId: this.modelId, authRoute: "codex" }); }
+        "Model activation failed · /model retry · Alt+L sign in", true);
+      if (applied) { this.pickerReturn = undefined; this.subscriptionPending = false; await this.emitModelActivated({ provider: "openai", modelId: this.modelId, authRoute: "codex" }); }
       else this.notice("Activation failed; sign-in saved · /model retry · Ctrl+I details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
+      if (this.pickerReturn) this.restorePickerAfterConnection();
       return applied;
     }
+    if (signedIn && this.pickerReturn) this.restorePickerAfterConnection();
     return signedIn;
   }
 

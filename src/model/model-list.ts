@@ -86,17 +86,30 @@ export function xaiModelCapabilities(models: readonly ListedModel[], authRoute: 
   }));
 }
 
+type ModelListRoute = "api-key" | "codex" | "compatible" | "xai" | "grok";
+
 /** Choose a marked default, the route fallback, a catalog ID, then the first listed ID. */
-export function recommendedListedModel(route: "api-key" | "codex" | "compatible" | "xai" | "grok", models: readonly ListedModel[]): string {
+export function recommendedListedModel(route: ModelListRoute, models: readonly ListedModel[]): string {
+  return listedModelRecommendation(route, models).id;
+}
+
+/** Return a listed marked, known supported, or sole model; leave ambiguous and empty lists unselected. */
+export function reliableListedModel(route: ModelListRoute, models: readonly ListedModel[]): string | undefined {
+  const choice = listedModelRecommendation(route, models);
+  return choice.reliable ? choice.id : undefined;
+}
+
+/** Apply route recommendation precedence and identify choices supported by the returned list. */
+function listedModelRecommendation(route: ModelListRoute, models: readonly ListedModel[]): { id: string; reliable: boolean } {
   const marked = models.find(model => model.recommended);
-  if (marked) return marked.id;
+  if (marked) return { id: marked.id, reliable: true };
   const provider = route === "compatible" ? "openai-compatible" : (route === "xai" || route === "grok") ? "xai" : "openai";
   const fallback = ROUTE_FALLBACK_MODELS[provider];
-  if (models.some(model => model.id === fallback)) return fallback;
+  if (models.some(model => model.id === fallback)) return { id: fallback, reliable: true };
   const catalog = new Set(listCatalog().filter(entry => entry.provider === provider).map(entry => entry.id));
   const known = models.find(model => catalog.has(model.id));
-  if (known) return known.id;
-  return models[0]?.id ?? fallback;
+  if (known) return { id: known.id, reliable: true };
+  return { id: models[0]?.id ?? fallback, reliable: models.length === 1 };
 }
 
 /** Fetch and parse one route's model list. Throws when the endpoint cannot be read; callers show static fallback. */

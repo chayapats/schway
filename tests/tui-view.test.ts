@@ -2250,13 +2250,13 @@ test("Grok chooser, browser and device panels preserve drafts and show codes at 
     expect(ui.editor.plainText).toBe("Keep my Thai ไทย draft"); expect(ui.editor.cursorOffset).toBe(5); expect(ui.session.items).toHaveLength(0);
   }
 });
-test("Grok success and failure restore the composer, and plan rejection opens the chooser with Alt+L", async () => {
+test("first Grok success and failure restore the composer, and plan rejection opens the chooser with Alt+L", async () => {
   const { grokSubscriptionIdentity } = await import("../src/auth/store.ts");
   for (const outcome of ["success", "failure", "plan"] as const) await withTempDir(async root => {
     const store = fakeCredentialStore(), workspace = { root, launchCwd: root, extraRoots: [] };
     const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai", model: "gpt-6-astra" } });
     let finish!: () => void;
-    const ui = await setup(80, 24, {}, undefined, { configEditor: editor, workspace, provider: "openai", modelId: "gpt-6-astra", credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved, onApproval }) => {
+    const ui = await setup(80, 24, {}, undefined, { configEditor: editor, workspace, provider: "openai", modelId: "", model: undefined, credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved, onApproval }) => {
       onApproval({ kind: "browser" }); await new Promise<void>(resolve => { finish = resolve; });
       if (outcome === "failure") return { ok: false, message: "Grok sign-in was denied." };
       await store.set(grokSubscriptionIdentity(), "saved-grok-token"); onSaved?.(); return { ok: true, status: "Saved" };
@@ -2267,13 +2267,12 @@ test("Grok success and failure restore the composer, and plan rejection opens th
     finish(); await ui.controller.waitForIdle(); await settle(ui);
     expect(ui.editor.plainText).toBe("My pending task"); expect(ui.editor.cursorOffset).toBe(4); expect(ui.session.items).toHaveLength(0);
     if (outcome === "plan") {
-      // The exact instruction wraps naturally at 80 columns; compare visible text without cell padding.
-      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L");
-      expect(ui.captureCharFrame()).toContain("Your Grok plan doesn't include API access.");
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Models unavailable; sign-in saved · /model retry · Alt+L sign in · Ctrl+I details");
+      expect(ui.captureCharFrame()).toContain("Models unavailable; sign-in saved");
       expect(ui.captureCharFrame()).toContain("Alt+L"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved-grok-token");
       ui.mockInput.pressKey("l", { meta: true }); await settle(ui); expect(ui.controller.snapshot().loginChooser).toBeDefined();
     }
-    if (outcome === "success") expect(ui.captureCharFrame()).toContain("Signed in · Using xai/grok-4.7 · Enter send");
+    if (outcome === "success") expect(ui.captureCharFrame()).toContain("Grok model active · grok-4.7 · Enter send");
   });
 });
 
