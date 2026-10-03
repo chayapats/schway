@@ -53,7 +53,7 @@ test("single npm-compatible package exposes the schway executable", async () => 
 });
 
 test("headless and interactive entry points wire all seven core tools", async () => {
-  const cli = await source("src/cli/main.ts");
+  const cli = await source("src/cli/runtime.ts");
   const tui = await source("src/tui/app.ts");
   for (const tool of CORE_TOOLS) {
     expect(cli).toContain(`${tool}Tool`);
@@ -93,7 +93,7 @@ test("only shipped extension surfaces are present in the base harness", async ()
   for (const deferred of ["server", "subagents", "workflows"]) {
     expect(entries.includes(deferred)).toBe(false);
   }
-  const cli = await source("src/cli/main.ts");
+  const cli = await source("src/cli/runtime.ts");
   const tui = await source("src/tui/app.ts");
   // Server orchestration remains deferred; OS credential storage is supported.
   for (const surface of ["mcp", "subagent"]) {
@@ -150,6 +150,8 @@ test("npm pack installs the public extension API and completes a headless tool r
     for (const required of [
       "package/bin/schway",
       "package/src/cli/main.ts",
+      "package/src/cli/runtime.ts",
+      "package/src/cli/version.ts",
       "package/src/tui/app.ts",
       "package/src/extensions/index.ts",
       "package/dist/types/extensions/index.d.ts",

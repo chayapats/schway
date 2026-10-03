@@ -26,6 +26,7 @@ export const CLI_OPTIONS: readonly Option[] = [
   { flags: ["-p"], value: "<task>", section: "Common", description: "Run one task without the interactive UI", doctor: false, sample: "explain this project" },
   { flags: ["--approval"], value: "<mode>", section: "Common", description: "Use auto, ask, or read-only for tools", doctor: false, sample: "read-only" },
   { flags: ["-h", "--help"], section: "Common", description: "Show this help", doctor: true },
+  { flags: ["-V", "--version"], section: "Common", description: "Show the installed version", doctor: false },
   { flags: ["--provider"], value: "<name>", section: "Model and auth", description: `Use ${CLI_PROVIDERS.join(", ")}`, doctor: true, sample: "openai" },
   { flags: ["--model"], value: "<id>", section: "Model and auth", description: "Choose a model", doctor: false, sample: "example-model" },
   { flags: ["--profile"], value: "<name>", section: "Model and auth", description: "Use a named compatible endpoint profile", doctor: true, sample: "local" },
@@ -91,7 +92,9 @@ export function formatHelp(): string {
 export function formatDoctorHelp(): string {
   return [
     "schway doctor — check your setup without running a model", "", "Usage",
-    "  schway doctor [options]", ...optionSections(true), "", "Examples",
+    "  schway doctor [options]",
+    row("schway --version", "Show the installed version"),
+    ...optionSections(true), "", "Examples",
     "  schway doctor", "  schway doctor --json", "",
   ].join("\n");
 }

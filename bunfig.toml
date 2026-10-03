@@ -2,5 +2,9 @@
 # merely because the user entered another repository.
 env = false
 
+[run]
+# Keep source CLI output identical to the installed launcher.
+silent = true
+
 [test]
 root = "."

@@ -145,7 +145,7 @@ test("TUI controller stays renderer-free; raw-input-safe renderer module loads O
 });
 
 test("provider adapters load lazily through the shared loader", async () => {
-  for (const file of ["src/cli/main.ts", "src/tui/app.ts"]) {
+  for (const file of ["src/cli/main.ts", "src/cli/runtime.ts", "src/tui/app.ts"]) {
     const source = await Bun.file(file).text();
     expect(source.includes('from "@anthropic-ai/sdk"')).toBe(false);
     expect(source.includes('from "openai"')).toBe(false);
@@ -174,7 +174,7 @@ test("subscription adapter stays headless-safe without TUI or provider SDK impor
 test("Grok OAuth is lazy and isolated from UI, SDK imports and other CLI credentials", async () => {
   const module = await Bun.file("src/model/providers/grok-subscription.ts").text();
   expect(module).not.toMatch(/@opentui|\.\.\/tui\/|from "openai"/);
-  for (const path of ["src/cli/main.ts", "src/tui/app.ts"]) expect(await Bun.file(path).text()).not.toContain('from "../model/providers/grok-subscription.ts"');
+  for (const path of ["src/cli/main.ts", "src/cli/runtime.ts", "src/tui/app.ts"]) expect(await Bun.file(path).text()).not.toContain('from "../model/providers/grok-subscription.ts"');
   for await (const path of new Bun.Glob("src/**/*.ts").scan(".")) {
     const source = await Bun.file(path).text();
     for (const forbidden of [".grok/", "auth.json", "cli-chat-proxy", "X-XAI-Token-Auth"]) expect(source).not.toContain(forbidden);

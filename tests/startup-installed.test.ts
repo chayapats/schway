@@ -52,6 +52,23 @@ test("packed executable verifies startup, appearance and Linux PTY cleanup with 
     expect(installed.exit).toBe(0);
     const packageRoot = join(install, "node_modules/schway");
     const executable = join(install, "node_modules/.bin/schway");
+    const versionHome = join(root, "version-home"), versionWork = join(root, "version-work");
+    await mkdir(versionHome); await mkdir(versionWork);
+    const metadataPath = join(packageRoot, "package.json");
+    const metadataText = await Bun.file(metadataPath).text();
+    const metadata = JSON.parse(metadataText);
+    try {
+      for (const packageVersion of [metadata.version, "2.3.4-rc.5+build.006"]) {
+        await Bun.write(metadataPath, JSON.stringify({ ...metadata, version: packageVersion }));
+        for (const flag of ["--version", "-V"]) {
+          expect(await run([executable, flag], versionWork, buildIsolatedCliEnv(versionHome, { HOME: undefined }))).toEqual({
+            stdout: `schway ${packageVersion}\n`, stderr: "", exit: 0,
+          });
+        }
+      }
+    } finally { await Bun.write(metadataPath, metadataText); }
+    expect(await readdir(versionHome)).toEqual([]);
+    expect(await readdir(versionWork)).toEqual([]);
     const fixture = join(install, "startup-preload.ts");
     await Bun.write(fixture, `
 import { mock } from "bun:test";
