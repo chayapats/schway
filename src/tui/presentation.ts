@@ -125,16 +125,28 @@ export function toolTarget(name: string, args: unknown): string | undefined {
 }
 
 /** Return a short tool summary and bounded preview, keeping errors visible without expanding. */
-export function toolPresentation(entry: TuiTranscriptEntry, expanded: boolean): { marker: string; target: string; state: string; detail: string; tone: "accent" | "success" | "warning" | "error" } {
+export function toolPresentation(entry: TuiTranscriptEntry, expanded: boolean): { marker: string; target: string; state: string; detail: string; tone: "accent" | "success" | "warning" | "error" | "muted" } {
   const state = entry.toolStatus ?? "error";
   const marker = { running: "●", success: "✓", cancelled: "−", error: "!" }[state];
   const tone = { running: "accent", success: "success", cancelled: "warning", error: "error" }[state] as "accent" | "success" | "warning" | "error";
   const lines = displayText(entry.text).split("\n");
   const target = entry.toolSummary || lines.find(line => line.trim()) || "";
-  const summary = { marker, target, state: state === "success" ? "done" : state, tone };
+  const summary = { marker, target, state: state === "success" ? "done" : state, tone, ...(entry.toolName === "bash" ? shellPresentation(entry) : {}) };
   if (expanded) return { ...summary, detail: lines.join("\n") };
   if (state === "success") return { ...summary, detail: "" };
   const preview = state === "running" ? lines.slice(-3) : lines.slice(0, 6);
   if (lines.length > preview.length) preview.push("… Ctrl+O to expand output");
   return { ...summary, detail: preview.join("\n").trim() };
+}
+
+/** Derive every shell status cue from execution state and validated evidence, with errors taking precedence over exits. */
+function shellPresentation(entry: TuiTranscriptEntry): Pick<ReturnType<typeof toolPresentation>, "marker" | "state" | "tone"> {
+  if (entry.toolStatus === "running") return { marker: "●", state: "running", tone: "accent" };
+  if (entry.toolStatus === "cancelled") return { marker: "−", state: "Stopped", tone: "muted" };
+  if (entry.shellOutcome?.kind === "timed-out") return { marker: "!", state: "Timed out", tone: "error" };
+  if (entry.toolStatus !== "success") return { marker: "!", state: "Tool error", tone: "error" };
+  if (entry.shellOutcome?.kind === "exit") return entry.shellOutcome.code === 0
+    ? { marker: "✓", state: "Exit 0", tone: "success" }
+    : { marker: "!", state: `Exit ${entry.shellOutcome.code}`, tone: "warning" };
+  return { marker: "−", state: entry.shellOutcome?.kind === "stopped" ? "Stopped" : "No exit observed", tone: "muted" };
 }

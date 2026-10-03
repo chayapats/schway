@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { formatDiffRows, formatNumberedEditDiff, summarizeResumedToolResult, summarizeToolResult } from "../src/tui/transcript-format.ts";
+import { asShellOutcome, formatDiffRows, formatNumberedEditDiff, summarizeResumedToolResult, summarizeToolResult } from "../src/tui/transcript-format.ts";
 
 test("read summaries distinguish complete, empty, partial and truncated reads", () => {
   for (const lineCount of [0, 1, 3]) {
@@ -28,13 +28,26 @@ test("ls reports entries with an irregular plural and truncation", () => {
   expect(summarizeToolResult("ls", "success", { entryCount: 50, truncated: true })).toBe("50+ entries · truncated");
 });
 
-test("bash uses measured duration and treats a missing exit code as stopped", () => {
-  expect(summarizeToolResult("bash", "success", { exitCode: 0 }, 1200)).toBe("exit 0 · 1.2s");
-  expect(summarizeToolResult("bash", "success", { exitCode: 1 }, 300)).toBe("exit 1 · 0.3s");
-  expect(summarizeToolResult("bash", "success", { exitCode: 0 }, 9960)).toBe("exit 0 · 10s");
-  expect(summarizeToolResult("bash", "success", { exitCode: 0 }, 65000)).toBe("exit 0 · 1m 5s");
-  expect(summarizeToolResult("bash", "success", { exitCode: null }, 1200)).toBe("stopped · no exit code");
-  expect(summarizeToolResult("bash", "success", { exitCode: null })).toBe("stopped · no exit code");
+test("bash timing is optional and independent of command exit evidence", () => {
+  expect(summarizeToolResult("bash", "success", { exitCode: 0 }, 1200)).toBe("1.2s");
+  expect(summarizeToolResult("bash", "success", { exitCode: 1 }, 300)).toBe("0.3s");
+  expect(summarizeToolResult("bash", "success", { exitCode: 0 }, 9960)).toBe("10s");
+  expect(summarizeToolResult("bash", "success", { exitCode: 0 }, 65000)).toBe("1m 5s");
+  expect(summarizeToolResult("bash", "success", { exitCode: null }, 1200)).toBe("1.2s");
+  expect(summarizeToolResult("bash", "success", undefined, 1200)).toBe("1.2s");
+  expect(summarizeToolResult("bash", "success", { exitCode: 1 })).toBeUndefined();
+});
+
+test("shell evidence validates exit and timeout fields without trusting prose or coercion", () => {
+  for (const code of [0, 1, 7, 127, 137, Number.MAX_SAFE_INTEGER]) expect(asShellOutcome({ exitCode: code })).toEqual({ kind: "exit", code });
+  expect(asShellOutcome({ exitCode: null })).toEqual({ kind: "stopped" });
+  expect(asShellOutcome({ timedOut: true, exitCode: null })).toEqual({ kind: "timed-out" });
+  expect(asShellOutcome({ timedOut: true, exitCode: 0 })).toEqual({ kind: "timed-out" });
+  expect(asShellOutcome({ timedOut: false, exitCode: 1 })).toEqual({ kind: "exit", code: 1 });
+  for (const details of [undefined, null, [], "Exit code: 0", 0, true, {}, { stdout: "all tests passed" },
+    ...[undefined, "0", false, NaN, Infinity, 1.5, -1, Number.MAX_SAFE_INTEGER + 1].map(exitCode => ({ exitCode })),
+    ...["true", 1, null].map(timedOut => ({ timedOut, exitCode: 0 })),
+  ]) expect(asShellOutcome(details)).toBeUndefined();
 });
 
 test("write distinguishes creation and replacement with actual written line counts", () => {
@@ -73,8 +86,8 @@ test("non-success rows and extension tools have no result summaries", () => {
   expect(summarizeToolResult("extension-tool", "success", { lineCount: 3, created: true }, 1200)).toBeUndefined();
 });
 
-test("absent, scalar and array details are rejected for every built-in tool", () => {
-  for (const name of ["read", "grep", "find", "ls", "bash", "write", "edit"]) {
+test("absent, scalar and array details cannot produce result counts", () => {
+  for (const name of ["read", "grep", "find", "ls", "write", "edit"]) {
     for (const details of [undefined, null, [], "result", 3, true, {}]) {
       expect(summarizeToolResult(name, "success", details, 1200)).toBeUndefined();
     }
@@ -104,9 +117,6 @@ test("malformed read ranges, write creation flags and bash timing are rejected",
   expect(summarizeToolResult("read", "success", { lineCount: 0, startLine: 2, endLine: 0, truncated: false })).toBeUndefined();
   for (const created of [undefined, null, "true", 1]) {
     expect(summarizeToolResult("write", "success", { lineCount: 3, created })).toBeUndefined();
-  }
-  for (const exitCode of [undefined, "0", NaN, Infinity, 1.5, -1]) {
-    expect(summarizeToolResult("bash", "success", { exitCode }, 1200)).toBeUndefined();
   }
   for (const duration of [undefined, NaN, Infinity, -1]) {
     expect(summarizeToolResult("bash", "success", { exitCode: 0 }, duration)).toBeUndefined();
