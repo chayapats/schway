@@ -49,7 +49,9 @@ resume hint to stderr after the task session is persisted and ready, including
 when a later model/tool failure or cancellation occurs. Pre-ready setup failure,
 unpersisted sessions and `/skills` produce no hint. An ID containing an observed
 credential, terminal/format controls or line/paragraph separators produces no
-text hint; it is never rewritten into a different token.
+text hint; it is never rewritten into a different token. Unquoted resume hints
+accept only Unicode letters, marks, numbers, pictographic emoji and `._-`, with
+no leading `-`. Use the JSONL workflow below to capture other exact IDs as data.
 
 `--json` already streams normalized runtime events as JSONL on stdout, including
 `session.ready` with the exact `sessionId`; diagnostics stay on stderr. Its

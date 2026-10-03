@@ -171,8 +171,11 @@ tasks. Later model/tool failure or cancellation does not remove that hint;
 a setup failure before readiness, an unpersisted session or a `/skills` listing
 prints none. If the exact ID contains an already-observed credential, the hint
 is suppressed rather than redacted into an unusable ID. IDs with terminal/format
-controls or line/paragraph separators also produce no text hint. The hint contains no
-prompt, file path or auth settings. Default text streams are unchanged without
+controls or line/paragraph separators also produce no text hint. For unquoted
+resume guidance, the hint accepts only Unicode letters, marks, numbers,
+pictographic emoji and `._-`, with no leading `-`. Other exact IDs remain
+available through the JSONL workflow below; they are never rewritten into shell
+syntax. The hint contains no prompt, file path or auth settings. Default text streams are unchanged without
 the flag. It is rejected without `-p`, with `--json`, or on doctor/version/list
 commands; use it only for text tasks.
 

@@ -402,8 +402,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       const ready = headlessSessionReadyPreamble(event, secrets);
       if (ready) {
         if (parsed.args.json) io.stdout.write(`${JSON.stringify(ready)}\n`);
-        // JSONL escapes controls; the optional terminal hint must stay one printable line.
-        else if (!/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(ready.sessionId)) io.stderr.write(`Session ${ready.sessionId} · Resume with --resume ${ready.sessionId}\n`);
+        else if (isBareResumeId(ready.sessionId)) io.stderr.write(`Session ${ready.sessionId} · Resume with --resume ${ready.sessionId}\n`);
       }
     }
     session.append({
@@ -511,6 +510,11 @@ function collectSecrets(
   headers?: Record<string, string>,
 ): string[] {
   return configDiagnosticSecrets({ env }, [{ apiKey: runtimeApiKey, credentialEnv, headers }]);
+}
+
+/** Keep the exact ID safe as the hint's unquoted argument, without choosing a shell's quoting rules. */
+function isBareResumeId(id: string): boolean {
+  return id.length > 0 && !id.startsWith("-") && !/[^\p{L}\p{M}\p{N}\p{Extended_Pictographic}\p{Emoji_Modifier}._-]/u.test(id);
 }
 
 /**

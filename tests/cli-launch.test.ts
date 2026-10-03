@@ -170,17 +170,36 @@ test("native headless ask denies a mutation without waiting for input or changin
   });
 });
 
-// Win32 filenames cannot contain C0 controls; the other exact-ID cases remain portable.
-for (const [name, id, printable] of [
+// Skip only IDs with characters Win32 forbids in filenames; the remaining cases are portable.
+for (const [name, id, hintSafe] of [
   ["ASCII", "legacy-exact-id", true],
   ["Unicode without normalization", "เซสชัน-🧪-cafe\u0301", true],
+  ["emoji modifier", "legacy-👍🏽", true],
+  ["spaces", "legacy two words", false],
+  ["nonbreaking space", "legacy\u00a0id", false],
+  ["command separator", "legacy; printf SHELL_MARKER", false],
+  ["command substitution", "legacy$(printf _expanded)", false],
+  ["backtick substitution", "legacy`printf _expanded`", false],
+  ["variable expansion", "legacy$HOME", false],
+  ["glob", "legacy*", false],
+  ["bracket glob", "legacy[ab]", false],
+  ["single quote", "legacy'quoted'", false],
+  ["double quote", 'legacy"quoted"', false],
+  ["pipe", "legacy|printf marker", false],
+  ["background operator", "legacy&printf marker", false],
+  ["redirection", "legacy>marker", false],
+  ["cmd expansion", "legacy%PATH%", false],
+  ["cmd escape", "legacy^id", false],
+  ["history expansion", "legacy!id", false],
+  ["PowerShell expression", "legacy@(id)", false],
+  ["leading hyphen", "-legacy-id", false],
   ["newline", "legacy\nsecond-line", false],
   ["ANSI escape", "legacy\u001b[2Jid", false],
   ["C1 control", "legacy\u0085id", false],
   ["format control", "legacy\u200eid", false],
   ["line separator", "legacy\u2028id", false],
   ["paragraph separator", "legacy\u2029id", false],
-] as const) test.skipIf(process.platform === "win32" && /[\u0000-\u001f]/u.test(id))(`native resumed ${name} ID preserves JSONL and ${printable ? "prints an exact" : "suppresses the entire"} text hint`, async () => {
+] as const) test.skipIf(process.platform === "win32" && /[<>:"/\\|?*\u0000-\u001f]/u.test(id))(`native resumed ${name} ID preserves JSONL and ${hintSafe ? "prints an exact" : "suppresses the entire"} text hint`, async () => {
   await withTempDir(async home => {
     const directory = sessionsDirectory(home);
     const created = await createJsonlSession({ directory, workspace: { root: home, launchCwd: home, extraRoots: [] } });
@@ -189,9 +208,9 @@ for (const [name, id, printable] of [
     const env = buildIsolatedCliEnv(home, { SCHWAY_DOCS_MODE: "success", OPENAI_API_KEY: "fixture-openai-key",
       BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/headless-docs-preload.ts")}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" });
     for (const flag of [undefined, "--show-session", "--json"]) {
-      const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", "--resume", id, ...(flag ? [flag] : [])], home, env);
+      const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", `--resume=${id}`, ...(flag ? [flag] : [])], home, env);
       expect(result.exit, result.stderr).toBe(0);
-      expect(result.stderr).toBe(flag === "--show-session" && printable ? `Session ${id} · Resume with --resume ${id}\n` : "");
+      expect(result.stderr).toBe(flag === "--show-session" && hintSafe ? `Session ${id} · Resume with --resume ${id}\n` : "");
       if (flag === "--json") {
         expect(result.stdout.split("\n")[0]).toBe(JSON.stringify({ type: "session.ready", sessionId: id }));
         expect(JSON.parse(result.stdout.split("\n")[0]!).sessionId).toBe(id);
