@@ -77,6 +77,7 @@ for (const mode of ["headless", "interactive"]) {
       let modelLoads = 0;
       const code = await runCli([...(mode === "headless" ? ["-p", "hello"] : []), "--extension", "broken.ts"], {
         cwd: work, env: { HOME: home, OPENAI_API_KEY: "private-key" },
+        terminal: { stdin: mode === "interactive", stdout: mode === "interactive" },
         stdout: { write() {} }, stderr: { write: (text) => { stderr += text; } },
         createModel: async () => { modelLoads++; return createScriptedModel(); },
       });

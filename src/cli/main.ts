@@ -33,6 +33,7 @@ async function main(): Promise<number> {
       stderr: { write: (chunk) => void process.stderr.write(chunk) },
       env: process.env,
       cwd: process.cwd(),
+      terminal: { stdin: process.stdin.isTTY === true, stdout: process.stdout.isTTY === true },
       signal: controller.signal,
     });
   } finally {

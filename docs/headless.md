@@ -11,6 +11,17 @@ remembered workspace model choice.
 
 ## Run a task
 
+Pass a nonempty task with `-p`. Empty or whitespace-only tasks exit 1 before
+reading setup or changing saved work. Valid tasks keep their leading and trailing
+whitespace, including multiline text. Stdin is not implicitly used as a task.
+
+Explicit tasks work with terminal or redirected input and output. Without `-p`,
+both stdin and stdout must be terminals; stderr may be redirected. Help, version
+and doctor do not need a terminal. Embedded `runCli` callers may provide
+`terminal: { stdin: true, stdout: true }` for an interactive renderer; omitted
+capabilities default to false. The executable reads the actual stdin/stdout
+terminal capabilities.
+
 ```bash
 export OPENAI_API_KEY=...
 schway -p "explain this repository"

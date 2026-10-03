@@ -73,6 +73,8 @@ export interface CliIo {
   stderr: CliWriter;
   env: Record<string, string | undefined>;
   cwd: string;
+  /** Terminal capabilities for interactive launches; omitted capabilities default to false. */
+  terminal?: { stdin: boolean; stdout: boolean };
   signal?: AbortSignal;
   model?: Model;
   /** Override OS credential storage for embedding or deterministic tests. */
@@ -103,7 +105,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       io.stderr.write(`${parsedDoctor.error}\n`);
       return 1;
     }
-    if ("error" in parsedDoctor || parsedDoctor.args.prompt || parsedDoctor.args.resume || parsedDoctor.args.branch) {
+    if ("error" in parsedDoctor || parsedDoctor.args.prompt !== undefined || parsedDoctor.args.resume || parsedDoctor.args.branch) {
       const error = "error" in parsedDoctor ? parsedDoctor.error : "Invalid doctor options. Doctor does not accept prompts or session resume.";
       io.stderr.write(`${error}\nRun 'schway doctor --help' for usage.\n`);
       return 2;
@@ -133,8 +135,18 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 0;
   }
 
-  if (!parsed.args.prompt) {
+  if (parsed.args.prompt === undefined) {
+    if (!io.terminal?.stdin || !io.terminal?.stdout) {
+      io.stderr.write('Interactive mode needs a terminal · Use -p "<task>" to run a task\n');
+      return 1;
+    }
     return runInteractive(parsed.args, io);
+  }
+
+  // Unicode White_Space includes U+0085; ECMAScript whitespace also includes BOM.
+  if (/^[\s\p{White_Space}]*$/u.test(parsed.args.prompt)) {
+    io.stderr.write('Task is empty · Pass -p "<task>" with a task\n');
+    return 1;
   }
 
   if (/^\s*\/(?:login|logout)(?:\s|$)/i.test(parsed.args.prompt)) {

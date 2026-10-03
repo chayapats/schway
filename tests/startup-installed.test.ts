@@ -69,6 +69,16 @@ test("packed executable verifies startup, appearance and Linux PTY cleanup with 
     } finally { await Bun.write(metadataPath, metadataText); }
     expect(await readdir(versionHome)).toEqual([]);
     expect(await readdir(versionWork)).toEqual([]);
+    for (const args of [[], ["--resume", "saved"], ["-p", ""], ["-p=\u0085", "--json", "--debug"]]) {
+      expect(await run([executable, ...args], versionWork, buildIsolatedCliEnv(versionHome))).toEqual({
+        exit: 1, stdout: "", stderr: args.some(arg => arg.startsWith("-p"))
+          ? 'Task is empty · Pass -p "<task>" with a task\n'
+          : 'Interactive mode needs a terminal · Use -p "<task>" to run a task\n',
+      });
+    }
+    // Ordinary dispatch may use Bun's transpiler cache; app state stays absent.
+    expect((await readdir(versionHome)).filter(name => name !== ".bun")).toEqual([]);
+    expect(await readdir(versionWork)).toEqual([]);
     const fixture = join(install, "startup-preload.ts");
     await Bun.write(fixture, `
 import { mock } from "bun:test";
@@ -77,6 +87,9 @@ import * as stateFs from "node:fs/promises";
 import { createTestRenderer } from "@opentui/core/testing";
 import * as storeModule from "./node_modules/schway/src/auth/store.ts";
 import { InteractiveMemory } from "./node_modules/schway/src/config/interactive-memory.ts";
+// Only this captured-output renderer fixture simulates interactive descriptors.
+Object.defineProperty(process.stdin, "isTTY", { value: true });
+Object.defineProperty(process.stdout, "isTTY", { value: true });
 const scenario = process.env.STARTUP_SCENARIO;
 const stateReadFile = stateFs.readFile, stateWriteFile = stateFs.writeFile;
 let splashWriteStarted = false, splashReadCalls = 0;
@@ -344,19 +357,27 @@ mock.module("./node_modules/schway/src/model/loader.ts", () => ({ bindGrokModel:
     }
     const plainHome = join(root, "plain-home"), plainWork = join(root, "plain-work");
     await mkdir(plainHome); await mkdir(plainWork);
-    for (const [args, expected] of [[["--profile", "missing-profile"], "missing-profile"], [[], "HOME is not set"]] as const) {
-      const env = buildIsolatedCliEnv(plainHome, expected === "HOME is not set" ? { HOME: undefined } : {});
+    // These probes exercise interactive setup failures before renderer creation.
+    // Give them explicit capabilities without changing the real installed PTY above.
+    const setupPreload = join(root, "setup-terminal-preload.ts");
+    await Bun.write(setupPreload, 'Object.defineProperty(process.stdin, "isTTY", { value: true });\nObject.defineProperty(process.stdout, "isTTY", { value: true });\n');
+    const setupEnv = (home: string, overrides: Record<string, string | undefined> = {}) =>
+      buildIsolatedCliEnv(home, { BUN_OPTIONS: `--preload ${setupPreload}`, ...overrides });
+    for (const [args, expected] of [[["--profile", "missing-profile"], /profile/i], [[], /HOME is not set/]] as const) {
+      const env = setupEnv(plainHome, args.length === 0 ? { HOME: undefined } : {});
       const result = await run([executable, ...args], plainWork, env);
       expect(result.exit).toBe(1);
-      expect(result.stderr).toContain(expected);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toMatch(expected);
+      expect(result.stderr).not.toContain("\x1b");
     }
     await Bun.write(join(plainHome, ".schway/config.json"), "{ invalid");
-    const broken = await run([executable], plainWork, buildIsolatedCliEnv(plainHome));
+    const broken = await run([executable], plainWork, setupEnv(plainHome));
     expect(broken.exit).toBe(1);
     expect(broken.stderr).toContain("config");
     const blockedHome = join(root, "blocked-home");
     await Bun.write(join(blockedHome, ".schway/sessions"), "not a directory");
-    const blocked = await run([executable], plainWork, buildIsolatedCliEnv(blockedHome));
+    const blocked = await run([executable], plainWork, setupEnv(blockedHome));
     expect(blocked.exit).toBe(1);
     expect(blocked.stderr).toContain("session storage");
     expect(await Bun.file(join(packageRoot, "docs/tui.md")).exists()).toBe(true);

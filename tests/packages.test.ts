@@ -394,6 +394,7 @@ for (const mode of ["headless", "interactive"]) {
       let diagnostic = "";
       expect(await runCli(mode === "headless" ? ["-p", "hello"] : [], {
         cwd: work, env: { HOME: home }, stdout: { write() {} }, stderr: { write(text) { diagnostic += text; } },
+        terminal: { stdin: mode === "interactive", stdout: mode === "interactive" },
         createModel: async () => { loads++; return createScriptedModel(); },
       })).toBe(1);
       expect(diagnostic).toContain('Missing project package "missing"');
