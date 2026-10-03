@@ -290,7 +290,7 @@ export abstract class TurnLayer extends CompactionLayer {
           if (event.type === "error") observedFailure = true;
           if (event.type === "agent.finished") terminalReason = event.reason;
           this.observeRuntimeEvent(event);
-          this.applyEvent(event, operationId);
+          if (!this.disposed && this.activeAbort?.signal === signal) this.applyEvent(event, operationId);
         }
       }
       if (this.activeAbort?.signal !== signal) {

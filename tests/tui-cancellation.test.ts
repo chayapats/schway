@@ -268,3 +268,43 @@ for (const action of ["replace-session", "dispose"] as const) test(`late stopped
     expect(original.busy).toBe(false);
   } finally { controller.dispose(); cleanup.open(); await Promise.allSettled([pending]); }
 }));
+
+for (const action of ["replace-session", "dispose"] as const) {
+  for (const observed of ["model.delta", "error"] as const) {
+    test(`runtime observer ${action} cannot apply the old ${observed} event`, async () => withTempDir(async root => {
+      const workspace = { root, launchCwd: root, extraRoots: [] };
+      const original = createSession();
+      const replacement = createSession();
+      let before: ReturnType<TuiController["snapshot"]> | undefined;
+      let callbacks = 0;
+      const controller = new TuiController({ session: original, workspace, contextManager: createContextManager(workspace),
+        provider: "scripted", modelId: "observer", sessionId: "original",
+        model: createScriptedModel(observed === "error"
+          ? { error: "Fixture provider failure", status: 400 }
+          : { chunks: ["old partial"], waitForAbort: true }),
+        onRuntimeEvent(event) {
+          if (event.type !== observed) return;
+          callbacks++;
+          if (action === "dispose") controller.dispose();
+          else controller.replaceSession(replacement, "replacement");
+          before = controller.snapshot();
+        },
+      });
+      const pending = controller.submit("old accepted task");
+      try {
+        expect(await pending).toBe(true);
+        expect(callbacks).toBe(1);
+        expect(before).toBeDefined();
+        const after = controller.snapshot();
+        expect(after.transcript).toEqual(before!.transcript);
+        expect(after.status).toBe(before!.status);
+        expect(after.outcome).toBeUndefined();
+        expect(after.recovery).toBeUndefined();
+        expect(await controller.continueRecovery()).toBe(false);
+        expect(replacement.items).toEqual([]);
+        expect(original.items.filter(item => item.type === "user")).toHaveLength(1);
+        expect(original.busy).toBe(false);
+      } finally { controller.dispose(); await Promise.allSettled([pending]); }
+    }));
+  }
+}
