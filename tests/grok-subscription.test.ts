@@ -284,3 +284,36 @@ test("Grok model-list transport failures stay sanitized and cancellation wins ov
   } }, fetch: async () => json({}, 401) });
   await expect(result).rejects.toMatchObject({ name: "AbortError" });
 });
+
+for (const phase of ["read rejects during abort", "read resolves before continuation"] as const) {
+  test(`Grok token resolution handles cancellation when ${phase}`, async () => {
+    const { createSubscriptionTokenRefresher, fetchDiscoveryCatalog } = await import("../src/model/providers/grok-subscription.ts");
+    for (const command of ["ordinary", "discovery"] as const) {
+      const abort = new AbortController(), entered = Promise.withResolvers<void>(), read = Promise.withResolvers<string | null>();
+      const unhandled: unknown[] = [], observe = (error: unknown) => { unhandled.push(error); };
+      const raw = JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", obtainedAt: 0, expiresAt: 0 });
+      let calls = 0, writes = 0;
+      const store = {
+        get() {
+          entered.resolve();
+          if (phase === "read rejects during abort") { abort.abort(); return Promise.reject(new Error("Controlled credential failure")); }
+          return read.promise;
+        },
+        async set() { writes++; }, async delete() { throw new Error("Unexpected deletion"); },
+      };
+      const fetch = async () => { calls++; return Response.json({ access_token: "too-late", expires_in: 3600 }); };
+      process.on("unhandledRejection", observe);
+      const operation = (command === "ordinary" ? createSubscriptionTokenRefresher({ store, fetch }).getValidAccessToken(abort.signal)
+        : fetchDiscoveryCatalog({ store, fetch, signal: abort.signal })).catch(error => error);
+      let expired = false;
+      const watchdog = setTimeout(() => { expired = true; abort.abort(); entered.resolve(); read.resolve(raw); }, 1500);
+      try {
+        await entered.promise;
+        if (phase === "read resolves before continuation") { read.resolve(raw); abort.abort(); }
+        expect(await operation).toMatchObject({ name: "AbortError" });
+        await new Promise<void>(resolve => setImmediate(resolve));
+        expect(expired).toBe(false); expect(calls).toBe(0); expect(writes).toBe(0); expect(unhandled).toEqual([]);
+      } finally { clearTimeout(watchdog); abort.abort(); read.resolve(raw); await operation; process.removeListener("unhandledRejection", observe); }
+    }
+  });
+}

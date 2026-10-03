@@ -1,3 +1,4 @@
+import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, type ModelListResult } from "../model-list.ts";
 import { assertThinking } from "../thinking.ts";
 import type {
   AssistantContent,
@@ -478,6 +479,31 @@ export function createSubscriptionTokenRefresher(input: {
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },
   };
+}
+
+/** Discover with a caller-owned refresh lifetime; no credential write starts after cancellation. */
+export async function fetchDiscoveryCatalog(input: {
+  store: CredentialStore; fetch?: CodexFetchLike; signal: AbortSignal;
+}): Promise<ModelListResult> {
+  input.signal.throwIfAborted();
+  let tokens = await abortableCatalogOperation(loadSubscriptionTokens(input.store), input.signal);
+  if (!tokens) throw new Error(codexMissingLoginError());
+  if (subscriptionAccessExpired(tokens)) {
+    if (!tokens.refreshToken) throw new Error(codexExpiredSessionError());
+    const refreshed = await abortableCatalogOperation(refreshSubscriptionTokens({
+      refreshToken: tokens.refreshToken, signal: input.signal,
+      fetch: boundedCatalogFetch({ ...input, label: "ChatGPT subscription" }),
+    }), input.signal);
+    input.signal.throwIfAborted();
+    tokens = { ...refreshed, refreshToken: refreshed.refreshToken ?? tokens.refreshToken };
+    await abortableCatalogOperation(saveSubscriptionTokens(input.store, tokens), input.signal);
+  }
+  input.signal.throwIfAborted();
+  return fetchProviderModelListResult({
+    url: `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(CODEX_CATALOG_CLIENT_VERSION)}`,
+    headers: codexRequestHeaders(tokens.accessToken, tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken)),
+    fetch: input.fetch, signal: input.signal, label: "ChatGPT subscription", parseOptions: { maxModels: 256, codex: true },
+  });
 }
 
 /** Fetch bounded, visible account-scoped model capabilities using only the subscription identity. */

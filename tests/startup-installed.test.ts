@@ -85,6 +85,24 @@ test("packed executable verifies startup, appearance and Linux PTY cleanup with 
     expect(savedHelp.exit).toBe(0); expect(savedHelp.stderr).toBe(""); expect(savedHelp.stdout).toContain("Usage: schway sessions list");
     const savedUsage = await run([executable, "sessions", "list", "--provider", "openai"], savedWork, buildIsolatedCliEnv(savedHome));
     expect(savedUsage.exit).toBe(2); expect(savedUsage.stdout).toBe(""); expect(savedUsage.stderr).toContain("sessions --help");
+    const modelsHome = join(root, "models-home"), modelsWork = join(root, "packed-private-key");
+    await mkdir(modelsHome); await mkdir(modelsWork);
+    const modelsHelp = await run([executable, "models", "--help"], modelsWork, buildIsolatedCliEnv(modelsHome, { HOME: undefined }));
+    expect(modelsHelp.exit).toBe(0); expect(modelsHelp.stderr).toBe(""); expect(modelsHelp.stdout).toContain("Usage: schway models list");
+    const models = await run([executable, "models", "list", "--offline", "--json"], modelsWork, buildIsolatedCliEnv(modelsHome));
+    expect(models.exit, models.stderr).toBe(0); expect(models.stderr).toBe("");
+    expect(JSON.parse(models.stdout)).toMatchObject({ schemaVersion: 1, provider: "openai", route: "unresolved", source: "builtin", status: "complete" });
+    expect(JSON.parse(models.stdout).warnings.join(" ")).toContain("unverified");
+    expect((await readdir(modelsHome)).filter(name => name !== ".bun")).toEqual([]); expect(await readdir(modelsWork)).toEqual([]);
+    await mkdir(join(modelsWork, ".schway"));
+    const modelsConfig = join(modelsWork, ".schway/config.json"), modelsConfigText = JSON.stringify({ maxTurns: -1 });
+    await Bun.write(modelsConfig, modelsConfigText);
+    const modelsError = await run([executable, "models", "list", "--offline", "--json", "--api-key", "packed-private-key"], modelsWork, buildIsolatedCliEnv(modelsHome));
+    expect(modelsError.exit).toBe(1); expect(JSON.parse(modelsError.stdout)).toMatchObject({ status: "error", models: [] });
+    expect(modelsError.stderr).toContain("maxTurns"); expect(modelsError.stdout + modelsError.stderr).not.toContain("packed-private-key");
+    expect(await Bun.file(modelsConfig).text()).toBe(modelsConfigText);
+    expect(await readdir(join(modelsWork, ".schway"))).toEqual(["config.json"]);
+    expect((await readdir(modelsHome)).filter(name => name !== ".bun")).toEqual([]);
     for (const args of [[], ["--resume", "saved"], ["-p", ""], ["-p=\u0085", "--json", "--debug"]]) {
       expect(await run([executable, ...args], versionWork, buildIsolatedCliEnv(versionHome))).toEqual({
         exit: 1, stdout: "", stderr: args.some(arg => arg.startsWith("-p"))

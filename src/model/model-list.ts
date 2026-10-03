@@ -112,69 +112,109 @@ function listedModelRecommendation(route: ModelListRoute, models: readonly Liste
   return { id: models[0]?.id ?? fallback, reliable: models.length === 1 };
 }
 
-/** Fetch and parse one route's model list. Throws when the endpoint cannot be read; callers show static fallback. */
-export async function fetchProviderModelList(input: {
-  url: string;
-  apiKey?: string;
-  headers?: Record<string, string>;
-  fetch?: ModelListFetch;
-  signal?: AbortSignal;
-  label: string;
-}): Promise<ListedModel[]> {
-  const deadline = AbortSignal.timeout(5_000);
-  const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
-  let response: Response;
-  try {
-    response = await (input.fetch ?? fetch)(input.url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...input.headers,
-        ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {}),
-      },
-      redirect: "error",
-      signal,
-    });
-  } catch {
-    if (input.signal?.aborted) throw new Error(`${input.label} model list cancelled.`);
-    if (signal.aborted) throw new Error(`${input.label} model list timed out.`);
-    throw new Error(`Could not reach the ${input.label} model list.`);
-  }
-  if (!response.ok) {
-    void response.body?.cancel().catch(() => {});
-    throw new Error(`${input.label} model list returned HTTP ${response.status}.`);
-  }
+/** Route-specific selection rules applied before the usable-model capacity limit. */
+export interface ModelListParseOptions { maxModels?: number; codex?: boolean; chatOnly?: "openai" | "xai" }
+
+/** Bounded catalog data plus an honest account of discarded entries. */
+export interface ModelListResult { models: ListedModel[]; warnings: string[]; partial: boolean }
+
+/** Reject promptly on cancellation while handling late settlement of the underlying operation. */
+export async function abortableCatalogOperation<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(value => { signal.removeEventListener("abort", abort); resolve(value); }, error => { signal.removeEventListener("abort", abort); reject(error); });
+    if (signal.aborted) abort();
+  });
+}
+
+/** Read at most one MiB under the caller's operation signal, cancelling a stalled reader on abort. */
+export async function readModelCatalogBody(response: Response, signal: AbortSignal, label: string): Promise<Uint8Array> {
+  signal.throwIfAborted();
   const reader = response.body?.getReader();
-  if (!reader) throw new Error(`${input.label} model list returned no data.`);
+  if (!reader) throw new Error(`${label} model list returned no data.`);
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener("abort", cancel, { once: true });
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      const { done, value } = await abortableCatalogOperation(reader.read(), signal);
+      signal.throwIfAborted();
       if (done) break;
       size += value.byteLength;
-      if (size > 1_048_576) throw new ModelListTooLargeError(input.label);
+      if (size > 1_048_576) throw new ModelListTooLargeError(label);
       chunks.push(value);
     }
-  } catch (error) {
-    void reader.cancel().catch(() => {});
-    if (error instanceof ModelListTooLargeError) throw error;
-    throw new Error(`Could not read the ${input.label} model list.`);
-  }
-  let payload: unknown;
-  try {
     const bytes = new Uint8Array(size);
     let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    payload = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw new Error(`${input.label} model list returned invalid JSON.`);
+    return bytes;
+  } catch (error) {
+    cancel();
+    signal.throwIfAborted();
+    if (error instanceof ModelListTooLargeError) throw error;
+    throw new Error(`Could not read the ${label} model list.`);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
   }
-  return parseModelList(payload, input.label, input.url.replace(/\/models\/?$/, ""));
+}
+
+/** Fetch with one caller-owned signal and discard any response arriving after cancellation. */
+export async function fetchModelCatalogResponse(input: { url: string | URL | Request; init?: RequestInit; fetch?: ModelListFetch; signal: AbortSignal; label: string }): Promise<Response> {
+  input.signal.throwIfAborted();
+  const request = Promise.resolve().then(() => {
+    input.signal.throwIfAborted();
+    return (input.fetch ?? fetch)(input.url, { ...input.init, signal: input.signal, redirect: "error" });
+  }).then(response => {
+    if (input.signal.aborted) { void response.body?.cancel().catch(() => {}); input.signal.throwIfAborted(); }
+    return response;
+  });
+  try { return await abortableCatalogOperation(request, input.signal); }
+  catch { input.signal.throwIfAborted(); throw new Error(`Could not reach the ${input.label} model list.`); }
+}
+
+/** Fetch a catalog under an existing total-operation deadline; no phase restarts the budget. */
+export async function fetchProviderModelListResult(input: {
+  url: string; apiKey?: string; headers?: Record<string, string>; fetch?: ModelListFetch; signal: AbortSignal; label: string; parseOptions?: ModelListParseOptions;
+}): Promise<ModelListResult> {
+  const headers = new Headers({ Accept: "application/json", ...input.headers });
+  if (input.apiKey) headers.set("Authorization", `Bearer ${input.apiKey}`);
+  const response = await fetchModelCatalogResponse({ ...input, init: { method: "GET", headers } });
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(`${input.label} model list returned HTTP ${response.status}.`);
+  }
+  const bytes = await readModelCatalogBody(response, input.signal, input.label);
+  let payload: unknown;
+  try { payload = JSON.parse(new TextDecoder().decode(bytes)); }
+  catch { throw new Error(`${input.label} model list returned invalid JSON.`); }
+  return parseModelListResult(payload, input.label, input.url.replace(/\/models\/?$/, ""), input.parseOptions);
+}
+
+/** Fetch and parse one route's model list with the existing five-second request ceiling. */
+export async function fetchProviderModelList(input: {
+  url: string; apiKey?: string; headers?: Record<string, string>; fetch?: ModelListFetch; signal?: AbortSignal; label: string;
+}): Promise<ListedModel[]> {
+  const deadline = AbortSignal.timeout(5_000);
+  const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
+  try { return (await fetchProviderModelListResult({ ...input, signal })).models; }
+  catch (error) {
+    if (input.signal?.aborted) throw new Error(`${input.label} model list cancelled.`);
+    if (signal.aborted) throw new Error(`${input.label} model list timed out.`);
+    throw error;
+  }
 }
 
 /** Parse an OpenAI-style `{ data: [...] }` list or a `{ models: [...] }` list without trusting extra fields. */
 export function parseModelList(payload: unknown, label: string, baseUrl?: string): ListedModel[] {
+  return parseModelListResult(payload, label, baseUrl).models;
+}
+
+/** Parse validated IDs and observed metadata, reporting invalid entries and capacity loss separately from filtering. */
+export function parseModelListResult(payload: unknown, label: string, baseUrl?: string, options: ModelListParseOptions = {}): ModelListResult {
   if (!payload || typeof payload !== "object") throw new Error(`${label} model list returned an invalid model list.`);
   const record = payload as Record<string, unknown>;
   const raw = Array.isArray(record.data) ? record.data : Array.isArray(record.models) ? record.models : undefined;
@@ -184,13 +224,20 @@ export function parseModelList(payload: unknown, label: string, baseUrl?: string
       : typeof record.recommended === "string" ? record.recommended
         : undefined;
   const models = new Map<string, ListedModel>();
+  const seen = new Set<string>();
+  let invalid = 0, capped = 0;
   for (const item of raw) {
-    if (models.size >= MAX_PARSED_MODELS) break;
-    if (!item || typeof item !== "object") continue;
+    if (!item || typeof item !== "object" || Array.isArray(item)) { invalid++; continue; }
     const row = item as Record<string, unknown>;
-    const id = typeof row.id === "string" ? row.id : typeof row.slug === "string" ? row.slug : undefined;
-    if (!id || !MODEL_ID.test(id) || models.has(id)) continue;
+    const id = options.codex ? typeof row.slug === "string" ? row.slug : undefined : typeof row.id === "string" ? row.id : typeof row.slug === "string" ? row.slug : undefined;
     if (row.visibility !== undefined && row.visibility !== "list") continue;
+    if (options.codex && row.visibility === undefined) { invalid++; continue; }
+    if (!id || !(options.codex ? /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/ : MODEL_ID).test(id)) { invalid++; continue; }
+    if (options.chatOnly === "openai" && !filterOpenAIApiKeyModels([{ id }]).length) continue;
+    if (options.chatOnly === "xai" && !filterXaiModels([{ id }]).length) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (models.size >= (options.maxModels ?? MAX_PARSED_MODELS)) { capped++; continue; }
     const contextWindow = positiveInt(row.context_window ?? row.contextWindow ?? row.context_length, 10_000_000);
     const maxOutput = positiveInt(row.max_output_tokens ?? row.max_completion_tokens ?? row.maxOutput, 1_000_000);
     const supportedThinking = thinkingLevels(row.supported_reasoning_levels ?? row.supportedThinking ?? reasoningEfforts(row));
@@ -207,7 +254,10 @@ export function parseModelList(payload: unknown, label: string, baseUrl?: string
     });
   }
   if (!models.size) throw new Error(`${label} model list returned no selectable models.`);
-  return [...models.values()];
+  const warnings: string[] = [];
+  if (invalid) warnings.push(`Discarded ${invalid} invalid model ${invalid === 1 ? "entry" : "entries"}. Retry schway models list for a fresh catalog.`);
+  if (capped) warnings.push(`Model list truncated at ${options.maxModels ?? MAX_PARSED_MODELS} models. Ask the provider for a smaller catalog.`);
+  return { models: [...models.values()], warnings, partial: invalid > 0 || capped > 0 };
 }
 
 function isOpenAIChatModelId(id: string): boolean {
@@ -269,4 +319,18 @@ function openRouterCapability(id: string, value: unknown): ModelCapability {
   const defaultThinking = reasoning.default_enabled === false && reasoning.mandatory !== true ? "off" : oneThinkingLevel(reasoning.default_effort);
   return { ...base, reasoningKnown: reasoning.supported_efforts === null || Array.isArray(reasoning.supported_efforts), mandatoryThinking: reasoning.mandatory === true, supportedThinking, supportsDisabling: supportedThinking.includes("off"),
     ...(defaultThinking && !(reasoning.mandatory === true && defaultThinking === "off") ? { defaultThinking } : {}) };
+}
+
+/** Wrap catalog-only token requests so their complete bodies obey the same deadline and response bound. */
+export function boundedCatalogFetch(input: { fetch?: ModelListFetch; signal: AbortSignal; label: string }): ModelListFetch {
+  return async (url, init) => {
+    const response = await fetchModelCatalogResponse({ ...input, url, init });
+    if (!response.ok) {
+      // Refresh diagnostics use the status; ignore untrusted bodies, including HTML gateway failures.
+      void response.body?.cancel().catch(() => {});
+      return Response.json({}, { status: response.status });
+    }
+    const bytes = await readModelCatalogBody(response, input.signal, input.label);
+    return new Response(bytes, { status: response.status, headers: response.headers });
+  };
 }

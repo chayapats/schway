@@ -79,6 +79,8 @@ export type OpenAITransport =
 /** Select the OpenAI transport without starting any interactive flow; explicit preference always wins. */
 export async function selectOpenAITransport(input: {
   openaiAuth?: OpenAIAuthPreference;
+  /** Discovery stops once subscription precedence selects an identity. Execution retains its existing checks. */
+  minimalLookup?: boolean;
   runtimeApiKey?: string;
   env: Record<string, string | undefined>;
   store: CredentialStore;
@@ -116,7 +118,11 @@ export async function selectOpenAITransport(input: {
   let subscription: string | null;
   let storedApiKey: string | null;
   try {
-    [subscription, storedApiKey] = await Promise.all([
+    if (input.minimalLookup) {
+      subscription = await input.store.get(codexSubscriptionIdentity());
+      if (subscription?.trim()) return { transport: "codex" };
+      storedApiKey = await input.store.get(credentialIdentity({ provider: "openai" }));
+    } else [subscription, storedApiKey] = await Promise.all([
       input.store.get(codexSubscriptionIdentity()),
       input.store.get(credentialIdentity({ provider: "openai" })),
     ]);

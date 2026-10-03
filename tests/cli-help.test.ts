@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { CLI_AUTH_MODES, CLI_OPENAI_AUTH_MODES, CLI_PROVIDERS, CLI_THINKING_LEVELS, CLI_XAI_AUTH_MODES, parseArgs, type CliArgs } from "../src/cli/args.ts";
 import { CLI_OPTIONS, formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
 import { parseSessionsArguments } from "../src/cli/sessions.ts";
+import { parseModelsCommand } from "../src/cli/models.ts";
 
 test("main help groups options and examples in the documented order", () => {
   const lines = formatHelp().trimEnd().split("\n");
@@ -15,6 +16,10 @@ test("main help groups options and examples in the documented order", () => {
     ["schway", "Start an interactive session"],
     ['schway -p "<task>" [--approval <auto|ask|read-only>]', "Run one task"],
     ["schway doctor", "Check your setup"],
+  ]);
+  expect(lines.slice(6, 8).map((line) => line.trim().split(/ {2,}/))).toEqual([
+    ["schway sessions list", "Browse saved work"],
+    ["schway models list", "List model IDs"],
   ]);
 });
 
@@ -130,6 +135,7 @@ test("every example is a complete parseable command with placeholder model and s
     expect(examples).toContain("schway doctor --json");
     if (format === formatHelp) {
       expect(examples).toContain("schway --resume <id>");
+      expect(examples).toContain("schway models list --offline --json");
       expect(examples.some((line) => line.includes(" -p ") && line.includes("--json"))).toBe(true);
       expect(examples.some((line) => line.includes("--provider") && line.includes("--model <id>"))).toBe(true);
     } else {
@@ -141,6 +147,10 @@ test("every example is a complete parseable command with placeholder model and s
       expect(words.shift()).toBe("schway");
       if (words[0] === "sessions") {
         expect(() => parseSessionsArguments(words.slice(1))).not.toThrow();
+        continue;
+      }
+      if (words[0] === "models") {
+        expect(parseModelsCommand(words)).toMatchObject({ args: { offline: true, json: true } });
         continue;
       }
       if (words[0] === "doctor") words.shift();

@@ -8,7 +8,7 @@ import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
 import { sessionsHelp } from "../src/cli/sessions.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
-import { credentialIdentity, type CredentialStore } from "../src/auth/store.ts";
+import { credentialIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 import type { Model } from "../src/model/model.ts";
 import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -25,6 +25,138 @@ function capture() {
       return text;
     },
   };
+}
+
+test("models dispatch uses only its selected identity without a task, terminal or model factory", async () => {
+  await withTempDir(async home => {
+    const reads: string[] = [], requests: string[] = [];
+    const store: CredentialStore = {
+      async get(identity) { expect(this).toBe(store); reads.push(identity.account); return "selected-key"; },
+      async set() { throw new Error("Unexpected credential write"); },
+      async delete() { throw new Error("Unexpected credential deletion"); },
+    };
+    const result = await run(["models", "list", "--provider", "openai", "--openai-auth", "api-key", "--json"], {
+      cwd: home, env: { HOME: home }, credentialStore: store,
+      createModel: async () => { throw new Error("Discovery cannot create an execution model"); },
+      fetch: async (url, init) => {
+        requests.push(String(url)); expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer selected-key");
+        return Response.json({ data: [{ id: "gpt-4o" }] });
+      },
+    });
+    expect(result.exitCode, result.stderr).toBe(0); expect(result.stderr).toBe("");
+    expect(reads).toEqual([credentialIdentity({ provider: "openai" }).account]); expect(requests).toEqual(["https://api.openai.com/v1/models"]);
+    expect(JSON.parse(result.stdout)).toMatchObject({ provider: "openai", route: "api-key", status: "complete", models: [{ id: "gpt-4o" }] });
+    expect(await readdir(home)).toEqual([]);
+  });
+});
+
+test("models production config preserves one deprecation warning per physical file without changing JSON or bytes", async () => {
+  await withTempDir(async home => {
+    await mkdir(join(home, ".schway"));
+    const path = join(home, ".schway/config.json"), text = JSON.stringify({ legacyProvider: "xai" });
+    await writeFile(path, text);
+    const stdout = capture(), stderr = capture();
+    const exit = await runCli(["models", "list", "--offline", "--json"], {
+      cwd: home, env: { HOME: home }, stdout, stderr,
+      configDeprecations: [{ key: "legacyProvider", replacement: "provider", since: "1.0.0", removeIn: "2.0.0" }],
+      credentialStore: { get: async () => { throw new Error("Unexpected credentials"); }, set: async () => { throw new Error("Unexpected write"); }, delete: async () => { throw new Error("Unexpected delete"); } },
+    });
+    expect(exit).toBe(0); expect(JSON.parse(stdout.text)).toMatchObject({ provider: "xai", route: "unresolved", status: "complete" });
+    expect(stderr.text.trim().split("\n")).toHaveLength(1); expect(stderr.text).toContain('"legacyProvider"');
+    expect(stderr.text).toContain('use "provider"'); expect(stderr.text).toContain("2.0.0");
+    expect(await Bun.file(path).text()).toBe(text);
+  });
+});
+
+test("concurrent models entry calls preserve the original store's shared Grok renewal identity", async () => {
+  await withTempDir(async home => {
+    const { GROK_TOKEN_URL } = await import("../src/model/providers/grok-subscription.ts");
+    const identity = grokSubscriptionIdentity(), started = Promise.withResolvers<void>(), joined = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const abort = new AbortController();
+    let reads = 0, writes = 0, renewals = 0, catalogs = 0, expired = false;
+    let raw = JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 });
+    const store: CredentialStore = {
+      async get(selected) { expect(this).toBe(store); expect(selected).toEqual(identity); if (++reads === 3) joined.resolve(); return raw; },
+      async set(selected, value) { expect(this).toBe(store); expect(selected).toEqual(identity); writes++; raw = value; },
+      async delete() { throw new Error("Unexpected credential deletion"); },
+    };
+    const fetch: NonNullable<CliIo["fetch"]> = async (url, init) => {
+      if (String(url) === GROK_TOKEN_URL) {
+        renewals++; started.resolve(); await release.promise;
+        return Response.json({ access_token: "shared-access", refresh_token: "shared-refresh", expires_in: 3600 });
+      }
+      catalogs++; expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer shared-access");
+      return Response.json({ data: [{ id: "grok-safe" }] });
+    };
+    const list = () => run(["models", "list", "--provider", "xai", "--xai-auth", "grok", "--json"], {
+      cwd: home, env: { HOME: home }, credentialStore: store, fetch, signal: abort.signal,
+    });
+    const pending: ReturnType<typeof list>[] = [];
+    const watchdog = setTimeout(() => { expired = true; abort.abort(); started.resolve(); joined.resolve(); release.resolve(); }, 1500);
+    try {
+      pending.push(list()); await started.promise;
+      pending.push(list()); await joined.promise; release.resolve();
+      for (const result of await Promise.all(pending)) {
+        expect(result.exitCode, result.stderr).toBe(0); expect(result.stderr).toBe("");
+        expect(JSON.parse(result.stdout)).toMatchObject({ route: "grok", status: "complete", models: [{ id: "grok-safe" }] });
+      }
+      expect(expired).toBe(false); expect(renewals).toBe(1); expect(writes).toBe(1); expect(catalogs).toBe(2);
+      expect(await readdir(home)).toEqual([]);
+    } finally {
+      clearTimeout(watchdog); abort.abort(); release.resolve(); await Promise.allSettled(pending);
+    }
+  });
+});
+
+for (const source of ["overridden-env", "normalized-overridden-env", "authorization-token", "other-profile-env"] as const) {
+  for (const offline of [false, true]) for (const json of [false, true]) {
+    test(`models retain ${source} secrets in ${offline ? "offline" : "online"} ${json ? "JSON" : "plain"} catalogs`, async () => {
+      await withTempDir(async root => {
+        const home = join(root, "home"), cwd = join(root, "work"), secret = "private-catalog-context-527941";
+        const profile = `selected-${secret}`, safeId = "safe-exact-model-2026";
+        await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(cwd, ".schway"), { recursive: true });
+        const env: Record<string, string> = { HOME: home };
+        const args = ["models", "list", ...(offline ? ["--offline"] : []), ...(json ? ["--json"] : [])];
+        await writeFile(join(cwd, ".schway/config.json"), JSON.stringify({ profile, profiles: {
+          [profile]: { baseUrl: "https://fixture.invalid/v1", auth: "none" },
+        } }));
+        if (source === "overridden-env" || source === "normalized-overridden-env") {
+          env.OPENAI_COMPATIBLE_API_KEY = source === "overridden-env" ? `  ${secret}  ` : secret.replace("catalog", "\u001b[31mcatalog\u001b[0m");
+          await writeFile(join(cwd, "overlay.env"), "OPENAI_COMPATIBLE_API_KEY=replacement-value\n");
+          args.push("--env-file", "overlay.env");
+        } else if (source === "authorization-token") args.push("--header", `Authorization:Bearer ${secret}`);
+        else {
+          env.OTHER_AUTH = `  ${secret}\n`;
+          await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profiles: {
+            other: { baseUrl: "https://other.invalid/v1", auth: "none", credentialEnv: "OTHER_AUTH" },
+          } }));
+        }
+        let requests = 0, credentialCalls = 0;
+        const forbidCredentials = async () => { credentialCalls++; throw new Error("Unexpected credential access"); };
+        const result = await run(args, {
+          cwd, env, credentialStore: { get: forbidCredentials, set: forbidCredentials, delete: forbidCredentials },
+          fetch: async url => {
+            requests++; expect(String(url)).toBe("https://fixture.invalid/v1/models");
+            return Response.json({ data: [{ id: secret }, { id: safeId }] });
+          },
+        });
+        expect(credentialCalls).toBe(0); expect(requests).toBe(offline ? 0 : 1);
+        expect(result.stdout + result.stderr).not.toContain(secret);
+        expect(result.exitCode).toBe(1); expect(result.stderr).toContain("Omitted profile name containing a credential value");
+        if (json) {
+          const catalog = JSON.parse(result.stdout);
+          expect(catalog).toMatchObject({ provider: "openai-compatible", route: "compatible", source: offline ? "builtin" : "remote", status: "partial" });
+          expect(catalog).not.toHaveProperty("profile");
+          expect(catalog.models).toEqual(offline ? [] : [{ id: safeId }]);
+        } else {
+          expect(result.stdout).toContain(`Models · openai-compatible · compatible · ${offline ? "builtin" : "remote"} · partial`);
+          if (!offline) expect(result.stdout.split("\n")).toContain(safeId);
+        }
+        expect(await readdir(join(home, ".schway"))).toEqual(source === "other-profile-env" ? ["config.json"] : []);
+        expect(await readdir(join(cwd, ".schway"))).toEqual(["config.json"]);
+      });
+    });
+  }
 }
 
 test("headless prompts, JSON output and subcommands never create interactive splash state", async () => {

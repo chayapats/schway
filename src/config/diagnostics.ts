@@ -18,6 +18,8 @@ export interface ConfigReadError { error: string; diagnostics: readonly ConfigDi
 /** Explicit environment and expandable known-secret list; diagnostic formatting never reads ambient credentials. */
 export interface ConfigDiagnosticContext {
   env?: Record<string, string | undefined>;
+  /** Prior explicit environment snapshots contribute known secrets only, never effective configuration or auth values. */
+  observedEnvs?: readonly Readonly<Record<string, string | undefined>>[];
   secrets?: string[];
 }
 
@@ -40,8 +42,8 @@ export function configDiagnosticSecrets(context: ConfigDiagnosticContext = {}, i
     inspect(input);
     if (Object.hasOwn(input, "profiles") && object(input.profiles)) for (const profile of Object.values(input.profiles)) if (object(profile)) inspect(profile);
   }
-  for (const name of envNames) {
-    const value = context.env && Object.hasOwn(context.env, name) ? context.env[name] : undefined;
+  for (const env of [context.env, ...(context.observedEnvs ?? [])]) for (const name of envNames) {
+    const value = env && Object.hasOwn(env, name) ? env[name] : undefined;
     if (value) values.push(value);
   }
   const secrets = [...new Set(values.flatMap(value => [value, value.trim()]).filter(Boolean))].sort((a, b) => b.length - a.length);

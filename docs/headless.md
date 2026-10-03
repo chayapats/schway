@@ -16,8 +16,8 @@ reading setup or changing saved work. Valid tasks keep their leading and trailin
 whitespace, including multiline text. Stdin is not implicitly used as a task.
 
 Explicit tasks work with terminal or redirected input and output. Without `-p`,
-both stdin and stdout must be terminals; stderr may be redirected. Help, version
-doctor and session listing do not need a terminal. Embedded `runCli` callers may provide
+both stdin and stdout must be terminals; stderr may be redirected. Help, version,
+doctor, session listing and model listing do not need a terminal. Embedded `runCli` callers may provide
 `terminal: { stdin: true, stdout: true }` for an interactive renderer; omitted
 capabilities default to false. The executable reads the actual stdin/stdout
 terminal capabilities.
@@ -99,6 +99,70 @@ corruption or full validation; explicit resume validates the complete history.
 The captured rows are sorted by valid activity/creation time, then exact ID,
 before filtering and pagination. Concurrent changes can move offset pages
 between invocations. See [session discovery](sessions.md) for saved-work states.
+
+## Discover model IDs
+
+```bash
+schway models list
+schway models list --provider openai --openai-auth codex
+schway models list --provider xai --xai-auth api-key --filter grok
+schway models list --profile local --json
+schway models list --offline --json
+```
+
+Model listing resolves one connection without requiring a configured model or
+sending a prompt. It reads normal user/project configuration and explicit CLI
+connection options, including profiles, base URL, auth selectors, runtime keys,
+headers and `--env-file`. Project settings come from the canonical primary
+workspace; process `HOME` anchors user settings even if an explicit env file sets
+another `HOME`. Env files load only when requested, with later files taking
+precedence. A selected profile uses its own endpoint and credential identity.
+Valid execution-only settings such as model and thinking do not limit discovery;
+malformed configuration still reports its source and repair guidance.
+
+Online listing makes the selected route's catalog request. Explicit
+`--openai-auth codex|api-key` and `--xai-auth grok|api-key` use only that identity;
+`auto` uses the existing credential precedence. A selected subscription may
+refresh its token. One five-second remote-operation deadline covers route
+credential reads, token refresh, catalog request and response-body consumption.
+Failure never switches billing routes or substitutes a built-in result.
+
+`--offline` reads local settings and explicit env files, without credential-store
+access, refresh or network. An explicit route is labelled with built-in metadata
+and unverified account access. Auto remains `route: "unresolved"`. Arbitrary
+compatible endpoints without a local catalog return an explained empty list.
+
+Rows contain exact, sorted, deduplicated IDs and only known capability metadata.
+`--filter <text>` matches a literal, case-insensitive ID substring. No matches is
+a complete result with guidance to clear the filter; an empty filter argument is
+invalid. Listed IDs do not guarantee live access. Unknown IDs remain accepted by
+`schway -p "<task>" --model <id>`.
+
+`--json` emits one object, distinct from task JSONL:
+
+```text
+{schemaVersion:1, provider, route, profile?, source, status, models, warnings}
+```
+
+`provider` names `openai`, `xai` or `openai-compatible`; it is `null` only for an
+error before provider resolution. `route` is `api-key`, `codex`, `grok`,
+`compatible` or `unresolved`. `source` is `remote` or `builtin`; `status` is
+`complete`, `partial` or `error`. The optional `profile` identifies the resolved
+compatible profile when safe to show. Each model has `id`; optional
+`contextWindow`, `maxOutput`, `supportedThinking` and `recommended` fields appear
+only when known. Warnings explain incomplete or unverified results. Credential
+values, endpoint headers and raw provider payloads are never output.
+
+Exit **0** means complete, including offline results and filters with no matches;
+**1** means partial, operational failure or cancellation; **2** means invalid arguments.
+Usage errors leave stdout empty. Operational JSON output remains one parseable
+object, with `models: []` when no usable data exists; diagnostics go to stderr.
+Use `schway models list --help` for options. Task, resume, approval, debug, body
+and limit options are rejected before setup or network.
+
+Model listing does not create sessions, run tools, read TUI memory, open sign-in
+or write configuration, drafts or other application state. The selected
+subscription's required token refresh is its only permitted credential write.
 
 ## Cancellation
 
