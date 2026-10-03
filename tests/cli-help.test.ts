@@ -21,6 +21,7 @@ const EXPECTED_OPTIONS = {
   "-p": { prompt: "explain this project" },
   "--approval": { approval: "read-only" },
   "-h": { help: true },
+  "-V": { version: true },
   "--provider": { provider: "openai" },
   "--model": { model: "example-model" },
   "--profile": { profile: "local" },
@@ -62,8 +63,8 @@ test("each documented option and alias sets its CLI field in both accepted forms
 });
 
 test("the option registry and parser flag literals cover each other", async () => {
-  const source = await Bun.file(new URL("../src/cli/args.ts", import.meta.url)).text();
-  const parsedFlags = new Set([...source.matchAll(/(["'])(-{1,2}[a-z][a-z-]*)(?:=)?\1/g)].map((match) => match[2]));
+  const source = (await Promise.all(["args.ts", "version.ts"].map(file => Bun.file(new URL(`../src/cli/${file}`, import.meta.url)).text()))).join("\n");
+  const parsedFlags = new Set([...source.matchAll(/(["'])(-{1,2}[A-Za-z][A-Za-z-]*)(?:=)?\1/g)].map((match) => match[2]));
   const helpFlags = CLI_OPTIONS.flatMap((option) => [...option.flags]);
   expect(new Set(helpFlags).size).toBe(helpFlags.length);
   expect([...parsedFlags].sort()).toEqual([...helpFlags].sort());
@@ -101,6 +102,8 @@ test("doctor help contains exactly the diagnostic option subset", () => {
     "--base-url", "--header", "--body", "--auth", "--max-turns", "--max-output", "--context-window", "--max-concurrent-tools", "--env-file", "--extension",
   ]);
   expect(rows.find((row) => row.startsWith("  --json "))).toContain("Print diagnostics as a JSON object");
+  expect(text).toContain("schway --version");
+  expect(text).toContain("Show the installed version");
 });
 
 test("help is plain text, terminal-independent and never wider than 80 columns", () => {

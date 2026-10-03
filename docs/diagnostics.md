@@ -1,5 +1,10 @@
 # Local diagnostics
 
+When reporting a bug, include the output of `schway --version` (or `schway -V`).
+This standalone command prints the installed package version without reading
+configuration, credentials or logs, even if setup is broken. Run it separately
+from `--debug`, `--json` and other options.
+
 Schway does not write diagnostic logs unless you opt in. To investigate a run:
 
 ```bash

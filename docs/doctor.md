@@ -12,6 +12,16 @@ Run `schway doctor --help` for grouped diagnostic options and examples. Use
 `schway --help` for the main command, including model and session options.
 Help does not read configuration or run diagnostics.
 
+Use `schway --version` (or `schway -V`) to print `schway <package-version>`
+without reading configuration, checking credentials or running diagnostics. It
+works outside a Git repository and without `HOME`. Include this output when
+reporting a bug, even if doctor cannot complete.
+
+Run either version flag on its own. Adding `--help` or `-h` shows the main help
+instead. Other combinations, including `doctor --version`, `--version --json`
+and repeated version flags, fail with exit status **1** before setup is read.
+Lowercase `-v` is not supported.
+
 ```bash
 schway doctor
 schway doctor --json

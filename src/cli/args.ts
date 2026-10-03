@@ -3,6 +3,7 @@ import { THINKING_LEVELS } from "../model/model.ts";
 import type { ConfigLayer } from "../config/config.ts";
 import { removedProviderMessage } from "../config/removed-provider.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
+import { parseVersionCommand } from "./version.ts";
 
 /** Provider families accepted by the CLI without loading a provider adapter. */
 export const CLI_PROVIDERS = ["openai", "xai", "openai-compatible"] as const;
@@ -47,6 +48,8 @@ export interface CliArgs {
   resume?: string;
   branch?: string;
   help: boolean;
+  /** Print package metadata without starting a session or inspecting setup. */
+  version?: boolean;
   baseUrl?: string;
   headers?: Record<string, string>;
   extraBody?: Record<string, unknown>;
@@ -62,11 +65,17 @@ export interface CliArgs {
   addDirs?: string[];
 }
 
-/** Parse argv. Unknown options and missing flag values return an error. */
+/** Parse argv, rejecting mixed version commands, unknown options and missing flag values. */
 export function parseArgs(
   argv: readonly string[],
 ): { args: CliArgs } | { error: string } {
   const args: CliArgs = { json: false, help: false };
+
+  const versionCommand = parseVersionCommand(argv);
+  if (versionCommand) {
+    if ("error" in versionCommand) return versionCommand;
+    return { args: { ...args, version: true, help: versionCommand.help } };
+  }
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
