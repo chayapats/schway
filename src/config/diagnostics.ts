@@ -53,13 +53,18 @@ export function configDiagnosticSecrets(context: ConfigDiagnosticContext = {}, i
 /** Bound source labels and remove terminal controls, recognizable credentials and URL secrets. */
 export function safeConfigSource(source: string, secrets: readonly string[] = []): string {
   const space = "[\\s\\x00-\\x1f\\x7f-\\x9f]";
-  const credentialHeader = new RegExp(`\\b(?:${[...CREDENTIAL_HEADER_NAMES].join("|")})${space}*[:=]${space}*(?:(?:Bearer|Basic|Token)${space}+)?[^\\s\\x00-\\x1f\\x7f-\\x9f]+`, "gi");
-  const credentialScheme = new RegExp(`\\b(?:Bearer|Basic|Token)${space}+[^\\s\\x00-\\x1f\\x7f-\\x9f]+`, "gi");
+  const prefix = (word: string) => [...word].join("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]*");
+  const scheme = `(?:${["Bearer", "Basic", "Token"].map(prefix).join("|")})`;
+  // Match split prefixes and complete tokens before removing controls, so a header cannot consume only a credential fragment.
+  const credentialHeader = new RegExp(`\\b(?:${[...CREDENTIAL_HEADER_NAMES].map(prefix).join("|")})${space}*[:=]${space}*(?:${scheme}${space}+)?[^\\s]+`, "giu");
+  const credentialScheme = new RegExp(`\\b${scheme}${space}+[^\\s]+`, "giu");
   const redactCredentials = (value: string) => value.replace(credentialHeader, "<redacted>").replace(credentialScheme, "<redacted>").replace(/\bsk-[\w-]+/g, "<redacted>");
   // Preserve separators until credential recognition; normalization must not join a scheme to its token.
   const known = [...new Set(secrets.flatMap(value => [value, value.trim(), stripVTControlCharacters(value).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "")]).filter(Boolean))].sort((a, b) => b.length - a.length);
   const redacted = redactCredentials(stripVTControlCharacters(redactSecrets(source, known)).replace(/\p{Cf}/gu, ""));
-  return redactSecrets(redactCredentials(redacted.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ""))
+  // Keep semantic whitespace until another recognition pass; deleting a newline would join Bearer to its token.
+  const normalized = redacted.replace(/[\p{Cc}\p{Cf}]/gu, control => /\s/u.test(control) ? control : "");
+  return redactSecrets(redactCredentials(redactCredentials(normalized).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ""))
     .replace(/https?:\/\/[^\s]+/gi, value => {
       try { const url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.toString(); }
       catch { return "<redacted URL>"; }

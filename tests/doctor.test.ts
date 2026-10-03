@@ -68,17 +68,26 @@ test("doctor masks a late-discovered profile credential before truncating the wo
   expect(check(report, "config.project")?.diagnostics?.[0]?.path).toBe("approval.mode");
 });
 
-for (const label of ["Bearer\nprivate-source-token", "Authorization:\r\nBearer private-source-token", "x-api-key=private-source-token", "x-api-key\u001b[31m=\u001b[0mprivate-source-token"]) test(`source credential form ${JSON.stringify(label)} is hidden across config outputs`, async () => {
+for (const label of ["Bearer\nprivate-source-token", "Authorization:\r\nBearer private-source-token", "x-api-key=private-source-token", "x-api-key\u001b[31m=\u001b[0mprivate-source-token", "Bea\u0001rer\nprivate-source-token", "Authorization:\nBea\u0001rer\nprivate-source-token"]) test(`source credential form ${JSON.stringify(label)} is hidden across config outputs`, async () => {
   const { root, home } = await fixture();
   const workspace = join(root, label); await mkdir(join(workspace, ".schway"), { recursive: true });
   await writeFile(join(workspace, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
   const settings = await loadResolvedSettings({ home, workspaceRoot: workspace });
+  const editor = await loadConfigEditor({ home, workspaceRoot: workspace }).catch(error => error as Error);
+  const packages = await inspectPackages({ home, workspaceRoot: workspace });
   const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
-  let stdout = "", stderr = "";
-  const exit = await runCli(["-p", "test"], { cwd: workspace, env: { HOME: home }, stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } } });
-  expect(exit).toBe(1); expect(stdout).toBe("");
-  for (const output of [JSON.stringify(settings), JSON.stringify(report), formatDoctor(report), stderr]) {
+  const startupErrors: string[] = [];
+  for (const argv of [["-p", "test"], []]) {
+    let stdout = "", stderr = "";
+    const exit = await runCli(argv, { cwd: workspace, env: { HOME: home }, terminal: { stdin: true, stdout: true }, credentialStore: store(Error("unexpected credential access")), stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } } });
+    expect(exit).toBe(1); expect(stdout).toBe("");
+    expect(stderr).toContain("Invalid approval.mode · Use auto, ask, or read-only");
+    startupErrors.push(stderr);
+  }
+  expect(await readFile(join(workspace, ".schway/config.json"), "utf8")).toBe('{"approval":{"mode":"readonly"}}');
+  for (const output of [JSON.stringify(settings), (editor as Error).message, JSON.stringify(packages.diagnostics), JSON.stringify(report), formatDoctor(report), ...startupErrors]) {
     expect(output).not.toContain("private-source-token"); expect(output).not.toContain("\u001b"); expect(output).not.toContain("\\u001b");
+    expect(output).not.toContain("\u0001"); expect(output).not.toContain("\\u0001");
   }
 });
 

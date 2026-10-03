@@ -79,6 +79,21 @@ test("credential separators survive until source redaction, including controls n
   }
 });
 
+test("control-split credential prefixes and tokens redact completely before display normalization", () => {
+  for (const control of ["\u0000", "\u0001", "\u0007", "\u001f", "\u007f", "\u0085", "\u200b", "\u001b[31m"]) {
+    for (const separator of ["\n", "\r\n", "\t", "\u2028"]) {
+      for (const prefix of [`Bea${control}rer`, `Authorization:${separator}Bea${control}rer`, `Authori${control}zation:${separator}Token`, `x-api${control}-key=`]) {
+        const source = `/tmp/${prefix}${separator}private-${control}source-token/config.json`;
+        const label = safeConfigSource(source);
+        expect(label).not.toContain("private-");
+        expect(label).not.toContain("source-token");
+        expect(label).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+        expect(label).toContain("<redacted>");
+      }
+    }
+  }
+});
+
 test("each distinct invalid field has one primary cause even alongside a forbidden secret", () => {
   const result = parseConfigObject({ token: "private-secret", approval: { mode: "readonly" }, profiles: { sample: {} }, profile: "a".repeat(65) }, "/config.json");
   if (!("error" in result)) throw Error("expected invalid config");
