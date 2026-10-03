@@ -18,7 +18,7 @@ function block(text: string, marker: string, language = "sh"): string {
 /** Execute the actual POSIX guide, feed deliberate choices, and reap its whole child group on deadline. */
 async function guide(script: string, cwd: string, env: Record<string, string>, choices: { model?: string; session?: boolean } = {}) {
   const command = 'schway() { "$SCHWAY_DOCS_BUN" --no-env-file --preload "$SCHWAY_DOCS_PRELOAD" "$SCHWAY_DOCS_ENTRY" "$@"; }\n' + script;
-  const child = spawn("bash", ["-eu", "-c", command], { cwd,
+  const child = spawn("bash", ["--norc", "-eu", "-c", command], { cwd,
     env: { ...env, SCHWAY_DOCS_BUN: process.execPath, SCHWAY_DOCS_ENTRY: entry, SCHWAY_DOCS_PRELOAD: preload },
     detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
   const exited = new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", code => resolve(code ?? 1)); });
@@ -63,6 +63,18 @@ async function environment(root: string, route: string) {
   });
   return { home, cwd, env, trace };
 }
+
+test("documented flows exclude Bash rc startup from piped stdin", async () => {
+  await withTempDir(async root => {
+    const { home, cwd, env } = await environment(root, "openai-api");
+    await writeFile(join(home, ".bashrc"), 'printf "fixture Bash startup\\n" >&2\nprintf invoked > "$HOME/rc-invoked"\n');
+    const result = await guide('schway -p "task" --provider openai --openai-auth api-key --model gpt-4.1 --show-session', cwd, env);
+    const id = result.stderr.match(/^Session (\S+) · Resume with --resume \1$/m)?.[1];
+    expect(id).toBeString();
+    expect(result).toEqual({ exit: 0, stdout: "Hello world\n", stderr: `Session ${id} · Resume with --resume ${id}\n` });
+    expect(await Bun.file(join(home, "rc-invoked")).exists()).toBe(false);
+  });
+});
 
 for (const route of ["openai-api", "codex", "xai-api", "grok", "compatible"] as const) {
   test(`documented ${route} POSIX flow discovers, chooses, runs, lists and resumes exact saved work`, async () => {
