@@ -212,17 +212,34 @@ test("a failed empty edit offers cleanup retry and retains the prior saved bytes
   } finally { ui.close(); }
 }));
 
-test("unavailable draft storage retains ordinary input and reports structured exit failure", async () => withTempDir(async home => {
+test("an empty exit retains the cleanup task when a previous saved draft remains", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    ui.editor.setText("Previously saved ไทย"); ui.view.flushDraft();
+    const store = openDraftStore({ home, workspaceRoot: home, sessionId: ui.session.header.id });
+    await writeFile(`${store.path}.lock`, "uncertain writer", { mode: 0o600 });
+    ui.editor.setText(""); expect(ui.view.flushDraft()).toEqual({ saved: false, failed: true });
+    expect(ui.view.freezeDraftForExit()).toMatchObject({
+      saved: false, failed: false, task: { text: "", sessionId: ui.session.header.id },
+    });
+    expect(ui.saved()).toBe("Previously saved ไทย");
+  } finally { ui.close(); }
+}));
+
+for (const draft of [
+  { text: "", cursor: 0, exitFailed: false },
+  { text: "ยังไม่ได้บันทึก 🧪", cursor: 3, exitFailed: true },
+]) test(`unavailable draft storage ${draft.text ? "retains ordinary input and reports exit failure" : "does not report an empty exit as a failed save"}`, async () => withTempDir(async home => {
   await mkdir(join(home, ".schway"), { recursive: true });
   await writeFile(join(home, ".schway/drafts"), "not a directory", { mode: 0o600 });
   const ui = await setup(home);
   try {
-    ui.editor.setText("ยังไม่ได้บันทึก 🧪"); ui.editor.cursorOffset = 3;
+    ui.editor.setText(draft.text); ui.editor.cursorOffset = draft.cursor;
     expect(ui.view.flushDraft()).toEqual({ saved: false, failed: true });
     ui.mockInput.pressKey("d", { meta: true }); ui.view.refresh(); await ui.renderOnce();
     expect(ui.captureCharFrame()).toContain("Draft recovery unavailable · Enter start a task");
-    expect(ui.editor.plainText).toBe("ยังไม่ได้บันทึก 🧪"); expect(ui.editor.cursorOffset).toBe(3);
-    expect(ui.view.freezeDraftForExit()).toEqual({ saved: false, failed: true });
+    expect(ui.editor.plainText).toBe(draft.text); expect(ui.editor.cursorOffset).toBe(draft.cursor);
+    expect(ui.view.freezeDraftForExit()).toEqual({ saved: false, failed: draft.exitFailed });
     expect(await readFile(join(home, ".schway/drafts"), "utf8")).toBe("not a directory");
   } finally { ui.close(); }
 }));

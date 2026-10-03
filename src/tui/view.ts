@@ -1588,7 +1588,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       draftFrozen = true;
       for (const state of durableDrafts.values()) { clearTimeout(state.timer); state.timer = undefined; }
       const state = durableDraft;
-      if (state && !state.text && !state.store?.checkpoint) return draftResult(state);
+      if (state && !state.text && !state.store?.checkpoint) return { saved: false, failed: false };
       if (state?.dirty && !state.suppressed && state.store && isOrdinaryDraft(state.text, false, options.secrets)) {
         return { task: { home: options.home, workspaceRoot: state.target.workspaceRoot ?? options.workspaceRoot,
           sessionId: state.target.sessionId, text: state.text, generation: state.store.generation, deferredSession: state.target.deferredSession() }, saved: false, failed: false };
