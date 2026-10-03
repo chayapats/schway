@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TuiSnapshot } from "../../src/tui/controller.ts";
 import type { ScreenHarness } from "./harness.ts";
@@ -16,6 +16,17 @@ const grokLogin = async (ui: ScreenHarness, device = false) => {
 };
 const failed = (s: TuiSnapshot) => !!s.recovery;
 const completed = (s: TuiSnapshot) => s.status === "idle" && !!s.outcome;
+const stopped = (s: TuiSnapshot) => s.status === "idle" && s.outcome?.reason === "cancelled" && s.recovery?.actions.includes("continue") === true;
+const stopWork = async (ui: ScreenHarness, tool: boolean) => {
+  await enter(ui, tool ? "Save the result, then run a command" : "Explain the next step");
+  await ui.waitFor(s => s.transcript.some(row => tool
+    ? row.toolCallId === "active-shell" && row.text.includes("Ready to stop")
+    : row.kind === "assistant" && row.text.includes("The next step is")));
+  await ui.mockInput.pasteBracketedText("งานถัดไป 🧪\nยังไม่ส่ง");
+  ui.mockInput.pressEscape();
+  await ui.waitFor(stopped);
+  if (tool && await readFile(join(ui.root, "saved.txt"), "utf8") !== "Completed work ไทย 🧪\n") throw new Error("Stopped tool lost completed file content");
+};
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
 const search = async (ui: ScreenHarness, query: string) => {
   ui.controller.notice("Read the project README before making changes.");
@@ -107,7 +118,9 @@ export const SCREENS: readonly Screen[] = [
     shellRow(ui, "error", "run unavailable command", "error", "Command could not start.");
   }, ready: s => s.transcript.filter(entry => entry.kind === "tool").length === 8 },
   { id: "large-edit", title: "Large edit", description: "An edit above the inline limit keeps its summary and disclosure marker.", noColor: true, drive: ui => enter(ui, "Update the clamp implementation"), ready: completed },
-  { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColor: true, drive: ui => enter(ui, "Summarize the changes"), ready: failed },
+  { id: "stopped-streaming", title: "Stopped streaming", description: "A requested stop retains incomplete output and an unsent Thai draft with a neutral continuation notice.", noColorWidths: true, drive: ui => stopWork(ui, false), ready: stopped },
+  { id: "stopped-tool", title: "Stopped command", description: "A stopped shell keeps the completed file write and offers explicit continuation without sending the next draft.", noColorWidths: true, drive: ui => stopWork(ui, true), ready: stopped },
+  { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColorWidths: true, drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "retry-countdown", title: "Retry countdown", description: "A transient failure waits before the next attempt.", elapsed: 1200, drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.phase === "retry" },
   // Render the loading panel before yielding to Git so scrollbar initialization has a fixed order.
   { id: "review-panel", title: "Review panel", description: "The change review displays the completed clamp fix.", noColor: true, drive: async ui => { await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); }, ready: s => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0 },
@@ -136,6 +149,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
+  if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));

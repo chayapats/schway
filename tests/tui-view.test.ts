@@ -3039,3 +3039,133 @@ test("rendered config startup notice appears once even when configuration is rel
   expect(ui.captureCharFrame()).toContain('Config: "oldTurns" in /config.json is deprecated; use "maxTurns".');
   expect(ui.captureCharFrame()).toContain("It will be removed in 2.0.");
 });
+
+for (const action of ["keep-editing", "continue", "inspection-escape", "inspection-continue"] as const) test(`stopped streaming ${action} keeps Thai type-ahead and accepted-turn ownership`, async () => {
+  const cleanup = Promise.withResolvers<void>();
+  const partial = "```txt\nแรก 😀\n```\n\n" + "Earlier explanation.\n\n".repeat(20) + "```txt\nท้ายสุด 🧪\n```";
+  const scripted = createScriptedModel({ responses: [{ text: partial, waitForAbort: true }, { text: "next explicit work" }] });
+  const ui = await setup(50, 20, {}, undefined, { changeTracking: "off", model: { ...scripted, async *stream(request) {
+    try { yield* scripted.stream(request); } finally { if (request.signal?.aborted) await cleanup.promise; }
+  } } }, undefined, {}, { motion: "off" });
+  try {
+    await ui.mockInput.pasteBracketedText("accepted task"); ui.mockInput.pressEnter();
+    await waitForUiState(ui, () => ui.controller.snapshot().transcript.some(row => row.text === partial), "partial streamed code");
+    await ui.mockInput.pasteBracketedText("เก็บงานภาษาไทย\nอีกบรรทัด 😀");
+    ui.editor.cursorOffset = 9; ui.editor.setSelection(3, 9);
+    const draft = { text: ui.editor.plainText, cursor: ui.editor.cursorOffset, selection: ui.editor.getSelectedText() };
+    ui.mockInput.pressEscape(); await ui.flush();
+    expect(ui.captureCharFrame()).toContain("Stop requested");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.running).toBe(true);
+    expect(ui.controller.snapshot().activity?.phase).toBe("stopping");
+    expect(ui.captureCharFrame()).toContain("Stopping");
+    expect(ui.controller.snapshot().recovery).toBeUndefined();
+    cleanup.resolve(); await ui.controller.waitForIdle(); await settle(ui);
+    const stopped = ui.controller.snapshot();
+    expect(stopped.outcome?.reason).toBe("cancelled");
+    expect(stopped.transcript.filter(row => row.kind === "error")).toEqual([]);
+    expect(stopped.transcript.filter(row => row.text.startsWith("Stopped ·"))).toHaveLength(1);
+    expect(stopped.transcript.find(row => row.text === partial)?.incomplete).toBe(true);
+    expect(ui.captureCharFrame()).toContain("Ready");
+    expect(ui.captureCharFrame()).not.toContain("! Error");
+    ui.transcript.scrollTo(0); await settle(ui);
+    const scroll = ui.transcript.scrollTop;
+    if (action.startsWith("inspection-")) {
+      ui.mockInput.pressKey("i", { meta: true }); await settle(ui);
+      ui.mockInput.pressTab(); await settle(ui);
+      expect(ui.editor.focused).toBe(false);
+      expect(ui.captureCharFrame()).toContain("C copy · Esc back");
+      expect(ui.transcript.scrollTop).not.toBe(scroll);
+    }
+    if (action.endsWith("continue")) {
+      ui.mockInput.pressKey("r", { ctrl: true }); await ui.controller.waitForIdle(); await settle(ui);
+      expect(ui.controller.snapshot().outcome?.reason).toBe("completed");
+      expect(ui.session.items.filter(row => row.type === "user")).toHaveLength(1);
+      expect(ui.controller.snapshot().recovery).toBeUndefined();
+    } else {
+      ui.mockInput.pressEscape(); await settle(ui);
+      expect(ui.editor.focused).toBe(true);
+      expect(ui.transcript.scrollTop).toBe(scroll);
+      expect(ui.controller.snapshot().recovery).toEqual(action === "inspection-escape" ? stopped.recovery : undefined);
+    }
+    expect(ui.editor.plainText).toBe(draft.text);
+    expect(ui.editor.cursorOffset).toBe(draft.cursor);
+    expect(ui.editor.getSelectedText()).toBe(draft.selection);
+    expect(ui.copied).toEqual([]);
+    if (action === "keep-editing") {
+      ui.mockInput.pressEnter(); await ui.controller.waitForIdle(); await settle(ui);
+      const users = ui.session.items.filter(row => row.type === "user");
+      expect(users).toHaveLength(2);
+      expect(users[1]?.content).toEqual([{ type: "text", text: draft.text }]);
+      expect(ui.editor.plainText).toBe("");
+    }
+  } finally { cleanup.resolve(); ui.controller.cancel(); await ui.controller.waitForIdle(); }
+});
+
+for (const appearance of ["dark", "light", "no-color"] as const) test(`stopped and failed outcomes retain distinct meaning across ${appearance} widths and motion`, async () => {
+  const env: Record<string, string> = appearance === "no-color" ? { SCHWAY_THEME: "dark", NO_COLOR: "1" } : { SCHWAY_THEME: appearance };
+  for (const failed of [false, true]) {
+    const ui = await setup(120, 30, {}, undefined, { changeTracking: "off", model: createScriptedModel(failed
+      ? { error: "Provider rejected request", status: 400 }
+      : { text: "คำตอบบางส่วน 🧪", waitForAbort: true }) }, undefined, env, { motion: failed ? "reduced" : "off" });
+    try {
+      await ui.mockInput.typeText("start work"); ui.mockInput.pressEnter();
+      if (!failed) {
+        await waitForUiState(ui, () => ui.controller.snapshot().transcript.some(row => row.text === "คำตอบบางส่วน 🧪"), "partial answer");
+        ui.mockInput.pressEscape();
+      }
+      await ui.controller.waitForIdle(); await settle(ui);
+      const theme = resolveTheme(appearance === "light" ? "light" : "dark", null, env);
+      for (const [width, height] of [[120, 30], [80, 30], [50, 30], [40, 20], [44, 18], [40, 8], [50, 8]] as const) {
+        ui.resize(width, height); await settle(ui);
+        const outcome = ui.renderer.root.findDescendantById("activity") as TextRenderable;
+        const label = failed ? "Failed" : "Stopped";
+        expect(outcome.chunks.find(chunk => chunk.text === label)?.fg).toEqual(RGBA.fromHex(failed ? theme.error : theme.muted));
+        expect(ui.controller.snapshot().outcome?.reason).toBe(failed ? "failed" : "cancelled");
+        expect(ui.captureCharFrame()).toContain("Auto");
+        if (height >= 10) expect(ui.captureCharFrame()).toContain(label);
+        if (!failed) expect(ui.captureCharFrame()).not.toContain("! Error");
+      }
+    } finally { ui.controller.cancel(); await ui.controller.waitForIdle(); }
+  }
+});
+
+test("keyboard stop retains a real write, exposes review and continues without replaying tools", async () => withTempDir(async root => {
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
+  await writeFile(join(root, "baseline.txt"), "before\n");
+  for (const args of [["init", "-q"], ["add", "baseline.txt"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "baseline"]]) {
+    const result = Bun.spawnSync(["git", ...args], { cwd: root, env: gitEnv });
+    if (result.exitCode) throw new Error(result.stderr.toString());
+  }
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  let writes = 0;
+  const ui = await setup(80, 28, {}, undefined, { workspace, contextManager: createContextManager(workspace),
+    tools: createToolRegistry([{ ...writeTool, execute: async (...args: Parameters<typeof writeTool.execute>) => { writes++; return writeTool.execute(...args); } }, bashTool]),
+    model: createScriptedModel({ responses: [
+      { toolCalls: [{ id: "saved-file", name: "write", arguments: { path: "saved.txt", content: "completed ไทย 🧪\n" } }] },
+      { toolCalls: [{ id: "active-shell", name: "bash", arguments: { command: "printf 'Ready to stop\\n'; sleep 30", timeout: 5_000 } }] },
+      { text: "Continued saved work." },
+    ] }),
+  });
+  try {
+    await ui.mockInput.typeText("write then run a command"); ui.mockInput.pressEnter();
+    await waitForUiState(ui, () => ui.controller.snapshot().transcript.some(row => row.toolCallId === "active-shell" && row.text.includes("Ready to stop")), "live shell output");
+    await ui.mockInput.pasteBracketedText("งานถัดไป 🧪\nยังไม่ส่ง"); ui.editor.cursorOffset = 3;
+    ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.controller.snapshot().outcome?.reason).toBe("cancelled");
+    expect(ui.controller.snapshot().transcript.filter(row => row.kind === "error")).toEqual([]);
+    expect(ui.controller.snapshot().transcript.find(row => row.toolCallId === "saved-file")?.toolStatus).toBe("success");
+    expect(ui.controller.snapshot().transcript.find(row => row.toolCallId === "active-shell")?.toolStatus).toBe("cancelled");
+    expect(await readFile(join(root, "saved.txt"), "utf8")).toBe("completed ไทย 🧪\n");
+    ui.mockInput.pressKey("r", { meta: true }); await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview?.loading, "stopped turn review");
+    expect(ui.captureCharFrame()).toContain("saved.txt");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.editor.plainText).toBe("งานถัดไป 🧪\nยังไม่ส่ง"); expect(ui.editor.cursorOffset).toBe(3);
+    ui.mockInput.pressKey("r", { ctrl: true }); await ui.controller.waitForIdle(); await settle(ui);
+    expect(ui.controller.snapshot().outcome?.reason).toBe("completed");
+    expect(writes).toBe(1);
+    expect(ui.session.items.filter(row => row.type === "tool_result")).toHaveLength(2);
+    expect(ui.session.items.filter(row => row.type === "user")).toHaveLength(1);
+    expect(ui.editor.plainText).toBe("งานถัดไป 🧪\nยังไม่ส่ง"); expect(ui.editor.cursorOffset).toBe(3);
+  } finally { ui.controller.cancel(); await ui.controller.waitForIdle(); }
+}));

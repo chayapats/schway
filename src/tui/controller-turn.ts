@@ -123,7 +123,7 @@ export abstract class TurnLayer extends CompactionLayer {
     return this.startAcceptedTurn(accepted);
   }
 
-  /** Continue an accepted failed turn from its durable session head without appending the user's task again. */
+  /** Continue an accepted interrupted turn from its durable session head without appending the user's task again. */
   async continueRecovery(): Promise<boolean> {
     const recovery = this.currentRecovery();
     if (!recovery || !recovery.accepted || !recovery.actions.includes("continue") || this.running || this.disposed || !this.model) return false;
@@ -265,6 +265,8 @@ export abstract class TurnLayer extends CompactionLayer {
   /** Run the owned accepted turn and settle its outcome without publishing stale operation results. */
   protected async runTurn(signal: AbortSignal, operationId: number): Promise<void> {
     if (this.disposed || this.activeAbort?.signal !== signal) return;
+    let terminalReason: Extract<RuntimeEvent, { type: "agent.finished" }>["reason"] | undefined;
+    let observedFailure = false;
     try {
       for await (const event of runAgentLoop({
         approval: { interactive: true, mode: () => this.currentApprovalMode, ask: (request, signal) => this.askTool(request, signal) },
@@ -283,28 +285,31 @@ export abstract class TurnLayer extends CompactionLayer {
       })) {
         // Drain accepted calls on cancellation; replaced sessions ignore stale display events.
         if (this.activeAbort?.signal === signal) {
+          // Observers may synchronously request cancellation after this result.
+          // Record what this operation actually observed before delivering it.
+          if (event.type === "error") observedFailure = true;
+          if (event.type === "agent.finished") terminalReason = event.reason;
           this.observeRuntimeEvent(event);
-          this.applyEvent(event, operationId);
+          if (!this.disposed && this.activeAbort?.signal === signal) this.applyEvent(event, operationId);
         }
       }
       if (this.activeAbort?.signal !== signal) {
         return;
       }
-      if (signal.aborted) {
+      if (terminalReason === "cancelled" && !observedFailure) {
         this.markProvisionalIncomplete();
         this.clearRetryNotice();
-        this.transcript.push(this.systemEntry("Cancelled."));
         await this.captureTurnResult(signal);
         if (this.disposed || this.activeAbort?.signal !== signal) return;
         await this.finishOutcome("cancelled");
         if (this.disposed || this.activeAbort?.signal !== signal) return;
         this.status = "idle";
-        this.offerRecovery("provider", true, "The saved turn was stopped. Completed results remain available; continue when ready.", undefined, operationId, false);
+        this.offerRecovery("provider", true, "Stopped · Completed results kept", undefined, operationId, false);
         return;
       }
       await this.captureTurnResult(signal);
       if (this.disposed || this.activeAbort?.signal !== signal) return;
-      await this.finishOutcome();
+      await this.finishOutcome(observedFailure ? "failed" : undefined);
       if (this.disposed || this.activeAbort?.signal !== signal) return;
       if (this.status === "running") {
         this.status = "idle";
@@ -319,7 +324,7 @@ export abstract class TurnLayer extends CompactionLayer {
       this.fail(redactSecrets(message, this.secrets));
       await this.captureTurnResult(signal);
       if (this.disposed || this.activeAbort?.signal !== signal) return;
-      await this.finishOutcome(signal.aborted ? "cancelled" : "failed");
+      await this.finishOutcome("failed");
       if (this.disposed || this.activeAbort?.signal !== signal) return;
     }
   }
@@ -552,7 +557,7 @@ export abstract class TurnLayer extends CompactionLayer {
             this.status = "error";
           }
         } else if (event.reason === "cancelled") {
-          // runTurn adds the Cancelled notice once the loop settles.
+          // runTurn offers neutral stopped recovery once the loop settles.
         } else if (event.reason === "max_turns") {
           this.transcript.push(
             this.systemEntry("Turn limit reached · Edit your task to continue"),
@@ -660,7 +665,7 @@ export abstract class TurnLayer extends CompactionLayer {
       "keep-editing",
     ];
     const controls = actions.map(action => ({ connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry credential access", "choose-model": "Alt+M choose model", continue: "Ctrl+R continue", details: "Ctrl+I details", "keep-editing": "Esc keep editing" })[action]);
-    const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: "error", text: `${message}\n${controls.join(" · ")}` };
+    const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: markError ? "error" : "system", text: `${message}\n${controls.join(" · ")}` };
     if (!accepted && this.recovery && !this.recovery.accepted) {
       this.transcript = this.transcript.filter(item => item.id !== this.recovery!.entryId);
     }

@@ -11,7 +11,7 @@ Run `bun test tests/screen-catalog.test.ts` to compare every screen against comm
 3. Run `bun run screens:update`. This writes the goldens and ordered index, and prunes obsolete files/directories. Normal test runs never update them.
 4. Review and commit the implementation and goldens together.
 
-Every screen has dark/light variants at 120, 80 and 50 columns, normally 30 rows. `noColor: true` adds `nocolor-dark-80`. The no-color screen uses no-color variants throughout. Narrow layout also has 40-column, 20-row variants.
+Every screen has dark/light variants at 120, 80 and 50 columns, normally 30 rows. `noColor: true` adds `nocolor-dark-80`; `noColorWidths: true` covers all three widths without color. The no-color screen uses no-color variants throughout. Narrow layout also has 40-column, 20-row variants. Stopped streaming, stopped tool and failed turn scenes include 40-column, 20-row variants in both themes and without color, so normal stops remain distinct from provider failures.
 
 ## Golden format
 
