@@ -687,3 +687,169 @@ test("path-scoped diff distinguishes staged and unstaged edits to the same file"
     controller.dispose();
   });
 });
+
+test("current comparison sections match Git boundaries without changing the index or files", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    const path = ":(glob)* ชื่อ.txt";
+    await writeFile(join(dir, path), "HEAD content\n");
+    await git(dir, "--literal-pathspecs", "add", "--", path);
+    await git(dir, "commit", "-qm", "literal path");
+    await writeFile(join(dir, path), "index content\n");
+    await git(dir, "--literal-pathspecs", "add", "--", path);
+    await writeFile(join(dir, path), "worktree content ไทย 😀\n");
+    await writeFile(join(dir, "tracked.txt"), "unrelated change\n");
+    const index = await readFile(join(dir, ".git", "index"));
+    const head = await git(dir, "rev-parse", "HEAD");
+    const preview = await getGitDiffPreview(dir, path);
+    if ("error" in preview) throw new Error(preview.error);
+    expect(preview.sections?.map(section => section.comparison)).toEqual(["index-to-worktree", "head-to-index"]);
+    const [unstaged, staged] = preview.sections!;
+    expect(unstaged!.diff).toContain("-index content\n+worktree content ไทย 😀");
+    expect(unstaged!.diff).not.toContain("HEAD content");
+    expect(staged!.diff).toContain("-HEAD content\n+index content");
+    expect(staged!.diff).not.toContain("worktree content");
+    expect(preview.diff).not.toContain("unrelated change");
+    expect(preview.sections!.every(section => !section.truncated && !section.binaryFiles.length)).toBe(true);
+    expect(parseGitDiff(preview, { includeComparisons: true }).filter(row => row.line === undefined).map(row => row.text)).toEqual([
+      "Unstaged · index → worktree", "Staged · HEAD → index",
+    ]);
+    expect(await readFile(join(dir, ".git", "index"))).toEqual(index);
+    expect(await git(dir, "rev-parse", "HEAD")).toBe(head);
+    expect(await readFile(join(dir, path), "utf8")).toBe("worktree content ไทย 😀\n");
+  });
+});
+
+test("current rename comparisons follow both historical and new literal paths", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    const oldPath = "# branch.oid old[1].txt", newPath = "new[1].txt";
+    const original = "one\ntwo\nthree\nfour\nfive\n";
+    await writeFile(join(dir, oldPath), original);
+    await git(dir, "add", "--", oldPath); await git(dir, "commit", "-qm", "rename source");
+    await git(dir, "mv", "--", oldPath, newPath);
+    await writeFile(join(dir, newPath), `${original}later external edit\n`);
+    for (const path of [oldPath, newPath]) {
+      const preview = await getGitDiffPreview(dir, path);
+      if ("error" in preview) throw new Error(preview.error);
+      expect(preview.path).toBe(path);
+      expect(preview.sections?.map(section => section.comparison)).toEqual(["index-to-worktree", "head-to-index"]);
+      expect(preview.sections![0]!.diff).toContain("+later external edit");
+      expect(preview.sections![1]!.diff).toContain(`rename from ${oldPath}\nrename to ${newPath}`);
+      expect(parseGitDiff(preview, { includeComparisons: true })).toContainEqual({ sign: " ", text: `Renamed from ${oldPath} to ${newPath}` });
+    }
+  });
+});
+
+test("unborn staged comparisons name the empty tree and never create Git objects", async () => {
+  await withTempDir(async dir => {
+    await git(dir, "init", "-q");
+    await writeFile(join(dir, "first.txt"), "first index content\n");
+    await git(dir, "add", "first.txt");
+    await writeFile(join(dir, "first.txt"), "later worktree content\n");
+    const index = await readFile(join(dir, ".git", "index"));
+    const objects = await git(dir, "count-objects", "-v");
+    for (const path of [undefined, "first.txt"]) {
+      const preview = await getGitDiffPreview(dir, path);
+      if ("error" in preview) throw new Error(preview.error);
+      expect(preview.sections?.map(section => section.comparison)).toEqual(["index-to-worktree", "empty-to-index"]);
+      expect(preview.sections![1]!.diff).toContain("+first index content");
+      expect(parseGitDiff(preview, { includeComparisons: true }).filter(row => row.line === undefined).map(row => row.text)).toEqual([
+        "Unstaged · index → worktree", "Staged · empty tree → index",
+      ]);
+    }
+    expect(await readFile(join(dir, ".git", "index"))).toEqual(index);
+    expect(await git(dir, "count-objects", "-v")).toBe(objects);
+    expect(await readFile(join(dir, "first.txt"), "utf8")).toBe("later worktree content\n");
+  });
+});
+
+test("one preview budget keeps omitted comparison scope and avoids splitting a surrogate pair", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    await writeFile(join(dir, "tracked.txt"), "index content\n");
+    await git(dir, "add", "tracked.txt");
+    await writeFile(join(dir, "tracked.txt"), "current 😀 content\n");
+    const full = await getGitDiffPreview(dir, "tracked.txt");
+    if ("error" in full) throw new Error(full.error);
+    const limit = full.diff.indexOf("😀") + 1;
+    expect(limit).toBeGreaterThan(1);
+    const preview = await getGitDiffPreview(dir, "tracked.txt", limit);
+    if ("error" in preview) throw new Error(preview.error);
+    expect(preview.truncated).toBe(true);
+    expect(preview.sections?.map(section => [section.comparison, section.truncated])).toEqual([
+      ["index-to-worktree", true], ["head-to-index", true],
+    ]);
+    expect(preview.sections![0]!.diff).toEndWith("+current ");
+    expect(preview.sections![1]!.diff).toBe("");
+    expect(preview.sections!.reduce((sum, section) => sum + section.diff.length, 0)).toBeLessThanOrEqual(limit);
+    expect(preview.diff.isWellFormed()).toBe(true);
+    expect(preview.sections!.every(section => section.diff.isWellFormed())).toBe(true);
+    expect(parseGitDiff(preview, { includeComparisons: true }).slice(-2)).toEqual([
+      { sign: " ", text: "Staged · HEAD → index" },
+      { sign: " ", text: "Preview truncated · use git diff for full content" },
+    ]);
+  });
+});
+
+test("untracked Unicode reads enough bytes for the character budget and reports every cutoff", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    const path = " spaced\nชื่อ😀.txt ";
+    const source = "กข😀ไทย\n";
+    await writeFile(join(dir, path), source);
+    for (const [limit, expected] of [[0, ""], [1, "ก"], [2, "กข"], [3, "กข"], [4, "กข😀"], [5, "กข😀ไ"], [7, "กข😀ไทย"], [8, source]] as const) {
+      const preview = await getGitDiffPreview(dir, path, limit);
+      if ("error" in preview) throw new Error(preview.error);
+      expect(preview.untrackedContent).toBe(expected);
+      expect(preview.truncated).toBe(limit < source.length);
+      expect(preview.sections).toEqual([{ comparison: "untracked", diff: "", truncated: limit < source.length, binaryFiles: [], untrackedContent: expected }]);
+      expect(preview.untrackedContent!.isWellFormed()).toBe(true);
+      expect(preview.untrackedContent).not.toContain("�");
+    }
+    await writeFile(join(dir, path), "😀");
+    const zero = await getGitDiffPreview(dir, path, 0);
+    if ("error" in zero) throw new Error(zero.error);
+    expect(zero.truncated).toBe(true);
+    expect(zero.untrackedContent).toBe("");
+    await writeFile(join(dir, path), "\uFEFFไทย");
+    const bom = await getGitDiffPreview(dir, path);
+    if ("error" in bom) throw new Error(bom.error);
+    expect(bom.untrackedContent).toBe("\uFEFFไทย");
+    expect(bom.truncated).toBe(false);
+  });
+});
+
+test("empty, clean, deleted and binary current sections do not invent textual content", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    const clean = await getGitDiffPreview(dir, "tracked.txt");
+    if ("error" in clean) throw new Error(clean.error);
+    expect(clean.sections).toEqual([]);
+    await writeFile(join(dir, "empty.txt"), "");
+    const empty = await getGitDiffPreview(dir, "empty.txt");
+    if ("error" in empty) throw new Error(empty.error);
+    expect(empty.sections).toEqual([{ comparison: "untracked", diff: "", truncated: false, binaryFiles: [], untrackedContent: "" }]);
+    await writeFile(join(dir, "blob.bin"), Buffer.from([0, 1, 2]));
+    const untracked = await getGitDiffPreview(dir, "blob.bin");
+    if ("error" in untracked) throw new Error(untracked.error);
+    expect(untracked.sections).toEqual([{ comparison: "untracked", diff: "", truncated: false, binaryFiles: ["blob.bin"] }]);
+    await git(dir, "add", "blob.bin");
+    await writeFile(join(dir, "blob.bin"), Buffer.from([0, 3, 4]));
+    const binary = await getGitDiffPreview(dir, "blob.bin");
+    if ("error" in binary) throw new Error(binary.error);
+    expect(binary.sections?.map(section => [section.comparison, section.binaryFiles.length])).toEqual([["index-to-worktree", 1], ["head-to-index", 1]]);
+    expect(parseGitDiff(binary, { includeComparisons: true }).filter(row => row.text === "Binary file · content not shown")).toHaveLength(2);
+    await rm(join(dir, "tracked.txt"));
+    const deleted = await getGitDiffPreview(dir, "tracked.txt");
+    if ("error" in deleted) throw new Error(deleted.error);
+    expect(deleted.sections?.map(section => section.comparison)).toEqual(["index-to-worktree"]);
+    expect(parseGitDiff(deleted, { includeComparisons: true })).toContainEqual({ sign: " ", text: "File deleted" });
+    await writeFile(join(dir, "tracked.txt"), "Binary files some text differ\n");
+    const literal = await getGitDiffPreview(dir, "tracked.txt");
+    if ("error" in literal) throw new Error(literal.error);
+    expect(literal.sections![0]!.binaryFiles).toEqual([]);
+    expect(literal.binaryFiles).toEqual([]);
+    expect(parseGitDiff(literal, { includeComparisons: true })).toContainEqual({ sign: "+", line: 1, text: "Binary files some text differ" });
+  });
+});
