@@ -73,11 +73,16 @@ export abstract class ModelsLayer extends CommandsLayer {
   }
 
   /** Reveal the selected model's exact ID and capacity on demand. */
-  togglePickerDetails(): void { if (this.modelPicker) this.modelPicker.details = !this.modelPicker.details; }
+  togglePickerDetails(): void {
+    const picker = this.modelPicker;
+    if (this.disposed || !picker || picker.loading || picker.error || picker.entries[picker.selectedIndex]?.kind !== "model") return;
+    picker.details = !picker.details;
+  }
 
-  /** Return from browsing before closing and restoring the composer draft. */
+  /** Close Details, then return from browsing before restoring the composer draft. */
   backModelPicker(): void {
-    if (this.modelPicker?.connecting) { this.modelPicker.connecting = false; this.searchModels(this.pickerModelQuery); }
+    if (this.modelPicker?.details) this.modelPicker.details = false;
+    else if (this.modelPicker?.connecting) { this.modelPicker.connecting = false; this.searchModels(this.pickerModelQuery); }
     else if (this.modelPicker?.browsing) this.browsePickerModels();
     else this.closeModelPicker();
   }
@@ -117,7 +122,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     this.pickerCacheKey = cacheKey;
     try { this.pickerPreferences = this.preferenceStore()?.read() ?? this.pickerPreferences; }
-    catch (error) { this.notice("Favorites unavailable · /model retry · Ctrl+I details", String(error)); }
+    catch (error) { this.notice("Favorites unavailable · /model retry · F2 details", String(error)); }
     this.pickerSelectionTouched = false;
     this.modelPicker = { query: "", selectedIndex: 0, entries: [], ...(this.subscriptionSelected() || this.credentials ? { loading: true, catalogState: "loading" } : {}),
       ...(this.credentials ? { accessLoading: true } : {}) };
@@ -492,12 +497,12 @@ export abstract class ModelsLayer extends CommandsLayer {
       this.pickerPreferences = this.preferenceStore()?.used(identity, model) ?? { ...this.pickerPreferences,
         models: { ...this.pickerPreferences.models, [identity]: model },
         recents: [identity, ...this.pickerPreferences.recents.filter(id => id !== identity)].slice(0, 32) };
-    } catch (error) { this.notice("Recent choice not saved · Ctrl+I details", String(error)); }
+    } catch (error) { this.notice("Recent choice not saved · F2 details", String(error)); }
     try {
       if (await this.configEditor?.rememberChoice(choice.authRoute) && notifySuccess) this.notice("Choice remembered · /model forget reset");
       this.onModelActivated?.({ provider: choice.provider, modelId: choice.modelId, authRoute: choice.authRoute,
       ...(choice.profile ? { profile: choice.profile } : {}) }); }
-    catch (error) { this.notice("Choice not remembered · Enter use model · Ctrl+I details", `Model activated and usable, but its preference was not remembered. ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)} No additional login is needed.`); }
+    catch (error) { this.notice("Choice not remembered · Enter use model · F2 details", `Model activated and usable, but its preference was not remembered. ${redactSecrets(error instanceof Error ? error.message : String(error), this.secrets)} No additional login is needed.`); }
   }
 
   /** Switch the named compatible profile as one staged change, retaining previous on failure. */
@@ -529,7 +534,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       this.recovery = undefined;
       this.notice(`Workspace choice forgotten · ${staged.model ? "Enter send" : "Alt+L sign in · /model choose model"}`);
       return true;
-    } catch (error) { this.notice("Choice not forgotten · /model forget retry · Ctrl+I details", error instanceof Error ? error.message : String(error)); return false; }
+    } catch (error) { this.notice("Choice not forgotten · /model forget retry · F2 details", error instanceof Error ? error.message : String(error)); return false; }
     finally { this.status = "idle"; }
   }
 

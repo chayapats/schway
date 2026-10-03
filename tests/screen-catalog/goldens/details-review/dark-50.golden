@@ -1,0 +1,168 @@
+schway-screen 1
+screen details-review
+title Review details
+description F2 shows the completed turn's tool evidence from the selected file review.
+variant dark-50
+size 50x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ***/home/demo on main
+
+ Review · turn 1
+
+ › clamp.ts                                 +1 −1
+
+ ✓ Done                                         █
+ 3 tool results; 0 failed tools.                ▀
+ Commands: 1 exit 0 / 0 nonzero / 0 unknown (
+ entire turn).
+ Command results (latest 50; exit codes, not a
+ test-suite guarantee):
+ printf 'ok\n' → exit 0
+
+ Current working-tree content is unattributed;
+ external edits may be included.
+ Snapshots show changes observed during the turn
+ not exclusive Schway authorship. Current diffs
+ may include later edits.
+ Review is read-only. Files remain changed after
+ failure/cancellation; conversation branching
+ does not restore files.
+
+
+ ✓ Done · 1 file +1 −1 · Alt+R review
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ ›
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted…    ctx ~105
+ PgUp/PgDn scroll · F2 files · Esc back
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-29 #8b95a7 #161b24 -
+00 29-33 #c0acff #161b24 -
+00 33-50 #ffffff #161b24 -
+01 0-50 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-16 #e6eaf0 #0e1117 -
+02 16-50 #ffffff #0e1117 -
+03 0-50 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-49 #e6eaf0 #0e1117 -
+04 49-50 #ffffff #0e1117 -
+05 0-50 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-7 #e6eaf0 #0e1117 -
+06 7-48 #ffffff #0e1117 -
+06 48-49 #9a9ea3 #252527 -
+06 49-50 #ffffff #0e1117 -
+07 0-1 #ffffff #0e1117 -
+07 1-32 #e6eaf0 #0e1117 -
+07 32-48 #ffffff #0e1117 -
+07 48-49 #9a9ea3 #252527 -
+07 49-50 #ffffff #0e1117 -
+08 0-1 #ffffff #0e1117 -
+08 1-45 #e6eaf0 #0e1117 -
+08 45-48 #ffffff #0e1117 -
+08 48-49 #ffffff #252527 -
+08 49-50 #ffffff #0e1117 -
+09 0-1 #ffffff #0e1117 -
+09 1-14 #e6eaf0 #0e1117 -
+09 14-48 #ffffff #0e1117 -
+09 48-49 #ffffff #252527 -
+09 49-50 #ffffff #0e1117 -
+10 0-1 #ffffff #0e1117 -
+10 1-47 #e6eaf0 #0e1117 -
+10 47-48 #ffffff #0e1117 -
+10 48-49 #ffffff #252527 -
+10 49-50 #ffffff #0e1117 -
+11 0-1 #ffffff #0e1117 -
+11 1-23 #e6eaf0 #0e1117 -
+11 23-48 #ffffff #0e1117 -
+11 48-49 #ffffff #252527 -
+11 49-50 #ffffff #0e1117 -
+12 0-1 #ffffff #0e1117 -
+12 1-23 #e6eaf0 #0e1117 -
+12 23-48 #ffffff #0e1117 -
+12 48-49 #ffffff #252527 -
+12 49-50 #ffffff #0e1117 -
+13 0-48 #ffffff #0e1117 -
+13 48-49 #ffffff #252527 -
+13 49-50 #ffffff #0e1117 -
+14 0-1 #ffffff #0e1117 -
+14 1-47 #e6eaf0 #0e1117 -
+14 47-48 #ffffff #0e1117 -
+14 48-49 #ffffff #252527 -
+14 49-50 #ffffff #0e1117 -
+15 0-1 #ffffff #0e1117 -
+15 1-32 #e6eaf0 #0e1117 -
+15 32-48 #ffffff #0e1117 -
+15 48-49 #ffffff #252527 -
+15 49-50 #ffffff #0e1117 -
+16 0-1 #ffffff #0e1117 -
+16 1-48 #e6eaf0 #0e1117 -
+16 48-49 #ffffff #252527 -
+16 49-50 #ffffff #0e1117 -
+17 0-1 #ffffff #0e1117 -
+17 1-48 #e6eaf0 #0e1117 -
+17 48-49 #ffffff #252527 -
+17 49-50 #ffffff #0e1117 -
+18 0-1 #ffffff #0e1117 -
+18 1-25 #e6eaf0 #0e1117 -
+18 25-48 #ffffff #0e1117 -
+18 48-49 #ffffff #252527 -
+18 49-50 #ffffff #0e1117 -
+19 0-1 #ffffff #0e1117 -
+19 1-48 #e6eaf0 #0e1117 -
+19 48-49 #ffffff #252527 -
+19 49-50 #ffffff #0e1117 -
+20 0-1 #ffffff #0e1117 -
+20 1-46 #e6eaf0 #0e1117 -
+20 46-48 #ffffff #0e1117 -
+20 48-49 #ffffff #252527 -
+20 49-50 #ffffff #0e1117 -
+21 0-1 #ffffff #0e1117 -
+21 1-24 #e6eaf0 #0e1117 -
+21 24-48 #ffffff #0e1117 -
+21 48-49 #ffffff #252527 -
+21 49-50 #ffffff #0e1117 -
+22 0-48 #ffffff #0e1117 -
+22 48-49 #ffffff #252527 -
+22 49-50 #ffffff #0e1117 -
+23 0-50 #ffffff #0e1117 -
+24 0-1 #ffffff #0e1117 -
+24 1-2 #8fd19e #0e1117 b
+24 2-3 #8b95a7 #0e1117 -
+24 3-7 #8fd19e #0e1117 b
+24 7-25 #8b95a7 #0e1117 -
+24 25-30 #e6eaf0 #293140 b
+24 30-37 #8b95a7 #0e1117 -
+24 37-50 #ffffff #0e1117 -
+25 0-1 #ffffff #0e1117 -
+25 1-49 #161b24 #0e1117 -
+25 49-50 #ffffff #0e1117 -
+26 0-1 #ffffff #0e1117 -
+26 1-5 #7cc4ff #161b24 -
+26 5-49 #ffffff #161b24 -
+26 49-50 #ffffff #0e1117 -
+27 0-1 #ffffff #0e1117 -
+27 1-49 #161b24 #0e1117 -
+27 49-50 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-17 #8fd19e #31433f b
+28 17-18 #8b95a7 #161b24 -
+28 18-38 #e6eaf0 #1e2430 -
+28 38-49 #8b95a7 #161b24 -
+28 49-50 #ffffff #0e1117 -
+29 0-1 #ffffff #0e1117 -
+29 1-10 #e6eaf0 #293140 b
+29 10-20 #8b95a7 #0e1117 -
+29 20-22 #e6eaf0 #293140 b
+29 22-31 #8b95a7 #0e1117 -
+29 31-34 #e6eaf0 #293140 b
+29 34-39 #8b95a7 #0e1117 -
+29 39-50 #ffffff #0e1117 -

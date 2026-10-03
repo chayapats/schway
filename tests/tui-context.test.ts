@@ -54,7 +54,7 @@ test("persisted summary write failure requires explicit resume before compaction
     await rename(path, saved);
     await mkdir(path);
     expect(await controller.compact()).toBe(false);
-    expect(controller.snapshot().compactionNotice).toBe("Compaction failed · Ctrl+I repair details");
+    expect(controller.snapshot().compactionNotice).toBe("Compaction failed · F2 repair details");
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain(`/resume ${session.header.id}`);
     expect(controller.snapshot().compactionNotice).not.toContain("EISDIR");
@@ -203,7 +203,7 @@ test("actual pressure loop distinguishes failed summarization from no-op and con
     await task;
     const transcript = controller.snapshot().transcript.map(row => row.text).join("\n");
     expect(transcript).toContain("Compacting context · Esc stop");
-    expect(transcript).toContain("Compaction failed · Ctrl+I repair details");
+    expect(transcript).toContain("Compaction failed · F2 repair details");
     expect(transcript).not.toContain("After a storage failure");
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("After a storage failure");

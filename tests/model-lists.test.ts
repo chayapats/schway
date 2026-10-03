@@ -321,7 +321,7 @@ test("initial sign-in preserves memory failure warnings while suppressing setup 
       expect(controller.snapshot().status).toBe("idle");
       const notices = controller.snapshot().transcript.map(entry => entry.text);
       expect(notices).toHaveLength(1);
-      expect(notices[0]).toBe("Choice not remembered · Enter use model · Ctrl+I details");
+      expect(notices[0]).toBe("Choice not remembered · Enter use model · F2 details");
       expect(controller.inspectNoticeDetails()).toBe(true);
       expect(controller.snapshot().transcript.at(-1)?.text).toContain("No additional login is needed.");
     } finally { controller.dispose(); }

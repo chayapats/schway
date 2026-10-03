@@ -1335,7 +1335,7 @@ test("controller browser callback saves a credential, discovers account models a
       expect(controller.snapshot().transcript.filter(entry => entry.kind === "user")).toHaveLength(0);
       const text = JSON.stringify(controller.snapshot());
       expect(text).toContain("Approval received");
-      expect(text).toContain("Sign-in saved · /model choose model · Ctrl+I details");
+      expect(text).toContain("Sign-in saved · /model choose model · F2 details");
       expect(text).not.toContain("acct-browser-journey");
       expect(controller.inspectNoticeDetails()).toBe(true);
       expect(controller.snapshot().transcript.at(-1)?.text).toContain("acct-browser-journey");

@@ -95,7 +95,7 @@ until a model is active.
 
 Once a model is selected, an empty conversation identifies the workspace,
 effective model and auth route, then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
-**Ctrl+R retry locked credential storage**, or **type a task**. **Ctrl+I** opens
+**Ctrl+R retry locked credential storage**, or **type a task**. **F2** opens
 failure details; its hint appears only when those details exist. The ready screen
 does not add a recurring welcome or restored-choice message to the transcript; `/config` retains setting provenance and `/model forget`
 clears remembered interactive choices.
@@ -177,11 +177,11 @@ headless events and whole-turn command totals retain their existing meaning.
 After an accepted turn settles, the activity line shows `✓ Done`, `✗ Failed`,
 `− Stopped`, or `◌ Limit`, then changed files and known line counts, observed
 command results, elapsed time, and **Alt+R review**. Failed turns also offer
-**Ctrl+I details**. For example:
+**F2 details**. For example:
 
 ```text
 ✓ Done · 1 file +1 −1 · 2 commands ok · 14s · Alt+R review
-✗ Failed · 2 files +8 −3 · 1 command failed · Alt+R review · Ctrl+I details
+✗ Failed · 2 files +8 −3 · 1 command failed · Alt+R review · F2 details
 ```
 
 Counts include successful file-tool changes and paths detected as changed by shell
@@ -201,9 +201,9 @@ Below 80 terminal columns, the file list stacks above the diff. Binary, deleted,
 renamed, and truncated previews have short explanations instead of Git metadata.
 Shell files begin with `changed by shell · not undoable`.
 
-Up/Down selects files; PageUp/PageDown scrolls the diff. **Ctrl+I** swaps the diff for
-turn details; Ctrl+I again or Esc returns to the diff. Esc from the diff restores the
-same conversation position, unsent draft, and cursor. After a failed turn, Ctrl+I in
+Up/Down selects files; PageUp/PageDown scrolls the diff. **F2** swaps the diff for
+turn details; F2 again or Esc returns to the diff. Esc from the diff restores the
+same conversation position, unsent draft, and cursor. After a failed turn, F2 in
 the conversation appends the same details, including any recovery diagnostics.
 Details contain tool counts, whole-turn exit-zero/nonzero/unknown totals, and the
 retained commands without tool-call IDs. **Alt+I** still inspects individual tools.
@@ -376,7 +376,7 @@ manifest. File-tool undo still works in each case.
 | Dismiss suggestions | Esc |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
-| Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, Ctrl+I shows details, Ctrl+R retries discovery, Esc goes back |
+| Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
@@ -420,7 +420,7 @@ reading position.
 | Panel | Navigation and action |
 | --- | --- |
 | Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back |
-| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, Ctrl+I shows details, Ctrl+R retries discovery |
+| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery |
 | Tool approval | Up/Down choose, Enter choose or send reason, Esc deny, Ctrl+C cancel turn, PageUp/PageDown scroll |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown |
@@ -491,7 +491,7 @@ and execution starts; their later completion leaves any newer draft intact.
 
 When a provider step fails, the error row gives the available recovery keys for
 that operation. Alt+L opens sign-in after an authentication failure, Alt+M opens
-model selection after an unavailable-model failure, Ctrl+I shows optional
+model selection after an unavailable-model failure, F2 shows optional
 redacted diagnostics, and Esc dismisses the controls while keeping the editor.
 For an accepted turn, Ctrl+R continues from saved conversation progress when
 offered. It does not submit the original user message again or rerun saved tool
@@ -546,7 +546,7 @@ targets. Cancelling connection restores the target and query; Esc from custom
 endpoint key entry first returns to the typed URL. A successful connection returns
 to matching models without replacing an already selected model.
 
-Ctrl+I reveals the exact ID and context/output budgets. Ctrl+R retries failed
+F2 reveals the exact ID and context/output budgets. Ctrl+R retries failed
 catalog or access discovery. Reopening can display cached lists while access is
 checked, and search and pinning remain available during refresh. A disappearing
 highlight cannot silently select another billing route. Pins and recents store
@@ -759,3 +759,15 @@ Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **De
 Esc denies the current call without stopping the turn. **Deny with reason…** opens an entry with `Why? The agent will see this…`; Enter submits the trimmed reason, including an empty denial. The model receives `Denied by the user.` or `Denied by the user: <reason>`. Reason text stays out of prompt history, composer drafts and draft checkpoints. Every exit restores the draft and cursor saved before the panel opened. **Ctrl+C** cancels the whole turn, including queued calls; **Shift+Tab** is ignored while the approval prompt is open.
 
 Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc close to review request` hint show how to reach the request; closing that view opens the approval prompt immediately.
+
+### Details keyboard compatibility
+
+**F2** opens available Details; **Ctrl+I** remains an alias when the terminal reports
+it distinctly. Esc returns to the previous view, selection and scroll position.
+Legacy terminals can report Ctrl+I as the same Tab byte (`0x09`), so Tab keeps
+its completion and navigation behavior. No terminal setting is required for F2.
+
+Decoder-to-view tests exercise SS3 `ESC O Q`, CSI `ESC [ 12 ~`, Linux-console
+`ESC [ [ B` and CSI `ESC [ Q` F2 sequences, plus Kitty F2 and distinct Ctrl+I
+press/release events and modifyOtherKeys Ctrl+I. These tests use OpenTUI
+0.5.11’s input decoder; they do not claim testing of every terminal emulator.

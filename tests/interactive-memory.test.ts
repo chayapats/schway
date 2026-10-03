@@ -121,7 +121,7 @@ test("interleaved controller updates preserve the newer revision and report stal
     const one = await launch(home, root), two = await launch(home, root);
     expect(await one.controller.selectModel("openai/gpt-4o")).toBe(true);
     expect(await two.controller.selectModel("openai/gpt-5.4")).toBe(true);
-    expect(two.controller.snapshot().transcript.at(-1)?.text).toBe("Choice not remembered · Enter use model · Ctrl+I details");
+    expect(two.controller.snapshot().transcript.at(-1)?.text).toBe("Choice not remembered · Enter use model · F2 details");
     expect(two.controller.inspectNoticeDetails()).toBe(true);
     expect(two.controller.snapshot().transcript.at(-1)?.text).toContain("Workspace choice changed · Reopen before choosing again");
     const reopen = await launch(home, root); expect(reopen.editor.settings.model).toBe("gpt-4o"); reopen.controller.dispose();

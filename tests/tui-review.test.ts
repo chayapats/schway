@@ -39,7 +39,7 @@ test("change mode names review beside a short status and keeps the origin in its
     const c = new TuiController({ session: createSession(), workspace, sessionId: "mode", provider: "scripted", modelId: "scripted", contextManager: createContextManager(workspace), configEditor });
     expect(await c.changesCommand("mode")).toBe(true);
     const notice = c.snapshot().transcript.at(-1)!.text;
-    expect(notice).toBe("Change tracking: on-demand · /changes review · Ctrl+I details");
+    expect(notice).toBe("Change tracking: on-demand · /changes review · F2 details");
     expect(c.inspectNoticeDetails()).toBe(true);
     const details = c.snapshot().transcript.at(-1)!.text;
     expect(details).toContain("[user-global]");

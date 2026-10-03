@@ -35,7 +35,7 @@ test("contextual startup keeps Thai task and cursor through keyboard setup cance
     expect(ui.captureCharFrame()).toContain("! Attention");
     expect(ui.captureCharFrame()).not.toContain("Not connected");
     expect(ui.captureCharFrame()).not.toContain("Enter send");
-    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+    expect(ui.captureCharFrame()).toContain("F2 details");
     expect(ui.captureCharFrame()).toContain("/isolated-workspace");
     expect(ui.captureCharFrame()).not.toContain("Missing credentials. Use /login");
     const draft = "ช่วยตรวจงานนี้\nแล้วอธิบายเป็นภาษาไทย";
@@ -96,7 +96,7 @@ test("slow startup allows paste and resize, blocks duplicate setup, and offline 
     await ui.settle();
     expect(ui.captureCharFrame()).toContain("Checking connection");
     expect(ui.captureCharFrame()).not.toContain("Enter send");
-    expect(ui.captureCharFrame()).not.toContain("Ctrl+I details");
+    expect(ui.captureCharFrame()).not.toContain("F2 details");
     await ui.mockInput.pasteBracketedText("รอได้\nอย่าลบงาน");
     ui.resize(44, 18);
     ui.mockInput.pressKey("m", { meta: true });

@@ -10,7 +10,7 @@ export function outcomeLabel(outcome: TurnOutcome): string {
 /** Fit a turn summary by dropping elapsed, commands, then files before clipping outcome and actions. */
 export function formatOutcomeLine(outcome: TurnOutcome, columns: number): string {
   let elapsed = formatDuration(outcome.elapsedMs);
-  const actions = `Alt+R review${outcome.reason === "failed" ? " · Ctrl+I details" : ""}`;
+  const actions = `Alt+R review${outcome.reason === "failed" ? " · F2 details" : ""}`;
   const counts = outcome.commandCounts;
   let commands = [[counts.exitZero, "ok"], [counts.nonzero, "failed"], [counts.unknown, "stopped"]]
     .filter(([count]) => Number(count) > 0).map(([count, word]) => `${formatCount(Number(count), "command")} ${word}`).join(" · ");

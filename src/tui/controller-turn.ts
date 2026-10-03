@@ -177,7 +177,7 @@ export abstract class TurnLayer extends CompactionLayer {
         this.recovery.model = loaded.model;
         this.recovery.actions = ["continue", ...(this.recovery.details ? ["details" as const] : []), "keep-editing"];
         const entry = this.transcript.find(item => item.id === this.recovery?.entryId);
-        if (entry) entry.text = `Credential access restored. Continue the saved turn when ready.\nCtrl+R continue · ${this.recovery.details ? "Ctrl+I details · " : ""}Esc keep editing`;
+        if (entry) entry.text = `Credential access restored. Continue the saved turn when ready.\nCtrl+R continue · ${this.recovery.details ? "F2 details · " : ""}Esc keep editing`;
       } else {
         this.recovery = undefined;
         this.notice("Credential access restored. Your draft is ready to send when you press Enter.");
@@ -526,7 +526,7 @@ export abstract class TurnLayer extends CompactionLayer {
           : event.status === "cancelled"
             ? "Compaction cancelled · /compact retry"
             : event.status === "failed"
-              ? "Compaction failed · Ctrl+I repair details"
+              ? "Compaction failed · F2 repair details"
               : "Context unchanged · /compact retry after more turns";
         this.compactionNotice = { identity: this.contextIdentity(), text: redactSecrets(text, this.secrets) };
         this.notice(text, event.status === "failed"
@@ -633,7 +633,7 @@ export abstract class TurnLayer extends CompactionLayer {
       if (recovery.accepted && (recovery.category === "auth" || recovery.category === "model")) {
         recovery.actions = ["continue", ...(recovery.details ? ["details" as const] : []), "keep-editing"];
         const entry = this.transcript.find(item => item.id === recovery.entryId);
-        if (entry) entry.text = `${recoveryMessage(recovery.category)}\nCtrl+R continue · ${recovery.details ? "Ctrl+I details · " : ""}Esc keep editing`;
+        if (entry) entry.text = `${recoveryMessage(recovery.category)}\nCtrl+R continue · ${recovery.details ? "F2 details · " : ""}Esc keep editing`;
       }
       this.recoveryRepair = false;
     }
@@ -664,7 +664,7 @@ export abstract class TurnLayer extends CompactionLayer {
       ...(details ? ["details" as const] : []),
       "keep-editing",
     ];
-    const controls = actions.map(action => ({ connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry credential access", "choose-model": "Alt+M choose model", continue: "Ctrl+R continue", details: "Ctrl+I details", "keep-editing": "Esc keep editing" })[action]);
+    const controls = actions.map(action => ({ connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry credential access", "choose-model": "Alt+M choose model", continue: "Ctrl+R continue", details: "F2 details", "keep-editing": "Esc keep editing" })[action]);
     const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: markError ? "error" : "system", text: `${message}\n${controls.join(" · ")}` };
     if (!accepted && this.recovery && !this.recovery.accepted) {
       this.transcript = this.transcript.filter(item => item.id !== this.recovery!.entryId);

@@ -551,9 +551,9 @@ test("busy session deletion shows the required reason and retry command while re
     ui.view.refresh(); await ui.renderOnce();
     await ui.mockInput.pasteBracketedText(`/delete-session ${id}`); ui.mockInput.pressEnter(); await ui.submitted();
     ui.view.refresh(); await ui.renderOnce();
-    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Cannot delete session: Undo store busy · /delete-session retry · Ctrl+I details");
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Cannot delete session: Undo store busy · /delete-session retry · F2 details");
     expect(ui.captureCharFrame()).toContain("/delete-session retry");
-    expect(ui.captureCharFrame()).toMatch(/Ctrl\+I\s+(?:▌\s*)?details/);
+    expect(ui.captureCharFrame()).toMatch(/F2\s+(?:▌\s*)?details/);
     expect(ui.captureCharFrame()).toContain("Cannot delete session: Undo store busy");
     expect(ui.captureCharFrame()).not.toContain("UNDO_STORE_BUSY");
     expect(await Bun.file(join(sessionsDirectory(home), `${id}.jsonl`)).exists()).toBe(true);

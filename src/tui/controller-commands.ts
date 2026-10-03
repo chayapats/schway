@@ -110,7 +110,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
     if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) { this.notice("Commands changed · Enter retry"); return true; }
     this.discoveredCommands = skills;
     const choices = commandCatalog(this.extensionCommands(), skills).filter(entry => entry.name === name);
-    if (choices.some(entry => !entry.available)) { this.notice("Command conflicts with skill · /help inspect sources · Ctrl+I details", `/${name} conflicts with skill or command sources: ${choices.map(entry => entry.source).join(", ")}. Rename the skill or extension.`); return true; }
+    if (choices.some(entry => !entry.available)) { this.notice("Command conflicts with skill · /help inspect sources · F2 details", `/${name} conflicts with skill or command sources: ${choices.map(entry => entry.source).join(", ")}. Rename the skill or extension.`); return true; }
     return false;
   }
 

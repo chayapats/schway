@@ -211,7 +211,7 @@ test("Grok plan rejection preserves the saved login and other routes but blocks 
       credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ onSaved }) => { await store.set(grokSubscriptionIdentity(), "saved"); onSaved?.(); return { ok: true, status: "Saved" }; }, listGrokModels: async () => { throw Error("Your Grok plan doesn't include API access. Use an xAI API key instead."); } }, stageSettings: async () => { throw Error("must not activate"); },
     });
     try { expect(await controller.login("grok")).toBe(previous !== "xai"); expect(controller.snapshot().modelId).toBe("previous-model"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved");
-      if (previous === "xai") expect(controller.snapshot().transcript.at(-1)?.text).toBe("Models unavailable; sign-in saved · /model retry · Alt+L sign in · Ctrl+I details");
+      if (previous === "xai") expect(controller.snapshot().transcript.at(-1)?.text).toBe("Models unavailable; sign-in saved · /model retry · Alt+L sign in · F2 details");
       expect(await controller.submit("Use the retained route if its credentials are unchanged")).toBe(previous !== "xai"); }
     finally { controller.dispose(); }
   });
