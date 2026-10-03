@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseModelsCommand, runModelsCommand, resolveModelsConnection } from "../src/cli/models.ts";
-import { discoverModels } from "../src/model/catalog-discovery.ts";
+import { discoverModels, safeCatalogMessage } from "../src/model/catalog-discovery.ts";
 import { parseModelListResult } from "../src/model/model-list.ts";
 import { codexSubscriptionIdentity, credentialIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 
@@ -53,6 +53,89 @@ test("runtime and renewed credentials cannot be reflected into catalog rows or s
   });
   expect(renewal.catalog.status).toBe("error"); expect(JSON.stringify(renewal)).not.toContain("renewed-private-token");
 });
+
+for (const source of ["env", "cli", "header", "env-file"] as const) for (const json of [false, true]) {
+  test(`${source} setup errors redact raw and trimmed credentials in ${json ? "JSON" : "plain"} output`, async () => {
+    const secret = "opaque-setup-credential-527941", raw = `  ${secret}\n`;
+    for (const reflected of [raw, secret, secret.replace("setup", "set\u001b[31mup\u001b[0m")]) {
+      let stdout = "", stderr = "", requests = 0;
+      const fixture = store();
+      const exit = await runModelsCommand(["models", "list", "--provider=openai-compatible", ...(json ? ["--json"] : []),
+        ...(source === "cli" ? ["--api-key", raw] : source === "header" ? ["--header", `X-Opaque:  ${secret}  `] : source === "env-file" ? ["--env-file=fixture.env"] : [])], {
+        cwd: "/workspace", env: source === "env" ? { OPENAI_COMPATIBLE_API_KEY: raw } : {}, store: fixture.credentials,
+        stdout: { write: value => { stdout += value; } }, stderr: { write: value => { stderr += value; } },
+        loadEnv: async () => ({ OPENAI_COMPATIBLE_API_KEY: raw }),
+        loadConfig: async () => ({ error: `Invalid configuration at /workspace/${reflected}/config.json` }),
+        fetch: async () => { requests++; throw new Error("Unexpected request"); },
+      });
+      expect(exit).toBe(1); expect(stdout + stderr).not.toContain(secret); expect(stdout + stderr).not.toContain("\u001b");
+      expect(stderr).toContain("Invalid configuration"); expect(stderr).toContain("***");
+      if (json) expect(JSON.parse(stdout)).toMatchObject({ status: "error", route: "unresolved", models: [] });
+      expect(requests).toBe(0); expect(fixture.reads).toEqual([]); expect(fixture.writes).toEqual([]);
+    }
+  });
+}
+
+test("diagnostic normalization cannot reconstruct a known credential and blank variants do not redact ordinary spaces", () => {
+  expect(safeCatalogMessage("Failed opaque\u0000credential", [" \topaque credential\n", " \t "])).toBe("Failed ***");
+  expect(safeCatalogMessage("Keep ordinary spaces", [" \t ", " "])).toBe("Keep ordinary spaces");
+});
+
+for (const source of ["runtime", "env", "credential-env", "header", "config-header", "stored"] as const) for (const json of [false, true]) {
+  test(`${source} normalized credential reflections omit unsafe IDs in ${json ? "JSON" : "plain"} output`, async () => {
+    const secret = "opaque-model-credential-527941", raw = `  ${secret}  `, baseUrl = "https://fixture.test/v1";
+    for (const withSafeModel of [false, true]) {
+      let stdout = "", stderr = "";
+      const identity = credentialIdentity({ provider: "openai-compatible", baseUrl });
+      const fixture = store(source === "stored" ? { [identity.account]: raw } : {});
+      const exit = await runModelsCommand(["models", "list", ...(json ? ["--json"] : []),
+        ...(source === "credential-env" ? ["--profile=fixture"] : ["--provider=openai-compatible", `--base-url=${baseUrl}`, `--auth=${source === "header" || source === "config-header" ? "none" : "required"}`]),
+        ...(source === "runtime" ? ["--api-key", raw] : source === "header" ? ["--header", `X-Opaque:${raw}`] : [])], {
+        cwd: "/", env: source === "env" ? { OPENAI_COMPATIBLE_API_KEY: raw } : source === "credential-env" ? { SERVICE_AUTH: raw } : {}, store: fixture.credentials,
+        stdout: { write: value => { stdout += value; } }, stderr: { write: value => { stderr += value; } },
+        loadConfig: async () => source === "credential-env" ? { project: { profiles: { fixture: { baseUrl, auth: "required", credentialEnv: "SERVICE_AUTH" } } } }
+          : source === "config-header" ? { project: { headers: { "X-Opaque": raw } } } : {},
+        fetch: async (_url, init) => {
+          const header = source === "header" || source === "config-header";
+          expect(new Headers(init?.headers).get(header ? "X-Opaque" : "Authorization")).toBe(header ? secret : `Bearer ${secret}`);
+          return Response.json({ data: [{ id: secret }, { id: `prefix-${secret}-suffix` }, ...(withSafeModel ? [{ id: "org/exact:Model.v2", context_window: 1234 }] : [])] });
+        },
+      });
+      expect(exit).toBe(1); expect(stdout + stderr).not.toContain(secret); expect(stdout + stderr).not.toContain("***");
+      expect(stderr).toContain(withSafeModel ? "Discarded model IDs containing credential values" : "No safe selectable models");
+      if (json) expect(JSON.parse(stdout)).toMatchObject({ status: withSafeModel ? "partial" : "error", models: withSafeModel ? [{ id: "org/exact:Model.v2", contextWindow: 1234 }] : [] });
+      else if (withSafeModel) expect(stdout).toContain("org/exact:Model.v2  context 1234");
+      expect(fixture.writes).toEqual([]);
+    }
+  });
+}
+
+for (const route of ["codex", "grok"] as const) {
+  test(`${route} stored token fields retain normalized redaction for IDs and refresh-save errors`, async () => {
+    const provider = route === "codex" ? "openai" as const : "xai" as const;
+    const auth = route === "codex" ? { openaiAuth: route } : { xaiAuth: route };
+    const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+    const access = "opaque-access-527941", refresh = "opaque-refresh-527941", account = "opaque-account-527941";
+    const tokens = { accessToken: `  ${access}  `, refreshToken: `  ${refresh}  `, accountId: `  ${account}  `, obtainedAt: 0 };
+    const fixture = store({ [identity.account]: JSON.stringify({ ...tokens, expiresAt: Date.now() + 600_000 }) });
+    const prefix = route === "codex" ? "gpt" : "grok", safe = `${prefix}-safe-exact`;
+    const catalog = await discoverModels({ provider, ...auth, env: {} }, { store: fixture.credentials, fetch: async (_url, init) => {
+      expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${access}`);
+      if (route === "codex") expect(new Headers(init?.headers).get("ChatGPT-Account-Id")).toBe(account);
+      const ids = [safe, ...[access, refresh, account].map(value => `${prefix}-${value}`)];
+      return Response.json(route === "codex" ? { models: ids.map(slug => ({ slug, visibility: "list" })) } : { data: ids.map(id => ({ id })) });
+    } });
+    expect(catalog.catalog).toMatchObject({ status: "partial", models: [{ id: safe }] });
+    for (const secret of [access, refresh, account]) expect(JSON.stringify(catalog)).not.toContain(secret);
+    const expired = store({ [identity.account]: JSON.stringify({ ...tokens, expiresAt: 0 }) });
+    expired.credentials.set = async () => { throw new Error(`Cannot save ${access} / ${refresh} / ${account} / renewed-private-token`); };
+    const result = await discoverModels({ provider, ...auth, env: {} }, {
+      store: expired.credentials, fetch: async () => Response.json({ access_token: "  renewed-private-token  ", expires_in: 3_600 }),
+    });
+    expect(result.catalog.status).toBe("error");
+    for (const secret of [access, refresh, account, "renewed-private-token"]) expect(JSON.stringify(result)).not.toContain(secret);
+  });
+}
 
 function controlledDeadline() {
   let elapsed = 0, budget = 0, started = 0, cleared = 0;

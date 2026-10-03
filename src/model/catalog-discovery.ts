@@ -50,11 +50,18 @@ function startDeadline(milliseconds: number) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
-/** Remove credential values, terminal controls and URLs from operational diagnostics. */
+/** Keep supplied credentials and their usable trimmed forms without matching empty or whitespace-only values. */
+function secretVariants(values: readonly (string | undefined)[]): string[] {
+  return [...new Set(values.flatMap(value => value?.trim() ? [value, value.trim()] : []))];
+}
+
+/** Remove raw/trimmed credentials, terminal controls and URLs from operational diagnostics. */
 export function safeCatalogMessage(message: string, secrets: readonly string[] = []): string {
-  return redactSecrets(stripVTControlCharacters(redactSecrets(message, secrets)), secrets)
+  const known = secretVariants(secrets);
+  const normalized = stripVTControlCharacters(redactSecrets(message, known))
     .replace(/https?:\/\/[^\s]+/gi, "[endpoint]")
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+  return redactSecrets(normalized, known);
 }
 
 function explicitRoute(input: CatalogConnection): CatalogRoute {
@@ -106,12 +113,12 @@ export async function discoverModels(input: CatalogConnection & {
 
   const deadline = (deps.startDeadline ?? startDeadline)(5_000);
   const signal = input.signal ? AbortSignal.any([input.signal, deadline.signal]) : deadline.signal;
-  const secrets = [input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)].filter((value): value is string => !!value);
+  const secrets = secretVariants([input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)]);
   const rememberCredential = (value: string) => {
-    secrets.push(value);
+    secrets.push(...secretVariants([value]));
     try {
       const tokens = JSON.parse(value);
-      for (const field of [tokens?.accessToken, tokens?.refreshToken, tokens?.accountId]) if (typeof field === "string") secrets.push(field);
+      for (const field of [tokens?.accessToken, tokens?.refreshToken, tokens?.accountId]) if (typeof field === "string") secrets.push(...secretVariants([field]));
     } catch { /* API keys are not token objects. */ }
   };
   try {
@@ -170,6 +177,7 @@ export async function discoverModels(input: CatalogConnection & {
       }
       const credential = await resolveProviderCredential({ ...input, store });
       if ("error" in credential) throw new Error(credential.error);
+      if (credential.apiKey) rememberCredential(credential.apiKey);
       signal.throwIfAborted();
       result = await fetchProviderModelListResult({ url, apiKey: credential.apiKey, headers: input.headers, fetch: deps.fetch, signal, parseOptions: input.provider === "openai-compatible" ? undefined : { chatOnly: input.provider }, label: input.provider === "openai" ? "OpenAI" : input.provider === "xai" ? "xAI" : "Compatible" });
       if (input.provider === "openai") result.models = requireOpenAIApiKeyModels(result.models);
