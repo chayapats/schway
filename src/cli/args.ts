@@ -38,6 +38,8 @@ export interface CliArgs {
   /** Explicit starting approval mode for this process. */
   approval?: ApprovalMode;
   json: boolean;
+  /** Print an exact persisted resume ID to stderr for a text task. */
+  showSession?: boolean;
   debug?: boolean;
   debugFile?: string;
   provider?: CliProvider;
@@ -92,6 +94,10 @@ export function parseArgs(
     }
     if (arg === "--json") {
       args.json = true;
+      continue;
+    }
+    if (arg === "--show-session") {
+      args.showSession = true;
       continue;
     }
     if (arg === "--debug") {

@@ -110,12 +110,25 @@ used. If the OS store cannot be read, optional auth still runs without a key.
 With `--auth none`, no automatic authentication header is sent and the OS store
 is not read. An explicitly empty runtime override is still rejected.
 
-A later headless invocation may use the saved key:
+A later headless invocation can reuse the saved key, but still needs an explicit
+model and billing route. In a **POSIX shell**, after `/login openai`:
 
 ```sh
-schway --provider openai -p 'Explain this repository'
-schway --provider openai-compatible --base-url https://example.com/v1 --auth required -p 'Hello'
+schway models list --provider openai --openai-auth api-key
+# Paste an exact ID returned by that route.
+IFS= read -r MODEL_ID
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" -p 'Explain this repository' --show-session
 ```
+
+For a compatible service, start/configure the endpoint and its own credential,
+then use the [complete profile flow](headless.md#compatible-endpoint-or-profile).
+For existing subscriptions, use the separate [ChatGPT/Codex](headless.md#existing-chatgptcodex-subscription)
+or [Grok](headless.md#existing-grok-subscription) flow, even when API keys also
+exist. Listing, task and resume must retain the intended auth route; `--resume`
+does not restore old credentials or billing. Copy the exact hint ID or find it
+with `sessions list`; see [saved sessions](sessions.md) and
+[output formats](headless.md#output-and-session-ids). [Doctor](doctor.md) reports
+local credential/model readiness, not live access.
 
 Headless mode never opens a login prompt. `/login` and `/logout` are interactive
 commands. Keys cannot be stored in ordinary config files, and Schway does not

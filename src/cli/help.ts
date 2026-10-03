@@ -38,6 +38,7 @@ export const CLI_OPTIONS: readonly Option[] = [
   { flags: ["--branch"], value: "<branch-id>", section: "Sessions", description: "Continue a branch (needs --resume)", doctor: false, sample: "example-branch" },
   { flags: ["--add-dir"], value: "<directory>", section: "Workspace", description: "Attach another project as context (repeatable)", doctor: true, sample: "../shared" },
   { flags: ["--json"], section: "Output and diagnostics", description: "Stream runtime events as JSON lines", doctor: true, doctorDescription: "Print diagnostics as a JSON object" },
+  { flags: ["--show-session"], section: "Output and diagnostics", description: "Print a resume hint to stderr (-p text only)", doctor: false },
   { flags: ["--debug"], section: "Output and diagnostics", description: "Write a local debug log", doctor: false },
   { flags: ["--debug-file"], value: "<path>", section: "Output and diagnostics", description: "Write the debug log to this file", doctor: false, sample: "debug.jsonl" },
   { flags: ["--base-url"], value: "<url>", section: "Advanced", description: "Use a compatible endpoint URL", doctor: true, sample: "http://localhost:11434/v1" },

@@ -1203,6 +1203,42 @@ test("--json keeps exact session IDs and suppresses session.ready when an ID wou
   });
 });
 
+test("--show-session prints one persisted resume ID only on stderr and survives a failed turn", async () => {
+  await withTempDir(async home => {
+    const first = await run(["-p", "private task", "--show-session"], { env: { HOME: home },
+      model: createScriptedModel({ error: "Fixture authentication failure", status: 401 }) });
+    expect(first.exitCode).toBe(1); expect(first.stdout).toBe("");
+    const lines = first.stderr.trimEnd().split("\n"), match = lines[0]!.match(/^Session ([^ ]+) · Resume with --resume \1$/);
+    expect(match).not.toBeNull(); expect(lines.filter(line => line.startsWith("Session "))).toHaveLength(1);
+    expect(first.stderr).not.toContain("private task"); expect(first.stderr).not.toContain(home);
+    const id = match![1]!;
+    expect(await Bun.file(join(home, ".schway/sessions", `${id}.jsonl`)).exists()).toBe(true);
+    const resumed = await run(["-p", "continue", "--resume", id, "--show-session"], { env: { HOME: home }, model: createScriptedModel({ text: "done" }) });
+    expect(resumed).toEqual({ exitCode: 0, stdout: "done\n", stderr: `${lines[0]}\n` });
+  });
+});
+
+for (const source of ["runtime", "header", "canonical", "original-profile"] as const) test(`text hint and JSONL share exact-ID suppression for ${source} observations`, async () => {
+  await withTempDir(async home => {
+    const args: string[] = [], env: Record<string, string> = { HOME: home };
+    if (source === "runtime") args.push("--api-key", " - ");
+    if (source === "header") args.push("--provider", "openai-compatible", "--base-url", "https://fixture.invalid/v1", "--header", "Authorization:Bearer -");
+    if (source === "canonical") env.OPENAI_API_KEY = " - ";
+    if (source === "original-profile") {
+      env.OTHER_AUTH = " - ";
+      await mkdir(join(home, ".schway"), { recursive: true });
+      await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profiles: { unused: { baseUrl: "https://fixture.invalid/v1", credentialEnv: "OTHER_AUTH" } } }));
+      await writeFile(join(home, "overlay.env"), "OTHER_AUTH=replacement-credential\n"); args.push("--env-file", join(home, "overlay.env"));
+    }
+    for (const output of ["--show-session", "--json"]) {
+      const result = await run(["-p", "task", ...args, output], { env, cwd: home, model: createScriptedModel({ text: "done" }) });
+      expect(result.exitCode, result.stderr).toBe(0); expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain("session.ready"); expect(result.stdout).not.toContain("Resume with");
+      if (output === "--show-session") expect(result.stdout).toBe("done\n");
+    }
+  });
+});
+
 test("--json exposes a resumable session ID after a failed turn with saved history", async () => {
   await withTempDir(async (home) => {
     const prompt = "private task text";

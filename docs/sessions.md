@@ -4,14 +4,39 @@ Sessions use append-only semantic JSONL under `~/.schway/sessions`. Each session
 
 ## Sessions: save, branch, and resume
 
-Headless and interactive runs persist versioned JSONL sessions under `~/.schway/sessions`. Config files are never created automatically, but sessions are written so work can resume.
+Headless and interactive runs persist versioned JSONL sessions under
+`~/.schway/sessions`. Config files are never created automatically, but accepted
+work is saved so it can resume. A session restores conversation and workspace
+history; current flags and config choose credentials, the model and billing.
+Headless tasks intentionally ignore the TUI's remembered model choice.
 
-```bash
-schway -p "start the migration"
-schway -p "continue the migration" --resume <session-id>
-schway --resume <session-id>   # interactive resume
-schway --resume <session-id> --branch <branch-id>
+This **POSIX shell** flow assumes you saved an OpenAI API key through interactive
+`/login openai`, then returned to your project shell. It explicitly selects
+API-key billing, even if a ChatGPT subscription is also saved. Each `read` waits
+for you to paste an exact ID and press Enter; placeholders are not catalog results.
+For ChatGPT/Codex, xAI, Grok or a compatible endpoint, use the separate
+[complete route flows](headless.md#choose-your-route-run-and-resume).
+
+<!-- headless-flow:sessions -->
+```sh
+schway models list --provider openai --openai-auth api-key
+# Paste an exact model ID returned above, then press Enter.
+IFS= read -r MODEL_ID
+schway -p "Start the migration" --provider openai --openai-auth api-key --model "$MODEL_ID" --approval read-only --show-session
+schway sessions list
+# Paste the exact Session hint ID or its matching saved-work row.
+IFS= read -r SESSION_ID
+schway -p "Continue the migration" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
+
+Keep the same intended route when continuing; resume never switches to old
+credentials or restores an earlier billing preference. A flag-light alternative
+requires the [explicit saved config](headless.md#use-explicit-saved-settings)
+shown in the headless guide. CLI flags override project and user config. See
+[credentials](credentials.md), [configuration](configuration.md), and the
+[README handoff](../README.md#run-a-headless-task) for setup. If no model is
+configured, list the intended route, choose an exact ID, and retry with `--model`;
+[doctor](doctor.md) checks local readiness with that model, not live access.
 
 Use `/branch list` to obtain exact branch IDs, entry IDs, and the empty conversation root ID. While idle, `/branch fork <entry-id> [name]` creates and selects an independent head at a complete user-turn boundary; `/branch switch <branch-id>` selects an existing head. Names are labels, so duplicate names are allowed and cannot select a branch. Each new reply advances only the selected branch. Branching changes conversation context; it does not undo file changes. Workspace attachments stay shared across branches.
 
@@ -19,7 +44,25 @@ Resume rebuilds only the selected ancestry without replaying tool effects. Omit 
 
 New files use format 4 with atomic branch operations containing semantic `user`, `assistant`, `tool_result`, `compaction`, and `turn_undo` entries. Formats 1 and 2 load as one `main` branch and gain an append-only upgrade marker when branch data changes. Runtime-only deltas (`model.delta`, `tool.delta`) are never persisted. See [renderer-free source API](#renderer-free-source-api) and [format 4 and recovery](#format-4-and-recovery) for runnable examples, compaction isolation, and recovery details.
 
-`--json` streams normalized runtime events as JSONL on stdout for tooling; diagnostics stay on stderr. Runtime JSONL and durable session JSONL are different concepts: the first is transient observability, the second is resumable state.
+Text mode writes model text to stdout. Opt-in `--show-session` writes one exact
+resume hint to stderr after the task session is persisted and ready, including
+when a later model/tool failure or cancellation occurs. Pre-ready setup failure,
+unpersisted sessions and `/skills` produce no hint. An ID containing an observed
+credential, terminal/format controls or line/paragraph separators produces no
+text hint; it is never rewritten into a different token. Unquoted resume hints
+accept only Unicode letters, marks, numbers, pictographic emoji and `._-`, with
+no leading `-`. Use the JSONL workflow below to capture other exact IDs as data.
+
+`--json` already streams normalized runtime events as JSONL on stdout, including
+`session.ready` with the exact `sessionId`; diagnostics stay on stderr. Its
+existing encoding and secret-suppression rule are unchanged. Do not combine
+`--show-session` with `--json`, omit `-p`, or add it to doctor/version/list commands.
+Use the [complete-stream JSONL extraction example](headless.md#output-and-session-ids)
+to capture an exact ID safely. Model and session listings each emit one JSON
+object, not runtime JSONL. Runtime events and durable session records are
+different concepts: the first is transient observability, the second is resumable
+state. See [task input and recovery](headless.md#task-input-and-recovery) for
+nonempty `-p` tasks, redirected input/output and immediate headless `ask` denial.
 
 ## Starting new work or resuming
 
@@ -55,11 +98,21 @@ Forking creates and selects a new independent head at the exact requested entry.
 
 Fork and switch require idle execution. While a model, tool, summary, extension command, attachment validation, or session replacement is active, wait for it to finish. After Esc, accepted tools must settle before branch changes become available. Branch changes clear volatile skill activation and rebuild the visible transcript from the selected ancestry.
 
-Both startup modes accept the same selection:
+Both startup modes accept the same selection. In the same POSIX shell as the
+OpenAI API-key flow above, retain `MODEL_ID` and `SESSION_ID`. Copy an exact
+conversation branch ID from interactive `/branch list`: run
+`IFS= read -r BRANCH_ID`, paste that ID and press Enter. It is not a Git branch
+name or a shortened ID. To continue with a headless task:
+
+<!-- headless-flow:sessions-branch -->
+```sh
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --branch "$BRANCH_ID" -p "Continue this approach" --approval read-only --show-session
+```
+
+To open that same branch interactively in a terminal instead:
 
 ```sh
-schway --resume <session-id> --branch <branch-id>
-schway --resume <session-id> --branch <branch-id> -p "Continue this approach"
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --branch "$BRANCH_ID"
 ```
 
 `--branch` requires `--resume`. Without it, resume selects the saved active branch. Resume and switch never rerun saved tools: interrupted accepted calls receive explicit error results only on the destination ancestry. The same unresolved call ID on another branch remains unrelated. Repeated resumes do not add another result for a settled call.
@@ -283,8 +336,9 @@ transcripts should select `.jsonl` files, not every file in the sessions directo
 
 `schway sessions list` inspects saved work without opening the TUI or resuming a
 session. It works with redirected input/output and needs no model or credentials.
-Use an exact listed ID with `schway --resume <session-id> -p "<task>"`; starting or
-resuming a task still requires your configured model and route.
+Copy an exact listed ID into `SESSION_ID` in the
+[complete run/resume flow](#sessions-save-branch-and-resume), retaining your
+chosen model and route. Listing itself does not configure either one.
 
 ```bash
 schway sessions list

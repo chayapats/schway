@@ -67,10 +67,24 @@ human-readable messages or relying on `package.<index>` ordering. Multiple
 dynamic entries can share the same redacted path. Deprecations remain warnings;
 removed-provider migration instructions remain available.
 
-```bash
-schway -p "explain this repository" --env-file ~/.config/my-ai.env
-schway -p "explain this repository" --max-turns 8 --max-output 2048
+For a first task, follow a [complete route/model guide](headless.md#choose-your-route-run-and-resume).
+For example, after preparing an OpenAI API key, these **POSIX shell** commands
+choose an advertised ID explicitly. The first line also uses the same explicit
+environment file as the first task; no `.env` file loads automatically.
+
+```sh
+schway models list --provider openai --openai-auth api-key --env-file ~/.config/my-ai.env
+IFS= read -r MODEL_ID
+schway -p "Explain this repository" --provider openai --openai-auth api-key --model "$MODEL_ID" --env-file ~/.config/my-ai.env --show-session
+schway -p "Explain this repository" --provider openai --openai-auth api-key --model "$MODEL_ID" --env-file ~/.config/my-ai.env --max-turns 8 --max-output 2048 --show-session
 ```
+
+An interactive choice remains separate from file settings and is ignored by
+headless tasks. `--resume` selects [saved history](sessions.md), not old auth or
+billing. Reuse the chosen route/model flags, or immediately save the required
+settings as shown in the [saved-config flow](headless.md#use-explicit-saved-settings).
+[Credentials](credentials.md) stay out of config; [doctor](doctor.md) checks local
+readiness without proving remote access.
 
 ## Approval modes
 
@@ -244,14 +258,18 @@ Truthful capability handling:
 - `thinking` plus any reasoning body key in effective `extraBody` (direct or selected-profile `extraBody`) is rejected as `thinking "<level>" conflicts with extraBody.<key>`; remove one to define a single source of truth.
 - Model and profile switches recompute capability and effective reasoning. Subscription model switches shadow incompatible saved thinking with a session-only provider default, without editing files. Other providers reject an incompatible request with the previous settings intact; set a compatible level or reset thinking first.
 
-Set reasoning for a task:
+Set reasoning for a task only after preparing that route's credentials and
+choosing an ID from its catalog, as in the [headless flows](headless.md).
+The named models below illustrate capability syntax; use them only if your
+route advertises them and the requested effort. `MODEL_ID` for the final local
+command must be an exact ID chosen from that running endpoint's list.
 
 ```sh
-schway --provider openai --model gpt-5.4 --thinking low -p 'plan only'
+schway --provider openai --openai-auth api-key --model gpt-5.4 --thinking low -p 'plan only'
 # OpenRouter: exact provider-advertised effort
-schway --provider openai-compatible --base-url https://openrouter.ai/api/v1 --model meta/muse-spark-1.3-contributor --thinking medium -p 'hello'
+schway --provider openai-compatible --base-url https://openrouter.ai/api/v1 --auth required --model meta/muse-spark-1.3-contributor --thinking medium -p 'hello'
 # Other compatible services: reasoning via extraBody, thinking stays unset
-schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --body '{"reasoning_effort":"medium"}' -p 'hello'
+schway --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none --model "$MODEL_ID" --body '{"reasoning_effort":"medium"}' -p 'hello'
 ```
 
 The shared contract lives in `src/model/thinking.ts`: capability provenance, selected model/endpoint checks, validation, conflicts, and effective descriptions. Config, command completion, preferences and adapters reuse it; only `src/model/providers/*` builds wire fields.
@@ -262,11 +280,13 @@ Capability sources: [OpenAI Luna](https://developers.openai.com/api/docs/models/
 
 An xAI API key bills the xAI console account. It is not the Grok subscription route: that sign-in, its OAuth flow, and any selector between the subscription and this key are a separate route. This route talks to the public xAI Responses API at `https://api.x.ai/v1` and does not read `OPENAI_API_KEY`.
 
-Set the key in the environment, pass it for one process, or save it interactively:
+Set `XAI_API_KEY` explicitly or save the key with `/login xai`, then choose an
+exact ID. In a POSIX shell:
 
 ```sh
-export XAI_API_KEY=...
-schway --provider xai --model grok-4.7 -p "explain this repository"
+schway models list --provider xai --xai-auth api-key
+IFS= read -r MODEL_ID
+schway --provider xai --xai-auth api-key --model "$MODEL_ID" -p "Explain this repository" --show-session
 ```
 
 ```text
@@ -328,14 +348,11 @@ Without a saved provider preference, Schway starts with its built-in OpenAI prov
 
 The browser returning to `http://localhost:1455/auth/callback` is expected. Schway starts that listener before launching the browser and finishes sending the callback page before closing the connection. The page confirms receipt; the terminal reports whether the tokens were saved. A callback from an older browser tab returns an error without cancelling the current attempt.
 
-Use the saved subscription or an API key:
-
-```sh
-# Use a saved ChatGPT login
-schway --provider openai --openai-auth codex -p 'hello'
-# Use an API key
-schway --provider openai --openai-auth api-key -p 'hello'
-```
+Use the [complete subscription flow](headless.md#existing-chatgptcodex-subscription)
+or the separate [API-key flow](headless.md#openai-api-key). Each prepares its
+credentials, lists the intended route, asks you to choose an exact ID, and
+retains that route and model for both the task and resume. A saved `openaiAuth`
+preference by itself does not configure a headless model.
 
 See `src/model/providers/codex-subscription.ts` (verified OAuth/Responses contract, token lifecycle, wire conversion), `src/auth/credentials.ts` (`selectOpenAITransport`), and `src/auth/store.ts` (`codexSubscriptionIdentity`) for the implementation contract.
 
@@ -387,7 +404,12 @@ Display and selection:
 - `/config show` and the status header show the active `profile` with redacted effective settings (`credentialEnv`/`credentialIdentity` names are shown, values hidden; URLs sanitized; headers/bodies hidden).
 - `/model` includes connected profiles with their name and host in the row’s API route label; `/model profile:<name>` and `/config set profile <name>` switch profiles. Only the explicit `profile:<name>` form switches profiles; a bare model token never selects a profile, so direct model IDs cannot collide with profile names. `/model <provider>/<id>` clears the profile for direct selection. `/model <provider>/<id>` and `/config reset profile` record a session-only cleared profile that outranks user, project, and CLI selections.
 
-Use two local endpoints:
+This is an isolated two-endpoint fixture example, not a ready-to-run public
+service or real credential. It assumes both local servers advertise `model-a`
+and `model-b` respectively, and server b also accepts `override-model`. The
+sentinel values below are fixture keys. For real endpoints, choose exact IDs
+using the [compatible flow](headless.md#compatible-endpoint-or-profile) and keep
+credentials in your environment or secure store.
 
 ```sh
 cat ~/.schway/config.json
@@ -437,7 +459,7 @@ A SuperGrok account can connect through `/login grok` for browser approval or `/
 
 `xaiAuth` selects `auto` (the default), `grok` or `api-key`. Set it with `/config set xaiAuth grok` or `--provider xai --xai-auth grok`. Automatic selection prefers a supplied API key or `XAI_API_KEY`, then a saved Grok login, then a saved xAI API key. Explicit `grok` ignores API keys. Explicit `api-key` ignores Grok tokens. There is no automatic billing fallback.
 
-After interactive sign-in, headless runs can use `schway --provider xai --xai-auth grok --model <id> -p "…"`. They refresh stored tokens when needed and never open a browser. Missing or revoked logins require interactive sign-in. `/logout grok` removes only the Grok OAuth credential and blocks an active Grok account until sign-in and activation succeed again.
+After interactive sign-in, use the [complete Grok headless flow](headless.md#existing-grok-subscription) to list that route, choose an exact model ID, run and resume. Headless runs refresh stored tokens when needed and never open a browser. Missing or revoked logins require interactive sign-in. `/logout grok` removes only the Grok OAuth credential and blocks an active Grok account until sign-in and activation succeed again.
 
 Test coverage for this guide: [release verification](release-verification.md#configuration).
 
