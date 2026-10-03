@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { CLI_AUTH_MODES, CLI_OPENAI_AUTH_MODES, CLI_PROVIDERS, CLI_THINKING_LEVELS, CLI_XAI_AUTH_MODES, parseArgs, type CliArgs } from "../src/cli/args.ts";
 import { CLI_OPTIONS, formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
+import { parseSessionsArguments } from "../src/cli/sessions.ts";
 
 test("main help groups options and examples in the documented order", () => {
   const lines = formatHelp().trimEnd().split("\n");
@@ -132,6 +133,10 @@ test("every example is a complete parseable command with placeholder model and s
     for (const example of examples) {
       const words = example.match(/"[^"]*"|\S+/g)!.map((word) => word.replace(/^"|"$/g, ""));
       expect(words.shift()).toBe("schway");
+      if (words[0] === "sessions") {
+        expect(() => parseSessionsArguments(words.slice(1))).not.toThrow();
+        continue;
+      }
       if (words[0] === "doctor") words.shift();
       const parsed = parseArgs(words);
       expect(parsed).not.toHaveProperty("error");

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
 import { runCli, type CliIo } from "../src/cli/main.ts";
 import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
+import { sessionsHelp } from "../src/cli/sessions.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { credentialIdentity, type CredentialStore } from "../src/auth/store.ts";
@@ -155,6 +156,26 @@ test("help needs neither HOME nor an accessible workspace", async () => {
     expect(stdout.text).toBe(argv[0] === "doctor" ? formatDoctorHelp() : formatHelp());
     expect(stderr.text).toBe("");
   }
+});
+
+test("session discovery dispatch bypasses interactive setup and owns its option errors", async () => {
+  expect(formatHelp()).toContain("schway sessions list");
+  expect(await run(["sessions", "--help"], { env: { HOME: undefined }, cwd: "/missing-workspace" }))
+    .toEqual({ exitCode: 0, stdout: sessionsHelp(), stderr: "" });
+  for (const flags of [["--version"], ["--provider", "openai"], ["-p", ""]]) {
+    const result = await run(["sessions", "list", ...flags], { env: {} });
+    expect(result.exitCode).toBe(2); expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("schway sessions --help");
+  }
+  await withTempDir(async home => {
+    const result = await run(["sessions", "list", "--all", "--json"], { env: { HOME: home }, cwd: "/missing-workspace",
+      createModel: async () => { throw new Error("Session listing loaded a model"); },
+      credentialStore: { get: async () => { throw new Error("Session listing read credentials"); }, set: async () => { throw new Error("Unexpected credential write"); }, delete: async () => false },
+    });
+    expect(result.exitCode).toBe(0); expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({ schemaVersion: 1, status: "complete", sessions: [] });
+    expect(await readdir(home)).toEqual([]);
+  });
 });
 
 test("removed-provider notices still print alone for both commands", async () => {

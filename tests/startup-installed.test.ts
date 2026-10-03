@@ -69,6 +69,22 @@ test("packed executable verifies startup, appearance and Linux PTY cleanup with 
     } finally { await Bun.write(metadataPath, metadataText); }
     expect(await readdir(versionHome)).toEqual([]);
     expect(await readdir(versionWork)).toEqual([]);
+    const savedHome = join(root, "sessions-home"), savedWork = join(root, "sessions-work");
+    await mkdir(join(savedHome, ".schway/sessions"), { recursive: true }); await mkdir(savedWork);
+    await Bun.write(join(savedHome, ".schway/config.json"), "invalid config must not load");
+    const savedPath = join(savedHome, ".schway/sessions/installed-saved.jsonl");
+    const savedText = JSON.stringify({ type: "session", version: 1, id: "installed-saved", createdAt: "2026-01-01T00:00:00Z", workspaceRoot: savedWork, launchCwd: savedWork, extraRoots: [] }) + "\n"
+      + JSON.stringify({ type: "user", id: "task", parentId: "installed-saved", content: [{ type: "text", text: "ตรวจงานภาษาไทย" }] }) + "\n";
+    await Bun.write(savedPath, savedText);
+    const savedList = await run([executable, "sessions", "list", "--preview", "--json"], savedWork, buildIsolatedCliEnv(savedHome));
+    expect(savedList.exit, savedList.stderr).toBe(0); expect(savedList.stderr).toBe("");
+    expect(JSON.parse(savedList.stdout)).toMatchObject({ schemaVersion: 1, status: "complete", scope: { all: false, workspace: savedWork }, sessions: [{ id: "installed-saved", state: "legacy", preview: "ตรวจงานภาษาไทย" }] });
+    expect(await Bun.file(savedPath).text()).toBe(savedText);
+    expect(await Bun.file(join(savedHome, ".schway/config.json")).text()).toBe("invalid config must not load");
+    const savedHelp = await run([executable, "sessions", "--help"], savedWork, buildIsolatedCliEnv(savedHome, { HOME: undefined }));
+    expect(savedHelp.exit).toBe(0); expect(savedHelp.stderr).toBe(""); expect(savedHelp.stdout).toContain("Usage: schway sessions list");
+    const savedUsage = await run([executable, "sessions", "list", "--provider", "openai"], savedWork, buildIsolatedCliEnv(savedHome));
+    expect(savedUsage.exit).toBe(2); expect(savedUsage.stdout).toBe(""); expect(savedUsage.stderr).toContain("sessions --help");
     for (const args of [[], ["--resume", "saved"], ["-p", ""], ["-p=\u0085", "--json", "--debug"]]) {
       expect(await run([executable, ...args], versionWork, buildIsolatedCliEnv(versionHome))).toEqual({
         exit: 1, stdout: "", stderr: args.some(arg => arg.startsWith("-p"))
