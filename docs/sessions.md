@@ -395,9 +395,10 @@ every keystroke. Ordinary exit freezes edits and attempts one current checkpoint
 writer with a 500 ms deadline, requests cancellation, and restores the terminal
 without awaiting model/tool settlement. A slow writer is killed; an unconfirmed
 replacement is never reported as saved. The writer compares the captured checkpoint
-generation before changing storage, so shutdown cannot overwrite another process. Saving
-errors are reported as failures, not success. A resume command is printed only when
-a durable session exists. Interrupted tools may already have changed files; resume
+generation before changing storage, so shutdown cannot overwrite another process.
+The exit message says **Draft saved.** only after confirmation. If saving fails or
+times out, it warns that your latest text may not be saved. A resume command is
+printed only when a durable session exists. Interrupted tools may already have changed files; resume
 marks pending tool calls interrupted and never replays them or claims to undo them.
 
 Test coverage for this guide: [release verification](release-verification.md#sessions).

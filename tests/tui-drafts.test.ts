@@ -264,7 +264,7 @@ test("actual app survives killed checkpoint process and reopens same session wit
 
 test("ordinary app exit flushes pending text and restores terminal; disk failure stays truthful", async () => withTempDir(async home => {
   const exit = await runProcess(home, "exit");
-  try { const result = await exit.next(); expect(result.code).toBe(0); expect(result.stopped && result.destroyed).toBe(true); expect(result.stderr).toContain("checkpoint saved"); expect(await artifacts(home)).toContain("unfinished Thai"); } finally { await exit.stop(); }
+  try { const result = await exit.next(); expect(result.code).toBe(0); expect(result.stopped && result.destroyed).toBe(true); expect(result.stderr).toContain("Draft saved.\n"); expect(result.stderr).not.toContain("checkpoint"); expect(await artifacts(home)).toContain("unfinished Thai"); } finally { await exit.stop(); }
   for (const mode of ["failure", "permission"]) {
     const isolated = join(home, mode); await mkdir(isolated);
     const previous = await createJsonlSession({ directory: sessionsDirectory(isolated), workspace: { root: isolated, launchCwd: isolated, extraRoots: [] } });
@@ -272,7 +272,7 @@ test("ordinary app exit flushes pending text and restores terminal; disk failure
     const failure = await runProcess(isolated, mode, previous.header.id);
     try {
       const ui = await failure.next(); expect(ui.retained).toContain("unfinished Thai"); expect(ui.frame).toContain("Draft not saved");
-      const result = await failure.next(); expect(result.stderr).toContain("checkpoint failed"); expect(result.stderr).not.toContain("checkpoint saved"); expect(result.destroyed).toBe(true);
+      const result = await failure.next(); expect(result.stderr).toContain("Draft saving failed; your latest text may not be saved.\n"); expect(result.stderr).not.toContain("Draft saved."); expect(result.stderr).not.toContain("checkpoint"); expect(result.destroyed).toBe(true);
       expect(await artifacts(isolated)).not.toContain("unfinished Thai");
       expect(openDraftStore({ home: isolated, workspaceRoot: isolated, sessionId: previous.header.id }).checkpoint?.text).toBe("previous valid checkpoint");
     } finally { await failure.stop(); }
@@ -304,9 +304,10 @@ test("app exit kills a blocked checkpoint within its deadline and still restores
     expect(Date.now() - started).toBeLessThan(2500);
     expect(result.code).toBe(0);
     expect(result.stopped && result.destroyed).toBe(true);
-    expect(result.stderr).toContain("checkpoint timed out");
+    expect(result.stderr).toContain("Draft saving timed out; your latest text may not be saved.\n");
     expect(await readFile(join(home, "exit-worker-state"), "utf8")).toBe("blocked");
-    expect(result.stderr).not.toContain("checkpoint saved");
+    expect(result.stderr).not.toContain("Draft saved.");
+    expect(result.stderr).not.toContain("checkpoint");
     const reaped = await blocked.next();
     expect(reaped).toMatchObject({ checkpointWorkerReaped: true, exitCode: 137 });
     expect(reaped.pid).toBeNumber();
@@ -341,7 +342,7 @@ test("unexpected exit writer rejection still restores terminal and never reports
   try {
     const result = await child.next();
     expect(result.stopped && result.destroyed).toBe(true);
-    expect(result.stderr).toBe("Draft checkpoint failed; unsaved input was not confirmed saved.\n");
+    expect(result.stderr).toBe("Draft saving failed; your latest text may not be saved.\n");
     expect(await child.child.exited).toBe(0);
   } finally { await child.stop(); }
 }));
