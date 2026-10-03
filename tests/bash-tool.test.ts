@@ -38,6 +38,25 @@ for (const mode of ["spawn-close", "normal", "stream-error", "both-errors", "abo
   });
 });
 
+for (const mode of ["exit", "error"]) test(`bash process ${mode} drains the remaining pipe before rejecting its original failure`, async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe(`open-pipe:${mode}`, root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result).toMatchObject({ sameOriginal: true, signals: ["SIGTERM", "SIGKILL"], destroyed: [true, true], pipeListeners: [0, 0], childListeners: [], abortListeners: 0 });
+  });
+});
+
+test("a real pipe failure kills a TERM-ignoring descendant before returning the original error", async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe("real-pipe-error", root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result).toMatchObject({ sameOriginal: true, expired: false, stable: true, stderrDestroyed: true, pipeListeners: [0, 0] });
+    expect(result.before).toBeGreaterThan(0);
+  });
+});
+
 test("bash declares exclusive execution", () => {
   expect(bashTool.execution).toBe("exclusive");
   expect(bashTool.name).toBe("bash");

@@ -159,13 +159,17 @@ async function runShell(
     }
   };
 
+  const forceTerminate = () => {
+    killTree("SIGKILL");
+    // An inherited descriptor can outlive the group; close our handles so collectors settle too.
+    child?.stdout?.destroy();
+    child?.stderr?.destroy();
+  };
+
   const terminate = () => {
+    if (killTimer !== undefined) return;
     killTree("SIGTERM");
-    if (killTimer === undefined) {
-      killTimer = setTimeout(() => {
-        killTree("SIGKILL");
-      }, 200);
-    }
+    killTimer = setTimeout(forceTerminate, 200);
   };
 
   const onAbort = () => {
@@ -202,6 +206,15 @@ async function runShell(
     const streams = Promise.all([stdout, stderr]);
     // A pipe may fail before process exit; handle it immediately while retaining the original rejection.
     void streams.catch(terminate);
+    const drainStreams = async () => {
+      const drainTimer = setTimeout(forceTerminate, 200);
+      try {
+        // A fail-fast rejection must not cancel escalation while the other pipe is still open.
+        await Promise.allSettled([stdout, stderr]);
+      } finally {
+        clearTimeout(drainTimer);
+      }
+    };
 
     let exitCode: number | null;
     try {
@@ -223,20 +236,12 @@ async function runShell(
       });
     } catch (error) {
       terminate();
-      await Promise.allSettled([stdout, stderr]);
+      await drainStreams();
       throw error;
     }
 
-    const drainTimer = setTimeout(() => {
-      killTree("SIGKILL");
-    }, 200);
-    let stdoutText: string;
-    let stderrText: string;
-    try {
-      [stdoutText, stderrText] = await streams;
-    } finally {
-      clearTimeout(drainTimer);
-    }
+    await drainStreams();
+    const [stdoutText, stderrText] = await streams;
     if (ctx.signal?.aborted) {
       throw abortError();
     }

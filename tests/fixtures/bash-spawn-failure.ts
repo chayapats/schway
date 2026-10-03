@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Run a spawn-failure regression in an isolated process, killing and reaping it if settlement regresses. */
@@ -11,8 +12,83 @@ export async function runBashProbe(mode: string, root: string, deadlineMs = 2500
     return { expired, exit, stdout, stderr };
   } finally {
     clearTimeout(timer);
+    if (mode === "real-pipe-error") {
+      // The parent also owns cleanup if the isolated fixture hits its external deadline.
+      const pid = Number(await readFile(join(root, "probe-pgid"), "utf8").catch(() => ""));
+      if (pid > 0) { try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ } }
+    }
     if (child.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
   }
+}
+
+async function openPipe(mode: string, root: string) {
+  const { spyOn } = await import("bun:test");
+  const childProcess = await import("node:child_process");
+  const { EventEmitter, getEventListeners } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const controller = new AbortController();
+  const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), pid: 999999999, kill: () => true });
+  const original = Object.assign(new Error("original open-pipe failure"), { code: "EIO" });
+  const signals: string[] = [];
+  const killSpy = spyOn(process, "kill").mockImplementation((_pid, signal) => {
+    signals.push(String(signal));
+    if (signal === "SIGTERM" && mode === "exit") queueMicrotask(() => child.emit("exit", null));
+    // Deliberately leave stderr open even after SIGKILL: cleanup must close the local handle.
+    return true;
+  });
+  const spawnSpy = spyOn(childProcess, "spawn").mockImplementation((() => {
+    setImmediate(() => {
+      child.stdout.write("partial output"); child.stdout.destroy(original);
+      if (mode === "error") child.emit("error", original);
+    });
+    return child;
+  }) as unknown as typeof childProcess.spawn);
+  try {
+    const { executeBash } = await import("../../src/tools/bash.ts");
+    let sameOriginal = false;
+    try { await executeBash({ command: "fixture" }, { workspace: { root, launchCwd: root, extraRoots: [] }, signal: controller.signal }); }
+    catch (error) { sameOriginal = error === original; }
+    return { sameOriginal, signals, destroyed: [child.stdout.destroyed, child.stderr.destroyed],
+      pipeListeners: [child.stdout, child.stderr].map(pipe => ["data", "error", "end", "close"].reduce((count, event) => count + pipe.listenerCount(event), 0)),
+      childListeners: child.eventNames(), abortListeners: getEventListeners(controller.signal, "abort").length };
+  } finally { child.stdout.destroy(); child.stderr.destroy(); spawnSpy.mockRestore(); killSpy.mockRestore(); }
+}
+
+async function realPipeFailure(root: string) {
+  const { spyOn } = await import("bun:test");
+  const childProcess = await import("node:child_process");
+  const realSpawn = childProcess.spawn;
+  const original = Object.assign(new Error("injected stdout read failure"), { code: "EIO" });
+  let child: ReturnType<typeof realSpawn> | undefined, closed: Promise<void> | undefined;
+  const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(((...args: Parameters<typeof realSpawn>) => {
+    child = Reflect.apply(realSpawn, childProcess, args);
+    writeFileSync(join(root, "probe-pgid"), String(child.pid));
+    closed = new Promise(resolve => child!.once("close", () => resolve()));
+    return child;
+  }) as typeof realSpawn);
+  const cleanup = () => {
+    if (child?.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ } }
+    child?.stdout?.destroy(); child?.stderr?.destroy();
+  };
+  let expired = false;
+  const deadline = setTimeout(() => { expired = true; cleanup(); }, 1500);
+  try {
+    const { executeBash } = await import("../../src/tools/bash.ts");
+    const command = `trap 'exit 0' TERM
+bash -c 'trap "" TERM; printf ready > ready; while true; do printf x >> ticks; sleep 0.02; done' &
+while [ ! -e ready ]; do sleep 0.01; done
+printf 'READY\\n'
+wait`;
+    let sameOriginal = false;
+    try { await executeBash({ command }, { workspace: { root, launchCwd: root, extraRoots: [] }, onOutput: chunk => {
+      if (chunk.stream === "stdout" && chunk.text.includes("READY")) child!.stdout!.emit("error", original);
+    } }); } catch (error) { sameOriginal = error === original; }
+    const before = (await readFile(join(root, "ticks"))).length;
+    await Bun.sleep(250);
+    const after = (await readFile(join(root, "ticks"))).length;
+    return { sameOriginal, expired, before, stable: before === after, stderrDestroyed: child!.stderr!.destroyed,
+      pipeListeners: [child!.stdout!, child!.stderr!].map(pipe => ["data", "error", "end", "close"].reduce((count, event) => count + pipe.listenerCount(event), 0)) };
+  } finally { cleanup(); await closed; clearTimeout(deadline); spawnSpy.mockRestore(); }
 }
 
 async function realFailure(mode: string, root: string) {
@@ -102,7 +178,9 @@ if (import.meta.main) {
   try {
     const mode = process.argv[2]!, root = process.argv[3]!;
     console.log(JSON.stringify({ stage: "running", mode }));
-    console.log(JSON.stringify(mode.startsWith("lifecycle:") ? await lifecycle(mode.slice("lifecycle:".length), root) : mode === "agent" ? await agentFailure(root) : await realFailure(mode, root)));
+    console.log(JSON.stringify(mode.startsWith("lifecycle:") ? await lifecycle(mode.slice("lifecycle:".length), root)
+      : mode.startsWith("open-pipe:") ? await openPipe(mode.slice("open-pipe:".length), root)
+      : mode === "real-pipe-error" ? await realPipeFailure(root) : mode === "agent" ? await agentFailure(root) : await realFailure(mode, root)));
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { clearInterval(alive); }
 }
