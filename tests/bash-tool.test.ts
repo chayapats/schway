@@ -38,12 +38,28 @@ for (const mode of ["spawn-close", "normal", "stream-error", "both-errors", "abo
   });
 });
 
-for (const mode of ["exit", "error"]) test(`bash process ${mode} drains the remaining pipe before rejecting its original failure`, async () => {
+for (const mode of ["exit", "error", "late-error"]) test(`bash process ${mode} drains the remaining pipe before rejecting its original failure`, async () => {
   await withTempDir(async root => {
     const probe = await runBashProbe(`open-pipe:${mode}`, root);
     expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
     const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
-    expect(result).toMatchObject({ sameOriginal: true, signals: ["SIGTERM", "SIGKILL"], destroyed: [true, true], pipeListeners: [0, 0], childListeners: [], abortListeners: 0 });
+    expect(result).toMatchObject({ sameOriginal: true, signals: [...(mode === "late-error" ? ["SIGKILL"] : []), "SIGTERM", "SIGKILL"], destroyed: [true, true], pipeListeners: [0, 0], childListeners: [], abortListeners: 0 });
+  });
+});
+
+test("normal bash exit preserves buffered Thai and emoji after the drain deadline", async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe("normal-drain", root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    const stdout = "PREFIX\nBUFFERED TAIL ไทย 😀\n", stderr = "tail written\n";
+    expect(result.expired).toBe(false);
+    expect(result.bufferedAtExit).toBeGreaterThan(0);
+    expect(result.result.details).toMatchObject({ stdout, stderr, exitCode: 0, truncated: false });
+    expect(result.result.isError).toBeUndefined();
+    for (const [stream, text] of [["stdout", stdout], ["stderr", stderr]]) {
+      expect(result.chunks.filter((chunk: { stream: string }) => chunk.stream === stream).map((chunk: { text: string }) => chunk.text).join("")).toBe(text);
+    }
   });
 });
 

@@ -207,7 +207,8 @@ async function runShell(
     // A pipe may fail before process exit; handle it immediately while retaining the original rejection.
     void streams.catch(terminate);
     const drainStreams = async () => {
-      const drainTimer = setTimeout(forceTerminate, 200);
+      // Stop inherited writers without discarding buffered normal output; failures escalate via terminate.
+      const drainTimer = setTimeout(() => killTree("SIGKILL"), 200);
       try {
         // A fail-fast rejection must not cancel escalation while the other pipe is still open.
         await Promise.allSettled([stdout, stderr]);
