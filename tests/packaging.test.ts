@@ -278,14 +278,22 @@ export default defineExtension(ctx => ctx.registerTool({
     }
     const marker = join(installDir, "disabled-ran");
     await Bun.write(join(installDir, "disabled.ts"), `await Bun.write(${JSON.stringify(marker)}, 'bad'); throw new Error('disabled extension ran');`);
-    const doctor = await runCommand([
+    const doctorCommand = [
       join(installDir, "node_modules/.bin/schway"), "doctor", "--json", "--provider", "openai-compatible",
       "--base-url", "http://127.0.0.1:11434/v1", "--auth", "none", "--extension", "disabled.ts",
-    ], { cwd: installDir, env: buildIsolatedCliEnv(join(dir, "home")) });
+    ];
+    const doctorOptions = { cwd: installDir, env: buildIsolatedCliEnv(join(dir, "home")) };
+    const doctor = await runCommand([...doctorCommand, "--model", "fixture"], doctorOptions);
     expect(doctor.exitCode).toBe(0);
     expect(doctor.stderr).toBe("");
-    expect(JSON.parse(doctor.stdout).checks.find((item: { id: string }) => item.id === "extensions")).toBeUndefined();
-    expect(JSON.parse(doctor.stdout).checks.some((item: { id: string; status: string }) => item.id === "extension.0" && item.status === "ok")).toBe(true);
+    const doctorReport = JSON.parse(doctor.stdout);
+    expect(doctorReport.checks).toContainEqual(expect.objectContaining({ id: "model", status: "ok", summary: "Configured model: fixture" }));
+    expect(doctorReport.checks.find((item: { id: string }) => item.id === "extensions")).toBeUndefined();
+    expect(doctorReport.checks.some((item: { id: string; status: string }) => item.id === "extension.0" && item.status === "ok")).toBe(true);
+    const missingModel = await runCommand(doctorCommand, doctorOptions);
+    expect(missingModel.exitCode).toBe(1);
+    expect(missingModel.stderr).toBe("");
+    expect(JSON.parse(missingModel.stdout).checks).toContainEqual(expect.objectContaining({ id: "model", status: "error", summary: "No model configured" }));
     expect(await Bun.file(marker).exists()).toBe(false);
     const requests: Array<{ model?: string; reasoning_effort?: string; tools?: Array<{ function: { name: string } }>; messages?: Array<{ role: string; tool_call_id?: string; content?: string }> }> = [];
     const authorizations: string[] = [];
