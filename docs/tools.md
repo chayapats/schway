@@ -23,6 +23,15 @@ completed bytes inaccessible to other local users until publication, including
 when final validation rejects a replacement with a readable final mode.
 Its ordinary permissions are `0700`; inherited directory setgid is retained so
 new files keep the parent directory's group inheritance.
+On POSIX, preparation first checks the canonical parent and its ancestors using
+ordinary owner, traversal, write and sticky bits. It refuses a path where another
+user could replace the staging directory, with `Cannot safely prepare file
+replacement` and guidance to use a directory protected from other users. This
+limits compatibility with shared writable workspaces: a non-sticky shared parent
+is accepted only behind a protected ancestor. Sticky temporary directories and
+ordinary protected projects remain supported. Directory identities and access
+bits are rechecked during preparation and before publication; observed symlink
+substitutions are rejected before directory chmod.
 Cancellation or failure before publication leaves the destination intact and
 attempts to remove the owned temporary file and empty staging directory. Cleanup
 does not recursively delete unexpected entries. If cleanup fails or the process
@@ -41,5 +50,8 @@ single-read behavior and revalidate metadata instead of consuming the stream aga
 Windows does not provide the ordinary POSIX permission model: permission metadata
 is omitted, final POSIX chmod is skipped, and native creation/access rules apply.
 Other platforms rely on their filesystem's POSIX mode support; a failed chmod
-aborts publication instead of silently weakening permissions. ACLs, ownership,
-extended attributes and setuid/setgid/sticky restoration are outside this behavior.
+aborts publication instead of silently weakening permissions. The staging checks
+use ordinary POSIX path access, trusting the effective user and privileged UID 0;
+they do not fence changes by those users, existing directory handles or ACL access.
+ACLs, ownership, extended attributes and setuid/setgid/sticky restoration are
+outside this behavior.

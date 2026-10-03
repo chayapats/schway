@@ -1,8 +1,81 @@
 import { expect, test } from "bun:test";
-import { chmod, lstat, open, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FileChangedError, observeFile, observeFileTarget, writeFileAtomically } from "../src/tools/fs.ts";
 import { withTempDir } from "./helpers.ts";
+
+for (const layout of ["shared-parent", "shared-ancestor", "private-ancestor", "sticky-parent"] as const) {
+  test.skipIf(process.platform === "win32")(`staging respects actual path access in a ${layout} layout`, async () => {
+    await withTempDir(async root => {
+      await chmod(root, layout === "private-ancestor" ? 0o700 : 0o755);
+      const shared = join(root, "shared"); await mkdir(shared);
+      await chmod(shared, layout === "sticky-parent" ? 0o1777 : 0o777);
+      const parent = layout === "shared-ancestor" ? join(shared, "private") : shared;
+      if (parent !== shared) await mkdir(parent, { mode: 0o700 });
+      const path = join(parent, "target"); await writeFile(path, "original", { mode: 0o600 });
+      let prepared = false;
+      const pending = writeFileAtomically(path, "saved bytes", undefined, async () => { prepared = true; }, { mode: 0o644 });
+      const allowed = layout === "private-ancestor" || layout === "sticky-parent";
+      if (allowed) await pending;
+      else await expect(pending).rejects.toThrow("another user can replace temporary paths");
+      expect(prepared).toBe(allowed);
+      expect(await readFile(path, "utf8")).toBe(allowed ? "saved bytes" : "original");
+      expect((await stat(path)).mode & 0o777).toBe(allowed ? 0o644 : 0o600);
+      expect(await readdir(parent)).toEqual(["target"]);
+    });
+  });
+}
+
+for (const point of ["unsafe-parent", "after-mkdir", "after-chmod"] as const) {
+  test.skipIf(process.platform === "win32")(`a staging symlink substitution at ${point} never changes outside bytes or modes`, async () => {
+    await withTempDir(async root => {
+      const script = `
+        import { mock } from "bun:test";
+        const fs = await import("node:fs/promises"), realMkdir = fs.mkdir, realChmod = fs.chmod, realOpen = fs.open;
+        const root = ${JSON.stringify(root)}, point = ${JSON.stringify(point)};
+        const parent = root + "/workspace", outside = root + "/outside", target = parent + "/target";
+        await fs.chmod(root, 0o755); await realMkdir(parent); await realMkdir(outside);
+        await realChmod(parent, point === "unsafe-parent" ? 0o777 : 0o755); await realChmod(outside, 0o755);
+        await fs.writeFile(outside + "/keep", "unrelated"); await fs.writeFile(target, "original", { mode: 0o600 });
+        let swapped = false;
+        const swap = async path => { await fs.rename(path, path + ".moved"); await fs.symlink(outside, path); swapped = true; };
+        mock.module("node:fs/promises", () => ({ ...fs,
+          mkdir: async (path, ...args) => { const result = await realMkdir(path, ...args); if (point === "after-mkdir") await swap(path); return result; },
+          chmod: async (path, ...args) => { const result = await realChmod(path, ...args); if (point === "after-chmod") await swap(path); return result; },
+          open: async (path, ...args) => { if (point === "unsafe-parent") await swap(path.slice(0, path.lastIndexOf("/"))); return realOpen(path, ...args); },
+        }));
+        const { writeFileAtomically } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});
+        let error;
+        try { await writeFileAtomically(target, "saved undo bytes", undefined, undefined, { mode: 0o644 }); }
+        catch (failure) { error = failure.message; }
+        console.log(JSON.stringify({ error, swapped, original: await fs.readFile(target, "utf8"),
+          outside: await fs.readdir(outside), bytes: await fs.readFile(outside + "/keep", "utf8"), mode: (await fs.stat(outside)).mode & 0o777 }));
+      `;
+      const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+      const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      try {
+        const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        expect(err).toBe(""); expect(code).toBe(0);
+        const result = JSON.parse(out);
+        expect(result.error).toContain(point === "unsafe-parent" ? "another user can replace temporary paths" : "File changed before replacement");
+        expect(result).toMatchObject({ swapped: point !== "unsafe-parent", original: "original", outside: ["keep"], bytes: "unrelated", mode: 0o755 });
+      } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
+    });
+  });
+}
+
+test.skipIf(process.platform === "win32")("changing an exposed parent's access during preparation prevents final-mode widening and publication", async () => {
+  await withTempDir(async root => {
+    await chmod(root, 0o755);
+    const parent = join(root, "workspace"); await mkdir(parent, { mode: 0o755 });
+    const target = join(parent, "target"); await writeFile(target, "original", { mode: 0o600 });
+    async function* changing() { yield "saved bytes"; await chmod(parent, 0o777); }
+    await expect(writeFileAtomically(target, changing(), undefined, undefined, { mode: 0o644 })).rejects.toBeInstanceOf(FileChangedError);
+    expect(await readFile(target, "utf8")).toBe("original");
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
+    expect(await readdir(parent)).toEqual(["target"]);
+  });
+});
 
 for (const outcome of ["changed", "cancelled", "published"] as const) test(`completed restore bytes stay private before publication (${outcome})`, async () => {
   await withTempDir(async root => {
@@ -16,24 +89,27 @@ for (const outcome of ["changed", "cancelled", "published"] as const) test(`comp
       expect(entries).toHaveLength(1);
       const staging = join(root, entries[0]!);
       expect((await lstat(staging)).isDirectory()).toBe(true);
-      expect((await stat(staging)).mode & 0o777).toBe(0o700);
+      if (process.platform !== "win32") expect((await stat(staging)).mode & 0o777).toBe(0o700);
       const files = await readdir(staging);
       expect(files).toHaveLength(1);
       const temporary = join(staging, files[0]!);
       expect(await readFile(temporary, "utf8")).toBe("saved public bytes");
       const info = await stat(temporary);
       preparedInode = info.ino;
-      expect(info.mode & 0o777).toBe(0o644);
+      if (process.platform !== "win32") expect(info.mode & 0o777).toBe(0o644);
       expect(info.dev).toBe((await stat(path)).dev);
       expect(await readFile(path, "utf8")).toBe("current private bytes");
-      if (outcome === "changed") await chmod(path, 0o640);
+      if (outcome === "changed") {
+        if (process.platform === "win32") await writeFile(path, "later bytes");
+        else await chmod(path, 0o640);
+      }
       if (outcome === "cancelled") abort.abort();
     }, { observed, mode: 0o644 });
     if (outcome === "changed") await expect(pending).rejects.toBeInstanceOf(FileChangedError);
     else if (outcome === "cancelled") await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     else { await pending; expect((await stat(path)).ino).toBe(preparedInode!); }
-    expect(await readFile(path, "utf8")).toBe(outcome === "published" ? "saved public bytes" : "current private bytes");
-    expect((await stat(path)).mode & 0o777).toBe(outcome === "changed" ? 0o640 : outcome === "cancelled" ? 0o600 : 0o644);
+    expect(await readFile(path, "utf8")).toBe(outcome === "published" ? "saved public bytes" : outcome === "changed" && process.platform === "win32" ? "later bytes" : "current private bytes");
+    if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(outcome === "changed" ? 0o640 : outcome === "cancelled" ? 0o600 : 0o644);
     expect(await readdir(root)).toEqual(["target"]);
   });
 });
@@ -49,12 +125,12 @@ test("a partial temporary write is exclusive and private, and cancellation remov
       const names = (await readdir(root)).filter(name => name.endsWith(".tmp"));
       expect(names).toHaveLength(1);
       const staging = join(root, names[0]!);
-      expect((await stat(staging)).mode & 0o777).toBe(0o700);
+      if (process.platform !== "win32") expect((await stat(staging)).mode & 0o777).toBe(0o700);
       const files = await readdir(staging);
       expect(files).toHaveLength(1);
       const temp = join(staging, files[0]!);
       expect(await readFile(temp, "utf8")).toBe("private partial content");
-      expect((await stat(temp)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect((await stat(temp)).mode & 0o777).toBe(0o600);
       await expect(open(temp, "wx", 0o666)).rejects.toMatchObject({ code: "EEXIST" });
       expect(await readFile(path, "utf8")).toBe("original");
       inspected = true; abort.abort();
@@ -62,12 +138,12 @@ test("a partial temporary write is exclusive and private, and cancellation remov
     }
     await expect(writeFileAtomically(path, partial(), abort.signal)).rejects.toMatchObject({ name: "AbortError" });
     expect(inspected).toBe(true); expect(await readdir(root)).toEqual(["private"]);
-    expect(await readFile(path, "utf8")).toBe("original"); expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(await readFile(path, "utf8")).toBe("original"); if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
 });
 
 for (const race of ["chmod", "replace", "symlink", "delete", "save", "create"] as const) {
-  test(`atomic replacement rejects an observed ${race} race without overwriting the later target`, async () => {
+  test.skipIf(process.platform === "win32" && race === "chmod")(`atomic replacement rejects an observed ${race} race without overwriting the later target`, async () => {
     await withTempDir(async root => {
       const path = join(root, "target"), other = join(root, "other");
       if (race !== "create") { await writeFile(path, "before"); await chmod(path, 0o755); }
@@ -84,7 +160,7 @@ for (const race of ["chmod", "replace", "symlink", "delete", "save", "create"] a
       if (race === "delete") await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
       else {
         expect(await readFile(path, "utf8")).toBe(race === "chmod" ? "before" : race === "save" || race === "create" ? "later" : "different");
-        if (["chmod", "replace", "symlink"].includes(race)) expect((await stat(path)).mode & 0o777).toBe(0o600);
+        if (process.platform !== "win32" && ["chmod", "replace", "symlink"].includes(race)) expect((await stat(path)).mode & 0o777).toBe(0o600);
         if (race === "symlink") expect((await lstat(path)).isSymbolicLink()).toBe(true);
       }
     });
@@ -101,7 +177,7 @@ for (const race of ["link-replaced", "referent-created"] as const) {
         if (race === "link-replaced") { await unlink(path); await writeFile(path, "later", { mode: 0o600 }); }
         else await writeFile(target, "later", { mode: 0o600 });
       }, { observed })).rejects.toBeInstanceOf(FileChangedError);
-      expect(await readFile(path, "utf8")).toBe("later"); expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect(await readFile(path, "utf8")).toBe("later"); if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
       expect((await lstat(path)).isSymbolicLink()).toBe(race === "referent-created");
       expect((await readdir(root)).some(name => name.endsWith(".tmp"))).toBe(false);
     });
@@ -116,7 +192,7 @@ test("failed temporary writes and cancellation at the final check retain the ori
     const abort = new AbortController();
     await expect(writeFileAtomically(path, "new", abort.signal, async () => { abort.abort(); })).rejects.toMatchObject({ name: "AbortError" });
     expect(await readdir(root)).toEqual(["target"]); expect(await readFile(path, "utf8")).toBe("original");
-    expect((await stat(path)).mode & 0o777).toBe(0o640);
+    if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o640);
   });
 });
 
@@ -186,8 +262,9 @@ for (const point of ["before-open", "after-rename", "cleanup-failure"] as const)
       expect(JSON.parse(out)).toMatchObject({
         ...(point === "after-rename" ? {} : { failure: point === "before-open" ? "EEXIST" : "Validation rejected" }),
         target: point === "after-rename" ? "prepared" : "original",
-        retained: point === "cleanup-failure" ? "prepared" : "unrelated", directoryMode: 0o700,
-        ...(point === "cleanup-failure" ? { fileMode: 0o644 } : {}),
+        retained: point === "cleanup-failure" ? "prepared" : "unrelated",
+        ...(process.platform !== "win32" ? { directoryMode: 0o700 } : {}),
+        ...(process.platform !== "win32" && point === "cleanup-failure" ? { fileMode: 0o644 } : {}),
       });
     } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
   });
@@ -210,16 +287,16 @@ test("process death after final chmod leaves saved bytes inside private staging 
       expect(new TextDecoder().decode(ready.value)).toBe("PREPARED\n");
       child.kill("SIGKILL"); await child.exited; expect(await error).toBe("");
       const entries = (await readdir(root)).filter(name => name !== "target"); expect(entries).toHaveLength(1);
-      const staging = join(root, entries[0]!); expect((await stat(staging)).mode & 0o777).toBe(0o700);
+      const staging = join(root, entries[0]!); if (process.platform !== "win32") expect((await stat(staging)).mode & 0o777).toBe(0o700);
       const files = await readdir(staging); expect(files).toHaveLength(1);
       const temporary = join(staging, files[0]!);
-      expect((await stat(temporary)).mode & 0o777).toBe(0o644); expect(await readFile(temporary, "utf8")).toBe("saved bytes");
-      expect(await readFile(path, "utf8")).toBe("original"); expect((await stat(path)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect((await stat(temporary)).mode & 0o777).toBe(0o644); expect(await readFile(temporary, "utf8")).toBe("saved bytes");
+      expect(await readFile(path, "utf8")).toBe("original"); if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
     } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; reader.releaseLock(); }
   });
 });
 
-test("restrictive umask preserves existing modes exactly and keeps fresh-file defaults", async () => {
+test.skipIf(process.platform === "win32")("restrictive umask preserves existing modes exactly and keeps fresh-file defaults", async () => {
   await withTempDir(async root => {
     const script = `
       import { chmod, stat, writeFile } from "node:fs/promises";
@@ -257,7 +334,7 @@ test.skipIf(process.platform === "win32")("private staging retains inherited dir
   });
 });
 
-test("owner-stripping umask cannot block staging and still governs fresh-file defaults", async () => {
+test.skipIf(process.platform === "win32")("owner-stripping umask cannot block staging and still governs fresh-file defaults", async () => {
   await withTempDir(async root => {
     const script = `
       import { stat, writeFile } from "node:fs/promises";
@@ -301,7 +378,7 @@ test("unsupported permission platforms omit undo modes and skip POSIX chmod with
   });
 });
 
-test("replacement preserves ordinary bits without copying setuid, setgid, sticky or file-type bits", async () => {
+test.skipIf(process.platform === "win32")("replacement preserves ordinary bits without copying setuid, setgid, sticky or file-type bits", async () => {
   await withTempDir(async root => {
     const path = join(root, "file"); await writeFile(path, "before"); await chmod(path, 0o7755);
     await writeFileAtomically(path, "after");
@@ -310,7 +387,7 @@ test("replacement preserves ordinary bits without copying setuid, setgid, sticky
   });
 });
 
-test("a chmod to unreadable during final content validation is still classified as a changed target", async () => {
+test.skipIf(process.platform === "win32")("a chmod to unreadable during final content validation is still classified as a changed target", async () => {
   await withTempDir(async root => {
     const script = `
       import { mock } from "bun:test";

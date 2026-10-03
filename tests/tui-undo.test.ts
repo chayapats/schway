@@ -77,7 +77,7 @@ test("rendered undo previews and restores edited files, deletes created files, a
 });
 
 for (const tool of ["edit", "write"] as const) for (const mode of [0o755, 0o600, 0o640]) {
-  test(`${tool} and resumed undo preserve ${mode.toString(8)} permissions`, async () => {
+  test.skipIf(process.platform === "win32")(`${tool} and resumed undo preserve ${mode.toString(8)} permissions`, async () => {
     await withTempDir(async root => {
       const path = join(root, "run.sh");
       await writeFile(path, "before"); await chmod(path, mode);
@@ -96,7 +96,7 @@ for (const tool of ["edit", "write"] as const) for (const mode of [0o755, 0o600,
   });
 }
 
-test("mode-only changes before preview protect existing and created files with new metadata", async () => {
+test.skipIf(process.platform === "win32")("mode-only changes before preview protect existing and created files with new metadata", async () => {
   await withTempDir(async root => {
     await writeFile(join(root, "clamp.ts"), original); await chmod(join(root, "clamp.ts"), 0o755);
     const ui = await setup(root);
@@ -114,7 +114,7 @@ test("mode-only changes before preview protect existing and created files with n
 });
 
 for (const changed of ["clamp.ts", "src/new.ts"] as const) {
-  test(`undo skips ${changed} chmod to 0000 after preview instead of reporting a restore failure`, async () => {
+  test.skipIf(process.platform === "win32")(`undo skips ${changed} chmod to 0000 after preview instead of reporting a restore failure`, async () => {
     await withTempDir(async root => {
       const path = join(root, changed);
       await writeFile(join(root, "clamp.ts"), original, { mode: 0o600 });
@@ -136,7 +136,7 @@ for (const changed of ["clamp.ts", "src/new.ts"] as const) {
   });
 }
 
-test("legacy undo preserves a pre-preview chmod with an explicit Details caveat and leaves the manifest untouched", async () => {
+test.skipIf(process.platform === "win32")("legacy undo preserves a pre-preview chmod with an explicit Details caveat and leaves the manifest untouched", async () => {
   await withTempDir(async root => {
     const path = join(root, "clamp.ts"); await writeFile(path, original); await chmod(path, 0o755);
     const ui = await setup(root);
@@ -159,7 +159,7 @@ test("legacy undo preserves a pre-preview chmod with an explicit Details caveat 
   });
 });
 
-test("permission-only captured turns are eligible and restore their original mode", async () => {
+test.skipIf(process.platform === "win32")("permission-only captured turns are eligible and restore their original mode", async () => {
   await withTempDir(async root => {
     const path = join(root, "clamp.ts"); await writeFile(path, original); await chmod(path, 0o755);
     const ui = await setup(root, undefined, [], [{ text: "Done." }]);
@@ -184,7 +184,7 @@ test("missing and symlink targets are skipped without touching their replacement
       const other = join(root, "other"); await writeFile(other, modified); await chmod(other, 0o600);
       await rm(path); await symlink(other, path); await rm(join(root, "src/new.ts"));
       await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview).toBeUndefined();
-      expect(await readFile(other, "utf8")).toBe(modified); expect((await stat(other)).mode & 0o777).toBe(0o600);
+      expect(await readFile(other, "utf8")).toBe(modified); if (process.platform !== "win32") expect((await stat(other)).mode & 0o777).toBe(0o600);
     } finally { await ui.dispose(); }
   });
 });
@@ -552,7 +552,7 @@ test("a later save also guards deletion and all apply-time changes write no undo
 });
 
 for (const scenario of ["prepare-chmod-and-delete", "prepare-legacy-chmod"]) {
-  test(`${scenario} rejects mode drift after preview and removes prepared replacements`, async () => {
+  test.skipIf(process.platform === "win32")(`${scenario} rejects mode drift after preview and removes prepared replacements`, async () => {
     await withTempDir(async root => {
       const result = await undoFilesystemProbe(root, scenario);
       expect(result.preparations).toBe(1); expect(result.bytes).toBe("after");
@@ -598,7 +598,7 @@ test("I/O failure during the final destination check is failed, rather than chan
   });
 });
 
-test("undo keeps a restored public mode behind private staging when final validation rejects the restore", async () => {
+test.skipIf(process.platform === "win32")("undo keeps a restored public mode behind private staging when final validation rejects the restore", async () => {
   await withTempDir(async root => {
     const result = await undoFilesystemProbe(root, "staged-restore-change");
     expect(result.preparations).toBe(1); expect(result.stagingMode).toBe(0o700);

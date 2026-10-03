@@ -212,7 +212,13 @@ the first pre-image and its mode, and the latest settled post-image and mode.
 Undo restores original bytes and supported ordinary permissions together. Complete
 restore files stay inside an owner-only staging directory on the destination's
 filesystem until final validation and atomic rename, even when the recorded mode
-allows other users to read the published file. A later chmod is a conflict even
+allows other users to read the published file. Restore preparation uses the same
+[POSIX parent checks as file tools](tools.md#file-permissions): an exposed shared
+writable parent that lets another user replace staging paths is refused. Use a
+directory protected from other users; shared writable descendants of a private
+ancestor and sticky temporary directories remain supported. These checks use
+ordinary POSIX path access and do not cover ACLs or trusted-owner namespace changes.
+A later chmod is a conflict even
 when the bytes still match, including for a newly
 created file that undo would delete. Preview observations are checked again just
 before restore or deletion, including the file's identity and permissions.
