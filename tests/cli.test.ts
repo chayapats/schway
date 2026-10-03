@@ -8,7 +8,7 @@ import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
 import { sessionsHelp } from "../src/cli/sessions.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
-import { credentialIdentity, type CredentialStore } from "../src/auth/store.ts";
+import { credentialIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 import type { Model } from "../src/model/model.ts";
 import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -26,6 +26,87 @@ function capture() {
     },
   };
 }
+
+test("models dispatch uses only its selected identity without a task, terminal or model factory", async () => {
+  await withTempDir(async home => {
+    const reads: string[] = [], requests: string[] = [];
+    const store: CredentialStore = {
+      async get(identity) { expect(this).toBe(store); reads.push(identity.account); return "selected-key"; },
+      async set() { throw new Error("Unexpected credential write"); },
+      async delete() { throw new Error("Unexpected credential deletion"); },
+    };
+    const result = await run(["models", "list", "--provider", "openai", "--openai-auth", "api-key", "--json"], {
+      cwd: home, env: { HOME: home }, credentialStore: store,
+      createModel: async () => { throw new Error("Discovery cannot create an execution model"); },
+      fetch: async (url, init) => {
+        requests.push(String(url)); expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer selected-key");
+        return Response.json({ data: [{ id: "gpt-4o" }] });
+      },
+    });
+    expect(result.exitCode, result.stderr).toBe(0); expect(result.stderr).toBe("");
+    expect(reads).toEqual([credentialIdentity({ provider: "openai" }).account]); expect(requests).toEqual(["https://api.openai.com/v1/models"]);
+    expect(JSON.parse(result.stdout)).toMatchObject({ provider: "openai", route: "api-key", status: "complete", models: [{ id: "gpt-4o" }] });
+    expect(await readdir(home)).toEqual([]);
+  });
+});
+
+test("models production config preserves one deprecation warning per physical file without changing JSON or bytes", async () => {
+  await withTempDir(async home => {
+    await mkdir(join(home, ".schway"));
+    const path = join(home, ".schway/config.json"), text = JSON.stringify({ legacyProvider: "xai" });
+    await writeFile(path, text);
+    const stdout = capture(), stderr = capture();
+    const exit = await runCli(["models", "list", "--offline", "--json"], {
+      cwd: home, env: { HOME: home }, stdout, stderr,
+      configDeprecations: [{ key: "legacyProvider", replacement: "provider", since: "1.0.0", removeIn: "2.0.0" }],
+      credentialStore: { get: async () => { throw new Error("Unexpected credentials"); }, set: async () => { throw new Error("Unexpected write"); }, delete: async () => { throw new Error("Unexpected delete"); } },
+    });
+    expect(exit).toBe(0); expect(JSON.parse(stdout.text)).toMatchObject({ provider: "xai", route: "unresolved", status: "complete" });
+    expect(stderr.text.trim().split("\n")).toHaveLength(1); expect(stderr.text).toContain('"legacyProvider"');
+    expect(stderr.text).toContain('use "provider"'); expect(stderr.text).toContain("2.0.0");
+    expect(await Bun.file(path).text()).toBe(text);
+  });
+});
+
+test("concurrent models entry calls preserve the original store's shared Grok renewal identity", async () => {
+  await withTempDir(async home => {
+    const { GROK_TOKEN_URL } = await import("../src/model/providers/grok-subscription.ts");
+    const identity = grokSubscriptionIdentity(), started = Promise.withResolvers<void>(), joined = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const abort = new AbortController();
+    let reads = 0, writes = 0, renewals = 0, catalogs = 0, expired = false;
+    let raw = JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 });
+    const store: CredentialStore = {
+      async get(selected) { expect(this).toBe(store); expect(selected).toEqual(identity); if (++reads === 3) joined.resolve(); return raw; },
+      async set(selected, value) { expect(this).toBe(store); expect(selected).toEqual(identity); writes++; raw = value; },
+      async delete() { throw new Error("Unexpected credential deletion"); },
+    };
+    const fetch: NonNullable<CliIo["fetch"]> = async (url, init) => {
+      if (String(url) === GROK_TOKEN_URL) {
+        renewals++; started.resolve(); await release.promise;
+        return Response.json({ access_token: "shared-access", refresh_token: "shared-refresh", expires_in: 3600 });
+      }
+      catalogs++; expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer shared-access");
+      return Response.json({ data: [{ id: "grok-safe" }] });
+    };
+    const list = () => run(["models", "list", "--provider", "xai", "--xai-auth", "grok", "--json"], {
+      cwd: home, env: { HOME: home }, credentialStore: store, fetch, signal: abort.signal,
+    });
+    const pending: ReturnType<typeof list>[] = [];
+    const watchdog = setTimeout(() => { expired = true; abort.abort(); started.resolve(); joined.resolve(); release.resolve(); }, 1500);
+    try {
+      pending.push(list()); await started.promise;
+      pending.push(list()); await joined.promise; release.resolve();
+      for (const result of await Promise.all(pending)) {
+        expect(result.exitCode, result.stderr).toBe(0); expect(result.stderr).toBe("");
+        expect(JSON.parse(result.stdout)).toMatchObject({ route: "grok", status: "complete", models: [{ id: "grok-safe" }] });
+      }
+      expect(expired).toBe(false); expect(renewals).toBe(1); expect(writes).toBe(1); expect(catalogs).toBe(2);
+      expect(await readdir(home)).toEqual([]);
+    } finally {
+      clearTimeout(watchdog); abort.abort(); release.resolve(); await Promise.allSettled(pending);
+    }
+  });
+});
 
 test("headless prompts, JSON output and subcommands never create interactive splash state", async () => {
   await withTempDir(async home => {

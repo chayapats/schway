@@ -7,6 +7,7 @@ export type { CliIo, CliWriter } from "./runtime.ts";
 /** Resolve standalone discovery and version commands before loading application setup or runtime. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv[0] === "sessions") return (await import("./sessions.ts")).runSessionsCommand(argv.slice(1), io);
+  if (argv[0] === "models") return (await import("./models.ts")).runModelsCommand(argv, { ...io, store: io.credentialStore });
   const versionCommand = parseVersionCommand(argv);
   if (versionCommand) {
     if ("error" in versionCommand) {

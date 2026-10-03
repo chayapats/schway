@@ -1,8 +1,11 @@
 import { resolve } from "node:path";
 import { cliOverridesFromArgs, hasCliConnectionOptions, parseArgs, type CliArgs } from "./args.ts";
-import { resolveSettings, type ConfigLayer, type CompatibleProfile } from "../config/config.ts";
+import { projectConfigPath, readConfigLayers, resolveSettings, userConfigPath, type ConfigLayer, type CompatibleProfile, type ParsedConfigLayer } from "../config/config.ts";
+import { configDiagnosticSecrets, type ConfigDiagnosticContext } from "../config/diagnostics.ts";
+import type { ConfigDeprecation } from "../config/deprecations.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { discoverModels, safeCatalogMessage, type CatalogConnection, type CatalogDiscoveryDeps, type ModelCatalog } from "../model/catalog-discovery.ts";
+import { resolveWorkspace } from "../workspace/workspace.ts";
 
 /** Catalog-only arguments, without task execution, model selection or session options. */
 export interface ModelsArgs extends Pick<CliArgs, "provider" | "profile" | "baseUrl" | "headers" | "auth" | "openaiAuth" | "xaiAuth" | "apiKey" | "envFiles" | "help" | "json"> {
@@ -89,9 +92,12 @@ function connectionLayer(layer?: ConfigLayer): ConfigLayer | undefined {
 }
 
 /** Reuse config/profile precedence while ignoring valid execution-only choices and interactive memory. */
-export function resolveModelsConnection(input: { user?: ConfigLayer; project?: ConfigLayer; args: ModelsArgs }): CatalogConnection | { error: string } {
+export function resolveModelsConnection(input: { user?: ConfigLayer; project?: ConfigLayer; args: ModelsArgs;
+  configSources?: { user?: string; project?: string }; diagnosticContext?: ConfigDiagnosticContext;
+}): CatalogConnection | { error: string } {
   const cliArgs: CliArgs = { ...input.args };
-  const settings = resolveSettings({ user: connectionLayer(input.user), project: connectionLayer(input.project), cli: connectionLayer(cliOverridesFromArgs(cliArgs)) });
+  const settings = resolveSettings({ user: connectionLayer(input.user), project: connectionLayer(input.project), cli: connectionLayer(cliOverridesFromArgs(cliArgs)),
+    configSources: input.configSources, diagnosticContext: input.diagnosticContext });
   if ("error" in settings) return settings;
   if (hasCliConnectionOptions(cliArgs) && settings.provider !== "openai-compatible") return { error: "Connection options require --provider openai-compatible." };
   if (input.args.openaiAuth && settings.provider !== "openai") return { error: "OpenAI auth requires --provider openai." };
@@ -120,12 +126,33 @@ export interface ModelsCommandIO extends CatalogDiscoveryDeps {
   signal?: AbortSignal;
   stdout: { write(value: string): unknown };
   stderr: { write(value: string): unknown };
+  configDeprecations?: readonly ConfigDeprecation[];
   /** Validate files normally before returning their layers; pass known secrets to config diagnostics. */
-  loadConfig(context: { env: Record<string, string | undefined>; runtimeApiKey?: string; headers?: Record<string, string> }): Promise<{ user?: ConfigLayer; project?: ConfigLayer } | { error: string }>;
+  loadConfig?(context: { env: Record<string, string | undefined>; runtimeApiKey?: string; headers?: Record<string, string>; diagnosticContext: ConfigDiagnosticContext }): Promise<{
+    user?: ParsedConfigLayer; project?: ParsedConfigLayer; configSources?: { user?: string; project?: string };
+  } | { error: string }>;
   loadEnv?: typeof applyEnvFiles;
 }
 
-/** Run a testable catalog command; executable dispatch supplies read-only config loading separately. */
+/** Read ordinary config scopes without execution setup, preserving source provenance and invocation-local secrets. */
+async function loadModelsConfig(home: string | undefined, io: ModelsCommandIO, diagnosticContext: ConfigDiagnosticContext) {
+  if (!home) return { error: "Configuration unavailable · Set HOME and retry schway models list." };
+  let workspace: Awaited<ReturnType<typeof resolveWorkspace>>;
+  try { workspace = await resolveWorkspace(io.cwd); }
+  catch { return { error: "Workspace unavailable · Check the launch directory and retry schway models list." }; }
+  const layers = await readConfigLayers({ home, workspaceRoot: workspace.root, configDeprecations: io.configDeprecations, diagnosticContext });
+  return "error" in layers ? layers : { ...layers, configSources: { user: userConfigPath(home), project: projectConfigPath(workspace.root) } };
+}
+
+/** Collect effective environment secrets before config paths can be truncated by diagnostic formatting. */
+function rememberDiagnosticEnv(context: ConfigDiagnosticContext, env: Record<string, string | undefined>): void {
+  context.env = env;
+  (context.secrets ??= []).push(...Object.entries(env).filter(([name]) => /key|token|secret|password/i.test(name))
+    .map(([, value]) => value).filter((value): value is string => !!value));
+  configDiagnosticSecrets(context);
+}
+
+/** Resolve one catalog connection with read-only setup, then emit one result without creating execution state. */
 export async function runModelsCommand(argv: readonly string[], io: ModelsCommandIO): Promise<0 | 1 | 2> {
   const parsed = parseModelsCommand(argv);
   if ("error" in parsed) { io.stderr.write(`${parsed.error}\n`); return 2; }
@@ -133,15 +160,24 @@ export async function runModelsCommand(argv: readonly string[], io: ModelsComman
   if (args.help) { io.stdout.write(MODELS_HELP); return 0; }
   let provider = args.provider ?? null;
   let env = io.env;
+  const home = io.env.HOME;
+  const diagnosticContext: ConfigDiagnosticContext = { env, secrets: [args.apiKey, ...Object.values(args.headers ?? {})]
+    .filter((value): value is string => !!value) };
+  rememberDiagnosticEnv(diagnosticContext, env);
+  configDiagnosticSecrets(diagnosticContext, [{ apiKey: args.apiKey, headers: args.headers }]);
   try {
     if (args.envFiles?.length) {
       const loaded = await (io.loadEnv ?? applyEnvFiles)(args.envFiles.map(path => resolve(io.cwd, path)), env);
       if ("error" in loaded) throw new Error("Could not read an explicit env file. Check --env-file and retry schway models list.");
       env = loaded;
     }
-    const layers = await io.loadConfig({ env, runtimeApiKey: args.apiKey, headers: args.headers });
+    rememberDiagnosticEnv(diagnosticContext, env);
+    const layers = await (io.loadConfig ? io.loadConfig({ env, runtimeApiKey: args.apiKey, headers: args.headers, diagnosticContext }) : loadModelsConfig(home, io, diagnosticContext));
     if ("error" in layers) throw new Error(layers.error);
-    const connection = resolveModelsConnection({ ...layers, args });
+    configDiagnosticSecrets(diagnosticContext, [layers.user, layers.project]);
+    const warnings = new Set([...(layers.user?.deprecationWarnings ?? []), ...(layers.project?.deprecationWarnings ?? [])].map(warning => warning.message));
+    for (const warning of warnings) io.stderr.write(`${safeCatalogMessage(warning, diagnosticContext.secrets)}\n`);
+    const connection = resolveModelsConnection({ ...layers, args, diagnosticContext });
     if ("error" in connection) throw new Error(connection.error);
     provider = connection.provider;
     const result = await discoverModels({ ...connection, env, runtimeApiKey: args.apiKey, offline: args.offline, filter: args.filter, signal: io.signal }, io);
@@ -150,8 +186,7 @@ export async function runModelsCommand(argv: readonly string[], io: ModelsComman
     else if (result.catalog.status === "partial") for (const warning of result.catalog.warnings) io.stderr.write(`${warning}\n`);
     return result.catalog.status === "complete" ? 0 : 1;
   } catch (error) {
-    const secrets = [args.apiKey, ...Object.values(args.headers ?? {}), ...Object.entries(env).filter(([key]) => /key|token|secret|password/i.test(key)).map(([, value]) => value)].filter((value): value is string => !!value);
-    const message = safeCatalogMessage(error instanceof Error ? error.message : "Could not resolve model discovery settings. Check configuration and retry schway models list.", secrets);
+    const message = safeCatalogMessage(error instanceof Error ? error.message : "Could not resolve model discovery settings. Check configuration and retry schway models list.", diagnosticContext.secrets);
     const catalog: ModelCatalog = { schemaVersion: 1, provider, route: "unresolved", source: args.offline ? "builtin" : "remote", status: "error", models: [], warnings: [message] };
     io.stdout.write(args.json ? `${JSON.stringify(catalog)}\n` : formatModelCatalog(catalog));
     io.stderr.write(`${message}\n`);
