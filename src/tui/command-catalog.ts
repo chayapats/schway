@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import type { SkillDiscovery } from "../skills/skills.ts";
 import type { ExtensionCommandInfo } from "../extensions/host.ts";
 import type { SlashCommandName } from "./commands.ts";
+import { fuzzyRank } from "./fuzzy.ts";
 
 /** One stable, safe command suggestion; unavailable entries are never inserted or dispatched. */
 export interface CommandChoice {
@@ -52,4 +53,90 @@ export function commandCatalog(extensions: readonly ExtensionCommandInfo[], skil
   const groupOrder = { "built-in": 0, skills: 1, extensions: 2, destructive: 3 };
   return entries.sort((left, right) => groupOrder[left.group!] - groupOrder[right.group!]
     || Number(left.id.startsWith("diagnostic:")) - Number(right.id.startsWith("diagnostic:")));
+}
+
+const KEYBOARD_GUIDES = {
+  newline: {
+    label: "Insert a newline", shortcut: "Shift+Enter or Ctrl+J", description: "Continue your draft on another line",
+    guidance: "Return to the composer, then press Shift+Enter or Ctrl+J. Enter sends the draft.",
+    aliases: ["newline", "line break", "ctrl+j", "control j", "shift+enter"],
+  },
+  "inspect-copy": {
+    label: "Copy code or a result", shortcut: "Alt+I, then C", description: "Inspect a block before copying it",
+    guidance: "Return to the conversation and press Alt+I. Use ↑↓ to select a code block or tool result, then C to copy the highlighted block. Enter copies code; it does not copy tool results.",
+    aliases: ["copy", "copy code", "copy result", "inspect", "alt+i"],
+  },
+  "copy-selection": {
+    label: "Copy selected text", shortcut: "Ctrl+C", description: "Copy selected conversation text",
+    guidance: "Select conversation text, then press Ctrl+C. Without selected text, Ctrl+C cancels a running turn or quits when idle.",
+    aliases: ["copy selection", "clipboard", "ctrl+c"],
+  },
+  "approval-mode": {
+    label: "Change approval mode", shortcut: "Shift+Tab", description: "Cycle auto, ask and read-only",
+    guidance: "Return to the composer and close panels, inspection, conversation search and command suggestions. When mode changes are available, press Shift+Tab.",
+    aliases: ["approval", "mode", "shift+tab"],
+  },
+  shortcuts: {
+    label: "Find keyboard shortcuts", shortcut: "Alt+H", description: "Browse commands and keyboard guidance",
+    guidance: "From the composer, press Alt+H to open help. Finish or leave credential entry and approval prompts using their own controls first.",
+    aliases: ["shortcuts", "keyboard", "help", "alt+h"],
+  },
+  details: {
+    label: "Inspect details", shortcut: "Ctrl+I", description: "Read details for the current context",
+    guidance: "Return to the notice, recovery, change review or model panel showing a Ctrl+I details hint, then press Ctrl+I. The available details depend on that context.",
+    aliases: ["details", "diagnostics", "ctrl+i"],
+  },
+  review: {
+    label: "Review changes", shortcut: "Alt+R", description: "Inspect changed files and command results",
+    guidance: "When the turn is idle, return to the conversation and close any panel. Press Alt+R to open change review.",
+    aliases: ["review", "changes", "diff", "alt+r"],
+  },
+  cancel: {
+    label: "Cancel running work", shortcut: "Esc; Ctrl+C without selected text", description: "Stop the active turn",
+    guidance: "Return to the conversation, then press Esc to stop a running turn. Esc first closes search, inspection or a panel. Ctrl+C copies selected text; without a selection it cancels a turn or quits when idle.",
+    aliases: ["cancel", "stop", "escape", "esc"],
+  },
+} as const;
+
+/** Stable keyboard guidance identities, independent of shortcut spelling or search order. */
+export type KeyboardGuideId = keyof typeof KEYBOARD_GUIDES;
+
+/** The caller observes the action's return context; unavailable actions still allow reading guidance. */
+export type KeyboardGuideAvailability = { available: true } | { available: false; reason: string };
+
+/** Presentation-only keyboard guidance, with no insertion or execution capability. */
+export type KeyboardGuideChoice = {
+  kind: "keyboard"; id: `keyboard:${KeyboardGuideId}`; label: string; shortcut: string;
+  description: string; guidance: string; aliases: readonly string[];
+} & KeyboardGuideAvailability;
+
+/** Commands retain slash authority metadata; keyboard rows can only explain an action. */
+export type PaletteChoice = (CommandChoice & { kind: "command" }) | KeyboardGuideChoice;
+
+/** Build searchable presentation rows from resolved commands and observed availability without dispatch or discovery. */
+export function paletteChoices(commands: readonly CommandChoice[], availability: Readonly<Record<KeyboardGuideId, KeyboardGuideAvailability>>, query = ""): PaletteChoice[] {
+  const rows: PaletteChoice[] = commands.map(command => ({ ...command, kind: "command" }));
+  const guides = (Object.keys(KEYBOARD_GUIDES) as KeyboardGuideId[]).map((id): KeyboardGuideChoice => ({
+    ...KEYBOARD_GUIDES[id], ...availability[id], kind: "keyboard", id: `keyboard:${id}`, aliases: [...KEYBOARD_GUIDES[id].aliases],
+  }));
+  const destructive = rows.findIndex(row => row.kind === "command" && (row.destructive || row.group === "destructive"));
+  rows.splice(destructive < 0 ? rows.length : destructive, 0, ...guides);
+  const needle = query.trim().normalize("NFC").toLowerCase();
+  if (!needle) return rows;
+  return rows.flatMap((row, order) => {
+    const rank = paletteRank(row, needle);
+    return rank === undefined ? [] : [{ row, rank, order }];
+  }).sort((left, right) => left.rank - right.rank || left.order - right.order).map(({ row }) => row);
+}
+
+function paletteRank(row: PaletteChoice, query: string): number | undefined {
+  const fields = row.kind === "command"
+    ? [[row.name, row.insertion.trim()], [row.description, row.source, row.provenance ?? ""]]
+    : [[row.label, row.shortcut, ...row.aliases], [row.description]];
+  let best = Infinity;
+  for (const [priority, values] of fields.entries()) for (const value of values) {
+    const rank = fuzzyRank(query, value.normalize("NFC"));
+    if (rank !== undefined) best = Math.min(best, rank * 2 + priority);
+  }
+  return best === Infinity ? undefined : best;
 }
