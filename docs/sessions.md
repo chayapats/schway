@@ -26,7 +26,7 @@ schway -p "Start the migration" --provider openai --openai-auth api-key --model 
 schway sessions list
 # Paste the exact Session hint ID or its matching saved-work row.
 IFS= read -r SESSION_ID
-schway -p "Continue the migration" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue the migration" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 Keep the same intended route when continuing; resume never switches to old
@@ -106,13 +106,13 @@ name or a shortened ID. To continue with a headless task:
 
 <!-- headless-flow:sessions-branch -->
 ```sh
-schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --branch "$BRANCH_ID" -p "Continue this approach" --approval read-only --show-session
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --branch "$BRANCH_ID" -p "Continue this approach" --approval read-only --show-session
 ```
 
 To open that same branch interactively in a terminal instead:
 
 ```sh
-schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --branch "$BRANCH_ID"
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --branch "$BRANCH_ID"
 ```
 
 `--branch` requires `--resume`. Without it, resume selects the saved active branch. Resume and switch never rerun saved tools: interrupted accepted calls receive explicit error results only on the destination ancestry. The same unresolved call ID on another branch remains unrelated. Repeated resumes do not add another result for a settled call.

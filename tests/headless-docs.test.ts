@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
+import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
@@ -164,6 +164,46 @@ test("the shown saved config supplies its model, CLI overrides it, and JSONL ext
     expect(await readFile(join(cwd, ".schway/config.json"), "utf8")).toBe('{"model":"wrong-project-model"}');
   });
 }, 20_000);
+
+for (const [name, id] of [
+  ["leading hyphen", "-legacy-id"],
+  ["trailing newlines", "legacy-id\n\n"],
+  ["shell syntax", "legacy$(printf changed); id"],
+  ["Unicode without normalization", "เซสชัน-🧪-cafe\u0301"],
+] as const) test.skipIf(process.platform === "win32" && /[\u0000-\u001f]/u.test(id))(`JSONL guide resumes an exact persisted ${name} ID`, async () => {
+  await withTempDir(async root => {
+    const { home, cwd, env } = await environment(root, "openai-api");
+    const directory = sessionsDirectory(home);
+    const created = await createJsonlSession({ directory, workspace: { root: cwd, launchCwd: cwd, extraRoots: [] } });
+    await writeFile(join(directory, `${id}.jsonl`), JSON.stringify({ ...created.header, id }) + "\n");
+    await unlink(join(directory, `${created.header.id}.jsonl`));
+    const text = await readFile(join(repo, "docs/headless.md"), "utf8");
+    const extractionAndResume = block(text, "flow:jsonl").split("\n").slice(1).join("\n");
+    const first = 'schway -p "Explain this project" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$LEGACY_SESSION_ID" --json > task.jsonl';
+    const result = await guide(`${first}\n${extractionAndResume}`, cwd, { ...env, MODEL_ID: "gpt-4.1", LEGACY_SESSION_ID: id });
+    expect(result).toEqual({ exit: 0, stdout: "Hello world\n", stderr: "" });
+    expect(JSON.parse((await readFile(join(cwd, "task.jsonl"), "utf8")).split("\n")[0]!).sessionId).toBe(id);
+    const resumed = await loadJsonlSession({ directory, id });
+    expect(resumed.items.filter(item => item.type === "user").map(item => item.content)).toEqual([
+      [{ type: "text", text: "Explain this project" }], [{ type: "text", text: "Continue this explanation" }],
+    ]);
+    expect((await readdir(directory)).filter(name => name.endsWith(".jsonl"))).toEqual([`${id}.jsonl`]);
+  });
+});
+
+for (const [name, jsonl] of [["missing ready event", '{"type":"agent.finished"}\n'], ["malformed JSONL", '{"type":\n']] as const) {
+  test(`JSONL guide stops before resume for ${name} even without shell errexit`, async () => {
+    await withTempDir(async root => {
+      const { cwd, env, trace } = await environment(root, "openai-api");
+      await writeFile(join(cwd, "task.jsonl"), jsonl);
+      const text = await readFile(join(repo, "docs/headless.md"), "utf8");
+      const extractionAndResume = block(text, "flow:jsonl").split("\n").slice(1).join("\n");
+      const result = await guide(`set +e\n${extractionAndResume}`, cwd, { ...env, MODEL_ID: "gpt-4.1" });
+      expect(result.exit).not.toBe(0); expect(result.stdout).toBe("");
+      expect(await Bun.file(trace).exists()).toBe(false);
+    });
+  });
+}
 
 test("direct compatible route, doctor recovery and branch continuation use the explicitly chosen model", async () => {
   await withTempDir(async root => {

@@ -35,7 +35,7 @@ schway -p "Explain this project" --provider openai --openai-auth api-key --model
 schway sessions list
 # Paste the ID from the Session hint (or the matching saved-work row).
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 ### Existing ChatGPT/Codex subscription
@@ -53,7 +53,7 @@ IFS= read -r MODEL_ID
 schway -p "Explain this project" --provider openai --openai-auth codex --model "$MODEL_ID" --approval read-only --show-session
 schway sessions list
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --provider openai --openai-auth codex --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --provider openai --openai-auth codex --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 ### xAI API key
@@ -69,7 +69,7 @@ IFS= read -r MODEL_ID
 schway -p "Explain this project" --provider xai --xai-auth api-key --model "$MODEL_ID" --approval read-only --show-session
 schway sessions list
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --provider xai --xai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --provider xai --xai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 ### Existing Grok subscription
@@ -86,7 +86,7 @@ IFS= read -r MODEL_ID
 schway -p "Explain this project" --provider xai --xai-auth grok --model "$MODEL_ID" --approval read-only --show-session
 schway sessions list
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --provider xai --xai-auth grok --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --provider xai --xai-auth grok --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 ### Compatible endpoint or profile
@@ -118,7 +118,7 @@ IFS= read -r MODEL_ID
 schway -p "Explain this project" --profile local --model "$MODEL_ID" --approval read-only --show-session
 schway sessions list
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --profile local --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --profile local --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 Without a profile, replace **each** `--profile local` above with
@@ -153,7 +153,7 @@ schway models list
 schway -p "Explain this project" --approval read-only --show-session
 schway sessions list
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --resume "$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 Project settings override user settings; explicit CLI flags override both.
@@ -175,8 +175,9 @@ controls or line/paragraph separators also produce no text hint. For unquoted
 resume guidance, the hint accepts only Unicode letters, marks, numbers,
 pictographic emoji and `._-`, with no leading `-`. Other exact IDs remain
 available through the JSONL workflow below; they are never rewritten into shell
-syntax. The hint contains no prompt, file path or auth settings. Default text streams are unchanged without
-the flag. It is rejected without `-p`, with `--json`, or on doctor/version/list
+syntax. The hint contains no prompt, file path or auth settings. Default text
+streams are unchanged without the flag. It is rejected without `-p`, with
+`--json`, or on doctor/version/list
 commands; use it only for text tasks.
 
 `--json` already emits runtime events as **JSONL** on stdout, including
@@ -189,12 +190,15 @@ route and `MODEL_ID` chosen above:
 <!-- headless-flow:jsonl -->
 ```sh
 schway -p "Explain this project" --provider openai --openai-auth api-key --model "$MODEL_ID" --json > task.jsonl
-SESSION_ID=$(bun -e 'const rows = (await Bun.file("task.jsonl").text()).split("\n").filter(Boolean).map(JSON.parse); const ready = rows.find(row => row.type === "session.ready"); if (!ready) process.exit(1); process.stdout.write(ready.sessionId);')
-schway -p "Continue this explanation" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only
+SESSION_ID=$(bun -e 'const rows = (await Bun.file("task.jsonl").text()).split("\n").filter(Boolean).map(JSON.parse); const ready = rows.find(row => row.type === "session.ready"); if (!ready || typeof ready.sessionId !== "string" || !ready.sessionId) process.exit(1); process.stdout.write(ready.sessionId + ".");') &&
+SESSION_ID=${SESSION_ID%.} &&
+schway -p "Continue this explanation" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only
 ```
 
-If no safe `session.ready` exists, extraction fails; do not substitute a guessed
-ID. `models list --json` and `sessions list --json` each emit one versioned JSON
+The temporary final dot preserves trailing newlines during shell capture and is
+then removed exactly once. Quoted `--resume="$SESSION_ID"` preserves the argument,
+including a leading `-`. The `&&` chain stops before resume if extraction fails;
+do not substitute a guessed ID. `models list --json` and `sessions list --json` each emit one versioned JSON
 object, unlike task JSONL. Runtime events also differ from durable session JSONL.
 See [saved sessions and branches](sessions.md).
 
@@ -249,8 +253,8 @@ schway sessions list
 schway sessions list --workspace ../project --limit 10 --offset 20
 schway sessions list --all --preview --json
 # With MODEL_ID and SESSION_ID chosen in the OpenAI API-key flow above:
-schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" -p "Continue this work"
-schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --branch "$BRANCH_ID" -p "Continue this branch"
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" -p "Continue this work"
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume="$SESSION_ID" --branch "$BRANCH_ID" -p "Continue this branch"
 ```
 
 For `--branch`, first copy the exact conversation branch ID shown by interactive
