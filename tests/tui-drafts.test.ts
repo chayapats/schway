@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
 import { mkdir, readFile, readdir, writeFile, chmod } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { flushDraftOnExit } from "../src/drafts/exit.ts";
 import { openDraftStore } from "../src/drafts/store.ts";
@@ -17,6 +17,7 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
 import { openUndoStore } from "../src/undo/store.ts";
+import { reapDraftCheckpointWorker } from "./fixtures/draft-exit-worker.ts";
 
 async function setup(home: string, resume?: string, submit?: ConversationViewOptions["submit"]) {
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
@@ -158,22 +159,97 @@ test("explicit session deletion removes draft content and stale handles cannot r
 }));
 
 async function runProcess(home: string, mode: string, resume?: string) {
+  const blockedExit = mode === "blocked-exit" || mode === "blocked-exit-cleanup";
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/draft-process.ts"), home, mode, ...(resume ? [resume] : [])], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
   const reader = child.stdout.getReader();
+  const stderr = new Response(child.stderr).text();
+  const decoder = new TextDecoder();
   let buffer = "";
-  const next = async (): Promise<Record<string, any>> => {
-    const until = Date.now() + 6000;
+  const bounded = async <T>(promise: Promise<T>, timeout: number, message: string): Promise<T> => {
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try { return await Promise.race([promise, new Promise<never>((_resolve, reject) => { watchdog = setTimeout(() => reject(Error(message)), timeout); })]); }
+    finally { clearTimeout(watchdog); }
+  };
+  const next = (timeoutMs = 6000): Promise<Record<string, any>> => bounded((async () => {
     while (!buffer.includes("\n")) {
-      if (Date.now() > until) throw Error("fixture output timed out");
-      const chunk = await Promise.race([reader.read(), Bun.sleep(6000).then(() => { throw Error("fixture output timed out"); })]);
-      if (chunk.done) throw Error(`fixture ended: ${await new Response(child.stderr).text()}`);
-      buffer += new TextDecoder().decode(chunk.value);
+      const chunk = await reader.read();
+      if (chunk.done) throw Error(`fixture ended: ${await stderr}`);
+      buffer += decoder.decode(chunk.value, { stream: true });
     }
     const end = buffer.indexOf("\n"), line = buffer.slice(0, end); buffer = buffer.slice(end + 1); return JSON.parse(line);
-  };
-  const stop = async () => { child.kill("SIGKILL"); await child.exited; reader.releaseLock(); };
+  })(), timeoutMs, "fixture output timed out");
+  let stopping: Promise<void> | undefined;
+  const stop = () => stopping ??= (async () => {
+    try {
+      if (child.exitCode === null && child.signalCode === null) child.kill(blockedExit ? "SIGTERM" : "SIGKILL");
+      try { await bounded(child.exited, 2500, "fixture shutdown timed out"); }
+      catch (error) {
+        // If graceful fixture cleanup fails, the parent still owns its recorded worker and process.
+        if (blockedExit) {
+          const owner = await readFile(join(home, "exit-worker-pid"), "utf8").then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
+          if (owner?.parent === child.pid && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+            try { process.kill(owner.pid, "SIGKILL"); } catch { /* Already gone. */ }
+          }
+        }
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await bounded(child.exited, 1500, "fixture could not be reaped");
+        throw error;
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); await stderr; }
+  })();
   return { child, next, stop };
 }
+
+for (const timesOut of [false, true]) test(`checkpoint fixture reap ${timesOut ? "timeout kills its worker" : "waits for real exit"} and clears its watchdog`, async () => {
+  const worker = Bun.spawn([process.execPath, "--eval", timesOut ? "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0)" : "process.exit(7)"], { stdout: "ignore", stderr: "ignore" });
+  worker.unref();
+  const setTimer = globalThis.setTimeout, clearTimer = globalThis.clearTimeout;
+  const active = new Set<ReturnType<typeof setTimeout>>();
+  const setSpy = spyOn(globalThis, "setTimeout").mockImplementation(((...args: Parameters<typeof setTimer>) => { const timer = Reflect.apply(setTimer, globalThis, args); active.add(timer); return timer; }) as typeof setTimer);
+  const clearSpy = spyOn(globalThis, "clearTimeout").mockImplementation(timer => { active.delete(timer as ReturnType<typeof setTimeout>); Reflect.apply(clearTimer, globalThis, [timer]); });
+  try {
+    if (timesOut) {
+      await expect(reapDraftCheckpointWorker(worker, 20)).rejects.toThrow("did not reap before its deadline");
+      expect(await reapDraftCheckpointWorker(worker)).toBe(137);
+    } else expect(await reapDraftCheckpointWorker(worker)).toBe(7);
+    expect(active.size).toBe(0);
+    expect(timesOut ? worker.signalCode : worker.exitCode).toBe(timesOut ? "SIGKILL" : 7);
+  } finally {
+    setSpy.mockRestore(); clearSpy.mockRestore();
+    if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");
+    await reapDraftCheckpointWorker(worker);
+  }
+});
+
+test("fixture output timeout cancels its pending read and reaps the fixture", async () => withTempDir(async home => {
+  const silent = await runProcess(home, "silent-fixture");
+  try { await expect(silent.next(50)).rejects.toThrow("fixture output timed out"); }
+  finally { await silent.stop(); }
+  expect(await silent.child.exited).toBe(137);
+  expect(silent.child.signalCode).toBe("SIGKILL");
+  await silent.stop(); // Cleanup remains safe if both an assertion and its caller request it.
+}));
+
+test("fixture assertion cleanup stops and reaps an observed checkpoint worker before app output", async () => withTempDir(async home => {
+  const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace: { root: home, launchCwd: home, extraRoots: [] } });
+  openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id }).save("previous completed checkpoint", 1);
+  const blocked = await runProcess(home, "blocked-exit-cleanup", session.header.id);
+  const failure = new Error("simulated fixture assertion failure");
+  let pid = 0;
+  const earlyAssertion = async () => {
+    try {
+      pid = (await blocked.next()).checkpointWorkerSpawned;
+      expect(pid).toBeGreaterThan(0);
+      throw failure;
+    } finally { await blocked.stop(); }
+  };
+  await expect(earlyAssertion()).rejects.toBe(failure);
+  expect(await blocked.child.exited).toBe(0);
+  expect(() => process.kill(pid, 0)).toThrow();
+  expect(await Bun.file(join(home, "exit-worker-pid")).exists()).toBe(false);
+  expect(openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id }).checkpoint?.text).toBe("previous completed checkpoint");
+  expect((await readdir(join(home, ".schway/drafts"))).filter(name => !name.endsWith(".json"))).toEqual([]);
+}), 12_000);
 
 test("actual app survives killed checkpoint process and reopens same session without submitting", async () => withTempDir(async home => {
   const first = await runProcess(home, "checkpoint");
@@ -219,21 +295,31 @@ test("silent tool shutdown requests cancellation, restores terminal promptly and
 
 test("app exit kills a blocked checkpoint within its deadline and still restores the terminal", async () => withTempDir(async home => {
   const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace: { root: home, launchCwd: home, extraRoots: [] } });
-  openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id }).save("previous completed checkpoint", 1);
+  const store = openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id });
+  store.save("previous completed checkpoint", 1);
   const started = Date.now();
   const blocked = await runProcess(home, "blocked-exit", session.header.id);
   try {
     const result = await blocked.next();
     expect(Date.now() - started).toBeLessThan(2500);
+    expect(result.code).toBe(0);
     expect(result.stopped && result.destroyed).toBe(true);
     expect(result.stderr).toContain("checkpoint timed out");
     expect(await readFile(join(home, "exit-worker-state"), "utf8")).toBe("blocked");
     expect(result.stderr).not.toContain("checkpoint saved");
+    const reaped = await blocked.next();
+    expect(reaped).toMatchObject({ checkpointWorkerReaped: true, exitCode: 137 });
+    expect(reaped.pid).toBeNumber();
     expect(await blocked.child.exited).toBe(0);
+    const directory = join(home, ".schway/drafts");
+    const stale = (await readdir(directory)).filter(name => !name.endsWith(".json"));
+    expect(stale).toHaveLength(2);
+    expect(stale).toContain(`${basename(store.path)}.lock`);
+    expect(stale.find(name => name.endsWith(".tmp"))).toStartWith(`${basename(store.path)}.`);
     expect(openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id }).checkpoint?.text).toBe("previous completed checkpoint");
-    expect((await readdir(join(home, ".schway/drafts"))).filter(name => !name.endsWith(".json"))).toEqual([]);
+    expect((await readdir(directory)).filter(name => !name.endsWith(".json"))).toEqual([]);
   } finally { await blocked.stop(); }
-}));
+}), 12_000);
 
 
 test("frozen renderer exit snapshot refuses a competing writer's newer generation", async () => withTempDir(async home => {
