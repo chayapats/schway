@@ -604,3 +604,77 @@ test("Ctrl+C cancels a running turn during inspection without copying or losing 
   ui.mockInput.pressKey("c", { ctrl: true });
   expect(ui.copied.at(-1)).toBe("previous result");
 });
+
+for (const action of ["inspection-escape", "recovery-escape", "continue", "inspection-continue"] as const) {
+  test(`${action} preserves an unrelated Thai draft after accepted provider recovery`, async () => {
+    const ui = await setup(50, 18);
+    ui.controller.setModel(createScriptedModel({ responses: [
+      { chunks: ["```txt\nfirst\n```\n\n" + "middle prose\n\n".repeat(25) + "```txt\nท้ายสุด 😀\n```"], error: "fixture failed after code", status: 400, throwAfter: "chunks" },
+      { text: "continued accepted task" },
+    ] }), "scripted", "recovery-model");
+    expect(await ui.controller.submit("accepted task")).toBe(true);
+    await ui.settle();
+    const recovery = ui.controller.snapshot().recovery;
+    expect(recovery).toMatchObject({ accepted: true, actions: ["continue", "details", "keep-editing"] });
+    await ui.mockInput.pasteBracketedText("เก็บงานภาษาไทย\nอีกบรรทัด 😀");
+    ui.editor.cursorOffset = 9; ui.editor.setSelection(3, 9);
+    ui.transcript.scrollTo(0); await ui.settle();
+    const before = { draft: ui.editor.plainText, cursor: ui.editor.cursorOffset, selection: ui.editor.getSelectedText(), scroll: ui.transcript.scrollTop };
+    if (action.startsWith("inspection-")) {
+      ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+      ui.mockInput.pressTab(); await ui.settle();
+      expect(ui.captureCharFrame()).toContain("C copy · Esc back");
+      expect(ui.editor.focused).toBe(false);
+      expect(ui.transcript.scrollTop).not.toBe(before.scroll);
+    }
+    if (action.endsWith("continue")) {
+      ui.mockInput.pressKey("r", { ctrl: true }); await ui.controller.waitForIdle(); await ui.settle();
+      expect(ui.controller.snapshot().outcome?.reason).toBe("completed");
+      expect(ui.controller.snapshot().recovery).toBeUndefined();
+      expect(ui.controller.snapshot().transcript.filter(row => row.kind === "user")).toHaveLength(1);
+    } else {
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.editor.focused).toBe(true);
+      expect(ui.captureCharFrame()).not.toContain("C copy · Esc back");
+      expect(ui.transcript.scrollTop).toBe(before.scroll);
+      if (action === "inspection-escape") expect(ui.controller.snapshot().recovery).toEqual(recovery);
+      else expect(ui.controller.snapshot().recovery).toBeUndefined();
+    }
+    expect(ui.editor.plainText).toBe(before.draft);
+    expect(ui.editor.cursorOffset).toBe(before.cursor);
+    expect(ui.editor.getSelectedText()).toBe(before.selection);
+    expect(ui.copied).toEqual([]);
+  });
+}
+
+for (const update of ["stream", "replace"] as const) for (const open of [false, true]) {
+  test(`${update} of a ${open ? "growing" : "closed"} code prefix requires current paint and copies complete canonical text`, async () => {
+    const ui = await setup(50, 24);
+    const original = open ? "```txt\noriginal ไทย" : "```txt\noriginal ไทย\n```";
+    const suffix = open ? "\nappended 🧪 secret-sentinel\n```" : "\n\nLater prose\n\n```txt\nother\n```";
+    const session = (text: string) => createSession([{ type: "assistant", id: "same-message", content: [{ type: "text", text }] }]);
+    if (update === "replace") ui.controller.replaceSession(session(original), "inspection-session");
+    else ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: original } });
+    await ui.settle();
+    ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+    expect(ui.captureCharFrame()).toContain("› txt");
+    expect(ui.copied).toEqual([]);
+    if (update === "replace") ui.controller.replaceSession(session(original + suffix), "inspection-session");
+    else ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: suffix } });
+    ui.renderer.requestRender(); await ui.flush();
+    ui.mockInput.pressKey("c"); expect(ui.copied).toEqual([]);
+    ui.view.refresh(); ui.mockInput.pressEnter(); expect(ui.copied).toEqual([]);
+    await ui.settle(); expect(ui.copied).toEqual([]);
+    const canonical = open ? "original ไทย\nappended 🧪 ***" : "original ไทย";
+    expect(ui.captureCharFrame()).toContain("› txt");
+    expect(ui.captureCharFrame()).not.toContain("```");
+    ui.mockInput.pressKey("c"); expect(ui.copied).toEqual([canonical]);
+    for (const width of [80, 40, 50]) {
+      const count = ui.copied.length;
+      ui.resize(width, 24); ui.mockInput.pressEnter(); expect(ui.copied).toHaveLength(count);
+      await ui.settle(); expect(ui.copied).toHaveLength(count);
+      expect(ui.captureCharFrame()).toContain("› txt");
+      ui.mockInput.pressEnter(); expect(ui.copied).toHaveLength(count + 1); expect(ui.copied.at(-1)).toBe(canonical);
+    }
+  });
+}

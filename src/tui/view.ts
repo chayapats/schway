@@ -1340,7 +1340,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if ((key.meta || key.option) && name === "m" && snapshot.recovery.actions.includes("choose-model")) {
         controller.openRecoveryRepair("choose-model"); handled(); return;
       }
-      if (name === "escape" && snapshot.recovery.actions.includes("keep-editing")) {
+      if (!inspection && name === "escape" && snapshot.recovery.actions.includes("keep-editing")) {
         controller.keepEditingRecovery(); handled(); return;
       }
     }

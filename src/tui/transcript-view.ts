@@ -344,9 +344,19 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
             ? [...prefix, ...keyHintChunks(line, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: theme.error })]
             : [...prefix, fg(color)(line)];
         };
-        body.content = body instanceof MarkdownRenderable ? streamText !== undefined ? caretContent() : displayText(entry.text) : linkify(displayText(entry.text).split("\n").flatMap(errorLines));
-        if (body instanceof MarkdownRenderable) body.streaming = streaming;
-        else body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
+        if (body instanceof MarkdownRenderable) {
+          const content = streamText !== undefined ? caretContent() : displayText(entry.text);
+          if (!body.streaming && body.content !== content) {
+            // Finalized Markdown caches its parsed prefix; changed saved content needs a fresh parse.
+            body.content = "";
+            body.streaming = streaming;
+          }
+          body.content = content;
+          body.streaming = streaming;
+        } else {
+          body.content = linkify(displayText(entry.text).split("\n").flatMap(errorLines));
+          body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
+        }
         if (entry.kind === "assistant") {
           codeBlocks().forEach(({ id }, index) => {
             const code = root.findDescendantById(id) as BoxRenderable;
