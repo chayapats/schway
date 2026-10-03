@@ -97,6 +97,62 @@ test("known environment secrets are masked in excerpts and cannot leak through s
   });
 });
 
+for (const placement of ["id", "workspace", "preview", "raw-preview", "ansi-preview", "normalized-preview"] as const) {
+  test(`plain and JSON inventories protect raw and trimmed environment credentials in ${placement}`, async () => {
+    await withTempDir(async home => {
+      const secret = placement === "normalized-preview" ? "opaque environment value" : "opaque-environment-value";
+      const padded = `  ${secret}\n`;
+      const root = join(home, placement === "workspace" ? secret : "workspace");
+      await fs.mkdir(root);
+      const id = placement === "id" ? `saved-${secret}` : "saved-exact-id";
+      const value = placement === "raw-preview" ? padded : placement === "ansi-preview" ? "opaque-\u001b[31menvironment\u001b[0m-value"
+        : placement === "normalized-preview" ? "opaque\t environment\nvalue" : secret;
+      const text = [
+        { type: "session", version: 1, id, workspaceRoot: root, launchCwd: root, extraRoots: [], createdAt: "2026-01-01T00:00:00Z" },
+        { type: "user", id: "task", parentId: id, content: [{ type: "text", text: `ทำงาน ${value}` }] },
+      ].map(record => JSON.stringify(record)).join("\n") + "\n";
+      await fs.mkdir(sessionsDirectory(home), { recursive: true });
+      const path = join(sessionsDirectory(home), `${id}.jsonl`);
+      await fs.writeFile(path, text);
+      for (const json of [false, true]) {
+        const result = await run(["list", "--preview", ...(json ? ["--json"] : [])], home, root, { OPENAI_API_KEY: padded });
+        expect(result.stdout + result.stderr).not.toContain(secret);
+        expect(result.stdout + result.stderr).not.toContain("\u001b");
+        expect(result.exit).toBe(placement === "id" || placement === "workspace" ? 1 : 0);
+        if (json) {
+          const inventory = JSON.parse(result.stdout);
+          expect(inventory.sessions.map((row: { id: string }) => row.id)).toEqual(placement === "id" ? [] : [id]);
+          if (placement === "workspace") {
+            expect(inventory.scope.workspace).toBeUndefined();
+            expect(inventory.sessions[0].workspaceRoot).toBeUndefined();
+          }
+          if (placement !== "id") expect(inventory.sessions[0].preview).toBe("ทำงาน ***");
+        } else if (placement !== "id") expect(result.stdout).toContain("ทำงาน ***");
+      }
+      expect(await fs.readFile(path, "utf8")).toBe(text);
+    });
+  });
+}
+
+test("plain and JSON inventories suppress control-split credential previews without changing saved text", async () => {
+  await withTempDir(async home => {
+    const saved = await createJsonlSession({ directory: sessionsDirectory(home), workspace: { root: home, launchCwd: home, extraRoots: [] } });
+    const credential = "private-credential-value";
+    saved.append({ type: "user", id: "task", content: [{ type: "text", text: `Bea\u200brer\n${credential}` }] });
+    const path = join(sessionsDirectory(home), `${saved.header.id}.jsonl`), before = await fs.readFile(path);
+    for (const json of [false, true]) {
+      const result = await run(["list", "--preview", ...(json ? ["--json"] : [])], home);
+      expect(result.exit).toBe(0); expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain(credential);
+      if (json) {
+        const row = JSON.parse(result.stdout).sessions[0];
+        expect(row.id).toBe(saved.header.id); expect(row).not.toHaveProperty("preview");
+      }
+    }
+    expect(await fs.readFile(path)).toEqual(before);
+  });
+});
+
 test("isolated command import and listing avoid config, env files, provider/TUI loads, credentials and network", async () => {
   await withTempDir(async home => {
     await fs.writeFile(join(home, ".env"), "OPENAI_API_KEY=must-not-load\n");

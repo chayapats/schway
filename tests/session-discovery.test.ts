@@ -92,6 +92,25 @@ test("observed corruption outranks a truncated window; bounded validation alone 
   });
 });
 
+test("a bounded read inside a valid large header is partial without inventing workspace or draft evidence", async () => {
+  await withTempDir(async home => {
+    const id = "large-header";
+    const text = transcript({ ...header(id, home), extraRoots: Array.from({ length: 12000 }, (_, index) => `/root-${index}`) });
+    expect(Buffer.byteLength(text)).toBeGreaterThan(65536);
+    expect(inspectSessionTranscript(text, id, false)).toMatchObject({ state: "empty", previewIncomplete: false });
+    await writeSession(home, id, text);
+    await draft(home, home, id);
+    await fs.writeFile(join(sessionsDirectory(home), `${id}.jsonl.meta`), JSON.stringify({ activityAt: "2026-01-01T00:00:00Z" }));
+    const result = await inventorySessions({ ...options(home), preview: true });
+    expect(result.status).toBe("complete");
+    expect(result.sessions).toEqual([{ id, state: "partial", previewIncomplete: true, activityAt: "2026-01-01T00:00:00.000Z" }]);
+    expect((await inventorySessions({ ...options(home), all: false, workspace: home })).sessions).toEqual([]);
+    expect(await fs.readFile(join(sessionsDirectory(home), `${id}.jsonl`), "utf8")).toBe(text);
+    expect(inspectSessionTranscript("{}", id, true).state).toBe("corrupt");
+    expect(inspectSessionTranscript("not json\n" + "x".repeat(65536), id, true).state).toBe("corrupt");
+  });
+});
+
 test("all supported legacy formats and forward transitions retain semantic validation", () => {
   for (const version of [1, 2, 3]) {
     const record = version < 3 ? { ...user(), parentId: "id" } : append("id", user());
@@ -259,6 +278,24 @@ test("previews preserve Unicode, remove controls, suppress sensitive patterns an
   expect(sessionTaskPreview("value-extended", ["value", "value-extended"])).toBe("***");
   expect(sessionTaskPreview("\u001b[31mงานภาษาไทย\u001b[0m")).toBe("งานภาษาไทย");
   for (const text of ["/login paste", "task\n/login private-value", "use Bearer private-value", "Bearer\u001b[31m private-value", "api\u0000_key=my-value", "https://local/callback?code=secret", "credential sk-abcdefghijk", "https://user:password@example.com", "oauth callback"]) expect(sessionTaskPreview(text)).toBeUndefined();
+});
+
+test("preview masking covers raw and trimmed known values before and after display normalization", () => {
+  const secret = "opaque-environment-value", padded = `  ${secret}\n`;
+  for (const value of [secret, padded, "opaque-\u001b[31menvironment\u001b[0m-value"]) {
+    expect(sessionTaskPreview(`ทำงาน ${value}`, [padded])).toBe("ทำงาน ***");
+  }
+  expect(sessionTaskPreview("ทำงาน opaque\t\n value", ["opaque value"])).toBe("ทำงาน ***");
+  expect(sessionTaskPreview("value-extended", [" value ", " value-extended\n"])).toBe("***");
+});
+
+test("credential recognition removes formatting splits while retaining semantic whitespace", () => {
+  for (const separator of ["\n", "\t", "\u0085", "\u2028", " "]) {
+    for (const split of ["\u200b", "\u0000", "\u001b[31m"]) {
+      expect(sessionTaskPreview(`Bea${split}rer${separator}private-credential-123`)).toBeUndefined();
+    }
+  }
+  expect(sessionTaskPreview("ช่วยตรวจ\nข้อความภาษาไทย 🙂")).toBe("ช่วยตรวจ ข้อความภาษาไทย 🙂");
 });
 
 test("preview is absent by default and exact normal IDs round-trip into existing resume", async () => {

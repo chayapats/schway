@@ -501,7 +501,8 @@ export function inspectSessionTranscript(text: string, id: string, incomplete: b
   const result: TranscriptInspection = { state: "corrupt", previewIncomplete: incomplete };
   const lines = text.split("\n");
   let header: unknown;
-  try { header = JSON.parse(lines[0] ?? ""); } catch { return result; }
+  try { header = JSON.parse(lines[0] ?? ""); }
+  catch { return incomplete && lines.length === 1 ? { state: "partial", previewIncomplete: true } : result; }
   if (!isSessionHeader(header) || header.id !== id || !header.id || !header.workspaceRoot || !Number.isSafeInteger(header.version) || header.version < 1) return result;
   result.header = header;
   if (header.version > SESSION_FORMAT_VERSION) return { ...result, state: "unsupported" };

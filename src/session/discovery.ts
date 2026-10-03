@@ -43,16 +43,24 @@ export interface SessionInventoryOptions {
 const CONTROL_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const CREDENTIAL_TEXT = /(?:\b(?:sk-[\w-]{8,}|xai-[\w-]{8,}|Bearer\s+\S+|eyJ[\w-]+\.eyJ[\w-]+\.[\w-]+)|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|id[_ -]?token|authorization|password|secret)\s*[=:]|https?:\/\/[^\s]*[?&#](?:code|token|access_token|refresh_token|id_token)=|https?:\/\/[^\s/]+:[^\s/]+@)/i;
 
+function knownSecretVariants(secrets: readonly string[]): string[] {
+  return [...new Set(secrets.flatMap(secret => [secret, secret.trim()]).filter(Boolean))].sort((a, b) => b.length - a.length);
+}
+
 /** Reject control-bearing or recognized sensitive identifiers instead of fabricating copyable replacements. */
 export function isSafeSessionIdentity(value: string, secrets: readonly string[] = []): boolean {
-  return !CONTROL_TEXT.test(value) && !CREDENTIAL_TEXT.test(value) && !secrets.some(secret => secret.length > 0 && value.includes(secret));
+  return !CONTROL_TEXT.test(value) && !CREDENTIAL_TEXT.test(value) && !knownSecretVariants(secrets).some(secret => value.includes(secret));
 }
 
 /** Produce a short Unicode task excerpt, suppressing sensitive commands and masking explicitly known secrets. */
 export function sessionTaskPreview(value: string, secrets: readonly string[] = []): string | undefined {
-  const recognizable = Bun.stripANSI(value).replace(/[\p{Cc}\p{Cf}]/gu, "");
+  // Formatting can split a credential label; retain whitespace that separates it from its value.
+  const recognizable = Bun.stripANSI(value).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, character => /\p{White_Space}/u.test(character) ? " " : "");
   if (CREDENTIAL_TEXT.test(recognizable) || /(?:^|\s)\/(?:login|logout|auth|key|apikey|connect|config|model|callback)\b|\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization|oauth|bearer)\b/i.test(`${value} ${recognizable}`) || recognizable.trimStart().startsWith("/")) return undefined;
-  const clean = Bun.stripANSI(redactSecrets(value, [...secrets].sort((a, b) => b.length - a.length))).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ").replace(/\s+/g, " ").trim();
+  const variants = knownSecretVariants(secrets);
+  const normalized = Bun.stripANSI(redactSecrets(value, variants)).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ").replace(/\s+/g, " ").trim();
+  // ANSI removal and whitespace folding can reconstruct an otherwise split known credential.
+  const clean = redactSecrets(normalized, variants);
   return clean ? Array.from(clean).slice(0, 160).join("") : undefined;
 }
 
