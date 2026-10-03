@@ -46,7 +46,7 @@ test("the removal notice names the supported replacement and the docs", () => {
 test("naming the Anthropic provider in arguments or configuration is rejected with the notice", () => {
   expect(parseArgs(["--provider", "anthropic"])).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
   expect(parseArgs(["--provider=anthropic"])).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
-  expect(parseConfigObject({ provider: "anthropic" }, "user config")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
+  expect(parseConfigObject({ provider: "anthropic" }, "user config")).toMatchObject({ error: ANTHROPIC_REMOVED_MESSAGE });
   expect(parseArgs(["--provider", "bogus"])).toEqual({ error: "Unknown provider: bogus" });
 });
 
@@ -127,7 +127,7 @@ test("a session recorded with Anthropic continues on OpenAI without Anthropic re
 
 test("case variants and in-session model selection also get the notice", async () => {
   expect(parseArgs(["--provider", "Anthropic"])).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
-  expect(parseConfigObject({ provider: "Anthropic" }, "user config")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
+  expect(parseConfigObject({ provider: "Anthropic" }, "user config")).toMatchObject({ error: ANTHROPIC_REMOVED_MESSAGE });
   const { parseModelArgs } = await import("../src/tui/commands.ts");
   expect(parseModelArgs("anthropic/claude-sonnet-4-6", "openai")).toEqual({ error: ANTHROPIC_REMOVED_MESSAGE });
 });

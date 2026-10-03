@@ -178,14 +178,33 @@ test("unknown and malformed profiles fail before any provider request", () => {
   });
   expect("error" in unknown).toBe(true);
   if (!("error" in unknown)) throw new Error("expected unknown profile error");
-  expect(unknown.error).toContain('Unknown profile "missing"');
-  expect(unknown.error).toContain("a");
+  expect(unknown.error).toContain('Invalid profile · Select a configured compatible profile');
+  expect(unknown).toMatchObject({ diagnostics: [{ source: "user settings", path: "profile", category: "constraint" }] });
 
   const empty = resolveSettings({ user: { profiles: {}, profile: "a" } });
   expect("error" in empty).toBe(true);
 
   const badName = parseArgs(["--profile", "bad name!"]);
   expect("error" in badName).toBe(true);
+});
+
+test("selected profile diagnostics identify the definition source across merged profile maps", () => {
+  const result = resolveSettings({
+    user: { profiles: { broken: { baseUrl: "https://user:private-secret@example.com?token=private-secret" } } },
+    project: { profiles: { other: { baseUrl: "https://example.com" } }, profile: "broken" },
+    configSources: { user: "/home/test/.schway/config.json", project: "/work/.schway/config.json" },
+  });
+  expect(result).toMatchObject({ diagnostics: [{ source: "/home/test/.schway/config.json", path: "profiles.<unknown setting>.baseUrl", category: "constraint" }] });
+  expect(JSON.stringify(result)).not.toContain("private-secret");
+});
+
+test("prototype-named profiles resolve only own definitions and retain the owning source", () => {
+  for (const name of ["constructor", "toString", "hasOwnProperty"]) {
+    const input = { user: { profiles: { [name]: { baseUrl: "https://user:private-secret@example.com" } } }, project: { profiles: { unrelated: { baseUrl: "https://example.com" } }, profile: name }, configSources: { user: "/actual/user/config.json", project: "/other/project/config.json" } };
+    expect(resolveSettings(input)).toMatchObject({ diagnostics: [{ source: input.configSources.user, path: "profiles.<unknown setting>.baseUrl", category: "constraint" }] });
+    input.user.profiles[name]!.baseUrl = "https://example.com";
+    expect(resolveSettings(input)).toMatchObject({ profile: name, baseUrl: "https://example.com" });
+  }
 });
 
 test("--profile selects the compatible provider and rejects other providers", () => {
@@ -479,7 +498,7 @@ test("headless --profile fails before provider requests for unknown profiles", a
     });
     expect(exitCode).toBe(1);
     expect(created).toBe(false);
-    expect(stderr).toContain('Unknown profile "missing"');
+    expect(stderr).toContain('Invalid profile · Select a configured compatible profile');
   });
 });
 
@@ -681,7 +700,7 @@ test("profile baseUrl values reject non-absolute userinfo and query URLs", () =>
     const parsed = parseConfigObject({ profiles: { a: { baseUrl } } }, "test");
     expect("error" in parsed).toBe(true);
     if ("error" in parsed) {
-      expect(parsed.error).toContain("profiles.a.baseUrl");
+      expect(parsed.error).toContain("profiles.<unknown setting>.baseUrl");
       expect(parsed.error.includes(baseUrl)).toBe(false);
     }
     const resolved = resolveSettings({
@@ -689,7 +708,7 @@ test("profile baseUrl values reject non-absolute userinfo and query URLs", () =>
     });
     expect("error" in resolved).toBe(true);
     if ("error" in resolved) {
-      expect(resolved.error).toContain("profiles.a.baseUrl");
+      expect(resolved.error).toContain("profiles.<unknown setting>.baseUrl");
     }
   }
 });
@@ -862,7 +881,7 @@ test("non-HTTP(S) profile base URLs fail before any provider request", () => {
     });
     expect("error" in resolved).toBe(true);
     if ("error" in resolved) {
-      expect(resolved.error).toContain("profiles.a.baseUrl");
+      expect(resolved.error).toContain("profiles.<unknown setting>.baseUrl");
     }
   }
   const ok = parseConfigObject(

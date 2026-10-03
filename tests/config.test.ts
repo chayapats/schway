@@ -7,10 +7,12 @@ import {
   mergeConfigLayers,
   parseConfigObject,
   projectConfigPath,
+  readConfigFile,
   resolveSettings,
   userConfigPath,
 } from "../src/config/config.ts";
 import { parseEnvFile } from "../src/config/env-file.ts";
+import { configDiagnosticSecrets, safeConfigSource } from "../src/config/diagnostics.ts";
 import { DEFAULT_MAX_TURNS } from "../src/agent/loop.ts";
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../src/agent/scheduler.ts";
 import { UNKNOWN_MODEL_DEFAULTS } from "../src/model/catalog.ts";
@@ -19,6 +21,125 @@ import { withTempDir } from "./helpers.ts";
 test("an empty object is a valid config layer", () => {
   expect(parseConfigObject({}, "test")).toEqual({});
 });
+
+test("source redaction runs after control normalization and before bounding complete credential values", () => {
+  const secret = "opaque-environment-credential";
+  for (const source of [
+    `/tmp/opaque-\u001b[31menvironment\u001b[0m-credential/config.json`,
+    `/tmp/opaque-environ\u200bment-credential/config.json`,
+    `/${"a".repeat(500)}/${secret}/config.json`,
+  ]) {
+    const label = safeConfigSource(source, [` ${secret}\n`]);
+    expect(label).not.toContain("opaque-");
+    expect(label).not.toMatch(/[\p{Cc}\p{Cf}]/u);
+    expect(label.length).toBeLessThanOrEqual(512);
+  }
+  expect(safeConfigSource("/tmp/Bea\u200brer\nprivate-token/config.json")).not.toContain("private-token");
+});
+
+test("diagnostic credential context uses explicit own references without scanning unrelated environment values", () => {
+  const env = Object.assign(Object.create({ INHERITED_KEY: "inherited-secret" }), { REFERENCED_KEY: " own-secret \n", ORDINARY_VALUE: "ordinary-path" });
+  const inherited = Object.create({ credentialEnv: "ORDINARY_VALUE" });
+  const context = { env, secrets: ["existing-secret"] };
+  const secrets = configDiagnosticSecrets(context, [{ profiles: { constructor: { credentialEnv: "REFERENCED_KEY" }, inherited, other: { credentialEnv: "INHERITED_KEY" } } }]);
+  expect(secrets).toContain("own-secret");
+  expect(secrets).toContain(" own-secret \n");
+  expect(secrets).toContain("existing-secret");
+  expect(secrets).not.toContain("ordinary-path");
+  expect(secrets).not.toContain("inherited-secret");
+  expect(context.secrets).toEqual(secrets);
+});
+
+test("contextual source redaction also covers deprecation warnings and post-schema profile resolution", () => {
+  const secret = "private-contextual-credential", source = `/tmp/${secret}/config.json`;
+  const diagnosticContext = { env: { CUSTOM_KEY: ` ${secret} ` }, secrets: [] as string[] };
+  const layer = parseConfigObject({ oldTurns: 7, profiles: { constructor: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } } }, source,
+    [{ key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" }], diagnosticContext);
+  if ("error" in layer) throw Error(layer.error);
+  expect(layer.deprecationWarnings?.[0]?.message).toContain('"oldTurns"');
+  expect(layer.deprecationWarnings?.[0]?.message).not.toContain(secret);
+  expect(JSON.stringify(layer.deprecationWarnings)).not.toContain(secret);
+  const resolved = resolveSettings({ user: { ...layer, profile: "missing" }, configSources: { user: source }, diagnosticContext });
+  expect(resolved).toMatchObject({ diagnostics: [{ source: "/tmp/***/config.json", path: "profile", category: "constraint", constraint: "Select a configured compatible profile" }] });
+});
+
+test("invalid approval config exposes its safe field and supported values", () => {
+  const result = parseConfigObject({ approval: { mode: "readonly" } }, "/user/config.json");
+  expect(result).toMatchObject({ diagnostics: [{ source: "/user/config.json", path: "approval.mode", category: "enum", constraint: "Use auto, ask, or read-only", values: ["auto", "ask", "read-only"] }] });
+  expect(result).toHaveProperty("error", "Invalid config at /user/config.json: Invalid approval.mode · Use auto, ask, or read-only");
+  expect(JSON.stringify(result)).not.toContain("readonly");
+});
+
+test("credential separators survive until source redaction, including controls not allowed in filenames", () => {
+  for (const source of ["Bearer\u0000private-source-token", "x-auth-token\u0000:\u0007private-source-token", "Authorization:\u001b[31mBearer\tprivate-source-token\u001b[0m", "x-access-token=private-source-token", "https://user:private-source-token@example.com/?token=private-source-token"]) {
+    const result = parseConfigObject({ approval: { mode: "readonly" } }, source);
+    expect(result).toMatchObject({ diagnostics: [expect.objectContaining({ path: "approval.mode", category: "enum" })] });
+    expect(JSON.stringify(result)).not.toContain("private-source-token");
+    expect(JSON.stringify(result)).not.toContain("\\u00");
+  }
+});
+
+test("control-split credential prefixes and tokens redact completely before display normalization", () => {
+  for (const control of ["\u0000", "\u0001", "\u0007", "\u001f", "\u007f", "\u0085", "\u200b", "\u001b[31m"]) {
+    for (const separator of ["\n", "\r\n", "\t", "\u2028"]) {
+      for (const prefix of [`Bea${control}rer`, `Authorization:${separator}Bea${control}rer`, `Authori${control}zation:${separator}Token`, `x-api${control}-key=`]) {
+        const source = `/tmp/${prefix}${separator}private-${control}source-token/config.json`;
+        const label = safeConfigSource(source);
+        expect(label).not.toContain("private-");
+        expect(label).not.toContain("source-token");
+        expect(label).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+        expect(label).toContain("<redacted>");
+      }
+    }
+  }
+});
+
+test("each distinct invalid field has one primary cause even alongside a forbidden secret", () => {
+  const result = parseConfigObject({ token: "private-secret", approval: { mode: "readonly" }, profiles: { sample: {} }, profile: "a".repeat(65) }, "/config.json");
+  if (!("error" in result)) throw Error("expected invalid config");
+  expect(result.diagnostics).toHaveLength(4);
+  expect(result.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({ path: "<unknown setting>", category: "secret" }),
+    expect.objectContaining({ path: "approval.mode", category: "enum" }),
+    expect.objectContaining({ path: "profiles.<unknown setting>.baseUrl", category: "type" }),
+    expect.objectContaining({ path: "profile", category: "constraint", constraint: "Use at most 64 characters" }),
+  ]));
+  expect(JSON.stringify(result)).not.toContain("private-secret");
+});
+
+test("configuration reasons hide unknown fields, profile identifiers and invalid secret values", () => {
+  const secret = "raw-private-token\u001b[31m\n";
+  const cases: Array<[unknown, string, string]> = [
+    [[], "", "root"],
+    [{ [secret]: true }, "<unknown setting>", "unknown-setting"],
+    [{ approval: { [secret]: true } }, "approval.<unknown setting>", "unknown-setting"],
+    [{ xaiAuth: secret }, "xaiAuth", "enum"],
+    [{ maxTurns: secret }, "maxTurns", "type"],
+    [{ maxTurns: 0 }, "maxTurns", "range"],
+    [{ profiles: { [secret]: { baseUrl: "https://example.com", model: 1 } } }, "profiles.<unknown setting>.model", "type"],
+    [{ profiles: { [secret]: { baseUrl: "https://u:password@example.com?token=private" } } }, "profiles.<unknown setting>", "constraint"],
+    [{ apiKey: secret }, "<unknown setting>", "secret"],
+    [{ profiles: { valid: { baseUrl: "https://example.com", headers: { Authorization: secret } } } }, "profiles.<unknown setting>.headers.<unknown setting>", "secret"],
+  ];
+  for (const [value, path, category] of cases) {
+    const result = parseConfigObject(value, "/config.json");
+    expect(result).toMatchObject({ diagnostics: expect.arrayContaining([expect.objectContaining({ source: "/config.json", path, category })]) });
+    for (const forbidden of ["raw-private-token", "password", "token=private", "\u001b", "Expected union value"]) expect(JSON.stringify(result)).not.toContain(forbidden);
+  }
+});
+
+test("config reads carry JSON and access reasons and startup retains both invalid scopes", async () => withTempDir(async root => {
+  const home = join(root, "home"), workspaceRoot = join(root, "work");
+  await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+  const user = userConfigPath(home), project = projectConfigPath(workspaceRoot);
+  await writeFile(user, "{private-invalid-json");
+  await mkdir(project);
+  expect(await readConfigFile(user)).toMatchObject({ diagnostics: [{ source: user, path: "", category: "json", constraint: expect.any(String) }] });
+  expect(await readConfigFile(project)).toMatchObject({ diagnostics: [{ source: project, path: "", category: "unreadable", constraint: expect.any(String) }] });
+  const resolved = await loadResolvedSettings({ home, workspaceRoot });
+  expect(resolved).toMatchObject({ diagnostics: [expect.objectContaining({ source: user }), expect.objectContaining({ source: project })] });
+  expect(JSON.stringify(resolved)).not.toContain("private-invalid-json");
+}));
 
 test("splash defaults to first-run and rejects unknown modes and ui keys", () => {
   expect(resolveSettings({})).toMatchObject({ splash: "first-run" });
@@ -140,14 +261,15 @@ test("a valid partial config parses known settings", () => {
   });
 });
 
-test("misspelled settings fail with the unknown name and valid keys", () => {
+test("misspelled settings fail with a redacted unknown name and repair action", () => {
   const result = parseConfigObject({ modell: "gpt-5.4" }, "user-config");
   expect("error" in result).toBe(true);
   if (!("error" in result)) {
     throw new Error("expected validation error");
   }
   expect(result.error).toContain("user-config");
-  expect(result.error).toContain("modell");
+  expect(result.error).toContain("<unknown setting>");
+  expect(result.error).not.toContain("modell");
   expect(result.error).toContain("model");
   expect(result.error.toLowerCase()).toContain("unknown");
 });
@@ -163,7 +285,7 @@ test("API keys in ordinary config fail with an actionable secret error", () => {
   expect(result.error).toContain("--api-key");
 });
 
-test("invalid types and non-positive limits fail with the setting name", () => {
+test("invalid types and non-positive limits fail with a redacted unknown setting", () => {
   const provider = parseConfigObject({ provider: "codex" }, "test");
   expect("error" in provider).toBe(true);
   if ("error" in provider) {
@@ -506,12 +628,12 @@ test("deprecations without replacements retain supported behavior and accept ret
     if (key === "maxTurns") expect(parsed.maxTurns).toBe(7);
     if (key === "ui.splash") expect(parsed.ui?.splash).toBe("never");
   }
-  expect(parseConfigObject({ legacy: true }, "/config.json", [])).toMatchObject({ error: expect.stringContaining('unknown setting "legacy"') });
+  expect(parseConfigObject({ legacy: true }, "/config.json", [])).toMatchObject({ error: expect.stringContaining('<unknown setting>') });
   expect(parseConfigObject({ oldTurns: "invalid" }, "/config.json", [{ key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" }])).toMatchObject({ error: expect.stringContaining("maxTurns") });
 });
 
 test("retired nested settings cannot hide unknown siblings or malformed replacement parents", () => {
   const table = [{ key: "retired.toggle", since: "1.1.0", removeIn: "2.0" }];
-  expect(parseConfigObject({ retired: { toggle: true, typo: true } }, "/config.json", table)).toMatchObject({ error: expect.stringContaining('unknown setting "retired"') });
-  expect(parseConfigObject({ oldSplash: "never", ui: false }, "/config.json", [{ key: "oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }])).toEqual({ error: "Invalid config at /config.json: ui must be an object" });
+  expect(parseConfigObject({ retired: { toggle: true, typo: true } }, "/config.json", table)).toMatchObject({ error: expect.stringContaining('<unknown setting>') });
+  expect(parseConfigObject({ oldSplash: "never", ui: false }, "/config.json", [{ key: "oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }])).toMatchObject({ error: "Invalid config at /config.json: Invalid ui · Use a JSON object" });
 });

@@ -37,6 +37,43 @@ Readable output is one `[OK]`, `[WARNING]` or `[ERROR]` line per check with a fi
 
 Exit statuses: **0** no required check failed (warnings allowed); **1** diagnosed required failure; **2** doctor could not complete, such as invalid doctor arguments or cancellation. No files are written by doctor itself. Filesystem permission checks are observational and cannot guarantee that a later disk write succeeds. Extension runtime behavior and live authentication require a real run to verify.
 
+## Repair invalid configuration
+
+For example, `{"approval":{"mode":"readonly"}}` previously produced a vague
+configuration error and an apparent package fault. Doctor now reports
+`Invalid approval.mode · Use auto, ask, or read-only` under `config.user` or
+`config.project`, with the affected file named in the remedy. Change the value
+to `"read-only"`, then rerun `schway doctor`. Normal startup reports the same
+cause and file, exits 1, and leaves stdout empty.
+
+Both invalid files are reported when user and project configuration need repair.
+When both scopes resolve to the same file, one config check reports the failure
+and the other points to that check for repair.
+Package inspection that depends on an invalid file is marked incomplete and
+points back to its config check; a real missing package in another scope still
+appears. Workspace, storage, skill and extension checks continue when safe.
+Doctor does not modify the files or install anything.
+
+Config-related checks can include an optional `diagnostics` array in JSON.
+Each item has `source` (sanitized file path or settings source), `path` (known
+schema fields), `category`, and `constraint`; enum failures also include
+`values`. Categories are `json`, `root`, `unknown-setting`, `enum`, `type`,
+`range`, `constraint`, `secret`, `unreadable`, `removed-provider`, and
+`deprecated`. Unknown setting names and dynamic profile/header segments appear
+as `<unknown setting>`, with known children retained, such as
+`profiles.<unknown setting>.baseUrl`. Invalid values are never included.
+Source identifiers are bounded and stripped of terminal controls and recognized
+credentials. Doctor also redacts known API-key and credential-header values from
+source labels and remedies before bounding them. This includes values loaded by
+an explicit `--env-file` and environment values named by valid `credentialEnv`
+references in either config file, including a file with other invalid settings.
+Normal startup uses the same sanitized reasons. Schema version 1 and each
+check's required fields remain unchanged.
+For automation, use check ID, diagnostic source/path/category and status;
+do not depend on prose or `package.<index>` ordering. See
+[configuration](configuration.md#configuration-files) for another
+recovery example and the full configuration contract.
+
 ## Grok login status
 
 `schway doctor --provider xai --xai-auth grok` checks only the saved Grok OAuth login for authentication. It reports present, needs refresh (within two minutes of expiry), expired without refresh, invalid, or missing. The check is local: it does not load the Grok adapter, contact xAI, open a browser or read another CLI's cache. Use `/login grok` or `/login grok --device` to repair the login; explicitly select `--xai-auth api-key` if you intend to use API-key billing.

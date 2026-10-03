@@ -1,3 +1,4 @@
+import { configDiagnosticSecrets, type ConfigDiagnosticContext } from "../config/diagnostics.ts";
 import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/deprecations.ts";
 import { pruneUndoStore } from "../undo/store.ts";
 import { isErrno } from "../tools/fs.ts";
@@ -17,7 +18,7 @@ import { createDiagnosticSink, type DiagnosticSink } from "../diagnostics/sink.t
 import {
   redactSecrets,
 } from "../auth/secrets.ts";
-import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
+import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
 import { loadCredentialSafeTui } from "./credential-input.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
@@ -114,7 +115,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
 
-  const secrets: string[] = collectSecrets(io.args.apiKey, io.env);
+  const secrets: string[] = collectSecrets(io.args.apiKey, io.env, undefined, io.args.headers);
   let diagnosticSessionId: string | undefined;
   const diagnostics = createDiagnosticSink({ home, enabled: io.args.debug ?? false,
     destination: io.args.debugFile ? resolve(io.cwd, io.args.debugFile) : undefined,
@@ -129,11 +130,13 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     );
     if ("error" in loadedEnv) {
       diagnostics.record("config", "env_file_failed", { category: "configuration_input" }, "error");
-      io.stderr.write(`${loadedEnv.error}\n`);
+      io.stderr.write(`${redactSecrets(String(loadedEnv.error), secrets)}\n`);
       return 1;
     }
     env = loadedEnv;
   }
+  const diagnosticContext = { env, secrets };
+  configDiagnosticSecrets(diagnosticContext);
 
   const directory = sessionsDirectory(home);
   let workspace: Workspace;
@@ -153,16 +156,16 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     if (startupResumed && io.args.addDirs?.length) startupResumed.setExtraRoots([...new Set([...startupResumed.metadata.extraRoots, ...workspace.extraRoots])]);
   } catch (error) {
     diagnostics.record("workspace", "load_failed", { category: "workspace_setup" }, "error");
-    io.stderr.write(`${messageOf(error)}\n`);
+    io.stderr.write(`${redactSecrets(messageOf(error), secrets)}\n`);
     return 1;
   }
 
   let configEditor: ConfigEditor;
   try {
-    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli: cliOverridesFromArgs(io.args), interactiveMemory: true, configDeprecations: io.configDeprecations });
+    configEditor = await loadConfigEditor({ home, workspaceRoot: workspace.root, diagnosticContext, cli: cliOverridesFromArgs(io.args), interactiveMemory: true, configDeprecations: io.configDeprecations });
   } catch (error) {
     diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");
-    io.stderr.write(`${messageOf(error)}\n`);
+    io.stderr.write(`${redactSecrets(messageOf(error), secrets)}\n`);
     return 1;
   }
   let settings = configEditor.settings;
@@ -186,7 +189,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     return 1;
   }
 
-  secrets.push(...collectSecrets(undefined, env, settings.credentialEnv));
+  configDiagnosticSecrets(diagnosticContext, [settings]);
   diagnostics.record("config", "resolved", { provider: settings.provider, model: settings.model, maxTurns: settings.maxTurns, maxConcurrentTools: settings.maxConcurrentTools });
   const credentialStore = io.credentialStore ?? createNativeCredentialStore();
   const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
@@ -244,7 +247,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     };
 
     let controller: TuiController;
-    const managerOptions = contextManagerOptions(home, settings.explicitContextWindow, io.configDeprecations);
+    const managerOptions = contextManagerOptions(home, settings.explicitContextWindow, io.configDeprecations, diagnosticContext);
     const skillScope: { manager?: ContextManager; workspaceRoot: string; configDeprecations?: readonly ConfigDeprecation[] } = {
       configDeprecations: io.configDeprecations,
       workspaceRoot: startupResumed?.header.workspaceRoot ?? io.cwd,
@@ -421,7 +424,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
       });
     } catch (error) {
       diagnostics.record("tui", "renderer_failed", { category: "terminal_setup" }, "error");
-      io.stderr.write(`${messageOf(error)}\n`);
+      io.stderr.write(`${redactSecrets(messageOf(error), secrets)}\n`);
       return 1;
     } finally {
       // Renderer setup may fail before its own cleanup runs; still record the
@@ -460,7 +463,7 @@ export async function stageInteractiveSettings(
     modelCapability = loaded.capability;
   }
   options.signal.throwIfAborted();
-  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow ?? options.fetchedContextWindow, options.configDeprecations)) };
+  return { model, ...(modelCapability ? { modelCapability } : {}), contextManager: createContextManager(options.workspace, contextManagerOptions(options.home, next.explicitContextWindow ?? options.fetchedContextWindow, options.configDeprecations, { env: options.env, secrets: options.secrets })) };
 }
 
 /** Mount OpenTUI widgets, pump controller snapshots, and handle input until quit. */
@@ -612,7 +615,7 @@ export async function handleSlashCommand(
     ctx.controller.notice("Wait for this turn · Esc stop");
     return false;
   }
-  const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow, ctx.skillScope.configDeprecations);
+  const managerOptions = contextManagerOptions(ctx.home, ctx.settings().explicitContextWindow, ctx.skillScope.configDeprecations, { env: ctx.env, secrets: ctx.secrets });
   switch (name) {
     case "new": {
       const workspace = await resolveWorkspace(ctx.workspaceRoot);
@@ -697,6 +700,7 @@ export async function handleSlashCommand(
     }
     case "skills": {
       const discovery = await discoverSkills({
+        diagnosticContext: { env: ctx.env, secrets: ctx.secrets },
         workspaceRoot: ctx.skillScope.workspaceRoot,
         configDeprecations: ctx.skillScope.configDeprecations,
         extraRoots: ctx.controller.workspaceIdentity()?.extraRoots,
@@ -742,6 +746,8 @@ export async function invokeSkillTurn(
   ctx: {
     controller: TuiController;
     home: string;
+    env?: Record<string, string | undefined>;
+    secrets?: string[];
     skillScope: { manager?: ContextManager; workspaceRoot: string; configDeprecations?: readonly ConfigDeprecation[] };
   },
   accepted: () => void = () => {},
@@ -758,6 +764,7 @@ export async function invokeSkillTurn(
   const branchId = ctx.controller.snapshot().branchId;
   const workspaceIdentity = ctx.controller.workspaceIdentity();
   const prepared = await prepareSkillInvocation({
+    diagnosticContext: { env: ctx.env, secrets: ctx.secrets },
     workspaceRoot: ctx.skillScope.workspaceRoot,
     configDeprecations: ctx.skillScope.configDeprecations,
     extraRoots: workspaceIdentity?.extraRoots,
@@ -791,8 +798,8 @@ export async function invokeSkillTurn(
 }
 
 /** Build context-manager options so catalog budgets follow model switches unless overridden. */
-function contextManagerOptions(home: string, explicitContextWindow?: number, configDeprecations?: readonly ConfigDeprecation[]): { home: string; contextWindow?: number; configDeprecations?: readonly ConfigDeprecation[] } {
-  return { home, configDeprecations, ...(explicitContextWindow !== undefined ? { contextWindow: explicitContextWindow } : {}) };
+function contextManagerOptions(home: string, explicitContextWindow?: number, configDeprecations?: readonly ConfigDeprecation[], diagnosticContext?: ConfigDiagnosticContext): Parameters<typeof createContextManager>[1] {
+  return { home, configDeprecations, diagnosticContext, ...(explicitContextWindow !== undefined ? { contextWindow: explicitContextWindow } : {}) };
 }
 
 /** Report whether branch-tree input must take the slash-command path instead of becoming a fork name. */
@@ -836,27 +843,9 @@ function collectSecrets(
   runtimeApiKey: string | undefined,
   env: Record<string, string | undefined>,
   credentialEnv?: string,
+  headers?: Record<string, string>,
 ): string[] {
-  const secrets: string[] = [];
-  if (runtimeApiKey) {
-    secrets.push(runtimeApiKey);
-  }
-  // The route is gone, but a leftover key can still reach tool output through the inherited environment.
-  const legacyAnthropicKey = env.ANTHROPIC_API_KEY;
-  if (legacyAnthropicKey) secrets.push(legacyAnthropicKey);
-  const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
-  if (compatibleKey) secrets.push(compatibleKey);
-  const openaiKey = env.OPENAI_API_KEY;
-  if (openaiKey) {
-    secrets.push(openaiKey);
-  }
-  const xaiKey = env.XAI_API_KEY;
-  if (xaiKey) secrets.push(xaiKey);
-  if (credentialEnv && credentialEnv !== COMPATIBLE_API_KEY_ENV) {
-    const profileKey = env[credentialEnv];
-    if (profileKey) secrets.push(profileKey);
-  }
-  return secrets;
+  return configDiagnosticSecrets({ env }, [{ apiKey: runtimeApiKey, credentialEnv, headers }]);
 }
 
 /** Build the explicit Grok OAuth runner with secure storage and ephemeral approval progress. */

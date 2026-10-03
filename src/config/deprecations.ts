@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { configDiagnostic, safeConfigSource, type ConfigDiagnostic } from "./diagnostics.ts";
 
 /** Describe a supported legacy setting and the major version allowed to remove it. */
 export interface ConfigDeprecation {
@@ -15,6 +16,12 @@ export const CONFIG_DEPRECATIONS: readonly ConfigDeprecation[] = [];
 export interface ConfigDeprecationWarning extends ConfigDeprecation {
   path: string;
   message: string;
+  diagnostic?: ConfigDiagnostic;
+}
+
+/** Identify an invalid replacement container without parsing or exposing native error text. */
+export class ConfigDeprecationError extends Error {
+  constructor(readonly field: string) { super("Deprecated setting replacement requires an object"); }
 }
 
 /** Read an own dotted property without traversing inherited objects. */
@@ -32,7 +39,7 @@ function location(object: Record<string, unknown>, key: string): { parent: Recor
 }
 
 /** Translate legacy keys on a copy, preserving explicit replacements and original file bytes. */
-export function applyConfigDeprecations(value: Record<string, unknown>, source: string, table: readonly ConfigDeprecation[]): {
+export function applyConfigDeprecations(value: Record<string, unknown>, source: string, table: readonly ConfigDeprecation[], secrets: readonly string[] = []): {
   value: Record<string, unknown>; warnings: ConfigDeprecationWarning[];
 } {
   const copy = structuredClone(value);
@@ -41,11 +48,11 @@ export function applyConfigDeprecations(value: Record<string, unknown>, source: 
     const old = location(copy, entry.key);
     if (!old) continue;
     const explicit = entry.replacement !== undefined && location(value, entry.replacement) !== undefined;
-    const path = resolve(source);
+    const path = safeConfigSource(resolve(source), secrets);
     const message = entry.replacement
       ? `Config: "${entry.key}" in ${path} is deprecated; use "${entry.replacement}". It will be removed in ${entry.removeIn}.`
       : `Config: "${entry.key}" in ${path} is deprecated and has no replacement. It will be removed in ${entry.removeIn}.`;
-    warnings.push({ ...entry, path, message: message + (explicit ? ` "${entry.key}" is ignored because "${entry.replacement}" is set.` : "") });
+    warnings.push({ ...entry, path, diagnostic: configDiagnostic(path, entry.key, "deprecated", entry.replacement ? `Use ${entry.replacement}` : `Remove ${entry.key}`), message: message + (explicit ? ` "${entry.key}" is ignored because "${entry.replacement}" is set.` : "") });
     const previous = old.parent[old.key];
     // Without a replacement an existing schema key retains its behavior.
     if (!entry.replacement) continue;
@@ -59,10 +66,10 @@ export function applyConfigDeprecations(value: Record<string, unknown>, source: 
     if (explicit) continue;
     const parts = entry.replacement.split(".");
     let parent = copy;
-    for (const part of parts.slice(0, -1)) {
+    for (const [index, part] of parts.slice(0, -1).entries()) {
       if (!Object.hasOwn(parent, part)) Object.defineProperty(parent, part, { value: {}, enumerable: true, writable: true, configurable: true });
       const next = parent[part];
-      if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error(`Invalid config at ${source}: ${part} must be an object`);
+      if (!next || typeof next !== "object" || Array.isArray(next)) throw new ConfigDeprecationError(parts.slice(0, index + 1).join("."));
       parent = next as Record<string, unknown>;
     }
     Object.defineProperty(parent, parts.at(-1)!, { value: previous, enumerable: true, writable: true, configurable: true });

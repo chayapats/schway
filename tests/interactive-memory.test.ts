@@ -137,16 +137,23 @@ test("missing profiles are explained and forget exposes explicit config without 
     const home = join(root, "home"), a = join(root, "a"), b = join(root, "b"); await mkdir(a); await mkdir(b);
     const config = join(home, ".schway/config.json"); await mkdir(join(home, ".schway"), { recursive: true });
     await writeFile(config, JSON.stringify({ profiles: { local: { baseUrl: "http://localhost:1234/v1", model: "local", auth: "none" } } }));
-    const first = await launch(home, a); expect(await first.controller.selectProfile("local")).toBe(true); first.controller.dispose();
-    const other = await launch(home, b); await other.controller.selectModel("openai/gpt-4o"); other.controller.dispose();
+    const first = await launch(home, a);
+    try { expect(await first.controller.selectProfile("local")).toBe(true); } finally { first.controller.dispose(); }
+    const other = await launch(home, b);
+    try { await other.controller.selectModel("openai/gpt-4o"); } finally { other.controller.dispose(); }
     await writeFile(config, JSON.stringify({ maxTurns: 8 }));
     const stale = await launch(home, a);
-    expect(stale.editor.memoryProblem).toContain('Unknown profile "local"');
-    expect(await stale.controller.selectModel("forget")).toBe(true);
-    expect(stale.controller.describeConfig()).toContain("maxTurns: 8 [user-global]");
-    stale.controller.dispose();
-    const reset = await launch(home, a); expect(reset.editor.memoryProblem).toBeUndefined(); expect(reset.editor.settings.model).toBe(""); reset.controller.dispose();
-    const unchanged = await launch(home, b); expect(unchanged.editor.settings.model).toBe("gpt-4o"); unchanged.controller.dispose();
+    try {
+      expect(stale.editor.memoryProblem).toContain("Invalid profile · Select a configured compatible profile");
+      expect(stale.editor.memoryProblem).toContain("interactive memory");
+      expect(stale.editor.memoryProblem).not.toContain('"local"');
+      expect(await stale.controller.selectModel("forget")).toBe(true);
+      expect(stale.controller.describeConfig()).toContain("maxTurns: 8 [user-global]");
+    } finally { stale.controller.dispose(); }
+    const reset = await launch(home, a);
+    try { expect(reset.editor.memoryProblem).toBeUndefined(); expect(reset.editor.settings.model).toBe(""); } finally { reset.controller.dispose(); }
+    const unchanged = await launch(home, b);
+    try { expect(unchanged.editor.settings.model).toBe("gpt-4o"); } finally { unchanged.controller.dispose(); }
   });
 });
 

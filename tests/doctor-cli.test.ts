@@ -37,3 +37,31 @@ test("shipped bin dispatches doctor as a standalone command", async () => {
   expect(report.authSource).toBe("none");
   expect(report.checks.find((c: { id: string }) => c.id === "extensions").status).toBe("ok");
 });
+
+test("real CLI reports both config causes once, keeps streams and help, and never leaks invalid input", async () => {
+  const root = await mkdtemp(join(tmpdir(), "schway-config-cli-")); dirs.push(root);
+  const work = join(root, "work"), home = join(root, "home");
+  await mkdir(join(work, ".schway"), { recursive: true }); await mkdir(join(home, ".schway"), { recursive: true });
+  await writeFile(join(home, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  await writeFile(join(work, ".schway/config.json"), JSON.stringify({ ui: { "private-invalid-token\u001b[31m": "secret-value" } }));
+  const invoke = async (argv: string[]) => {
+    const child = Bun.spawn([bun, "--no-env-file", "--preload", resolve(import.meta.dir, "fixtures/credential-store-preload.ts"), entry, ...argv], { cwd: work, env: { HOME: home, PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    return { stdout, stderr, exit };
+  };
+  const json = await invoke(["doctor", "--json"]), plain = await invoke(["doctor"]), startup = await invoke(["-p", "test"]);
+  for (const result of [json, plain, startup]) {
+    expect(result.exit).toBe(1);
+    for (const value of ["private-invalid-token", "secret-value", "Expected union value", "\u001b", "\\u001b"]) expect(result.stdout + result.stderr).not.toContain(value);
+  }
+  expect(json.stderr).toBe(""); expect(plain.stderr).toBe(""); expect(startup.stdout).toBe("");
+  const report = JSON.parse(json.stdout);
+  expect(report.schemaVersion).toBe(1);
+  const config = report.checks.filter((item: { id: string; status: string }) => item.id.startsWith("config.") && item.status === "error");
+  expect(config.map((item: { id: string }) => item.id)).toEqual(["config.user", "config.project"]);
+  for (const item of config) { expect(plain.stdout).toContain(item.summary); expect(startup.stderr).toContain(item.summary); }
+  expect(report.checks.some((item: { id: string }) => item.id.startsWith("package."))).toBe(false);
+  const help = await invoke(["--help"]), doctorHelp = await invoke(["doctor", "--help"]);
+  for (const result of [help, doctorHelp]) { expect(result.exit).toBe(0); expect(result.stderr).toBe(""); expect(result.stdout).not.toContain("Invalid config"); }
+  expect((await invoke(["doctor", "--unknown-option"])).exit).toBe(2);
+});

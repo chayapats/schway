@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -13,6 +14,46 @@ import {
   encodeChatCompletionsSse,
   TEXT_STREAM_CHUNKS,
 } from "./fixtures/openai-compatible.ts";
+
+for (const source of ["environment", "runtime", "header", "env-file", "other-scope", "both-invalid"] as const) {
+  test(`config startup redacts ${source} credentials in real headless and embedded interactive entrypoints`, async () => {
+    await withTempDir(async root => {
+      const secret = "private-startup-credential", home = join(root, secret, "home"), cwd = join(root, secret, "work");
+      await mkdir(join(home, ".schway"), { recursive: true });
+      await mkdir(join(cwd, ".schway"), { recursive: true });
+      const named = source === "other-scope" || source === "both-invalid";
+      await writeFile(join(home, ".schway/config.json"), named ? JSON.stringify({ profiles: { constructor: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } }, ...(source === "both-invalid" ? { maxTurns: 0 } : {}) }) : "{}");
+      await writeFile(join(cwd, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+      const envFile = join(root, "explicit.env");
+      await writeFile(envFile, `OPENAI_API_KEY=${secret}\n`);
+      const flags = source === "runtime" ? ["--api-key", ` ${secret} `] : source === "header" ? ["--header", `Authorization:Bearer ${secret}`] : source === "env-file" ? ["--env-file", envFile] : [];
+      const env = { PATH: process.env.PATH, HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", ...(source === "environment" ? { OPENAI_API_KEY: ` ${secret}\n` } : {}), ...(named ? { CUSTOM_KEY: ` ${secret} ` } : {}) };
+      const entry = fileURLToPath(new URL("../src/cli/main.ts", import.meta.url));
+      const preload = fileURLToPath(new URL("./fixtures/credential-store-preload.ts", import.meta.url));
+      for (const interactive of [false, true]) {
+        // Explicit terminal capabilities exercise setup failures without a real terminal or renderer.
+        const dispatch = interactive ? ["-e", `const {runCli}=await import(${JSON.stringify(entry)});process.exit(await runCli(${JSON.stringify(flags)},{cwd:process.cwd(),env:process.env,terminal:{stdin:true,stdout:true},stdout:{write:t=>process.stdout.write(t)},stderr:{write:t=>process.stderr.write(t)}}));`] : [entry, "-p", "test", ...flags];
+        const child = Bun.spawn([process.execPath, "--no-env-file", "--preload", preload, ...dispatch], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+        const timeout = setTimeout(() => child.kill("SIGKILL"), 3_000);
+        try {
+          const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+          expect(exit).toBe(1);
+          expect(stdout).toBe("");
+          expect(stderr).toContain("Invalid approval.mode · Use auto, ask, or read-only");
+          expect(stderr).not.toContain(secret);
+          expect(stderr.match(/Invalid approval.mode/g)).toHaveLength(1);
+          if (source === "both-invalid") expect(stderr).toContain("Invalid maxTurns · Use an integer of 1 or greater");
+        } finally {
+          clearTimeout(timeout);
+          if (child.exitCode === null) child.kill("SIGKILL");
+          await child.exited;
+        }
+      }
+      expect(await readdir(join(home, ".schway"))).toEqual(["config.json"]);
+      expect(await readdir(join(cwd, ".schway"))).toEqual(["config.json"]);
+    });
+  }, 8_000);
+}
 
 /** Capture writes so CLI tests can assert stdout and stderr. */
 function capture() {
@@ -183,7 +224,7 @@ test("user-global config applies when the project has none", async () => {
   });
 });
 
-test("invalid and misspelled project config exit non-zero with the setting name", async () => {
+test("invalid and misspelled project config exit non-zero with a redacted unknown setting", async () => {
   await withTempDir(async (dir) => {
     await mkdir(join(dir, ".schway"));
     await writeFile(
@@ -196,7 +237,8 @@ test("invalid and misspelled project config exit non-zero with the setting name"
     });
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("modell");
+    expect(result.stderr).toContain("<unknown setting>");
+    expect(result.stderr).not.toContain("modell");
     expect(result.stderr).toContain("model");
   });
 });

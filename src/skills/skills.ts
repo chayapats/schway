@@ -1,4 +1,5 @@
 import type { ConfigDeprecation } from "../config/deprecations.ts";
+import type { ConfigDiagnosticContext } from "../config/diagnostics.ts";
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { discoverPackages, type EnabledPackage } from "../packages/packages.ts";
@@ -220,6 +221,7 @@ export function parseSkillFile(content: string): { ok: true; value: ParsedSkillF
 /** Discover metadata in project directories, project packages, global directories, then global packages, excluding ambiguous names and command collisions. */
 export async function discoverSkills(options: {
   configDeprecations?: readonly ConfigDeprecation[];
+  diagnosticContext?: ConfigDiagnosticContext;
   workspaceRoot: string;
   extraRoots?: readonly string[];
   home?: string;
@@ -313,6 +315,7 @@ export function resolveSkillInvocation(
 /** Discover and validate one named skill, enforcing model eligibility when requested and loading only its current body. */
 export async function prepareSkillInvocation(options: {
   configDeprecations?: readonly ConfigDeprecation[];
+  diagnosticContext?: ConfigDiagnosticContext;
   workspaceRoot: string;
   extraRoots?: readonly string[];
   home?: string;

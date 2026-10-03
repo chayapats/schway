@@ -1,16 +1,17 @@
 import type { ConfigDeprecation } from "../config/deprecations.ts";
+import { configDiagnostic, configDiagnosticSecrets, configDiagnosticSummary, configReadError, safeConfigSource, type ConfigDiagnostic } from "../config/diagnostics.ts";
 import { undoStoreSize } from "../undo/store.ts";
 import { DEFAULT_UNDO_MAX_SIZE_MB } from "../config/defaults.ts";
 import { formatCount } from "../text/format.ts";
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
-import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../auth/secrets.ts";
+import { redactSecrets } from "../auth/secrets.ts";
 import { platform } from "node:os";
 import { version } from "../../package.json";
-import { COMPATIBLE_API_KEY_ENV, credentialEnvironmentVariable } from "../auth/credentials.ts";
+import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialIdentity, LEGACY_ANTHROPIC_ACCOUNT, LEGACY_ANTHROPIC_REMOVAL_COMMAND, type CredentialStore } from "../auth/store.ts";
-import { readConfigFile, resolveApprovalSettings, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
+import { readConfigSources, resolveApprovalSettings, userConfigPath, projectConfigPath, resolveSettings, type ConfigLayer } from "../config/config.ts";
 import { inspectPackages } from "../packages/packages.ts";
 import { discoverSkills } from "../skills/skills.ts";
 import { sessionsDirectory } from "../session/jsonl.ts";
@@ -26,6 +27,7 @@ export interface DoctorCheck {
   status: "ok" | "warning" | "error";
   summary: string;
   remedy: string;
+  diagnostics?: readonly ConfigDiagnostic[];
 }
 
 /** Stable local diagnostic payload; no credential values or live-provider results are included. */
@@ -50,9 +52,11 @@ export async function diagnose(input: {
   store?: CredentialStore;
   signal?: AbortSignal;
 }): Promise<DoctorReport> {
+  const secrets = configDiagnosticSecrets({ env: input.env }, [input.args]);
+  const sourceLabel = (source: string) => safeConfigSource(source, secrets);
   const checks: DoctorCheck[] = [];
-  const add = (id: string, status: DoctorCheck["status"], summary: string, remedy = "None.") =>
-    checks.push({ id, status, summary, remedy });
+  const add = (id: string, status: DoctorCheck["status"], summary: string, remedy = "None.", diagnostics?: readonly ConfigDiagnostic[]) =>
+    checks.push({ id, status, summary, remedy, ...(diagnostics ? { diagnostics } : {}) });
   const report: DoctorReport = { schemaVersion: 1, version, runtime: `Bun ${Bun.version}`, platform: `${platform()} ${process.arch}`, checks };
   input.signal?.throwIfAborted();
   add("runtime", "ok", `Schway ${version}; ${report.runtime}; ${report.platform}`);
@@ -71,8 +75,8 @@ export async function diagnose(input: {
         add("attachments", "error", "An attached workspace directory is inaccessible.", "Correct --add-dir paths and permissions.");
       }
     }
-    report.workspace = workspace;
-    add("workspace", "ok", `Primary workspace: ${workspace}`);
+    report.workspace = sourceLabel(workspace);
+    add("workspace", "ok", `Primary workspace: ${sourceLabel(workspace)}`);
     const gitRoot = await findGitRoot(input.cwd);
     add("git", !Bun.which("git") ? "warning" : gitRoot ? "ok" : "warning", !Bun.which("git") ? "Git executable unavailable; workspace paths still resolve." : gitRoot ? "Git workspace available." : "No Git repository; using launch directory.", "Install git and initialize a repository if Git inspection is needed.");
   } catch {
@@ -93,6 +97,13 @@ export async function diagnose(input: {
       if ("error" in loaded) add("env-files", "error", "An explicitly enabled environment file could not be loaded.", "Check --env-file paths and syntax.");
       else { env = loaded; add("env-files", "ok", "Explicit environment files loaded for presence checks."); }
     } catch { add("env-files", "error", "Environment file inspection failed.", "Check --env-file paths and permissions."); }
+  }
+  const diagnosticContext = { env, secrets };
+  configDiagnosticSecrets(diagnosticContext, [input.args]);
+  if (workspace && report.workspace !== undefined) {
+    report.workspace = sourceLabel(workspace);
+    const workspaceCheck = checks.find(check => check.id === "workspace");
+    if (workspaceCheck?.status === "ok") workspaceCheck.summary = `Primary workspace: ${report.workspace}`;
   }
   // Normal CLI requires process HOME before reading --env-file; overlays may provide keys but cannot move storage.
   const home = input.env.HOME;
@@ -121,27 +132,49 @@ export async function diagnose(input: {
 
   let user: ConfigLayer | undefined;
   let project: ConfigLayer | undefined;
-  for (const [scope, path] of [
+  const configScopes = [
     ...(home ? [["user", userConfigPath(home)] as const] : []),
     ...(workspace ? [["project", projectConfigPath(workspace)] as const] : []),
-  ]) {
+  ];
+  const configFiles = await readConfigSources(configScopes.map(([, path]) => path), input.configDeprecations, diagnosticContext);
+  const failures = new Map<object, string>();
+  const warned = new Set<object>();
+  const configRepairs = new Map<string, string>();
+  for (const [scope, path] of configScopes) {
     try {
-      const config = await readConfigFile(path, input.configDeprecations);
-      if (config && "error" in config) add(`config.${scope}`, "error", `Invalid ${scope} configuration.`, `Correct or remove ${path}; validate JSON and setting names.`);
+      const config = configFiles.get(path);
+      const label = sourceLabel(path);
+      if (config && "error" in config) {
+        const primary = failures.get(config);
+        configRepairs.set(scope, primary ?? `config.${scope}`);
+        if (primary) add(`config.${scope}`, "warning", "Configuration needs repair", `Repair ${primary}; both scopes use the same file.`);
+        else {
+          failures.set(config, `config.${scope}`);
+          add(`config.${scope}`, "error", config.diagnostics.map(configDiagnosticSummary).join("; "), `Edit ${label} and follow the setting guidance.`, config.diagnostics.map(diagnostic => ({ ...diagnostic, source: label })));
+        }
+      }
       else {
-        for (const warning of config?.deprecationWarnings ?? []) add(`config.deprecated.${warning.key}`, "warning", warning.message, warning.replacement ? `Replace "${warning.key}" with "${warning.replacement}" in ${warning.path}.` : `Remove "${warning.key}" from ${warning.path}.`);
+        if (config && !warned.has(config)) {
+          warned.add(config);
+          for (const warning of config.deprecationWarnings ?? []) add(`config.deprecated.${warning.key}`, "warning", warning.message.replaceAll(warning.path, label), warning.replacement ? `Replace "${warning.key}" with "${warning.replacement}" in ${label}.` : `Remove "${warning.key}" from ${label}.`, warning.diagnostic ? [{ ...warning.diagnostic, source: label }] : undefined);
+        }
         if (scope === "user") user = config;
         else project = config;
         add(`config.${scope}`, "ok", config ? `${scope} configuration valid.` : `${scope} configuration not present; defaults apply.`);
       }
     } catch {
-      add(`config.${scope}`, "error", `Cannot inspect ${scope} configuration.`, `Check access to ${path}.`);
+      const diagnostic = configDiagnostic(sourceLabel(path), "", "unreadable", "Restore access to a readable config file");
+      configFiles.set(path, configReadError([diagnostic]));
+      configRepairs.set(scope, `config.${scope}`);
+      add(`config.${scope}`, "error", configDiagnosticSummary(diagnostic), `Check access to ${sourceLabel(path)}.`, [diagnostic]);
     }
   }
   const invalidConfig = checks.some(c => c.id.startsWith("config.") && c.status === "error");
-  const settings = resolveSettings({ user, project, cli: cliOverridesFromArgs({ ...input.args, approval: undefined }) });
+  const settings = resolveSettings({ user, project, diagnosticContext, cli: cliOverridesFromArgs({ ...input.args, approval: undefined }), configSources: { user: home ? sourceLabel(userConfigPath(home)) : undefined, project: workspace ? sourceLabel(projectConfigPath(workspace)) : undefined } });
+  configDiagnosticSecrets(diagnosticContext, [settings]);
   const approval = resolveApprovalSettings({ user, project });
-  if (approval.ignoredProjectApprovalMode !== undefined) add("approval-config", "warning", `Project approval.mode "${approval.ignoredProjectApprovalMode}" is looser than your "${approval.userApprovalMode}" and is ignored.`, `Remove approval.mode from ${projectConfigPath(workspace!)} or set a stricter mode.`);
+  if (invalidConfig) add("approval-config", "warning", "Approval configuration needs repair", "Fix the config.user or config.project error, then rerun doctor.");
+  else if (approval.ignoredProjectApprovalMode !== undefined) add("approval-config", "warning", `Project approval.mode "${approval.ignoredProjectApprovalMode}" is looser than your "${approval.userApprovalMode}" and is ignored.`, `Remove approval.mode from ${sourceLabel(projectConfigPath(workspace!))} or set a stricter mode.`);
   else add("approval-config", "ok", `Approval mode: ${approval.approvalMode}.`);
   if (home) {
     try {
@@ -153,7 +186,7 @@ export async function diagnose(input: {
   }
   if (invalidConfig) add("provider", "warning", "Provider selection may change after invalid configuration is fixed.", "Fix configuration, then rerun doctor.");
   else if ("error" in settings) {
-    add("provider", "error", "Provider or profile settings cannot be resolved (unknown profile, incompatible mode, or missing endpoint).", "Check --profile, --provider and --base-url against configured profiles.");
+    add("provider", "error", settings.diagnostics?.map(configDiagnosticSummary).join("; ") ?? "Provider or profile settings cannot be resolved (unknown profile, incompatible mode, or missing endpoint).", settings.diagnostics ? `Repair ${[...new Set(settings.diagnostics.map(d => d.source))].join(", ")} and follow the setting guidance.` : "Check --profile, --provider and --base-url against configured profiles.", settings.diagnostics);
   } else if (hasCliConnectionOptions(input.args) && settings.provider !== "openai-compatible") {
     add("provider", "error", "OpenAI-compatible connection flags conflict with the selected provider.", "Select --provider openai-compatible or remove --base-url, --header, --body, --auth and --profile.");
   } else if (input.args.xaiAuth !== undefined && settings.provider !== "xai") {
@@ -162,8 +195,8 @@ export async function diagnose(input: {
     add("provider", "error", "OpenAI auth preference conflicts with the selected provider.", "Select --provider openai or remove --openai-auth.");
   } else {
     report.provider = settings.provider;
-    if (settings.profile) report.profile = settings.profile;
-    add("provider", "ok", `${settings.provider}${settings.profile ? ` profile ${settings.profile}` : ""} selected.`);
+    if (settings.profile) report.profile = sourceLabel(settings.profile);
+    add("provider", "ok", `${settings.provider}${report.profile ? ` profile ${report.profile}` : ""} selected.`);
     const store = input.store ?? createNativeCredentialStore();
     const runtime = input.args.apiKey;
     const envName = settings.credentialEnv ?? credentialEnvironmentVariable(settings.provider);
@@ -250,20 +283,11 @@ export async function diagnose(input: {
 
   if (workspace) {
     try {
-      const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal, configDeprecations: input.configDeprecations });
-      add("packages", "ok", `${legacyDoctorCount(inspected.packages.length, "enabled package manifest")} valid.`);
-      // Bound identifiers and redact only known credential sources: ordinary env/header values are not keys.
-      const credentialEnvNames = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", COMPATIBLE_API_KEY_ENV,
-        ...(!("error" in settings) && settings.credentialEnv ? [settings.credentialEnv] : [])];
-      const credentialHeaders = Object.entries(input.args.headers ?? {})
-        .filter(([name]) => CREDENTIAL_HEADER_NAMES.has(name.trim().toLowerCase()))
-        .flatMap(([, value]) => {
-          // Authorization schemes prefix the actual credential; redact both forms.
-          const token = /^(?:Bearer|Basic|Token)\s+(\S+)$/i.exec(value.trim())?.[1];
-          return token ? [value, token] : [value];
-        });
-      const secrets = [input.args.apiKey, ...credentialEnvNames.map(name => env[name]), ...credentialHeaders]
-        .filter((value): value is string => !!value).sort((a, b) => b.length - a.length);
+      const inspected = await inspectPackages({ workspaceRoot: workspace, home, signal: input.signal, configDeprecations: input.configDeprecations, configFiles, diagnosticContext });
+      const incomplete = inspected.issues.filter(issue => issue.kind === "configuration");
+      const repairs = [...new Set(incomplete.map(issue => { const scope = issue.scope === "global" ? "user" : "project"; return configRepairs.get(scope) ?? `config.${scope}`; }))].join(", ");
+      if (incomplete.length) add("packages", "warning", "Package inspection incomplete", `Repair ${repairs}, then rerun doctor; other scopes were inspected.`);
+      else add("packages", "ok", `${legacyDoctorCount(inspected.packages.length, "enabled package manifest")} valid.`);
       const safeName = (value: string) => redactSecrets(value, secrets).replace(/[^a-zA-Z0-9._*/-]/g, "?").slice(0, 64);
       const safeEntry = (value: string) => {
         const redacted = redactSecrets(value, secrets).replace(/[^a-zA-Z0-9._*/-]/g, "?");
@@ -271,8 +295,10 @@ export async function diagnose(input: {
       };
       for (let i = 0; i < inspected.issues.length; i++) {
         const issue = inspected.issues[i]!;
+        // These are the same observations already reported by config.user/config.project.
+        if (issue.kind === "configuration") continue;
         const subject = issue.name ? `${issue.scope} package ${safeName(issue.name)}` : `${issue.scope} package configuration`;
-        const category = issue.kind === "configuration" ? "is invalid or unreadable" : issue.kind === "missing" ? "has a missing installation" : issue.kind === "entry" ? `has missing declared entry ${safeEntry(issue.entry ?? "unknown")}` : issue.kind === "peer" ? "has an invalid or incompatible peer declaration" : "has an invalid manifest";
+        const category = issue.kind === "missing" ? "has a missing installation" : issue.kind === "entry" ? `has missing declared entry ${safeEntry(issue.entry ?? "unknown")}` : issue.kind === "peer" ? "has an invalid or incompatible peer declaration" : "has an invalid manifest";
         add(`package.${i}`, "error", `${subject} ${category}.`, issue.kind === "entry" ? `Restore declared path ${safeEntry(issue.entry ?? "unknown")} inside ${safeName(issue.name ?? "package")}, or remove it from that package's schway manifest.` : issue.name ? `Inspect the schway manifest and declared paths for ${safeName(issue.name)}; install it in its configured scope or remove its enablement.` : "Correct the invalid package configuration or restore access to it.");
       }
       // Discovery accepts already validated packages and never imports extension registration code.
@@ -292,7 +318,10 @@ export async function diagnose(input: {
       }
       const identities = new Set<string>();
       const entries = [...inspected.packages.flatMap(pkg => pkg.extensions), ...(input.args.extensions ?? []).map(path => resolve(workspace, path))];
-      if (!entries.length) add("extensions", "ok", "No executable extensions enabled (optional capability disabled).");
+      if (!entries.length) {
+        if (incomplete.length) add("extensions", "warning", "Extension inspection incomplete", `Repair ${repairs}, then rerun doctor to inspect configured package extensions.`);
+        else add("extensions", "ok", "No executable extensions enabled (optional capability disabled).");
+      }
       for (let i = 0; i < entries.length; i++) {
         try {
           const canonical = await realpath(entries[i]!);
@@ -307,6 +336,18 @@ export async function diagnose(input: {
     }
   }
   input.signal?.throwIfAborted();
+  // A selected credential reference may become known after earlier checks. Redact it everywhere.
+  if (workspace && report.workspace !== undefined) {
+    report.workspace = sourceLabel(workspace);
+    const check = checks.find(check => check.id === "workspace");
+    if (check?.status === "ok") check.summary = `Primary workspace: ${report.workspace}`;
+  }
+  if (report.profile) report.profile = sourceLabel(report.profile);
+  for (const check of checks) {
+    check.summary = redactSecrets(check.summary, secrets);
+    check.remedy = redactSecrets(check.remedy, secrets);
+    if (check.diagnostics) check.diagnostics = check.diagnostics.map(diagnostic => ({ ...diagnostic, source: redactSecrets(diagnostic.source, secrets) }));
+  }
   return report;
 }
 
