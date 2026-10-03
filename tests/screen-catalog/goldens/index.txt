@@ -29,6 +29,9 @@ streaming-answer
 running-search
 parallel-tools
 completed-turn
+shell-long-failure
+shell-long-failure-expanded
+shell-outcomes
 large-edit
 failed-turn
 retry-countdown

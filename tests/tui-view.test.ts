@@ -477,7 +477,7 @@ test("real read, edit, write and bash results render summaries with deterministi
       });
       await ui.controller.submit("Update the file"); await settle(ui);
       const frame = ui.captureCharFrame();
-      for (const summary of ["3 lines", "+1 −1", "new · 42 lines", "exit 0 · 1.2s"]) expect(frame).toContain(summary);
+      for (const summary of ["3 lines", "+1 −1", "new · 42 lines", "Exit 0 · 1.2s"]) expect(frame).toContain(summary);
       expect(frame.includes("2 │-old")).toBe(limit > 0);
       expect(frame.includes("2 │+new")).toBe(limit > 0);
       expect(frame).not.toContain("created line 1");

@@ -159,6 +159,21 @@ session; returning to new work does not paste an older session's draft into it.
 
 ## Turn outcomes and change review
 
+Shell rows distinguish running a tool from the command's observed exit. A
+completed command shows `✓ BASH … Exit 0` or `! BASH … Exit 1` (with its actual
+nonzero code). The outcome and disclosure control stay visible before a long
+command, duration or decoration, including at 40 columns and with `NO_COLOR`.
+Click the disclosure or use **Ctrl+O** to inspect the bounded command output.
+
+Cancellation or a signal without an exit code shows `− Stopped`. A timeout shows
+`! Timed out`, and a tool or harness error shows `! Tool error`. Missing or invalid
+exit details show `− No exit observed`, even if the output says “all tests passed”.
+Saved shell rows without structured exit evidence also use this neutral label;
+their original output remains inspectable. Nonzero outcomes never flash success.
+`Exit 0` reports only the process result: it does not establish that tests ran or
+that a requested change was verified. Tool execution status, model-visible errors,
+headless events and whole-turn command totals retain their existing meaning.
+
 After an accepted turn settles, the activity line shows `✓ Done`, `✗ Failed`,
 `− Cancelled`, or `◌ Limit`, then changed files and known line counts, observed
 command results, elapsed time, and **Alt+R review**. Failed turns also offer

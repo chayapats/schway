@@ -13,7 +13,7 @@ cursor 7 27 visible
 
    ✓  READ  clamp.ts                                             3 lines ▸
    ✓  EDIT  clamp.ts                                              +13 −1 ▸
-   ✓  BASH  printf 'ok\n'                                  exit 0 · 1.2s ▸
+   ✓  BASH  printf 'ok\n'                                  Exit 0 · 1.2s ▸
 
   Updated the clamp implementation.
 
@@ -82,7 +82,9 @@ cursor 7 27 visible
 07 4-5 #1d232c #e1e3df -
 07 5-11 #6a3fb0 #d3cfd9 b
 07 11-25 #1d232c #e1e3df -
-07 25-75 #545e6c #e1e3df -
+07 25-59 #545e6c #e1e3df -
+07 59-72 #19612f #e1e3df -
+07 72-75 #545e6c #e1e3df -
 07 75-77 #ffffff #e1e3df -
 07 77-80 #ffffff #f7f7f4 -
 08 0-80 #ffffff #f7f7f4 -
