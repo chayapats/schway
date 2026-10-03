@@ -1,0 +1,45 @@
+schway-screen 1
+screen auto-mode
+title Auto mode
+description An idle conversation shows the default Auto mode and its change-mode hint.
+variant light-40x8
+size 40x8
+cursor 6 6 visible
+== text
+ scripted/scripted-model · scripted
+ API key
+
+ Type a task · Enter sends
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Enter send
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-24 #1d232c #f7f7f4 b
+00 24-36 #545e6c #f7f7f4 -
+00 36-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-8 #545e6c #f7f7f4 -
+01 8-40 #ffffff #f7f7f4 -
+02 0-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-15 #545e6c #f7f7f4 -
+03 15-20 #1d232c #caced3 b
+03 20-26 #545e6c #f7f7f4 -
+03 26-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-39 #ecedea #f7f7f4 -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-5 #0a5894 #ecedea -
+05 5-16 #545e6c #ecedea -
+05 16-39 #ffffff #ecedea -
+05 39-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-39 #ecedea #f7f7f4 -
+06 39-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-18 #545e6c #ecedea -
+07 18-40 #ffffff #f7f7f4 -

@@ -239,7 +239,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
-  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false };
+  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -428,7 +428,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   /** Render the status pill within terminal width, adding model details only after connection. */
   function paintFooter(at: number) {
     const columns = Math.max(1, renderer.width);
-    const modeChip = footerParts.approvalMode !== "auto" ? [bold(fg(theme.warning)(footerParts.approvalMode === "ask" ? "◆ ASK" : "◆ READ-ONLY")), fg(theme.muted)(" ")] : [];
+    const modeLabel = { auto: "Auto", ask: "Ask", "read-only": "Read-only" }[footerParts.approvalMode];
+    const modeColor = footerParts.approvalMode === "auto" ? theme.text : theme.warning;
+    const modeChip = [bold(fg(modeColor)(`◆ ${modeLabel}`)), fg(theme.muted)(" ")];
+    // When space hides hints, keep the mode and urgent key before status decoration.
+    const compactFooter = (action: string) => {
+      const room = columns - Bun.stringWidth(modeLabel) - 4;
+      const next = Bun.stringWidth(action) <= room ? action : action.split(" ")[0]!;
+      footer.content = new StyledText([fg(theme.muted)(" "), bold(fg(modeColor)(modeLabel)),
+        ...(Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
+    };
+    if (columns < 30 || !hints.visible) { compactFooter(footerParts.nextAction); return; }
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
@@ -438,7 +448,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const sweep = ((at / 30) % (label.length + 16)) - 8;
     const pillChunks = [...label].map((char, index) => bold(bg(pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill)(fg(colors.fg)(char))));
     const approvalPillChunks = [...modeChip, ...pillChunks];
-    if (footerParts.notConnected) { footer.content = new StyledText([fg(theme.muted)(" "), ...approvalPillChunks]); return; }
+    if (footerParts.notConnected) {
+      const action = keyHintChunks(footerParts.nextAction, hintColors(theme.surface));
+      if (chunkWidth(approvalPillChunks) + chunkWidth(action) + 3 > columns) compactFooter(footerParts.nextAction);
+      else footer.content = new StyledText([fg(theme.muted)(" "), ...approvalPillChunks, fg(theme.muted)(" "), ...action]);
+      return;
+    }
     const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
     const thinking = footerParts.thinking ? [bg(tint(theme, theme.violet, theme.surface))(fg(theme.violet)(` ${footerParts.thinking} `))] : [];
     const route = footerParts.route ? [fg(theme.muted)(` ${footerParts.route}`)] : [];
@@ -448,9 +463,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const ctx = footerParts.ctxPercent === undefined
       ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
       : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
-    const esc = footerParts.running ? keyHintChunks(footerParts.toolApproval ? "Ctrl+C cancel" : "Esc stops", hintColors(theme.surface)) : [];
+    const esc = footerParts.running ? keyHintChunks(footerParts.nextAction, hintColors(theme.surface)) : [];
     const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
-    // Narrow priority: pill, Esc stops and context stay; route then reasoning drop, then the model name is clipped.
+    // Keep mode and the active action; drop route, reasoning, model and context as space tightens.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
     const build = (modelChunks = model) => ({
       left: [...approvalPillChunks, fg(theme.muted)(" "), ...modelChunks, ...(include.thinking ? [fg(theme.muted)(" "), ...thinking] : []), ...(include.route ? route : [])],
@@ -469,7 +484,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const room = columns - chunkWidth(approvalPillChunks) - chunkWidth(build([]).right) - 6;
       ({ left, right } = build(room > 3 ? [bg(theme.surface2)(fg(theme.text)(` ${fitLine(footerParts.model, room - 2)} `))] : []));
     }
-    if (!fits()) { left = approvalPillChunks; right = chunkWidth(approvalPillChunks) + chunkWidth(esc) + 3 <= columns ? esc : []; }
+    if (!fits()) {
+      if (chunkWidth(approvalPillChunks) + chunkWidth(esc) + 3 > columns) {
+        compactFooter(footerParts.nextAction);
+        return;
+      }
+      left = approvalPillChunks; right = esc;
+    }
     footer.content = new StyledText([fg(theme.muted)(" "), ...left, ...gapChunk(columns - chunkWidth(left) - chunkWidth(right) - 2), ...right]);
   }
 
@@ -663,6 +684,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
+        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection ? "Esc back"
+          : snapshot.activity || snapshot.status === "running" ? "Esc stops"
+          : snapshot.readiness === "loading" ? "Esc cancel"
+          : snapshot.recovery?.actions.includes("details") ? "Ctrl+I details"
+          : snapshot.readiness === "ready" ? "Enter send"
+          : snapshot.readiness === "not-connected" || snapshot.readiness === "connect" ? "Alt+L sign in" : "Alt+M model",
       };
       const tail = entries.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
@@ -984,7 +1011,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (snapshot.modelPicker) {
         hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
-        const modeHint = snapshot.approvalMode === "auto" ? "" : `Shift+Tab ${snapshot.approvalMode} · `;
+        const modeHint = "Shift+Tab change mode · ";
         hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;

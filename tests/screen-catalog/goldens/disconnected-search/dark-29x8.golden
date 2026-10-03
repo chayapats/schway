@@ -1,0 +1,42 @@
+schway-screen 1
+screen disconnected-search
+title Search before connecting
+description A disconnected conversation retains its mode and search restore action.
+variant dark-29x8
+size 29x8
+cursor 12 6 visible
+== text
+ Read the project README
+ before making changes.
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › README
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Read-only · Esc restore
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-25 #8b95a7 #2c3444 -
+00 25-27 #ffffff #2c3444 -
+00 27-29 #ffffff #0e1117 -
+01 0-1 #ffffff #0e1117 -
+01 1-23 #8b95a7 #2c3444 -
+01 23-27 #ffffff #2c3444 -
+01 27-29 #ffffff #0e1117 -
+02 0-29 #ffffff #0e1117 -
+03 0-29 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-28 #161b24 #0e1117 -
+04 28-29 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-5 #7cc4ff #161b24 -
+05 5-11 #e6eaf0 #161b24 -
+05 11-28 #ffffff #161b24 -
+05 28-29 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-28 #161b24 #0e1117 -
+06 28-29 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-10 #f0c674 #161b24 b
+07 10-24 #8b95a7 #161b24 -
+07 24-29 #ffffff #0e1117 -

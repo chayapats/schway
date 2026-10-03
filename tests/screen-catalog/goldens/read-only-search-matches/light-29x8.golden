@@ -1,0 +1,42 @@
+schway-screen 1
+screen read-only-search-matches
+title Read-only search, matching query
+description A matching query retains the mode and Escape action at safety widths.
+variant light-29x8
+size 29x8
+cursor 12 6 visible
+== text
+ Read the project README
+ before making changes.
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › README
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Read-only · Esc restore
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-25 #545e6c #c5c9cf -
+00 25-27 #ffffff #c5c9cf -
+00 27-29 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-23 #545e6c #c5c9cf -
+01 23-27 #ffffff #c5c9cf -
+01 27-29 #ffffff #f7f7f4 -
+02 0-29 #ffffff #f7f7f4 -
+03 0-29 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-28 #ecedea #f7f7f4 -
+04 28-29 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-5 #0a5894 #ecedea -
+05 5-11 #1d232c #ecedea -
+05 11-28 #ffffff #ecedea -
+05 28-29 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-28 #ecedea #f7f7f4 -
+06 28-29 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-10 #7a5000 #ecedea b
+07 10-24 #545e6c #ecedea -
+07 24-29 #ffffff #f7f7f4 -

@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Search models or type provider/model…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● Ready   openai/gpt-6-astra       ctx ━━━━━ 0%
+ ◆ Auto  ● Ready   openai/gpt-6-…    ctx ━━━━━ 0%
  ↑↓ select · Enter use · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -110,10 +110,12 @@ cursor 6 27 visible
 27 1-49 #ecedea #f7f7f4 -
 27 49-50 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-10 #19612f #d3dcd4 b
-28 10-11 #545e6c #ecedea -
-28 11-31 #1d232c #e1e3df -
-28 31-41 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-34 #1d232c #e1e3df -
+28 34-41 #545e6c #ecedea -
 28 41-46 #c5c9cf #ecedea -
 28 46-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -

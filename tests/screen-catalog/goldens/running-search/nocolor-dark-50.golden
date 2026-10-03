@@ -1,0 +1,120 @@
+schway-screen 1
+screen running-search
+title Search during active work
+description Search retains the current mode and offers Escape to restore the draft while the turn keeps running.
+variant nocolor-dark-50
+size 50x30
+cursor 12 27 visible
+== text
+ ⚡ schway  /project
+
+ ▌ You
+ ▌ Explain the config loader
+
+
+ Plan
+ Reading the config loader first.
+   ▸ Check src/config/config.ts
+   ▸ Then▍
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ⌕ Find 1/4 · active branch, displayed text
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › config
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ⠋ Receiving 4.0s     Esc restore  ctx ~7
+ ↑/↓ next/previous · Enter accept · Esc restore
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #e6eaf0 #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-50 #ffffff #161b24 -
+01 0-50 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-2 #e6eaf0 #2c3444 -
+02 2-3 #ffffff #2c3444 -
+02 3-6 #e6eaf0 #2c3444 b
+02 6-48 #ffffff #2c3444 -
+02 48-50 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-2 #e6eaf0 #2c3444 -
+03 2-3 #ffffff #2c3444 -
+03 3-28 #e6eaf0 #2c3444 -
+03 28-48 #ffffff #2c3444 -
+03 48-50 #ffffff #0e1117 -
+04 0-50 #ffffff #0e1117 -
+05 0-50 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-5 #e6eaf0 #0e1117 b
+06 5-50 #ffffff #0e1117 -
+07 0-1 #ffffff #0e1117 -
+07 1-13 #e6eaf0 #0e1117 -
+07 13-19 #e6eaf0 #0e1117 b
+07 19-33 #e6eaf0 #0e1117 -
+07 33-50 #ffffff #0e1117 -
+08 0-3 #ffffff #0e1117 -
+08 3-11 #e6eaf0 #0e1117 -
+08 11-31 #e6eaf0 #4a505a -
+08 31-50 #ffffff #0e1117 -
+09 0-3 #ffffff #0e1117 -
+09 3-10 #e6eaf0 #0e1117 -
+09 10-50 #ffffff #0e1117 -
+10 0-50 #ffffff #0e1117 -
+11 0-50 #ffffff #0e1117 -
+12 0-50 #ffffff #0e1117 -
+13 0-50 #ffffff #0e1117 -
+14 0-50 #ffffff #0e1117 -
+15 0-50 #ffffff #0e1117 -
+16 0-50 #ffffff #0e1117 -
+17 0-50 #ffffff #0e1117 -
+18 0-50 #ffffff #0e1117 -
+19 0-50 #ffffff #0e1117 -
+20 0-50 #ffffff #0e1117 -
+21 0-50 #ffffff #0e1117 -
+22 0-50 #ffffff #0e1117 -
+23 0-50 #ffffff #0e1117 -
+24 0-1 #ffffff #0e1117 -
+24 1-2 #e6eaf0 #0e1117 b
+24 2-3 #8b95a7 #0e1117 -
+24 3-43 #e6eaf0 #0e1117 -
+24 43-50 #ffffff #0e1117 -
+25 0-1 #ffffff #0e1117 -
+25 1-49 #161b24 #0e1117 -
+25 49-50 #ffffff #0e1117 -
+26 0-1 #ffffff #0e1117 -
+26 1-11 #e6eaf0 #161b24 -
+26 11-49 #ffffff #161b24 -
+26 49-50 #ffffff #0e1117 -
+27 0-1 #ffffff #0e1117 -
+27 1-49 #161b24 #0e1117 -
+27 49-50 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-26 #0e1117 #e6eaf0 b
+28 26-30 #8b95a7 #161b24 -
+28 30-33 #e6eaf0 #2a3241 b
+28 33-49 #8b95a7 #161b24 -
+28 49-50 #ffffff #0e1117 -
+29 0-1 #ffffff #0e1117 -
+29 1-4 #e6eaf0 #293140 b
+29 4-21 #8b95a7 #0e1117 -
+29 21-26 #e6eaf0 #293140 b
+29 26-36 #8b95a7 #0e1117 -
+29 36-39 #e6eaf0 #293140 b
+29 39-47 #8b95a7 #0e1117 -
+29 47-50 #ffffff #0e1117 -

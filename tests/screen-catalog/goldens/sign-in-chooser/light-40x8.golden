@@ -1,0 +1,49 @@
+schway-screen 1
+screen sign-in-chooser
+title Sign-in chooser
+description The connection chooser groups subscriptions, API keys and a custom endpoint.
+variant light-40x8
+size 40x8
+cursor 6 6 visible
+== text
+ Not connected
+ Connect a provider · Alt+L
+  Sign in
+      › ChatGPT
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc back
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-14 #1d232c #f7f7f4 b
+00 14-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-22 #545e6c #f7f7f4 -
+01 22-27 #1d232c #caced3 b
+01 27-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #ffffff #e1e3df -
+02 2-9 #0a5894 #e1e3df -
+02 9-39 #ffffff #e1e3df -
+02 39-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-2 #ffffff #e1e3df -
+03 2-15 #0a5894 #c7d2d6 -
+03 15-39 #ffffff #e1e3df -
+03 39-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-39 #ecedea #f7f7f4 -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-5 #0a5894 #ecedea -
+05 5-16 #545e6c #ecedea -
+05 16-39 #ffffff #ecedea -
+05 39-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-39 #ecedea #f7f7f4 -
+06 39-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-16 #545e6c #ecedea -
+07 16-40 #ffffff #f7f7f4 -

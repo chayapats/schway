@@ -66,7 +66,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   if (screen.id === "compaction") for (let i = 0; i < 2; i++) session.append({ type: "user", id: `user-${i}`, content: [{ type: "text", text: `Explain session loading step ${i + 1}.` }] }, { type: "assistant", id: `assistant-${i}`, content: [{ type: "text", text: "Read the records, validate them, and restore the conversation." }] });
   let responses: ScriptedTurn[] = [{ text: "Ready." }];
-  if (screen.id === "streaming-answer") responses = [{ chunks: ["## Plan\n\n", "Reading the **config** loader first.\n\n", "- Check `src/config/config.ts`\n- Then"], waitForAbort: true }];
+  if (["streaming-answer", "running-search"].includes(screen.id)) responses = [{ chunks: ["## Plan\n\n", "Reading the **config** loader first.\n\n", "- Check `src/config/config.ts`\n- Then"], waitForAbort: true }];
   if (["failed-turn", "no-color"].includes(screen.id)) responses = Array.from({ length: 3 }, () => ({ error: "Service unavailable", status: 503 }));
   if (screen.id === "retry-countdown") responses = [{ error: "busy", status: 503, headers: { "Retry-After": "3" } }];
   if (screen.id === "compaction") responses = [{ waitForAbort: true }];
@@ -96,7 +96,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
     responses = [{ toolCalls: names.map(name => ({ id: `call_fixture_parallel_${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
   }
-  const fresh = ["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
+  const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
@@ -116,6 +116,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
   if (screen.id === "approval-command" || screen.id === "approval-edit") options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });
+  if (screen.id === "approval-modes-help") options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (picker || unconnectedPicker) {
     options.configEditor = new ConfigEditor(picker ? { cli: { provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787/v1", auth: "none" } } : {},
       { user: join(home, "config.json"), project: join(root, "config.json") });

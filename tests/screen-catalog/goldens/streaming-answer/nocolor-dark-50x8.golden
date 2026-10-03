@@ -1,0 +1,45 @@
+schway-screen 1
+screen streaming-answer
+title Streaming answer
+description An incomplete Markdown answer streams into the transcript.
+variant nocolor-dark-50x8
+size 50x8
+cursor 6 6 visible
+== text
+ Reading the config loader first.
+   ▸ Check src/config/config.ts
+   ▸ Then▍
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc stops
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-13 #e6eaf0 #0e1117 -
+00 13-19 #e6eaf0 #0e1117 b
+00 19-33 #e6eaf0 #0e1117 -
+00 33-50 #ffffff #0e1117 -
+01 0-3 #ffffff #0e1117 -
+01 3-11 #e6eaf0 #0e1117 -
+01 11-31 #e6eaf0 #4a505a -
+01 31-50 #ffffff #0e1117 -
+02 0-3 #ffffff #0e1117 -
+02 3-10 #e6eaf0 #0e1117 -
+02 10-50 #ffffff #0e1117 -
+03 0-50 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-49 #161b24 #0e1117 -
+04 49-50 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-5 #e6eaf0 #161b24 -
+05 5-16 #8b95a7 #161b24 -
+05 16-49 #ffffff #161b24 -
+05 49-50 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-49 #161b24 #0e1117 -
+06 49-50 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-5 #e6eaf0 #161b24 b
+07 5-17 #8b95a7 #161b24 -
+07 17-50 #ffffff #0e1117 -

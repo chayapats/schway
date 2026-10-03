@@ -23,18 +23,18 @@ cursor 6 27 visible
  Saved here: Inherited
  Effective now: Provider default (medium)
 
-
-
-
-
-
+ Approval modes · Esc back to change
+ Auto: Run tools without asking.
+ Ask: Ask before tools that need approval.
+ Read-only: Allow read-only tools.
+ PgUp/PgDn scroll · Esc back
 
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● Ready   openai-compatible/meta/mus…    ctx ~0
+ ◆ Auto  ● Ready   openai-compatible/m…    ctx ~0
  ←→ change · Enter preview · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -87,11 +87,21 @@ cursor 6 27 visible
 15 1-41 #e6eaf0 #0e1117 -
 15 41-50 #ffffff #0e1117 -
 16 0-50 #ffffff #0e1117 -
-17 0-50 #ffffff #0e1117 -
-18 0-50 #ffffff #0e1117 -
-19 0-50 #ffffff #0e1117 -
-20 0-50 #ffffff #0e1117 -
-21 0-50 #ffffff #0e1117 -
+17 0-1 #ffffff #0e1117 -
+17 1-36 #e6eaf0 #0e1117 -
+17 36-50 #ffffff #0e1117 -
+18 0-1 #ffffff #0e1117 -
+18 1-32 #e6eaf0 #0e1117 -
+18 32-50 #ffffff #0e1117 -
+19 0-1 #ffffff #0e1117 -
+19 1-42 #e6eaf0 #0e1117 -
+19 42-50 #ffffff #0e1117 -
+20 0-1 #ffffff #0e1117 -
+20 1-34 #e6eaf0 #0e1117 -
+20 34-50 #ffffff #0e1117 -
+21 0-1 #ffffff #0e1117 -
+21 1-28 #e6eaf0 #0e1117 -
+21 28-50 #ffffff #0e1117 -
 22 0-50 #ffffff #0e1117 -
 23 0-50 #ffffff #0e1117 -
 24 0-50 #ffffff #0e1117 -
@@ -107,9 +117,11 @@ cursor 6 27 visible
 27 1-49 #161b24 #0e1117 -
 27 49-50 #ffffff #0e1117 -
 28 0-1 #8b95a7 #161b24 -
-28 1-10 #8fd19e #31433f b
-28 10-11 #8b95a7 #161b24 -
-28 11-40 #e6eaf0 #1e2430 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-17 #8fd19e #31433f b
+28 17-18 #8b95a7 #161b24 -
+28 18-40 #e6eaf0 #1e2430 -
 28 40-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -

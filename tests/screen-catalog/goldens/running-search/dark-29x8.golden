@@ -1,0 +1,51 @@
+schway-screen 1
+screen running-search
+title Search during active work
+description Search retains the current mode and offers Escape to restore the draft while the turn keeps running.
+variant dark-29x8
+size 29x8
+cursor 12 6 visible
+== text
+ ▌ You
+ ▌ Explain the config
+ ▌ loader
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › config
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc restore
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-2 #7cc4ff #2c3444 -
+00 2-3 #ffffff #2c3444 -
+00 3-6 #7cc4ff #2c3444 b
+00 6-27 #ffffff #2c3444 -
+00 27-29 #ffffff #0e1117 -
+01 0-1 #ffffff #0e1117 -
+01 1-2 #7cc4ff #2c3444 -
+01 2-3 #ffffff #2c3444 -
+01 3-22 #e6eaf0 #2c3444 -
+01 22-27 #ffffff #2c3444 -
+01 27-29 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-2 #7cc4ff #2c3444 -
+02 2-3 #ffffff #2c3444 -
+02 3-9 #e6eaf0 #2c3444 -
+02 9-27 #ffffff #2c3444 -
+02 27-29 #ffffff #0e1117 -
+03 0-29 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-28 #161b24 #0e1117 -
+04 28-29 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-5 #7cc4ff #161b24 -
+05 5-11 #e6eaf0 #161b24 -
+05 11-28 #ffffff #161b24 -
+05 28-29 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-28 #161b24 #0e1117 -
+06 28-29 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-5 #e6eaf0 #161b24 b
+07 5-19 #8b95a7 #161b24 -
+07 19-29 #ffffff #0e1117 -

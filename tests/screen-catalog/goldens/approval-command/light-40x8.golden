@@ -1,0 +1,48 @@
+schway-screen 1
+screen approval-command
+title Approve a command
+description A mutating command waits for an interactive approval choice.
+variant light-40x8
+size 40x8
+cursor 1 1 hidden
+== text
+  Allow bash? · ask mode
+
+  bun test --filter clamp
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ ›
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Ask · Ctrl+C cancel
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-2 #ffffff #e1e3df -
+00 2-24 #1d232c #e1e3df -
+00 24-39 #ffffff #e1e3df -
+00 39-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-39 #ffffff #e1e3df -
+01 39-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #ffffff #e1e3df -
+02 2-25 #1d232c #e1e3df -
+02 25-39 #ffffff #e1e3df -
+02 39-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-39 #ffffff #e1e3df -
+03 39-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-39 #ecedea #f7f7f4 -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-2 #7a5000 #ecedea -
+05 2-5 #0a5894 #ecedea -
+05 5-39 #ffffff #ecedea -
+05 39-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-39 #ecedea #f7f7f4 -
+06 39-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-4 #7a5000 #ecedea b
+07 4-20 #545e6c #ecedea -
+07 20-40 #ffffff #f7f7f4 -

@@ -1,0 +1,45 @@
+schway-screen 1
+screen ask-mode
+title Ask mode
+description An idle conversation shows the ask approval chip and mode hint.
+variant dark-40x8
+size 40x8
+cursor 6 6 visible
+== text
+ scripted/scripted-model · scripted
+ API key
+
+ Type a task · Enter sends
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Ask · Enter send
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-24 #e6eaf0 #0e1117 b
+00 24-36 #8b95a7 #0e1117 -
+00 36-40 #ffffff #0e1117 -
+01 0-1 #ffffff #0e1117 -
+01 1-8 #8b95a7 #0e1117 -
+01 8-40 #ffffff #0e1117 -
+02 0-40 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-15 #8b95a7 #0e1117 -
+03 15-20 #e6eaf0 #293140 b
+03 20-26 #8b95a7 #0e1117 -
+03 26-40 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-39 #161b24 #0e1117 -
+04 39-40 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-5 #7cc4ff #161b24 -
+05 5-16 #8b95a7 #161b24 -
+05 16-39 #ffffff #161b24 -
+05 39-40 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-39 #161b24 #0e1117 -
+06 39-40 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-4 #f0c674 #161b24 b
+07 4-17 #8b95a7 #161b24 -
+07 17-40 #ffffff #0e1117 -

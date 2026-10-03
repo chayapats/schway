@@ -1,6 +1,12 @@
 first-run
+disconnected-search
+auto-mode
 read-only-mode
 ask-mode
+approval-modes-help
+read-only-search-empty
+read-only-search-matches
+read-only-search-no-matches
 approval-command
 approval-edit
 sign-in-chooser
@@ -20,6 +26,7 @@ command-palette-groups
 command-palette-query
 thai-composer
 streaming-answer
+running-search
 parallel-tools
 completed-turn
 large-edit
