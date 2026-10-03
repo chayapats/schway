@@ -89,7 +89,7 @@ export async function executeWrite(
     details: {
       path: input.path,
       resolvedPath,
-      created: observed === null,
+      created: observed?.target == null,
       lineCount: countLines(input.content),
     } satisfies WriteDetails,
   };

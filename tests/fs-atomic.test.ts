@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmod, lstat, open, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { FileChangedError, observeFile, writeFileAtomically } from "../src/tools/fs.ts";
+import { FileChangedError, observeFile, observeFileTarget, writeFileAtomically } from "../src/tools/fs.ts";
 import { withTempDir } from "./helpers.ts";
 
 test("a partial temporary write is exclusive and private, and cancellation removes it without publishing", async () => {
@@ -49,6 +49,23 @@ for (const race of ["chmod", "replace", "symlink", "delete", "save", "create"] a
         if (["chmod", "replace", "symlink"].includes(race)) expect((await stat(path)).mode & 0o777).toBe(0o600);
         if (race === "symlink") expect((await lstat(path)).isSymbolicLink()).toBe(true);
       }
+    });
+  });
+}
+
+for (const race of ["link-replaced", "referent-created"] as const) {
+  test(`dangling-link replacement rejects a ${race} race while retaining the new target`, async () => {
+    await withTempDir(async root => {
+      const path = join(root, "link"), target = join(root, "absent"); await symlink(target, path);
+      const observed = await observeFileTarget(path);
+      expect(observed?.entry.isSymbolicLink()).toBe(true); expect(observed?.target).toBeNull();
+      await expect(writeFileAtomically(path, "agent", undefined, async () => {
+        if (race === "link-replaced") { await unlink(path); await writeFile(path, "later", { mode: 0o600 }); }
+        else await writeFile(target, "later", { mode: 0o600 });
+      }, { observed })).rejects.toBeInstanceOf(FileChangedError);
+      expect(await readFile(path, "utf8")).toBe("later"); expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect((await lstat(path)).isSymbolicLink()).toBe(race === "referent-created");
+      expect((await readdir(root)).some(name => name.endsWith(".tmp"))).toBe(false);
     });
   });
 }
@@ -136,5 +153,30 @@ test("replacement preserves ordinary bits without copying setuid, setgid, sticky
     await writeFileAtomically(path, "after");
     const mode = (await stat(path)).mode;
     expect(mode & 0o7777).toBe(0o755); expect((await stat(path)).isFile()).toBe(true);
+  });
+});
+
+test("a chmod to unreadable during final content validation is still classified as a changed target", async () => {
+  await withTempDir(async root => {
+    const script = `
+      import { mock } from "bun:test";
+      const fs = await import("node:fs/promises"), realRead = fs.readFile;
+      const path = ${JSON.stringify(join(root, "file"))}; let armed = false;
+      await fs.writeFile(path, "before", { mode: 0o600 });
+      mock.module("node:fs/promises", () => ({ ...fs, readFile: async (...args) => {
+        if (armed && args[0] === path) { armed = false; await fs.chmod(path, 0o000); }
+        return realRead(...args);
+      } }));
+      const { observeFile, writeFileAtomically, FileChangedError } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});
+      const observed = await observeFile(path); armed = true; let changed = false;
+      try { await writeFileAtomically(path, "agent", undefined, undefined, { observed }); }
+      catch (error) { changed = error instanceof FileChangedError; }
+      const mode = (await fs.stat(path)).mode & 0o777; await fs.chmod(path, 0o600);
+      console.log(JSON.stringify({ changed, mode, bytes: await realRead(path, "utf8"), files: await fs.readdir(${JSON.stringify(root)}) }));
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(err).toBe(""); expect(code).toBe(0);
+    expect(JSON.parse(out)).toEqual({ changed: true, mode: 0, bytes: "before", files: ["file"] });
   });
 });

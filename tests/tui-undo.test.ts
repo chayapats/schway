@@ -113,6 +113,29 @@ test("mode-only changes before preview protect existing and created files with n
   });
 });
 
+for (const changed of ["clamp.ts", "src/new.ts"] as const) {
+  test(`undo skips ${changed} chmod to 0000 after preview instead of reporting a restore failure`, async () => {
+    await withTempDir(async root => {
+      const path = join(root, changed);
+      await writeFile(join(root, "clamp.ts"), original, { mode: 0o600 });
+      const ui = await setup(root);
+      try {
+        await ui.send("Fix clamp"); await chmod(path, 0o600);
+        // Refresh the settled mode so the fixture tests only the preview/apply interval.
+        const { openUndoStore } = await import("../src/undo/store.ts"), store = openUndoStore({ home: ui.home });
+        const turn = (await store.list(ui.session.rootId))[0]!; await store.settle(turn, path, false);
+        await ui.send("/undo"); await chmod(path, 0o000);
+        await ui.controller.applyUndo();
+        expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+        expect(ui.session.items.at(-1)).toMatchObject({ type: "turn_undo", skipped: [{ path: changed, reason: "changed" }] });
+        expect((await stat(path)).mode & 0o777).toBe(0o000);
+        await chmod(path, 0o600);
+        expect(await readFile(path, "utf8")).toBe(changed === "clamp.ts" ? modified : "export const newFile = true;\n");
+      } finally { await chmod(path, 0o600).catch(() => {}); await ui.dispose(); }
+    });
+  });
+}
+
 test("legacy undo preserves a pre-preview chmod with an explicit Details caveat and leaves the manifest untouched", async () => {
   await withTempDir(async root => {
     const path = join(root, "clamp.ts"); await writeFile(path, original); await chmod(path, 0o755);

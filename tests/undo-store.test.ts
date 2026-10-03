@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFile, writeFile, chmod, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, chmod, mkdir, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { openUndoStore, pruneUndoStore } from "../src/undo/store.ts";
 import { executeToolCall } from "../src/tools/executor.ts";
@@ -87,6 +87,17 @@ test("created files record absence and repeated edits retain only the first pre-
     expect(manifest.files[0]!.before).toBeNull(); expect(manifest.files[0]!.after).toBeDefined();
     expect((await store.blob("session", manifest.files[1]!.before!.sha256)).toString()).toBe("first");
     expect(manifest.files[1]!.after?.sha256).toBe(Bun.CryptoHasher.hash("sha256", "third", "hex"));
+  });
+});
+
+test("write through undo capture preserves dangling-symlink creation behavior", async () => {
+  await withTempDir(async root => {
+    const { store, run } = await fixture(root), path = join(root, "link");
+    await symlink(join(root, "absent"), path);
+    expect((await run("write", { path: "link", content: "created" })).status).toBe("success");
+    const file = (await store.list("session"))[0]!.files[0]!;
+    expect(file.before).toBeNull(); expect(file.beforeMode).toBeUndefined(); expect(file.after).not.toBeNull();
+    expect(await readFile(path, "utf8")).toBe("created");
   });
 });
 

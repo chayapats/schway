@@ -26,6 +26,10 @@ before publication; reads used by edit are also checked against their original
 bytes. Observable saves, chmods and replacements cause the operation to fail.
 This check and rename are separate filesystem operations, not a kernel-level
 compare-and-swap. Path resolution and existing symlink behavior are unchanged.
+`write` still replaces dangling symlinks and non-directory special entries such
+as FIFOs or sockets using fresh-file defaults; it observes the link entry
+separately from any existing target. Nonregular reads used by `edit` retain their
+single-read behavior and revalidate metadata instead of consuming the stream again.
 
 Windows does not provide the ordinary POSIX permission model: permission metadata
 is omitted, final POSIX chmod is skipped, and native creation/access rules apply.

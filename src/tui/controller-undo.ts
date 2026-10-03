@@ -129,7 +129,7 @@ export abstract class UndoLayer extends ChangesLayer {
     const file = manifest.files.find(file => file.path === path)!;
     let current: Buffer | null = null, before: Buffer | null = null, readable = true;
     let observed: FileObservation | null = null;
-    try { observed = await observeFile(path); current = observed?.bytes ?? null; if (file.before) before = await store.blob(manifest.sessionId, file.before.sha256); }
+    try { observed = await observeFile(path, undefined, { regularOnly: true }); current = observed?.bytes ?? null; if (file.before) before = await store.blob(manifest.sessionId, file.before.sha256); }
     catch { readable = false; }
     const eligible = readable && observed?.entry.isFile() && file.after !== undefined && equalUndoHash(hashUndoBytes(current), file.after)
       && (file.afterMode === undefined || observed.mode === undefined || file.afterMode === observed.mode);
