@@ -28,7 +28,7 @@ export const CLI_OPTIONS: readonly Option[] = [
   { flags: ["-h", "--help"], section: "Common", description: "Show this help", doctor: true },
   { flags: ["-V", "--version"], section: "Common", description: "Show the installed version", doctor: false },
   { flags: ["--provider"], value: "<name>", section: "Model and auth", description: `Use ${CLI_PROVIDERS.join(", ")}`, doctor: true, sample: "openai" },
-  { flags: ["--model"], value: "<id>", section: "Model and auth", description: "Choose a model", doctor: false, sample: "example-model" },
+  { flags: ["--model"], value: "<id>", section: "Model and auth", description: "Choose a model", doctor: true, doctorDescription: "Use this model for local checks", sample: "example-model" },
   { flags: ["--profile"], value: "<name>", section: "Model and auth", description: "Use a named compatible endpoint profile", doctor: true, sample: "local" },
   { flags: ["--thinking"], value: "<level>", section: "Model and auth", description: `Use ${CLI_THINKING_LEVELS.join(",")}`, doctor: true, sample: "low" },
   { flags: ["--openai-auth"], value: "<mode>", section: "Model and auth", description: `Use ${CLI_OPENAI_AUTH_MODES.join(", ")}`, doctor: true, sample: "auto" },
@@ -100,6 +100,7 @@ export function formatDoctorHelp(): string {
     "  schway doctor [options]",
     row("schway --version", "Show the installed version"),
     ...optionSections(true), "", "Examples",
-    "  schway doctor", "  schway doctor --json", "",
+    "  schway doctor", "  schway doctor --json",
+    "  schway doctor --provider openai --openai-auth api-key --model <id>", "",
   ].join("\n");
 }

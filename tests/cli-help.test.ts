@@ -99,10 +99,13 @@ test("doctor help contains exactly the diagnostic option subset", () => {
   const labels = rows.map((line) => line.slice(2, 29).trimEnd());
   expect(labels).toEqual(CLI_OPTIONS.filter((option) => option.doctor).map((option) => option.flags.join(", ") + (option.value ? ` ${option.value}` : "")));
   expect(CLI_OPTIONS.filter((option) => option.doctor).map((option) => option.flags[0])).toEqual([
-    "-h", "--provider", "--profile", "--thinking", "--openai-auth", "--xai-auth", "--api-key", "--add-dir", "--json",
+    "-h", "--provider", "--model", "--profile", "--thinking", "--openai-auth", "--xai-auth", "--api-key", "--add-dir", "--json",
     "--base-url", "--header", "--body", "--auth", "--max-turns", "--max-output", "--context-window", "--max-concurrent-tools", "--env-file", "--extension",
   ]);
   expect(rows.find((row) => row.startsWith("  --json "))).toContain("Print diagnostics as a JSON object");
+  expect(rows.filter((row) => row.startsWith("  --model "))).toEqual([
+    "  --model <id>               Use this model for local checks",
+  ]);
   expect(text).toContain("schway --version");
   expect(text).toContain("Show the installed version");
 });
@@ -129,7 +132,10 @@ test("every example is a complete parseable command with placeholder model and s
       expect(examples).toContain("schway --resume <id>");
       expect(examples.some((line) => line.includes(" -p ") && line.includes("--json"))).toBe(true);
       expect(examples.some((line) => line.includes("--provider") && line.includes("--model <id>"))).toBe(true);
-    } else expect(examples).toContain("schway doctor");
+    } else {
+      expect(examples).toContain("schway doctor");
+      expect(examples).toContain("schway doctor --provider openai --openai-auth api-key --model <id>");
+    }
     for (const example of examples) {
       const words = example.match(/"[^"]*"|\S+/g)!.map((word) => word.replace(/^"|"$/g, ""));
       expect(words.shift()).toBe("schway");

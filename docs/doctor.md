@@ -3,8 +3,8 @@
 ## Diagnose local readiness
 
 Doctor reports runtime, workspace, shell/search, session storage, configuration,
-selected authentication and enabled skill/extension metadata without starting a
-model or executing extensions.
+configured model, selected authentication and enabled skill/extension metadata
+without starting a model or executing extensions.
 
 Run `schway doctor` before starting a conversation; it does not call a model, open a login browser, install packages or execute extension modules.
 
@@ -22,20 +22,60 @@ instead. Other combinations, including `doctor --version`, `--version --json`
 and repeated version flags, fail with exit status **1** before setup is read.
 Lowercase `-v` is not supported.
 
+Replace `MODEL_ID` with the model ID you intend to use; doctor checks its local
+configuration without testing remote access.
+
 ```bash
 schway doctor
 schway doctor --json
-schway doctor --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none
-schway doctor --provider openai --openai-auth codex
+schway doctor --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none --model MODEL_ID
+schway doctor --provider openai --openai-auth codex --model MODEL_ID
 ```
 
 ## Options and exit status
 
-The CLI reads the selected configuration from `~/.schway/config.json` and the canonical primary workspace's `.schway/config.json`. CLI provider, profile, authentication, connection and extension flags override or augment configuration, as in a normal run. `--env-file` is read only if explicitly requested; process `HOME` must already be set and cannot be relocated by a `HOME` entry in that file (matching ordinary runs). Doctor never prints API key contents, stored subscription tokens, HTTP headers or native store exceptions. Its checks only read metadata and key presence; a healthy local result does **not** prove connectivity, provider billing or a successful refresh. Subscription expiry/refresh warnings come from locally stored token timestamps, not a network validation.
+The CLI reads the selected configuration from `~/.schway/config.json` and the canonical primary workspace's `.schway/config.json`. CLI provider, profile, model, authentication, connection and extension flags override or augment configuration, as in a normal run. `--env-file` is read only if explicitly requested; process `HOME` must already be set and cannot be relocated by a `HOME` entry in that file (matching ordinary runs). Doctor never prints API key contents, stored subscription tokens, HTTP headers or native store exceptions. Its checks only read metadata and key presence; a healthy local result does **not** prove connectivity, provider billing or a successful refresh. Subscription expiry/refresh warnings come from locally stored token timestamps, not a network validation.
 
 Readable output is one `[OK]`, `[WARNING]` or `[ERROR]` line per check with a fix for non-OK results. `--json` emits a single object on stdout (`schemaVersion: 1`, `version`, `runtime`, `platform`, optional `workspace`, `provider`, `profile`, `authSource`, and `checks`). Each check has stable `id`, `status` (`ok`, `warning`, `error`), `summary` and `remedy` fields. A disabled optional capability (no extensions, optional compatible auth without a credential) is healthy or warning; an enabled missing module or required credential is an error. When configuration is malformed, unrelated workspace, runtime, storage and package findings remain visible; provider/auth status may require fixing config first.
 
 Exit statuses: **0** no required check failed (warnings allowed); **1** diagnosed required failure; **2** doctor could not complete, such as invalid doctor arguments or cancellation. No files are written by doctor itself. Filesystem permission checks are observational and cannot guarantee that a later disk write succeeds. Extension runtime behavior and live authentication require a real run to verify.
+
+## Configured model
+
+The stable `model` check reports whether the effective headless settings name a
+nonblank model. `--model` overrides file settings; project settings override user
+settings. A selected compatible profile supplies its own model, with an explicit
+`--model` taking precedence. A profile with no model does not inherit a direct
+file model. Changing providers without selecting a model clears an inherited
+model, as in a headless run.
+
+An explicitly configured model produces `ok` and `Configured model: <id>`.
+Printed IDs are bounded and stripped of terminal controls and recognized or
+already observed credential values before display.
+Custom IDs pass this presence check without catalog discovery or a remote
+entitlement check. Capability and thinking validation remain separate: an
+unsupported thinking setting can still produce a required provider/settings
+failure while the model presence check is `ok`.
+
+Without an explicit model, doctor reports `No model configured` as an `error`
+and exits **1**. The remedy is `Pass --model <id> or set model in config, then run
+schway doctor again.` This is a repair template, not a recommended model.
+For a configured profile named `local`, for example:
+
+```bash
+schway doctor --profile local --model MODEL_ID
+```
+
+Malformed configuration or an unresolved provider/profile produces a `model`
+warning with fix-configuration-first guidance. The underlying required error
+and independent readiness checks remain visible. Missing credentials and a
+missing model can both be reported.
+
+Doctor does not read remembered TUI choices or use a historical session model
+or built-in fallback to satisfy this check. It does not persist a selection,
+fetch model catalogs, refresh credentials, request inference, or change the
+selected auth route or billing. A successful local check does not establish
+remote model availability or authorization.
 
 ## Repair invalid configuration
 
