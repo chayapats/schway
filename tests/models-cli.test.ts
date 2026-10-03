@@ -242,8 +242,10 @@ for (const route of ["codex", "grok"] as const) {
     const result = await pending;
     expect(result.catalog).toMatchObject({ route, status: "error", models: [] });
     expect(result.error).toContain("timed out after 5 seconds");
-    expect(calls).toBe(2); expect(new Set(signals).size).toBe(1);
-    expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(calls).toBe(2);
+    // Grok renewal has a shared lifetime; this caller's original deadline still owns the catalog body.
+    expect(signals[1]).toBe(clock.controller.signal); expect(signals[1]!.aborted).toBe(true);
+    if (route === "codex") expect(signals[0]).toBe(signals[1]);
     expect(bodyCancelled).toBe(true); expect(fixture.writes).toEqual([identity.account]);
     expect(clock.inspect()).toEqual({ elapsed: 5_000, budget: 5_000, started: 1, cleared: 1 });
   });
@@ -368,7 +370,8 @@ test("Grok authorization retry shares the original refresh and body deadline", a
   await bodyStarted.promise; clock.advance(1_100);
   const result = await pending;
   expect(result.error).toContain("timed out after 5 seconds"); expect(calls).toBe(3);
-  expect(new Set(signals).size).toBe(1); expect(cancelled).toBe(true); expect(fixture.writes).toEqual([identity.account]);
+  expect(signals[0]).toBe(clock.controller.signal); expect(signals[2]).toBe(signals[0]);
+  expect(signals[2]!.aborted).toBe(true); expect(cancelled).toBe(true); expect(fixture.writes).toEqual([identity.account]);
 });
 
 test("Grok retry preserves missing-refresh guidance without API billing fallback", async () => {
@@ -497,4 +500,133 @@ describe("model catalog discovery", () => {
     expect(result.catalog).toMatchObject({ route: "grok", status: "complete", models: [{ id: "grok-new" }] });
     expect(fixture.reads).toEqual([grokSubscriptionIdentity().account]);
   });
+});
+
+for (const first of ["ordinary", "discovery"] as const) for (const ending of ["complete", "discovery-timeout", "ordinary-cancel"] as const) {
+  test(`Grok ${first}-first callers share renewal with independent ${ending} lifetimes`, async () => {
+    const { createSubscriptionTokenRefresher, GROK_TOKEN_URL } = await import("../src/model/providers/grok-subscription.ts");
+    const identity = grokSubscriptionIdentity();
+    const fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "old-private-refresh", expiresAt: 0, obtainedAt: 0 }) });
+    const started = deferred<void>(), joined = deferred<void>(), release = deferred<void>();
+    const clock = controlledDeadline(), ordinaryAbort = new AbortController(), discoveryAbort = new AbortController();
+    const read = fixture.credentials.get;
+    fixture.credentials.get = async selected => {
+      const value = await read(selected);
+      if (fixture.reads.length === (first === "ordinary" ? 3 : 2)) joined.resolve();
+      return value;
+    };
+    let refreshes = 0;
+    const signals: AbortSignal[] = [];
+    const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url) === GROK_TOKEN_URL) {
+        refreshes++; signals.push(init!.signal!); started.resolve(); await release.promise;
+        return Response.json({ access_token: "shared-private-access", refresh_token: "shared-private-refresh", expires_in: 3600 });
+      }
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer shared-private-access");
+      return Response.json({ data: [{ id: "grok-safe" }, { id: "grok-shared-private-access" }, { id: "grok-shared-private-refresh" }] });
+    };
+    const ordinary = () => createSubscriptionTokenRefresher({ store: fixture.credentials, fetch }).getValidAccessToken(ordinaryAbort.signal)
+      .then(token => ({ token, error: undefined }), error => ({ token: undefined, error }));
+    const discovery = () => discoverModels({ provider: "xai", xaiAuth: "grok", env: {}, signal: discoveryAbort.signal }, { ...clock, store: fixture.credentials, fetch });
+    let execution: ReturnType<typeof ordinary> | undefined, listing: ReturnType<typeof discovery> | undefined;
+    let expired = false;
+    const watchdog = setTimeout(() => { expired = true; ordinaryAbort.abort(); discoveryAbort.abort(); release.resolve(); started.resolve(); joined.resolve(); }, 1500);
+    try {
+      if (first === "ordinary") execution = ordinary(); else listing = discovery();
+      await started.promise;
+      if (first === "ordinary") listing = discovery(); else execution = ordinary();
+      await joined.promise;
+      clock.advance(4900);
+      if (ending === "discovery-timeout") { clock.advance(100); expect((await listing!).error).toContain("timed out after 5 seconds"); expect(signals[0]!.aborted).toBe(false); }
+      if (ending === "ordinary-cancel") { ordinaryAbort.abort(); expect((await execution!).error?.name).toBe("AbortError"); expect(signals[0]!.aborted).toBe(false); }
+      release.resolve();
+      const [executed, discovered] = await Promise.all([execution!, listing!]);
+      expect(expired).toBe(false); expect(refreshes).toBe(1); expect(fixture.writes).toEqual([identity.account]);
+      if (ending !== "ordinary-cancel") expect(executed).toEqual({ token: "shared-private-access", error: undefined });
+      if (ending !== "discovery-timeout") {
+        expect(discovered.catalog).toMatchObject({ route: "grok", status: "partial", models: [{ id: "grok-safe" }] });
+        expect(discovered.error).toBeUndefined();
+        expect(JSON.stringify(discovered)).not.toContain("shared-private-access"); expect(JSON.stringify(discovered)).not.toContain("shared-private-refresh");
+      }
+      expect(clock.inspect()).toEqual({ elapsed: ending === "discovery-timeout" ? 5000 : 4900, budget: 5000, started: 1, cleared: 1 });
+    } finally {
+      clearTimeout(watchdog); ordinaryAbort.abort(); discoveryAbort.abort(); release.resolve();
+      await Promise.allSettled([execution, listing]);
+    }
+  });
+}
+
+test("Grok shared renewal cancels a stalled token body only after its last interested caller leaves", async () => {
+  const { createSubscriptionTokenRefresher, GROK_TOKEN_URL } = await import("../src/model/providers/grok-subscription.ts");
+  const identity = grokSubscriptionIdentity(), fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
+  const bodyStarted = deferred<void>(), joined = deferred<void>(), bodyCancelled = deferred<void>();
+  const read = fixture.credentials.get;
+  fixture.credentials.get = async selected => { const value = await read(selected); if (fixture.reads.length === 2) joined.resolve(); return value; };
+  const clock = controlledDeadline(), ordinaryAbort = new AbortController();
+  let refreshes = 0, signal: AbortSignal | undefined;
+  const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    expect(String(url)).toBe(GROK_TOKEN_URL); refreshes++; signal = init!.signal!;
+    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"access_token":"never-completed"')); bodyStarted.resolve(); }, cancel() { bodyCancelled.resolve(); } }));
+  };
+  let expired = false;
+  const watchdog = setTimeout(() => { expired = true; ordinaryAbort.abort(); clock.advance(5000); bodyStarted.resolve(); bodyCancelled.resolve(); joined.resolve(); }, 1500);
+  const listing = discoverModels({ provider: "xai", xaiAuth: "grok", env: {} }, { ...clock, store: fixture.credentials, fetch });
+  let execution: Promise<unknown> | undefined;
+  try {
+    await bodyStarted.promise;
+    execution = createSubscriptionTokenRefresher({ store: fixture.credentials, fetch }).getValidAccessToken(ordinaryAbort.signal).catch(error => error);
+    await joined.promise; clock.advance(5000);
+    expect((await listing).error).toContain("timed out"); expect(signal?.aborted).toBe(false);
+    ordinaryAbort.abort(); expect(await execution).toMatchObject({ name: "AbortError" });
+    await bodyCancelled.promise; expect(expired).toBe(false); expect(signal?.aborted).toBe(true); expect(refreshes).toBe(1); expect(fixture.writes).toEqual([]);
+  } finally { clearTimeout(watchdog); ordinaryAbort.abort(); clock.advance(5000); await Promise.allSettled([listing, execution]); }
+});
+
+test("Grok failed credential readers detach and cannot keep an abandoned discovery renewal alive", async () => {
+  const { createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const identity = grokSubscriptionIdentity(), fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
+  const read = fixture.credentials.get;
+  fixture.credentials.get = async selected => { const value = await read(selected); if (fixture.reads.length === 2) throw new Error("Controlled credential read failure"); return value; };
+  const clock = controlledDeadline(), started = deferred<void>(), response = deferred<Response>(), cancelledBody = deferred<void>();
+  const ordinaryAbort = new AbortController();
+  let requestSignal: AbortSignal | undefined, expired = false;
+  const fetch = async (_url: string | URL | Request, init?: RequestInit) => { requestSignal = init!.signal!; started.resolve(); return response.promise; };
+  const watchdog = setTimeout(() => { expired = true; ordinaryAbort.abort(); clock.advance(5000); started.resolve(); cancelledBody.resolve(); }, 1500);
+  const listing = discoverModels({ provider: "xai", xaiAuth: "grok", env: {} }, { ...clock, store: fixture.credentials, fetch });
+  let execution: Promise<string> | undefined;
+  try {
+    await started.promise;
+    execution = createSubscriptionTokenRefresher({ store: fixture.credentials, fetch }).getValidAccessToken(ordinaryAbort.signal);
+    await expect(execution).rejects.toThrow("credential store");
+    clock.advance(5000); expect((await listing).error).toContain("timed out"); expect(requestSignal?.aborted).toBe(true);
+    response.resolve(new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"access_token":"too-late"}')); }, cancel() { cancelledBody.resolve(); } })));
+    await cancelledBody.promise; expect(expired).toBe(false); expect(fixture.writes).toEqual([]);
+  } finally {
+    clearTimeout(watchdog); ordinaryAbort.abort(); clock.advance(5000); response.resolve(Response.json({ access_token: "discarded" }));
+    await Promise.allSettled([listing, execution]);
+  }
+});
+
+test("Grok shared renewal cannot begin saving after every caller cancels at the pre-write boundary", async () => {
+  const { createSubscriptionTokenRefresher, fetchDiscoveryCatalog } = await import("../src/model/providers/grok-subscription.ts");
+  const identity = grokSubscriptionIdentity(), fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
+  const first = new AbortController(), second = new AbortController(), started = deferred<void>(), joined = deferred<void>(), release = deferred<void>();
+  const read = fixture.credentials.get;
+  fixture.credentials.get = async selected => { const value = await read(selected); if (fixture.reads.length === 2) joined.resolve(); return value; };
+  let renewals = 0, reachedBoundary = false;
+  const fetch = async () => { renewals++; started.resolve(); await release.promise; return Response.json({ access_token: "renewed-private", expires_in: 3600 }); };
+  let expired = false;
+  const watchdog = setTimeout(() => { expired = true; first.abort(); second.abort(); release.resolve(); started.resolve(); joined.resolve(); }, 1500);
+  const listing = fetchDiscoveryCatalog({ store: fixture.credentials, signal: first.signal, fetch, onCredential: raw => {
+    if (JSON.parse(raw).accessToken === "renewed-private") { reachedBoundary = true; first.abort(); second.abort(); }
+  } }).catch(error => error);
+  let execution: Promise<unknown> | undefined;
+  try {
+    await started.promise;
+    execution = createSubscriptionTokenRefresher({ store: fixture.credentials, fetch }).getValidAccessToken(second.signal).catch(error => error);
+    await joined.promise; release.resolve();
+    const outcomes = await Promise.all([listing, execution]);
+    expect(expired).toBe(false); expect(reachedBoundary).toBe(true); expect(outcomes).toEqual([expect.objectContaining({ name: "AbortError" }), expect.objectContaining({ name: "AbortError" })]);
+    expect(renewals).toBe(1); expect(fixture.writes).toEqual([]);
+  } finally { clearTimeout(watchdog); first.abort(); second.abort(); release.resolve(); await Promise.allSettled([listing, execution]); }
 });

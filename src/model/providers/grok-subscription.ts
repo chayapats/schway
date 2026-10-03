@@ -1,6 +1,6 @@
 import { grokSubscriptionIdentity, credentialStoreError, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
-import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
+import { boundedCatalogFetch, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -212,11 +212,15 @@ export async function loadSubscriptionTokens(store: CredentialStore, onCredentia
   if (raw) onCredential?.(raw);
   return raw?.trim() ? parseSubscriptionTokens(raw) : null;
 }
-type CredentialLifecycle = { generation: number; writes: Promise<void>; refresh?: { generation: number; promise: Promise<GrokTokens> } };
+type RefreshCaller = { onCredential?: (raw: string) => void };
+type CredentialLifecycle = {
+  generation: number; writes: Promise<void>; callers: Set<RefreshCaller>;
+  refresh?: { generation: number; promise: Promise<GrokTokens>; controller: AbortController };
+};
 const credentialLifecycles = new WeakMap<CredentialStore, CredentialLifecycle>();
 function credentialLifecycle(store: CredentialStore): CredentialLifecycle {
   let state = credentialLifecycles.get(store);
-  if (!state) { state = { generation: 0, writes: Promise.resolve() }; credentialLifecycles.set(store, state); }
+  if (!state) { state = { generation: 0, writes: Promise.resolve(), callers: new Set() }; credentialLifecycles.set(store, state); }
   return state;
 }
 function serializeCredentialWrite<T>(state: CredentialLifecycle, operation: () => Promise<T>): Promise<T> {
@@ -239,40 +243,86 @@ export async function deleteSubscriptionTokens(store: CredentialStore): Promise<
     try { return await store.delete(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("delete")); }
   });
 }
-/** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
-export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
-  const state = credentialLifecycle(input.store);
-  const getValidAccessToken = async (signal?: AbortSignal, rejectedToken?: string): Promise<string> => {
+/** Inputs retain the original lifecycle identity when discovery memoizes its first credential read. */
+interface SubscriptionTokenInput {
+  store: CredentialStore; fetch?: GrokFetch; now?: () => number;
+  lifecycleStore?: CredentialStore; onCredential?: (raw: string) => void;
+}
+
+/** Share renewal per original store and generation; cancellation detaches only this caller. */
+async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string): Promise<string> {
+  aborted(signal);
+  const owner = input.lifecycleStore ?? input.store, state = credentialLifecycle(owner);
+  const caller: RefreshCaller = { onCredential: input.onCredential };
+  // Register before any asynchronous read so an arriving caller can keep a shared renewal alive.
+  state.callers.add(caller);
+  const detach = () => {
+    state.callers.delete(caller);
+    if (!state.callers.size && state.refresh) {
+      const refresh = state.refresh;
+      state.refresh = undefined;
+      refresh.controller.abort();
+    }
+  };
+  signal?.addEventListener("abort", detach, { once: true });
+  const getToken = async (): Promise<string> => {
     aborted(signal);
     const pendingWrites = state.writes;
     await raceAbort(pendingWrites, signal);
-    if (pendingWrites !== state.writes) return getValidAccessToken(signal, rejectedToken);
-    const observedGeneration = state.generation;
-    const tokens = await raceAbort(loadSubscriptionTokens(input.store), signal);
-    if (observedGeneration !== state.generation) return getValidAccessToken(signal, rejectedToken);
+    if (pendingWrites !== state.writes) return getToken();
+    const generation = state.generation;
+    // Memoized route selection is reusable only before an in-process mutation or renewal.
+    const currentStore = input.lifecycleStore && (generation !== 0 || state.refresh) ? owner : input.store;
+    const tokens = await raceAbort(loadSubscriptionTokens(currentStore, input.onCredential), signal);
+    if (generation !== state.generation) return getToken();
     if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
-    if (state.refresh?.generation === observedGeneration) return (await raceAbort(state.refresh.promise, signal)).accessToken;
-    if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens, (input.now ?? Date.now)())) return tokens.accessToken;
-    if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
-    const refreshToken = tokens.refreshToken;
-    const promise = (async () => {
-      let renewed: GrokTokens;
-      try { renewed = await refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, now: input.now, signal: AbortSignal.timeout(30_000) }); }
-      catch (error) { if (error instanceof DOMException && error.name === "AbortError") throw new Error(grokRefreshFailedError("timed out")); throw error; }
-      const merged = { ...renewed, refreshToken: renewed.refreshToken ?? refreshToken };
-      await serializeCredentialWrite(state, async () => {
-        if (state.generation !== observedGeneration) throw new Error(grokRevokedSessionError());
-        await writeTokens(input.store, merged);
-        // A queued logout or sign-in owns the final credential and this old turn cannot proceed.
-        if (state.generation !== observedGeneration) throw new Error(grokRevokedSessionError());
-        state.generation++;
+    let refresh = state.refresh;
+    if (refresh?.generation !== generation) {
+      if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens, (input.now ?? Date.now)())) return tokens.accessToken;
+      if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
+      const refreshToken = tokens.refreshToken, controller = new AbortController();
+      // Ordinary execution retains its safety ceiling; discovery's earlier deadline detaches its interest.
+      const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), 30_000);
+      const promise = (async () => {
+        let renewed: GrokTokens;
+        try {
+          renewed = await refreshSubscriptionTokens({ refreshToken, now: input.now, signal: controller.signal,
+            fetch: boundedCatalogFetch({ fetch: input.fetch, signal: controller.signal, label: "Grok subscription" }) });
+        } catch (error) {
+          if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") throw new Error(grokRefreshFailedError("timed out"));
+          throw error;
+        }
+        const merged = { ...renewed, refreshToken: renewed.refreshToken ?? refreshToken };
+        for (const interested of state.callers) interested.onCredential?.(JSON.stringify(merged));
+        await serializeCredentialWrite(state, async () => {
+          controller.signal.throwIfAborted();
+          if (state.generation !== generation) throw new Error(grokRevokedSessionError());
+          // A discovery wrapper belongs to one deadline; only the original store can serve all callers.
+          await writeTokens(owner, merged);
+          if (state.generation !== generation) throw new Error(grokRevokedSessionError());
+          state.generation++;
+        });
+        return merged;
+      })().finally(() => {
+        clearTimeout(timer);
+        if (state.refresh?.promise === promise) state.refresh = undefined;
       });
-      return merged;
-    })().finally(() => { if (state.refresh?.promise === promise) state.refresh = undefined; });
-    state.refresh = { generation: observedGeneration, promise };
-    return (await raceAbort(promise, signal)).accessToken;
+      // Cancellation can happen before a caller begins awaiting this shared promise.
+      void promise.catch(() => {});
+      refresh = { generation, promise, controller };
+      state.refresh = refresh;
+    }
+    const renewed = await raceAbort(refresh.promise, signal);
+    input.onCredential?.(JSON.stringify(renewed));
+    return renewed.accessToken;
   };
-  return { getValidAccessToken };
+  try { return await getToken(); }
+  finally { signal?.removeEventListener("abort", detach); detach(); }
+}
+
+/** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
+export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
+  return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string) => resolveSubscriptionToken(input, signal, rejectedToken) };
 }
 async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   aborted(signal); if (!signal) return promise;
@@ -282,7 +332,7 @@ async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
     promise.then(value => { signal.removeEventListener("abort", stop); resolve(value); }, error => { signal.removeEventListener("abort", stop); reject(error); });
   });
 }
-/** Discover under the caller's total deadline without joining a longer-lived execution refresh. */
+/** Discover under the caller's total deadline while sharing selected-account renewal with execution. */
 export async function fetchDiscoveryCatalog(input: {
   store: CredentialStore; fetch?: GrokFetch; signal: AbortSignal;
   /** Original identity owner when reads are memoized for route selection. */
@@ -290,35 +340,7 @@ export async function fetchDiscoveryCatalog(input: {
   /** Register every selected credential read, including fresh reads after concurrent replacement. */
   onCredential?: (raw: string) => void;
 }): Promise<ModelListResult> {
-  const state = credentialLifecycle(input.lifecycleStore ?? input.store);
-  const getToken = async (rejectedToken?: string): Promise<string> => {
-    input.signal.throwIfAborted();
-    const pendingWrites = state.writes;
-    await abortableCatalogOperation(pendingWrites, input.signal);
-    if (pendingWrites !== state.writes) return getToken(rejectedToken);
-    const generation = state.generation;
-    // Route-selection reads are reusable only while no in-process credential mutation has occurred.
-    const currentStore = input.lifecycleStore && (state.generation !== 0 || state.refresh) ? input.lifecycleStore : input.store;
-    const tokens = await abortableCatalogOperation(loadSubscriptionTokens(currentStore, input.onCredential), input.signal);
-    if (generation !== state.generation) return getToken(rejectedToken);
-    if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
-    if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens)) return tokens.accessToken;
-    if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again with /login grok.");
-    const renewed = await abortableCatalogOperation(refreshSubscriptionTokens({
-      refreshToken: tokens.refreshToken, signal: input.signal,
-      fetch: boundedCatalogFetch({ ...input, label: "Grok subscription" }),
-    }), input.signal);
-    const merged = { ...renewed, refreshToken: renewed.refreshToken ?? tokens.refreshToken };
-    input.signal.throwIfAborted();
-    await abortableCatalogOperation(serializeCredentialWrite(state, async () => {
-      input.signal.throwIfAborted();
-      if (generation !== state.generation) throw new Error(grokRevokedSessionError());
-      await writeTokens(input.store, merged);
-      if (generation !== state.generation) throw new Error(grokRevokedSessionError());
-      state.generation++;
-    }), input.signal);
-    return merged.accessToken;
-  };
+  const getToken = (rejectedToken?: string) => resolveSubscriptionToken(input, input.signal, rejectedToken);
   let accessToken = await getToken();
   let authError: unknown;
   const authorizedFetch: GrokFetch = async (url, init) => {
