@@ -11,6 +11,12 @@ export * from "./transcript-format.ts";
 
 /** Own interactive transcript state around the shared agent loop without loading the renderer. */
 export class TuiController extends TurnLayer {
+  /** Replace the active conversation and expire its unconsumed notice diagnostics. */
+  override replaceSession(...args: Parameters<TurnLayer["replaceSession"]>): void {
+    super.replaceSession(...args);
+    this.noticeDetails = undefined;
+  }
+
   /** Return redacted current state and the active assistant preview independently of transcript order. */
   snapshot(): TuiSnapshot {
     const thinking = this.configEditor ? this.configEditor.settings.thinking : this.thinking;
@@ -33,6 +39,7 @@ export class TuiController extends TurnLayer {
       streamingAssistantId: this.transcript.find(entry => entry.id === this.currentAssistantId && entry.text.length > 0 && !entry.incomplete)?.id,
       context,
       compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
+      noticeDetailsAvailable: this.currentNoticeDetails() !== undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
       undoPreview: this.undoPreview ? structuredClone(this.undoPreview) : undefined,
       changeReview: this.changeReview ? structuredClone(this.changeReview) : undefined,
@@ -131,6 +138,7 @@ export class TuiController extends TurnLayer {
     this.startupAbort?.abort();
     this.signInListAbort?.abort();
     this.disposed = true;
+    this.noticeDetails = undefined;
     this.outcome = undefined;
     this.outcomeDiagnostics = undefined;
     this.gitBaseline = undefined;
