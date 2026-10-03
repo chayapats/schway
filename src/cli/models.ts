@@ -180,7 +180,8 @@ export async function runModelsCommand(argv: readonly string[], io: ModelsComman
     const connection = resolveModelsConnection({ ...layers, args, diagnosticContext });
     if ("error" in connection) throw new Error(connection.error);
     provider = connection.provider;
-    const result = await discoverModels({ ...connection, env, runtimeApiKey: args.apiKey, offline: args.offline, filter: args.filter, signal: io.signal }, io);
+    const result = await discoverModels({ ...connection, env, runtimeApiKey: args.apiKey, knownSecrets: diagnosticContext.secrets,
+      offline: args.offline, filter: args.filter, signal: io.signal }, io);
     io.stdout.write(args.json ? `${JSON.stringify(result.catalog)}\n` : formatModelCatalog(result.catalog));
     if (result.error) io.stderr.write(`${result.error}\n`);
     else if (result.catalog.status === "partial") for (const warning of result.catalog.warnings) io.stderr.write(`${warning}\n`);

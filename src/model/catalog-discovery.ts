@@ -50,9 +50,13 @@ function startDeadline(milliseconds: number) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
-/** Keep supplied credentials and their usable trimmed forms without matching empty or whitespace-only values. */
+/** Keep raw, trimmed and display-normalized credentials without matching empty or whitespace-only values. */
 function secretVariants(values: readonly (string | undefined)[]): string[] {
-  return [...new Set(values.flatMap(value => value?.trim() ? [value, value.trim()] : []))];
+  return [...new Set(values.flatMap(value => {
+    if (!value?.trim()) return [];
+    const normalized = stripVTControlCharacters(value).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "");
+    return [value, value.trim(), normalized, normalized.trim()].filter(variant => !!variant.trim());
+  }))];
 }
 
 /** Remove raw/trimmed credentials, terminal controls and URLs from operational diagnostics. */
@@ -83,8 +87,10 @@ function publicModel(model: ListedModel): CatalogModel {
 /** Read one route's catalog without inference, account fallback, TUI memory or other application writes. */
 export async function discoverModels(input: CatalogConnection & {
   env: Record<string, string | undefined>; runtimeApiKey?: string; offline?: boolean; filter?: string; signal?: AbortSignal;
+  /** Already observed invocation secrets, copied before adding selected credential observations. */
+  knownSecrets?: readonly string[];
 }, deps: CatalogDiscoveryDeps = {}): Promise<CatalogOutcome> {
-  const secrets = secretVariants([input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)]);
+  const secrets = secretVariants([...(input.knownSecrets ?? []), input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)]);
   const catalog: ModelCatalog = {
     schemaVersion: 1, provider: input.provider, route: explicitRoute(input),
     ...(input.profile ? { profile: input.profile } : {}), source: input.offline ? "builtin" : "remote",

@@ -54,6 +54,23 @@ test("runtime and renewed credentials cannot be reflected into catalog rows or s
   expect(renewal.catalog.status).toBe("error"); expect(JSON.stringify(renewal)).not.toContain("renewed-private-token");
 });
 
+for (const [variant, raw] of [["trimmed", "  private-seed-527941\n"], ["ANSI", "private-\u001b[31mseed\u001b[0m-527941"], ["format control", "private-\u200bseed-527941"]] as const)
+test(`catalog discovery copies ${variant} known secrets without changing exact safe IDs`, async () => {
+  const secret = "private-seed-527941", knownSecrets = Object.freeze([raw, "", "  "]);
+  const input = { provider: "openai-compatible" as const, baseUrl: "https://fixture.test/v1", auth: "none" as const,
+    profile: `selected-${secret}`, env: {}, knownSecrets };
+  const fixture = store();
+  const fetch = async () => Response.json({ data: [{ id: "safe-model" }, { id: secret }] });
+  const seeded = await discoverModels(input, { store: fixture.credentials, fetch });
+  expect(JSON.stringify(seeded)).not.toContain(secret);
+  expect(seeded.catalog).toMatchObject({ status: "partial", models: [{ id: "safe-model" }] });
+  expect(seeded.catalog).not.toHaveProperty("profile");
+  expect(knownSecrets).toEqual([raw, "", "  "]);
+  const unseeded = await discoverModels({ ...input, knownSecrets: [] }, { store: fixture.credentials, fetch });
+  expect(unseeded.catalog).toMatchObject({ status: "complete", profile: input.profile, models: [{ id: secret }, { id: "safe-model" }] });
+  expect(fixture.reads).toEqual([]); expect(fixture.writes).toEqual([]);
+});
+
 for (const source of ["env", "cli", "header", "env-file"] as const) for (const json of [false, true]) {
   test(`${source} setup errors redact raw and trimmed credentials in ${json ? "JSON" : "plain"} output`, async () => {
     const secret = "opaque-setup-credential-527941", raw = `  ${secret}\n`;
@@ -79,6 +96,7 @@ for (const source of ["env", "cli", "header", "env-file"] as const) for (const j
 test("diagnostic normalization cannot reconstruct a known credential and blank variants do not redact ordinary spaces", () => {
   expect(safeCatalogMessage("Failed opaque\u0000credential", [" \topaque credential\n", " \t "])).toBe("Failed ***");
   expect(safeCatalogMessage("Keep ordinary spaces", [" \t ", " "])).toBe("Keep ordinary spaces");
+  expect(safeCatalogMessage("Keep  ordinary  spaces", ["\u001b[31m  \u001b[0m", " \u200b "])).toBe("Keep  ordinary  spaces");
 });
 
 for (const source of ["runtime", "env", "credential-env", "header", "config-header", "stored"] as const) for (const json of [false, true]) {

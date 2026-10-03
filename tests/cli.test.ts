@@ -108,6 +108,57 @@ test("concurrent models entry calls preserve the original store's shared Grok re
   });
 });
 
+for (const source of ["overridden-env", "normalized-overridden-env", "authorization-token", "other-profile-env"] as const) {
+  for (const offline of [false, true]) for (const json of [false, true]) {
+    test(`models retain ${source} secrets in ${offline ? "offline" : "online"} ${json ? "JSON" : "plain"} catalogs`, async () => {
+      await withTempDir(async root => {
+        const home = join(root, "home"), cwd = join(root, "work"), secret = "private-catalog-context-527941";
+        const profile = `selected-${secret}`, safeId = "safe-exact-model-2026";
+        await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(cwd, ".schway"), { recursive: true });
+        const env: Record<string, string> = { HOME: home };
+        const args = ["models", "list", ...(offline ? ["--offline"] : []), ...(json ? ["--json"] : [])];
+        await writeFile(join(cwd, ".schway/config.json"), JSON.stringify({ profile, profiles: {
+          [profile]: { baseUrl: "https://fixture.invalid/v1", auth: "none" },
+        } }));
+        if (source === "overridden-env" || source === "normalized-overridden-env") {
+          env.OPENAI_COMPATIBLE_API_KEY = source === "overridden-env" ? `  ${secret}  ` : secret.replace("catalog", "\u001b[31mcatalog\u001b[0m");
+          await writeFile(join(cwd, "overlay.env"), "OPENAI_COMPATIBLE_API_KEY=replacement-value\n");
+          args.push("--env-file", "overlay.env");
+        } else if (source === "authorization-token") args.push("--header", `Authorization:Bearer ${secret}`);
+        else {
+          env.OTHER_AUTH = `  ${secret}\n`;
+          await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profiles: {
+            other: { baseUrl: "https://other.invalid/v1", auth: "none", credentialEnv: "OTHER_AUTH" },
+          } }));
+        }
+        let requests = 0, credentialCalls = 0;
+        const forbidCredentials = async () => { credentialCalls++; throw new Error("Unexpected credential access"); };
+        const result = await run(args, {
+          cwd, env, credentialStore: { get: forbidCredentials, set: forbidCredentials, delete: forbidCredentials },
+          fetch: async url => {
+            requests++; expect(String(url)).toBe("https://fixture.invalid/v1/models");
+            return Response.json({ data: [{ id: secret }, { id: safeId }] });
+          },
+        });
+        expect(credentialCalls).toBe(0); expect(requests).toBe(offline ? 0 : 1);
+        expect(result.stdout + result.stderr).not.toContain(secret);
+        expect(result.exitCode).toBe(1); expect(result.stderr).toContain("Omitted profile name containing a credential value");
+        if (json) {
+          const catalog = JSON.parse(result.stdout);
+          expect(catalog).toMatchObject({ provider: "openai-compatible", route: "compatible", source: offline ? "builtin" : "remote", status: "partial" });
+          expect(catalog).not.toHaveProperty("profile");
+          expect(catalog.models).toEqual(offline ? [] : [{ id: safeId }]);
+        } else {
+          expect(result.stdout).toContain(`Models · openai-compatible · compatible · ${offline ? "builtin" : "remote"} · partial`);
+          if (!offline) expect(result.stdout.split("\n")).toContain(safeId);
+        }
+        expect(await readdir(join(home, ".schway"))).toEqual(source === "other-profile-env" ? ["config.json"] : []);
+        expect(await readdir(join(cwd, ".schway"))).toEqual(["config.json"]);
+      });
+    });
+  }
+}
+
 test("headless prompts, JSON output and subcommands never create interactive splash state", async () => {
   await withTempDir(async home => {
     for (const args of [["--model", "test-model", "-p", "hello"], ["--model", "test-model", "-p", "hello", "--json"], ["--help"]]) {
