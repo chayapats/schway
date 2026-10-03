@@ -7,6 +7,7 @@ import {
   mergeConfigLayers,
   parseConfigObject,
   projectConfigPath,
+  readConfigFile,
   resolveSettings,
   userConfigPath,
 } from "../src/config/config.ts";
@@ -19,6 +20,60 @@ import { withTempDir } from "./helpers.ts";
 test("an empty object is a valid config layer", () => {
   expect(parseConfigObject({}, "test")).toEqual({});
 });
+
+test("invalid approval config exposes its safe field and supported values", () => {
+  const result = parseConfigObject({ approval: { mode: "readonly" } }, "/user/config.json");
+  expect(result).toMatchObject({ diagnostics: [{ source: "/user/config.json", path: "approval.mode", category: "enum", constraint: "Use auto, ask, or read-only", values: ["auto", "ask", "read-only"] }] });
+  expect(result).toHaveProperty("error", "Invalid config at /user/config.json: Invalid approval.mode · Use auto, ask, or read-only");
+  expect(JSON.stringify(result)).not.toContain("readonly");
+});
+
+test("each distinct invalid field has one primary cause even alongside a forbidden secret", () => {
+  const result = parseConfigObject({ token: "private-secret", approval: { mode: "readonly" }, profiles: { sample: {} }, profile: "a".repeat(65) }, "/config.json");
+  if (!("error" in result)) throw Error("expected invalid config");
+  expect(result.diagnostics).toHaveLength(4);
+  expect(result.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({ path: "<unknown setting>", category: "secret" }),
+    expect.objectContaining({ path: "approval.mode", category: "enum" }),
+    expect.objectContaining({ path: "profiles.<unknown setting>.baseUrl", category: "type" }),
+    expect.objectContaining({ path: "profile", category: "constraint", constraint: "Use at most 64 characters" }),
+  ]));
+  expect(JSON.stringify(result)).not.toContain("private-secret");
+});
+
+test("configuration reasons hide unknown fields, profile identifiers and invalid secret values", () => {
+  const secret = "raw-private-token\u001b[31m\n";
+  const cases: Array<[unknown, string, string]> = [
+    [[], "", "root"],
+    [{ [secret]: true }, "<unknown setting>", "unknown-setting"],
+    [{ approval: { [secret]: true } }, "approval.<unknown setting>", "unknown-setting"],
+    [{ xaiAuth: secret }, "xaiAuth", "enum"],
+    [{ maxTurns: secret }, "maxTurns", "type"],
+    [{ maxTurns: 0 }, "maxTurns", "range"],
+    [{ profiles: { [secret]: { baseUrl: "https://example.com", model: 1 } } }, "profiles.<unknown setting>.model", "type"],
+    [{ profiles: { [secret]: { baseUrl: "https://u:password@example.com?token=private" } } }, "profiles.<unknown setting>", "constraint"],
+    [{ apiKey: secret }, "<unknown setting>", "secret"],
+    [{ profiles: { valid: { baseUrl: "https://example.com", headers: { Authorization: secret } } } }, "profiles.<unknown setting>.headers.<unknown setting>", "secret"],
+  ];
+  for (const [value, path, category] of cases) {
+    const result = parseConfigObject(value, "/config.json");
+    expect(result).toMatchObject({ diagnostics: expect.arrayContaining([expect.objectContaining({ source: "/config.json", path, category })]) });
+    for (const forbidden of ["raw-private-token", "password", "token=private", "\u001b", "Expected union value"]) expect(JSON.stringify(result)).not.toContain(forbidden);
+  }
+});
+
+test("config reads carry JSON and access reasons and startup retains both invalid scopes", async () => withTempDir(async root => {
+  const home = join(root, "home"), workspaceRoot = join(root, "work");
+  await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+  const user = userConfigPath(home), project = projectConfigPath(workspaceRoot);
+  await writeFile(user, "{private-invalid-json");
+  await mkdir(project);
+  expect(await readConfigFile(user)).toMatchObject({ diagnostics: [{ source: user, path: "", category: "json", constraint: expect.any(String) }] });
+  expect(await readConfigFile(project)).toMatchObject({ diagnostics: [{ source: project, path: "", category: "unreadable", constraint: expect.any(String) }] });
+  const resolved = await loadResolvedSettings({ home, workspaceRoot });
+  expect(resolved).toMatchObject({ diagnostics: [expect.objectContaining({ source: user }), expect.objectContaining({ source: project })] });
+  expect(JSON.stringify(resolved)).not.toContain("private-invalid-json");
+}));
 
 test("splash defaults to first-run and rejects unknown modes and ui keys", () => {
   expect(resolveSettings({})).toMatchObject({ splash: "first-run" });
@@ -140,14 +195,15 @@ test("a valid partial config parses known settings", () => {
   });
 });
 
-test("misspelled settings fail with the unknown name and valid keys", () => {
+test("misspelled settings fail with a redacted unknown name and repair action", () => {
   const result = parseConfigObject({ modell: "gpt-5.4" }, "user-config");
   expect("error" in result).toBe(true);
   if (!("error" in result)) {
     throw new Error("expected validation error");
   }
   expect(result.error).toContain("user-config");
-  expect(result.error).toContain("modell");
+  expect(result.error).toContain("<unknown setting>");
+  expect(result.error).not.toContain("modell");
   expect(result.error).toContain("model");
   expect(result.error.toLowerCase()).toContain("unknown");
 });
@@ -163,7 +219,7 @@ test("API keys in ordinary config fail with an actionable secret error", () => {
   expect(result.error).toContain("--api-key");
 });
 
-test("invalid types and non-positive limits fail with the setting name", () => {
+test("invalid types and non-positive limits fail with a redacted unknown setting", () => {
   const provider = parseConfigObject({ provider: "codex" }, "test");
   expect("error" in provider).toBe(true);
   if ("error" in provider) {
@@ -506,12 +562,12 @@ test("deprecations without replacements retain supported behavior and accept ret
     if (key === "maxTurns") expect(parsed.maxTurns).toBe(7);
     if (key === "ui.splash") expect(parsed.ui?.splash).toBe("never");
   }
-  expect(parseConfigObject({ legacy: true }, "/config.json", [])).toMatchObject({ error: expect.stringContaining('unknown setting "legacy"') });
+  expect(parseConfigObject({ legacy: true }, "/config.json", [])).toMatchObject({ error: expect.stringContaining('<unknown setting>') });
   expect(parseConfigObject({ oldTurns: "invalid" }, "/config.json", [{ key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" }])).toMatchObject({ error: expect.stringContaining("maxTurns") });
 });
 
 test("retired nested settings cannot hide unknown siblings or malformed replacement parents", () => {
   const table = [{ key: "retired.toggle", since: "1.1.0", removeIn: "2.0" }];
-  expect(parseConfigObject({ retired: { toggle: true, typo: true } }, "/config.json", table)).toMatchObject({ error: expect.stringContaining('unknown setting "retired"') });
-  expect(parseConfigObject({ oldSplash: "never", ui: false }, "/config.json", [{ key: "oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }])).toEqual({ error: "Invalid config at /config.json: ui must be an object" });
+  expect(parseConfigObject({ retired: { toggle: true, typo: true } }, "/config.json", table)).toMatchObject({ error: expect.stringContaining('<unknown setting>') });
+  expect(parseConfigObject({ oldSplash: "never", ui: false }, "/config.json", [{ key: "oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }])).toMatchObject({ error: "Invalid config at /config.json: Invalid ui · Use a JSON object" });
 });

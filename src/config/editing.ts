@@ -1,6 +1,6 @@
 import { CONFIG_DEPRECATIONS, type ConfigDeprecation, type ConfigDeprecationWarning } from "./deprecations.ts";
 import { InteractiveMemory, type InteractiveChoice } from "./interactive-memory.ts";
-import { effectiveInteractiveMemory, resolveApprovalSettings, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { effectiveInteractiveMemory, resolveApprovalSettings, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, readConfigLayers, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
 import { getThinkingSupport, type ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
@@ -131,12 +131,12 @@ export class ConfigEditor {
     const pendingLayers = mergeConfigLayers(BUILTIN_DEFAULTS, this.layers.memory, this.layers.user, this.layers.project, this.layers.cli, this.layers.session);
     const pendingCodexCatalog = this.modelCapabilities === undefined &&
       (pendingLayers.openaiAuth === "codex" || (pendingLayers.provider === "xai" && pendingLayers.thinking != null));
-    try { this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog); }
+    try { this.current = resolved(this.layers, this.paths, this.modelCapabilities, pendingCodexCatalog); }
     catch (error) {
       if (!this.layers.memory) throw error;
       this.memoryProblem = `Remembered interactive choice is unavailable: ${error instanceof Error ? error.message : String(error)} Use /model to repair it or /model forget.`;
       this.layers.memory = undefined;
-      this.current = resolved(this.layers, this.modelCapabilities, pendingCodexCatalog);
+      this.current = resolved(this.layers, this.paths, this.modelCapabilities, pendingCodexCatalog);
     }
     this.memoryProblem ??= memory?.problem;
   }
@@ -163,9 +163,9 @@ export class ConfigEditor {
     const next = structuredClone(capabilities);
     // An incompatible saved effort must not prevent recovery or leave stale model limits.
     let settings: ResolvedSettings | undefined;
-    try { settings = resolved(this.layers, next); } catch {
+    try { settings = resolved(this.layers, this.paths, next); } catch {
       try {
-        const recovered = resolved({ ...this.layers, session: { ...this.layers.session, thinking: null } }, next);
+        const recovered = resolved({ ...this.layers, session: { ...this.layers.session, thinking: null } }, this.paths, next);
         if (recovered.provider === this.current.provider && recovered.model === this.current.model && recovered.openaiAuth === this.current.openaiAuth && recovered.xaiAuth === this.current.xaiAuth) {
           settings = { ...recovered, thinking: this.current.thinking };
         }
@@ -218,7 +218,7 @@ export class ConfigEditor {
     if (!this.memory) throw new Error("Workspace memory unavailable · Restart Schway to retry");
     const revision = this.revision;
     const layers = { ...this.layers, memory: choice };
-    const settings = resolved(layers, this.modelCapabilities);
+    const settings = resolved(layers, this.paths, this.modelCapabilities);
     return { settings, origins: configOrigins(layers), commit: async signal => {
       signal?.throwIfAborted();
       if (revision !== this.revision || this.committing) throw new Error("Settings changed · Reopen and retry the edit");
@@ -299,7 +299,7 @@ export class ConfigEditor {
       // aligned with that durable choice, so a retry uses the new revision rather than going stale.
       if (this.memory!.choice !== previous) {
         this.layers = { ...this.layers, memory: this.memory!.choice };
-        this.current = resolved(this.layers, this.modelCapabilities);
+        this.current = resolved(this.layers, this.paths, this.modelCapabilities);
         this.memoryProblem = this.memory!.problem;
         this.revision++;
       }
@@ -418,7 +418,7 @@ export class ConfigEditor {
     for (const edit of expanded) if ((edit.key === "model" || edit.key === "baseUrl" || edit.key === "profile") && typeof edit.value === "string" && !parsed[edit.key]?.trim()) throw new Error(`${edit.key} must be a nonempty string.`);
     if (scope !== "session" && expanded.some(edit => edit.key === "baseUrl" && edit.value !== undefined)) validatePersistedBaseUrl(parsed.baseUrl!);
     const layers = { ...this.layers, [scope]: parsed };
-    const settings = resolved(layers, this.modelCapabilities);
+    const settings = resolved(layers, this.paths, this.modelCapabilities);
     return { settings, origins: configOrigins(layers), commit: async (signal) => {
       signal?.throwIfAborted();
       if (revision !== this.revision || this.committing) throw new Error("Settings changed · Reopen and retry the edit");
@@ -529,17 +529,16 @@ async function atomicWrite(path: string, layer: ConfigLayer, before: string | un
 /** Load editable settings from the explicit home and primary workspace without creating files. */
 export async function loadConfigEditor(input: { home: string; workspaceRoot: string; cli?: ConfigLayer; interactiveMemory?: boolean; configDeprecations?: readonly ConfigDeprecation[] }): Promise<ConfigEditor> {
   const paths = { user: userConfigPath(input.home), project: projectConfigPath(input.workspaceRoot) };
-  const user = await readConfigFile(paths.user, input.configDeprecations);
-  if (user && "error" in user) throw new Error(user.error);
-  const project = await readConfigFile(paths.project, input.configDeprecations);
-  if (project && "error" in project) throw new Error(project.error);
+  const layers = await readConfigLayers(input);
+  if ("error" in layers) throw new Error(layers.error);
+  const { user, project } = layers;
   const memory = input.interactiveMemory ? await InteractiveMemory.load(input.home, input.workspaceRoot) : undefined;
   return new ConfigEditor({ memory: memory?.choice, user, project, cli: input.cli }, paths, undefined, memory, input.home, input.configDeprecations, [...(user?.deprecationWarnings ?? []), ...(project?.deprecationWarnings ?? [])]);
 }
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */
-function resolved(layers: Layers, modelCapabilities?: readonly ModelCapability[], deferOpenAIThinking = false): ResolvedSettings {
-  const settings = resolveSettings({ ...layers, modelCapabilities, deferOpenAIThinking, deferUncachedThinking: true });
+function resolved(layers: Layers, configSources: { user: string; project: string }, modelCapabilities?: readonly ModelCapability[], deferOpenAIThinking = false): ResolvedSettings {
+  const settings = resolveSettings({ ...layers, configSources, modelCapabilities, deferOpenAIThinking, deferUncachedThinking: true });
   if ("error" in settings) throw new Error(settings.error);
   return settings;
 }

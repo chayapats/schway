@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
 import { runCli } from "../src/cli/main.ts";
 import { inspectPackages } from "../src/packages/packages.ts";
+import { loadResolvedSettings } from "../src/config/config.ts";
+import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
+import { readFile } from "node:fs/promises";
 import type { CredentialStore } from "../src/auth/store.ts";
 
 const dirs: string[] = [];
@@ -22,6 +25,131 @@ const store = (value: string | null | Error): CredentialStore => ({
   delete: async () => { throw Error("unexpected mutation"); },
 });
 const check = (report: Awaited<ReturnType<typeof diagnose>>, id: string) => report.checks.find(item => item.id === id);
+
+for (const scope of ["user", "project", "both"] as const) test(`${scope} removed provider retains the exact migration notice and source metadata`, async () => {
+  const { workspace, home } = await fixture();
+  const scopes = scope === "both" ? ["user", "project"] : [scope];
+  const paths = scopes.map(current => join(current === "user" ? home : workspace, ".schway/config.json"));
+  for (const path of paths) { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, '{"provider":"anthropic"}'); }
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace });
+  expect(settings).toMatchObject({ error: scopes.map(() => ANTHROPIC_REMOVED_MESSAGE).join("\n"), diagnostics: paths.map(source => expect.objectContaining({ source, path: "provider", category: "removed-provider", constraint: ANTHROPIC_REMOVED_MESSAGE })) });
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  for (const current of scopes) expect(check(report, `config.${current}`)?.summary).toContain(ANTHROPIC_REMOVED_MESSAGE);
+  expect(doctorExitCode(report)).toBe(1);
+  expect(report.checks.filter(c => c.id.startsWith("package."))).toHaveLength(0);
+});
+
+for (const scope of ["user", "project", "cli"] as const) test(`${scope} unknown profile has safe source-aware startup and doctor diagnostics`, async () => {
+  const { workspace, home } = await fixture();
+  const path = join(scope === "user" ? home : workspace, ".schway/config.json");
+  const profile = "private-selection";
+  if (scope !== "cli") { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, JSON.stringify({ profile, profiles: { "private-available": { baseUrl: "https://example.test" } } })); }
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace, ...(scope === "cli" ? { cli: { profile } } : {}) });
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, ...(scope === "cli" ? { profile } : {}) }, store: store(null) });
+  const diagnostic = { source: scope === "cli" ? "CLI settings" : path, path: "profile", category: "constraint", constraint: "Select a configured compatible profile" };
+  expect(settings).toMatchObject({ diagnostics: [diagnostic] });
+  expect(check(report, "provider")).toMatchObject({ status: "error", summary: "Invalid profile · Select a configured compatible profile", diagnostics: [diagnostic] });
+  expect(doctorExitCode(report)).toBe(1);
+  expect(JSON.stringify(settings)).not.toContain("private-");
+  expect(JSON.stringify(report)).not.toContain("private-");
+  expect(formatDoctor(report)).not.toContain("private-");
+});
+
+for (const scope of ["user", "project", "both"] as const) test(`${scope} deprecations retain migration, warnings and original files`, async () => {
+  const { workspace, home } = await fixture();
+  const scopes = scope === "both" ? ["user", "project"] : [scope];
+  const configDeprecations = [{ key: "oldModel", replacement: "model", since: "1.0", removeIn: "2.0" }];
+  const bytes = JSON.stringify({ oldModel: "configured-model", provider: "openai-compatible", baseUrl: "http://localhost:11434/v1", auth: "none" });
+  const paths = scopes.map(current => join(current === "user" ? home : workspace, ".schway/config.json"));
+  for (const path of paths) { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, bytes); }
+  const notices: string[] = [];
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace, configDeprecations, onDeprecation: warning => notices.push(warning.message) });
+  expect(settings).toMatchObject({ model: "configured-model" });
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null), configDeprecations });
+  expect(doctorExitCode(report)).toBe(0);
+  const warnings = report.checks.filter(c => c.id === "config.deprecated.oldModel");
+  expect(warnings.map(c => c.summary)).toEqual(notices);
+  expect(warnings.map(c => c.diagnostics?.[0]?.source)).toEqual(paths);
+  expect(warnings.every(c => c.status === "warning" && c.diagnostics?.[0]?.category === "deprecated")).toBe(true);
+  for (const path of paths) expect(await readFile(path, "utf8")).toBe(bytes);
+});
+
+test("doctor bounds source identifiers and strips secret-shaped text and terminal controls", async () => {
+  const { root, home } = await fixture();
+  const workspace = join(root, "sk-private-source\u001b[31m"); await mkdir(join(workspace, ".schway"), { recursive: true });
+  await writeFile(join(workspace, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(JSON.stringify(report)).not.toContain("sk-private-source");
+  expect(JSON.stringify(report)).not.toContain("\\u001b");
+  expect(formatDoctor(report)).not.toContain("\u001b");
+});
+
+const configFailures = [
+  { name: "malformed JSON", bytes: '{"private-secret', category: "json", path: "" },
+  { name: "wrong root", bytes: '["private-secret"]', category: "root", path: "" },
+  { name: "unknown root key", value: { "private-secret\u001b[31m\n": true }, category: "unknown-setting", path: "<unknown setting>" },
+  { name: "unknown nested key", value: { ui: { "private-secret\u001b]8;;url\u0007": true } }, category: "unknown-setting", path: "ui.<unknown setting>" },
+  { name: "enum", value: { approval: { mode: "private-secret" } }, category: "enum", path: "approval.mode" },
+  { name: "type", value: { maxTurns: "private-secret" }, category: "type", path: "maxTurns" },
+  { name: "range", value: { ui: { inlineDiffLines: -1 } }, category: "range", path: "ui.inlineDiffLines" },
+  { name: "profile type", value: { profiles: { "private-secret\n": { baseUrl: "https://example.com", model: {} } } }, category: "type", path: "profiles.<unknown setting>.model" },
+  { name: "profile URL", value: { profiles: { "private-secret": { baseUrl: "https://user:private-secret@example.com?token=private-secret" } } }, category: "constraint", path: "profiles.<unknown setting>.baseUrl" },
+  { name: "profile credential", value: { profiles: { "private-secret": { baseUrl: "https://example.com", credentialEnv: "Bearer private-secret" } } }, category: "constraint", path: "profiles.<unknown setting>.credentialEnv" },
+  { name: "forbidden secret", value: { token: "private-secret" }, category: "secret", path: "<unknown setting>" },
+  { name: "secret header", value: { headers: { Authorization: "Bearer private-secret" } }, category: "secret", path: "headers.<unknown setting>" },
+  { name: "unreadable", directory: true, category: "unreadable", path: "" },
+] as const;
+
+for (const scope of ["user", "project", "both"] as const) for (const sample of configFailures) {
+  test(`${scope} ${sample.name} has the same sanitized doctor and startup cause`, async () => {
+    const { workspace, home } = await fixture();
+    const scopes = scope === "both" ? ["user", "project"] : [scope];
+    for (const current of scopes) {
+      const file = join(current === "user" ? home : workspace, ".schway/config.json");
+      await mkdir(join(current === "user" ? home : workspace, ".schway"), { recursive: true });
+      if ("directory" in sample) await mkdir(file);
+      else await writeFile(file, "bytes" in sample ? sample.bytes : JSON.stringify(sample.value));
+    }
+    const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+    expect(report.schemaVersion).toBe(1); expect(doctorExitCode(report)).toBe(1);
+    expect(report.checks.filter(c => c.id.startsWith("config.") && c.status === "error")).toHaveLength(scopes.length);
+    expect(report.checks.filter(c => c.id.startsWith("package."))).toHaveLength(0);
+    let stdout = "", stderr = "";
+    const code = await runCli(["-p", "test"], { cwd: workspace, env: { HOME: home }, credentialStore: store(null), createModel: async () => { throw Error("model must not load"); }, fetch: async () => { throw Error("network must not run"); }, stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } } });
+    expect(code).toBe(1); expect(stdout).toBe("");
+    for (const current of scopes) {
+      const item = check(report, `config.${current}`)!;
+      expect(item.diagnostics).toEqual([expect.objectContaining({ source: join(current === "user" ? home : workspace, ".schway/config.json"), path: sample.path, category: sample.category })]);
+      expect(stderr).toContain(item.summary);
+      expect(stderr).toContain(item.diagnostics![0]!.source);
+    }
+    for (const output of [JSON.stringify(report), formatDoctor(report), stderr]) {
+      expect(output).not.toContain("private-secret"); expect(output).not.toContain("\u001b"); expect(output).not.toContain("\\u001b"); expect(output).not.toContain("Expected union value");
+    }
+  });
+}
+
+test("doctor reports one actionable config cause and retains independent package and extension failures", async () => {
+  const { workspace, home } = await fixture();
+  await mkdir(join(home, ".schway")); await mkdir(join(workspace, ".schway"));
+  await writeFile(join(home, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(check(report, "config.user")).toMatchObject({ status: "error", summary: "Invalid approval.mode · Use auto, ask, or read-only", diagnostics: [{ path: "approval.mode", category: "enum", source: join(home, ".schway/config.json"), constraint: "Use auto, ask, or read-only", values: ["auto", "ask", "read-only"] }] });
+  expect(report.checks.filter(c => c.id.startsWith("package."))).toEqual([]);
+  expect(check(report, "packages")).toMatchObject({ status: "warning", remedy: expect.stringContaining("config.user") });
+  expect(check(report, "approval-config")?.status).toBe("warning");
+  expect(check(report, "extensions")?.status).toBe("warning");
+  await writeFile(join(workspace, ".schway/config.json"), '{"packages":["missing-package"]}');
+  await writeFile(join(home, ".schway/sessions"), "not a directory");
+  const skill = join(workspace, ".agents/skills/broken/SKILL.md");
+  await mkdir(join(skill, ".."), { recursive: true }); await writeFile(skill, "malformed frontmatter");
+  const independent = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, extensions: ["missing-extension.ts"] }, store: store(null) });
+  expect(independent.checks.filter(c => c.id.startsWith("package."))).toEqual([expect.objectContaining({ status: "error", summary: expect.stringContaining("missing-package has a missing installation") })]);
+  expect(check(independent, "extension.0")?.status).toBe("error");
+  expect(check(independent, "sessions")?.status).toBe("error");
+  expect(independent.checks.some(c => c.id.startsWith("skill.") && c.status === "error")).toBe(true);
+  expect(doctorExitCode(independent)).toBe(1);
+});
 
 for (const count of [1, 2]) test(`doctor renders ${count} skills without changing JSON summaries`, async () => {
   const { workspace, home } = await fixture();
@@ -348,6 +476,7 @@ test("doctor JSON carries the shared deprecation text and exits zero for warning
   const report = JSON.parse(stdout);
   expect(report.checks.filter((entry: { id: string }) => entry.id.startsWith("config.deprecated."))).toEqual([{
     id: "config.deprecated.oldModel", status: "warning",
+    diagnostics: [{ source: path, path: "oldModel", category: "deprecated", constraint: "Use model" }],
     summary: `Config: "oldModel" in ${path} is deprecated; use "model". It will be removed in 2.0.`,
     remedy: `Replace "oldModel" with "model" in ${path}.`,
   }]);

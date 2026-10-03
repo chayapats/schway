@@ -1,7 +1,8 @@
-import { applyConfigDeprecations, CONFIG_DEPRECATIONS, type ConfigDeprecation, type ConfigDeprecationWarning } from "./deprecations.ts";
+import { applyConfigDeprecations, ConfigDeprecationError, CONFIG_DEPRECATIONS, type ConfigDeprecation, type ConfigDeprecationWarning } from "./deprecations.ts";
 import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, stricterApprovalMode, type ApprovalMode } from "../agent/approval.ts";
 import { Type, type Static, type TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import { configDiagnostic, configReadError, schemaDiagnostics, type ConfigReadError, type ConfigDiagnostic } from "./diagnostics.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
@@ -132,8 +133,8 @@ export const CompatibleProfileSchema = Type.Object(
     model: Type.Optional(Type.String({ minLength: 1 })),
     contextWindow: Type.Optional(PositiveInt),
     maxOutput: Type.Optional(PositiveInt),
-    headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-    extraBody: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    headers: Type.Optional(Type.Record(Type.String({ pattern: "^[\\s\\S]*$" }), Type.String())),
+    extraBody: Type.Optional(Type.Record(Type.String({ pattern: "^[\\s\\S]*$" }), Type.Unknown())),
     auth: Type.Optional(AuthSchema),
     credentialEnv: Type.Optional(
       Type.String({ minLength: 1, maxLength: 128, pattern: CREDENTIAL_ENV_PATTERN }),
@@ -156,13 +157,13 @@ export const ConfigSchema = Type.Object(
     contextWindow: Type.Optional(PositiveInt),
     maxOutput: Type.Optional(PositiveInt),
     baseUrl: Type.Optional(Type.String({ minLength: 1 })),
-    headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-    extraBody: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    headers: Type.Optional(Type.Record(Type.String({ pattern: "^[\\s\\S]*$" }), Type.String())),
+    extraBody: Type.Optional(Type.Record(Type.String({ pattern: "^[\\s\\S]*$" }), Type.Unknown())),
     auth: Type.Optional(AuthSchema),
     openaiAuth: Type.Optional(OpenAIAuthSchema),
     xaiAuth: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("grok"), Type.Literal("api-key")])),
     packages: Type.Optional(Type.Array(Type.String({ pattern: "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$" }), { uniqueItems: true })),
-    profiles: Type.Optional(Type.Record(Type.String(), CompatibleProfileSchema)),
+    profiles: Type.Optional(Type.Record(Type.String({ pattern: "^[\\s\\S]*$" }), CompatibleProfileSchema)),
     profile: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
     git: Type.Optional(GitConfigSchema),
     undo: Type.Optional(UndoConfigSchema),
@@ -304,14 +305,14 @@ export function parseConfigObject(
   value: unknown,
   source: string,
   deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS,
-): ParsedConfigLayer | { error: string } {
+): ParsedConfigLayer | ConfigReadError {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return { error: `Invalid config at ${source}: expected a JSON object` };
+    return configReadError([configDiagnostic(source, "", "root", "Use a JSON object")]);
   }
 
   let migrated: ReturnType<typeof applyConfigDeprecations>;
   try { migrated = applyConfigDeprecations(value as Record<string, unknown>, source, deprecations); }
-  catch (error) { return { error: errorMessage(error) }; }
+  catch (error) { return configReadError([configDiagnostic(source, error instanceof ConfigDeprecationError ? error.field : "", "type", "Use a JSON object")]); }
   value = migrated.value;
   const record = migrated.value;
   for (const entry of deprecations) {
@@ -335,160 +336,59 @@ export function parseConfigObject(
       }
     }
   }
-  const keys = Object.keys(record);
-  const secretKey = keys.find((key) =>
-    SECRET_KEY_ALIASES.has(normalizeKey(key)),
-  );
-  if (secretKey !== undefined) {
-    return {
-      error: `API keys must not be stored in ${source}. Use --api-key or environment variables.`,
-    };
-  }
-
-  const known = new Set<string>(CONFIG_SETTING_NAMES);
-  const unknown = keys.filter((key) => !known.has(key));
-  if (unknown.length > 0) {
-    return {
-      error: `Invalid config at ${source}: unknown setting "${unknown[0]}". Valid settings: ${CONFIG_SETTING_NAMES.join(", ")}`,
-    };
-  }
-
-  const nestedSecret = findNestedProfileSecret(record, source);
-  if (nestedSecret !== undefined) {
-    return { error: nestedSecret };
-  }
-
+  const secrets = configSecrets(record, source);
   const removedProvider = removedProviderMessage(record.provider);
-  if (removedProvider !== undefined) {
-    return { error: removedProvider };
+  if (removedProvider !== undefined && !secrets.size) {
+    return { error: removedProvider, diagnostics: [configDiagnostic(source, "provider", "removed-provider", removedProvider)] };
   }
-
-  if (record.xaiAuth !== undefined && !["auto", "grok", "api-key"].includes(String(record.xaiAuth))) return { error: `Unknown xAI auth preference: ${String(record.xaiAuth)}. Use auto, grok, or api-key.` };
 
   if (!Value.Check(ConfigSchema, value)) {
-    const errors = [...Value.Errors(ConfigSchema, value)]
-      .map((entry) => formatSchemaError(entry.path, entry.message))
-      .join("; ");
-    return {
-      error: `Invalid config at ${source}: ${errors || "failed validation"}`,
-    };
+    return configReadError([...secrets.values(), ...schemaDiagnostics(ConfigSchema, [...Value.Errors(ConfigSchema, value)].filter(error => !secrets.has(error.path)), source)]);
   }
 
+  if (secrets.size) return configReadError([...secrets.values()]);
   const layer = normalizeLayer(value);
-  const credentialHeader = Object.keys(layer.headers ?? {}).find((name) =>
-    CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()),
-  );
-  if (credentialHeader !== undefined) {
-    return {
-      error: `API keys must not be stored in ${source}. Use --api-key, --header at runtime, or environment variables.`,
-    };
-  }
-  const profilesError = validateProfiles(layer.profiles, source);
-  if (profilesError !== undefined) {
-    return { error: profilesError };
-  }
-  if (layer.thinking === null && source !== "session") {
-    return { error: `Invalid config at ${source}: thinking must be a supported level. Null is a session-only provider-default marker.` };
-  }
-  if (layer.profile === null && source !== "session") {
-    return {
-      error: `Invalid config at ${source}: profile must be a nonempty string. Null is a session-only cleared marker.`,
-    };
-  }
+  const diagnostics = validateProfiles(layer.profiles, source);
+  if (layer.thinking === null && source !== "session") diagnostics.push(configDiagnostic(source, "thinking", "enum", `Use ${THINKING_LEVELS.join(", ")}; null is only supported in a session`, THINKING_LEVELS));
+  if (layer.profile === null && source !== "session") diagnostics.push(configDiagnostic(source, "profile", "type", "Use a nonempty string; null is only supported in a session"));
   if (layer.profile !== undefined && layer.profile !== null && !isValidProfileName(layer.profile.trim())) {
-    return {
-      error: `Invalid config at ${source}: profile must match ${PROFILE_NAME_PATTERN}.`,
-    };
+    diagnostics.push(configDiagnostic(source, "profile", "constraint", `Use a nonempty profile name matching ${PROFILE_NAME_PATTERN}`));
   }
-  if (layer.profile !== undefined && layer.profile !== null && layer.profile.trim().length === 0) {
-    return {
-      error: `Invalid config at ${source}: profile must be a nonempty string.`,
-    };
-  }
+  if (diagnostics.length) return configReadError(diagnostics);
   return Object.defineProperty(layer, "deprecationWarnings", { value: migrated.warnings, enumerable: false }) as ParsedConfigLayer;
 }
 
-/** Find secret-like keys inside profile definitions before schema validation. */
-function findNestedProfileSecret(record: Record<string, unknown>, source: string): string | undefined {
-  const profiles = record.profiles;
-  if (profiles === null || typeof profiles !== "object" || Array.isArray(profiles)) {
-    return undefined;
-  }
-  for (const profile of Object.values(profiles as Record<string, unknown>)) {
-    if (profile === null || typeof profile !== "object" || Array.isArray(profile)) {
-      continue;
-    }
-    const secretKey = Object.keys(profile as Record<string, unknown>).find((key) =>
-      SECRET_KEY_ALIASES.has(normalizeKey(key)),
-    );
-    if (secretKey !== undefined) {
-      return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
-    }
-    const extraBody = (profile as Record<string, unknown>).extraBody;
-    if (extraBody !== null && typeof extraBody === "object" && !Array.isArray(extraBody)) {
-      const extraBodySecret = Object.keys(extraBody as Record<string, unknown>).find((key) =>
-        SECRET_KEY_ALIASES.has(normalizeKey(key)),
-      );
-      if (extraBodySecret !== undefined) {
-        return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
-      }
-    }
-  }
-  return undefined;
+/** Find forbidden credential fields without exposing their values or dynamic names. */
+function configSecrets(record: Record<string, unknown>, source: string): Map<string, ConfigDiagnostic> {
+  const diagnostics = new Map<string, ConfigDiagnostic>();
+  const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+  const inspect = (value: Record<string, unknown>, prefix: string, segments: string[]) => {
+    const add = (keys: string[], path: string, headers = false) => {
+      const pointer = "/" + [...segments, ...keys].map(key => key.replaceAll("~", "~0").replaceAll("/", "~1")).join("/");
+      diagnostics.set(pointer, configDiagnostic(source, prefix + path, "secret", `API keys must not be stored in config; use --api-key${headers ? ", --header at runtime," : ""} or environment variables`));
+    };
+    for (const key of Object.keys(value)) if (SECRET_KEY_ALIASES.has(normalizeKey(key))) add([key], "<unknown setting>");
+    if (object(value.headers)) for (const key of Object.keys(value.headers)) if (CREDENTIAL_HEADER_NAMES.has(key.toLowerCase())) add(["headers", key], "headers.<unknown setting>", true);
+    if (object(value.extraBody)) for (const key of Object.keys(value.extraBody)) if (SECRET_KEY_ALIASES.has(normalizeKey(key))) add(["extraBody", key], "extraBody.<unknown setting>");
+  };
+  inspect(record, "", []);
+  if (object(record.profiles)) for (const [name, profile] of Object.entries(record.profiles)) if (object(profile)) inspect(profile, "profiles.<unknown setting>.", ["profiles", name]);
+  return diagnostics;
 }
 
-/** Validate profile names, reference-only credentials, and non-secret headers. */
-function validateProfiles(
-  profiles: CompatibleProfileMap | undefined,
-  source: string,
-): string | undefined {
-  if (profiles === undefined) {
-    return undefined;
+/** Validate profile constraints without echoing arbitrary names or endpoint credentials. */
+function validateProfiles(profiles: CompatibleProfileMap | undefined, source: string): ConfigDiagnostic[] {
+  const diagnostics = [...configSecrets({ profiles }, source).values()];
+  for (const [name, profile] of Object.entries(profiles ?? {})) {
+    const path = "profiles.<unknown setting>";
+    if (!isValidProfileName(name)) diagnostics.push(configDiagnostic(source, path, "constraint", `Use a profile name matching ${PROFILE_NAME_PATTERN}`));
+    if (!profile.baseUrl.trim()) diagnostics.push(configDiagnostic(source, `${path}.baseUrl`, "constraint", "Use a nonempty string"));
+    else if (!isValidProfileBaseUrl(profile.baseUrl.trim())) diagnostics.push(configDiagnostic(source, `${path}.baseUrl`, "constraint", "Use an absolute URL without userinfo or query parameters"));
+    if (profile.credentialEnv !== undefined && !new RegExp(CREDENTIAL_ENV_PATTERN).test(profile.credentialEnv)) diagnostics.push(configDiagnostic(source, `${path}.credentialEnv`, "constraint", `Use a string matching ${CREDENTIAL_ENV_PATTERN}`));
+    if (profile.credentialIdentity !== undefined && !new RegExp(CREDENTIAL_IDENTITY_PATTERN).test(profile.credentialIdentity)) diagnostics.push(configDiagnostic(source, `${path}.credentialIdentity`, "constraint", `Use a string matching ${CREDENTIAL_IDENTITY_PATTERN}`));
+    if (profile.model !== undefined && !profile.model.trim()) diagnostics.push(configDiagnostic(source, `${path}.model`, "constraint", "Use a nonempty string"));
   }
-  for (const [name, profile] of Object.entries(profiles)) {
-    if (!isValidProfileName(name)) {
-      return `Invalid config at ${source}: profile name "${name}" must match ${PROFILE_NAME_PATTERN}.`;
-    }
-    const keys = Object.keys(profile as unknown as Record<string, unknown>);
-    const secretKey = keys.find((key) => SECRET_KEY_ALIASES.has(normalizeKey(key)));
-    if (secretKey !== undefined) {
-      return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
-    }
-    const extraBodySecret = Object.keys(profile.extraBody ?? {}).find((key) =>
-      SECRET_KEY_ALIASES.has(normalizeKey(key)),
-    );
-    if (extraBodySecret !== undefined) {
-      return `API keys must not be stored in ${source}. Use --api-key or environment variables.`;
-    }
-    if (profile.baseUrl.trim().length === 0) {
-      return `Invalid config at ${source}: profiles.${name}.baseUrl must be a nonempty string.`;
-    }
-    if (!isValidProfileBaseUrl(profile.baseUrl.trim())) {
-      return `Invalid config at ${source}: profiles.${name}.baseUrl must be an absolute URL without userinfo or query parameters.`;
-    }
-    if (profile.model !== undefined && profile.model.trim().length === 0) {
-      return `Invalid config at ${source}: profiles.${name}.model must be a nonempty string.`;
-    }
-    if (
-      profile.credentialEnv !== undefined &&
-      !new RegExp(CREDENTIAL_ENV_PATTERN).test(profile.credentialEnv)
-    ) {
-      return `Invalid config at ${source}: profiles.${name}.credentialEnv must match ${CREDENTIAL_ENV_PATTERN}.`;
-    }
-    if (
-      profile.credentialIdentity !== undefined &&
-      !new RegExp(CREDENTIAL_IDENTITY_PATTERN).test(profile.credentialIdentity)
-    ) {
-      return `Invalid config at ${source}: profiles.${name}.credentialIdentity must match ${CREDENTIAL_IDENTITY_PATTERN}.`;
-    }
-    const credentialHeader = Object.keys(profile.headers ?? {}).find((header) =>
-      CREDENTIAL_HEADER_NAMES.has(header.toLowerCase()),
-    );
-    if (credentialHeader !== undefined) {
-      return `API keys must not be stored in ${source}. Use --api-key, --header at runtime, or environment variables.`;
-    }
-  }
-  return undefined;
+  return diagnostics;
 }
 
 /** Merge profile maps by name with later definitions replacing the whole same-name profile. */
@@ -572,15 +472,23 @@ export function resolveSettings(input: {
   project?: ConfigLayer;
   cli?: ConfigLayer;
   session?: ConfigLayer;
+  /** Original file paths for actionable resolution failures after schema validation. */
+  configSources?: { user?: string; project?: string };
   /** Verified account or endpoint capabilities for the selected billing route. */
   modelCapabilities?: readonly ModelCapability[];
   /** Preliminary headless resolution only; never use it for an outgoing request. */
   deferOpenAIThinking?: boolean;
   /** Stage an uncached OpenRouter or xAI choice for verified discovery before interactive activation. */
   deferUncachedThinking?: boolean;
-}): ResolvedSettings | { error: string } {
+}): ResolvedSettings | { error: string; diagnostics?: readonly ConfigDiagnostic[] } {
   const approval = resolveApprovalSettings(input);
   const memory = effectiveInteractiveMemory(input);
+  const sourceFor = (field: keyof ConfigLayer, profileName?: string): string => {
+    for (const [layer, source] of [[input.session, "session settings"], [input.cli, "CLI settings"], [input.project, input.configSources?.project ?? "project settings"], [input.user, input.configSources?.user ?? "user settings"], [memory, "interactive memory"]] as const) {
+      if (profileName ? layer?.profiles?.[profileName] !== undefined : layer?.[field] !== undefined) return source;
+    }
+    return "default settings";
+  };
   const mergedProfiles = mergeProfileMaps(input.user?.profiles, input.project?.profiles, input.cli?.profiles, input.session?.profiles);
   const selection = mergeConfigLayers(
     BUILTIN_DEFAULTS,
@@ -592,7 +500,7 @@ export function resolveSettings(input: {
   );
   const selectedName = selection.profile?.trim() || undefined;
   if (selectedName !== undefined && !isValidProfileName(selectedName)) {
-    return { error: `Invalid profile "${selectedName}". Profile names must match ${PROFILE_NAME_PATTERN}.` };
+    return configReadError([configDiagnostic(sourceFor("profile"), "profile", "constraint", `Use a name matching ${PROFILE_NAME_PATTERN}`)]);
   }
   let merged: ConfigLayer;
   let activeProfile: CompatibleProfile | undefined;
@@ -601,18 +509,10 @@ export function resolveSettings(input: {
   } else {
     activeProfile = mergedProfiles[selectedName];
     if (activeProfile === undefined) {
-      const available = Object.keys(mergedProfiles);
-      return {
-        error:
-          available.length === 0
-            ? `Unknown profile "${selectedName}". No compatible profiles are defined.`
-            : `Unknown profile "${selectedName}". Available: ${available.sort().join(", ")}.`,
-      };
+      return configReadError([configDiagnostic(sourceFor("profile"), "profile", "constraint", "Select a configured compatible profile")]);
     }
-    const profileError = validateProfiles({ [selectedName]: activeProfile }, "selected profile");
-    if (profileError !== undefined) {
-      return { error: profileError };
-    }
+    const profileError = validateProfiles({ [selectedName]: activeProfile }, sourceFor("profiles", selectedName));
+    if (profileError.length) return configReadError(profileError);
     const profileLayer = profileToLayer(activeProfile);
     const PROFILE_CONNECTION_KEYS = ["baseUrl", "model", "headers", "extraBody", "auth"] as const;
     const fileLayer = (layer: ConfigLayer | undefined): ConfigLayer | undefined => {
@@ -636,9 +536,7 @@ export function resolveSettings(input: {
   const provider = merged.provider ?? DEFAULT_PROVIDER;
   const model = merged.model?.trim() ?? "";
   if (selectedName !== undefined && provider !== "openai-compatible") {
-    return {
-      error: `Profile "${selectedName}" requires provider openai-compatible. Remove the conflicting provider override.`,
-    };
+    return configReadError([configDiagnostic(sourceFor("provider"), "provider", "constraint", "Use openai-compatible with a profile; remove the conflicting provider override")]);
   }
   if (!model) {
     if (provider === "openai-compatible" && !(merged.baseUrl?.trim())) {
@@ -800,7 +698,20 @@ function omitProfileKeys(layer: ConfigLayer | undefined): ConfigLayer | undefine
   return direct;
 }
 
-/** Read config under the supplied home and workspace root, returning resolved settings or the first file/settings error. */
+/** Read both config sources before reporting failure, so one invalid file cannot hide another. */
+export async function readConfigLayers(input: {
+  home: string;
+  workspaceRoot: string;
+  configDeprecations?: readonly ConfigDeprecation[];
+}): Promise<{ user?: ParsedConfigLayer; project?: ParsedConfigLayer } | ConfigReadError> {
+  const layers = await Promise.all([readConfigFile(userConfigPath(input.home), input.configDeprecations), readConfigFile(projectConfigPath(input.workspaceRoot), input.configDeprecations)]);
+  const failures = layers.filter((layer): layer is ConfigReadError => !!layer && "error" in layer);
+  if (failures.length) return { error: failures.map(failure => failure.error).join("\n"), diagnostics: failures.flatMap(failure => failure.diagnostics) };
+  const [user, project] = layers as [ParsedConfigLayer | undefined, ParsedConfigLayer | undefined];
+  return { user, project };
+}
+
+/** Read config under the supplied home and workspace root, returning every invalid file reason before resolving settings. */
 export async function loadResolvedSettings(input: {
   home: string;
   workspaceRoot: string;
@@ -811,15 +722,10 @@ export async function loadResolvedSettings(input: {
   requireExplicitModel?: boolean;
   configDeprecations?: readonly ConfigDeprecation[];
   onDeprecation?: (warning: ConfigDeprecationWarning) => void;
-}): Promise<ResolvedSettings | { error: string }> {
-  const user = await readConfigFile(userConfigPath(input.home), input.configDeprecations);
-  if (user && "error" in user) {
-    return user;
-  }
-  const project = await readConfigFile(projectConfigPath(input.workspaceRoot), input.configDeprecations);
-  if (project && "error" in project) {
-    return project;
-  }
+}): Promise<ResolvedSettings | { error: string; diagnostics?: readonly ConfigDiagnostic[] }> {
+  const layers = await readConfigLayers(input);
+  if ("error" in layers) return layers;
+  const { user, project } = layers;
   for (const warning of [...(user?.deprecationWarnings ?? []), ...(project?.deprecationWarnings ?? [])]) input.onDeprecation?.(warning);
   const resolved = resolveSettings({
     user,
@@ -827,6 +733,7 @@ export async function loadResolvedSettings(input: {
     cli: input.cli,
     modelCapabilities: input.modelCapabilities,
     deferOpenAIThinking: input.deferOpenAIThinking,
+    configSources: { user: userConfigPath(input.home), project: projectConfigPath(input.workspaceRoot) },
   });
   if ("error" in resolved) return resolved;
   if (input.requireExplicitModel && !resolved.modelConfigured) {
@@ -839,7 +746,7 @@ export async function loadResolvedSettings(input: {
 export async function readConfigFile(
   path: string,
   deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS,
-): Promise<ParsedConfigLayer | { error: string } | undefined> {
+): Promise<ParsedConfigLayer | ConfigReadError | undefined> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -847,18 +754,16 @@ export async function readConfigFile(
     if (isNotFound(error)) {
       return undefined;
     }
-    return {
-      error: `Unable to read config ${path}: ${errorMessage(error)}`,
-    };
+    return configReadError([configDiagnostic(path, "", "unreadable", "Restore access to a readable config file")]);
   }
   if (text.trim().length === 0) {
-    return { error: `Invalid config at ${path}: expected a JSON object` };
+    return configReadError([configDiagnostic(path, "", "root", "Use a JSON object")]);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { error: `Invalid config at ${path}: malformed JSON` };
+    return configReadError([configDiagnostic(path, "", "json", "Fix malformed JSON; use a JSON object with quoted setting names")]);
   }
   return parseConfigObject(parsed, path, deprecations);
 }
@@ -886,12 +791,6 @@ function normalizeLayer(layer: ConfigLayer): ConfigLayer {
   };
 }
 
-/** Fold TypeBox path + message into a short, setting-oriented phrase. */
-function formatSchemaError(path: string, message: string): string {
-  const setting = path.replace(/^\//, "").replaceAll("/", ".") || "value";
-  return `${setting} ${message}`;
-}
-
 /** Compare config keys without punctuation so api_key and apiKey match. */
 function normalizeKey(key: string): string {
   return key.toLowerCase().replaceAll(/[-_]/g, "");
@@ -906,12 +805,6 @@ function isNotFound(error: unknown): boolean {
     (error as { code: unknown }).code === "ENOENT"
   );
 }
-
-/** Normalize thrown values into a printable error string. */
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 
 /** Resolve approval independently of memory, allowing project settings only to tighten the user baseline. */
 export function resolveApprovalSettings(input: { user?: ConfigLayer; project?: ConfigLayer; cli?: ConfigLayer; session?: ConfigLayer }): {

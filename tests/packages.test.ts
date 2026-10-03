@@ -5,10 +5,10 @@ import { pathToFileURL } from "node:url";
 import { inc } from "semver";
 import { version } from "../package.json";
 import { runCli } from "../src/cli/main.ts";
-import { parseConfigObject } from "../src/config/config.ts";
+import { parseConfigObject, readConfigFile, userConfigPath } from "../src/config/config.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
-import { discoverPackages } from "../src/packages/packages.ts";
+import { discoverPackages, inspectPackages } from "../src/packages/packages.ts";
 import { createSession } from "../src/session/session.ts";
 import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { discoverSkills, prepareSkillInvocation } from "../src/skills/skills.ts";
@@ -23,6 +23,20 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 async function configure(root: string, packages: string[]): Promise<void> {
   await Bun.write(join(root, ".schway/config.json"), JSON.stringify({ packages }));
 }
+
+test("package inspection retains the exact config observation and still inspects the other scope", async () => withIsolatedCliDirs(async ({ home, work: workspace }) => {
+  const path = userConfigPath(home);
+  await Bun.write(path, '{"approval":{"mode":"readonly"}}');
+  const observation = await readConfigFile(path);
+  await configure(home, ["new-global-package"]);
+  await configure(workspace, ["independent-project-package"]);
+  const inspection = await inspectPackages({ home, workspaceRoot: workspace, configFiles: new Map([[path, observation]]) });
+  expect(inspection.issues).toEqual([
+    { scope: "global", kind: "configuration", configDiagnostics: [expect.objectContaining({ source: path, path: "approval.mode", category: "enum" })] },
+    { scope: "project", name: "independent-project-package", kind: "missing" },
+  ]);
+  expect(inspection.diagnostics.join("\n")).not.toContain("new-global-package");
+}));
 
 /** Materialize an installed package fixture with its declared manifest and requested files. */
 async function installed(root: string, name: string, manifest: unknown, files: Record<string, string> = {}): Promise<string> {

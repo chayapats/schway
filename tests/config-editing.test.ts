@@ -4,6 +4,32 @@ import { join } from "node:path";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
 
+test("interactive configuration loading reports both invalid files before reading memory", async () => {
+  await withTempDir(async dir => {
+    const home = join(dir, "home"), workspaceRoot = join(dir, "project");
+    const paths = [join(home, ".schway/config.json"), join(workspaceRoot, ".schway/config.json")];
+    for (const path of paths) { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, '{"approval":{"mode":"private-secret"}}'); }
+    const error = await loadConfigEditor({ home, workspaceRoot, interactiveMemory: true }).catch(error => error as Error);
+    expect(error).toBeInstanceOf(Error);
+    for (const path of paths) expect((error as Error).message).toContain(path);
+    expect((error as Error).message.match(/Invalid approval.mode/g)).toHaveLength(2);
+    expect((error as Error).message).not.toContain("private-secret");
+    expect(await readdir(join(home, ".schway"))).toEqual(["config.json"]);
+  });
+});
+
+test("interactive unknown profile errors retain source without exposing selected or available names", async () => {
+  await withTempDir(async dir => {
+    const home = join(dir, "home"), workspaceRoot = join(dir, "project"), path = join(home, ".schway/config.json");
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, JSON.stringify({ profile: "private-selection", profiles: { "private-available": { baseUrl: "https://example.test" } } }));
+    const error = await loadConfigEditor({ home, workspaceRoot }).catch(error => error as Error);
+    expect((error as Error).message).toContain(path);
+    expect((error as Error).message).toContain("Invalid profile · Select a configured compatible profile");
+    expect((error as Error).message).not.toContain("private-");
+  });
+});
+
 test("ui splash setting and field reset preserve sibling keys in session and disk layers", async () => {
   await withTempDir(async home => {
     const editor = await loadConfigEditor({ home, workspaceRoot: join(home, "project") });
@@ -191,7 +217,7 @@ test("Grok and xAI API-key model staging commit explicit distinct billing routes
     const grok = await editor.prepareGrokModel("grok-4.7"); expect(editor.settings.xaiAuth).toBe("auto"); await grok.commit(); expect(editor.settings.xaiAuth).toBe("grok");
     await (await editor.prepareXaiModel("grok-4.7")).commit(); expect(editor.settings.xaiAuth).toBe("api-key");
     await (await editor.prepare({ scope: "session", key: "xaiAuth", value: "grok" })).commit(); expect(editor.settings.xaiAuth).toBe("grok");
-    await expect(editor.prepare({ scope: "session", key: "xaiAuth", value: "bogus" })).rejects.toThrow("Unknown xAI auth preference: bogus. Use auto, grok, or api-key.");
+    await expect(editor.prepare({ scope: "session", key: "xaiAuth", value: "bogus" })).rejects.toThrow("Invalid xaiAuth · Use auto, grok, or api-key");
   });
 });
 

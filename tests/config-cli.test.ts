@@ -183,7 +183,7 @@ test("user-global config applies when the project has none", async () => {
   });
 });
 
-test("invalid and misspelled project config exit non-zero with the setting name", async () => {
+test("invalid and misspelled project config exit non-zero with a redacted unknown setting", async () => {
   await withTempDir(async (dir) => {
     await mkdir(join(dir, ".schway"));
     await writeFile(
@@ -196,7 +196,8 @@ test("invalid and misspelled project config exit non-zero with the setting name"
     });
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("modell");
+    expect(result.stderr).toContain("<unknown setting>");
+    expect(result.stderr).not.toContain("modell");
     expect(result.stderr).toContain("model");
   });
 });

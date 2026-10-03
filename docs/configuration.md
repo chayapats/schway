@@ -30,6 +30,35 @@ Project config is read from the workspace root (nearest Git root, otherwise the 
 
 Unknown or misspelled settings fail with an actionable error. `baseUrl`, `headers`, `extraBody`, and `auth` apply only when the selected provider is `openai-compatible`.
 
+For example, change `{"approval":{"mode":"readonly"}}` to
+`{"approval":{"mode":"read-only"}}`. Previously, startup named a validation
+failure and doctor reported both a config failure and an apparent package fault.
+Both now report `Invalid approval.mode · Use auto, ask, or read-only`, with the
+affected config file. Doctor reports each invalid source under `config.user` or
+`config.project` and continues independent checks. Package inspection explains
+which config check to repair when that scope could not be inspected; a missing
+package in another valid scope is still reported.
+
+Diagnostics describe expected types, supported values and constraints without
+printing invalid values. Unknown keys and dynamic profile/header names appear as
+`<unknown setting>`; recognized paths such as `approval.mode` remain specific.
+For example, a profile endpoint error names
+`profiles.<unknown setting>.baseUrl`. Check the named file to identify the entry.
+Source labels are bounded and terminal control sequences are removed. Config
+reads and doctor never repair files automatically.
+
+Doctor JSON keeps `schemaVersion: 1` and each check's required `id`, `status`,
+`summary` and `remedy`. Config errors and deprecation warnings may additionally
+include `diagnostics`, an array of `{ source, path, category, constraint, values? }`.
+`source` is the sanitized file label or settings source, `path` is a safe setting path (empty for a
+whole-file failure), and `values` lists supported enum strings when applicable.
+Categories are `json`, `root`, `unknown-setting`, `enum`, `type`, `range`,
+`constraint`, `secret`, `unreadable`, `removed-provider`, and `deprecated`.
+Use these categories and the config check ID for automation; avoid matching
+human-readable messages or relying on `package.<index>` ordering. Multiple
+dynamic entries can share the same redacted path. Deprecations remain warnings;
+removed-provider migration instructions remain available.
+
 ```bash
 schway -p "explain this repository" --env-file ~/.config/my-ai.env
 schway -p "explain this repository" --max-turns 8 --max-output 2048

@@ -1,4 +1,5 @@
 import type { ConfigDeprecation } from "../config/deprecations.ts";
+import type { ConfigDiagnostic } from "../config/diagnostics.ts";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { satisfies, validRange } from "semver";
@@ -22,6 +23,8 @@ export interface PackageIssue {
   kind: "configuration" | "missing" | "entry" | "manifest" | "peer";
   /** Raw declared relative entry path; callers must redact and bound it before display. */
   entry?: string;
+  /** Safe source reasons when package enablement could not be inspected. */
+  configDiagnostics?: readonly ConfigDiagnostic[];
 }
 
 /** Resolve enabled packages, retaining the first error as the runtime loader always has. */
@@ -39,6 +42,8 @@ export async function discoverPackages(options: {
 
 /** Inspect each configured package independently without evaluating extension entrypoints. */
 export async function inspectPackages(options: {
+  /** Reuse a caller's exact config observations, including absent or invalid sources. */
+  configFiles?: ReadonlyMap<string, Awaited<ReturnType<typeof readConfigFile>>>;
   /** Use the same supported legacy keys as the settings reader. */
   configDeprecations?: readonly ConfigDeprecation[];
   workspaceRoot: string;
@@ -54,10 +59,10 @@ export async function inspectPackages(options: {
   ];
   for (const { scope, root, config } of scopes) {
     options.signal?.throwIfAborted();
-    const layer = await readConfigFile(config, options.configDeprecations);
+    const layer = options.configFiles?.has(config) ? options.configFiles.get(config) : await readConfigFile(config, options.configDeprecations);
     if (layer && "error" in layer) {
       diagnostics.push(layer.error);
-      issues.push({ scope, kind: "configuration" });
+      issues.push({ scope, kind: "configuration", configDiagnostics: layer.diagnostics });
       continue;
     }
     for (const name of layer?.packages ?? []) {
