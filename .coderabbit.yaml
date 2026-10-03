@@ -1,0 +1,5 @@
+# Generated terminal captures are checked by the catalog tests and gallery review.
+# Keep the generator, assertions, inventory and all other files eligible for review.
+reviews:
+  path_filters:
+    - "!tests/screen-catalog/goldens/**/*.golden"

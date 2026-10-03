@@ -44,6 +44,8 @@ Run `bun run screens:gallery`, then open the printed absolute path in a browser.
 
 In a pull request, inspect the text-section diff for content/layout changes and style runs for unintended color, attribute or column changes. Open the gallery to compare every affected width and both themes. Golden changes should correspond to the intended UI change; investigate unexpected updates before committing. Failure messages name the file and show at most 60 changed lines.
 
+CodeRabbit excludes only generated `.golden` captures through `.coderabbit.yaml`, so a layout change across the catalog does not exceed its file limit. The screen definitions, harness, assertions and `index.txt` remain eligible for review. This filter does not replace the required golden comparison, text/style diff inspection or gallery review above; include that evidence in the PR. The current-HEAD CodeRabbit review and finding-disposition gate still applies to every implementation PR.
+
 ## Determinism
 
 The harness freezes wall time at `2026-01-15T09:30:00.000Z`, injects fixed animation and activity clocks, disables decorative motion, gates long-running operations until disposal, and isolates theme input from the host environment. Git fixtures use a fixed author, date and `main` branch in a temporary `~/demo` workspace. The complete catalog run ignores global and system Git configuration, including diff prefixes. The review recipe renders its loading panel before awaiting Git, keeping the renderer’s existing scrollbar layout independent of subprocess timing. A fetch guard rejects network access for the entire catalog run.
