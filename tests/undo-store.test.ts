@@ -25,7 +25,7 @@ test("file tools durably capture original bytes and their resulting hash", async
   });
 });
 
-test("permission-only changes are durable and repeated captures keep the first mode and latest settled mode", async () => {
+test.skipIf(process.platform === "win32")("permission-only changes are durable and repeated captures keep the first mode and latest settled mode", async () => {
   await withTempDir(async root => {
     const path = join(root, "file.txt"), turn = { sessionId: "session", turnId: "user", turnNumber: 1 };
     const store = openUndoStore({ home: root });

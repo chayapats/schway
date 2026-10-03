@@ -45,7 +45,7 @@ test("write fully replaces an existing file", async () => {
   });
 });
 
-test("write preserves a write-only destination without adding a read-access requirement", async () => {
+test.skipIf(process.platform === "win32")("write preserves a write-only destination without adding a read-access requirement", async () => {
   await withTempDir(async dir => {
     const path = join(dir, "private"); await writeFile(path, "before"); await chmod(path, 0o200);
     try {
@@ -63,7 +63,7 @@ test("write replaces a dangling symlink with a newly created regular file", asyn
     const result = await writeTool.execute({ path: "link", content: "replacement" }, contextFor(dir));
     expect(result.isError).toBeUndefined(); expect(result.details).toMatchObject({ created: true });
     expect((await lstat(path)).isFile()).toBe(true); expect(await readFile(path, "utf8")).toBe("replacement");
-    expect((await stat(path)).mode & 0o777).toBe(0o666 & ~process.umask());
+    if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o666 & ~process.umask());
     await expect(lstat(absent)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

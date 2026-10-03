@@ -18,7 +18,7 @@ test("edit declares exclusive execution", () => {
   expect(editTool.name).toBe("edit");
 });
 
-test.each([0o755, 0o600, 0o640])("edit preserves ordinary permission bits %o", async mode => {
+test.skipIf(process.platform === "win32").each([0o755, 0o600, 0o640])("edit preserves ordinary permission bits %o", async mode => {
   await withTempDir(async dir => {
     const path = join(dir, "run.sh");
     await writeFile(path, "before"); await chmod(path, mode);
