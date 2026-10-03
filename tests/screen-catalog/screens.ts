@@ -20,8 +20,10 @@ const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสร
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
+  { id: "auto-mode", title: "Auto mode", description: "An idle conversation shows the default Auto mode and its change-mode hint.", noColorWidths: true, drive: async () => {}, ready: s => s.approvalMode === "auto" && s.readiness === "ready" },
   { id: "read-only-mode", title: "Read-only mode", description: "An idle conversation shows the read-only approval chip and mode hint.", noColor: true, drive: async ui => { ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true }); }, ready: s => s.approvalMode === "read-only" },
   { id: "ask-mode", title: "Ask mode", description: "An idle conversation shows the ask approval chip and mode hint.", noColor: true, drive: async ui => { ui.mockInput.pressTab({ shift: true }); }, ready: s => s.approvalMode === "ask" },
+  { id: "approval-modes-help", title: "Approval mode meanings", description: "Preferences explain the three modes without changing the current mode.", noColor: true, drive: async ui => { ui.mockInput.pressKey("p", { meta: true }); await ui.settle(); ui.mockInput.pressKey("pagedown"); }, ready: s => !!s.preferences && s.approvalMode === "auto" },
   { id: "approval-command", title: "Approve a command", description: "A mutating command waits for an interactive approval choice.", noColor: true, drive: ui => enter(ui, "Test the clamp fix"), ready: s => s.toolApproval?.content === "bun test --filter clamp" },
   { id: "approval-edit", title: "Approve an edit", description: "The exact clamp replacement is previewed before approval.", noColor: true, drive: ui => enter(ui, "Fix the clamp upper bound"), ready: s => !!s.toolApproval?.diff },
   { id: "sign-in-chooser", title: "Sign-in chooser", description: "The connection chooser groups subscriptions, API keys and a custom endpoint.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); }, ready: s => !!s.loginChooser },
@@ -70,5 +72,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
+  if (["first-run", "auto-mode", "ask-mode", "read-only-mode"].includes(screen.id)) variants.push(
+    make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   return variants;
 }

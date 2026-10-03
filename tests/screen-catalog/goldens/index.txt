@@ -1,6 +1,8 @@
 first-run
+auto-mode
 read-only-mode
 ask-mode
+approval-modes-help
 approval-command
 approval-edit
 sign-in-chooser

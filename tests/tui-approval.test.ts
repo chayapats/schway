@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { handleSlashCommand } from "../src/tui/app.ts";
-import { sessionsDirectory } from "../src/session/jsonl.ts";
+import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { pathToFileURL } from "node:url";
@@ -20,7 +20,7 @@ import { editTool } from "../src/tools/edit.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { TextareaRenderable, TextRenderable } from "@opentui/core";
+import { ScrollBoxRenderable, TextareaRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -61,17 +61,18 @@ test("Shift+Tab cycles auto, ask and read-only with a persistent chip and leadin
     const ui = await setup(width);
     const hints = () => (ui.renderer.root.findDescendantById("hints") as TextRenderable).chunks.map(chunk => chunk.text).join("");
     const autoHints = hints();
-    expect(autoHints).not.toContain("Shift+Tab");
+    expect(autoHints).toContain("Shift+Tab change mode");
+    expect(ui.captureCharFrame()).toContain("◆ Auto");
     ui.mockInput.pressTab({ shift: true }); await ui.settle();
     expect(ui.controller.snapshot().approvalMode).toBe("ask");
-    expect(ui.captureCharFrame()).toContain("◆ ASK");
+    expect(ui.captureCharFrame()).toContain("◆ Ask");
     ui.mockInput.pressTab({ shift: true }); await ui.settle();
     expect(ui.controller.snapshot().approvalMode).toBe("read-only");
-    expect(ui.captureCharFrame()).toContain("◆ READ-ONLY");
-    expect(hints()).toStartWith("Shift+Tab read-only");
+    expect(ui.captureCharFrame()).toContain("◆ Read-only");
+    expect(hints()).toStartWith("Shift+Tab change mode");
     ui.mockInput.pressTab({ shift: true }); await ui.settle();
     expect(ui.controller.snapshot().approvalMode).toBe("auto");
-    expect(ui.captureCharFrame()).not.toContain("◆ READ-ONLY");
+    expect(ui.captureCharFrame()).toContain("◆ Auto");
     expect(hints()).toBe(autoHints);
   }
 });
@@ -81,7 +82,7 @@ test("legacy ESC [ Z cycles approval and preferences retain Shift+Tab scope navi
   const legacy = await setup(80, false);
   await legacy.mockInput.pressKeys(["\x1b[Z"]); await legacy.settle();
   expect(legacy.controller.snapshot().approvalMode).toBe("ask");
-  expect(legacy.captureCharFrame()).toContain("◆ ASK");
+  expect(legacy.captureCharFrame()).toContain("◆ Ask");
   const editor = new ConfigEditor({ user: { model: "gpt-5.4" } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
   const ui = await setup(80, true, { configEditor: editor });
   ui.mockInput.pressKey("p", { meta: true }); await ui.settle();
@@ -95,13 +96,117 @@ test("completion and search own Shift+Tab without changing approval", async () =
   const ui = await setup();
   await ui.controller.refreshCommands();
   await ui.mockInput.typeText("/"); await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+  expect(ui.captureCharFrame()).toContain("◆ Auto");
   ui.mockInput.pressTab({ shift: true }); await ui.settle();
   expect(ui.controller.snapshot().approvalMode).toBe("auto");
   ui.mockInput.pressEscape(); await ui.settle();
   ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+  expect(ui.captureCharFrame()).toContain("◆ Auto");
   ui.mockInput.pressTab({ shift: true }); await ui.settle();
   expect(ui.controller.snapshot().approvalMode).toBe("auto");
 });
+
+test("mode cycling preserves a multiline Thai draft, selection, cursor and transcript scroll", async () => {
+  const ui = await setup();
+  ui.controller.notice(Array.from({ length: 60 }, (_, i) => `Earlier work ${i}`).join("\n"));
+  await ui.mockInput.pasteBracketedText("ช่วยอ่านไฟล์นี้\nแล้วเพิ่มการทดสอบ");
+  await ui.settle();
+  const transcript = ui.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
+  transcript.scrollTo(8); await ui.settle();
+  ui.editor.setSelection(2, 6);
+  const text = ui.editor.plainText, cursor = ui.editor.cursorOffset, selected = ui.editor.getSelectedText(), scroll = transcript.scrollTop;
+  expect(selected).not.toBe("");
+  for (const [mode, label] of [["ask", "Ask"], ["read-only", "Read-only"], ["auto", "Auto"]] as const) {
+    ui.mockInput.pressTab({ shift: true }); await ui.settle();
+    expect(ui.controller.snapshot().approvalMode).toBe(mode);
+    expect(ui.captureCharFrame()).toContain(`◆ ${label}`);
+    expect(ui.editor.plainText).toBe(text);
+    expect(ui.editor.cursorOffset).toBe(cursor);
+    expect(ui.editor.getSelectedText()).toBe(selected);
+    expect(transcript.scrollTop).toBe(scroll);
+  }
+});
+
+test("preferences explain every approval mode without applying or saving a mode", async () => {
+  const editor = new ConfigEditor({}, { user: "/tmp/user-config", project: "/tmp/project-config" });
+  const ui = await setup(80, true, { configEditor: editor });
+  await ui.mockInput.pasteBracketedText("ข้อความร่าง\nคงไว้");
+  ui.editor.cursorOffset = 4;
+  ui.mockInput.pressKey("p", { meta: true }); await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+  ui.mockInput.pressKey("pagedown"); await ui.settle();
+  const frame = ui.captureCharFrame();
+  for (const line of ["Auto: Run tools without asking.", "Ask: Ask before tools that need approval.", "Read-only: Allow read-only tools."]) expect(frame).toContain(line);
+  expect(ui.controller.snapshot().approvalMode).toBe("auto");
+  expect(editor.settings.approvalMode).toBe("auto");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.editor.plainText).toBe("ข้อความร่าง\nคงไว้");
+  expect(ui.editor.cursorOffset).toBe(4);
+});
+
+test("narrow footer retains each mode and the available stop or sign-in action without color", async () => {
+  for (const [mode, label] of [["auto", "Auto"], ["ask", "Ask"], ["read-only", "Read-only"]] as const) {
+    const editor = new ConfigEditor({ cli: { approval: { mode } } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
+    const ui = await setup(24, true, { configEditor: editor, model: createScriptedModel({ waitForAbort: true }) }, { env: { SCHWAY_MOTION: "off", NO_COLOR: "1" } });
+    ui.resize(24, 8); await ui.settle();
+    expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).toContain("Enter send");
+    const turn = ui.controller.submit("wait");
+    await ui.waitFor(snapshot => snapshot.status === "running");
+    const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+    expect(footer.plainText).toContain(label);
+    expect(footer.plainText).toContain("Esc stop");
+    expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(24);
+    expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+    ui.mockInput.pressEscape(); await turn;
+    const disconnected = await setup(24, true, { configEditor: editor, model: undefined, modelId: "" });
+    disconnected.resize(24, 8); await disconnected.settle();
+    const disconnectedFooter = disconnected.renderer.root.findDescendantById("footer") as TextRenderable;
+    expect(disconnectedFooter.plainText).toContain(label);
+    expect(disconnectedFooter.plainText).toContain("Alt+L");
+    expect(Bun.stringWidth(disconnectedFooter.plainText)).toBeLessThanOrEqual(24);
+  }
+});
+
+test("configured modes stay visible through disk resume, startup, completed and stopped turns without saving a preference", async () => withTempDir(async home => {
+  const workspace = { root: home, launchCwd: home, extraRoots: [] };
+  const directory = sessionsDirectory(home);
+  const original = await createJsonlSession({ directory, workspace });
+  original.append({ type: "user", id: "prior-task", content: [{ type: "text", text: "Explain this project" }] },
+    { type: "assistant", id: "prior-answer", content: [{ type: "text", text: "The entry point starts the application." }] });
+  for (const [mode, label] of [["auto", "Auto"], ["ask", "Ask"], ["read-only", "Read-only"]] as const) {
+    const config = JSON.stringify({ approval: { mode } });
+    const configPath = join(home, ".schway/config.json");
+    await writeFile(configPath, config);
+    const loaded = await loadJsonlSession({ directory, id: original.header.id });
+    const editor = await loadConfigEditor({ home, workspaceRoot: home });
+    const ui = await setup(80, true, { session: loaded, sessionId: loaded.header.id, configEditor: editor,
+      home, workspace, contextManager: createContextManager(workspace), model: undefined });
+    const assertMode = () => {
+      expect(ui.controller.snapshot().approvalMode).toBe(mode);
+      expect(ui.captureCharFrame()).toContain(`◆ ${label}`);
+    };
+    assertMode();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const startup = ui.controller.initializeStartup(async () => {
+      await gate;
+      return { model: createScriptedModel({ responses: [{ text: "Done." }, { waitForAbort: true }] }) };
+    });
+    await ui.settle(); expect(ui.controller.snapshot().readiness).toBe("loading"); assertMode();
+    release(); await startup; await ui.settle(); assertMode();
+    expect(await ui.controller.submit("complete a turn")).toBe(true);
+    await ui.settle(); expect(ui.controller.snapshot().outcome?.reason).toBe("completed"); assertMode();
+    const turn = ui.controller.submit("stop a turn");
+    await ui.waitFor(snapshot => snapshot.status === "running"); assertMode();
+    ui.mockInput.pressEscape(); await turn; await ui.settle();
+    expect(ui.controller.snapshot().outcome?.reason).toBe("cancelled"); assertMode();
+    for (let i = 0; i < 3; i++) ui.mockInput.pressTab({ shift: true });
+    await ui.settle(); assertMode();
+    expect(await Bun.file(configPath).text()).toBe(config);
+  }
+}));
 
 test("CLI read-only starts with the chip and process mode survives session and model switches", async () => {
   const parsed = parseArgs(["--approval", "read-only"]);
@@ -109,13 +214,13 @@ test("CLI read-only starts with the chip and process mode survives session and m
   const editor = new ConfigEditor({ cli: cliOverridesFromArgs(parsed.args) }, { user: "/tmp/user-config", project: "/tmp/project-config" });
   const ui = await setup(80, true, { configEditor: editor });
   expect(ui.controller.snapshot().approvalMode).toBe("read-only");
-  expect(ui.captureCharFrame()).toContain("◆ READ-ONLY");
+  expect(ui.captureCharFrame()).toContain("◆ Read-only");
   ui.controller.cycleApprovalMode();
   ui.controller.replaceSession(createSession(), "new-session");
   ui.controller.setModel(createScriptedModel(), "scripted", "another-model");
   await ui.settle();
   expect(ui.controller.snapshot().approvalMode).toBe("auto");
-  expect(ui.captureCharFrame()).not.toContain("◆ READ-ONLY");
+  expect(ui.captureCharFrame()).toContain("◆ Auto");
 });
 
 test("ignored-project approval notices appear once per path across config edits and workspace switches", async () => {
@@ -169,6 +274,7 @@ test("switching to read-only between tool rounds denies the next edit and expand
       expect(ui.controller.running).toBe(true);
       ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true }); await ui.settle();
       expect(ui.controller.snapshot().approvalMode).toBe("read-only");
+      expect(ui.captureCharFrame()).toContain("◆ Read-only");
     } finally { release(); }
     expect(await turn).toBe(true);
     await ui.settle();
@@ -186,11 +292,25 @@ test("read-only chip survives the smallest footer fallback and disconnected stat
   const ui = await setup(50);
   ui.controller.cycleApprovalMode(); ui.controller.cycleApprovalMode(); await ui.settle();
   ui.resize(28, 28); await ui.settle();
-  expect(ui.captureCharFrame()).toContain("◆ READ-ONLY");
+  const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+  expect(footer.plainText).toContain("Read-only");
+  expect(footer.plainText).toContain("Enter send");
   const disconnected = await setup(50, true, { model: undefined, modelId: "", provider: "openai" });
   disconnected.mockInput.pressTab({ shift: true }); disconnected.mockInput.pressTab({ shift: true }); await disconnected.settle();
-  expect(disconnected.captureCharFrame()).toContain("◆ READ-ONLY");
-  expect(disconnected.captureCharFrame()).toContain("Shift+Tab read-only");
+  expect(disconnected.captureCharFrame()).toContain("◆ Read-only");
+  expect(disconnected.captureCharFrame()).toContain("Shift+Tab change mode");
+});
+
+test("inspection keeps the visible mode while owning Shift+Tab", async () => {
+  const ui = await setup(80, true, { model: createScriptedModel({ text: "```ts\nconst n = 1;\n```" }) });
+  await ui.controller.submit("show code"); await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("◆ Auto");
+  expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+  ui.mockInput.pressTab({ shift: true }); await ui.settle();
+  expect(ui.controller.snapshot().approvalMode).toBe("auto");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Shift+Tab change mode");
 });
 
 
@@ -338,7 +458,8 @@ test("Shift+Tab cannot change an open request or its ask chip, including after r
   ui.mockInput.pressTab({ shift: true }); ui.resize(50, 28); await ui.settle();
   expect(ui.controller.snapshot().approvalMode).toBe("ask");
   expect(ui.controller.snapshot().toolApproval).toEqual(request);
-  expect(ui.captureCharFrame()).toContain("◆ ASK");
+  expect(ui.captureCharFrame()).toContain("◆ Ask");
+  expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
   expect(ui.captureCharFrame()).not.toContain("Esc stops");
   expect(ui.captureCharFrame()).toContain("Ctrl+C cancel");
   expect(ui.captureCharFrame()).toContain("Enter choose · Esc deny · Ctrl+C cancel turn");

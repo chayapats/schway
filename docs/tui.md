@@ -691,12 +691,14 @@ Test coverage for this guide: [release verification](release-verification.md#tui
 
 ## Approval mode
 
-Press **Shift+Tab** in the ordinary composer to cycle `auto` → `ask` → `read-only` → `auto`, including while a turn runs. Calls that have not reached their approval decision use the current mode. In read-only mode the footer keeps a **◆ READ-ONLY** chip to the left of the status pill, including at narrow widths, and the composer hints start with **Shift+Tab read-only**. Failed tool rows expand the denial reason.
+The footer always shows the effective mode: **◆ Auto**, **◆ Ask**, or **◆ Read-only**, including before sign-in, during work and after resuming a session. Press **Shift+Tab** in the ordinary composer to cycle `auto` → `ask` → `read-only` → `auto`, including while a turn runs. The **Shift+Tab change mode** hint appears when that shortcut is available. At narrow widths, the mode and urgent action take priority over model/context information. Failed tool rows expand the denial reason.
+
+Open **Alt+P preferences** for the mode meanings; **PageUp/PageDown** scrolls the explanation. Auto runs tools without asking, Ask asks before tools that need approval, and Read-only allows read-only tools. Existing tool restrictions and session allowances still apply. A mode change affects calls that have not reached their approval decision; it does not undo or relabel an already authorized operation.
 
 Shift+Tab retains its existing scope, inspection, or completion behavior while those views are open; it does not switch modes in panels or search. Launch with `schway --approval ask` or `schway --approval read-only` to start in that mode. The process choice survives new/resumed sessions and model changes without writing config or interactive memory.
 
 
-In **ask** mode the footer shows **◆ ASK**. Read-only tools run without a prompt. A mutating tool opens an `Allow <tool>? · ask mode` panel after `beforeTool` hooks and argument validation. Bash shows the full command; edit and write show the target path, line counts and a numbered diff; other tools show their final arguments as indented JSON. Known secrets are masked. PageUp/PageDown scroll the preview; resizing reflows it.
+In **Ask** mode, read-only tools run without a prompt. A mutating tool opens an `Allow <tool>? · ask mode` panel after `beforeTool` hooks and argument validation. Bash shows the full command; edit and write show the target path, line counts and a numbered diff; other tools show their final arguments as indented JSON. Known secrets are masked. PageUp/PageDown scroll the preview; resizing reflows it.
 
 Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **Deny with reason…**, then Enter. Allow once applies only to the current call. A session allowance applies to later ask-mode calls with the same tool name; it never overrides read-only mode and survives cycling back to ask. Successful session switches through `/new`, `/resume`, `/sessions` or Alt+B clear every allowance. Allowances are not saved across processes.
 

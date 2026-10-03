@@ -34,7 +34,7 @@ cursor 8 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › /
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-  ● Ready   scripted/scripted-model                                      ctx ~0
+ ◆ Auto  ● Ready   scripted/scripted-model                               ctx ~0
   ↑/↓ select · Tab complete · Esc dismiss · Enter send
 == styles
 00 0-1 #ffffff #ecedea -
@@ -110,10 +110,12 @@ cursor 8 27 visible
 27 2-78 #ecedea #f7f7f4 -
 27 78-80 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
-28 1-10 #19612f #d3dcd4 b
-28 10-11 #545e6c #ecedea -
-28 11-36 #1d232c #e1e3df -
-28 36-79 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-79 #545e6c #ecedea -
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-5 #1d232c #caced3 b

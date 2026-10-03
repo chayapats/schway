@@ -91,7 +91,8 @@ test("not-connected copy and neutral pill survive no-color, narrow widths and re
     for (const [width, height] of [[120, 24], [80, 24], [50, 24], [120, 24], [44, 18], [24, 18], [80, 9]] as const) {
       ui.resize(width, height);
       await settle(ui);
-      expect(ui.captureCharFrame()).toContain("○ Not connected");
+      expect(ui.captureCharFrame()).toContain(width < 30 ? "Auto · Alt+L sign in" : "○ Not connected");
+      expect(ui.captureCharFrame()).toContain("Auto");
       if (height >= 10) expect(ui.captureCharFrame()).toContain("Alt+L sign in");
       const empty = ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable;
       expect(empty.chunks.map(chunk => chunk.text).join("")).toContain("Not connected\nConnect a provider · Alt+L");
@@ -1058,7 +1059,8 @@ test("resize keeps the editor and status inside the viewport with a populated tr
     const footer = ui.renderer.root.findDescendantById("footer")!;
     expect(composer.y + composer.height, `composer at ${width}x${height}`).toBeLessThanOrEqual(height!);
     expect(footer.y + footer.height, `footer at ${width}x${height}`).toBeLessThanOrEqual(height!);
-    expect(ui.captureCharFrame(), `status at ${width}x${height}`).toContain("Ready");
+    expect(ui.captureCharFrame(), `mode at ${width}x${height}`).toContain("Auto");
+    expect(ui.captureCharFrame(), `status/action at ${width}x${height}`).toContain(width! < 30 ? "Esc back" : "Ready");
   }
   ui.mockInput.pressEscape();
   await settle(ui);
@@ -2666,7 +2668,7 @@ for (const width of [120, 80, 50, 24]) test(`short model picker keeps route iden
     } else {
       expect(frame).toContain("Choose model");
       expect(ui.controller.snapshot().modelPicker!.entries.find(entry => entry.active)?.modelId).toBe("gpt-6-astra");
-      expect(frame).toContain("Ready"); expect(frame.split("\n").filter(line => line.trim()).length).toBeLessThanOrEqual(8);
+      expect(frame).toContain("Auto · Esc back"); expect(frame.split("\n").filter(line => line.trim()).length).toBeLessThanOrEqual(8);
     }
     ui.controller.searchModels("coder"); await settle(ui);
     const picker = ui.controller.snapshot().modelPicker!;

@@ -1,0 +1,44 @@
+schway-screen 1
+screen auto-mode
+title Auto mode
+description An idle conversation shows the default Auto mode and its change-mode hint.
+variant nocolor-dark-24
+size 24x8
+cursor 6 6 visible
+== text
+ key
+
+ Type a task · Enter
+ sends
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Enter send
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-4 #8b95a7 #0e1117 -
+00 4-24 #ffffff #0e1117 -
+01 0-24 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-15 #8b95a7 #0e1117 -
+02 15-20 #e6eaf0 #293140 b
+02 20-21 #8b95a7 #0e1117 -
+02 21-24 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-6 #8b95a7 #0e1117 -
+03 6-24 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-23 #161b24 #0e1117 -
+04 23-24 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-5 #e6eaf0 #161b24 -
+05 5-16 #8b95a7 #161b24 -
+05 16-23 #ffffff #161b24 -
+05 23-24 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-23 #161b24 #0e1117 -
+06 23-24 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-5 #e6eaf0 #161b24 b
+07 5-18 #8b95a7 #161b24 -
+07 18-24 #ffffff #0e1117 -
