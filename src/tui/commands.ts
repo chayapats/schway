@@ -114,6 +114,8 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "Drag conversation text to copy it. Ctrl+C copies a selection. Click a web link to open your browser.",
     "Enter sends. Shift+Enter or Ctrl+J inserts a newline. Up/Down recalls prompts at editor boundaries.",
     "Ctrl+O expands/collapses tool output; click a tool heading to toggle one result.",
+    "Alt+I enters inspection without copying. Up/Down or Tab selects a block or result; C copies the highlighted item.",
+    "Enter copies selected code or toggles an expandable tool result. Esc returns to the draft.",
     "PageUp/PageDown scroll. Ctrl+End returns to the latest message. Alt+M opens models without losing your draft.",
     "Ctrl+L resets terminal output if stale text remains; your draft and conversation are preserved.",
     "Type / for commands, Up/Down to select, Tab to complete, Esc to dismiss.",

@@ -79,6 +79,15 @@ test("slash commands include credential management and settings", () => {
   expect(parseSlashCommand("/logout openai")?.name).toBe("logout");
 });
 
+test("help distinguishes entering inspection, copying code and toggling tool results", () => {
+  const help = helpText();
+  expect(help).toContain("Alt+I enters inspection without copying");
+  expect(help).toContain("Up/Down or Tab selects a block or result");
+  expect(help).toContain("C copies the highlighted item");
+  expect(help).toContain("Enter copies selected code or toggles an expandable tool result");
+  expect(help).toContain("Esc returns to the draft");
+});
+
 test("model args accept known, unknown, and provider-qualified ids", () => {
   expect(parseModelArgs("gpt-4o", "openai")).toEqual({ provider: "openai", modelId: "gpt-4o" });
   expect(parseModelArgs("openai/gpt-4o", "openai-compatible")).toEqual({ provider: "openai", modelId: "gpt-4o" });

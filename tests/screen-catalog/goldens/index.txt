@@ -44,3 +44,6 @@ compaction
 no-color
 narrow-layout
 table-and-code
+inspection-unfocused
+inspection-code
+inspection-tool

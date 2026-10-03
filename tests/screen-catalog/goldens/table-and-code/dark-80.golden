@@ -20,7 +20,7 @@ cursor 7 37 visible
    sis-with-an-extra-long-suffix
    E Beta                                        F done     G nine     H Lin
 
-    ts                                                            Alt+I copy
+    ts                                                         Alt+I inspect
    const message =
    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ
    KLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -109,8 +109,8 @@ cursor 7 37 visible
 14 0-2 #ffffff #0e1117 -
 14 2-3 #ffffff #1e2430 -
 14 3-7 #7cc4ff #33475e b
-14 7-66 #ffffff #1e2430 -
-14 66-76 #8b95a7 #1e2430 -
+14 7-63 #ffffff #1e2430 -
+14 63-76 #8b95a7 #1e2430 -
 14 76-77 #ffffff #1e2430 -
 14 77-80 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -

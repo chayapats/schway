@@ -18,7 +18,7 @@ cursor 7 37 visible
    A pneumonoultramicroscopicsilicovolcanoconiosis-with-an-extra-long-suffix    B ready    C seven    D Ada
    E Beta                                                                       F done     G nine     H Lin
 
-    ts                                                                                                    Alt+I copy
+    ts                                                                                                 Alt+I inspect
    const message =
    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
    yz0123456789";
@@ -103,8 +103,8 @@ cursor 7 37 visible
 12 0-2 #ffffff #0e1117 -
 12 2-3 #ffffff #1e2430 -
 12 3-7 #e6eaf0 #4a505a b
-12 7-106 #ffffff #1e2430 -
-12 106-116 #8b95a7 #1e2430 -
+12 7-103 #ffffff #1e2430 -
+12 103-116 #8b95a7 #1e2430 -
 12 116-117 #ffffff #1e2430 -
 12 117-120 #ffffff #0e1117 -
 13 0-2 #ffffff #0e1117 -

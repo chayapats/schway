@@ -381,13 +381,29 @@ manifest. File-tool undo still works in each case.
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
-| Inspect results and code | Alt+I enters inspection; Up/Down or Tab moves between results and fenced code blocks; Enter expands or collapses one expandable tool result; C copies the selected item; Esc returns to the draft |
+| Inspect results and code | Alt+I enters inspection without copying; Up/Down or Tab selects a result or code block; C copies the highlighted item; Enter copies selected code or toggles an expandable tool result; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
 | Recover stale terminal cells | Ctrl+L; preserves the draft and scroll position |
 | Cancel | Esc or Ctrl+C during a turn when no text is selected |
 | Quit | `/quit`, Ctrl+C while idle with no selection, or Ctrl+D with empty input |
+
+Code headers show **Alt+I inspect** until selected. Inspection returns to a
+still-valid previous target; otherwise it starts with the first block or result
+in view, or the nearest one when none is visible. The selected code header shows
+**›** and **C copy · Esc back**, including without color. Opening inspection
+never copies. If a selection needs to scroll or repaint, `Showing selection · C
+copy again` asks for another explicit C; it does not queue a copy.
+
+Copy uses the selected block's sanitized text with its original Unicode and
+newlines, without headers, wrapping or focus markers. Bounded tool previews keep
+their truncation notice. `Copied code` means the terminal copy request was
+accepted; clipboard failures leave the selection and draft available for native
+terminal selection. Enter on a tool result only toggles its expandable output.
+Esc restores the draft, cursor and prior reading position. A replaced or removed
+target cannot be copied under its old highlight; session and branch changes
+clear the selection.
 
 The keyboard contract for the panels present in this version is: the composer
 owns ordinary text; opening a panel preserves its draft and cursor; the active

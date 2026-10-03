@@ -54,10 +54,14 @@ test("keyboard inspects one collapsed result and returns to the original draft a
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ first");
   expect(ui.captureCharFrame()).not.toContain("ผลลัพธ์ second");
+  expect(ui.copied).toEqual([]);
   ui.mockInput.pressArrow("down");
   ui.mockInput.pressEnter();
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ second");
+  expect(ui.copied).toEqual([]);
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["second\nผลลัพธ์ second"]);
   ui.mockInput.pressEscape();
   await ui.settle();
   expect(ui.editor.plainText).toBe("draft ภาษาไทย");
@@ -69,6 +73,37 @@ test("keyboard inspects one collapsed result and returns to the original draft a
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ first");
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ second");
 });
+
+for (const [theme, env] of Object.entries({ dark: { SCHWAY_THEME: "dark" }, light: { SCHWAY_THEME: "light" }, nocolor: { NO_COLOR: "1" } })) {
+  for (const width of [120, 80, 50, 40]) test(`code headers describe inspection and only the highlighted block copies at ${theme} ${width}`, async () => {
+    const ui = await setup(width, 24, env);
+    await ui.mockInput.pasteBracketedText("งานถัดไป 🧪");
+    ui.editor.cursorOffset = 3;
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nภาษาไทย 🧪\nบรรทัดสอง\n```\n\n```json\n{\"ok\":true}\n```" } });
+    await ui.settle();
+    const unfocused = ui.captureCharFrame();
+    expect(unfocused.match(/Alt\+I inspect/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(unfocused).not.toContain("Alt+I copy");
+    ui.mockInput.pressKey("i", { meta: true });
+    expect(ui.copied).toEqual([]);
+    await ui.settle();
+    const focused = ui.captureCharFrame();
+    expect(focused.split("\n").find(line => line.includes("› txt"))).toContain("C copy · Esc back");
+    expect(focused.split("\n").find(line => line.includes("json"))).toContain("Alt+I inspect");
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["ภาษาไทย 🧪\nบรรทัดสอง"]);
+    ui.mockInput.pressTab();
+    await ui.settle();
+    expect(ui.captureCharFrame().split("\n").find(line => line.includes("› json"))).toContain("C copy · Esc back");
+    ui.mockInput.pressEnter();
+    expect(ui.copied).toEqual(["ภาษาไทย 🧪\nบรรทัดสอง", "{\"ok\":true}"]);
+    ui.mockInput.pressEscape();
+    await ui.settle();
+    expect(ui.captureCharFrame()).not.toContain("C copy");
+    expect(ui.editor.plainText).toBe("งานถัดไป 🧪");
+    expect(ui.editor.cursorOffset).toBe(3);
+  });
+}
 
 test("opening inspection does not repeat secret scans for every code block in one message", async () => {
   const scans: number[] = [];
@@ -287,7 +322,7 @@ test("long code keeps a visible non-color focus marker across themes and standar
     ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: `\`\`\`txt\n${code}\n\`\`\`` } });
     await ui.settle();
     // The initial viewport intersects the block's tail, while its header is offscreen.
-    expect(ui.captureCharFrame()).not.toContain("Alt+I copy");
+    expect(ui.captureCharFrame()).not.toMatch(/\btxt\s+Alt\+I inspect/);
     ui.mockInput.pressKey("i", { meta: true });
     await ui.settle();
     for (const width of [120, 80, 50]) {

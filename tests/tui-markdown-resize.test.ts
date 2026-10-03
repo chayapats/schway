@@ -67,10 +67,10 @@ async function frame(ui: Awaited<ReturnType<typeof setup>>, scenario: string) {
   return text;
 }
 
-/** Require all short-fixture cells, code lines and copy controls in captured terminal text. */
+/** Require all short-fixture cells, code lines and inspection controls in captured terminal text. */
 function expectAnswer(text: string) {
   for (const value of [...cells, ...codeLines, "End of answer"]) expect(compact(text), `Missing ${value}\n${text}`).toContain(compact(value));
-  expect(text).toContain("Alt+I copy");
+  expect(text).toMatch(/\bts\s+Alt\+I inspect/);
   expect(text.split("\n").filter(line => line.trim()).length).toBeGreaterThan(10);
 }
 
@@ -187,7 +187,7 @@ test("notice between streamed table and code deltas does not permanently split M
     const text = await frame(ui, "notice-completed-60");
     expectAnswer(text);
     expect(text).not.toContain("|");
-    expect(text.match(/Alt\+I copy/g)).toHaveLength(1);
+    expect(text.match(/\bts\s+Alt\+I inspect/g)).toHaveLength(1);
   } finally { gated.gates.forEach(gate => gate.resolve()); await turn; }
 });
 
@@ -220,8 +220,8 @@ function expectWrapping(ui: Awaited<ReturnType<typeof setup>>, hasCode = true) {
     }
   }
   if (hasCode) {
-    expect(text).toContain("Alt+I copy");
-    expect(text).toMatch(/\bts\s+Alt\+I copy/);
+    expect(text).toContain("Alt+I inspect");
+    expect(text).toMatch(/\bts\s+Alt\+I inspect/);
     for (const code of MARKDOWN_CODE_LINES) expect(compact(text), text).toContain(compact(code));
   }
   const entry = ui.controller.snapshot().transcript.findLast(entry => entry.kind === "assistant")!;
@@ -357,7 +357,7 @@ test("a local diagnostic does not finalize an answer that is still receiving del
     const text = await frame(ui, "diagnostic-completed-60");
     expectAnswer(text);
     expect(text).not.toContain("|");
-    expect(text.match(/Alt\+I copy/g)).toHaveLength(1);
+    expect(text.match(/\bts\s+Alt\+I inspect/g)).toHaveLength(1);
   } finally { gated.gates.forEach(gate => gate.resolve()); await turn; }
 });
 

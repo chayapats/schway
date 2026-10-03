@@ -61,11 +61,11 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
     const block = new BoxRenderable(renderer, { flexDirection: "column", backgroundColor: theme.surface, marginTop: 1, marginBottom: 1 });
     const title = token.lang || "code";
     registerCode(block, token.text ?? "", title);
-    // Header strip: language pill left, copy hint right, on the second surface.
+    // Header strip: language pill left, inspection hint right, on the second surface.
     const header = new BoxRenderable(renderer, { flexDirection: "row", backgroundColor: theme.surface2, paddingX: 1 });
     header.add(new TextRenderable(renderer, { content: codeTitle(title, false, theme), flexShrink: 0 }));
     header.add(new BoxRenderable(renderer, { flexGrow: 1 }));
-    header.add(new TextRenderable(renderer, { content: "Alt+I copy", fg: theme.muted, flexShrink: 1, wrapMode: "none" }));
+    header.add(new TextRenderable(renderer, { content: "Alt+I inspect", fg: theme.muted, flexShrink: 1, wrapMode: "none" }));
     block.add(header);
     const code = new BoxRenderable(renderer, { flexDirection: "column", paddingX: 1 });
     code.add(new TextRenderable(renderer, { content: linkify(highlightCode(token.text ?? "", token.lang, theme)), fg: theme.code, wrapMode: "word" }));
@@ -355,7 +355,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
             const focused = focusedCode === index;
             label!.content = codeTitle(codeData.get(code)!.title, focused, theme);
             header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
-            hint!.content = focused ? "C copy · Esc back" : "Alt+I copy";
+            hint!.content = focused ? "C copy · Esc back" : "Alt+I inspect";
             hint!.fg = focused ? theme.text : theme.muted;
           });
         }
