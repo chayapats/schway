@@ -1,8 +1,38 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { withTempDir } from "./helpers.ts";
+
+test("interactive workspace revalidation retains credentials discovered in the original user configuration", async () => withTempDir(async root => {
+  const secret = "private-editor-credential", home = join(root, "home"), workspaceRoot = join(root, "work"), next = join(root, secret);
+  await mkdir(join(home, ".schway"), { recursive: true });
+  await mkdir(workspaceRoot); await mkdir(join(next, ".schway"), { recursive: true });
+  await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profiles: { custom: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } } }));
+  await writeFile(join(next, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const editor = await loadConfigEditor({ home, workspaceRoot, diagnosticContext: { env: { CUSTOM_KEY: secret } } });
+  const error = await editor.forWorkspace(next).catch(error => error as Error);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain("Invalid approval.mode");
+  expect((error as Error).message).not.toContain(secret);
+}));
+
+test("editor repairs keep malformed and unreadable source labels private before any write", async () => withTempDir(async root => {
+  const secret = "private-editor-source", workspaceRoot = join(root, secret), path = join(workspaceRoot, ".schway/config.json");
+  await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+  await writeFile(path, "{}");
+  const editor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot, diagnosticContext: { env: { OPENAI_API_KEY: secret } } });
+  await writeFile(path, "{broken");
+  const malformed = await editor.prepare({ scope: "project", key: "maxTurns", value: 7 }).catch(error => error as Error);
+  expect((malformed as Error).message).toContain("Fix malformed JSON");
+  expect((malformed as Error).message).not.toContain(secret);
+  expect(await readFile(path, "utf8")).toBe("{broken");
+  await rm(path); await mkdir(path);
+  const unreadable = await editor.prepare({ scope: "project", key: "maxTurns", value: 7 }).catch(error => error as Error);
+  expect((unreadable as Error).message).toContain("Restore access to a readable config file");
+  expect((unreadable as Error).message).not.toContain(secret);
+  expect(editor.settings.maxTurns).toBe(32);
+}));
 
 test("interactive configuration loading reports both invalid files before reading memory", async () => {
   await withTempDir(async dir => {

@@ -2,7 +2,7 @@ import { applyConfigDeprecations, ConfigDeprecationError, CONFIG_DEPRECATIONS, t
 import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, stricterApprovalMode, type ApprovalMode } from "../agent/approval.ts";
 import { Type, type Static, type TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
-import { configDiagnostic, configReadError, schemaDiagnostics, type ConfigReadError, type ConfigDiagnostic } from "./diagnostics.ts";
+import { configDiagnostic, configDiagnosticSecrets, configReadError, safeConfigSource, schemaDiagnostics, type ConfigDiagnosticContext, type ConfigReadError, type ConfigDiagnostic } from "./diagnostics.ts";
 import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
@@ -305,14 +305,17 @@ export function parseConfigObject(
   value: unknown,
   source: string,
   deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS,
+  diagnosticContext?: ConfigDiagnosticContext,
 ): ParsedConfigLayer | ConfigReadError {
+  const secretsForDiagnostics = configDiagnosticSecrets(diagnosticContext, [value]);
+  const diagnosticSource = safeConfigSource(source, secretsForDiagnostics);
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return configReadError([configDiagnostic(source, "", "root", "Use a JSON object")]);
+    return configReadError([configDiagnostic(diagnosticSource, "", "root", "Use a JSON object")]);
   }
 
   let migrated: ReturnType<typeof applyConfigDeprecations>;
-  try { migrated = applyConfigDeprecations(value as Record<string, unknown>, source, deprecations); }
-  catch (error) { return configReadError([configDiagnostic(source, error instanceof ConfigDeprecationError ? error.field : "", "type", "Use a JSON object")]); }
+  try { migrated = applyConfigDeprecations(value as Record<string, unknown>, source, deprecations, secretsForDiagnostics); }
+  catch (error) { return configReadError([configDiagnostic(diagnosticSource, error instanceof ConfigDeprecationError ? error.field : "", "type", "Use a JSON object")]); }
   value = migrated.value;
   const record = migrated.value;
   for (const entry of deprecations) {
@@ -336,23 +339,23 @@ export function parseConfigObject(
       }
     }
   }
-  const secrets = configSecrets(record, source);
+  const secrets = configSecrets(record, diagnosticSource);
   const removedProvider = removedProviderMessage(record.provider);
   if (removedProvider !== undefined && !secrets.size) {
-    return { error: removedProvider, diagnostics: [configDiagnostic(source, "provider", "removed-provider", removedProvider)] };
+    return { error: removedProvider, diagnostics: [configDiagnostic(diagnosticSource, "provider", "removed-provider", removedProvider)] };
   }
 
   if (!Value.Check(ConfigSchema, value)) {
-    return configReadError([...secrets.values(), ...schemaDiagnostics(ConfigSchema, [...Value.Errors(ConfigSchema, value)].filter(error => !secrets.has(error.path)), source)]);
+    return configReadError([...secrets.values(), ...schemaDiagnostics(ConfigSchema, [...Value.Errors(ConfigSchema, value)].filter(error => !secrets.has(error.path)), diagnosticSource)]);
   }
 
   if (secrets.size) return configReadError([...secrets.values()]);
   const layer = normalizeLayer(value);
-  const diagnostics = validateProfiles(layer.profiles, source);
-  if (layer.thinking === null && source !== "session") diagnostics.push(configDiagnostic(source, "thinking", "enum", `Use ${THINKING_LEVELS.join(", ")}; null is only supported in a session`, THINKING_LEVELS));
-  if (layer.profile === null && source !== "session") diagnostics.push(configDiagnostic(source, "profile", "type", "Use a nonempty string; null is only supported in a session"));
+  const diagnostics = validateProfiles(layer.profiles, diagnosticSource);
+  if (layer.thinking === null && source !== "session") diagnostics.push(configDiagnostic(diagnosticSource, "thinking", "enum", `Use ${THINKING_LEVELS.join(", ")}; null is only supported in a session`, THINKING_LEVELS));
+  if (layer.profile === null && source !== "session") diagnostics.push(configDiagnostic(diagnosticSource, "profile", "type", "Use a nonempty string; null is only supported in a session"));
   if (layer.profile !== undefined && layer.profile !== null && !isValidProfileName(layer.profile.trim())) {
-    diagnostics.push(configDiagnostic(source, "profile", "constraint", `Use a nonempty profile name matching ${PROFILE_NAME_PATTERN}`));
+    diagnostics.push(configDiagnostic(diagnosticSource, "profile", "constraint", `Use a nonempty profile name matching ${PROFILE_NAME_PATTERN}`));
   }
   if (diagnostics.length) return configReadError(diagnostics);
   return Object.defineProperty(layer, "deprecationWarnings", { value: migrated.warnings, enumerable: false }) as ParsedConfigLayer;
@@ -474,6 +477,7 @@ export function resolveSettings(input: {
   session?: ConfigLayer;
   /** Original file paths for actionable resolution failures after schema validation. */
   configSources?: { user?: string; project?: string };
+  diagnosticContext?: ConfigDiagnosticContext;
   /** Verified account or endpoint capabilities for the selected billing route. */
   modelCapabilities?: readonly ModelCapability[];
   /** Preliminary headless resolution only; never use it for an outgoing request. */
@@ -483,9 +487,10 @@ export function resolveSettings(input: {
 }): ResolvedSettings | { error: string; diagnostics?: readonly ConfigDiagnostic[] } {
   const approval = resolveApprovalSettings(input);
   const memory = effectiveInteractiveMemory(input);
+  const diagnosticSecrets = configDiagnosticSecrets(input.diagnosticContext, [input.user, input.project, input.cli, input.session]);
   const sourceFor = (field: keyof ConfigLayer, profileName?: string): string => {
     for (const [layer, source] of [[input.session, "session settings"], [input.cli, "CLI settings"], [input.project, input.configSources?.project ?? "project settings"], [input.user, input.configSources?.user ?? "user settings"], [memory, "interactive memory"]] as const) {
-      if (profileName ? layer?.profiles && Object.hasOwn(layer.profiles, profileName) : layer?.[field] !== undefined) return source;
+      if (profileName ? layer?.profiles && Object.hasOwn(layer.profiles, profileName) : layer?.[field] !== undefined) return safeConfigSource(source, diagnosticSecrets);
     }
     return "default settings";
   };
@@ -698,17 +703,23 @@ function omitProfileKeys(layer: ConfigLayer | undefined): ConfigLayer | undefine
   return direct;
 }
 
-/** Read each actual config file once while retaining all requested scope paths as lookup keys. */
-export async function readConfigSources(paths: readonly string[], deprecations?: readonly ConfigDeprecation[]): Promise<Map<string, Awaited<ReturnType<typeof readConfigFile>>>> {
+/** Read each actual config once, collecting both scopes' credential references before formatting diagnostics. */
+export async function readConfigSources(paths: readonly string[], deprecations?: readonly ConfigDeprecation[], diagnosticContext?: ConfigDiagnosticContext): Promise<Map<string, Awaited<ReturnType<typeof readConfigFile>>>> {
   const identities = await Promise.all(paths.map(async path => { try { return await realpath(path); } catch { return resolve(path); } }));
-  const reads = new Map<string, ReturnType<typeof readConfigFile>>();
-  const layers = await Promise.all(paths.map((path, index) => {
+  const reads = new Map<string, ReturnType<typeof readConfigInput>>();
+  const inputs = await Promise.all(paths.map((path, index) => {
     const identity = identities[index]!;
     let read = reads.get(identity);
-    if (!read) { read = readConfigFile(path, deprecations); reads.set(identity, read); }
+    if (!read) { read = readConfigInput(path); reads.set(identity, read); }
     return read;
   }));
-  return new Map(paths.map((path, index) => [path, layers[index]]));
+  const context = { ...diagnosticContext, secrets: configDiagnosticSecrets(diagnosticContext, inputs.map(input => input && "value" in input ? input.value : undefined)) };
+  const parsed = new Map<string, Awaited<ReturnType<typeof readConfigFile>>>();
+  return new Map(paths.map((path, index) => {
+    const identity = identities[index]!;
+    if (!parsed.has(identity)) parsed.set(identity, parseConfigInput(inputs[index], path, deprecations, context));
+    return [path, parsed.get(identity)];
+  }));
 }
 
 /** Read both config sources before reporting failure, so one invalid file cannot hide another. */
@@ -716,9 +727,10 @@ export async function readConfigLayers(input: {
   home: string;
   workspaceRoot: string;
   configDeprecations?: readonly ConfigDeprecation[];
+  diagnosticContext?: ConfigDiagnosticContext;
 }): Promise<{ user?: ParsedConfigLayer; project?: ParsedConfigLayer } | ConfigReadError> {
   const paths = [userConfigPath(input.home), projectConfigPath(input.workspaceRoot)];
-  const observations = await readConfigSources(paths, input.configDeprecations);
+  const observations = await readConfigSources(paths, input.configDeprecations, input.diagnosticContext);
   const layers = paths.map(path => observations.get(path));
   const failures = [...new Set(layers)].filter((layer): layer is ConfigReadError => !!layer && "error" in layer);
   if (failures.length) return { error: failures.map(failure => failure.error).join("\n"), diagnostics: failures.flatMap(failure => failure.diagnostics) };
@@ -736,6 +748,7 @@ export async function loadResolvedSettings(input: {
   /** Headless runs must name a provider and model in config or CLI flags. */
   requireExplicitModel?: boolean;
   configDeprecations?: readonly ConfigDeprecation[];
+  diagnosticContext?: ConfigDiagnosticContext;
   onDeprecation?: (warning: ConfigDeprecationWarning) => void;
 }): Promise<ResolvedSettings | { error: string; diagnostics?: readonly ConfigDiagnostic[] }> {
   const layers = await readConfigLayers(input);
@@ -749,6 +762,7 @@ export async function loadResolvedSettings(input: {
     modelCapabilities: input.modelCapabilities,
     deferOpenAIThinking: input.deferOpenAIThinking,
     configSources: { user: userConfigPath(input.home), project: projectConfigPath(input.workspaceRoot) },
+    diagnosticContext: input.diagnosticContext,
   });
   if ("error" in resolved) return resolved;
   if (input.requireExplicitModel && !resolved.modelConfigured) {
@@ -757,30 +771,30 @@ export async function loadResolvedSettings(input: {
   return resolved;
 }
 
-/** Read one config.json. Missing files are skipped; invalid files are errors. */
-export async function readConfigFile(
-  path: string,
-  deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS,
-): Promise<ParsedConfigLayer | ConfigReadError | undefined> {
+type ConfigInput = { value: unknown } | { category: "unreadable" | "root" | "json"; constraint: string } | undefined;
+
+/** Read and decode one source without formatting a path before other scopes' credential references are known. */
+async function readConfigInput(path: string): Promise<ConfigInput> {
   let text: string;
-  try {
-    text = await readFile(path, "utf8");
-  } catch (error) {
-    if (isNotFound(error)) {
-      return undefined;
-    }
-    return configReadError([configDiagnostic(path, "", "unreadable", "Restore access to a readable config file")]);
+  try { text = await readFile(path, "utf8"); }
+  catch (error) {
+    if (isNotFound(error)) return undefined;
+    return { category: "unreadable", constraint: "Restore access to a readable config file" };
   }
-  if (text.trim().length === 0) {
-    return configReadError([configDiagnostic(path, "", "root", "Use a JSON object")]);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return configReadError([configDiagnostic(path, "", "json", "Fix malformed JSON; use a JSON object with quoted setting names")]);
-  }
-  return parseConfigObject(parsed, path, deprecations);
+  if (!text.trim()) return { category: "root", constraint: "Use a JSON object" };
+  try { return { value: JSON.parse(text) }; }
+  catch { return { category: "json", constraint: "Fix malformed JSON; use a JSON object with quoted setting names" }; }
+}
+
+function parseConfigInput(input: ConfigInput, path: string, deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS, diagnosticContext?: ConfigDiagnosticContext): ParsedConfigLayer | ConfigReadError | undefined {
+  if (!input) return undefined;
+  if ("value" in input) return parseConfigObject(input.value, path, deprecations, diagnosticContext);
+  return configReadError([configDiagnostic(safeConfigSource(path, configDiagnosticSecrets(diagnosticContext)), "", input.category, input.constraint)]);
+}
+
+/** Read one config.json. Missing files are skipped; invalid files carry sanitized source-specific errors. */
+export async function readConfigFile(path: string, deprecations: readonly ConfigDeprecation[] = CONFIG_DEPRECATIONS, diagnosticContext?: ConfigDiagnosticContext): Promise<ParsedConfigLayer | ConfigReadError | undefined> {
+  return parseConfigInput(await readConfigInput(path), path, deprecations, diagnosticContext);
 }
 
 /** Trim string fields after schema validation, including profile selections and definitions. */

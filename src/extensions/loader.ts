@@ -27,7 +27,7 @@ export async function loadExtensions(options: {
   onDiagnostic?: (message: string) => void;
 }): Promise<{ tools: ToolRegistry; runtime: ExtensionRuntime }> {
   options.signal?.throwIfAborted();
-  const packages = await discoverPackages({ workspaceRoot: options.workspace.root, home: options.home, signal: options.signal, configDeprecations: options.configDeprecations });
+  const packages = await discoverPackages({ workspaceRoot: options.workspace.root, home: options.home, signal: options.signal, configDeprecations: options.configDeprecations, diagnosticContext: { secrets: [...(options.secrets ?? [])] } });
   const declarations: Array<{ path: string; source: string; packageName?: string }> = [
     ...packages.flatMap(pkg => pkg.extensions.map(path => ({ path, source: `${pkg.source}: ${path}`, packageName: pkg.name }))),
     ...options.modules.map(path => ({ path: resolve(options.workspace.root, path), source: `CLI module "${path}"` })),

@@ -64,7 +64,11 @@ as `<unknown setting>`, with known children retained, such as
 `profiles.<unknown setting>.baseUrl`. Invalid values are never included.
 Source identifiers are bounded and stripped of terminal controls and recognized
 credentials. Doctor also redacts known API-key and credential-header values from
-source labels and remedies. Schema version 1 and each check's required fields remain unchanged.
+source labels and remedies before bounding them. This includes values loaded by
+an explicit `--env-file` and environment values named by valid `credentialEnv`
+references in either config file, including a file with other invalid settings.
+Normal startup uses the same sanitized reasons. Schema version 1 and each
+check's required fields remain unchanged.
 For automation, use check ID, diagnostic source/path/category and status;
 do not depend on prose or `package.<index>` ordering. See
 [configuration](configuration.md#configuration-files) for another

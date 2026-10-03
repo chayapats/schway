@@ -1,4 +1,5 @@
 import type { ConfigDeprecation } from "../config/deprecations.ts";
+import type { ConfigDiagnosticContext } from "../config/diagnostics.ts";
 import {
   discoverAgentsInstructions,
   formatAgentsInstructions,
@@ -63,6 +64,8 @@ export type CompactionOutcome = "completed" | "noop" | "failed" | "cancelled";
 
 /** Options for creating a context manager with explicit budget overrides. */
 export interface ContextManagerOptions {
+  /** Explicit credential context for sanitized package-backed skill diagnostics. */
+  diagnosticContext?: ConfigDiagnosticContext;
   /** Use the settings reader’s legacy keys during package-backed skill discovery. */
   configDeprecations?: readonly ConfigDeprecation[];
   home?: string;
@@ -154,7 +157,7 @@ export function createContextManager(
           content: formatAgentsInstructions(instructions),
         });
       }
-      const discovered = await discoverSkillsSafe(workspace, options.home, options.configDeprecations);
+      const discovered = await discoverSkillsSafe(workspace, options.home, options.configDeprecations, options.diagnosticContext);
       const modelSkills = discovered.filter((skill) => !skill.userOnly);
       if (modelSkills.length > 0) {
         base.push({
@@ -241,6 +244,7 @@ export function createContextManager(
       activationOptions.signal?.throwIfAborted();
       const scope = activationScope;
       const invocation = await prepareSkillInvocation({
+        diagnosticContext: options.diagnosticContext,
         configDeprecations: options.configDeprecations,
         workspaceRoot: workspace.root,
         extraRoots: workspace.extraRoots,
@@ -351,9 +355,10 @@ async function discoverSkillsSafe(
   workspace: Workspace,
   home: string | undefined,
   configDeprecations?: readonly ConfigDeprecation[],
+  diagnosticContext?: ConfigDiagnosticContext,
 ): Promise<SkillMetadata[]> {
   try {
-    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations });
+    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations, diagnosticContext });
     return discovered.skills;
   } catch {
     return [];

@@ -12,6 +12,7 @@ import {
   userConfigPath,
 } from "../src/config/config.ts";
 import { parseEnvFile } from "../src/config/env-file.ts";
+import { configDiagnosticSecrets, safeConfigSource } from "../src/config/diagnostics.ts";
 import { DEFAULT_MAX_TURNS } from "../src/agent/loop.ts";
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../src/agent/scheduler.ts";
 import { UNKNOWN_MODEL_DEFAULTS } from "../src/model/catalog.ts";
@@ -19,6 +20,47 @@ import { withTempDir } from "./helpers.ts";
 
 test("an empty object is a valid config layer", () => {
   expect(parseConfigObject({}, "test")).toEqual({});
+});
+
+test("source redaction runs after control normalization and before bounding complete credential values", () => {
+  const secret = "opaque-environment-credential";
+  for (const source of [
+    `/tmp/opaque-\u001b[31menvironment\u001b[0m-credential/config.json`,
+    `/tmp/opaque-environ\u200bment-credential/config.json`,
+    `/${"a".repeat(500)}/${secret}/config.json`,
+  ]) {
+    const label = safeConfigSource(source, [` ${secret}\n`]);
+    expect(label).not.toContain("opaque-");
+    expect(label).not.toMatch(/[\p{Cc}\p{Cf}]/u);
+    expect(label.length).toBeLessThanOrEqual(512);
+  }
+  expect(safeConfigSource("/tmp/Bea\u200brer\nprivate-token/config.json")).not.toContain("private-token");
+});
+
+test("diagnostic credential context uses explicit own references without scanning unrelated environment values", () => {
+  const env = Object.assign(Object.create({ INHERITED_KEY: "inherited-secret" }), { REFERENCED_KEY: " own-secret \n", ORDINARY_VALUE: "ordinary-path" });
+  const inherited = Object.create({ credentialEnv: "ORDINARY_VALUE" });
+  const context = { env, secrets: ["existing-secret"] };
+  const secrets = configDiagnosticSecrets(context, [{ profiles: { constructor: { credentialEnv: "REFERENCED_KEY" }, inherited, other: { credentialEnv: "INHERITED_KEY" } } }]);
+  expect(secrets).toContain("own-secret");
+  expect(secrets).toContain(" own-secret \n");
+  expect(secrets).toContain("existing-secret");
+  expect(secrets).not.toContain("ordinary-path");
+  expect(secrets).not.toContain("inherited-secret");
+  expect(context.secrets).toEqual(secrets);
+});
+
+test("contextual source redaction also covers deprecation warnings and post-schema profile resolution", () => {
+  const secret = "private-contextual-credential", source = `/tmp/${secret}/config.json`;
+  const diagnosticContext = { env: { CUSTOM_KEY: ` ${secret} ` }, secrets: [] as string[] };
+  const layer = parseConfigObject({ oldTurns: 7, profiles: { constructor: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } } }, source,
+    [{ key: "oldTurns", replacement: "maxTurns", since: "1.1.0", removeIn: "2.0" }], diagnosticContext);
+  if ("error" in layer) throw Error(layer.error);
+  expect(layer.deprecationWarnings?.[0]?.message).toContain('"oldTurns"');
+  expect(layer.deprecationWarnings?.[0]?.message).not.toContain(secret);
+  expect(JSON.stringify(layer.deprecationWarnings)).not.toContain(secret);
+  const resolved = resolveSettings({ user: { ...layer, profile: "missing" }, configSources: { user: source }, diagnosticContext });
+  expect(resolved).toMatchObject({ diagnostics: [{ source: "/tmp/***/config.json", path: "profile", category: "constraint", constraint: "Select a configured compatible profile" }] });
 });
 
 test("invalid approval config exposes its safe field and supported values", () => {

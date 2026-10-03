@@ -39,7 +39,7 @@ function location(object: Record<string, unknown>, key: string): { parent: Recor
 }
 
 /** Translate legacy keys on a copy, preserving explicit replacements and original file bytes. */
-export function applyConfigDeprecations(value: Record<string, unknown>, source: string, table: readonly ConfigDeprecation[]): {
+export function applyConfigDeprecations(value: Record<string, unknown>, source: string, table: readonly ConfigDeprecation[], secrets: readonly string[] = []): {
   value: Record<string, unknown>; warnings: ConfigDeprecationWarning[];
 } {
   const copy = structuredClone(value);
@@ -48,7 +48,7 @@ export function applyConfigDeprecations(value: Record<string, unknown>, source: 
     const old = location(copy, entry.key);
     if (!old) continue;
     const explicit = entry.replacement !== undefined && location(value, entry.replacement) !== undefined;
-    const path = safeConfigSource(resolve(source));
+    const path = safeConfigSource(resolve(source), secrets);
     const message = entry.replacement
       ? `Config: "${entry.key}" in ${path} is deprecated; use "${entry.replacement}". It will be removed in ${entry.removeIn}.`
       : `Config: "${entry.key}" in ${path} is deprecated and has no replacement. It will be removed in ${entry.removeIn}.`;

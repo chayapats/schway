@@ -1,3 +1,4 @@
+import { configDiagnosticSecrets } from "../config/diagnostics.ts";
 import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/deprecations.ts";
 import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
@@ -8,7 +9,7 @@ import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import type { HeadlessSessionReadyEvent, RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
-import { COMPATIBLE_API_KEY_ENV, resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
+import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
 import { loadResolvedSettings, ignoredProjectApprovalNotice, projectConfigPath, type ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
@@ -160,7 +161,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
-  const secrets: string[] = collectSecrets(parsed.args.apiKey, io.env);
+  const secrets: string[] = collectSecrets(parsed.args.apiKey, io.env, undefined, parsed.args.headers);
   let diagnosticSessionId: string | undefined;
   const diagnostics = createDiagnosticSink({
     enabled: parsed.args.debug ?? false, home,
@@ -177,11 +178,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     if ("error" in loadedEnv) {
       diagnostics.record("config", "env_file_failed", { category: "configuration_input" }, "error");
-      io.stderr.write(`${loadedEnv.error}\n`);
+      io.stderr.write(`${redactSecrets(String(loadedEnv.error), secrets)}\n`);
       return 1;
     }
     env = loadedEnv;
   }
+  const diagnosticContext = { env, secrets };
+  configDiagnosticSecrets(diagnosticContext);
 
   const directory = sessionsDirectory(home);
   let workspace: Workspace;
@@ -216,8 +219,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   const warned = new Set<string>();
-  const deprecationOptions = { configDeprecations: io.configDeprecations, onDeprecation: (warning: ConfigDeprecationWarning) => {
-    if (!warned.has(warning.message)) { warned.add(warning.message); io.stderr.write(`${warning.message}\n`); }
+  const deprecationOptions = { diagnosticContext, configDeprecations: io.configDeprecations, onDeprecation: (warning: ConfigDeprecationWarning) => {
+    if (!warned.has(warning.message)) { warned.add(warning.message); io.stderr.write(`${redactSecrets(warning.message, secrets)}\n`); }
   } };
   const cliLayer = cliOverridesFromArgs(parsed.args);
   let settings = await loadResolvedSettings({ ...deprecationOptions,
@@ -229,7 +232,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   });
   if ("error" in settings) {
     diagnostics.record("config", "invalid_configuration", { category: "resolution_failed" }, "error");
-    io.stderr.write(`${settings.error}\n`);
+    io.stderr.write(`${redactSecrets(settings.error, secrets)}\n`);
     return 1;
   }
   if (
@@ -252,11 +255,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   const approvalNotice = ignoredProjectApprovalNotice(settings, projectConfigPath(workspace.root));
-  if (approvalNotice) io.stderr.write(`${approvalNotice}\n`);
+  if (approvalNotice) io.stderr.write(`${redactSecrets(approvalNotice, secrets)}\n`);
 
   try { await pruneUndoStore({ home, maxAgeDays: settings.undoMaxAgeDays, maxSizeBytes: settings.undoMaxSizeMB * 1024 * 1024 }); }
   catch { diagnostics.record("undo", "prune_failed", { category: "undo_retention" }, "warn"); }
-  secrets.push(...collectSecrets(undefined, env, settings.credentialEnv));
+  configDiagnosticSecrets(diagnosticContext, [settings]);
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   try {
@@ -277,12 +280,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const slash = splitSlashCommand(parsed.args.prompt);
     let skillTurn: { skill: SkillMetadata; body: string } | undefined;
     if (slash && slash.name === "skills") {
-      const discovery = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations: io.configDeprecations });
+      const discovery = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations: io.configDeprecations, diagnosticContext });
       io.stdout.write(`${formatSkillsListing(discovery)}\n`);
       return 0;
     }
     if (slash && !RESERVED_SKILL_NAMES.includes(slash.name) && isSkillNameToken(slash.name)) {
       const prepared = await prepareSkillInvocation({
+        diagnosticContext,
         workspaceRoot: workspace.root,
         extraRoots: workspace.extraRoots,
         home,
@@ -321,7 +325,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         }
       } else {
         const validated = await loadResolvedSettings({ ...deprecationOptions, home, workspaceRoot: workspace.root, cli: cliLayer });
-        if ("error" in validated) { io.stderr.write(`${validated.error}\n`); return 1; }
+        if ("error" in validated) { io.stderr.write(`${redactSecrets(validated.error, secrets)}\n`); return 1; }
         settings = validated;
       }
     }
@@ -399,6 +403,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     let failed = false;
     let printedText = false;
     const contextManager = createContextManager(workspace, {
+      diagnosticContext,
       configDeprecations: io.configDeprecations,
       home,
       contextWindow: settings.contextWindow,
@@ -491,27 +496,9 @@ function collectSecrets(
   runtimeApiKey: string | undefined,
   env: Record<string, string | undefined>,
   credentialEnv?: string,
+  headers?: Record<string, string>,
 ): string[] {
-  const secrets: string[] = [];
-  if (runtimeApiKey) {
-    secrets.push(runtimeApiKey);
-  }
-  // The route is gone, but a leftover key can still reach tool output through the inherited environment.
-  const legacyAnthropicKey = env.ANTHROPIC_API_KEY;
-  if (legacyAnthropicKey) secrets.push(legacyAnthropicKey);
-  const compatibleKey = env[COMPATIBLE_API_KEY_ENV];
-  if (compatibleKey) secrets.push(compatibleKey);
-  const openaiKey = env.OPENAI_API_KEY;
-  if (openaiKey) {
-    secrets.push(openaiKey);
-  }
-  const xaiKey = env.XAI_API_KEY;
-  if (xaiKey) secrets.push(xaiKey);
-  if (credentialEnv && credentialEnv !== COMPATIBLE_API_KEY_ENV) {
-    const profileKey = env[credentialEnv];
-    if (profileKey) secrets.push(profileKey);
-  }
-  return secrets;
+  return configDiagnosticSecrets({ env }, [{ apiKey: runtimeApiKey, credentialEnv, headers }]);
 }
 
 /**

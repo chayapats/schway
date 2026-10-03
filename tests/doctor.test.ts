@@ -27,6 +27,47 @@ const store = (value: string | null | Error): CredentialStore => ({
 });
 const check = (report: Awaited<ReturnType<typeof diagnose>>, id: string) => report.checks.find(item => item.id === id);
 
+for (const profileScope of ["user", "project"] as const) test(`a credentialEnv reference in invalid ${profileScope} config protects both scopes across diagnostic consumers`, async () => {
+  const { root } = await fixture();
+  const secret = "private-cross-scope-credential", home = join(root, secret, "home"), workspace = join(root, secret, "work");
+  await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspace, ".schway"), { recursive: true });
+  const invalidProfile = JSON.stringify({ profiles: { constructor: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } }, approval: { mode: "readonly" } });
+  await writeFile(join(home, ".schway/config.json"), profileScope === "user" ? invalidProfile : "{malformed");
+  await writeFile(join(workspace, ".schway/config.json"), profileScope === "project" ? invalidProfile : "{malformed");
+  const env = { HOME: home, CUSTOM_KEY: ` ${secret} ` };
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace, diagnosticContext: { env } });
+  const editorError = await loadConfigEditor({ home, workspaceRoot: workspace, diagnosticContext: { env } }).catch(error => error as Error);
+  const packages = await inspectPackages({ home, workspaceRoot: workspace, diagnosticContext: { env } });
+  const report = await diagnose({ cwd: workspace, env, args, store: store(null) });
+  expect(settings).toMatchObject({ diagnostics: [expect.any(Object), expect.any(Object)] });
+  expect(packages.issues.filter(issue => issue.kind === "configuration")).toHaveLength(2);
+  expect(packages.diagnostics).toHaveLength(2);
+  expect(check(report, "config.user")?.status).toBe("error");
+  expect(check(report, "config.project")?.status).toBe("error");
+  expect(check(report, "packages")?.status).toBe("warning");
+  for (const output of [JSON.stringify(settings), (editorError as Error).message, JSON.stringify(packages), JSON.stringify(report), formatDoctor(report)]) {
+    expect(output).not.toContain(secret);
+    expect(output).toContain("approval.mode");
+    expect(output).toContain("malformed JSON");
+  }
+});
+
+test("doctor masks a late-discovered profile credential before truncating the workspace label", async () => {
+  const { root, home } = await fixture();
+  const prefix = join(root, "a".repeat(180), "b".repeat(180));
+  const secret = "private-cross-boundary-credential";
+  const workspace = join(prefix, "c".repeat(502 - prefix.length), secret);
+  await mkdir(join(workspace, ".schway"), { recursive: true });
+  await mkdir(join(home, ".schway"));
+  await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profiles: { custom: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } } }));
+  await writeFile(join(workspace, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const report = await diagnose({ cwd: workspace, env: { HOME: home, CUSTOM_KEY: secret }, args, store: store(null) });
+  for (const output of [JSON.stringify(report), formatDoctor(report)]) expect(output).not.toContain("private-");
+  expect(report.workspace).toBeDefined();
+  expect(report.workspace!.length).toBeLessThanOrEqual(512);
+  expect(check(report, "config.project")?.diagnostics?.[0]?.path).toBe("approval.mode");
+});
+
 for (const label of ["Bearer\nprivate-source-token", "Authorization:\r\nBearer private-source-token", "x-api-key=private-source-token", "x-api-key\u001b[31m=\u001b[0mprivate-source-token"]) test(`source credential form ${JSON.stringify(label)} is hidden across config outputs`, async () => {
   const { root, home } = await fixture();
   const workspace = join(root, label); await mkdir(join(workspace, ".schway"), { recursive: true });

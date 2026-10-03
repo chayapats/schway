@@ -15,6 +15,41 @@ export interface ConfigDiagnostic {
 /** Retain the established printable error while carrying reasons for diagnostic consumers. */
 export interface ConfigReadError { error: string; diagnostics: readonly ConfigDiagnostic[] }
 
+/** Explicit environment and expandable known-secret list; diagnostic formatting never reads ambient credentials. */
+export interface ConfigDiagnosticContext {
+  env?: Record<string, string | undefined>;
+  secrets?: string[];
+}
+
+/** Remember raw and effective credential values from explicit inputs and own valid profile environment references. */
+export function configDiagnosticSecrets(context: ConfigDiagnosticContext = {}, inputs: readonly unknown[] = []): string[] {
+  const values = [...(context.secrets ?? [])];
+  const envNames = new Set(["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY"]);
+  const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+  const inspect = (value: Record<string, unknown>) => {
+    if (Object.hasOwn(value, "apiKey") && typeof value.apiKey === "string") values.push(value.apiKey);
+    if (Object.hasOwn(value, "headers") && object(value.headers)) for (const [name, header] of Object.entries(value.headers)) {
+      if (!CREDENTIAL_HEADER_NAMES.has(name.trim().toLowerCase()) || typeof header !== "string") continue;
+      values.push(header);
+      const token = /^(?:Bearer|Basic|Token)\s+(\S+)$/i.exec(header.trim())?.[1];
+      if (token) values.push(token);
+    }
+    if (Object.hasOwn(value, "credentialEnv") && typeof value.credentialEnv === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value.credentialEnv)) envNames.add(value.credentialEnv);
+  };
+  for (const input of inputs) if (object(input)) {
+    inspect(input);
+    if (Object.hasOwn(input, "profiles") && object(input.profiles)) for (const profile of Object.values(input.profiles)) if (object(profile)) inspect(profile);
+  }
+  for (const name of envNames) {
+    const value = context.env && Object.hasOwn(context.env, name) ? context.env[name] : undefined;
+    if (value) values.push(value);
+  }
+  const secrets = [...new Set(values.flatMap(value => [value, value.trim()]).filter(Boolean))].sort((a, b) => b.length - a.length);
+  context.secrets ??= [];
+  context.secrets.splice(0, context.secrets.length, ...secrets);
+  return secrets;
+}
+
 /** Bound source labels and remove terminal controls, recognizable credentials and URL secrets. */
 export function safeConfigSource(source: string, secrets: readonly string[] = []): string {
   const space = "[\\s\\x00-\\x1f\\x7f-\\x9f]";
@@ -22,12 +57,13 @@ export function safeConfigSource(source: string, secrets: readonly string[] = []
   const credentialScheme = new RegExp(`\\b(?:Bearer|Basic|Token)${space}+[^\\s\\x00-\\x1f\\x7f-\\x9f]+`, "gi");
   const redactCredentials = (value: string) => value.replace(credentialHeader, "<redacted>").replace(credentialScheme, "<redacted>").replace(/\bsk-[\w-]+/g, "<redacted>");
   // Preserve separators until credential recognition; normalization must not join a scheme to its token.
-  const redacted = redactCredentials(stripVTControlCharacters(redactSecrets(source, secrets)));
-  return redactCredentials(redacted.replace(/[\x00-\x1f\x7f-\x9f]/g, ""))
+  const known = [...new Set(secrets.flatMap(value => [value, value.trim(), stripVTControlCharacters(value).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "")]).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const redacted = redactCredentials(stripVTControlCharacters(redactSecrets(source, known)).replace(/\p{Cf}/gu, ""));
+  return redactSecrets(redactCredentials(redacted.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ""))
     .replace(/https?:\/\/[^\s]+/gi, value => {
       try { const url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.toString(); }
       catch { return "<redacted URL>"; }
-    }).slice(0, 512);
+    }), known).slice(0, 512);
 }
 
 /** Construct a diagnostic from trusted schema paths and guidance, never invalid input values. */

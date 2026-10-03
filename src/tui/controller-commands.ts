@@ -76,7 +76,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
     const workspace = this.workspace;
     const session = this.session;
     if (!workspace) return true;
-    const skills = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true });
+    const skills = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true, diagnosticContext: { secrets: this.secrets } });
     if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) return false;
     this.discoveredCommands = skills;
     return true;
@@ -106,7 +106,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
     const generation = ++this.commandDiscoveryGeneration;
     const workspace = this.workspace;
     const session = this.session;
-    const skills = workspace ? await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true }) : undefined;
+    const skills = workspace ? await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home: this.home, metadataOnly: true, diagnosticContext: { secrets: this.secrets } }) : undefined;
     if (this.disposed || generation !== this.commandDiscoveryGeneration || workspace !== this.workspace || session !== this.session) { this.notice("Commands changed · Enter retry"); return true; }
     this.discoveredCommands = skills;
     const choices = commandCatalog(this.extensionCommands(), skills).filter(entry => entry.name === name);
@@ -146,7 +146,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
     const current = () => this.activeAbort === abort && !this.disposed;
     try {
       if (this.workspace) {
-        const skills = await discoverSkills({ workspaceRoot: this.workspace.root, extraRoots: this.workspace.extraRoots, home: this.home, signal: abort.signal });
+        const skills = await discoverSkills({ workspaceRoot: this.workspace.root, extraRoots: this.workspace.extraRoots, home: this.home, signal: abort.signal, diagnosticContext: { secrets: this.secrets } });
         this.extensions!.assertNoSkillCollision(command, skills);
       }
       abort.signal.throwIfAborted();

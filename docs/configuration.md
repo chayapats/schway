@@ -48,6 +48,12 @@ For example, a profile endpoint error names
 `profiles.<unknown setting>.baseUrl`. Check the named file to identify the entry.
 Source labels are bounded and terminal control sequences are removed. Config
 reads and doctor never repair files automatically.
+Startup and doctor hide known credentials in source labels before shortening
+them, including CLI keys, secret headers, provider keys from the supplied
+environment or explicit `--env-file`, and environment values named by valid
+`credentialEnv` references in either config file. Both files are read before
+these labels are formatted, even when another setting is invalid. This does not
+read saved credentials or treat unrelated environment values as secrets.
 
 Doctor JSON keeps `schemaVersion: 1` and each check's required `id`, `status`,
 `summary` and `remedy`. Config errors and deprecation warnings may additionally

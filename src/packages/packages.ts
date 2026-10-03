@@ -1,9 +1,10 @@
+import { configDiagnosticSecrets, safeConfigSource, type ConfigDiagnosticContext } from "../config/diagnostics.ts";
 import type { ConfigDeprecation } from "../config/deprecations.ts";
 import type { ConfigDiagnostic } from "../config/diagnostics.ts";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { satisfies, validRange } from "semver";
-import { projectConfigPath, readConfigFile, userConfigPath } from "../config/config.ts";
+import { projectConfigPath, readConfigFile, readConfigSources, userConfigPath } from "../config/config.ts";
 import { version } from "../../package.json";
 
 /** An enabled package with canonical, validated capabilities and a diagnostic source. */
@@ -31,6 +32,7 @@ export interface PackageIssue {
 export async function discoverPackages(options: {
   /** Use the same supported legacy keys as the settings reader. */
   configDeprecations?: readonly ConfigDeprecation[];
+  diagnosticContext?: ConfigDiagnosticContext;
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
@@ -46,6 +48,7 @@ export async function inspectPackages(options: {
   configFiles?: ReadonlyMap<string, Awaited<ReturnType<typeof readConfigFile>>>;
   /** Use the same supported legacy keys as the settings reader. */
   configDeprecations?: readonly ConfigDeprecation[];
+  diagnosticContext?: ConfigDiagnosticContext;
   workspaceRoot: string;
   home?: string;
   signal?: AbortSignal;
@@ -57,11 +60,17 @@ export async function inspectPackages(options: {
     ...(options.home ? [{ scope: "global" as const, root: join(options.home, ".schway"), config: userConfigPath(options.home) }] : []),
     { scope: "project" as const, root: options.workspaceRoot, config: projectConfigPath(options.workspaceRoot) },
   ];
+  const diagnosticContext = options.diagnosticContext ?? { secrets: [] };
+  configDiagnosticSecrets(diagnosticContext, [...(options.configFiles?.values() ?? [])]);
+  const configFiles = new Map(options.configFiles);
+  options.signal?.throwIfAborted();
+  for (const [path, config] of await readConfigSources(scopes.map(scope => scope.config).filter(path => !configFiles.has(path)), options.configDeprecations, diagnosticContext)) configFiles.set(path, config);
+  const reported = new Set<object>();
   for (const { scope, root, config } of scopes) {
     options.signal?.throwIfAborted();
-    const layer = options.configFiles?.has(config) ? options.configFiles.get(config) : await readConfigFile(config, options.configDeprecations);
+    const layer = configFiles.get(config);
     if (layer && "error" in layer) {
-      diagnostics.push(layer.error);
+      if (!reported.has(layer)) { reported.add(layer); diagnostics.push(layer.error); }
       issues.push({ scope, kind: "configuration", configDiagnostics: layer.diagnostics });
       continue;
     }
@@ -125,7 +134,7 @@ export async function inspectPackages(options: {
         options.signal?.throwIfAborted();
         // Native filesystem errors can include untrusted path or OS detail; keep diagnostics bounded.
         const message = error instanceof Error ? error.message : "Unable to inspect package";
-        diagnostics.push(message.startsWith(`Missing ${source}.`) ? message : `${source}: ${message.slice(0, 500)}`);
+        diagnostics.push(safeConfigSource(message.startsWith(`Missing ${source}.`) ? message : `${source}: ${message}`, configDiagnosticSecrets(diagnosticContext)));
         issues.push({ scope, name, kind, ...(missingEntry !== undefined ? { entry: missingEntry } : {}) });
       }
     }

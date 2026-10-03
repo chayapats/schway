@@ -24,6 +24,48 @@ async function configure(root: string, packages: string[]): Promise<void> {
   await Bun.write(join(root, ".schway/config.json"), JSON.stringify({ packages }));
 }
 
+test("extension and skill loading forward known credentials before bounding a missing-package error", async () => withIsolatedCliDirs(async ({ root, home }) => {
+  const prefix = join(root, "a".repeat(180), "b".repeat(180)), secret = "private-loader-credential";
+  const lead = 'Missing project package "missing" (';
+  const work = join(prefix, "c".repeat(502 - lead.length - prefix.length), secret);
+  await mkdir(work, { recursive: true });
+  await configure(work, ["missing"]);
+  const manager = createContextManager(workspace(work), { home, diagnosticContext: { secrets: [secret] } });
+  const controller = new TuiController({ session: createSession(), sessionId: "diagnostic-privacy", provider: "scripted", modelId: "scripted", workspace: workspace(work), home, secrets: [secret], contextManager: manager });
+  try {
+    for (const load of [
+      () => loadExtensions({ modules: [], workspace: workspace(work), home, secrets: [secret], tools: createToolRegistry() }),
+      () => discoverSkills({ workspaceRoot: work, home, diagnosticContext: { secrets: [secret] } }),
+      () => prepareSkillInvocation({ workspaceRoot: work, home, name: "guide", diagnosticContext: { secrets: [secret] } }),
+      () => manager.activateSkill("guide"),
+      () => controller.refreshCommands(),
+      () => controller.commandCollision("guide"),
+    ]) {
+      const error = await load().catch(error => error as Error);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('Missing project package "missing"');
+      expect((error as Error).message).not.toContain("private-");
+      expect((error as Error).message.length).toBeLessThanOrEqual(512);
+    }
+  } finally { controller.dispose(); }
+}));
+
+test("cached credential references redact independent package failures and incomplete shared scopes remain explicit", async () => withIsolatedCliDirs(async ({ home, work: workspace }) => {
+  const secret = "private-package-credential", path = userConfigPath(home);
+  const cached = parseConfigObject({ profiles: { custom: { baseUrl: "https://example.test", credentialEnv: "CUSTOM_KEY" } } }, path);
+  await configure(workspace, [secret]);
+  const result = await inspectPackages({ home, workspaceRoot: workspace, configFiles: new Map([[path, cached]]), diagnosticContext: { env: { CUSTOM_KEY: secret } } });
+  expect(result.issues).toEqual([{ scope: "project", kind: "missing", name: secret }]);
+  expect(result.diagnostics).toHaveLength(1);
+  expect(result.diagnostics[0]).toContain('Missing project package "***"');
+  expect(result.diagnostics[0]).not.toContain(secret);
+  await Bun.write(path, '{"approval":{"mode":"readonly"}}');
+  const shared = await inspectPackages({ home, workspaceRoot: home });
+  expect(shared.diagnostics).toHaveLength(1);
+  expect(shared.issues.map(issue => issue.scope)).toEqual(["global", "project"]);
+  expect(shared.issues.every(issue => issue.kind === "configuration")).toBe(true);
+}));
+
 test("package inspection retains the exact config observation and still inspects the other scope", async () => withIsolatedCliDirs(async ({ home, work: workspace }) => {
   const path = userConfigPath(home);
   await Bun.write(path, '{"approval":{"mode":"readonly"}}');
