@@ -1,4 +1,5 @@
 first-run
+disconnected-search
 auto-mode
 read-only-mode
 ask-mode

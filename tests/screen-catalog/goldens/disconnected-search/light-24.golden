@@ -1,0 +1,43 @@
+schway-screen 1
+screen disconnected-search
+title Search before connecting
+description A disconnected conversation retains its mode and search restore action.
+variant light-24
+size 24x8
+cursor 12 6 visible
+== text
+ Read the project
+ README before making
+ changes.
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › README
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Read-only · Esc restore
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-18 #545e6c #c5c9cf -
+00 18-22 #ffffff #c5c9cf -
+00 22-24 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-22 #545e6c #c5c9cf -
+01 22-24 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-9 #545e6c #c5c9cf -
+02 9-22 #ffffff #c5c9cf -
+02 22-24 #ffffff #f7f7f4 -
+03 0-24 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-23 #ecedea #f7f7f4 -
+04 23-24 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-5 #0a5894 #ecedea -
+05 5-11 #1d232c #ecedea -
+05 11-23 #ffffff #ecedea -
+05 23-24 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-23 #ecedea #f7f7f4 -
+06 23-24 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-10 #7a5000 #ecedea b
+07 10-24 #545e6c #ecedea -

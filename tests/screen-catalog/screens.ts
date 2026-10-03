@@ -26,6 +26,7 @@ const search = async (ui: ScreenHarness, query: string) => {
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
+  { id: "disconnected-search", title: "Search before connecting", description: "A disconnected conversation retains its mode and search restore action.", noColorWidths: true, drive: ui => search(ui, "README"), ready: (s, ui) => s.readiness === "not-connected" && s.approvalMode === "read-only" && ui.editor.plainText === "README" },
   { id: "auto-mode", title: "Auto mode", description: "An idle conversation shows the default Auto mode and its change-mode hint.", noColorWidths: true, drive: async () => {}, ready: s => s.approvalMode === "auto" && s.readiness === "ready" },
   { id: "read-only-mode", title: "Read-only mode", description: "An idle conversation shows the read-only approval chip and mode hint.", noColor: true, drive: async ui => { ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true }); }, ready: s => s.approvalMode === "read-only" },
   { id: "ask-mode", title: "Ask mode", description: "An idle conversation shows the ask approval chip and mode hint.", noColor: true, drive: async ui => { ui.mockInput.pressTab({ shift: true }); }, ready: s => s.approvalMode === "ask" },
@@ -87,9 +88,9 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
-  if (["first-run", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
+  if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
-  const shortWidths = screen.id.startsWith("read-only-search-") || screen.id === "running-search" ? [29, 30, 40, 50]
+  const shortWidths = screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
     : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command"].includes(screen.id) ? [40, 50] : [];
   for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));
   return variants;

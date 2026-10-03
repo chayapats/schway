@@ -26,6 +26,7 @@ import { TuiController, type TuiControllerOptions } from "../src/tui/controller.
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
@@ -147,6 +148,50 @@ test("preferences explain every approval mode without applying or saving a mode"
 });
 
 const shortLayouts = [[24, 8], [29, 8], [30, 8], [40, 8], [49, 8], [50, 8], [80, 13], [120, 8]] as const;
+
+for (const [mode, label] of [["auto", "Auto"], ["ask", "Ask"], ["read-only", "Read-only"]] as const) {
+  test(`disconnected ${mode} footer keeps the active sign-in, chooser or search action`, async () => {
+    const configEditor = new ConfigEditor({ cli: { approval: { mode } } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
+    const ui = await setup(120, true, { configEditor, provider: "openai", model: undefined, modelId: "",
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) } }, { env: { SCHWAY_MOTION: "off", NO_COLOR: "1" } });
+    const draft = "ข้อความร่าง\nคงไว้";
+    await ui.mockInput.pasteBracketedText(draft);
+    ui.editor.cursorOffset = 4;
+    const assertAction = async (action: string) => {
+      for (const [width, height] of [[120, 28], [80, 28], [50, 28], [40, 28], [30, 28], ...shortLayouts] as const) {
+        ui.resize(width, height); await ui.settle();
+        const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+        const expected = mode === "read-only" && width === 24 && action === "Alt+L sign in" ? "Alt+L" : action;
+        expect(footer.plainText).toContain(label);
+        expect(footer.plainText).toContain(expected);
+        expect(ui.captureCharFrame()).toContain(expected);
+        expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width);
+        expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+        expect(ui.controller.snapshot().approvalMode).toBe(mode);
+        if (action !== "Alt+L sign in") {
+          expect(footer.plainText).not.toContain("Alt+L");
+          expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+        }
+      }
+      ui.resize(120, 28); await ui.settle();
+    };
+    await assertAction("Alt+L sign in");
+    ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+    expect(ui.controller.snapshot().loginChooser).toBeDefined();
+    await assertAction("Esc back");
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.controller.snapshot().loginChooser).toBeUndefined();
+    expect(ui.editor.plainText).toBe(draft);
+    expect(ui.editor.cursorOffset).toBe(4);
+    ui.controller.notice("Needle in previous output");
+    ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+    await ui.mockInput.typeText("Needle"); await ui.settle();
+    await assertAction("Esc restore");
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.editor.plainText).toBe(draft);
+    expect(ui.editor.cursorOffset).toBe(4);
+  }, 15_000);
+}
 
 test("short footer retains each mode and idle, stop, panel or sign-in actions without color", async () => {
   for (const [mode, label] of [["auto", "Auto"], ["ask", "Ask"], ["read-only", "Read-only"]] as const) {

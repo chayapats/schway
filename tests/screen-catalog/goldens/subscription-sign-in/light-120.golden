@@ -34,7 +34,7 @@ cursor 1 1 hidden
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Approval pending · Esc cancels
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Working
+ ◆ Auto  ⠋ Working  Esc back
   Enter confirm · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -95,7 +95,10 @@ cursor 1 1 hidden
 28 1-7 #1d232c #ecedea b
 28 7-8 #545e6c #ecedea -
 28 8-19 #ffffff #0a5894 b
-28 19-120 #ffffff #f7f7f4 -
+28 19-20 #545e6c #ecedea -
+28 20-23 #1d232c #c9cdd2 b
+28 23-28 #545e6c #ecedea -
+28 28-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-7 #1d232c #caced3 b
 29 7-18 #545e6c #f7f7f4 -

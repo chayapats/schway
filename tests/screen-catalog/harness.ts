@@ -96,7 +96,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
     responses = [{ toolCalls: names.map(name => ({ id: `call_fixture_parallel_${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
   }
-  const fresh = ["first-run", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
+  const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker";
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();

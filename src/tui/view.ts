@@ -449,8 +449,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const pillChunks = [...label].map((char, index) => bold(bg(pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill)(fg(colors.fg)(char))));
     const approvalPillChunks = [...modeChip, ...pillChunks];
     if (footerParts.notConnected) {
-      if (chunkWidth(approvalPillChunks) + 2 > columns) compactFooter("Alt+L sign in");
-      else footer.content = new StyledText([fg(theme.muted)(" "), ...approvalPillChunks]);
+      const action = keyHintChunks(footerParts.nextAction, hintColors(theme.surface));
+      if (chunkWidth(approvalPillChunks) + chunkWidth(action) + 3 > columns) compactFooter(footerParts.nextAction);
+      else footer.content = new StyledText([fg(theme.muted)(" "), ...approvalPillChunks, fg(theme.muted)(" "), ...action]);
       return;
     }
     const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
