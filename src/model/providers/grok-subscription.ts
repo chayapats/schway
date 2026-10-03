@@ -269,11 +269,13 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
     aborted(signal);
     const pendingWrites = state.writes;
     await raceAbort(pendingWrites, signal);
+    aborted(signal);
     if (pendingWrites !== state.writes) return getToken();
     const generation = state.generation;
     // Memoized route selection is reusable only before an in-process mutation or renewal.
     const currentStore = input.lifecycleStore && (generation !== 0 || state.refresh) ? owner : input.store;
     const tokens = await raceAbort(loadSubscriptionTokens(currentStore, input.onCredential), signal);
+    aborted(signal);
     if (generation !== state.generation) return getToken();
     if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
     let refresh = state.refresh;
@@ -313,6 +315,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       state.refresh = refresh;
     }
     const renewed = await raceAbort(refresh.promise, signal);
+    aborted(signal);
     input.onCredential?.(JSON.stringify(renewed));
     return renewed.accessToken;
   };
@@ -325,11 +328,13 @@ export function createSubscriptionTokenRefresher(input: { store: CredentialStore
   return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string) => resolveSubscriptionToken(input, signal, rejectedToken) };
 }
 async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  aborted(signal); if (!signal) return promise;
+  if (!signal) return promise;
   return new Promise<T>((resolve, reject) => {
     const stop = () => { signal.removeEventListener("abort", stop); reject(new DOMException("Aborted", "AbortError")); };
     signal.addEventListener("abort", stop, { once: true });
+    // The operation already exists: always observe rejection, even if it aborted synchronously.
     promise.then(value => { signal.removeEventListener("abort", stop); resolve(value); }, error => { signal.removeEventListener("abort", stop); reject(error); });
+    if (signal.aborted) stop();
   });
 }
 /** Discover under the caller's total deadline while sharing selected-account renewal with execution. */

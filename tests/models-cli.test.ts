@@ -630,3 +630,38 @@ test("Grok shared renewal cannot begin saving after every caller cancels at the 
     expect(renewals).toBe(1); expect(fixture.writes).toEqual([]);
   } finally { clearTimeout(watchdog); first.abort(); second.abort(); release.resolve(); await Promise.allSettled([listing, execution]); }
 });
+
+test("public Grok discovery never starts HTTP or leaves unhandled reads across credential-resolution microtask handoffs", async () => {
+  const { GROK_TOKEN_URL } = await import("../src/model/providers/grok-subscription.ts");
+  const unhandled: unknown[] = [], observe = (error: unknown) => { unhandled.push(error); };
+  process.on("unhandledRejection", observe);
+  try {
+    // Sweep the surrounding scheduler interleavings as well as the explicit read barriers in provider tests.
+    for (let handoff = 1; handoff <= 32; handoff++) {
+      const abort = new AbortController();
+      let reads = 0, postAbortCalls = 0, postAbortWrites = 0, expired = false;
+      const raw = JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", obtainedAt: 0, expiresAt: 0 });
+      const fixture: CredentialStore = {
+        async get() {
+          if (!reads++) {
+            let remaining = handoff;
+            const next = () => { if (--remaining) queueMicrotask(next); else abort.abort(); };
+            queueMicrotask(next);
+          }
+          return raw;
+        },
+        async set() { if (abort.signal.aborted) postAbortWrites++; }, async delete() { throw new Error("Unexpected deletion"); },
+      };
+      const watchdog = setTimeout(() => { expired = true; abort.abort(); }, 1500);
+      try {
+        const result = await discoverModels({ provider: "xai", xaiAuth: "grok", env: {}, signal: abort.signal }, { store: fixture, fetch: async url => {
+          if (abort.signal.aborted) postAbortCalls++;
+          return String(url) === GROK_TOKEN_URL ? Response.json({ access_token: "renewed", expires_in: 3600 }) : Response.json({ data: [{ id: "grok-safe" }] });
+        } });
+        expect(result.catalog.status).toBe("error"); expect(result.error).toContain("cancelled");
+        expect(expired).toBe(false); expect(postAbortCalls).toBe(0); expect(postAbortWrites).toBe(0);
+      } finally { clearTimeout(watchdog); abort.abort(); await new Promise<void>(resolve => setImmediate(resolve)); }
+    }
+    expect(unhandled).toEqual([]);
+  } finally { process.removeListener("unhandledRejection", observe); }
+});
