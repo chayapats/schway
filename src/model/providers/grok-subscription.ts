@@ -1,6 +1,6 @@
 import { grokSubscriptionIdentity, credentialStoreError, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
-import { fetchProviderModelList, requireXaiModels, type ListedModel } from "../model-list.ts";
+import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -281,6 +281,61 @@ async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
     promise.then(value => { signal.removeEventListener("abort", stop); resolve(value); }, error => { signal.removeEventListener("abort", stop); reject(error); });
   });
 }
+/** Discover under the caller's total deadline without joining a longer-lived execution refresh. */
+export async function fetchDiscoveryCatalog(input: {
+  store: CredentialStore; fetch?: GrokFetch; signal: AbortSignal;
+  /** Original identity owner when reads are memoized for route selection. */
+  lifecycleStore?: CredentialStore;
+}): Promise<ModelListResult> {
+  const state = credentialLifecycle(input.lifecycleStore ?? input.store);
+  const getToken = async (rejectedToken?: string): Promise<string> => {
+    input.signal.throwIfAborted();
+    const pendingWrites = state.writes;
+    await abortableCatalogOperation(pendingWrites, input.signal);
+    if (pendingWrites !== state.writes) return getToken(rejectedToken);
+    const generation = state.generation;
+    // Route-selection reads are reusable only while no in-process credential mutation has occurred.
+    const currentStore = input.lifecycleStore && (state.generation !== 0 || state.refresh) ? input.lifecycleStore : input.store;
+    const tokens = await abortableCatalogOperation(loadSubscriptionTokens(currentStore), input.signal);
+    if (generation !== state.generation) return getToken(rejectedToken);
+    if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
+    if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens)) return tokens.accessToken;
+    if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again with /login grok.");
+    const renewed = await abortableCatalogOperation(refreshSubscriptionTokens({
+      refreshToken: tokens.refreshToken, signal: input.signal,
+      fetch: boundedCatalogFetch({ ...input, label: "Grok subscription" }),
+    }), input.signal);
+    const merged = { ...renewed, refreshToken: renewed.refreshToken ?? tokens.refreshToken };
+    input.signal.throwIfAborted();
+    await abortableCatalogOperation(serializeCredentialWrite(state, async () => {
+      input.signal.throwIfAborted();
+      if (generation !== state.generation) throw new Error(grokRevokedSessionError());
+      await writeTokens(input.store, merged);
+      if (generation !== state.generation) throw new Error(grokRevokedSessionError());
+      state.generation++;
+    }), input.signal);
+    return merged.accessToken;
+  };
+  let accessToken = await getToken();
+  let authError: unknown;
+  const authorizedFetch: GrokFetch = async (url, init) => {
+    const send = () => (input.fetch ?? fetch)(url, { ...init, signal: input.signal, redirect: "error", headers: { ...Object.fromEntries(new Headers(init?.headers)), Authorization: `Bearer ${accessToken}` } });
+    let response = await send();
+    if (response.status === 401) {
+      void response.body?.cancel().catch(() => {});
+      try { accessToken = await getToken(accessToken); }
+      catch (error) { authError = error; throw error; }
+      input.signal.throwIfAborted();
+      response = await send();
+    }
+    return response;
+  };
+  try {
+    const result = await fetchProviderModelListResult({ url: "https://api.x.ai/v1/models", signal: input.signal, label: "Grok subscription", fetch: authorizedFetch, parseOptions: { chatOnly: "xai" } });
+    return { ...result, models: requireXaiModels(result.models) };
+  } catch (error) { input.signal.throwIfAborted(); throw authError ?? error; }
+}
+
 /** List chat-capable Grok account models with one auth refresh, never an API-key fallback. */
 export async function fetchSubscriptionModels(input: { store: CredentialStore; fetch?: GrokFetch; signal?: AbortSignal; refresher?: ReturnType<typeof createSubscriptionTokenRefresher> }): Promise<ListedModel[]> {
   const refresher = input.refresher ?? createSubscriptionTokenRefresher(input);
