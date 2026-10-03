@@ -4,6 +4,40 @@ import { join } from "node:path";
 import { FileChangedError, observeFile, observeFileTarget, writeFileAtomically } from "../src/tools/fs.ts";
 import { withTempDir } from "./helpers.ts";
 
+for (const outcome of ["changed", "cancelled", "published"] as const) test(`completed restore bytes stay private before publication (${outcome})`, async () => {
+  await withTempDir(async root => {
+    const path = join(root, "target");
+    await writeFile(path, "current private bytes", { mode: 0o600 });
+    const observed = await observeFile(path);
+    const abort = new AbortController();
+    let preparedInode: number | undefined;
+    const pending = writeFileAtomically(path, "saved public bytes", abort.signal, async () => {
+      const entries = (await readdir(root)).filter(name => name !== "target");
+      expect(entries).toHaveLength(1);
+      const staging = join(root, entries[0]!);
+      expect((await lstat(staging)).isDirectory()).toBe(true);
+      expect((await stat(staging)).mode & 0o777).toBe(0o700);
+      const files = await readdir(staging);
+      expect(files).toHaveLength(1);
+      const temporary = join(staging, files[0]!);
+      expect(await readFile(temporary, "utf8")).toBe("saved public bytes");
+      const info = await stat(temporary);
+      preparedInode = info.ino;
+      expect(info.mode & 0o777).toBe(0o644);
+      expect(info.dev).toBe((await stat(path)).dev);
+      expect(await readFile(path, "utf8")).toBe("current private bytes");
+      if (outcome === "changed") await chmod(path, 0o640);
+      if (outcome === "cancelled") abort.abort();
+    }, { observed, mode: 0o644 });
+    if (outcome === "changed") await expect(pending).rejects.toBeInstanceOf(FileChangedError);
+    else if (outcome === "cancelled") await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    else { await pending; expect((await stat(path)).ino).toBe(preparedInode!); }
+    expect(await readFile(path, "utf8")).toBe(outcome === "published" ? "saved public bytes" : "current private bytes");
+    expect((await stat(path)).mode & 0o777).toBe(outcome === "changed" ? 0o640 : outcome === "cancelled" ? 0o600 : 0o644);
+    expect(await readdir(root)).toEqual(["target"]);
+  });
+});
+
 test("a partial temporary write is exclusive and private, and cancellation removes it without publishing", async () => {
   await withTempDir(async root => {
     const path = join(root, "private");
@@ -14,7 +48,11 @@ test("a partial temporary write is exclusive and private, and cancellation remov
       yield "private partial content";
       const names = (await readdir(root)).filter(name => name.endsWith(".tmp"));
       expect(names).toHaveLength(1);
-      const temp = join(root, names[0]!);
+      const staging = join(root, names[0]!);
+      expect((await stat(staging)).mode & 0o777).toBe(0o700);
+      const files = await readdir(staging);
+      expect(files).toHaveLength(1);
+      const temp = join(staging, files[0]!);
       expect(await readFile(temp, "utf8")).toBe("private partial content");
       expect((await stat(temp)).mode & 0o777).toBe(0o600);
       await expect(open(temp, "wx", 0o666)).rejects.toMatchObject({ code: "EEXIST" });
@@ -82,22 +120,102 @@ test("failed temporary writes and cancellation at the final check retain the ori
   });
 });
 
-test("exclusive creation refuses an occupied temporary name and never deletes the unrelated file", async () => {
+for (const kind of ["file", "directory", "symlink"] as const) test(`exclusive staging refuses an occupied ${kind} and never deletes unrelated entries`, async () => {
   await withTempDir(async root => {
     const script = `
       const { writeFileAtomically } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});
-      const { writeFile, readFile } = await import("node:fs/promises");
+      const { mkdir, writeFile, readFile, symlink, stat } = await import("node:fs/promises");
       const target = ${JSON.stringify(join(root, "target"))};
       const id = "11111111-1111-4111-8111-111111111111";
+      const kind = ${JSON.stringify(kind)}, staging = target + "." + id + ".tmp";
       crypto.randomUUID = () => id;
-      await writeFile(target, "original"); await writeFile(target + "." + id + ".tmp", "unrelated");
+      await writeFile(target, "original");
+      if (kind === "directory") { await mkdir(staging, { mode: 0o755 }); await writeFile(staging + "/keep", "unrelated"); }
+      else if (kind === "symlink") { await writeFile(target + ".other", "unrelated"); await symlink(target + ".other", staging); }
+      else await writeFile(staging, "unrelated");
+      const mode = (await stat(staging)).mode;
       try { await writeFileAtomically(target, "agent"); throw new Error("Expected EEXIST"); }
       catch (error) { if (error.code !== "EEXIST") throw error; }
-      console.log(JSON.stringify([await readFile(target, "utf8"), await readFile(target + "." + id + ".tmp", "utf8")]));
+      console.log(JSON.stringify([await readFile(target, "utf8"), await readFile(kind === "directory" ? staging + "/keep" : staging, "utf8"), (await stat(staging)).mode === mode]));
     `;
     const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
     const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-    expect(err).toBe(""); expect(code).toBe(0); expect(JSON.parse(out)).toEqual(["original", "unrelated"]);
+    expect(err).toBe(""); expect(code).toBe(0); expect(JSON.parse(out)).toEqual(["original", "unrelated", true]);
+  });
+});
+
+for (const point of ["before-open", "after-rename", "cleanup-failure"] as const) test(`staging cleanup retains unrelated entries and private abandoned bytes at ${point}`, async () => {
+  await withTempDir(async root => {
+    const script = `
+      import { mock } from "bun:test";
+      import { dirname } from "node:path";
+      const fs = await import("node:fs/promises"), realOpen = fs.open, realRename = fs.rename, realUnlink = fs.unlink;
+      const target = ${JSON.stringify(join(root, "target"))}, point = ${JSON.stringify(point)};
+      await fs.writeFile(target, "original", { mode: 0o600 });
+      let temporary;
+      mock.module("node:fs/promises", () => ({ ...fs,
+        open: async (path, ...args) => {
+          temporary = path;
+          if (point === "before-open") await fs.writeFile(path, "unrelated");
+          return realOpen(path, ...args);
+        },
+        rename: async (source, destination) => {
+          await realRename(source, destination);
+          if (point === "after-rename") await fs.writeFile(source, "unrelated");
+        },
+        unlink: async path => {
+          if (point === "cleanup-failure" && path === temporary) throw Object.assign(new Error("Cleanup denied"), { code: "EACCES" });
+          return realUnlink(path);
+        },
+      }));
+      const { writeFileAtomically } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});
+      let failure;
+      try { await writeFileAtomically(target, "prepared", undefined, async () => {
+        if (point === "cleanup-failure") throw new Error("Validation rejected");
+      }, { mode: 0o644 }); }
+      catch (error) { failure = error.code ?? error.message; }
+      console.log(JSON.stringify({ failure, target: await fs.readFile(target, "utf8"),
+        retained: await fs.readFile(temporary, "utf8"), directoryMode: (await fs.stat(dirname(temporary))).mode & 0o777,
+        fileMode: (await fs.stat(temporary)).mode & 0o777 }));
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    try {
+      const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      expect(err).toBe(""); expect(code).toBe(0);
+      expect(JSON.parse(out)).toMatchObject({
+        ...(point === "after-rename" ? {} : { failure: point === "before-open" ? "EEXIST" : "Validation rejected" }),
+        target: point === "after-rename" ? "prepared" : "original",
+        retained: point === "cleanup-failure" ? "prepared" : "unrelated", directoryMode: 0o700,
+        ...(point === "cleanup-failure" ? { fileMode: 0o644 } : {}),
+      });
+    } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
+  });
+});
+
+test("process death after final chmod leaves saved bytes inside private staging without publishing", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "target"); await writeFile(path, "original", { mode: 0o600 });
+    const script = `
+      const { writeFileAtomically } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});
+      await writeFileAtomically(${JSON.stringify(path)}, "saved bytes", undefined, async () => {
+        console.log("PREPARED"); await Bun.sleep(60_000);
+      }, { mode: 0o644 });
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    const reader = child.stdout.getReader(), error = new Response(child.stderr).text();
+    try {
+      const ready = await reader.read();
+      expect(new TextDecoder().decode(ready.value)).toBe("PREPARED\n");
+      child.kill("SIGKILL"); await child.exited; expect(await error).toBe("");
+      const entries = (await readdir(root)).filter(name => name !== "target"); expect(entries).toHaveLength(1);
+      const staging = join(root, entries[0]!); expect((await stat(staging)).mode & 0o777).toBe(0o700);
+      const files = await readdir(staging); expect(files).toHaveLength(1);
+      const temporary = join(staging, files[0]!);
+      expect((await stat(temporary)).mode & 0o777).toBe(0o644); expect(await readFile(temporary, "utf8")).toBe("saved bytes");
+      expect(await readFile(path, "utf8")).toBe("original"); expect((await stat(path)).mode & 0o777).toBe(0o600);
+    } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; reader.releaseLock(); }
   });
 });
 
@@ -123,6 +241,42 @@ test("restrictive umask preserves existing modes exactly and keeps fresh-file de
   });
 });
 
+test.skipIf(process.platform === "win32")("private staging retains inherited directory setgid without publishing privileged file bits", async () => {
+  await withTempDir(async root => {
+    await chmod(root, 0o2700);
+    const path = join(root, "fresh");
+    await writeFileAtomically(path, "fresh", undefined, async () => {
+      const entries = await readdir(root); expect(entries).toHaveLength(1);
+      const staging = join(root, entries[0]!);
+      expect((await stat(staging)).mode & 0o2777).toBe(0o2700);
+      const files = await readdir(staging); expect(files).toHaveLength(1);
+      expect((await stat(join(staging, files[0]!))).gid).toBe((await stat(root)).gid);
+    }, { mode: 0o640 });
+    expect((await stat(path)).mode & 0o7777).toBe(0o640);
+    expect(await readdir(root)).toEqual(["fresh"]);
+  });
+});
+
+test("owner-stripping umask cannot block staging and still governs fresh-file defaults", async () => {
+  await withTempDir(async root => {
+    const script = `
+      import { stat, writeFile } from "node:fs/promises";
+      const { writeFileAtomically } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});
+      const path = ${JSON.stringify(join(root, "target"))};
+      await writeFile(path, "before", { mode: 0o640 });
+      process.umask(0o777);
+      await writeFileAtomically(path, "after"); await writeFileAtomically(path + ".fresh", "fresh");
+      console.log(JSON.stringify([(await stat(path)).mode & 0o777, (await stat(path + ".fresh")).mode & 0o777]));
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    try {
+      const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      expect(err).toBe(""); expect(code).toBe(0); expect(JSON.parse(out)).toEqual([0o640, 0]);
+    } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
+  });
+});
+
 test("unsupported permission platforms omit undo modes and skip POSIX chmod without claiming mode fidelity", async () => {
   await withTempDir(async root => {
     const script = `
@@ -131,7 +285,7 @@ test("unsupported permission platforms omit undo modes and skip POSIX chmod with
       const root = ${JSON.stringify(root)}, path = root + "/file";
       await fs.writeFile(path, "before"); await fs.chmod(path, 0o755);
       Object.defineProperty(process, "platform", { value: "win32" });
-      mock.module("node:fs/promises", () => ({ ...fs, open: async (...args) => {
+      mock.module("node:fs/promises", () => ({ ...fs, chmod: async () => { throw new Error("Unexpected directory chmod"); }, open: async (...args) => {
         const handle = await realOpen(...args); handle.chmod = async () => { throw new Error("Unexpected POSIX chmod"); }; return handle;
       } }));
       const { observeFile, writeFileAtomically } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/fs.ts"))});

@@ -416,7 +416,7 @@ async function undoFilesystemProbe(root: string, scenario: string) {
   const source = join(import.meta.dir, "../src");
   const script = `
     import { mock } from "bun:test";
-    import { join } from "node:path";
+    import { dirname, join } from "node:path";
     const fs = await import("node:fs/promises");
     const realWrite = fs.writeFile, realUnlink = fs.unlink, realRead = fs.readFile, realRename = fs.rename, realOpen = fs.open;
     const handles = new WeakMap();
@@ -424,6 +424,7 @@ async function undoFilesystemProbe(root: string, scenario: string) {
     if (scenario === "private-mode") process.umask(0o000);
     const path = join(root, "clamp.ts"), created = join(root, "new.ts");
     let armed = false, preparations = 0, prepared = false, tempMode, creationMode, beforeRenameMode;
+    let preparedPath, stagingMode, checkedMode, stagedBytes;
     mock.module("node:fs/promises", () => ({ ...fs,
       open: async (destination, flags, mode) => {
         const handle = await realOpen(destination, flags, mode);
@@ -441,6 +442,7 @@ async function undoFilesystemProbe(root: string, scenario: string) {
           tempMode = (await fs.stat(destination)).mode & 0o777;
           return;
         }
+        if (scenario === "staged-restore-change") { prepared = true; preparedPath = destination; return; }
         if (scenario === "check-failure") { prepared = true; return; }
         if (scenario.startsWith("prepare")) {
           if (scenario.includes("chmod")) await fs.chmod(path, 0o600);
@@ -458,6 +460,13 @@ async function undoFilesystemProbe(root: string, scenario: string) {
       readFile: async (...args) => {
         if (prepared && args[0] === path) {
           prepared = false;
+          if (scenario === "staged-restore-change") {
+            stagingMode = (await fs.stat(dirname(preparedPath))).mode & 0o777;
+            checkedMode = (await fs.stat(preparedPath)).mode & 0o777;
+            stagedBytes = await realRead(preparedPath, "utf8");
+            await fs.chmod(path, 0o640);
+            return realRead(...args);
+          }
           throw Object.assign(new Error("EIO internal file read: " + path), { code: "EIO" });
         }
         return realRead(...args);
@@ -479,7 +488,10 @@ async function undoFilesystemProbe(root: string, scenario: string) {
     const store = openUndoStore({ home: root });
     const turn = { sessionId: session.rootId, turnId: "user", turnNumber: 1 };
     await realWrite(path, "before", scenario === "private-mode" ? { mode: 0o600 } : undefined);
-    await store.capture(turn, path); await realWrite(path, "after"); await store.settle(turn, path, true);
+    if (scenario === "staged-restore-change") await fs.chmod(path, 0o644);
+    await store.capture(turn, path); await realWrite(path, "after");
+    if (scenario === "staged-restore-change") await fs.chmod(path, 0o600);
+    await store.settle(turn, path, true);
     await store.capture(turn, created); await realWrite(created, "created"); await store.settle(turn, created, true);
     if (scenario === "prepare-legacy-chmod") {
       const manifestPath = join(root, ".schway/undo", session.rootId, "turns/user.json");
@@ -506,7 +518,7 @@ async function undoFilesystemProbe(root: string, scenario: string) {
         defaults = { write, edit: (await fs.stat(join(root, "ordinary.txt"))).mode & 0o777,
           content: await fs.readFile(join(root, "ordinary.txt"), "utf8") };
       }
-      console.log(JSON.stringify({ preparations, tempMode, creationMode, beforeRenameMode, defaults,
+      console.log(JSON.stringify({ preparations, tempMode, creationMode, beforeRenameMode, defaults, stagingMode, checkedMode, stagedBytes,
         restoredMode: (await fs.stat(path)).mode & 0o777, bytes: await fs.readFile(path, "utf8"),
         createdBytes: await fs.readFile(created, "utf8").catch(() => null),
         rows: snapshot.undoPreview?.files.map(file => file.status), result: snapshot.undoPreview?.result,
@@ -583,6 +595,16 @@ test("I/O failure during the final destination check is failed, rather than chan
     expect(result.preparations).toBe(1); expect(result.bytes).toBe("after"); expect(result.temps).toEqual([]);
     expect(result.rows).toEqual(["could not restore · Could not read or write file", "Deleted"]);
     expect(result.record).toMatchObject({ reverted: [{ path: "new.ts", action: "deleted" }], skipped: [{ path: "clamp.ts", reason: "failed" }] });
+  });
+});
+
+test("undo keeps a restored public mode behind private staging when final validation rejects the restore", async () => {
+  await withTempDir(async root => {
+    const result = await undoFilesystemProbe(root, "staged-restore-change");
+    expect(result.preparations).toBe(1); expect(result.stagingMode).toBe(0o700);
+    expect(result.creationMode).toBe(0o600); expect(result.checkedMode).toBe(0o644); expect(result.stagedBytes).toBe("before");
+    expect(result.bytes).toBe("after"); expect(result.restoredMode).toBe(0o640); expect(result.temps).toEqual([]);
+    expect(result.record).toMatchObject({ reverted: [{ path: "new.ts", action: "deleted" }], skipped: [{ path: "clamp.ts", reason: "changed" }] });
   });
 });
 

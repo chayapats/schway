@@ -16,10 +16,17 @@ Every core tool returns bounded model-facing output; oversized results are trunc
 `edit` and replacement `write` preserve an existing regular file's ordinary POSIX
 permission bits (`mode & 0777`), including executable and private modes, even under
 a restrictive umask. New files keep the usual `0666 & ~umask` creation defaults.
-Replacement files are created exclusively with `0600` or stricter permissions;
-the final mode is applied only after the content is complete and before rename.
+Replacement files are created exclusively with `0600` or stricter permissions
+inside an owner-only staging directory beside the destination. The final mode is
+applied only after the content is complete and before rename. The directory keeps
+completed bytes inaccessible to other local users until publication, including
+when final validation rejects a replacement with a readable final mode.
+Its ordinary permissions are `0700`; inherited directory setgid is retained so
+new files keep the parent directory's group inheritance.
 Cancellation or failure before publication leaves the destination intact and
-removes the temporary file.
+attempts to remove the owned temporary file and empty staging directory. Cleanup
+does not recursively delete unexpected entries. If cleanup fails or the process
+is killed, remaining staged bytes stay behind the private directory.
 
 The destination's identity, mutation metadata and permissions are rechecked just
 before publication; reads used by edit are also checked against their original

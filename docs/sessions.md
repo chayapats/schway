@@ -209,8 +209,11 @@ manifest. Undo reads this store on restart and leaves manifests unchanged.
 New version-1 manifests also store optional `beforeMode` and `afterMode` integer
 permissions (`0` through `0777`) beside each content hash. Repeated changes keep
 the first pre-image and its mode, and the latest settled post-image and mode.
-Undo restores original bytes and supported ordinary permissions together. A
-later chmod is a conflict even when the bytes still match, including for a newly
+Undo restores original bytes and supported ordinary permissions together. Complete
+restore files stay inside an owner-only staging directory on the destination's
+filesystem until final validation and atomic rename, even when the recorded mode
+allows other users to read the published file. A later chmod is a conflict even
+when the bytes still match, including for a newly
 created file that undo would delete. Preview observations are checked again just
 before restore or deletion, including the file's identity and permissions.
 

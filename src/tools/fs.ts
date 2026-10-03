@@ -1,5 +1,6 @@
 import type { Stats } from "node:fs";
-import { lstat, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ToolExecutionResult } from "./types.ts";
 
 /** Create an Error named AbortError for tool cancellation handling. */
@@ -113,7 +114,7 @@ export async function assertFileUnchanged(path: string, expected: FileTarget | n
   }
 }
 
-/** Publish a complete private temporary write with exact supported final permissions after revalidating the observed destination. */
+/** Stage bytes behind owner-only traversal and atomically publish supported permissions after revalidating the destination. */
 export async function writeFileAtomically(
   path: string,
   content: string | Uint8Array | AsyncIterable<string | Uint8Array>,
@@ -125,11 +126,16 @@ export async function writeFileAtomically(
   const observed = options.observed === undefined ? await observeFileTarget(path) : options.observed;
   const finalMode = options.mode ?? observed?.mode ?? (0o666 & ~process.umask());
   if (!Number.isInteger(finalMode) || finalMode < 0 || finalMode > 0o777) throw new Error("Invalid file permissions");
-  const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
-  let owned = false;
+  const staging = `${path}.${crypto.randomUUID()}.tmp`;
+  const tempPath = join(staging, "content.tmp");
+  let ownedDirectory = false, ownedFile = false;
   try {
+    await mkdir(staging, { mode: 0o700 });
+    ownedDirectory = true;
+    // Restore owner access stripped by umask while retaining the parent's inherited group behavior.
+    if (process.platform !== "win32") await chmod(staging, 0o700 | ((await stat(staging)).mode & 0o2000));
     const handle = await open(tempPath, "wx", 0o600);
-    owned = true;
+    ownedFile = true;
     try {
       await writeFile(handle, content, { signal });
       if (signal?.aborted) throw abortError();
@@ -139,9 +145,11 @@ export async function writeFileAtomically(
     await assertFileUnchanged(path, observed, signal);
     if (signal?.aborted) throw abortError();
     await rename(tempPath, path);
-  } catch (error) {
-    if (owned) await unlink(tempPath).catch(() => undefined);
-    throw error;
+    ownedFile = false;
+  } finally {
+    if (ownedFile) await unlink(tempPath).catch(() => undefined);
+    // Never recursively remove unexpected entries, or unlink a file recreated after publication.
+    if (ownedDirectory) await rmdir(staging).catch(() => undefined);
   }
 }
 
