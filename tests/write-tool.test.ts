@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTool } from "../src/tools/read.ts";
 import type { ToolContext } from "../src/tools/types.ts";
@@ -41,6 +41,17 @@ test("write fully replaces an existing file", async () => {
     const read = await readTool.execute({ path: "note.txt" }, ctx);
     expect(read.content).toContain("new-content");
     expect(read.content.includes("old")).toBe(false);
+  });
+});
+
+test("write preserves a write-only destination without adding a read-access requirement", async () => {
+  await withTempDir(async dir => {
+    const path = join(dir, "private"); await writeFile(path, "before"); await chmod(path, 0o200);
+    try {
+      const result = await writeTool.execute({ path: "private", content: "after" }, contextFor(dir));
+      expect(result.isError).toBeUndefined(); expect((await stat(path)).mode & 0o777).toBe(0o200);
+      await chmod(path, 0o600); expect(await readFile(path, "utf8")).toBe("after");
+    } finally { await chmod(path, 0o600); }
   });
 });
 

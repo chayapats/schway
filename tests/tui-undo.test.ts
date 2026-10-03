@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFile, access, writeFile, chmod, rm, mkdir, readdir } from "node:fs/promises";
+import { readFile, access, writeFile, chmod, rm, mkdir, readdir, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
@@ -72,6 +72,96 @@ test("rendered undo previews and restores edited files, deletes created files, a
       expect(ui.captureCharFrame()).toContain("Undid turn 1 · 2 files");
       await ui.send("Continue"); expect(sawNote).toBe(true);
       await ui.send("/undo"); expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo");
+    } finally { await ui.dispose(); }
+  });
+});
+
+for (const tool of ["edit", "write"] as const) for (const mode of [0o755, 0o600, 0o640]) {
+  test(`${tool} and resumed undo preserve ${mode.toString(8)} permissions`, async () => {
+    await withTempDir(async root => {
+      const path = join(root, "run.sh");
+      await writeFile(path, "before"); await chmod(path, mode);
+      const ui = await setup(root, undefined, [], [{ toolCalls: [{ id: "change", name: tool, arguments: tool === "edit"
+        ? { path: "run.sh", edits: [{ oldText: "before", newText: "after" }] } : { path: "run.sh", content: "after" } }] }, { text: "Done." }]);
+      let resumed: Awaited<ReturnType<typeof setup>> | undefined;
+      try {
+        await ui.send("Change the file");
+        expect(await readFile(path, "utf8")).toBe("after"); expect((await stat(path)).mode & 0o777).toBe(mode);
+        await ui.dispose();
+        resumed = await setup(root, await loadJsonlSession({ directory: ui.directory, id: ui.session.rootId }));
+        await resumed.send("/undo"); await resumed.controller.applyUndo();
+        expect(await readFile(path, "utf8")).toBe("before"); expect((await stat(path)).mode & 0o777).toBe(mode);
+      } finally { if (resumed) await resumed.dispose(); else await ui.dispose(); }
+    });
+  });
+}
+
+test("mode-only changes before preview protect existing and created files with new metadata", async () => {
+  await withTempDir(async root => {
+    await writeFile(join(root, "clamp.ts"), original); await chmod(join(root, "clamp.ts"), 0o755);
+    const ui = await setup(root);
+    try {
+      await ui.send("Fix clamp");
+      await chmod(join(root, "clamp.ts"), 0o600); await chmod(join(root, "src/new.ts"), 0o400);
+      await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo · every file changed since");
+      expect(await readFile(join(root, "clamp.ts"), "utf8")).toBe(modified);
+      expect(await readFile(join(root, "src/new.ts"), "utf8")).toContain("newFile");
+      expect(ui.session.items.some(item => item.type === "turn_undo")).toBe(false);
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("legacy undo preserves a pre-preview chmod with an explicit Details caveat and leaves the manifest untouched", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "clamp.ts"); await writeFile(path, original); await chmod(path, 0o755);
+    const ui = await setup(root);
+    try {
+      await ui.send("Fix clamp");
+      const { openUndoStore } = await import("../src/undo/store.ts");
+      const manifest = (await openUndoStore({ home: ui.home }).list(ui.session.rootId))[0]!;
+      for (const file of manifest.files) { delete file.beforeMode; delete file.afterMode; }
+      const manifestPath = join(ui.home, ".schway/undo", ui.session.rootId, "turns", `${manifest.turnId}.json`);
+      const legacy = JSON.stringify(manifest); await writeFile(manifestPath, legacy);
+      await chmod(path, 0o640);
+      await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview?.files[0]?.action).toBe("restore");
+      expect(ui.controller.inspectNoticeDetails()).toBe(true);
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Original permissions were unavailable");
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Permission changes before this preview cannot be verified");
+      await ui.controller.applyUndo();
+      expect(await readFile(path, "utf8")).toBe(original); expect((await stat(path)).mode & 0o777).toBe(0o640);
+      expect(await readFile(manifestPath, "utf8")).toBe(legacy);
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("permission-only captured turns are eligible and restore their original mode", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "clamp.ts"); await writeFile(path, original); await chmod(path, 0o755);
+    const ui = await setup(root, undefined, [], [{ text: "Done." }]);
+    try {
+      await ui.send("Change permissions fixture");
+      const { openUndoStore } = await import("../src/undo/store.ts"), store = openUndoStore({ home: ui.home });
+      const turn = { sessionId: ui.session.rootId, turnId: ui.session.items.find(item => item.type === "user")!.id, turnNumber: 1 };
+      await store.capture(turn, path); await chmod(path, 0o600); await store.settle(turn, path, true);
+      await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview?.files[0]?.action).toBe("restore");
+      await ui.controller.applyUndo();
+      expect(await readFile(path, "utf8")).toBe(original); expect((await stat(path)).mode & 0o777).toBe(0o755);
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("missing and symlink targets are skipped without touching their replacements", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "clamp.ts"); await writeFile(path, original);
+    const ui = await setup(root);
+    try {
+      await ui.send("Fix clamp");
+      const other = join(root, "other"); await writeFile(other, modified); await chmod(other, 0o600);
+      await rm(path); await symlink(other, path); await rm(join(root, "src/new.ts"));
+      await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      expect(await readFile(other, "utf8")).toBe(modified); expect((await stat(other)).mode & 0o777).toBe(0o600);
     } finally { await ui.dispose(); }
   });
 });
@@ -305,26 +395,35 @@ async function undoFilesystemProbe(root: string, scenario: string) {
     import { mock } from "bun:test";
     import { join } from "node:path";
     const fs = await import("node:fs/promises");
-    const realWrite = fs.writeFile, realUnlink = fs.unlink, realRead = fs.readFile, realRename = fs.rename;
+    const realWrite = fs.writeFile, realUnlink = fs.unlink, realRead = fs.readFile, realRename = fs.rename, realOpen = fs.open;
+    const handles = new WeakMap();
     const root = ${JSON.stringify(root)}, scenario = ${JSON.stringify(scenario)};
     if (scenario === "private-mode") process.umask(0o000);
     const path = join(root, "clamp.ts"), created = join(root, "new.ts");
     let armed = false, preparations = 0, prepared = false, tempMode, creationMode, beforeRenameMode;
     mock.module("node:fs/promises", () => ({ ...fs,
+      open: async (destination, flags, mode) => {
+        const handle = await realOpen(destination, flags, mode);
+        handles.set(handle, destination);
+        if (armed && String(destination).startsWith(path + ".")) creationMode = mode;
+        return handle;
+      },
       writeFile: async (destination, content, options) => {
         await realWrite(destination, content, options);
+        destination = typeof destination === "object" ? handles.get(destination) : destination;
         if (!armed || !String(destination).startsWith(path + ".") || !String(destination).endsWith(".tmp")) return;
         if (scenario === "delete-failure") return;
         armed = false; preparations++;
         if (scenario === "private-mode") {
           tempMode = (await fs.stat(destination)).mode & 0o777;
-          creationMode = options?.mode;
           return;
         }
         if (scenario === "check-failure") { prepared = true; return; }
         if (scenario.startsWith("prepare")) {
-          await realWrite(path, "later save");
+          if (scenario.includes("chmod")) await fs.chmod(path, 0o600);
+          else await realWrite(path, "later save");
           if (scenario === "prepare-and-delete-change") await realWrite(created, "later created save");
+          if (scenario === "prepare-chmod-and-delete") await fs.chmod(created, 0o600);
         } else {
           throw Object.assign(new Error(scenario + " internal temp path: " + destination), { code: scenario });
         }
@@ -359,6 +458,12 @@ async function undoFilesystemProbe(root: string, scenario: string) {
     await realWrite(path, "before", scenario === "private-mode" ? { mode: 0o600 } : undefined);
     await store.capture(turn, path); await realWrite(path, "after"); await store.settle(turn, path, true);
     await store.capture(turn, created); await realWrite(created, "created"); await store.settle(turn, created, true);
+    if (scenario === "prepare-legacy-chmod") {
+      const manifestPath = join(root, ".schway/undo", session.rootId, "turns/user.json");
+      const manifest = JSON.parse(await realRead(manifestPath, "utf8"));
+      for (const file of manifest.files) { delete file.beforeMode; delete file.afterMode; }
+      await realWrite(manifestPath, JSON.stringify(manifest));
+    }
     const workspace = { root, launchCwd: root, extraRoots: [] };
     const controller = new TuiController({ session, sessionId: session.rootId, workspace, home: root,
       provider: "scripted", modelId: "fixture", contextManager: createContextManager(workspace) });
@@ -410,6 +515,22 @@ test("a later save also guards deletion and all apply-time changes write no undo
     expect(result.notice).toBe("Nothing to undo · every file changed since");
   });
 });
+
+for (const scenario of ["prepare-chmod-and-delete", "prepare-legacy-chmod"]) {
+  test(`${scenario} rejects mode drift after preview and removes prepared replacements`, async () => {
+    await withTempDir(async root => {
+      const result = await undoFilesystemProbe(root, scenario);
+      expect(result.preparations).toBe(1); expect(result.bytes).toBe("after");
+      expect(result.restoredMode).toBe(0o600); expect(result.temps).toEqual([]);
+      if (scenario === "prepare-chmod-and-delete") {
+        expect(result.createdBytes).toBe("created"); expect(result.record).toBeUndefined();
+      } else {
+        expect(result.record.skipped).toEqual([{ path: "clamp.ts", reason: "changed" }]);
+        expect(result.details).toContain("Permission changes before this preview cannot be verified");
+      }
+    });
+  });
+}
 
 for (const [code, reason] of [["ENOSPC", "No space left on device"], ["UNKNOWN_STORAGE", "File operation failed"]]) {
   test(`undo ${code} failures use safe reasons while retaining diagnostics and cleaning prepared files`, async () => {

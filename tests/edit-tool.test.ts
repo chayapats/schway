@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editTool } from "../src/tools/edit.ts";
 import { readTool } from "../src/tools/read.ts";
@@ -16,6 +16,17 @@ function contextFor(dir: string, launchCwd = dir): ToolContext {
 test("edit declares exclusive execution", () => {
   expect(editTool.execution).toBe("exclusive");
   expect(editTool.name).toBe("edit");
+});
+
+test.each([0o755, 0o600, 0o640])("edit preserves ordinary permission bits %o", async mode => {
+  await withTempDir(async dir => {
+    const path = join(dir, "run.sh");
+    await writeFile(path, "before"); await chmod(path, mode);
+    const result = await editTool.execute({ path: "run.sh", edits: [{ oldText: "before", newText: "after" }] }, contextFor(dir));
+    expect(result.isError).toBeUndefined();
+    expect(await readFile(path, "utf8")).toBe("after");
+    expect((await stat(path)).mode & 0o777).toBe(mode);
+  });
 });
 
 test("edit replaces a unique match", async () => {

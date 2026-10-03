@@ -1,9 +1,10 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { readFile, stat } from "node:fs/promises";
 import {
   abortError,
   filesystemFailure,
   isAbortError,
+  observeFile,
+  type FileObservation,
   writeFileAtomically,
 } from "./fs.ts";
 import { resolveToolPath } from "./path.ts";
@@ -91,19 +92,12 @@ export async function executeEdit(
   }
 
   let original: string;
+  let observed: FileObservation;
   try {
-    const info = await stat(resolvedPath);
-    if (info.isDirectory()) {
-      return {
-        content: `Path is a directory: ${input.path}`,
-        isError: true,
-        details: { path: input.path, resolvedPath } satisfies EditDetails,
-      };
-    }
-    original = await readFile(resolvedPath, {
-      encoding: "utf8",
-      signal: ctx.signal,
-    });
+    const current = await observeFile(resolvedPath, ctx.signal);
+    if (!current) throw Object.assign(new Error("File not found"), { code: "ENOENT" });
+    observed = current;
+    original = current.bytes.toString("utf8");
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
@@ -121,7 +115,7 @@ export async function executeEdit(
   }
 
   try {
-    await writeFileAtomically(resolvedPath, applied.content, ctx.signal);
+    await writeFileAtomically(resolvedPath, applied.content, ctx.signal, undefined, { observed });
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
