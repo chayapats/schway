@@ -580,9 +580,9 @@ async function runTuiRenderer(options: {
         await Promise.race([splashRecording, new Promise<void>(resolve => { timer = setTimeout(resolve, 100); })]);
       } finally { clearTimeout(timer); }
     }
-    if (draft && "timedOut" in draft && draft.timedOut) options.stderr.write("Draft checkpoint timed out; unsaved input was not confirmed saved.\n");
-    else if (draft?.failed) options.stderr.write("Draft checkpoint failed; unsaved input was not confirmed saved.\n");
-    else if (draft?.saved) options.stderr.write("Latest completed draft checkpoint saved.\n");
+    if (draft && "timedOut" in draft && draft.timedOut) options.stderr.write("Draft saving timed out; your latest text may not be saved.\n");
+    else if (draft?.failed) options.stderr.write("Draft saving failed; your latest text may not be saved.\n");
+    else if (draft?.saved) options.stderr.write("Draft saved.\n");
     if (interrupted) options.stderr.write("Cancellation requested. Running tools may have changed files; completion was not confirmed.\n");
     if (resume.persisted() || (draft && "persisted" in draft && draft.persisted)) options.stderr.write(`Resume: schway --resume ${resume.sessionId}\n`);
   }

@@ -96,6 +96,13 @@ export const SCREENS: readonly Screen[] = [
   { id: "command-palette-groups", title: "Command palette groups", description: "Skills and extension owners precede the final destructive command.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/"); await ui.settle(); ui.mockInput.pressArrow("up"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.captureCharFrame().includes("Extensions") },
   { id: "command-palette-query", title: "Command palette search", description: "A typed query ranks matching names without group headers.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/ses"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/ses" && !!ui.renderer.root.findDescendantById("picker")?.visible },
   { id: "thai-composer", title: "Thai composer", description: "A multiline Thai draft remains in the composer.", drive: async ui => { await ui.mockInput.pasteBracketedText(thai); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === thai },
+  { id: "draft-restored", title: "Restored draft", description: "A saved Thai draft returns to its session without being sent.", noColorWidths: true, drive: async () => {}, ready: (_s, ui) => ui.editor.plainText === "ร่างภาษาไทย\nยังไม่ส่ง 🧪" && ui.captureCharFrame().includes("Draft restored") },
+  { id: "draft-not-saved", title: "Draft not saved", description: "A denied draft write retains the latest Thai text and offers explicit selection and copy.", noColorWidths: true, drive: async ui => {
+    await writeFile(`${ui.draftStore!.path}.lock`, "uncertain writer", { mode: 0o600 });
+    ui.editor.setText("");
+    await ui.mockInput.pasteBracketedText("ข้อความใหม่\nยังไม่ส่ง 🧪");
+    if (!ui.view.flushDraft().failed) throw new Error("Draft fixture must observe a real save failure");
+  }, ready: (_s, ui) => ui.editor.plainText === "ข้อความใหม่\nยังไม่ส่ง 🧪" && ui.captureCharFrame().includes("Draft not saved") },
   { id: "streaming-answer", title: "Streaming answer", description: "An incomplete Markdown answer streams into the transcript.", elapsed: 4000, drive: ui => enter(ui, "Explain the config loader"), ready: s => s.activity?.phase === "streaming" && s.transcript.some(e => e.text.includes("- Then")) },
   { id: "running-search", title: "Search during active work", description: "Search retains the current mode and offers Escape to restore the draft while the turn keeps running.", elapsed: 4000, noColorWidths: true, drive: async ui => {
     await enter(ui, "Explain the config loader");
@@ -150,10 +157,10 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
-  if (screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
-  if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
+  if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
+  if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
-  const shortWidths = screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
+  const shortWidths = screen.id.startsWith("draft-") || screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
     : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command"].includes(screen.id) ? [40, 50] : [];
   for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));
   return variants;

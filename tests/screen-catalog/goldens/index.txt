@@ -25,6 +25,8 @@ command-palette
 command-palette-groups
 command-palette-query
 thai-composer
+draft-restored
+draft-not-saved
 streaming-answer
 running-search
 parallel-tools

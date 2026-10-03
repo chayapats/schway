@@ -1,0 +1,115 @@
+schway-screen 1
+screen draft-not-saved
+title Draft not saved
+description A denied draft write retains the latest Thai text and offers explicit selection and copy.
+variant light-120
+size 120x30
+cursor 16 26 visible
+== text
+ ⚡ schway  ~/demo
+
+
+  scripted/scripted-model · scripted API key
+
+  Type a task · Enter sends
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › ข้อความใหม่
+      ยังไม่ส่ง 🧪
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                                                                       ctx ~0
+  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  Draft not saved · Select text, Ctrl+C copy
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-18 #545e6c #ecedea -
+00 18-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-25 #1d232c #f7f7f4 b
+03 25-44 #545e6c #f7f7f4 -
+03 44-120 #ffffff #f7f7f4 -
+04 0-120 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-16 #545e6c #f7f7f4 -
+05 16-21 #1d232c #caced3 b
+05 21-27 #545e6c #f7f7f4 -
+05 27-120 #ffffff #f7f7f4 -
+06 0-120 #ffffff #f7f7f4 -
+07 0-120 #ffffff #f7f7f4 -
+08 0-120 #ffffff #f7f7f4 -
+09 0-120 #ffffff #f7f7f4 -
+10 0-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
+12 0-120 #ffffff #f7f7f4 -
+13 0-120 #ffffff #f7f7f4 -
+14 0-120 #ffffff #f7f7f4 -
+15 0-120 #ffffff #f7f7f4 -
+16 0-120 #ffffff #f7f7f4 -
+17 0-120 #ffffff #f7f7f4 -
+18 0-120 #ffffff #f7f7f4 -
+19 0-120 #ffffff #f7f7f4 -
+20 0-120 #ffffff #f7f7f4 -
+21 0-120 #ffffff #f7f7f4 -
+22 0-120 #ffffff #f7f7f4 -
+23 0-2 #ffffff #f7f7f4 -
+23 2-118 #ecedea #f7f7f4 -
+23 118-120 #ffffff #f7f7f4 -
+24 0-2 #ffffff #f7f7f4 -
+24 2-6 #0a5894 #ecedea -
+24 6-15 #1d232c #ecedea -
+24 15-118 #ffffff #ecedea -
+24 118-120 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-6 #ffffff #ecedea -
+25 6-15 #1d232c #ecedea -
+25 15-118 #ffffff #ecedea -
+25 118-120 #ffffff #f7f7f4 -
+26 0-2 #ffffff #f7f7f4 -
+26 2-118 #ecedea #f7f7f4 -
+26 118-120 #ffffff #f7f7f4 -
+27 0-1 #545e6c #ecedea -
+27 1-7 #1d232c #ecedea b
+27 7-8 #545e6c #ecedea -
+27 8-17 #19612f #d3dcd4 b
+27 17-18 #545e6c #ecedea -
+27 18-43 #1d232c #e1e3df -
+27 43-119 #545e6c #ecedea -
+27 119-120 #ffffff #f7f7f4 -
+28 0-2 #ffffff #f7f7f4 -
+28 2-11 #1d232c #caced3 b
+28 11-26 #545e6c #f7f7f4 -
+28 26-31 #1d232c #caced3 b
+28 31-39 #545e6c #f7f7f4 -
+28 39-45 #1d232c #caced3 b
+28 45-53 #545e6c #f7f7f4 -
+28 53-58 #1d232c #caced3 b
+28 58-69 #545e6c #f7f7f4 -
+28 69-75 #1d232c #caced3 b
+28 75-84 #545e6c #f7f7f4 -
+28 84-85 #1d232c #caced3 b
+28 85-94 #545e6c #f7f7f4 -
+28 94-120 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-44 #545e6c #f7f7f4 -
+29 44-120 #ffffff #f7f7f4 -

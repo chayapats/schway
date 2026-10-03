@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
-import { mkdir, readFile, readdir, writeFile, chmod } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile, chmod, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { flushDraftOnExit } from "../src/drafts/exit.ts";
@@ -19,16 +19,21 @@ import { withTempDir } from "./helpers.ts";
 import { openUndoStore } from "../src/undo/store.ts";
 import { reapDraftCheckpointWorker } from "./fixtures/draft-exit-worker.ts";
 
-async function setup(home: string, resume?: string, submit?: ConversationViewOptions["submit"]) {
+async function setup(home: string, resume?: string, submit?: ConversationViewOptions["submit"], options: {
+  beforeView?(controller: TuiController): void;
+  motion?: ConversationViewOptions["motion"];
+  env?: Record<string, string>;
+} = {}) {
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
   const directory = sessionsDirectory(home);
   const session = resume ? await loadJsonlSession({ directory, id: resume }) : await createJsonlSession({ directory, workspace, deferred: true });
   const controller = new TuiController({ home, session, workspace, sessionId: session.header.id, provider: "scripted", modelId: "test", model: createScriptedModel({ text: "accepted" }), contextManager: createContextManager(workspace, { home }), credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) } });
+  options.beforeView?.(controller);
   const terminal = await createTestRenderer({ width: 80, height: 24, kittyKeyboard: true, exitOnCtrlC: false, exitSignals: [] });
   const config = await loadConfigEditor({ home, workspaceRoot: home });
   const ctx = { controller, home, workspaceRoot: home, skillScope: { workspaceRoot: home }, sessionsDir: directory, settings: () => config.settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } };
   let submission: Promise<unknown> | undefined;
-  const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: home, env: {}, secrets: ["credential-sentinel"], draftPersistence: true, quit() {}, submit: (value, accepted) => submission = submit ? submit(value, accepted) : dispatchEditorInput(value, controller, command => handleSlashCommand(command.name, command.args, ctx), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: home, env: options.env ?? {}, motion: options.motion, secrets: ["credential-sentinel"], draftPersistence: true, quit() {}, submit: (value, accepted) => submission = submit ? submit(value, accepted) : dispatchEditorInput(value, controller, command => handleSlashCommand(command.name, command.args, ctx), accepted) });
   const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
   const saved = () => openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id }).checkpoint?.text;
   const close = () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); };
@@ -55,7 +60,7 @@ test("renderer checkpoints a deferred multiline draft, offers recent recovery, d
   const reopened = await setup(home, id);
   expect(reopened.editor.plainText).toBe("ภาษาไทย line one\nline two");
   reopened.resize(44, 18); await reopened.renderOnce();
-  expect(reopened.captureCharFrame()).toContain("Recovered draft · Alt+D discard");
+  expect(reopened.captureCharFrame()).toContain("Draft restored · Alt+D discard");
   reopened.mockInput.pressKey("d", { meta: true }); reopened.view.refresh();
   expect(reopened.editor.plainText).toBe(""); expect(reopened.saved()).toBeUndefined();
   await reopened.mockInput.pasteBracketedText("accepted task"); await idle(reopened);
@@ -78,6 +83,165 @@ test("late accepted handoff cannot clear a newer completed checkpoint", async ()
     expect(ui.saved()).toBe("newer completed draft");
     expect(ui.editor.plainText).toBe("newer completed draft");
   } finally { resolve(); ui.close(); }
+}));
+
+test("draft status stops claiming a saved revision as soon as newer ordinary text arrives", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    ui.editor.setText("previous completed ไทย draft");
+    expect(ui.view.flushDraft()).toEqual({ saved: true, failed: false });
+    ui.view.refresh(); await ui.renderOnce();
+    ui.editor.setText("newer unsaved ไทย 🧪 draft"); ui.editor.cursorOffset = 4;
+    ui.view.refresh(); await ui.renderOnce();
+    expect(ui.captureCharFrame()).not.toMatch(/Draft (?:checkpoint )?saved|Draft restored/);
+    expect(ui.saved()).toBe("previous completed ไทย draft");
+    expect(ui.editor.cursorOffset).toBe(4);
+    expect(ui.view.flushDraft()).toEqual({ saved: true, failed: false });
+    expect(ui.saved()).toBe("newer unsaved ไทย 🧪 draft");
+  } finally { ui.close(); }
+}));
+
+for (const newer of [false, true]) test(`failed draft cleanup retains ${newer ? "newer unsaved text and its exit task" : "confirmation of unchanged saved text"}`, async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    ui.editor.setText("previous completed ไทย draft"); ui.view.flushDraft();
+    const store = openDraftStore({ home, workspaceRoot: home, sessionId: ui.session.header.id });
+    if (newer) { ui.editor.setText("newer unsaved ไทย draft"); ui.view.refresh(); }
+    ui.editor.cursorOffset = 3;
+    await writeFile(`${store.path}.lock`, "uncertain writer", { mode: 0o600 });
+    ui.mockInput.pressKey("d", { meta: true }); ui.view.refresh(); await ui.renderOnce();
+    expect(ui.captureCharFrame()).toContain("Draft cleanup failed · Alt+D retry");
+    expect(ui.editor.plainText).toBe(newer ? "newer unsaved ไทย draft" : "previous completed ไทย draft");
+    expect(ui.editor.cursorOffset).toBe(3);
+    expect(ui.saved()).toBe("previous completed ไทย draft");
+    const frozen = ui.view.freezeDraftForExit();
+    expect(frozen.saved).toBe(!newer);
+    if (newer) expect(frozen.task).toMatchObject({ text: "newer unsaved ไทย draft", sessionId: ui.session.header.id });
+    else expect(frozen).toEqual({ saved: true, failed: true });
+  } finally { ui.close(); }
+}));
+
+test("recovered draft waits for an owning panel to restore the actual composer without clearing saved bytes", async () => withTempDir(async home => {
+  const workspace = { root: home, launchCwd: home, extraRoots: [] };
+  const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace });
+  const text = "ร่างที่กู้คืน 🧪\nยังไม่ส่ง";
+  const store = openDraftStore({ home, workspaceRoot: home, sessionId: session.header.id }); store.save(text, 1);
+  const before = await readFile(store.path);
+  const ui = await setup(home, session.header.id, undefined, { beforeView: controller => controller.openCommandHelp() });
+  try {
+    await ui.renderOnce(); const panel = ui.captureCharFrame();
+    ui.view.flushDraft();
+    ui.mockInput.pressEscape(); ui.view.refresh(); await ui.renderOnce();
+    expect(await readFile(store.path)).toEqual(before);
+    expect(ui.editor.plainText).toBe(text);
+    expect(panel).not.toMatch(/Recovered draft|Draft restored/);
+    expect(ui.captureCharFrame()).toContain("Draft restored · Alt+D discard");
+  } finally { ui.close(); }
+}));
+
+test("empty edits, explicit discard and accepted input remove saved status", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    for (const action of ["empty", "discard", "accept"]) {
+      ui.editor.setText(`Saved ไทย ${action}`); ui.view.flushDraft(); ui.view.refresh(); await ui.renderOnce();
+      expect(ui.captureCharFrame()).toContain("Draft saved · Alt+D discard");
+      if (action === "empty") { ui.editor.setText(""); ui.view.refresh(); }
+      else if (action === "discard") ui.mockInput.pressKey("d", { meta: true });
+      else { ui.mockInput.pressEnter(); await ui.submitted(); }
+      ui.view.refresh(); await ui.renderOnce();
+      expect(ui.editor.plainText).toBe("");
+      expect(ui.captureCharFrame()).not.toMatch(/Draft saved|Draft restored/);
+      expect(ui.view.flushDraft()).toEqual({ saved: false, failed: false });
+      expect(ui.saved()).toBeUndefined();
+    }
+  } finally { ui.close(); }
+}));
+
+for (const state of ["saved", "restored", "failed"] as const) {
+  for (const motion of ["full", "reduced", "off"] as const) {
+    test(`draft ${state} keeps its status and usable action with ${motion} motion at safety widths`, async () => withTempDir(async home => {
+      const text = "ร่างภาษาไทย 🧪\nยังไม่ส่ง";
+      let resume: string | undefined;
+      if (state === "restored") {
+        const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace: { root: home, launchCwd: home, extraRoots: [] } });
+        resume = session.header.id;
+        openDraftStore({ home, workspaceRoot: home, sessionId: resume }).save(text, 1);
+      }
+      const ui = await setup(home, resume, undefined, { motion, env: motion === "off" ? { NO_COLOR: "1" } : { SCHWAY_THEME: motion === "reduced" ? "light" : "dark" } });
+      try {
+        if (state !== "restored") {
+          if (state === "failed") {
+            ui.editor.setText("Previously saved"); ui.view.flushDraft();
+            const store = openDraftStore({ home, workspaceRoot: home, sessionId: ui.session.header.id });
+            await writeFile(`${store.path}.lock`, "uncertain writer", { mode: 0o600 });
+          }
+          ui.editor.setText(text); ui.view.flushDraft();
+        }
+        ui.editor.cursorOffset = 3;
+        for (const width of [24, 29, 30, 40, 50, 80, 120]) {
+          ui.resize(width, 8); ui.view.refresh(); await ui.renderOnce();
+          const frame = ui.captureCharFrame();
+          expect(frame).toContain(state === "failed" ? "Draft not saved" : `Draft ${state}`);
+          expect(frame).toContain(state === "failed" ? width === 24 ? "Select, Ctrl+C copy" : "Select text, Ctrl+C copy" : "Alt+D discard");
+          if (state === "failed") expect(frame).toContain("Ctrl+C");
+          expect(frame).toContain("Auto"); expect(frame).toContain("Enter send");
+          expect(ui.editor.plainText).toBe(text); expect(ui.editor.cursorOffset).toBe(3);
+          const status = ui.renderer.root.findDescendantById("draft-status")!;
+          expect(status.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+          expect(status.y + status.height).toBeLessThanOrEqual(8);
+        }
+      } finally { ui.close(); }
+    }));
+  }
+}
+
+test("a failed empty edit offers cleanup retry and retains the prior saved bytes until confirmation", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    ui.editor.setText("Previously saved ไทย"); ui.view.flushDraft();
+    const store = openDraftStore({ home, workspaceRoot: home, sessionId: ui.session.header.id });
+    await writeFile(`${store.path}.lock`, "uncertain writer", { mode: 0o600 });
+    ui.editor.setText(""); expect(ui.view.flushDraft()).toEqual({ saved: false, failed: true });
+    ui.resize(24, 8); ui.view.refresh(); await ui.renderOnce();
+    expect(ui.captureCharFrame()).toContain("Draft cleanup failed");
+    expect(ui.captureCharFrame()).toContain("Alt+D retry");
+    expect(ui.saved()).toBe("Previously saved ไทย"); expect(ui.editor.plainText).toBe("");
+    await unlink(`${store.path}.lock`); ui.mockInput.pressKey("d", { meta: true }); ui.view.refresh(); await ui.renderOnce();
+    expect(ui.saved()).toBeUndefined(); expect(ui.captureCharFrame()).not.toMatch(/Draft saved|Draft restored|Draft cleanup failed/);
+    expect(ui.view.freezeDraftForExit()).toEqual({ saved: false, failed: false });
+  } finally { ui.close(); }
+}));
+
+test("an empty exit retains the cleanup task when a previous saved draft remains", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    ui.editor.setText("Previously saved ไทย"); ui.view.flushDraft();
+    const store = openDraftStore({ home, workspaceRoot: home, sessionId: ui.session.header.id });
+    await writeFile(`${store.path}.lock`, "uncertain writer", { mode: 0o600 });
+    ui.editor.setText(""); expect(ui.view.flushDraft()).toEqual({ saved: false, failed: true });
+    expect(ui.view.freezeDraftForExit()).toMatchObject({
+      saved: false, failed: false, task: { text: "", sessionId: ui.session.header.id },
+    });
+    expect(ui.saved()).toBe("Previously saved ไทย");
+  } finally { ui.close(); }
+}));
+
+for (const draft of [
+  { text: "", cursor: 0, exitFailed: false },
+  { text: "ยังไม่ได้บันทึก 🧪", cursor: 3, exitFailed: true },
+]) test(`unavailable draft storage ${draft.text ? "retains ordinary input and reports exit failure" : "does not report an empty exit as a failed save"}`, async () => withTempDir(async home => {
+  await mkdir(join(home, ".schway"), { recursive: true });
+  await writeFile(join(home, ".schway/drafts"), "not a directory", { mode: 0o600 });
+  const ui = await setup(home);
+  try {
+    ui.editor.setText(draft.text); ui.editor.cursorOffset = draft.cursor;
+    expect(ui.view.flushDraft()).toEqual({ saved: false, failed: true });
+    ui.mockInput.pressKey("d", { meta: true }); ui.view.refresh(); await ui.renderOnce();
+    expect(ui.captureCharFrame()).toContain("Draft recovery unavailable · Enter start a task");
+    expect(ui.editor.plainText).toBe(draft.text); expect(ui.editor.cursorOffset).toBe(draft.cursor);
+    expect(ui.view.freezeDraftForExit()).toEqual({ saved: false, failed: draft.exitFailed });
+    expect(await readFile(join(home, ".schway/drafts"), "utf8")).toBe("not a directory");
+  } finally { ui.close(); }
 }));
 
 test("credential surfaces suppress ordinary pending text, masked keys and callback commands across every draft artifact", async () => withTempDir(async home => {
@@ -135,6 +299,10 @@ test("conflicting checkpoint and explicit deletion operate through renderer and 
     ui.editor.setText("memory retained on failure"); await idle(ui);
     expect(ui.captureCharFrame()).toContain("Draft not saved"); expect(ui.saved()).toBe("previous completed");
     expect(ui.editor.plainText).toBe("memory retained on failure");
+    expect(ui.view.flushDraft()).toEqual({ saved: false, failed: true });
+    const frozen = ui.view.freezeDraftForExit();
+    expect(frozen.saved).toBe(false);
+    expect(frozen.task?.text).toBe("memory retained on failure");
   } finally { ui.close(); }
 }));
 
@@ -257,14 +425,14 @@ test("actual app survives killed checkpoint process and reopens same session wit
   try { id = (await first.next()).checkpoint; expect(id!).toBeString(); } finally { await first.stop(); }
   const resumed = await runProcess(home, "reopen", id!);
   try {
-    const recovery = await resumed.next(); expect(recovery.recovered).toBe("unfinished Thai ภาษาไทย\nsecond line"); expect(recovery.frame).toContain("Recovered draft");
+    const recovery = await resumed.next(); expect(recovery.recovered).toBe("unfinished Thai ภาษาไทย\nsecond line"); expect(recovery.frame).toContain("Draft restored");
     const exit = await resumed.next(); expect(exit.stopped).toBe(true); expect(exit.destroyed).toBe(true); expect(exit.stderr).toContain(`schway --resume ${id!}`);
   } finally { await resumed.stop(); }
 }));
 
 test("ordinary app exit flushes pending text and restores terminal; disk failure stays truthful", async () => withTempDir(async home => {
   const exit = await runProcess(home, "exit");
-  try { const result = await exit.next(); expect(result.code).toBe(0); expect(result.stopped && result.destroyed).toBe(true); expect(result.stderr).toContain("checkpoint saved"); expect(await artifacts(home)).toContain("unfinished Thai"); } finally { await exit.stop(); }
+  try { const result = await exit.next(); expect(result.code).toBe(0); expect(result.stopped && result.destroyed).toBe(true); expect(result.stderr).toContain("Draft saved.\n"); expect(result.stderr).not.toContain("checkpoint"); expect(await artifacts(home)).toContain("unfinished Thai"); } finally { await exit.stop(); }
   for (const mode of ["failure", "permission"]) {
     const isolated = join(home, mode); await mkdir(isolated);
     const previous = await createJsonlSession({ directory: sessionsDirectory(isolated), workspace: { root: isolated, launchCwd: isolated, extraRoots: [] } });
@@ -272,7 +440,7 @@ test("ordinary app exit flushes pending text and restores terminal; disk failure
     const failure = await runProcess(isolated, mode, previous.header.id);
     try {
       const ui = await failure.next(); expect(ui.retained).toContain("unfinished Thai"); expect(ui.frame).toContain("Draft not saved");
-      const result = await failure.next(); expect(result.stderr).toContain("checkpoint failed"); expect(result.stderr).not.toContain("checkpoint saved"); expect(result.destroyed).toBe(true);
+      const result = await failure.next(); expect(result.stderr).toContain("Draft saving failed; your latest text may not be saved.\n"); expect(result.stderr).not.toContain("Draft saved."); expect(result.stderr).not.toContain("checkpoint"); expect(result.destroyed).toBe(true);
       expect(await artifacts(isolated)).not.toContain("unfinished Thai");
       expect(openDraftStore({ home: isolated, workspaceRoot: isolated, sessionId: previous.header.id }).checkpoint?.text).toBe("previous valid checkpoint");
     } finally { await failure.stop(); }
@@ -304,9 +472,10 @@ test("app exit kills a blocked checkpoint within its deadline and still restores
     expect(Date.now() - started).toBeLessThan(2500);
     expect(result.code).toBe(0);
     expect(result.stopped && result.destroyed).toBe(true);
-    expect(result.stderr).toContain("checkpoint timed out");
+    expect(result.stderr).toContain("Draft saving timed out; your latest text may not be saved.\n");
     expect(await readFile(join(home, "exit-worker-state"), "utf8")).toBe("blocked");
-    expect(result.stderr).not.toContain("checkpoint saved");
+    expect(result.stderr).not.toContain("Draft saved.");
+    expect(result.stderr).not.toContain("checkpoint");
     const reaped = await blocked.next();
     expect(reaped).toMatchObject({ checkpointWorkerReaped: true, exitCode: 137 });
     expect(reaped.pid).toBeNumber();
@@ -341,7 +510,7 @@ test("unexpected exit writer rejection still restores terminal and never reports
   try {
     const result = await child.next();
     expect(result.stopped && result.destroyed).toBe(true);
-    expect(result.stderr).toBe("Draft checkpoint failed; unsaved input was not confirmed saved.\n");
+    expect(result.stderr).toBe("Draft saving failed; your latest text may not be saved.\n");
     expect(await child.child.exited).toBe(0);
   } finally { await child.stop(); }
 }));
