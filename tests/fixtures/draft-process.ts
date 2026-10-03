@@ -1,4 +1,4 @@
-import { mock } from "bun:test";
+import { mock, spyOn } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { TextareaRenderable } from "@opentui/core";
 import * as fs from "node:fs";
@@ -6,9 +6,26 @@ import * as asyncFs from "node:fs/promises";
 import { join } from "node:path";
 import { createScriptedModel } from "../helpers/scripted-model.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
+import { reapDraftCheckpointWorker } from "./draft-exit-worker.ts";
 
 const [home, mode, resume] = process.argv.slice(2) as [string, string, string | undefined];
+const blockedExit = mode === "blocked-exit" || mode === "blocked-exit-cleanup";
 const abort = new AbortController();
+const workerPath = join(import.meta.dir, "draft-exit-worker.ts");
+const workerPidPath = join(home, "exit-worker-pid");
+let checkpointWorker: Bun.Subprocess | undefined, workerReaped = false, stopRequested = false;
+const onStop = () => { stopRequested = true; abort.abort(); };
+const spawn = Bun.spawn;
+const spawnSpy = blockedExit ? spyOn(Bun, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
+  const child = Reflect.apply(spawn, Bun, args);
+  if (Array.isArray(args[0]) && args[0][1] === workerPath) {
+    checkpointWorker = child;
+    fs.writeFileSync(workerPidPath, JSON.stringify({ pid: child.pid, parent: process.pid }));
+    if (mode === "blocked-exit-cleanup") event({ checkpointWorkerSpawned: child.pid });
+  }
+  return child;
+}) as typeof Bun.spawn) : undefined;
+if (blockedExit) process.on("SIGTERM", onStop);
 let stopped = false, destroyed = false, splashReads = 0;
 const readFile = asyncFs.readFile;
 if (mode === "splash-read-abort") mock.module("node:fs/promises", () => ({ ...asyncFs,
@@ -26,13 +43,13 @@ const wait = async (condition: () => boolean) => {
   const until = Date.now() + 5000;
   while (!condition()) { if (Date.now() > until) throw Error("fixture condition timed out"); await Bun.sleep(10); }
 };
-if (["failure", "permission", "blocked-exit", "flush-rejection"].includes(mode)) {
-  process.env.SCHWAY_DRAFT_FIXTURE = mode;
+if (blockedExit || ["failure", "permission", "flush-rejection"].includes(mode)) {
+  process.env.SCHWAY_DRAFT_FIXTURE = blockedExit ? "blocked-exit" : mode;
   process.env.SCHWAY_DRAFT_FIXTURE_MARKER = join(home, "exit-worker-state");
   const actual = await import("../../src/drafts/exit.ts");
   const flush = actual.flushDraftOnExit;
   mock.module(join(import.meta.dir, "../../src/drafts/exit.ts"), () => ({ ...actual,
-    flushDraftOnExit: (input: Parameters<typeof actual.flushDraftOnExit>[0]) => mode === "flush-rejection" ? Promise.reject(Error("fixture flush rejection")) : flush(input, join(import.meta.dir, "draft-exit-worker.ts")),
+    flushDraftOnExit: (input: Parameters<typeof actual.flushDraftOnExit>[0]) => mode === "flush-rejection" ? Promise.reject(Error("fixture flush rejection")) : flush(input, workerPath),
   }));
 }
 if (["failure", "permission"].includes(mode)) {
@@ -68,6 +85,7 @@ mock.module(join(import.meta.dir, "../../src/tui/credential-input.ts"), () => ({
   terminal.renderer.destroy = () => { destroyed = true; return destroy(); };
   driver = (async () => {
     await wait(() => !!terminal.renderer.root.findDescendantById("prompt"));
+    if (mode === "silent-fixture") return;
     const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
     if (mode === "reopen") {
       await terminal.renderOnce();
@@ -75,7 +93,7 @@ mock.module(join(import.meta.dir, "../../src/tui/credential-input.ts"), () => ({
     }
     await terminal.mockInput.pasteBracketedText(mode === "tool" ? "run silent tool" : "unfinished Thai ภาษาไทย\nsecond line");
     if (mode === "tool") { terminal.mockInput.pressEnter(); return; }
-    if (mode === "exit" || mode === "blocked-exit" || mode === "flush-rejection") { abort.abort(); return; }
+    if (mode === "exit" || blockedExit || mode === "flush-rejection") { abort.abort(); return; }
     if (["failure", "permission"].includes(mode)) {
       await Bun.sleep(650); await terminal.renderOnce();
       event({ retained: editor.plainText, frame: terminal.captureCharFrame() }); abort.abort(); return;
@@ -92,7 +110,27 @@ mock.module(join(import.meta.dir, "../../src/tui/credential-input.ts"), () => ({
 const { runInteractiveTui } = await import("../../src/tui/app.ts");
 let stderr = "";
 const model = mode === "tool" ? createScriptedModel({ toolCalls: [{ id: "silent-tool", name: "bash", arguments: { command: "fixture" } }] }) : createScriptedModel({ text: "must not be sent" });
-const code = await runInteractiveTui({ cwd: home, env: { HOME: home, SCHWAY_MOTION: mode === "splash-read-abort" ? "full" : "off" }, args: { json: false, help: false, ...(resume ? { resume } : {}) }, model, signal: abort.signal, credentialStore: fakeCredentialStore(), stdout: { write() {} }, stderr: { write(text) { stderr += text; } } });
-await driver;
-event({ code, stopped, destroyed, stderr, ...(mode === "splash-read-abort" ? { splashReads } : {}) });
+try {
+  const code = await runInteractiveTui({ cwd: home, env: { HOME: home, SCHWAY_MOTION: mode === "splash-read-abort" ? "full" : "off" }, args: { json: false, help: false, ...(resume ? { resume } : {}) }, model, signal: abort.signal, credentialStore: fakeCredentialStore(), stdout: { write() {} }, stderr: { write(text) { stderr += text; } } });
+  await driver;
+  // Report terminal restoration before waiting for worker reaping; the app's deadline stays independent.
+  event({ code, stopped, destroyed, stderr, ...(mode === "splash-read-abort" ? { splashReads } : {}) });
+  if (blockedExit) {
+    if (!checkpointWorker && !stopRequested) throw new Error("Checkpoint fixture did not observe its worker");
+    if (checkpointWorker) {
+      const exitCode = await reapDraftCheckpointWorker(checkpointWorker);
+      workerReaped = true;
+      event({ checkpointWorkerReaped: true, pid: checkpointWorker.pid, exitCode });
+    }
+  }
+} finally {
+  try {
+    if (checkpointWorker && !workerReaped) {
+      try { checkpointWorker.kill("SIGKILL"); } catch { /* Already exited. */ }
+      await reapDraftCheckpointWorker(checkpointWorker);
+      workerReaped = true;
+    }
+    if (workerReaped) fs.rmSync(workerPidPath, { force: true });
+  } finally { process.removeListener("SIGTERM", onStop); spawnSpy?.mockRestore(); }
+}
 if (mode === "tool") setInterval(() => {}, 1000);
