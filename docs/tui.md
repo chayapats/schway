@@ -718,20 +718,28 @@ The confirmation controls explain that files and Git remain unchanged. Switching
 
 ## Leaving and recovering unfinished input
 
-Ordinary drafts checkpoint after 500 ms idle. A draft-only session appears as
-**Unsent draft** in recent work; **Alt+B**, `/sessions`, or `schway --resume <id>`
-restores it into that conversation without sending it. The recovery notice offers
-**Alt+D discard**. Accepted input clears its checkpoint, while a newer composed
-draft remains intact. Credential entry, callback entry and auth commands never
-become draft checkpoints; checkpointing pauses throughout credential surfaces.
+Ordinary drafts save after 500 ms idle. **Draft saved · Alt+D discard** confirms
+the current text; editing it removes that notice until the new text is saved.
+A draft-only session appears as **Unsent draft** in recent work; **Alt+B**,
+`/sessions`, or `schway --resume <id>` restores it into that conversation without
+sending it. **Draft restored · Alt+D discard** appears when the text is back in the
+composer. Accepted input clears the saved text while a newer draft remains intact.
 
-Quit attempts a checkpoint of the latest editor text in an isolated writer with a
-500 ms deadline, then restores the terminal even if storage stalls.
-The final message distinguishes a completed checkpoint from a save failure and
-prints a resume command for saved sessions. During an active tool, exit requests
-cancellation without waiting indefinitely; it does not claim the tool settled or
-its filesystem effects were undone. After a forced kill, only the last completed
-checkpoint is promised. See [retention, deletion and storage limits](sessions.md#unsent-draft-checkpoints).
+If saving fails, **Draft not saved · Select text, Ctrl+C copy** keeps the editable
+text available. Select the text before pressing **Ctrl+C**; without a selection,
+Ctrl+C keeps its ordinary stop or quit action. A narrow terminal puts the status
+and selection/copy action on separate lines. Failed discard keeps the text and
+shows **Draft cleanup failed · Alt+D retry**. Credential entry, callback entry and
+auth commands are never saved as drafts; saving pauses throughout credential
+surfaces.
+
+Quit attempts to save the latest editor text in an isolated writer with a 500 ms
+deadline, then restores the terminal even if storage stalls. **Draft saved.**
+confirms success. Failure or timeout warns that your latest text may not be saved;
+a resume command is printed for saved sessions. During an active tool, exit
+requests cancellation without waiting indefinitely; it does not claim the tool
+settled or its filesystem effects were undone. After a forced kill, only the last
+completed save is recoverable. See [retention, deletion and storage limits](sessions.md#unsent-draft-checkpoints).
 
 Test coverage for this guide: [release verification](release-verification.md#tui).
 

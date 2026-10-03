@@ -1,5 +1,6 @@
 import { ConfigEditor } from "../../src/config/editing.ts";
 import { Database } from "bun:sqlite";
+import { openDraftStore } from "../../src/drafts/store.ts";
 import { openUndoStore } from "../../src/undo/store.ts";
 import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
@@ -39,7 +40,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
-  const disk = palette || screen.id.startsWith("model-picker") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const draft = screen.id.startsWith("draft-");
+  const disk = draft || palette || screen.id.startsWith("model-picker") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -58,7 +60,10 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     }
   }
   const workspace = { root, launchCwd: root, extraRoots: [] };
-  const session = createSession();
+  const durableSession = draft ? await createJsonlSession({ directory: sessionsDirectory(home), workspace }) : undefined;
+  const session = durableSession ?? createSession();
+  const draftStore = durableSession ? openDraftStore({ home, workspaceRoot: root, sessionId: durableSession.header.id }) : undefined;
+  if (draftStore) draftStore.save(screen.id === "draft-restored" ? "ร่างภาษาไทย\nยังไม่ส่ง 🧪" : "Previously saved", 1);
   if (screen.id === "recent-work-resume") {
     sessionDirectory = sessionsDirectory(home);
     const prior = await createJsonlSession({ directory: sessionDirectory, workspace });
@@ -109,7 +114,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
-    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: "catalog-session",
+    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? "catalog-session",
     model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     onRuntimeEvent: event => { if (event.type === "tool.finished") activityTime += 1200; },
@@ -173,7 +178,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     undoLock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
   }
   const deletionContext = screen.id === "delete-session-busy" ? { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionDirectory!, settings: () => new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") }).settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } } : undefined;
-  const view = createConversationView(terminal.renderer, { controller, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();
@@ -183,7 +188,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     }
   };
   await settle();
-  return { ...terminal, controller, view, session, sessionDirectory, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
+  return { ...terminal, controller, view, session, sessionDirectory, draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
     dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
   };

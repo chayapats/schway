@@ -1,0 +1,44 @@
+schway-screen 1
+screen draft-restored
+title Restored draft
+description A saved Thai draft returns to its session without being sent.
+variant dark-30x8
+size 30x8
+cursor 15 4 visible
+== text
+
+ Type a task · Enter sends
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › ยังไม่ส่ง 🧪
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Enter send
+ Draft restored
+ Alt+D discard
+== styles
+00 0-30 #ffffff #0e1117 -
+01 0-1 #ffffff #0e1117 -
+01 1-15 #8b95a7 #0e1117 -
+01 15-20 #e6eaf0 #293140 b
+01 20-26 #8b95a7 #0e1117 -
+01 26-30 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-29 #161b24 #0e1117 -
+02 29-30 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-5 #7cc4ff #161b24 -
+03 5-14 #e6eaf0 #161b24 -
+03 14-29 #ffffff #161b24 -
+03 29-30 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-29 #161b24 #0e1117 -
+04 29-30 #ffffff #0e1117 -
+05 0-1 #8b95a7 #161b24 -
+05 1-5 #e6eaf0 #161b24 b
+05 5-18 #8b95a7 #161b24 -
+05 18-30 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-15 #8b95a7 #0e1117 -
+06 15-30 #ffffff #0e1117 -
+07 0-1 #ffffff #0e1117 -
+07 1-14 #8b95a7 #0e1117 -
+07 14-30 #ffffff #0e1117 -

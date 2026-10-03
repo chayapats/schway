@@ -363,6 +363,13 @@ restores the draft in its original session without submitting it. **Alt+D** remo
 the current draft; accepted submission removes the accepted text without clearing a
 newer draft typed while the handoff was pending.
 
+**Draft saved** confirms the current text. A newer edit removes that confirmation
+until saving completes. **Draft restored** appears after the saved text is loaded
+into the composer. Both notices offer **Alt+D discard**. If saving fails, the text
+stays editable and **Draft not saved** asks you to select text and press **Ctrl+C**
+to copy it. Failed discard retains the text and offers **Alt+D retry**; it does
+not treat a newer unsaved edit as already saved.
+
 Only the latest checkpoint is retained, with no automatic expiry or history archive.
 A content-free generation marker remains after cleanup to prevent stale writers
 from restoring deleted text. To delete a saved conversation and associated draft

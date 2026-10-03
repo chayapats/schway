@@ -57,6 +57,15 @@ function diff(expected: string, actual: string): string {
 for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`screen ${screen.id} ${variant.id}`, async () => {
   setSystemTime(new Date(fixedTime));
   const actual = await renderScreen(screen, variant);
+  if (screen.id.startsWith("draft-")) {
+    const text = parseScreen(actual).text.join("\n");
+    expect(text).toContain(screen.id === "draft-restored" ? "Draft restored" : "Draft not saved");
+    expect(text).toContain(screen.id === "draft-restored" ? "Alt+D discard" : variant.cols === 24 ? "Select, Ctrl+C copy" : "Select text, Ctrl+C copy");
+    if (screen.id === "draft-not-saved") { expect(text).toContain("Ctrl+C"); expect(text).not.toContain("Draft saved"); }
+    expect(text).not.toMatch(/checkpoint|NOT SAVED|Keep this window open/);
+    expect(text).toContain("Auto"); expect(text).toContain(variant.rows === 8 ? "Enter send" : "Enter");
+    expect(text).toContain("🧪");
+  }
   if (screen.id.startsWith("inspection-")) {
     const text = parseScreen(actual).text.join("\n");
     expect(text).not.toContain("Alt+I copy");
@@ -130,13 +139,13 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "retry-countdown", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "retry-countdown", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);
 });
 test("catalog repeated renders are byte-identical", async () => {
-  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "inspection-code", "stopped-streaming", "stopped-tool"]) {
+  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "inspection-code", "stopped-streaming", "stopped-tool", "draft-restored", "draft-not-saved"]) {
     const screen = SCREENS.find(s => s.id === id)!, variant = variantsFor(screen).find(v => v.id === "dark-80")!;
     setSystemTime(new Date(fixedTime)); const first = await renderScreen(screen, variant);
     setSystemTime(new Date(fixedTime)); expect(await renderScreen(screen, variant)).toBe(first);
