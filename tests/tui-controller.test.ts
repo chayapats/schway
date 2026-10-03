@@ -230,7 +230,8 @@ test("cancellation stops the active turn and returns to idle", async () => {
     const snapshot = controller.snapshot();
     expect(controller.running).toBe(false);
     expect(snapshot.status).toBe("idle");
-    expect(snapshot.transcript.some((entry) => entry.text === "Cancelled.")).toBe(true);
+    expect(snapshot.transcript.filter(entry => entry.text.startsWith("Stopped"))).toMatchObject([{ kind: "system" }]);
+    expect(snapshot.transcript.some(entry => entry.kind === "error")).toBe(false);
     // User prompt is still persisted for resume even though the turn cancelled.
     expect(session.items.some((item) => item.type === "user")).toBe(true);
   });

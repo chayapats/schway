@@ -102,7 +102,9 @@ test("cancel during a quiet first-token wait keeps the turn owned until provider
     expect(controller.snapshot().activity).toBeUndefined();
     expect(controller.snapshot().status).toBe("idle");
     expect(controller.snapshot().transcript.some(entry => entry.kind === "assistant")).toBe(false);
-    expect(controller.snapshot().transcript.some(entry => entry.text === "Cancelled.")).toBe(true);
+    expect(controller.snapshot().transcript.filter(entry => entry.text.startsWith("Stopped"))).toMatchObject([{ kind: "system" }]);
+    expect(controller.snapshot().transcript.some(entry => entry.kind === "error")).toBe(false);
+    expect(controller.snapshot().outcome?.reason).toBe("cancelled");
   });
 });
 
@@ -161,6 +163,11 @@ test("cancel during retry backoff replaces countdown with stopping and prevents 
     await task;
     expect(attempts).toBe(1);
     expect(controller.snapshot().status).toBe("idle");
+    expect(controller.snapshot().transcript.filter(entry => entry.kind === "system")).toMatchObject([
+      { text: "Stopped · Completed results kept\nCtrl+R continue · Esc keep editing" },
+    ]);
+    expect(controller.snapshot().transcript.some(entry => entry.kind === "error")).toBe(false);
+    expect(controller.snapshot().outcome?.reason).toBe("cancelled");
   });
 });
 

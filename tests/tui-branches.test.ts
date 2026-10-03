@@ -304,7 +304,8 @@ test("busy turns reject switch and fork while preview stays side-effect-free", a
       controller.cancel();
       await pending;
       expect(controller.running).toBe(false);
-      expect(controller.snapshot().transcript.some((entry) => entry.text === "Cancelled.")).toBe(true);
+      expect(controller.snapshot().transcript.filter(entry => entry.text.startsWith("Stopped"))).toMatchObject([{ kind: "system" }]);
+      expect(controller.snapshot().transcript.some(entry => entry.kind === "error")).toBe(false);
       controller.refreshBranchTree();
       expect(controller.branchCommand("switch main")).toBe(true);
     } finally {

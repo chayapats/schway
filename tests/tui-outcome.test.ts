@@ -8,7 +8,7 @@ const outcome = (overrides: Partial<TurnOutcome> = {}): TurnOutcome => ({
 });
 
 test("outcome words and glyphs keep failed-only details and omit zero counts", () => {
-  for (const [reason, word] of [["completed", "✓ Done"], ["failed", "✗ Failed"], ["cancelled", "− Cancelled"], ["limit", "◌ Limit"]] as const) {
+  for (const [reason, word] of [["completed", "✓ Done"], ["failed", "✗ Failed"], ["cancelled", "− Stopped"], ["limit", "◌ Limit"]] as const) {
     expect(formatOutcomeLine(outcome({ reason }), 120)).toBe(`${word} · 14s · Alt+R review${reason === "failed" ? " · Ctrl+I details" : ""}`);
   }
 });

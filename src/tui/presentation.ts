@@ -4,7 +4,7 @@ import type { TurnOutcome } from "./controller-types.ts";
 
 /** Return the visible completion word and glyph without implying verification. */
 export function outcomeLabel(outcome: TurnOutcome): string {
-  return { completed: "✓ Done", failed: "✗ Failed", cancelled: "− Cancelled", limit: "◌ Limit" }[outcome.reason];
+  return { completed: "✓ Done", failed: "✗ Failed", cancelled: "− Stopped", limit: "◌ Limit" }[outcome.reason];
 }
 
 /** Fit a turn summary by dropping elapsed, commands, then files before clipping outcome and actions. */
@@ -128,10 +128,10 @@ export function toolTarget(name: string, args: unknown): string | undefined {
 export function toolPresentation(entry: TuiTranscriptEntry, expanded: boolean): { marker: string; target: string; state: string; detail: string; tone: "accent" | "success" | "warning" | "error" | "muted" } {
   const state = entry.toolStatus ?? "error";
   const marker = { running: "●", success: "✓", cancelled: "−", error: "!" }[state];
-  const tone = { running: "accent", success: "success", cancelled: "warning", error: "error" }[state] as "accent" | "success" | "warning" | "error";
+  const tone = ({ running: "accent", success: "success", cancelled: "muted", error: "error" } as const)[state];
   const lines = displayText(entry.text).split("\n");
   const target = entry.toolSummary || lines.find(line => line.trim()) || "";
-  const summary = { marker, target, state: state === "success" ? "done" : state, tone, ...(entry.toolName === "bash" ? shellPresentation(entry) : {}) };
+  const summary = { marker, target, state: state === "success" ? "done" : state === "cancelled" ? "Stopped" : state, tone, ...(entry.toolName === "bash" ? shellPresentation(entry) : {}) };
   if (expanded) return { ...summary, detail: lines.join("\n") };
   if (state === "success") return { ...summary, detail: "" };
   const preview = state === "running" ? lines.slice(-3) : lines.slice(0, 6);

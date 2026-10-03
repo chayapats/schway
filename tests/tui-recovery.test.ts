@@ -291,6 +291,46 @@ test("cancelling a continuation retains its saved task for another explicit cont
   });
 });
 
+for (const change of ["branch", "session", "new-turn", "keep-editing"] as const) {
+  test(`a stopped turn's continuation cannot outlive ${change}`, async () => withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    const session = createSession();
+    let stop = true;
+    let requests = 0;
+    const tui = new TuiController({ session, workspace, contextManager: createContextManager(workspace),
+      provider: "scripted", modelId: "stopped", sessionId: "stopped-recovery",
+      model: createScriptedModel({ responses: [
+        () => { requests++; return { text: "partial", waitForAbort: true }; },
+        () => { requests++; return { text: "new task completed" }; },
+      ] }),
+      onRuntimeEvent(event) { if (stop && event.type === "model.delta") { stop = false; tui.cancel(); } },
+    });
+    const pending = tui.submit("original task");
+    try {
+      expect(await pending).toBe(true);
+      const operationId = tui.snapshot().recovery!.operationId;
+      expect(tui.snapshot().recovery?.actions).toEqual(["continue", "keep-editing"]);
+      expect(requests).toBe(1);
+      if (change === "branch") {
+        expect(tui.branchCommand(`fork ${session.rootId} separate`)).toBe(true);
+        expect(await tui.continueRecovery()).toBe(false);
+        expect(tui.branchCommand("switch main")).toBe(true);
+      } else if (change === "session") tui.replaceSession(createSession(), "replacement");
+      else if (change === "keep-editing") expect(tui.keepEditingRecovery()).toBe(true);
+      else expect(await tui.submit("explicit new task")).toBe(true);
+      const before = tui.snapshot();
+      tui.applyEvent({ type: "agent.finished", reason: "cancelled" }, operationId);
+      expect(tui.snapshot().transcript).toEqual(before.transcript);
+      expect(tui.snapshot().outcome).toEqual(before.outcome);
+      expect(tui.snapshot().recovery).toBeUndefined();
+      expect(await tui.continueRecovery()).toBe(false);
+      expect(tui.keepEditingRecovery()).toBe(false);
+      expect(requests).toBe(change === "new-turn" ? 2 : 1);
+      expect(session.items.filter(item => item.type === "user")).toHaveLength(change === "new-turn" ? 2 : 1);
+    } finally { tui.dispose(); await Promise.allSettled([pending]); }
+  }));
+}
+
 
 test("forbidden credentials do not imply expiry and retain diagnostic details", async () => {
   await withTempDir(async dir => {
