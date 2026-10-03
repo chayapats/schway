@@ -556,9 +556,43 @@ test("links, selection and mouse tool toggles still work during inspection", asy
   expect(ui.copied.at(-1)).toBe("Click result");
 });
 
-test("selected-text Ctrl+C keeps precedence and recovery when the clipboard throws", async () => {
+for (const kind of ["code", "tool"] as const) for (const action of ["quit", "copy", "uppercase-copy"] as const) {
+  test(`idle ${kind} inspection ${action} preserves the Thai draft and cursor`, async () => {
+    const ui = await setup(50, 24);
+    const text = "canonical ภาษาไทย 🧪";
+    if (kind === "code") {
+      ui.controller.replaceSession(createSession([{ type: "assistant", id: "selected-code", content: [{ type: "text", text: `\`\`\`txt\n${text}\n\`\`\`` }] }]), "inspection-session");
+    } else {
+      ui.controller.applyEvent({ type: "tool.started", toolCallId: "selected-tool", name: "read" });
+      ui.controller.applyEvent({ type: "tool.finished", toolCallId: "selected-tool", name: "read", status: "success", content: text });
+    }
+    await ui.settle();
+    await ui.mockInput.pasteBracketedText("เก็บภาษาไทย\nอีกบรรทัด 😀");
+    ui.editor.cursorOffset = 9;
+    const draft = ui.editor.plainText, cursor = ui.editor.cursorOffset;
+    ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+    expect(ui.controller.running).toBe(false);
+    expect(ui.renderer.getSelection()?.getSelectedText() ?? "").toBe("");
+    expect(ui.editor.focused).toBe(false);
+    expect(ui.captureCharFrame()).toContain("C copy");
+    ui.mockInput.pressKey("c", action === "quit" ? { ctrl: true } : action === "uppercase-copy" ? { shift: true } : {});
+    await ui.settle();
+    expect(ui.didQuit()).toBe(action === "quit");
+    expect(ui.copied).toEqual(action === "quit" ? [] : [text]);
+    expect(ui.editor.plainText).toBe(draft);
+    expect(ui.editor.cursorOffset).toBe(cursor);
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.editor.focused).toBe(true);
+    expect(ui.editor.plainText).toBe(draft);
+    expect(ui.editor.cursorOffset).toBe(cursor);
+  });
+}
+
+for (const clipboard of [true, false, "throw"] as const) test(`selected-text Ctrl+C keeps precedence with clipboard ${clipboard}`, async () => {
   const ui = await setup();
-  await ui.mockInput.pasteBracketedText("keep draft");
+  await ui.mockInput.pasteBracketedText("keep draft ภาษาไทย");
+  ui.editor.cursorOffset = 3;
+  const cursor = ui.editor.cursorOffset;
   ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "Select this text\n\n```txt\ncode\n```" } });
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
@@ -568,14 +602,16 @@ test("selected-text Ctrl+C keeps precedence and recovery when the clipboard thro
   const x = lines[y]!.indexOf("Select this text");
   ui.setClipboard(false);
   await ui.mockMouse.drag(x, y, x + 5, y);
-  expect(ui.renderer.getSelection()?.getSelectedText()).toBeTruthy();
-  ui.setClipboard("throw");
+  const selected = ui.renderer.getSelection()?.getSelectedText();
+  expect(selected).toBeTruthy();
+  ui.setClipboard(clipboard);
   expect(() => ui.mockInput.pressKey("c", { ctrl: true })).not.toThrow();
   expect(ui.renderer.getSelection()?.getSelectedText() ?? "").toBe("");
   await ui.settle();
-  expect(ui.copied).toEqual([]);
-  expect(ui.captureCharFrame()).toContain("native selection");
-  expect(ui.editor.plainText).toBe("keep draft");
+  expect(ui.copied).toEqual(clipboard === true ? [selected!] : []);
+  expect(ui.captureCharFrame()).toContain(clipboard === true ? "Copied selection" : "native selection");
+  expect(ui.editor.plainText).toBe("keep draft ภาษาไทย");
+  expect(ui.editor.cursorOffset).toBe(cursor);
   expect(ui.editor.focused).toBe(false);
   expect(ui.didQuit()).toBe(false);
 });
@@ -587,7 +623,9 @@ test("Ctrl+C cancels a running turn during inspection without copying or losing 
   await ui.waitFor(() => ui.controller.running);
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "previous", name: "read" });
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: "previous", name: "read", status: "success", content: "previous result" });
-  await ui.mockInput.pasteBracketedText("future draft");
+  await ui.mockInput.pasteBracketedText("future draft ภาษาไทย");
+  ui.editor.cursorOffset = 3;
+  const cursor = ui.editor.cursorOffset;
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
   await ui.settle();
@@ -599,10 +637,14 @@ test("Ctrl+C cancels a running turn during inspection without copying or losing 
   expect(ui.controller.running).toBe(false);
   expect(ui.copied).toEqual([]);
   expect(ui.didQuit()).toBe(false);
-  expect(ui.editor.plainText).toBe("future draft");
+  expect(ui.editor.plainText).toBe("future draft ภาษาไทย");
+  expect(ui.editor.cursorOffset).toBe(cursor);
   expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("previous result"))).toBe(true);
   ui.mockInput.pressKey("c", { ctrl: true });
-  expect(ui.copied.at(-1)).toBe("previous result");
+  expect(ui.didQuit()).toBe(true);
+  expect(ui.copied).toEqual([]);
+  expect(ui.editor.plainText).toBe("future draft ภาษาไทย");
+  expect(ui.editor.cursorOffset).toBe(cursor);
 });
 
 for (const action of ["inspection-escape", "recovery-escape", "continue", "inspection-continue"] as const) {

@@ -1371,7 +1371,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         } else copyInspection(snapshot);
         handled(); return;
       }
-      if (key.ctrl && name === "c" && controller.running) { controller.cancel(); handled(); return; }
+      if (key.ctrl && name === "c") { if (controller.running) controller.cancel(); else options.quit(); handled(); return; }
       if (name === "c") { copyInspection(snapshot); handled(); return; }
       if (key.ctrl && name === "o") { allExpanded = !allExpanded; expandedTools.clear(); handled(); return; }
       if (key.ctrl && name === "end") { latest(); handled(); return; }
