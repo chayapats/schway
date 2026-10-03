@@ -28,6 +28,7 @@ async function run(argv: string[], home: string, cwd: string) {
     stderr: { write: (chunk: string) => { stderr += chunk; return true; } } as never,
     env: { HOME: home, ANTHROPIC_API_KEY: "sk-ant-ignored" },
     cwd,
+    terminal: { stdin: true, stdout: true },
     credentialStore: { get: async () => null, set: async () => {}, delete: async () => false },
   });
   return { exitCode, stdout, stderr };
