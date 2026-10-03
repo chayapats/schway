@@ -183,7 +183,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
       const timer = setTimeout(() => child.kill(), 8000);
       try {
         const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-        expect(stderr).toMatch(/^(?:Latest completed draft checkpoint saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/); expect(exit).toBe(0);
+        expect(stderr).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/); expect(exit).toBe(0);
         return JSON.parse(stdout.trim()) as { code: number; requests: Array<{ provider: string; model: string; thinking?: string; apiKey: string }>; screen: string };
       } finally { clearTimeout(timer); }
     };
@@ -234,7 +234,7 @@ test("fresh startup explains removed credentials and subscription models without
       const timer = setTimeout(() => child.kill(), 8000);
       try {
         const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-        expect(code).toBe(0); expect(err).toMatch(/^(?:Latest completed draft checkpoint saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
+        expect(code).toBe(0); expect(err).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
         return JSON.parse(out) as { requests: Array<{ provider: string; openaiAuth?: string; model: string; thinking?: string }>; screen: string };
       } finally { clearTimeout(timer); }
     };
@@ -378,7 +378,7 @@ test("corrupt memory cannot choose a fallback route but complete explicit CLI se
       const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
       try {
         const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-        expect(code).toBe(0); expect(err).toMatch(/^(?:Latest completed draft checkpoint saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
+        expect(code).toBe(0); expect(err).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
         return JSON.parse(out) as { requests: Array<{ provider: string; model: string; apiKey?: string }>; screen: string };
       } finally { clearTimeout(timer); }
     };
