@@ -116,9 +116,11 @@ export type PaletteChoice = (CommandChoice & { kind: "command" }) | KeyboardGuid
 /** Build searchable presentation rows from resolved commands and observed availability without dispatch or discovery. */
 export function paletteChoices(commands: readonly CommandChoice[], availability: Readonly<Record<KeyboardGuideId, KeyboardGuideAvailability>>, query = ""): PaletteChoice[] {
   const rows: PaletteChoice[] = commands.map(command => ({ ...command, kind: "command" }));
-  const guides = (Object.keys(KEYBOARD_GUIDES) as KeyboardGuideId[]).map((id): KeyboardGuideChoice => ({
-    ...KEYBOARD_GUIDES[id], ...availability[id], kind: "keyboard", id: `keyboard:${id}`, aliases: [...KEYBOARD_GUIDES[id].aliases],
-  }));
+  const guides = (Object.keys(KEYBOARD_GUIDES) as KeyboardGuideId[]).map((id): KeyboardGuideChoice => {
+    const observed = availability[id];
+    const state: KeyboardGuideAvailability = observed.available ? { available: true } : { available: false, reason: observed.reason };
+    return { ...KEYBOARD_GUIDES[id], ...state, kind: "keyboard", id: `keyboard:${id}`, aliases: [...KEYBOARD_GUIDES[id].aliases] };
+  });
   const destructive = rows.findIndex(row => row.kind === "command" && (row.destructive || row.group === "destructive"));
   rows.splice(destructive < 0 ? rows.length : destructive, 0, ...guides);
   const needle = query.trim().normalize("NFC").toLowerCase();

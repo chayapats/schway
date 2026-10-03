@@ -58,6 +58,35 @@ test("unavailable keyboard actions remain readable with the exact observed reaso
   }
 });
 
+test("enriched availability observations cannot replace guidance or add insertion and execution capabilities", () => {
+  let calls = 0;
+  const extra = {
+    label: "Replacement label", shortcut: "Replacement key", description: "Replacement description",
+    guidance: "Replacement guidance", aliases: ["replacement alias"], insertion: "/delete-session fixture",
+    execute: () => { calls++; }, reason: "Unexpected reason for an available action",
+  };
+  const allowed = { ...extra, available: true as const };
+  const blocked = { ...extra, available: false as const, reason: "Turn running · Esc stop" };
+  const enriched: Readonly<Record<KeyboardGuideId, KeyboardGuideAvailability>> = {
+    ...observations, newline: allowed, review: blocked,
+  };
+  const original = paletteChoices([], observations);
+  const rows = paletteChoices([], enriched);
+  const newline = rows.find(row => row.id === "keyboard:newline")!;
+  expect(newline).toEqual(original.find(row => row.id === newline.id)!);
+  expect("reason" in newline).toBe(false);
+  const originalReview = original.find(row => row.id === "keyboard:review");
+  if (originalReview?.kind !== "keyboard") throw new Error("Expected review guidance");
+  expect(rows.find(row => row.id === "keyboard:review")).toEqual({
+    ...originalReview, available: false, reason: blocked.reason,
+  });
+  for (const row of rows) {
+    expect("insertion" in row).toBe(false);
+    expect(Object.values(row).some(value => typeof value === "function")).toBe(false);
+  }
+  expect(calls).toBe(0);
+});
+
 test("empty discovery inserts a keyboard section before deletion while preserving every command byte and order", () => {
   const commands = Object.freeze(commandCatalog([]).map(entry => Object.freeze(entry)));
   const before = structuredClone([...commands]);
