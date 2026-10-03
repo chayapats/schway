@@ -620,7 +620,7 @@ test("missing manifest paths are distinct from missing installs and safely ident
 test("doctor help lists diagnostic flags without implying model runs", async () => {
   const { workspace, home } = await fixture();
   let text = "";
-  const exit = await runCli(["doctor", "--help"], {
+  const exit = await runCli(["doctor", "--model", "custom/model", "--help"], {
     cwd: workspace, env: { HOME: home }, stdout: { write(chunk) { text += chunk; } }, stderr: { write() {} },
   });
   expect(exit).toBe(0);
@@ -628,7 +628,8 @@ test("doctor help lists diagnostic flags without implying model runs", async () 
   for (const flag of ["--api-key", "--openai-auth", "--base-url", "--auth", "--header", "--body", "--env-file", "--add-dir", "--extension"]) {
     expect(doctor).toContain(flag);
   }
-  expect(doctor).not.toContain("--model");
+  expect(doctor).toContain("  --model <id>               Use this model for local checks\n");
+  expect(doctor).toContain("check your setup without running a model");
   expect(doctor).toContain("\nUsage\n  schway doctor [options]\n");
   expect(doctor).toContain("\nExamples\n");
 });
