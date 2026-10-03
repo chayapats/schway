@@ -279,6 +279,80 @@ partial-preview state. Cache updates use same-directory temporary replacement;
 JSONL remains the durable conversation authority. Recovery tools that enumerate
 transcripts should select `.jsonl` files, not every file in the sessions directory.
 
+## List saved work from the CLI
+
+`schway sessions list` inspects saved work without opening the TUI or resuming a
+session. It works with redirected input/output and needs no model or credentials.
+Use an exact listed ID with `schway --resume <session-id> -p "<task>"`; starting or
+resuming a task still requires your configured model and route.
+
+```bash
+schway sessions list
+schway sessions list --workspace ../project --limit 10 --offset 20
+schway sessions list --all --preview --json
+```
+
+The command reads sessions from the process `HOME` under `.schway/sessions`.
+Without `--all`, it filters to the launch directory's canonical primary workspace;
+`--workspace` resolves an explicit directory with the same nearest-Git-root and
+realpath rules. `--all` and `--workspace` conflict. Limit defaults to 20 and accepts
+1–100; offset defaults to 0 and must be a nonnegative integer. A missing session
+directory is an empty success. Missing/inaccessible `HOME`, inaccessible storage
+and cancellation produce actionable stderr diagnostics. Unrelated provider,
+task, authentication and mutation flags are rejected before storage is read.
+
+Listing captures candidate names once, produces at most one row per exact
+filename-derived ID, and inspects each history with at most 64 KiB of transcript
+plus at most 2 KiB of activity metadata. It sorts the captured rows by valid
+`activityAt`, falling back to valid `createdAt`, descending; unknown times come
+last and exact IDs break ties in ascending order. Workspace filtering precedes
+pagination over the whole set. Concurrent writes are not an atomic filesystem
+snapshot: later invocations and offset pages can move as saved work changes.
+
+Default output contains exact ID, time, workspace and observed state. `--preview`
+adds a one-line task excerpt of at most 160 Unicode code points. It never displays
+draft text or tool arguments/results. Sensitive command/callback/credential
+patterns suppress the excerpt; explicitly known environment secrets are masked
+in raw and trimmed forms and after display normalization. Arbitrary secrets are
+not detected, so excerpts may still contain user-sensitive content. Sensitive or
+control-bearing IDs are omitted with a partial-result warning; they are never
+redacted into false resume tokens. Sensitive workspace paths are omitted from
+rows and scope. Damaged headers with unknown workspaces remain visible with
+`--all`.
+
+`--json` writes one object with `schemaVersion: 1`, `scope: {workspace?, all}`,
+`limit`, `offset`, `hasMore`, `status`, `sessions` and `warnings`. Each session row
+has `id`, optional `createdAt`, `activityAt` and `workspaceRoot`, a `state`, and
+`previewIncomplete`. The optional `preview` key appears only with `--preview`
+and only when a safe excerpt is available. Machine states contain no TUI hints.
+
+State precedence is: unreadable bytes (`unreadable`); corrupt or mismatched header
+(`corrupt`); structurally valid unsupported format (`unsupported`); observed
+known-format corruption (`corrupt`); incomplete validation window (`partial`);
+observed interruption (`interrupted`); empty history with a valid present draft
+(`draft`); empty history without one (`empty`); supported nonempty legacy history
+(`legacy`); otherwise `ready`. A window ending inside an unfinished header is
+`partial`, with no invented workspace or draft evidence. `previewIncomplete`
+marks incomplete transcript validation; explicit resume validates the full file.
+Draft and legacy status cannot conceal corruption, unsupported data or interruption.
+
+The inventory's `status` is `complete`, `partial` or `error`. Exit 0 means the
+captured inventory completed, including empty results and discoverable damaged
+histories. A bounded `partial` history row alone does not make the inventory
+partial. Exit 1 means an incomplete inventory, cancellation or operational error;
+accessible completed rows remain available with warnings. Exit 2 means invalid
+arguments and leaves stdout empty. Operational JSON remains parseable and stderr
+carries diagnostics.
+
+No listing operation loads config, environment files, provider credentials or
+remembered TUI settings. It never invokes the resume loader, repairs or truncates
+histories, settles interrupted calls, replays tools, switches branches, prunes
+undo/drafts, or recovers stopped draft writers. Draft detection only inspects a
+read-only checkpoint envelope, bounded to 4 MiB, and returns validity, identity
+and present/cleared evidence. Inaccessible or unverifiable checkpoints produce a
+warning rather than a claim that a recoverable draft exists. Checkpoint contents,
+stale locks and recovery artifacts remain untouched.
+
 ## Unsent draft checkpoints
 
 Interactive ordinary input checkpoints separately under `~/.schway/drafts` after

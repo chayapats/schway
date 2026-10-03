@@ -17,7 +17,7 @@ whitespace, including multiline text. Stdin is not implicitly used as a task.
 
 Explicit tasks work with terminal or redirected input and output. Without `-p`,
 both stdin and stdout must be terminals; stderr may be redirected. Help, version
-and doctor do not need a terminal. Embedded `runCli` callers may provide
+doctor and session listing do not need a terminal. Embedded `runCli` callers may provide
 `terminal: { stdin: true, stdout: true }` for an interactive renderer; omitted
 capabilities default to false. The executable reads the actual stdin/stdout
 terminal capabilities.
@@ -59,6 +59,46 @@ From a source checkout with dependencies installed, run:
 ```bash
 bun run dev -- -p "hello"
 ```
+
+## Browse saved work
+
+```bash
+schway sessions list
+schway sessions list --workspace ../project --limit 10 --offset 20
+schway sessions list --all --preview --json
+schway --resume <session-id> -p "continue this work"
+```
+
+Listing uses process `HOME` and defaults to the launch directory's canonical
+primary workspace. `--all` includes other and unknown workspaces; it conflicts
+with `--workspace`. Limit defaults to 20 (1–100); offset defaults to 0.
+Use `schway sessions --help` for options. Starting or resuming a task still needs
+your configured model and route.
+
+This command reads saved work without loading configuration, environment files,
+provider credentials or the TUI. It does not resume, repair, recover drafts,
+prune, delete or change saved files. Default output contains exact session IDs,
+time, workspace and observed state. `--preview` opts into a short task excerpt;
+draft text and tool payloads are never shown. Recognized credential patterns are
+suppressed and known environment secrets are masked, including trimmed values.
+Excerpts may still contain user-sensitive content; arbitrary secrets are not
+detected. Sensitive IDs are omitted with a partial warning rather than changed
+into an unusable resume token. Sensitive workspace paths are also omitted.
+
+Session listing's `--json` emits one versioned inventory object, not runtime
+JSONL events. It includes `scope`, `limit`, `offset`, `hasMore`, inventory
+`status`, `sessions` and `warnings`; preview keys appear only when requested and
+safe to show. Exit 0 means the captured inventory completed, 1 means an
+operational failure, cancellation or incomplete inventory, and 2 means invalid
+arguments (stdout stays empty). Diagnostics use stderr. A corrupt or unsupported
+history remains a discoverable row and does not itself fail the command.
+
+Each history receives at most 64 KiB of transcript inspection and bounded
+metadata reads. A `partial` row with `previewIncomplete: true` does not imply
+corruption or full validation; explicit resume validates the complete history.
+The captured rows are sorted by valid activity/creation time, then exact ID,
+before filtering and pagination. Concurrent changes can move offset pages
+between invocations. See [session discovery](sessions.md) for saved-work states.
 
 ## Cancellation
 
