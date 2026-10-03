@@ -402,7 +402,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       const ready = headlessSessionReadyPreamble(event, secrets);
       if (ready) {
         if (parsed.args.json) io.stdout.write(`${JSON.stringify(ready)}\n`);
-        else io.stderr.write(`Session ${ready.sessionId} · Resume with --resume ${ready.sessionId}\n`);
+        // JSONL escapes controls; the optional terminal hint must stay one printable line.
+        else if (!/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(ready.sessionId)) io.stderr.write(`Session ${ready.sessionId} · Resume with --resume ${ready.sessionId}\n`);
       }
     }
     session.append({

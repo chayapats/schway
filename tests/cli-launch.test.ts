@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runCli, type CliIo } from "../src/cli/main.ts";
 import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
+import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
@@ -166,6 +167,35 @@ test("native headless ask denies a mutation without waiting for input or changin
     const events = result.stdout.trimEnd().split("\n").map(line => JSON.parse(line));
     expect(events.find(event => event.type === "tool.denied")).toEqual({ type: "tool.denied", toolCallId: "fixture-call", name: "write", mode: "ask", reason: "approval required; headless cannot ask" });
     expect(await Bun.file(join(home, "must-not-exist")).exists()).toBe(false);
+  });
+});
+
+for (const [name, id, printable] of [
+  ["ASCII", "legacy-exact-id", true],
+  ["Unicode without normalization", "เซสชัน-🧪-cafe\u0301", true],
+  ["newline", "legacy\nsecond-line", false],
+  ["ANSI escape", "legacy\u001b[2Jid", false],
+  ["C1 control", "legacy\u0085id", false],
+  ["format control", "legacy\u200eid", false],
+  ["line separator", "legacy\u2028id", false],
+  ["paragraph separator", "legacy\u2029id", false],
+] as const) test(`native resumed ${name} ID preserves JSONL and ${printable ? "prints an exact" : "suppresses the entire"} text hint`, async () => {
+  await withTempDir(async home => {
+    const directory = sessionsDirectory(home);
+    const created = await createJsonlSession({ directory, workspace: { root: home, launchCwd: home, extraRoots: [] } });
+    await writeFile(join(directory, `${id}.jsonl`), JSON.stringify({ ...created.header, id }) + "\n");
+    await unlink(join(directory, `${created.header.id}.jsonl`));
+    const env = buildIsolatedCliEnv(home, { SCHWAY_DOCS_MODE: "success", OPENAI_API_KEY: "fixture-openai-key",
+      BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/headless-docs-preload.ts")}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" });
+    for (const flag of [undefined, "--show-session", "--json"]) {
+      const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", "--resume", id, ...(flag ? [flag] : [])], home, env);
+      expect(result.exit, result.stderr).toBe(0);
+      expect(result.stderr).toBe(flag === "--show-session" && printable ? `Session ${id} · Resume with --resume ${id}\n` : "");
+      if (flag === "--json") {
+        expect(result.stdout.split("\n")[0]).toBe(JSON.stringify({ type: "session.ready", sessionId: id }));
+        expect(JSON.parse(result.stdout.split("\n")[0]!).sessionId).toBe(id);
+      } else expect(result.stdout).toBe("Fixture answer\n");
+    }
   });
 });
 
