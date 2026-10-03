@@ -1,0 +1,206 @@
+schway-screen 1
+screen shell-outcomes
+title Shell exit evidence
+description Exit codes, cancellation, timeout, unknown evidence and tool errors retain distinct text and glyphs.
+variant light-40
+size 40x36
+cursor 6 33 visible
+== text
+ ⚡ schway  /project
+
+  ✓  BASH  exit 0   Exit 0 · 1.2s ▸
+  !  BASH  exit 7   Exit 7 · 1.2s ▸
+  −  BASH  kill -TERM $$  Stopped ▸
+  −  BASH  sleep 5        Stopped ▸
+    Command cancelled.
+
+  !  BASH  sleep 5      Timed out ▾
+    Command timed out.
+    Tool failed. Inspect this result
+    before continuing.
+
+  −  BASH  run … No exit observed ▸
+  −  BASH  insp… No exit observed ▸
+  !  BASH  run unavai… Tool error ▾
+    Command could not start.
+    Tool failed. Inspect this result
+    before continuing.
+
+
+
+
+
+
+
+
+
+
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripte…    ctx ~108
+ Shift+Tab change mode · Enter send
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-40 #ffffff #ecedea -
+01 0-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #0a5894 #e1e3df -
+02 2-3 #19612f #e1e3df b
+02 3-4 #1d232c #e1e3df -
+02 4-10 #6a3fb0 #d3cfd9 b
+02 10-17 #1d232c #e1e3df -
+02 17-20 #545e6c #e1e3df -
+02 20-33 #19612f #e1e3df -
+02 33-36 #545e6c #e1e3df -
+02 36-38 #ffffff #e1e3df -
+02 38-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-2 #0a5894 #e1e3df -
+03 2-3 #7a5000 #e1e3df b
+03 3-4 #1d232c #e1e3df -
+03 4-10 #6a3fb0 #d3cfd9 b
+03 10-17 #1d232c #e1e3df -
+03 17-20 #545e6c #e1e3df -
+03 20-33 #7a5000 #e1e3df -
+03 33-36 #545e6c #e1e3df -
+03 36-38 #ffffff #e1e3df -
+03 38-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-2 #0a5894 #e1e3df -
+04 2-3 #545e6c #e1e3df b
+04 3-4 #1d232c #e1e3df -
+04 4-10 #6a3fb0 #d3cfd9 b
+04 10-24 #1d232c #e1e3df -
+04 24-36 #545e6c #e1e3df -
+04 36-38 #ffffff #e1e3df -
+04 38-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-2 #0a5894 #e1e3df -
+05 2-3 #545e6c #e1e3df b
+05 3-4 #1d232c #e1e3df -
+05 4-10 #6a3fb0 #d3cfd9 b
+05 10-18 #1d232c #e1e3df -
+05 18-36 #545e6c #e1e3df -
+05 36-38 #ffffff #e1e3df -
+05 38-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-4 #ffffff #e1e3df -
+06 4-22 #545e6c #e1e3df -
+06 22-38 #ffffff #e1e3df -
+06 38-40 #ffffff #f7f7f4 -
+07 0-40 #ffffff #f7f7f4 -
+08 0-1 #ffffff #f7f7f4 -
+08 1-2 #0a5894 #e1e3df -
+08 2-3 #a61f16 #e1e3df b
+08 3-4 #1d232c #e1e3df -
+08 4-10 #6a3fb0 #d3cfd9 b
+08 10-18 #1d232c #e1e3df -
+08 18-24 #545e6c #e1e3df -
+08 24-33 #a61f16 #e1e3df -
+08 33-36 #545e6c #e1e3df -
+08 36-38 #ffffff #e1e3df -
+08 38-40 #ffffff #f7f7f4 -
+09 0-1 #ffffff #f7f7f4 -
+09 1-4 #ffffff #e1e3df -
+09 4-22 #545e6c #e1e3df -
+09 22-38 #ffffff #e1e3df -
+09 38-40 #ffffff #f7f7f4 -
+10 0-1 #ffffff #f7f7f4 -
+10 1-4 #ffffff #e1e3df -
+10 4-37 #545e6c #e1e3df -
+10 37-38 #ffffff #e1e3df -
+10 38-40 #ffffff #f7f7f4 -
+11 0-1 #ffffff #f7f7f4 -
+11 1-4 #ffffff #e1e3df -
+11 4-22 #545e6c #e1e3df -
+11 22-38 #ffffff #e1e3df -
+11 38-40 #ffffff #f7f7f4 -
+12 0-40 #ffffff #f7f7f4 -
+13 0-1 #ffffff #f7f7f4 -
+13 1-2 #0a5894 #e1e3df -
+13 2-3 #545e6c #e1e3df b
+13 3-4 #1d232c #e1e3df -
+13 4-10 #6a3fb0 #d3cfd9 b
+13 10-16 #1d232c #e1e3df -
+13 16-36 #545e6c #e1e3df -
+13 36-38 #ffffff #e1e3df -
+13 38-40 #ffffff #f7f7f4 -
+14 0-1 #ffffff #f7f7f4 -
+14 1-2 #0a5894 #e1e3df -
+14 2-3 #545e6c #e1e3df b
+14 3-4 #1d232c #e1e3df -
+14 4-10 #6a3fb0 #d3cfd9 b
+14 10-16 #1d232c #e1e3df -
+14 16-36 #545e6c #e1e3df -
+14 36-38 #ffffff #e1e3df -
+14 38-40 #ffffff #f7f7f4 -
+15 0-1 #ffffff #f7f7f4 -
+15 1-2 #0a5894 #e1e3df -
+15 2-3 #a61f16 #e1e3df b
+15 3-4 #1d232c #e1e3df -
+15 4-10 #6a3fb0 #d3cfd9 b
+15 10-22 #1d232c #e1e3df -
+15 22-23 #545e6c #e1e3df -
+15 23-33 #a61f16 #e1e3df -
+15 33-36 #545e6c #e1e3df -
+15 36-38 #ffffff #e1e3df -
+15 38-40 #ffffff #f7f7f4 -
+16 0-1 #ffffff #f7f7f4 -
+16 1-4 #ffffff #e1e3df -
+16 4-28 #545e6c #e1e3df -
+16 28-38 #ffffff #e1e3df -
+16 38-40 #ffffff #f7f7f4 -
+17 0-1 #ffffff #f7f7f4 -
+17 1-4 #ffffff #e1e3df -
+17 4-37 #545e6c #e1e3df -
+17 37-38 #ffffff #e1e3df -
+17 38-40 #ffffff #f7f7f4 -
+18 0-1 #ffffff #f7f7f4 -
+18 1-4 #ffffff #e1e3df -
+18 4-22 #545e6c #e1e3df -
+18 22-38 #ffffff #e1e3df -
+18 38-40 #ffffff #f7f7f4 -
+19 0-40 #ffffff #f7f7f4 -
+20 0-40 #ffffff #f7f7f4 -
+21 0-40 #ffffff #f7f7f4 -
+22 0-40 #ffffff #f7f7f4 -
+23 0-40 #ffffff #f7f7f4 -
+24 0-40 #ffffff #f7f7f4 -
+25 0-40 #ffffff #f7f7f4 -
+26 0-40 #ffffff #f7f7f4 -
+27 0-40 #ffffff #f7f7f4 -
+28 0-40 #ffffff #f7f7f4 -
+29 0-40 #ffffff #f7f7f4 -
+30 0-40 #ffffff #f7f7f4 -
+31 0-1 #ffffff #f7f7f4 -
+31 1-39 #ecedea #f7f7f4 -
+31 39-40 #ffffff #f7f7f4 -
+32 0-1 #ffffff #f7f7f4 -
+32 1-5 #0a5894 #ecedea -
+32 5-16 #545e6c #ecedea -
+32 16-39 #ffffff #ecedea -
+32 39-40 #ffffff #f7f7f4 -
+33 0-1 #ffffff #f7f7f4 -
+33 1-39 #ecedea #f7f7f4 -
+33 39-40 #ffffff #f7f7f4 -
+34 0-1 #545e6c #ecedea -
+34 1-7 #1d232c #ecedea b
+34 7-8 #545e6c #ecedea -
+34 8-17 #19612f #d3dcd4 b
+34 17-18 #545e6c #ecedea -
+34 18-28 #1d232c #e1e3df -
+34 28-39 #545e6c #ecedea -
+34 39-40 #ffffff #f7f7f4 -
+35 0-1 #ffffff #f7f7f4 -
+35 1-10 #1d232c #caced3 b
+35 10-25 #545e6c #f7f7f4 -
+35 25-30 #1d232c #caced3 b
+35 30-35 #545e6c #f7f7f4 -
+35 35-40 #ffffff #f7f7f4 -

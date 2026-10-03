@@ -1,0 +1,206 @@
+schway-screen 1
+screen shell-outcomes
+title Shell exit evidence
+description Exit codes, cancellation, timeout, unknown evidence and tool errors retain distinct text and glyphs.
+variant dark-40
+size 40x36
+cursor 6 33 visible
+== text
+ ⚡ schway  /project
+
+  ✓  BASH  exit 0   Exit 0 · 1.2s ▸
+  !  BASH  exit 7   Exit 7 · 1.2s ▸
+  −  BASH  kill -TERM $$  Stopped ▸
+  −  BASH  sleep 5        Stopped ▸
+    Command cancelled.
+
+  !  BASH  sleep 5      Timed out ▾
+    Command timed out.
+    Tool failed. Inspect this result
+    before continuing.
+
+  −  BASH  run … No exit observed ▸
+  −  BASH  insp… No exit observed ▸
+  !  BASH  run unavai… Tool error ▾
+    Command could not start.
+    Tool failed. Inspect this result
+    before continuing.
+
+
+
+
+
+
+
+
+
+
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripte…    ctx ~108
+ Shift+Tab change mode · Enter send
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-40 #ffffff #161b24 -
+01 0-40 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-2 #7cc4ff #1e2430 -
+02 2-3 #8fd19e #1e2430 b
+02 3-4 #e6eaf0 #1e2430 -
+02 4-10 #c0acff #42425e b
+02 10-17 #e6eaf0 #1e2430 -
+02 17-20 #8b95a7 #1e2430 -
+02 20-33 #8fd19e #1e2430 -
+02 33-36 #8b95a7 #1e2430 -
+02 36-38 #ffffff #1e2430 -
+02 38-40 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-2 #7cc4ff #1e2430 -
+03 2-3 #f0c674 #1e2430 b
+03 3-4 #e6eaf0 #1e2430 -
+03 4-10 #c0acff #42425e b
+03 10-17 #e6eaf0 #1e2430 -
+03 17-20 #8b95a7 #1e2430 -
+03 20-33 #f0c674 #1e2430 -
+03 33-36 #8b95a7 #1e2430 -
+03 36-38 #ffffff #1e2430 -
+03 38-40 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-2 #7cc4ff #1e2430 -
+04 2-3 #8b95a7 #1e2430 b
+04 3-4 #e6eaf0 #1e2430 -
+04 4-10 #c0acff #42425e b
+04 10-24 #e6eaf0 #1e2430 -
+04 24-36 #8b95a7 #1e2430 -
+04 36-38 #ffffff #1e2430 -
+04 38-40 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-2 #7cc4ff #1e2430 -
+05 2-3 #8b95a7 #1e2430 b
+05 3-4 #e6eaf0 #1e2430 -
+05 4-10 #c0acff #42425e b
+05 10-18 #e6eaf0 #1e2430 -
+05 18-36 #8b95a7 #1e2430 -
+05 36-38 #ffffff #1e2430 -
+05 38-40 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-4 #ffffff #1e2430 -
+06 4-22 #8b95a7 #1e2430 -
+06 22-38 #ffffff #1e2430 -
+06 38-40 #ffffff #0e1117 -
+07 0-40 #ffffff #0e1117 -
+08 0-1 #ffffff #0e1117 -
+08 1-2 #7cc4ff #1e2430 -
+08 2-3 #f79d9d #1e2430 b
+08 3-4 #e6eaf0 #1e2430 -
+08 4-10 #c0acff #42425e b
+08 10-18 #e6eaf0 #1e2430 -
+08 18-24 #8b95a7 #1e2430 -
+08 24-33 #f79d9d #1e2430 -
+08 33-36 #8b95a7 #1e2430 -
+08 36-38 #ffffff #1e2430 -
+08 38-40 #ffffff #0e1117 -
+09 0-1 #ffffff #0e1117 -
+09 1-4 #ffffff #1e2430 -
+09 4-22 #8b95a7 #1e2430 -
+09 22-38 #ffffff #1e2430 -
+09 38-40 #ffffff #0e1117 -
+10 0-1 #ffffff #0e1117 -
+10 1-4 #ffffff #1e2430 -
+10 4-37 #8b95a7 #1e2430 -
+10 37-38 #ffffff #1e2430 -
+10 38-40 #ffffff #0e1117 -
+11 0-1 #ffffff #0e1117 -
+11 1-4 #ffffff #1e2430 -
+11 4-22 #8b95a7 #1e2430 -
+11 22-38 #ffffff #1e2430 -
+11 38-40 #ffffff #0e1117 -
+12 0-40 #ffffff #0e1117 -
+13 0-1 #ffffff #0e1117 -
+13 1-2 #7cc4ff #1e2430 -
+13 2-3 #8b95a7 #1e2430 b
+13 3-4 #e6eaf0 #1e2430 -
+13 4-10 #c0acff #42425e b
+13 10-16 #e6eaf0 #1e2430 -
+13 16-36 #8b95a7 #1e2430 -
+13 36-38 #ffffff #1e2430 -
+13 38-40 #ffffff #0e1117 -
+14 0-1 #ffffff #0e1117 -
+14 1-2 #7cc4ff #1e2430 -
+14 2-3 #8b95a7 #1e2430 b
+14 3-4 #e6eaf0 #1e2430 -
+14 4-10 #c0acff #42425e b
+14 10-16 #e6eaf0 #1e2430 -
+14 16-36 #8b95a7 #1e2430 -
+14 36-38 #ffffff #1e2430 -
+14 38-40 #ffffff #0e1117 -
+15 0-1 #ffffff #0e1117 -
+15 1-2 #7cc4ff #1e2430 -
+15 2-3 #f79d9d #1e2430 b
+15 3-4 #e6eaf0 #1e2430 -
+15 4-10 #c0acff #42425e b
+15 10-22 #e6eaf0 #1e2430 -
+15 22-23 #8b95a7 #1e2430 -
+15 23-33 #f79d9d #1e2430 -
+15 33-36 #8b95a7 #1e2430 -
+15 36-38 #ffffff #1e2430 -
+15 38-40 #ffffff #0e1117 -
+16 0-1 #ffffff #0e1117 -
+16 1-4 #ffffff #1e2430 -
+16 4-28 #8b95a7 #1e2430 -
+16 28-38 #ffffff #1e2430 -
+16 38-40 #ffffff #0e1117 -
+17 0-1 #ffffff #0e1117 -
+17 1-4 #ffffff #1e2430 -
+17 4-37 #8b95a7 #1e2430 -
+17 37-38 #ffffff #1e2430 -
+17 38-40 #ffffff #0e1117 -
+18 0-1 #ffffff #0e1117 -
+18 1-4 #ffffff #1e2430 -
+18 4-22 #8b95a7 #1e2430 -
+18 22-38 #ffffff #1e2430 -
+18 38-40 #ffffff #0e1117 -
+19 0-40 #ffffff #0e1117 -
+20 0-40 #ffffff #0e1117 -
+21 0-40 #ffffff #0e1117 -
+22 0-40 #ffffff #0e1117 -
+23 0-40 #ffffff #0e1117 -
+24 0-40 #ffffff #0e1117 -
+25 0-40 #ffffff #0e1117 -
+26 0-40 #ffffff #0e1117 -
+27 0-40 #ffffff #0e1117 -
+28 0-40 #ffffff #0e1117 -
+29 0-40 #ffffff #0e1117 -
+30 0-40 #ffffff #0e1117 -
+31 0-1 #ffffff #0e1117 -
+31 1-39 #161b24 #0e1117 -
+31 39-40 #ffffff #0e1117 -
+32 0-1 #ffffff #0e1117 -
+32 1-5 #7cc4ff #161b24 -
+32 5-16 #8b95a7 #161b24 -
+32 16-39 #ffffff #161b24 -
+32 39-40 #ffffff #0e1117 -
+33 0-1 #ffffff #0e1117 -
+33 1-39 #161b24 #0e1117 -
+33 39-40 #ffffff #0e1117 -
+34 0-1 #8b95a7 #161b24 -
+34 1-7 #e6eaf0 #161b24 b
+34 7-8 #8b95a7 #161b24 -
+34 8-17 #8fd19e #31433f b
+34 17-18 #8b95a7 #161b24 -
+34 18-28 #e6eaf0 #1e2430 -
+34 28-39 #8b95a7 #161b24 -
+34 39-40 #ffffff #0e1117 -
+35 0-1 #ffffff #0e1117 -
+35 1-10 #e6eaf0 #293140 b
+35 10-25 #8b95a7 #0e1117 -
+35 25-30 #e6eaf0 #293140 b
+35 30-35 #8b95a7 #0e1117 -
+35 35-40 #ffffff #0e1117 -

@@ -41,6 +41,9 @@ export interface TuiActivity {
 /** Tool execution state shown in the transcript. */
 export type TuiToolStatus = "running" | "success" | "error" | "cancelled";
 
+/** Validated, volatile shell evidence; absence means no observed exit, including resumed legacy results. */
+export type TuiShellOutcome = { kind: "exit"; code: number } | { kind: "stopped" | "timed-out" };
+
 /** Recovery choices bound to one failed operation and its current conversation identity. */
 export interface TuiRecovery {
   operationId: number;
@@ -65,6 +68,8 @@ export interface TuiTranscriptEntry {
   toolSummary?: string;
   /** Short observed result summary, separate from the call target. */
   resultSummary?: string;
+  /** Structured shell evidence kept separate from tool execution status and model-facing records. */
+  shellOutcome?: TuiShellOutcome;
   /** Original deletion and edited addition rows derived from successful runtime details. */
   diffRows?: DiffRow[];
 }

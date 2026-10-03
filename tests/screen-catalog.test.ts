@@ -56,6 +56,26 @@ function diff(expected: string, actual: string): string {
 for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`screen ${screen.id} ${variant.id}`, async () => {
   setSystemTime(new Date(fixedTime));
   const actual = await renderScreen(screen, variant);
+  if (screen.id.startsWith("shell-")) {
+    const frame = parseScreen(actual);
+    const rows = frame.text.filter(line => line.includes(" BASH "));
+    if (screen.id.startsWith("shell-long-failure")) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatch(/! +BASH.*Exit 1.*[▸▾]/);
+      expect(rows[0]).not.toContain("✓");
+      if (screen.id.endsWith("expanded")) {
+        expect(frame.text.join("\n")).toContain("Exit code: 1");
+        expect(frame.text.join("\n")).toContain("ตรวจผลลัพธ์ภาษาไทย 🧪");
+      }
+    } else {
+      expect(rows).toHaveLength(8);
+      for (const [index, label] of ["Exit 0", "Exit 7", "Stopped", "Stopped", "Timed out", "No exit observed", "No exit observed", "Tool error"].entries()) {
+        expect(rows[index]).toContain(label);
+        expect(rows[index]).toMatch(/[▸▾]/);
+        if (index > 0) expect(rows[index]).not.toContain("✓");
+      }
+    }
+  }
   const relative = `tests/screen-catalog/goldens/${screen.id}/${variant.id}.golden`, path = join(directory, screen.id, `${variant.id}.golden`);
   if (update) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, actual); return; }
   if (!await Bun.file(path).exists()) throw new Error(`Missing golden ${relative}. Run: bun run screens:update`);
@@ -64,7 +84,7 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "large-edit", "failed-turn", "retry-countdown", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "failed-turn", "retry-countdown", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);

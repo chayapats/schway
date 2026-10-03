@@ -1,20 +1,33 @@
 import { formatUndoResult } from "../undo/record.ts";
 import { toolTarget } from "./presentation.ts";
 import type { SessionRecord } from "../conversation/types.ts";
-import type { TuiTranscriptEntry } from "./controller-types.ts";
+import type { TuiShellOutcome, TuiTranscriptEntry } from "./controller-types.ts";
 import { buildEditDiff, buildEditDiffHunks, type DiffRow } from "../text/diff.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
 
 /** Bound on displayed tool-result characters; session data stays complete. */
 export const MAX_TOOL_DISPLAY_CHARS = 2000;
 
-/** Summarize successful built-in results from validated summary fields, leaving other states and malformed details without a summary. */
+/** Read shell evidence only from valid structured exit and timeout fields, never from result prose. */
+export function asShellOutcome(details: unknown): TuiShellOutcome | undefined {
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
+  const record = details as Record<string, unknown>;
+  if (record.timedOut !== undefined && typeof record.timedOut !== "boolean") return undefined;
+  if (record.timedOut === true) return { kind: "timed-out" };
+  if (record.exitCode === null) return { kind: "stopped" };
+  if (typeof record.exitCode === "number" && Number.isSafeInteger(record.exitCode) && record.exitCode >= 0) return { kind: "exit", code: record.exitCode };
+  return undefined;
+}
+
+/** Summarize successful built-in results; shell timing is optional and independent of observed exit evidence. */
 export function summarizeToolResult(
   name: string,
   status: TuiTranscriptEntry["toolStatus"],
   details: unknown,
   durationMs?: number,
 ): string | undefined {
+  if (name === "bash") return status === "success" && typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0
+    ? formatDuration(durationMs) : undefined;
   if (status !== "success" || typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
   const record = details as Record<string, unknown>;
   if (name === "read") {
@@ -35,11 +48,6 @@ export function summarizeToolResult(
     return record.truncated
       ? `${count}+ ${plural} · truncated`
       : formatCount(count, singular, plural);
-  }
-  if (name === "bash") {
-    if (record.exitCode === null) return "stopped · no exit code";
-    if (!isCount(record.exitCode) || typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return undefined;
-    return `exit ${record.exitCode} · ${formatDuration(durationMs)}`;
   }
   if (name === "write") {
     if (!isCount(record.lineCount) || typeof record.created !== "boolean") return undefined;

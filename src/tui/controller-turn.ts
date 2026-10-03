@@ -6,7 +6,7 @@ import type { RuntimeEvent } from "../agent/events.ts";
 import { credentialStoreError } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { TuiRecovery, TuiTranscriptEntry, TuiControllerOptions } from "./controller-types.ts";
-import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, summarizeToolResult } from "./transcript-format.ts";
+import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, asShellOutcome, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, summarizeToolResult } from "./transcript-format.ts";
 import { buildEditDiff, countLines, type DiffRow } from "../text/diff.ts";
 import { recoveryMessage, startupFailureCategory, startupRecoveryMessage, redactRecoveryDetails } from "./controller-support.ts";
 import { CompactionLayer } from "./controller-compaction.ts";
@@ -454,6 +454,7 @@ export abstract class TurnLayer extends CompactionLayer {
         const durationMs = startedAt === undefined ? undefined : Math.max(0, this.activityClock() - startedAt);
         this.toolStartedAt.delete(event.toolCallId);
         const resultSummary = summarizeToolResult(event.name, event.status, event.details, durationMs);
+        const shellOutcome = event.name === "bash" ? asShellOutcome(event.details) : undefined;
         const edit = event.name === "edit" && event.status === "success" ? asEditDetails(event.details) : undefined;
         let diffRows: DiffRow[] | undefined;
         if (resultSummary && edit?.hunks) diffRows = buildEditDiff(edit.hunks).rows;
@@ -483,6 +484,7 @@ export abstract class TurnLayer extends CompactionLayer {
           entry.toolStatus =
             event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error";
           entry.resultSummary = resultSummary;
+          entry.shellOutcome = shellOutcome;
           entry.diffRows = diffRows;
         } else {
           this.transcript.push({
@@ -493,6 +495,7 @@ export abstract class TurnLayer extends CompactionLayer {
             toolCallId: event.toolCallId,
             toolStatus: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error",
             resultSummary,
+            shellOutcome,
             diffRows,
           });
         }

@@ -270,18 +270,18 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       return animating;
     },
     update(entry, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines = DEFAULT_INLINE_DIFF_LINES) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines]);
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.shellOutcome, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines]);
       if (next === fingerprint) return;
       fingerprint = next;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const inline = hasInlineDiff(entry, inlineDiffLines);
         const detail = inline ? boundDisplay(displayText(formatDiffRows(entry.diffRows!)).split("\n").map(line => line.slice(0, 300)).join("\n")) : tool.detail;
-        if (status === "running" && entry.toolStatus === "success" && motion.mode === "full") flashStart = motion.now();
+        if (status === "running" && tool.tone === "success" && motion.mode === "full") flashStart = motion.now();
         status = entry.toolStatus;
         focusedRow = !!focusedTool;
         applyBackground();
-        // Keep the target intact by dropping result summaries before clipping the target.
+        // Reserve shell outcome and disclosure first; optional summaries give way to the target.
         const inner = Math.max(8, width - 2);
         const color = toolColor(entry.toolName, theme);
         const pillBg = tint(theme, color);
@@ -292,8 +292,9 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         const fixed = Bun.stringWidth(` ${focus}● ${kind}`);
         const fullTarget = tool.target ? ` ${fitLine(tool.target, Number.MAX_SAFE_INTEGER)}` : "";
         const candidate = entry.toolStatus === "success" ? displayText(entry.resultSummary ?? "") : "";
-        const result = candidate && fixed + Bun.stringWidth(fullTarget) + Bun.stringWidth(candidate) + Bun.stringWidth(disclosure) + (disclosure ? 1 : 0) + 1 <= inner ? candidate : "";
-        const right = state || result;
+        const summary = entry.toolName === "bash" && state && candidate ? `${state} · ${candidate}` : candidate;
+        const result = summary && fixed + Bun.stringWidth(fullTarget) + Bun.stringWidth(summary) + Bun.stringWidth(disclosure) + (disclosure ? 1 : 0) + 1 <= inner ? summary : "";
+        const right = entry.toolName === "bash" ? result || state : state || result;
         const rightWidth = Bun.stringWidth(right);
         const trailerWidth = Bun.stringWidth(disclosure) + (right && disclosure ? 1 : 0);
         const targetWidth = inner - fixed - rightWidth - trailerWidth - 1;

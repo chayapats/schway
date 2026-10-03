@@ -19,6 +19,7 @@ import { statusPill } from "../src/tui/presentation.ts";
 import { readGitHead } from "../src/tui/git-head.ts";
 import { createTranscriptItem, markdownStyle } from "../src/tui/transcript-view.ts";
 import { TUI_THEMES, mixColor, tint } from "../src/tui/theme.ts";
+import type { TuiTranscriptEntry } from "../src/tui/controller-types.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
@@ -193,7 +194,7 @@ test("tool rows animate a spinner while running and flash success on completion"
   await terminal.renderOnce();
   expect(terminal.captureCharFrame().split("\n")[0]).not.toBe(first.split("\n")[0]);
 
-  row.update({ ...entry, toolStatus: "success", text: "done" }, false, false, 68);
+  row.update({ ...entry, toolStatus: "success", shellOutcome: { kind: "exit", code: 0 }, text: "done" }, false, false, 68);
   expect(row.root.backgroundColor.equals(RGBA.fromHex(theme.surface2))).toBe(false);
   expect(row.tick()).toBe(true);
   clock.now = 1000;
@@ -201,6 +202,31 @@ test("tool rows animate a spinner while running and flash success on completion"
   expect(row.root.backgroundColor.equals(RGBA.fromHex(theme.surface2))).toBe(true);
   await terminal.renderOnce();
   expect(terminal.captureCharFrame()).toContain("✓");
+});
+
+test("nonzero, stopped, unknown and failed shell rows settle without a success flash", async () => {
+  const terminal = await createTestRenderer({ width: 70, height: 10 });
+  cleanups.push(() => terminal.renderer.destroy());
+  const syntax = markdownStyle(theme);
+  cleanups.push(() => syntax.destroy());
+  const outcomes: Partial<TuiTranscriptEntry>[] = [
+    { shellOutcome: { kind: "exit", code: 1 } }, { shellOutcome: { kind: "exit", code: 7 } },
+    { shellOutcome: { kind: "stopped" } }, {}, { shellOutcome: { kind: "timed-out" }, toolStatus: "error" },
+    { toolStatus: "error" }, { toolStatus: "cancelled" },
+  ];
+  for (const [index, result] of outcomes.entries()) {
+    const entry: TuiTranscriptEntry = { id: `shell-${index}`, kind: "tool", toolName: "bash", toolStatus: "running", text: "partial", toolSummary: "run command" };
+    const row = createTranscriptItem(terminal.renderer, entry, theme, syntax, () => {}, { now: () => 0, mode: "full" });
+    terminal.renderer.root.add(row.root);
+    row.update(entry, false, false, 68);
+    expect(row.tick()).toBe(true);
+    row.update({ ...entry, toolStatus: "success", text: "all tests passed", ...result }, false, false, 68);
+    expect(row.tick()).toBe(false);
+    expect(row.root.backgroundColor.equals(RGBA.fromHex(theme.surface2))).toBe(true);
+    await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).not.toContain("✓");
+    row.root.destroyRecursively();
+  }
 });
 
 test("a streaming answer shows a blinking caret outside code fences and none once settled", async () => {

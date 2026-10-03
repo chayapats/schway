@@ -23,6 +23,18 @@ const search = async (ui: ScreenHarness, query: string) => {
   ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
   if (query) await ui.mockInput.typeText(query);
 };
+const longFailingCommand = `printf '%s\\n' '${"ตรวจผลลัพธ์ภาษาไทย 🧪 café ".repeat(8)}'; exit 1`;
+const shellRow = (ui: ScreenHarness, id: string, command: string, status: "success" | "error" | "cancelled", content: string, details?: unknown) => {
+  ui.session.append({ type: "assistant", id: `request-${id}`, content: [{ type: "tool_call", id, name: "bash", arguments: { command } }] });
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: id, name: "bash" });
+  ui.advance();
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "bash", status, content, details });
+  ui.session.append({ type: "tool_result", id: `result-${id}`, toolCallId: id, content, isError: status !== "success" });
+};
+const longFailure = async (ui: ScreenHarness, expanded = false) => {
+  shellRow(ui, "long-failure", longFailingCommand, "success", "Exit code: 1\nตรวจผลลัพธ์ภาษาไทย 🧪\nThe command returned a nonzero exit.", { exitCode: 1 });
+  if (expanded) { await ui.settle(); ui.mockInput.pressKey("o", { ctrl: true }); }
+};
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -61,6 +73,18 @@ export const SCREENS: readonly Screen[] = [
   }, ready: (s, ui) => s.status === "running" && ui.editor.plainText === "config" && ui.editor.placeholder === "Find in this conversation…" },
   { id: "parallel-tools", title: "Parallel tools", description: "Three independent tool calls are running together.", elapsed: 7000, drive: ui => enter(ui, "Inspect the project"), ready: s => s.activity?.activeTools === 3 },
   { id: "completed-turn", title: "Completed turn", description: "A completed fix records a file edit and successful command.", noColor: true, drive: ui => enter(ui, "Fix the clamp upper bound"), ready: completed },
+  { id: "shell-long-failure", title: "Long command, nonzero exit", description: "A long Unicode command retains its exit warning before its target is clipped.", noColorWidths: true, elapsed: 1200, drive: ui => longFailure(ui), ready: s => s.transcript.some(entry => entry.shellOutcome?.kind === "exit" && entry.shellOutcome.code === 1) },
+  { id: "shell-long-failure-expanded", title: "Long command, expanded output", description: "The same nonzero command retains its outcome while its original bounded output is expanded.", noColorWidths: true, elapsed: 1200, drive: ui => longFailure(ui, true), ready: s => s.transcript.some(entry => entry.shellOutcome?.kind === "exit" && entry.shellOutcome.code === 1) },
+  { id: "shell-outcomes", title: "Shell exit evidence", description: "Exit codes, cancellation, timeout, unknown evidence and tool errors retain distinct text and glyphs.", noColorWidths: true, rows: 36, elapsed: 1200, drive: async ui => {
+    shellRow(ui, "zero", "exit 0", "success", "Exit code: 0\nCommand completed.", { exitCode: 0 });
+    shellRow(ui, "seven", "exit 7", "success", "Exit code: 7", { exitCode: 7 });
+    shellRow(ui, "signal", "kill -TERM $$", "success", "Process stopped.", { exitCode: null });
+    shellRow(ui, "cancel", "sleep 5", "cancelled", "Command cancelled.", { exitCode: null });
+    shellRow(ui, "timeout", "sleep 5", "error", "Command timed out.", { timedOut: true, exitCode: null });
+    shellRow(ui, "unknown", "run saved command", "success", "Exit code: 0\nall tests passed");
+    shellRow(ui, "malformed", "inspect invalid exit details", "success", "Exit code: 0", { exitCode: "0" });
+    shellRow(ui, "error", "run unavailable command", "error", "Command could not start.");
+  }, ready: s => s.transcript.filter(entry => entry.kind === "tool").length === 8 },
   { id: "large-edit", title: "Large edit", description: "An edit above the inline limit keeps its summary and disclosure marker.", noColor: true, drive: ui => enter(ui, "Update the clamp implementation"), ready: completed },
   { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColor: true, drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "retry-countdown", title: "Retry countdown", description: "A transient failure waits before the next attempt.", elapsed: 1200, drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.phase === "retry" },
@@ -88,6 +112,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
+  if (screen.id.startsWith("shell-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   const shortWidths = screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
