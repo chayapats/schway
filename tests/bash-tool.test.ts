@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { bashTool, MAX_BASH_CHARS } from "../src/tools/bash.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
+import { runBashProbe } from "./fixtures/bash-spawn-failure.ts";
 
 /** Tool context whose workspace root is a temporary directory. */
 function contextFor(dir: string, launchCwd = dir): ToolContext {
@@ -11,6 +12,66 @@ function contextFor(dir: string, launchCwd = dir): ToolContext {
     workspace: { root: dir, launchCwd, extraRoots: [] },
   };
 }
+
+for (const scenario of ["missing-cwd", "file-cwd", "missing-shell"]) for (const control of ["none", "abort", "timeout"]) test(`bash ${scenario} with ${control} settles as a process-start failure`, async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe(`${scenario}:${control}`, root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false);
+    expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result).toMatchObject({ status: "rejected", code: scenario === "file-cwd" ? "ENOTDIR" : "ENOENT", output: [] });
+    expect(result).not.toHaveProperty("result");
+  });
+});
+
+for (const mode of ["spawn-close", "normal", "stream-error", "both-errors", "abort"]) test(`bash ${mode} preserves stream provenance and cleans lifecycle listeners and timers`, async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe(`lifecycle:${mode}`, root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result).toMatchObject({ timers: 0, abortListeners: 0, childListeners: [], pipeListeners: [0, 0] });
+    expect(result.chunks.filter((chunk: { stream: string }) => chunk.stream === "stderr").map((chunk: { text: string }) => chunk.text).join("")).toBe("diagnostic\n");
+    expect(result.chunks.filter((chunk: { stream: string }) => chunk.stream === "stdout").map((chunk: { text: string }) => chunk.text).join("")).toBe(mode === "stream-error" || mode === "both-errors" ? "ก🙂" : "ก🙂�");
+    if (mode === "normal") expect(result.outcome).toMatchObject({ status: "fulfilled", result: { details: { stdout: "ก🙂�", stderr: "diagnostic\n", exitCode: 0 } } });
+    else if (mode === "abort") expect(result.outcome).toMatchObject({ status: "rejected", name: "AbortError" });
+    else expect(result.outcome).toMatchObject({ status: "rejected", ...(mode === "stream-error" ? { code: "EIO", samePipeError: true } : { code: "ENOENT", sameSpawnError: true }) });
+  });
+});
+
+for (const mode of ["exit", "error", "late-error"]) test(`bash process ${mode} drains the remaining pipe before rejecting its original failure`, async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe(`open-pipe:${mode}`, root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result).toMatchObject({ sameOriginal: true, signals: [...(mode === "late-error" ? ["SIGKILL"] : []), "SIGTERM", "SIGKILL"], destroyed: [true, true], pipeListeners: [0, 0], childListeners: [], abortListeners: 0 });
+  });
+});
+
+test("normal bash exit preserves buffered Thai and emoji after the drain deadline", async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe("normal-drain", root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    const stdout = "PREFIX\nBUFFERED TAIL ไทย 😀\n", stderr = "tail written\n";
+    expect(result.expired).toBe(false);
+    expect(result.bufferedAtExit).toBeGreaterThan(0);
+    expect(result.result.details).toMatchObject({ stdout, stderr, exitCode: 0, truncated: false });
+    expect(result.result.isError).toBeUndefined();
+    for (const [stream, text] of [["stdout", stdout], ["stderr", stderr]]) {
+      expect(result.chunks.filter((chunk: { stream: string }) => chunk.stream === stream).map((chunk: { text: string }) => chunk.text).join("")).toBe(text);
+    }
+  });
+});
+
+test("a real pipe failure kills a TERM-ignoring descendant before returning the original error", async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe("real-pipe-error", root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result).toMatchObject({ sameOriginal: true, expired: false, stable: true, stderrDestroyed: true, pipeListeners: [0, 0] });
+    expect(result.before).toBeGreaterThan(0);
+  });
+});
 
 test("bash declares exclusive execution", () => {
   expect(bashTool.execution).toBe("exclusive");
