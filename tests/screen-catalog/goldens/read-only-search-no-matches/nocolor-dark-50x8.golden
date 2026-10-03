@@ -1,0 +1,37 @@
+schway-screen 1
+screen read-only-search-no-matches
+title Read-only search, no matches
+description An unmatched query retains the mode and Escape action at safety widths.
+variant nocolor-dark-50x8
+size 50x8
+cursor 12 6 visible
+== text
+ Read the project README before making changes.
+
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › absent
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Read-only · Esc restore
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-47 #8b95a7 #0e1117 -
+00 47-50 #ffffff #0e1117 -
+01 0-50 #ffffff #0e1117 -
+02 0-50 #ffffff #0e1117 -
+03 0-50 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-49 #161b24 #0e1117 -
+04 49-50 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-11 #e6eaf0 #161b24 -
+05 11-49 #ffffff #161b24 -
+05 49-50 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-49 #161b24 #0e1117 -
+06 49-50 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-10 #e6eaf0 #161b24 b
+07 10-24 #8b95a7 #161b24 -
+07 24-50 #ffffff #0e1117 -

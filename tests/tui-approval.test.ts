@@ -146,28 +146,36 @@ test("preferences explain every approval mode without applying or saving a mode"
   expect(ui.editor.cursorOffset).toBe(4);
 });
 
-test("narrow footer retains each mode and the available stop or sign-in action without color", async () => {
+const shortLayouts = [[24, 8], [29, 8], [30, 8], [40, 8], [49, 8], [50, 8], [80, 13], [120, 8]] as const;
+
+test("short footer retains each mode and idle, stop, panel or sign-in actions without color", async () => {
   for (const [mode, label] of [["auto", "Auto"], ["ask", "Ask"], ["read-only", "Read-only"]] as const) {
     const editor = new ConfigEditor({ cli: { approval: { mode } } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
     const ui = await setup(24, true, { configEditor: editor, model: createScriptedModel({ waitForAbort: true }) }, { env: { SCHWAY_MOTION: "off", NO_COLOR: "1" } });
-    ui.resize(24, 8); await ui.settle();
-    expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).toContain("Enter send");
+    const assertAction = async (terminal: typeof ui, action: string) => {
+      for (const [width, height] of shortLayouts) {
+        terminal.resize(width, height); await terminal.settle();
+        const footer = terminal.renderer.root.findDescendantById("footer") as TextRenderable;
+        expect(terminal.renderer.root.findDescendantById("hints")!.visible).toBe(false);
+        expect(footer.plainText).toContain(label);
+        expect(footer.plainText).toContain(action);
+        expect(terminal.captureCharFrame()).toContain(action);
+        expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width);
+        expect(footer.y).toBeGreaterThanOrEqual(terminal.editor.y + terminal.editor.height);
+      }
+    };
+    await assertAction(ui, "Enter send");
     const turn = ui.controller.submit("wait");
     await ui.waitFor(snapshot => snapshot.status === "running");
-    const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
-    expect(footer.plainText).toContain(label);
-    expect(footer.plainText).toContain("Esc stop");
-    expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(24);
-    expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+    await assertAction(ui, "Esc stop");
     ui.mockInput.pressEscape(); await turn;
+    ui.controller.openPreferences(); await ui.settle();
+    await assertAction(ui, "Esc back");
+    ui.mockInput.pressEscape(); await ui.settle();
     const disconnected = await setup(24, true, { configEditor: editor, model: undefined, modelId: "" });
-    disconnected.resize(24, 8); await disconnected.settle();
-    const disconnectedFooter = disconnected.renderer.root.findDescendantById("footer") as TextRenderable;
-    expect(disconnectedFooter.plainText).toContain(label);
-    expect(disconnectedFooter.plainText).toContain("Alt+L");
-    expect(Bun.stringWidth(disconnectedFooter.plainText)).toBeLessThanOrEqual(24);
+    await assertAction(disconnected, "Alt+L");
   }
-});
+}, 15_000);
 
 for (const [query, status] of [["", "Type a query"], ["Needle", "Find 1/60"], ["absent", "No matches"]] as const) {
   test(`narrow search retains mode and Escape for ${query || "an empty query"} without changing editor state`, async () => {
@@ -186,22 +194,29 @@ for (const [query, status] of [["", "Type a query"], ["Needle", "Find 1/60"], ["
       if (query) await ui.mockInput.typeText(query);
       await ui.settle();
       expect(ui.captureCharFrame()).toContain(status);
-      ui.resize(24, 8); await ui.settle();
-      if (query) ui.editor.setSelection(1, 3);
-      const cursor = ui.editor.cursorOffset, selection = ui.editor.getSelectedText(), searchScroll = transcript.scrollTop;
-      ui.mockInput.pressTab({ shift: true }); await ui.settle();
-      const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
-      expect(footer.plainText).toContain(`${label} · Esc restore`);
-      expect(ui.captureCharFrame()).toContain(`${label} · Esc restore`);
-      expect(ui.captureCharFrame()).not.toContain("Enter send");
-      expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
-      expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(24);
-      expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
-      expect(ui.controller.snapshot().approvalMode).toBe(mode);
-      expect(ui.editor.plainText).toBe(query);
-      expect(ui.editor.cursorOffset).toBe(cursor);
-      expect(ui.editor.getSelectedText()).toBe(selection);
-      expect(transcript.scrollTop).toBe(searchScroll);
+      for (const [width, height] of shortLayouts) {
+        ui.resize(width, height); await ui.settle();
+        if (query) ui.editor.setSelection(1, 3);
+        const cursor = ui.editor.cursorOffset, selection = ui.editor.getSelectedText(), searchScroll = transcript.scrollTop;
+        ui.mockInput.pressTab({ shift: true }); await ui.settle();
+        const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+        expect(ui.renderer.root.findDescendantById("hints")!.visible).toBe(false);
+        expect(footer.plainText).toContain(`${label} · Esc restore`);
+        expect(ui.captureCharFrame()).toContain(`${label} · Esc restore`);
+        expect(ui.captureCharFrame()).not.toContain("Enter send");
+        expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+        expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width);
+        expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+        expect(ui.controller.snapshot().approvalMode).toBe(mode);
+        expect(ui.editor.plainText).toBe(query);
+        expect(ui.editor.cursorOffset).toBe(cursor);
+        expect(ui.editor.getSelectedText()).toBe(selection);
+        expect(transcript.scrollTop).toBe(searchScroll);
+      }
+      ui.resize(80, 14); await ui.settle();
+      expect(ui.renderer.root.findDescendantById("hints")!.visible).toBe(true);
+      expect(ui.captureCharFrame()).toContain(`◆ ${label}`);
+      expect(ui.captureCharFrame()).toContain("Esc restore");
       ui.mockInput.pressEscape(); await ui.settle();
       expect(ui.editor.plainText).toBe(draft);
       expect(ui.editor.cursorOffset).toBe(4);
@@ -504,6 +519,16 @@ test("Shift+Tab cannot change an open request or its ask chip, including after r
   expect(ui.captureCharFrame()).not.toContain("Esc stops");
   expect(ui.captureCharFrame()).toContain("Ctrl+C cancel");
   expect(ui.captureCharFrame()).toContain("Enter choose · Esc deny · Ctrl+C cancel turn");
+  for (const [width, height] of shortLayouts) {
+    ui.resize(width, height); await ui.settle();
+    const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+    expect(ui.renderer.root.findDescendantById("hints")!.visible).toBe(false);
+    expect(footer.plainText).toContain("Ask · Ctrl+C cancel");
+    expect(ui.captureCharFrame()).toContain("Ask · Ctrl+C cancel");
+    expect(ui.captureCharFrame()).not.toContain("Esc stops");
+    expect(ui.controller.snapshot().toolApproval).toEqual(request);
+    expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width);
+  }
   ui.mockInput.pressEscape(); await turn;
 }));
 

@@ -75,7 +75,7 @@ def main() -> None:
         os.write(master, b"\x0c")
         read_for(master, output, 0.3)
         recovery_output = bytes(output[recovery_start:])
-        if b"Ready" not in recovery_output or b"Ask Schway" not in recovery_output:
+        if not all(text in recovery_output for text in (b"Auto", b"Enter send", b"Ask Schway")):
             raise RuntimeError("Ctrl+L did not restore the narrow installed screen")
         os.write(master, b"\x03")
         read_for(master, output, 0.3)

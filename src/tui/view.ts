@@ -431,14 +431,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const modeLabel = { auto: "Auto", ask: "Ask", "read-only": "Read-only" }[footerParts.approvalMode];
     const modeColor = footerParts.approvalMode === "auto" ? theme.text : theme.warning;
     const modeChip = [bold(fg(modeColor)(`◆ ${modeLabel}`)), fg(theme.muted)(" ")];
-    // At safety widths, keep the full mode word and urgent key before status decoration.
+    // When space hides hints, keep the mode and urgent key before status decoration.
     const compactFooter = (action: string) => {
       const room = columns - Bun.stringWidth(modeLabel) - 4;
       const next = Bun.stringWidth(action) <= room ? action : action.split(" ")[0]!;
       footer.content = new StyledText([fg(theme.muted)(" "), bold(fg(modeColor)(modeLabel)),
         ...(Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
     };
-    if (columns < 30) { compactFooter(footerParts.nextAction); return; }
+    if (columns < 30 || !hints.visible) { compactFooter(footerParts.nextAction); return; }
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;

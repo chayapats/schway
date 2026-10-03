@@ -91,7 +91,7 @@ test("not-connected copy and neutral pill survive no-color, narrow widths and re
     for (const [width, height] of [[120, 24], [80, 24], [50, 24], [120, 24], [44, 18], [24, 18], [80, 9]] as const) {
       ui.resize(width, height);
       await settle(ui);
-      expect(ui.captureCharFrame()).toContain(width < 30 ? "Auto · Alt+L sign in" : "○ Not connected");
+      expect(ui.captureCharFrame()).toContain(width < 30 || height < 14 ? "Auto · Alt+L sign in" : "○ Not connected");
       expect(ui.captureCharFrame()).toContain("Auto");
       if (height >= 10) expect(ui.captureCharFrame()).toContain("Alt+L sign in");
       const empty = ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable;
@@ -1060,7 +1060,7 @@ test("resize keeps the editor and status inside the viewport with a populated tr
     expect(composer.y + composer.height, `composer at ${width}x${height}`).toBeLessThanOrEqual(height!);
     expect(footer.y + footer.height, `footer at ${width}x${height}`).toBeLessThanOrEqual(height!);
     expect(ui.captureCharFrame(), `mode at ${width}x${height}`).toContain("Auto");
-    expect(ui.captureCharFrame(), `status/action at ${width}x${height}`).toContain(width! < 30 ? "Esc back" : "Ready");
+    expect(ui.captureCharFrame(), `panel exit at ${width}x${height}`).toContain("Esc back");
   }
   ui.mockInput.pressEscape();
   await settle(ui);
@@ -1474,7 +1474,10 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     ui.editor.setText("/theme wrong");
     ui.mockInput.pressEscape(); await settle(ui);
     ui.mockInput.pressEnter(); await settle(ui);
-    expect(ui.captureCharFrame()).toContain("! Attention");
+    expect(ui.captureCharFrame()).toContain("! Error");
+    expect(ui.captureCharFrame()).toContain("Usage: /theme [");
+    expect(ui.captureCharFrame()).toContain("auto|dark|light]");
+    expect(ui.captureCharFrame()).toContain("Auto · Enter send");
     expect(ui.editor.plainText).toBe("/theme wrong");
   });
 });

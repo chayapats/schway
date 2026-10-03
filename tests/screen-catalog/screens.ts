@@ -76,12 +76,15 @@ export const SCREENS: readonly Screen[] = [
 ];
 /** Enumerate six standard variants and the screen's explicit color or narrow extras. */
 export function variantsFor(screen: Screen): Variant[] {
-  const make = (theme: "dark" | "light", cols: number, rows = screen.rows ?? 30, noColor = screen.id === "no-color"): Variant => ({ id: `${noColor ? "nocolor-" : ""}${theme}-${cols}`, theme, cols, rows, noColor });
+  const make = (theme: "dark" | "light", cols: number, rows = screen.rows ?? 30, noColor = screen.id === "no-color"): Variant => ({ id: `${noColor ? "nocolor-" : ""}${theme}-${cols}${rows === 8 && cols !== 24 ? "x8" : ""}`, theme, cols, rows, noColor });
   const variants = (["dark", "light"] as const).flatMap(theme => [120, 80, 50].map(cols => make(theme, cols)));
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
   if (["first-run", "auto-mode", "ask-mode", "read-only-mode"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
+  const shortWidths = screen.id.startsWith("read-only-search-") ? [29, 30, 40, 50]
+    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command"].includes(screen.id) ? [40, 50] : [];
+  for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));
   return variants;
 }
