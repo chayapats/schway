@@ -175,7 +175,7 @@ that a requested change was verified. Tool execution status, model-visible error
 headless events and whole-turn command totals retain their existing meaning.
 
 After an accepted turn settles, the activity line shows `✓ Done`, `✗ Failed`,
-`− Cancelled`, or `◌ Limit`, then changed files and known line counts, observed
+`− Stopped`, or `◌ Limit`, then changed files and known line counts, observed
 command results, elapsed time, and **Alt+R review**. Failed turns also offer
 **Ctrl+I details**. For example:
 
@@ -235,11 +235,11 @@ The Voltage palette pairs calm canvases with color blocks for each zone.
 | Surface | `#161b24` | `#ecedea` | Top bar, user messages, composer, code bodies, status bar |
 | Surface 2 | `#1e2430` | `#e1e3df` | Tool trays, code headers, pickers, model chip |
 | Text | `#e6eaf0` | `#1d232c` | Conversation and errors' content |
-| Muted | `#8b95a7` | `#545e6c` | Metadata, hints, tool details |
+| Muted | `#8b95a7` | `#545e6c` | Metadata, hints, tool details, stopped outcomes and tools |
 | Border | `#2c3444` | `#c5c9cf` | Key chips, search highlight |
 | Accent | `#7cc4ff` | `#0a5894` | Working pill, focus bar, selection, read tools |
 | Success | `#8fd19e` | `#19612f` | Ready pill, completed tools, added lines |
-| Warning | `#f0c674` | `#7a5000` | Stopping pill, edit tools, cancelled tools |
+| Warning | `#f0c674` | `#7a5000` | Stopping pill, edit tools, turn limits |
 | Error | `#f79d9d` | `#a61f16` | Attention pill, error blocks, removed lines |
 | Code / Violet | `#c0acff` | `#6a3fb0` | Inline code, keywords, reasoning chip, shell tools |
 | Cyan | `#5ee7ff` | `#065e74` | Types in code, other tools, logo gradient start |
@@ -465,6 +465,21 @@ editor until you send it after settlement. Pressing Esc or Ctrl+C shows
 Running tools and other owned work may
 still need to settle. Completed output and tool results remain visible; `Ready`
 returns only after settlement, and cancellation does not undo completed effects.
+
+Once cleanup finishes, the prior turn shows a muted `− Stopped` outcome and one
+`Stopped · Completed results kept` notice, with **Ctrl+R continue** and **Esc keep editing**.
+Only unfinished streamed assistant text is marked incomplete. Completed tool
+results and file changes remain available through **Alt+I** inspection and **Alt+R**
+review. Repeated Esc while stopping does not start another cancellation or send a
+task. A provider, cleanup or session-write failure still shows its error recovery;
+pressing Esc later does not turn that failure into a normal stop.
+
+Continue explicitly resumes the accepted turn without adding a user message or
+repeating completed tools. It preserves unrelated type-ahead text, its selection
+and cursor. Esc keeps that draft for editing; Enter sends it only when you choose.
+While inspecting a stopped result, the first Esc returns focus and the prior
+reading position to the composer, leaving Continue available. A second Esc can
+dismiss the recovery controls. Session or branch replacement expires those controls.
 
 Enter releases a prompt only after its user record is saved. Missing credentials,
 busy operations, and rejected commands keep the text and cursor in the editor

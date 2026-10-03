@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { SCREENS, variantsFor } from "./screen-catalog/screens.ts";
 import { renderScreen } from "./screen-catalog/harness.ts";
 import { parseScreen, serializeScreen } from "./screen-catalog/format.ts";
+import { TUI_THEMES } from "../src/tui/theme.ts";
 import { buildGallery } from "./screen-catalog/gallery.ts";
 
 const directory = join(import.meta.dir, "screen-catalog/goldens");
@@ -76,6 +77,31 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
       expect(text).toContain("C copy");
     }
   }
+  if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") {
+    const frame = parseScreen(actual), text = frame.text.join("\n");
+    const stopping = screen.id.startsWith("stopped-");
+    expect(text).toContain(stopping ? "Stopped" : "Failed");
+    expect(text).toContain("Ctrl+R continue");
+    expect(frame.text.map(line => line.trim().replace(/^▌\s?/, "")).join(" ").replace(/\s+/g, " ")).toContain("Esc keep editing");
+    expect(text).not.toContain("Cancelled");
+    const outcomeRow = frame.text.findIndex(line => line.includes(stopping ? "− Stopped" : "✗ Failed"));
+    expect(outcomeRow).toBeGreaterThanOrEqual(0);
+    const theme = TUI_THEMES[variant.theme];
+    expect(frame.styles.some(style => style.row === outcomeRow && style.fg === (stopping ? theme.muted : variant.noColor ? theme.text : theme.error))).toBe(true);
+    if (stopping) {
+      expect(text).not.toContain("! Error");
+      expect(text).toContain("Ready");
+      expect(text).toContain("งานถัดไป 🧪");
+      expect(text).toContain("ยังไม่ส่ง");
+      expect(text).toContain("Completed results kept");
+      if (screen.id === "stopped-streaming") expect(text).toContain("Incomplete response");
+      else {
+        expect(text).toContain("saved.txt");
+        expect(frame.text.find(line => line.includes(" BASH "))).toContain("Stopped");
+        if (variant.cols >= 80) expect(text).toContain("1 command stopped");
+      }
+    } else expect(text).toContain("! Error");
+  }
   if (screen.id.startsWith("shell-")) {
     const frame = parseScreen(actual);
     const rows = frame.text.filter(line => line.includes(" BASH "));
@@ -104,13 +130,13 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "failed-turn", "retry-countdown", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "retry-countdown", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);
 });
 test("catalog repeated renders are byte-identical", async () => {
-  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "inspection-code"]) {
+  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "inspection-code", "stopped-streaming", "stopped-tool"]) {
     const screen = SCREENS.find(s => s.id === id)!, variant = variantsFor(screen).find(v => v.id === "dark-80")!;
     setSystemTime(new Date(fixedTime)); const first = await renderScreen(screen, variant);
     setSystemTime(new Date(fixedTime)); expect(await renderScreen(screen, variant)).toBe(first);

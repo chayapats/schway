@@ -909,7 +909,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const completed = snapshot.outcome;
       const outcomeText = completed ? formatOutcomeLine(completed, width) : "";
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
-      const outcomeTone = completed ? ({ completed: "success", failed: "error" } as const)[completed.reason as "completed" | "failed"] ?? "warning" : "muted";
+      const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
         : snapshot.toolApproval ? { text: "Approval required · Ctrl+C cancel turn", tone: "warning", glyph: "◌", chips: true }
         : searchOpen ? { text: searchStatus, tone: "accent", glyph: "⌕" }
