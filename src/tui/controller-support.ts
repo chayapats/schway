@@ -30,7 +30,7 @@ export function startupRecoveryMessage(category: "auth" | "credential-store" | "
     case "auth": return "Sign in to continue · Alt+L sign in";
     case "credential-store": return "Credential storage unavailable · Unlock the secure store";
     case "model": return "Model unavailable · Alt+M choose model";
-    case "provider": return "Connection unavailable · Ctrl+I inspect details";
+    case "provider": return "Connection unavailable · F2 inspect details";
   }
 }
 

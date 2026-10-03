@@ -122,6 +122,8 @@ export interface TuiSnapshot {
   status: TuiStatus;
   context: { estimatedTokens: number; capacity: number | null; providerUsage: ModelUsage | null; summaryId?: string; firstKeptId?: string };
   compactionNotice?: string;
+  /** Whether unconsumed notice diagnostics belong to this conversation; input ownership still controls routing. */
+  noticeDetailsAvailable: boolean;
   outcome?: TurnOutcome;
   changeReview?: ChangeReview;
   undoPreview?: UndoPreview;

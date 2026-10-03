@@ -35,7 +35,7 @@ cursor 1 1 hidden
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/scripted-model                             ctx ~105
-  ↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back
+  ↑↓ files · PgUp/PgDn scroll · F2 details · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #e6eaf0 #161b24 b
@@ -144,8 +144,8 @@ cursor 1 1 hidden
 29 4-13 #8b95a7 #0e1117 -
 29 13-22 #e6eaf0 #293140 b
 29 22-32 #8b95a7 #0e1117 -
-29 32-38 #e6eaf0 #293140 b
-29 38-49 #8b95a7 #0e1117 -
-29 49-52 #e6eaf0 #293140 b
-29 52-57 #8b95a7 #0e1117 -
-29 57-80 #ffffff #0e1117 -
+29 32-34 #e6eaf0 #293140 b
+29 34-45 #8b95a7 #0e1117 -
+29 45-48 #e6eaf0 #293140 b
+29 48-53 #8b95a7 #0e1117 -
+29 53-80 #ffffff #0e1117 -

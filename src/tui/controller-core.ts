@@ -306,12 +306,17 @@ export abstract class ControllerCore {
     this.transcript.push(this.systemEntry(text));
   }
   protected retainNoticeDetails(details: string): void {
+    if (this.disposed) return;
     this.noticeDetails = { identity: `${this.sessionId}/${this.session.activeBranchId}`, text: redactSecrets(details, this.secrets).slice(0, 50_000) };
+  }
+  /** Return unconsumed notice diagnostics only within their live original conversation. */
+  protected currentNoticeDetails(): string | undefined {
+    return !this.disposed && this.noticeDetails?.identity === `${this.sessionId}/${this.session.activeBranchId}` ? this.noticeDetails.text : undefined;
   }
   /** Reveal retained notice diagnostics only on request and within their original conversation. */
   inspectNoticeDetails(): boolean {
-    if (!this.noticeDetails || this.noticeDetails.identity !== `${this.sessionId}/${this.session.activeBranchId}`) return false;
-    const details = this.noticeDetails.text;
+    const details = this.currentNoticeDetails();
+    if (details === undefined) return false;
     this.noticeDetails = undefined;
     this.notice(`Details · Esc keep editing\n${details}`);
     return true;

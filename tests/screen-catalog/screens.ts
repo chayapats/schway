@@ -67,6 +67,8 @@ const inspection = async (ui: ScreenHarness, focus: "none" | "code" | "tool") =>
   }
   if (copies) throw new Error("Inspection opening, navigation and tool expansion must not copy");
 };
+const openDetails = (ui: ScreenHarness) => ui.mockInput.pressKey("\u001bOQ");
+const reviewReady = (s: TuiSnapshot) => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0;
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -90,6 +92,9 @@ export const SCREENS: readonly Screen[] = [
   { id: "grok-device-approval", title: "Grok device approval", description: "The ephemeral Grok device code remains in the approval panel.", drive: ui => grokLogin(ui, true), ready: s => s.status === "running" && s.loginApprovalData?.kind === "device" },
   { id: "grok-plan-error", title: "Grok plan restriction", description: "A plan restriction retains the saved login and offers another connection.", drive: ui => grokLogin(ui), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.includes("Your Grok plan doesn't include API access")) },
   { id: "model-picker", title: "Model picker", description: "A short connected list shows readable model names and access routes.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
+  { id: "details-model", title: "Model details", description: "F2 reveals the selected model's exact ID and capacity without changing the connection.", noColorWidths: true, drive: async ui => {
+    ui.mockInput.pressKey("m", { meta: true }); await ui.waitFor(s => !!s.modelPicker && !s.modelPicker.loading); openDetails(ui);
+  }, ready: s => s.modelPicker?.details === true },
   { id: "model-picker-unconnected", title: "Model picker, connect a provider", description: "An empty model list offers one action to connect a provider.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
   { id: "thinking-controls", title: "Thinking controls", description: "Basic preferences show ordinary settings and supported thinking choices.", noColorWidths: true, drive: async ui => { ui.controller.openPreferences(); ui.controller.movePreference(1); }, ready: s => !!s.preferences },
   { id: "command-palette", title: "Command palette", description: "Typing a slash opens the curated built-in order.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.controller.commandChoices("/").length > 0 && !!ui.renderer.root.findDescendantById("picker")?.visible },
@@ -128,9 +133,26 @@ export const SCREENS: readonly Screen[] = [
   { id: "stopped-streaming", title: "Stopped streaming", description: "A requested stop retains incomplete output and an unsent Thai draft with a neutral continuation notice.", noColorWidths: true, drive: ui => stopWork(ui, false), ready: stopped },
   { id: "stopped-tool", title: "Stopped command", description: "A stopped shell keeps the completed file write and offers explicit continuation without sending the next draft.", noColorWidths: true, drive: ui => stopWork(ui, true), ready: stopped },
   { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColorWidths: true, drive: ui => enter(ui, "Summarize the changes"), ready: failed },
+  { id: "details-notice", title: "Notice details", description: "A retained notice opens local diagnostic evidence while preserving the Thai draft.", noColorWidths: true, drive: async ui => {
+    ui.controller.notice("Choice used for this session · F2 details", "The choice could not be saved.\nThe project settings file is read-only.\nตรวจสอบสิทธิ์ของไฟล์ 🧪");
+    await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); await ui.settle(); openDetails(ui);
+  }, ready: s => s.noticeDetailsAvailable === false && s.transcript.at(-1)?.text.includes("The choice could not be saved.") === true },
+  { id: "details-recovery", title: "Recovery details", description: "F2 opens a failed turn's diagnostic evidence while Escape remains available to return.", noColorWidths: true, drive: async ui => {
+    await enter(ui, "Summarize the changes"); await ui.waitFor(failed); await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); openDetails(ui);
+  }, ready: s => !!s.recovery && s.transcript.at(-1)?.text.includes("Failure details:") === true },
+  { id: "details-unavailable", title: "Details unavailable", description: "F2 leaves a fresh composer unchanged when there is no evidence to show.", noColorWidths: true, drive: async ui => {
+    await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); openDetails(ui);
+  }, ready: (s, ui) => s.status === "idle" && !s.noticeDetailsAvailable && !s.recovery && !s.outcome && ui.editor.plainText === "งานถัดไป 🧪" && s.transcript.length === 0 },
   { id: "retry-countdown", title: "Retry countdown", description: "A transient failure waits before the next attempt.", elapsed: 1200, drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.phase === "retry" },
   // Render the loading panel before yielding to Git so scrollbar initialization has a fixed order.
   { id: "review-panel", title: "Review panel", description: "The change review displays the completed clamp fix.", noColor: true, drive: async ui => { await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); }, ready: s => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0 },
+  { id: "details-review", title: "Review details", description: "F2 shows the completed turn's tool evidence from the selected file review.", noColorWidths: true, drive: async ui => {
+    await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); ui.mockInput.pressKey("r", { meta: true });
+    await ui.renderOnce(); await ui.flush(); await ui.waitFor(reviewReady);
+    // Redact per-run snapshot identities through the real view before layout, not in captured cells.
+    ui.secrets.push(...ui.controller.snapshot().changeReview!.details.matchAll(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g).map(match => match[0]));
+    openDetails(ui);
+  }, ready: s => reviewReady(s) && s.changeReview!.showingDetails },
   { id: "undo-preview", title: "Undo preview", description: "Undo previews file restores, a deletion and a shell change.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
     await writeFile(join(ui.root, "README.md"), "Changes made afterwards.\n");
@@ -156,10 +178,11 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
-  if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
+  if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
+  if (["details-notice", "details-recovery", "details-unavailable"].includes(screen.id)) variants.push(make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   const shortWidths = screen.id.startsWith("draft-") || screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
     : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command"].includes(screen.id) ? [40, 50] : [];
   for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));

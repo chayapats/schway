@@ -14,7 +14,7 @@ import { SPLASH_DURATION_MS, SPLASH_ACCENT_DURATION_MS, SPLASH_LOGO, SPLASH_MIN_
 import { resolveMotion } from "../src/tui/motion-policy.ts";
 import { shimmer, spinnerFrame } from "../src/tui/motion.ts";
 import { highlightCode } from "../src/tui/highlight.ts";
-import { keyHintChunks } from "../src/tui/hints.ts";
+import { HINT_KEY, keyHintChunks } from "../src/tui/hints.ts";
 import { statusPill } from "../src/tui/presentation.ts";
 import { readGitHead } from "../src/tui/git-head.ts";
 import { createTranscriptItem, markdownStyle } from "../src/tui/transcript-view.ts";
@@ -134,10 +134,15 @@ test("code highlighting, key chips, and pills keep text exact while adding color
   expect(text(highlightCode("echo hi # note", "sh", theme))).toBe("echo hi # note");
   expect(highlightCode("echo hi # note", "sh", theme).at(-1)?.text).toBe("# note");
 
-  const hint = "Enter send · Ctrl+F find · Files/Git unchanged · / commands";
+  const hint = "Enter send · Ctrl+F find · F2 details · Files/Git unchanged · / commands";
   const styled = keyHintChunks(hint, { key: theme.text, chip: theme.border, action: theme.muted });
   expect(text(styled)).toBe(hint);
   expect(styled.find(chunk => chunk.text === "Ctrl+F")?.bg?.equals(RGBA.fromHex(theme.border))).toBe(true);
+  expect(styled.find(chunk => chunk.text === "F2")?.bg?.equals(RGBA.fromHex(theme.border))).toBe(true);
+  expect(styled.find(chunk => chunk.text === "F2")?.fg?.equals(RGBA.fromHex(theme.text))).toBe(true);
+  expect(styled.find(chunk => chunk.text === " details")?.bg).toBeUndefined();
+  for (const value of ["F2", "F2 details", "Ctrl+I", "Alt+I"]) expect(HINT_KEY.test(value)).toBe(true);
+  for (const value of ["F20", "F2suffix", "F2-extra", "prefixF2", "Files/Git"]) expect(HINT_KEY.test(value)).toBe(false);
   expect(styled.find(chunk => chunk.text === "Files/Git unchanged")?.bg).toBeUndefined();
 
   expect(statusPill({ readiness: "ready", status: "idle" })).toEqual({ label: "Ready", tone: "ready", spinning: false });

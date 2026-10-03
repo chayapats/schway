@@ -14,7 +14,7 @@ cursor 6 27 visible
  ▌ ! Error
  ▌ Request failed · Inspect details before
  ▌ continuing
- ▌ Ctrl+R continue · Ctrl+I details · Esc keep
+ ▌ Ctrl+R continue · F2 details · Esc keep
  ▌ editing
 
 
@@ -30,7 +30,7 @@ cursor 6 27 visible
 
 
 
- ✗ Failed · 0.0s · Alt+R review · Ctrl+I details
+ ✗ Failed · 0.0s · Alt+R review · F2 details
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -80,11 +80,11 @@ cursor 6 27 visible
 08 2-3 #ffffff #edddd9 -
 08 3-9 #1d232c #c9cbd0 b
 08 9-21 #a61f16 #edddd9 -
-08 21-27 #1d232c #c9cbd0 b
-08 27-38 #a61f16 #edddd9 -
-08 38-41 #1d232c #c9cbd0 b
-08 41-47 #a61f16 #edddd9 -
-08 47-48 #ffffff #edddd9 -
+08 21-23 #1d232c #c9cbd0 b
+08 23-34 #a61f16 #edddd9 -
+08 34-37 #1d232c #c9cbd0 b
+08 37-43 #a61f16 #edddd9 -
+08 43-48 #ffffff #edddd9 -
 08 48-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
 09 1-2 #a61f16 #edddd9 -
@@ -113,9 +113,9 @@ cursor 6 27 visible
 24 9-19 #545e6c #f7f7f4 -
 24 19-24 #1d232c #caced3 b
 24 24-34 #545e6c #f7f7f4 -
-24 34-40 #1d232c #caced3 b
-24 40-48 #545e6c #f7f7f4 -
-24 48-50 #ffffff #f7f7f4 -
+24 34-36 #1d232c #caced3 b
+24 36-44 #545e6c #f7f7f4 -
+24 44-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -
 25 49-50 #ffffff #f7f7f4 -

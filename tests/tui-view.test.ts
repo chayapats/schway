@@ -2411,7 +2411,7 @@ test("first Grok success and failure restore the composer, and plan rejection op
     finish(); await ui.controller.waitForIdle(); await settle(ui);
     expect(ui.editor.plainText).toBe("My pending task"); expect(ui.editor.cursorOffset).toBe(4); expect(ui.session.items).toHaveLength(0);
     if (outcome === "plan") {
-      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Models unavailable; sign-in saved · /model retry · Alt+L sign in · Ctrl+I details");
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Models unavailable; sign-in saved · /model retry · Alt+L sign in · F2 details");
       expect(ui.captureCharFrame()).toContain("Models unavailable; sign-in saved");
       expect(ui.captureCharFrame()).toContain("Alt+L"); expect(await store.get(grokSubscriptionIdentity())).toBe("saved-grok-token");
       ui.mockInput.pressKey("l", { meta: true }); await settle(ui); expect(ui.controller.snapshot().loginChooser).toBeDefined();
@@ -2665,7 +2665,7 @@ for (const width of [120, 80, 50, 24]) test(`short model picker keeps route iden
       expect(frame).not.toContain("32k");
       expect(frame).not.toContain("reasoning");
       expect(frame).toContain("ChatGPT subscription");
-      expect(frame).toContain("Ctrl+I details");
+      expect(frame).toContain("F2 details");
       expect(frame).not.toContain("✓ current");
       expect(frame).not.toContain("Ctrl+R retry");
     } else {
@@ -2745,7 +2745,7 @@ test("completed outcome and responsive numbered review preserve draft and hide f
     expect(diff.x).toBe(files.x);
     ui.resize(50, 28); await settle(ui);
     expect(ui.captureCharFrame()).toContain("Esc back");
-    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+    expect(ui.captureCharFrame()).toContain("F2 details");
     ui.resize(79, 28); await settle(ui);
     ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
     expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(true);
@@ -2776,10 +2776,10 @@ test("failed outcome details append once and review details escape returns to th
   });
   await ui.controller.submit("try a check"); await settle(ui);
   expect(ui.captureCharFrame()).toContain("✗ Failed");
-  expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+  expect(ui.captureCharFrame()).toContain("F2 details");
   ui.mockInput.pressEscape(); await settle(ui);
   expect(ui.controller.snapshot().recovery).toBeUndefined();
-  expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+  expect(ui.captureCharFrame()).toContain("F2 details");
   const before = ui.controller.snapshot().transcript.length;
   ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
   expect(ui.controller.snapshot().transcript).toHaveLength(before + 1);
@@ -2880,7 +2880,7 @@ test("new unaccepted recovery details take priority over retained completed and 
     await ui.controller.initializeStartup(async () => ({ error: "new unaccepted startup diagnostic" }));
     await ui.mockInput.pasteBracketedText("keep the new draft"); await settle(ui);
     expect(ui.controller.snapshot().recovery).toMatchObject({ accepted: false, actions: ["details", "keep-editing"] });
-    expect(ui.captureCharFrame()).toContain("Ctrl+I details");
+    expect(ui.captureCharFrame()).toContain("F2 details");
     const before = ui.controller.snapshot().transcript.length;
     ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
     expect(ui.controller.snapshot().transcript).toHaveLength(before + 1);
@@ -2890,7 +2890,7 @@ test("new unaccepted recovery details take priority over retained completed and 
     ui.controller.keepEditingRecovery();
     ui.resize(24, 28); await settle(ui);
     const activity = ui.renderer.root.findDescendantById("activity") as TextRenderable;
-    expect(activity.plainText).not.toContain("Ctrl+I details");
+    expect(activity.plainText).not.toContain("F2 details");
     const dismissed = ui.controller.snapshot().transcript.length;
     ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
     expect(ui.controller.snapshot().transcript).toHaveLength(dismissed);
@@ -3000,7 +3000,7 @@ test("narrow header hides a detached SHA rather than shortening its identity", a
 test("Ctrl+I reveals notice diagnostics without changing the draft or session", async () => {
   const session = createSession();
   const ui = await setup(80, 28, {}, undefined, { session });
-  ui.controller.notice("Choice not remembered · Enter use model · Ctrl+I details", "Storage diagnostic secret-sentinel");
+  ui.controller.notice("Choice not remembered · Enter use model · F2 details", "Storage diagnostic secret-sentinel");
   ui.editor.setText("retained draft");
   await settle(ui);
   expect(ui.captureCharFrame()).not.toContain("Storage diagnostic");

@@ -144,7 +144,7 @@ test("interactive /compact reports completed, noop, cancellation and rejected tr
   });
   expect(await failure.compact()).toBe(false);
   expect(failure.snapshot().status).toBe("idle");
-  expect(failure.snapshot().compactionNotice).toBe("Compaction failed · Ctrl+I repair details");
+  expect(failure.snapshot().compactionNotice).toBe("Compaction failed · F2 repair details");
   expect(failure.inspectNoticeDetails()).toBe(true);
   expect(failure.snapshot().transcript.at(-1)?.text).toContain("/compact");
   await sink.close();

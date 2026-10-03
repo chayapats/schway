@@ -9,7 +9,7 @@ const outcome = (overrides: Partial<TurnOutcome> = {}): TurnOutcome => ({
 
 test("outcome words and glyphs keep failed-only details and omit zero counts", () => {
   for (const [reason, word] of [["completed", "✓ Done"], ["failed", "✗ Failed"], ["cancelled", "− Stopped"], ["limit", "◌ Limit"]] as const) {
-    expect(formatOutcomeLine(outcome({ reason }), 120)).toBe(`${word} · 14s · Alt+R review${reason === "failed" ? " · Ctrl+I details" : ""}`);
+    expect(formatOutcomeLine(outcome({ reason }), 120)).toBe(`${word} · 14s · Alt+R review${reason === "failed" ? " · F2 details" : ""}`);
   }
 });
 
@@ -30,7 +30,7 @@ test("narrow outcomes drop elapsed then all commands then files while preserving
   expect(formatOutcomeLine(value, 55)).toBe("✓ Done · 1 file +1 −1 · 2 commands ok · Alt+R review");
   expect(formatOutcomeLine(value, 50)).toBe("✓ Done · 1 file +1 −1 · Alt+R review");
   expect(formatOutcomeLine(value, 40)).toBe("✓ Done · 1 file +1 −1 · Alt+R review");
-  expect(formatOutcomeLine({ ...value, reason: "failed" }, 50)).toBe("✗ Failed · Alt+R review · Ctrl+I details");
-  expect(formatOutcomeLine({ ...value, reason: "failed" }, 40)).toBe("✗ Failed · Alt+R review · Ctrl+I details");
+  expect(formatOutcomeLine({ ...value, reason: "failed" }, 50)).toBe("✗ Failed · Alt+R review · F2 details");
+  expect(formatOutcomeLine({ ...value, reason: "failed" }, 40)).toBe("✗ Failed · Alt+R review · F2 details");
   expect(Bun.stringWidth(formatOutcomeLine({ ...value, reason: "failed" }, 20))).toBeLessThanOrEqual(20);
 });

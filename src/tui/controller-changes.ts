@@ -35,7 +35,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     const action = !sub ? "status" : sub.toLowerCase();
     if (action === "mode") {
       const origin = this.configEditor?.origins.git ? ` [${this.configEditor.origins.git}]` : "";
-      this.notice(`Change tracking: ${mode} · /changes review · Ctrl+I details`, `${origin ? `Configuration source:${origin}.\n` : ""}Off disables inspection; on-demand and snapshot capture paths and hashes before and after each turn, never file content. Snapshot also shows the comparison in /changes status. Diffs load only when requested.`);
+      this.notice(`Change tracking: ${mode} · /changes review · F2 details`, `${origin ? `Configuration source:${origin}.\n` : ""}Off disables inspection; on-demand and snapshot capture paths and hashes before and after each turn, never file content. Snapshot also shows the comparison in /changes status. Diffs load only when requested.`);
       return true;
     }
     if (action === "diff") {
@@ -50,7 +50,7 @@ export abstract class ChangesLayer extends BranchesLayer {
         return false;
       }
       const rows = parseGitDiff(preview, { includePaths: !path, includeSections: true }).map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`);
-      this.notice(redactSecrets(["Review diff · Ctrl+I details · Enter continue", ...(path ? [path] : []), ...rows].join("\n"), this.secrets).slice(0, 50_000), formatGitDiffPreview(preview));
+      this.notice(redactSecrets(["Review diff · F2 details · Enter continue", ...(path ? [path] : []), ...rows].join("\n"), this.secrets).slice(0, 50_000), formatGitDiffPreview(preview));
       return true;
     }
     if (action !== "status" && trimmed.length > 0) {
@@ -76,9 +76,9 @@ export abstract class ChangesLayer extends BranchesLayer {
       lines.push("Snapshots cover the current session/run only and cannot restore files.");
     }
     const primary = status.isGit
-      ? [`${formatCount(status.totalFiles, "changed file")} · /changes diff inspect · Ctrl+I details`, ...(status.branch ? [`Branch: ${status.branch}`] : ["Detached HEAD"]), ...status.files.map(file => file.path)]
+      ? [`${formatCount(status.totalFiles, "changed file")} · /changes diff inspect · F2 details`, ...(status.branch ? [`Branch: ${status.branch}`] : ["Detached HEAD"]), ...status.files.map(file => file.path)]
       : ["Not a Git workspace · Enter continue"];
-    if (this.gitSnapshotError) primary.unshift("Snapshot unavailable · Ctrl+I details");
+    if (this.gitSnapshotError) primary.unshift("Snapshot unavailable · F2 details");
     this.notice(redactSecrets(primary.join("\n"), this.secrets), lines.join("\n"));
     return true;
   }

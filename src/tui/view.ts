@@ -66,6 +66,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let renderedInspection: InspectionContent | undefined;
   let paintedInspection: InspectionContent & { node: ReturnType<typeof inspectionNode>; y: number; scroll: number; width: number; height: number } | undefined;
   let scrollToInspection = false;
+  let detailsReturn: { key: string; entryId: string; scroll: number; inspection?: InspectionTarget } | undefined;
+  let scrollToDetails = false;
   let searchOpen = false;
   let searchOriginalScroll = 0;
   let searchRestoreScroll: number | undefined;
@@ -82,6 +84,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let panelMode = "";
   let savedDraft = "";
   let savedDraftCursor = 0;
+  let savedDraftSelection: ReturnType<TextareaRenderable["getSelection"]> = null;
   let savedDraftRevision = 0;
   let panelFingerprint = "";
   let treePreviewKey = "";
@@ -97,6 +100,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let discoveryOpen = false;
   let helpOriginalScroll = 0;
   let reviewOriginalScroll = 0;
+  let reviewDetailsScroll: { path?: string; scroll: number } | undefined;
+  let reviewRestoreScroll: number | undefined;
   let treeOriginalScroll = 0;
   let sessionOriginalScroll = 0;
   let reviewContent = "";
@@ -692,12 +697,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         destination = sessionViewState.get(snapshot.sessionId);
         savedDraft = destination?.draft ?? recoveredText ?? "";
         savedDraftCursor = destination?.cursor ?? 0;
+        savedDraftSelection = null;
         sessionOriginalScroll = destination?.scroll ?? 0;
       }
       activeSessionId = snapshot.sessionId;
       if (sessionKey !== key) {
         discoveryOpen = false; completionId = undefined;
         resetRows(); sessionKey = key; expandedTools.clear(); clearInspection(); previousInspection = undefined; unseen = false; lastTail = "";
+        detailsReturn = undefined; scrollToDetails = false; reviewDetailsScroll = undefined; reviewRestoreScroll = undefined;
         searchOpen = false; searchSelected = -1; searchLastQuery = "";
         searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
         searchIndex.clear();
@@ -705,26 +712,35 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; }
       }
       const externalPanel = externalPanelFor(snapshot);
+      if (detailsReturn && (externalPanel || searchOpen || controller.commandHelpOpen || controller.running || !snapshot.transcript.some(entry => entry.id === detailsReturn!.entryId))) {
+        detailsReturn = undefined; scrollToDetails = false;
+      }
       if (externalPanel && inspection) { previousInspection = inspection; clearInspection(); }
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && snapshot.toolApproval ? "tool-approval" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) {
-          if (!sessionChanged) { savedDraft = recoveredText ?? editor.plainText; savedDraftCursor = recoveredText === undefined ? editor.cursorOffset : 0; }
+          if (!sessionChanged) {
+            savedDraft = recoveredText ?? editor.plainText; savedDraftCursor = recoveredText === undefined ? editor.cursorOffset : 0;
+            savedDraftSelection = recoveredText === undefined ? editor.getSelection() : null;
+          }
           savedDraftRevision = editorRevision;
         }
         if (nextPanel === "sessions") { sessionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "sessions" && !nextPanel && !sessionChanged) searchRestoreScroll = sessionOriginalScroll;
         if (nextPanel === "tree") { treeOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "tree" && !nextPanel && !sessionChanged) searchRestoreScroll = treeOriginalScroll;
-        if (nextPanel === "review" || nextPanel === "undo") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (nextPanel === "review" || nextPanel === "undo") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; reviewDetailsScroll = undefined; reviewRestoreScroll = undefined; }
         if ((panelMode === "review" || panelMode === "undo") && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
         if (nextPanel === "help") { helpInserted = false; lastQuery = undefined; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (panelMode === "help" && !nextPanel && !sessionChanged) searchRestoreScroll = helpOriginalScroll;
         panelMode = nextPanel;
         setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
-        if (!panelMode) editor.cursorOffset = savedDraftCursor;
+        if (!panelMode) {
+          editor.cursorOffset = savedDraftCursor;
+          if (savedDraftSelection) editor.setSelection(savedDraftSelection.start, savedDraftSelection.end);
+        }
         panelFingerprint = "";
       }
       if (sessionChanged && !nextPanel) { setDraft(savedDraft); editor.cursorOffset = savedDraftCursor; }
@@ -780,10 +796,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
-        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection ? "Esc back"
+        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection || detailsReturn ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stops"
           : snapshot.readiness === "loading" ? "Esc cancel"
-          : snapshot.recovery?.actions.includes("details") ? "Ctrl+I details"
+          : snapshot.recovery?.actions.includes("details") ? "F2 details"
           : snapshot.readiness === "ready" ? "Enter send"
           : snapshot.readiness === "not-connected" || snapshot.readiness === "connect" ? "Alt+L sign in" : "Alt+M model",
       };
@@ -873,7 +889,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}\n\n`))] : [fg(theme.muted)("\n\n")]),
         ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(`${safe(snapshot.readinessDetail)}\n`)] : []),
         ...keyHintChunks(safe(action), hintColors(theme.background)),
-        ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I details · Esc keep editing", hintColors(theme.background))] : []),
+        ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("F2 details · Esc keep editing", hintColors(theme.background))] : []),
       ]);
       const ids = new Set(entries.map(entry => entry.id));
       if (previousInspection && !inspectionEntry(previousInspection, entries)) previousInspection = undefined;
@@ -1050,7 +1066,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const selected = models.entries[models.selectedIndex];
           const detail = models.details && selected?.kind === "model"
             ? `${selected.modelId} · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`
-            : models.connecting ? "Type to search · ↑↓ select · Esc back" : selected?.kind === "model" ? `Type to search · Ctrl+P ${selected.favorite ? "unpin" : "pin"} · Ctrl+I details` : "↑↓ select · Enter open · Esc back";
+            : models.loading ? "Checking models · Esc back" : models.connecting ? "Type to search · ↑↓ select · Esc back" : selected?.kind === "model" ? `Type to search · Ctrl+P ${selected.favorite ? "unpin" : "pin"} · F2 details` : "↑↓ select · Enter open · Esc back";
           textRow(picker, fitLine(models.error ?? detail, room), models.error ? theme.error : theme.muted);
         } else if (browsing) {
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
@@ -1117,12 +1133,16 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "undo") {
         hints.content = "↑↓ select · PgUp/PgDn scroll · Esc close";
       } else if (panelMode === "review") {
-        hints.content = new StyledText(keyHintChunks("↑↓ files · PgUp/PgDn scroll · Ctrl+I details · Esc back", hintColors(theme.background)));
+        const navigation = snapshot.changeReview?.showingDetails ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
+        const actions = `${snapshot.outcome ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
+        // Keep each key with its action when the review hint needs a second row.
+        const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
+        hints.content = new StyledText([...keyHintChunks(navigation, hintColors(theme.background)), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
       } else if (snapshot.modelPicker) {
         hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
         const modeHint = "Shift+Tab change mode · ";
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1190,7 +1210,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       historyIndex = -1;
       if (panelMode) {
-        if (savedDraftRevision === revision && savedDraft === value) { savedDraft = ""; savedDraftCursor = 0; }
+        if (savedDraftRevision === revision && savedDraft === value) { savedDraft = ""; savedDraftCursor = 0; savedDraftSelection = null; }
       } else if (editorRevision === revision && editor.plainText === value) {
         setDraft("");
       }
@@ -1260,6 +1280,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const name = key.name.toLowerCase();
     const snapshot = controller.snapshot();
     const handled = () => { key.preventDefault(); key.stopPropagation(); refresh(); };
+    const detailsKey = name === "f2" && !key.ctrl && !key.shift && !key.meta && !key.option || key.ctrl && name === "i" && !key.meta && !key.option;
+    // Approval owns input even while transcript inspection hides its panel.
+    if (detailsKey && snapshot.toolApproval) { handled(); return; }
     if (panelMode === "tool-approval" && snapshot.toolApproval) {
       if (key.ctrl && name === "c") { controller.cancel(); handled(); return; }
       if (name === "escape") { controller.denyToolApproval(); handled(); return; }
@@ -1299,8 +1322,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if (snapshot.changeReview) {
-      if (key.ctrl && name === "i") { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); handled(); return; }
-      if (name === "escape") { if (snapshot.changeReview.showingDetails) { controller.toggleReviewDetails(); reviewDiff.scrollTo(0); } else controller.closeChangeReview(); handled(); return; }
+      if (detailsKey || name === "escape" && snapshot.changeReview.showingDetails) {
+        const review = snapshot.changeReview, path = review.files[review.selected]?.path;
+        if (controller.toggleReviewDetails()) {
+          if (review.showingDetails) reviewRestoreScroll = reviewDetailsScroll?.path === path ? reviewDetailsScroll.scroll : 0;
+          else { reviewDetailsScroll = { path, scroll: reviewDiff.scrollTop }; reviewRestoreScroll = 0; }
+        }
+        handled(); return;
+      }
+      if (name === "escape") { controller.closeChangeReview(); handled(); return; }
       if (!snapshot.changeReview.showingDetails && (name === "up" || name === "down")) { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewDiff.scrollTo(0); }
       if (name === "pageup" || name === "pagedown") {
         const distance = Math.max(1, reviewDiff.viewport.height - 2);
@@ -1308,9 +1338,26 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       handled(); return;
     }
-    if (key.ctrl && name === "i" && !panelMode && !controller.running && !snapshot.preferences && !snapshot.modelPicker && !snapshot.loginChooser && controller.inspectNoticeDetails()) { handled(); return; }
-    if (key.ctrl && name === "i" && !panelMode && !controller.running && snapshot.outcome) {
-      if ((snapshot.recovery?.accepted === false && snapshot.recovery.actions.includes("details")) || activityPaint.text.includes("Ctrl+I details")) controller.inspectRecovery();
+    if (detailsKey) {
+      if (panelMode === "model") controller.togglePickerDetails();
+      else if (!panelMode && !controller.running && snapshot.readiness !== "loading" && !detailsReturn) {
+        const prior = { key: sessionKey, scroll: transcript.scrollTop, inspection };
+        const opened = snapshot.noticeDetailsAvailable ? controller.inspectNoticeDetails()
+          : snapshot.recovery?.actions.includes("details") || snapshot.outcome?.reason === "failed" ? controller.inspectRecovery() : false;
+        if (opened) {
+          detailsReturn = { ...prior, entryId: controller.snapshot().transcript.at(-1)!.id };
+          clearInspection(); transcript.stickyScroll = false; scrollToDetails = true;
+        }
+      }
+      handled(); return;
+    }
+    if (name === "escape" && detailsReturn && !panelMode && !controller.running && !snapshot.toolApproval) {
+      const prior = detailsReturn; detailsReturn = undefined; scrollToDetails = false;
+      if (prior.key === sessionKey) {
+        inspection = prior.inspection && validInspection(prior.inspection, snapshot.transcript) ? prior.inspection : undefined;
+        transcript.stickyScroll = false; searchRestoreScroll = prior.scroll;
+        if (inspection) editor.blur(); else editor.focus();
+      }
       handled(); return;
     }
     if ((key.meta || key.option) && name === "r" && !panelMode && !controller.running) {
@@ -1360,9 +1407,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("continue")) {
         void controller.continueRecovery().then(refresh, fail); handled(); return;
-      }
-      if (key.ctrl && name === "i" && snapshot.recovery.actions.includes("details")) {
-        controller.inspectRecovery(); handled(); return;
       }
       if ((key.meta || key.option) && name === "l" && snapshot.recovery.actions.includes("connect")) {
         controller.openRecoveryRepair("connect"); handled(); return;
@@ -1442,7 +1486,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if (snapshot.modelPicker && key.ctrl && name === "p") { controller.togglePickerFavorite(); handled(); return; }
-    if (snapshot.modelPicker && key.ctrl && name === "i") { controller.togglePickerDetails(); handled(); return; }
     if (snapshot.modelPicker?.error && name === "r" && key.ctrl && !key.meta && !key.option &&
       ["empty", "offline", "failed"].includes(snapshot.modelPicker.catalogState ?? "")) {
       controller.retryModelPickerCatalog(); handled(); return;
@@ -1537,6 +1580,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   };
   const onFrame = () => {
     if (accentPending) { accentPending = false; accentStartedAt = now(); ticker.ensure(); }
+    if (reviewRestoreScroll !== undefined) { reviewDiff.scrollTo(reviewRestoreScroll); reviewRestoreScroll = undefined; }
+    if (scrollToDetails && detailsReturn) {
+      const row = rows.get(detailsReturn.entryId)?.root;
+      if (row) transcript.scrollTo(transcript.scrollTop + row.y - transcript.viewport.y);
+      scrollToDetails = false;
+    }
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;
@@ -1607,6 +1656,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       endSplash();
       destroyed = true;
       inspection = undefined; previousInspection = undefined; renderedInspection = undefined; paintedInspection = undefined;
+      detailsReturn = undefined; reviewDetailsScroll = undefined;
       ticker.stop();
       clearInterval(activityTimer);
       renderer.keyInput.off("paste", onPaste);

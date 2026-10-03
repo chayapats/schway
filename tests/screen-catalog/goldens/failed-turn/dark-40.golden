@@ -14,13 +14,13 @@ cursor 6 17 visible
  ▌ ! Error
  ▌ Request failed · Inspect details
  ▌ before continuing
- ▌ Ctrl+R continue · Ctrl+I details ·
- ▌ Esc keep editing
+ ▌ Ctrl+R continue · F2 details · Esc
+ ▌ keep editing
 
 
 
 
- ✗ Failed · Alt+R review · Ctrl+I deta…
+ ✗ Failed · Alt+R review · F2 details
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -70,16 +70,16 @@ cursor 6 17 visible
 08 2-3 #ffffff #2a2227 -
 08 3-9 #e6eaf0 #2c3241 b
 08 9-21 #f79d9d #2a2227 -
-08 21-27 #e6eaf0 #2c3241 b
-08 27-37 #f79d9d #2a2227 -
+08 21-23 #e6eaf0 #2c3241 b
+08 23-34 #f79d9d #2a2227 -
+08 34-37 #e6eaf0 #2c3241 b
 08 37-38 #ffffff #2a2227 -
 08 38-40 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
 09 1-2 #f79d9d #2a2227 -
 09 2-3 #ffffff #2a2227 -
-09 3-6 #e6eaf0 #2c3241 b
-09 6-19 #f79d9d #2a2227 -
-09 19-38 #ffffff #2a2227 -
+09 3-15 #f79d9d #2a2227 -
+09 15-38 #ffffff #2a2227 -
 09 38-40 #ffffff #0e1117 -
 10 0-40 #ffffff #0e1117 -
 11 0-40 #ffffff #0e1117 -
@@ -92,9 +92,9 @@ cursor 6 17 visible
 14 9-12 #8b95a7 #0e1117 -
 14 12-17 #e6eaf0 #293140 b
 14 17-27 #8b95a7 #0e1117 -
-14 27-33 #e6eaf0 #293140 b
-14 33-39 #8b95a7 #0e1117 -
-14 39-40 #ffffff #0e1117 -
+14 27-29 #e6eaf0 #293140 b
+14 29-37 #8b95a7 #0e1117 -
+14 37-40 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
 15 1-39 #161b24 #0e1117 -
 15 39-40 #ffffff #0e1117 -

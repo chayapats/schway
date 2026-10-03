@@ -41,7 +41,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
   const draft = screen.id.startsWith("draft-");
-  const disk = draft || palette || screen.id.startsWith("model-picker") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -50,7 +50,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await mkdir(join(root, ".git"), { recursive: true });
       await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/feature/a-very-long-branch-name-for-testing\n");
     }
-    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git"].includes(screen.id)) {
+    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id)) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
       if (screen.id !== "undo-preview-no-git") for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
@@ -73,7 +73,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let responses: ScriptedTurn[] = [{ text: "Ready." }];
   if (["streaming-answer", "running-search"].includes(screen.id)) responses = [{ chunks: ["## Plan\n\n", "Reading the **config** loader first.\n\n", "- Check `src/config/config.ts`\n- Then"], waitForAbort: true }];
   if (screen.id === "stopped-streaming") responses = [{ chunks: ["## Partial answer\n\n", "อ่านไฟล์แล้ว 🧪\n\n", "The next step is"], waitForAbort: true }];
-  if (["failed-turn", "no-color"].includes(screen.id)) responses = Array.from({ length: 3 }, () => ({ error: "Service unavailable", status: 503 }));
+  if (["failed-turn", "no-color", "details-recovery"].includes(screen.id)) responses = Array.from({ length: 3 }, () => ({ error: "Service unavailable", status: 503 }));
   if (screen.id === "retry-countdown") responses = [{ error: "busy", status: 503, headers: { "Retry-After": "3" } }];
   if (screen.id === "compaction") responses = [{ waitForAbort: true }];
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
@@ -86,7 +86,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       { toolCalls: [{ id: "active-shell", name: "bash", arguments: { command: "printf 'Ready to stop\\n'; sleep 30", timeout: 5_000 } }] },
     ];
   }
-  if (["completed-turn", "large-edit", "review-panel", "undo-preview", "undo-preview-no-git"].includes(screen.id)) {
+  if (["completed-turn", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id)) {
     tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);
     responses = [
       { toolCalls: [{ id: "call_fixture_read", name: "read", arguments: { path: "clamp.ts" } }] },
@@ -110,7 +110,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     responses = [{ toolCalls: names.map(name => ({ id: `call_fixture_parallel_${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
   }
   const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
-  const picker = screen.id === "model-picker";
+  const picker = screen.id === "model-picker" || screen.id === "details-model";
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
@@ -128,6 +128,9 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
+  if (screen.id === "details-recovery") options.changeTracking = "off";
+  // Exercise real diagnostic redaction before layout so temporary-root bytes never enter goldens.
+  if (screen.id === "details-review") options.secrets = [temp!];
   if (screen.id === "approval-command" || screen.id === "approval-edit") options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (screen.id === "approval-modes-help") options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (picker || unconnectedPicker) {
@@ -178,7 +181,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     undoLock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
   }
   const deletionContext = screen.id === "delete-session-busy" ? { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionDirectory!, settings: () => new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") }).settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } } : undefined;
-  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets: [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets: options.secrets ?? [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();
@@ -188,7 +191,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     }
   };
   await settle();
-  return { ...terminal, controller, view, session, sessionDirectory, draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
+  return { ...terminal, controller, view, session, sessionDirectory, secrets: options.secrets ?? [], draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
     dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
   };

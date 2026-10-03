@@ -19,6 +19,7 @@ grok-browser-approval
 grok-device-approval
 grok-plan-error
 model-picker
+details-model
 model-picker-unconnected
 thinking-controls
 command-palette
@@ -38,8 +39,12 @@ large-edit
 stopped-streaming
 stopped-tool
 failed-turn
+details-notice
+details-recovery
+details-unavailable
 retry-countdown
 review-panel
+details-review
 undo-preview
 undo-preview-no-git
 delete-session-busy

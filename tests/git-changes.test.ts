@@ -647,7 +647,7 @@ test("diff command keeps Git headers behind requested details without losing sou
     expect(primary).toContain("1 - original");
     expect(primary).toContain("1 + replacement");
     expect(primary).not.toMatch(/diff --git|index [0-9a-f]{7,}|@@ -|--- a\/|\+\+\+ b\//);
-    expect(primary).toContain("Ctrl+I details");
+    expect(primary).toContain("F2 details");
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(lastNotice(controller)).toContain("diff --git");
     controller.dispose();

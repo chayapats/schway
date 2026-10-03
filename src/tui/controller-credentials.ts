@@ -570,7 +570,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       } catch (error) {
         if (this.loginGeneration !== generation) return false;
         if (abort.signal.aborted) this.notice(saved ? "Sign-in saved; activation cancelled · /model choose model" : "Sign-in cancelled · Alt+L retry");
-        else this.fail(saved ? "Models unavailable; sign-in saved · /model retry · Alt+L sign in · Ctrl+I details" : "Grok sign-in failed · Alt+L retry · /model choose model", redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+        else this.fail(saved ? "Models unavailable; sign-in saved · /model retry · Alt+L sign in · F2 details" : "Grok sign-in failed · Alt+L retry · /model choose model", redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
         return false;
       }
     })();
@@ -639,7 +639,7 @@ export abstract class CredentialsLayer extends ControllerCore {
             if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return;
             if (message.startsWith("Enter this code at ")) this.loginApproval = message;
             else {
-              if (message.startsWith("ChatGPT subscription (Codex OAuth):")) this.notice("Sign-in saved · /model choose model · Ctrl+I details", message);
+              if (message.startsWith("ChatGPT subscription (Codex OAuth):")) this.notice("Sign-in saved · /model choose model · F2 details", message);
               else if (message.startsWith("Approval received.")) this.notice("Approval received · Saving sign-in · Esc cancel");
               else this.notice(redactSecrets(message, this.secrets));
               if (message.startsWith("The browser could not be opened automatically")) this.loginChooserState = { level: "chatgpt", selectedId: "chatgpt-device" };
@@ -655,7 +655,7 @@ export abstract class CredentialsLayer extends ControllerCore {
           }
           return false;
         }
-        this.notice("Sign-in saved · /model choose model · Ctrl+I details", result.status);
+        this.notice("Sign-in saved · /model choose model · F2 details", result.status);
         // Test runners may omit onSaved; production also invalidates at the store commit point.
         if (!credentialSaved) this.invalidateSubscriptionAdapter();
         credentialSaved = true;
@@ -730,8 +730,8 @@ export abstract class CredentialsLayer extends ControllerCore {
         discovery.signal.throwIfAborted();
         this.notice(`Found ${formatCount(models.length, "model")} · Activating ${preferred} · Esc cancel`);
       } catch (error) {
-        if (discovery.signal.aborted) this.notice("Activation cancelled; sign-in saved · /model retry · Ctrl+I details", this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model.");
-        else this.fail("Models unavailable; sign-in saved · /model retry · Ctrl+I details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model without signing in again.\n${error instanceof Error ? error.message : String(error)}`);
+        if (discovery.signal.aborted) this.notice("Activation cancelled; sign-in saved · /model retry · F2 details", this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked; retry /model." : "Previous provider is still active; retry /model.");
+        else this.fail("Models unavailable; sign-in saved · /model retry · F2 details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model without signing in again.\n${error instanceof Error ? error.message : String(error)}`);
         if (this.activeAbort === discovery) this.activeAbort = undefined;
         if (this.pickerReturn) this.restorePickerAfterConnection();
         return false;
@@ -743,7 +743,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         () => `ChatGPT model active · Enter send · ${this.modelId}`,
         "Model activation failed · /model retry · Alt+L sign in", true);
       if (applied) { this.pickerReturn = undefined; this.subscriptionPending = false; await this.emitModelActivated({ provider: "openai", modelId: this.modelId, authRoute: "codex" }); }
-      else this.notice("Activation failed; sign-in saved · /model retry · Ctrl+I details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
+      else this.notice("Activation failed; sign-in saved · /model retry · F2 details", `${this.subscriptionReactivationRequired ? "Previous Codex adapter is blocked" : "Previous provider remains active"}; retry /model after checking the error.`);
       if (this.pickerReturn) this.restorePickerAfterConnection();
       return applied;
     }
