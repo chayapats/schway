@@ -52,6 +52,7 @@ export async function diagnose(input: {
   store?: CredentialStore;
   signal?: AbortSignal;
 }): Promise<DoctorReport> {
+  const originalEnv = { ...input.env };
   const secrets = configDiagnosticSecrets({ env: input.env }, [input.args]);
   const sourceLabel = (source: string) => safeConfigSource(source, secrets);
   const checks: DoctorCheck[] = [];
@@ -98,7 +99,7 @@ export async function diagnose(input: {
       else { env = loaded; add("env-files", "ok", "Explicit environment files loaded for presence checks."); }
     } catch { add("env-files", "error", "Environment file inspection failed.", "Check --env-file paths and permissions."); }
   }
-  const diagnosticContext = { env, secrets };
+  const diagnosticContext = { env, secrets, observedEnvs: [originalEnv] };
   configDiagnosticSecrets(diagnosticContext, [input.args]);
   const rememberCredential = (value: string | null) => {
     configDiagnosticSecrets(diagnosticContext, [{ apiKey: value }]);

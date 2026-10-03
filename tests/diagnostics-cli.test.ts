@@ -11,6 +11,39 @@ async function withHome(run: (home: string) => Promise<void>) {
   try { await run(home); } finally { await rm(home, { recursive: true, force: true }); }
 }
 
+for (const command of ["prompt", "doctor-json", "doctor-plain"] as const) for (const name of ["OTHER_AUTH", "OPENAI_API_KEY"])
+test(`${command} diagnostics preserve original ${name} credential provenance across env overlays`, async () => withHome(async root => {
+  const home = join(root, "toy-home"), cwd = join(root, "workspace"), envFile = join(root, "overlay.env");
+  await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(cwd);
+  const config = JSON.stringify({ unexpectedSetting: true, profiles: {
+    unused: { baseUrl: "https://fixture.invalid/v1", credentialEnv: name, auth: "none" },
+  } });
+  await writeFile(join(home, ".schway/config.json"), config);
+  await writeFile(envFile, `${name}=replacement-credential\n`);
+  const before = (await readdir(root, { recursive: true })).sort(), reads: string[] = [];
+  let stdout = "", stderr = "", writes = 0, models = 0, requests = 0;
+  const code = await runCli([...(command === "prompt" ? ["-p", "fixture task"] : ["doctor", ...(command === "doctor-json" ? ["--json"] : [])]),
+    "--env-file", envFile, "--model=local-fixture"], {
+    cwd, env: { HOME: home, [name]: "toy" }, terminal: { stdin: false, stdout: false },
+    stdout: { write: value => { stdout += value; } }, stderr: { write: value => { stderr += value; } },
+    credentialStore: { async get(identity) { reads.push(identity.account); return null; },
+      async set() { writes++; throw new Error("Unexpected credential write"); }, async delete() { writes++; throw new Error("Unexpected credential deletion"); } },
+    fetch: async () => { requests++; throw new Error("Unexpected network"); },
+    createModel: async () => { models++; throw new Error("Unexpected model creation"); },
+  });
+  expect(code).toBe(1); expect(stdout + stderr).not.toContain("toy");
+  expect(stdout + stderr).toContain("***-home/.schway/config.json");
+  expect(stdout + stderr).toContain("Remove this unknown setting");
+  if (command === "doctor-json") expect(JSON.parse(stdout).checks).toContainEqual(expect.objectContaining({ id: "config.user", status: "error",
+    diagnostics: [expect.objectContaining({ category: "unknown-setting" })] }));
+  if (command === "prompt") expect(stdout).toBe("");
+  expect(reads).toEqual(command === "prompt" ? [] : ["api-key:anthropic"]);
+  expect({ writes, models, requests }).toEqual({ writes: 0, models: 0, requests: 0 });
+  expect((await readdir(root, { recursive: true })).sort()).toEqual(before);
+  expect(await readFile(join(home, ".schway/config.json"), "utf8")).toBe(config);
+  expect(await readFile(envFile, "utf8")).toBe(`${name}=replacement-credential\n`);
+}));
+
 test("debug opt-in keeps runtime JSONL and durable semantic JSONL separate", async () => withHome(async home => {
   let stdout = "";
   const invoke = (flags: string[]) => runCli(["-p", "hello", "--json", ...flags], {

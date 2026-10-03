@@ -161,6 +161,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return 1;
   }
 
+  const originalEnv = { ...io.env };
   const secrets: string[] = collectSecrets(parsed.args.apiKey, io.env, undefined, parsed.args.headers);
   let diagnosticSessionId: string | undefined;
   const diagnostics = createDiagnosticSink({
@@ -183,7 +184,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     env = loadedEnv;
   }
-  const diagnosticContext = { env, secrets };
+  const diagnosticContext = { env, secrets, observedEnvs: [originalEnv] };
   configDiagnosticSecrets(diagnosticContext);
 
   const directory = sessionsDirectory(home);
