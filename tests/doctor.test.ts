@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
 import { runCli } from "../src/cli/main.ts";
 import { inspectPackages } from "../src/packages/packages.ts";
-import { loadResolvedSettings } from "../src/config/config.ts";
+import { loadResolvedSettings, type ConfigLayer } from "../src/config/config.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { readFile } from "node:fs/promises";
@@ -26,6 +26,140 @@ const store = (value: string | null | Error): CredentialStore => ({
   delete: async () => { throw Error("unexpected mutation"); },
 });
 const check = (report: Awaited<ReturnType<typeof diagnose>>, id: string) => report.checks.find(item => item.id === id);
+
+const modelPrecedence: Array<{ name: string; user?: ConfigLayer; project?: ConfigLayer; cli?: Partial<Parameters<typeof diagnose>[0]["args"]>; model?: string }> = [
+  { name: "no configured model" },
+  { name: "user whitespace", user: { model: " \t\n " } },
+  { name: "user model", user: { model: "user-custom" }, model: "user-custom" },
+  { name: "project overrides user", user: { model: "user-custom" }, project: { model: "project-custom" }, model: "project-custom" },
+  { name: "CLI overrides both files", user: { model: "user-custom" }, project: { model: "project-custom" }, cli: { model: "  ทีม/custom-🧪  " }, model: "ทีม/custom-🧪" },
+  { name: "project whitespace clears user", user: { model: "user-custom" }, project: { model: " \t " } },
+  { name: "CLI whitespace clears both files", user: { model: "user-custom" }, project: { model: "project-custom" }, cli: { model: " \t " } },
+  { name: "provider switch clears inherited model", user: { provider: "openai", model: "user-custom" }, cli: { provider: "xai" } },
+  { name: "user profile replaces direct model", user: { model: "file-custom", profile: "local", profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", model: "profile-custom", auth: "none" } } }, model: "profile-custom" },
+  { name: "project profile overrides same user profile", user: { profile: "local", profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", model: "user-profile" } } }, project: { profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", model: "project-profile" } } }, model: "project-profile" },
+  { name: "CLI profile and model override file selections", user: { profile: "first", profiles: { first: { baseUrl: "http://127.0.0.1:9/v1", model: "first-model" }, second: { baseUrl: "http://127.0.0.1:9/v1", model: "second-model" } } }, cli: { profile: "second", model: "cli-custom" }, model: "cli-custom" },
+  { name: "model-less profile cannot borrow direct model", user: { model: "file-custom", profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", auth: "none" } } }, cli: { profile: "local" } },
+];
+for (const sample of modelPrecedence) test(`model readiness follows headless precedence: ${sample.name}`, async () => {
+  const { workspace, home } = await fixture();
+  for (const [root, value] of [[home, sample.user], [workspace, sample.project]] as const) if (value) {
+    await mkdir(join(root, ".schway"), { recursive: true });
+    await writeFile(join(root, ".schway/config.json"), JSON.stringify(value));
+  }
+  const options = { ...args, apiKey: "fixture-api-key", ...sample.cli };
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: options, store: store(null) });
+  expect(report.checks.filter(item => item.id === "model")).toHaveLength(1);
+  expect(check(report, "model")).toEqual(sample.model
+    ? { id: "model", status: "ok", summary: `Configured model: ${sample.model}`, remedy: "None." }
+    : { id: "model", status: "error", summary: "No model configured", remedy: "Pass --model <id> or set model in config, then run schway doctor again." });
+  expect(check(report, "auth")?.status).toBe("ok");
+  expect(doctorExitCode(report)).toBe(sample.model ? 0 : 1);
+  expect(formatDoctor(report)).toContain(sample.model ? `[Ok] model: Configured model: ${sample.model}` : "[Error] model: No model configured");
+});
+
+for (const scope of ["user", "project", "cli"] as const) test(`model presence is independent of unsupported ${scope} thinking`, async () => {
+  const { workspace, home } = await fixture();
+  const configured = { provider: "openai" as const, model: "custom-unknown", thinking: "low" as const };
+  if (scope !== "cli") {
+    const root = scope === "user" ? home : workspace;
+    await mkdir(join(root, ".schway")); await writeFile(join(root, ".schway/config.json"), JSON.stringify(configured));
+  }
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, ...(scope === "cli" ? configured : {}) }, store: store(null) });
+  expect(check(report, "model")).toMatchObject({ status: "ok", summary: "Configured model: custom-unknown" });
+  expect(check(report, "provider")?.status).toBe("error");
+  expect(doctorExitCode(report)).toBe(1);
+});
+
+for (const sample of [
+  { name: "malformed JSON", bytes: "{broken" },
+  { name: "empty model", value: { model: "" } },
+  { name: "invalid model type", value: { model: 123 } },
+  { name: "blank profile model", value: { profile: "local", profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", model: " \t " } } } },
+  { name: "unresolved profile", value: { model: "file-model", profile: "missing" } },
+]) test(`model readiness does not guess through ${sample.name}`, async () => {
+  const { workspace, home } = await fixture();
+  await mkdir(join(workspace, ".schway"));
+  await writeFile(join(workspace, ".schway/config.json"), sample.bytes ?? JSON.stringify(sample.value));
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, model: "cli-model" }, store: store(null) });
+  expect(check(report, "model")).toMatchObject({ status: "warning", summary: "Model configuration needs repair", remedy: expect.stringContaining("Fix configuration") });
+  expect(check(report, "model")?.summary).not.toContain("No model");
+  expect(report.checks.some(item => item.id !== "model" && item.status === "error")).toBe(true);
+  for (const id of ["runtime", "workspace", "search", "sessions", "packages", "skills"]) expect(check(report, id)).toBeDefined();
+  expect(doctorExitCode(report)).toBe(1);
+});
+
+test("missing credentials and model remain independent required failures", async () => {
+  const { workspace, home } = await fixture();
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, provider: "openai", openaiAuth: "api-key" }, store: store(null) });
+  expect(check(report, "auth")?.status).toBe("error");
+  expect(check(report, "model")?.status).toBe("error");
+  expect(doctorExitCode(report)).toBe(1);
+});
+
+for (const source of ["runtime", "environment", "profile", "env-file", "recognized"] as const) test(`configured model labels redact ${source} secrets before bounding and strip controls`, async () => {
+  const { workspace, home } = await fixture();
+  const secret = source === "recognized" ? "sk-private-model-key" : "private-known-model-key";
+  const model = `ทีม/${"x".repeat(495)}${secret}\u001b[31m🧪`;
+  const envFile = join(workspace, "keys.env");
+  await writeFile(envFile, `OPENAI_API_KEY=${secret}\n`);
+  if (source === "profile") {
+    await mkdir(join(workspace, ".schway"));
+    await writeFile(join(workspace, ".schway/config.json"), JSON.stringify({ profiles: { local: { baseUrl: "http://127.0.0.1:9/v1", credentialEnv: "CUSTOM_KEY", model } } }));
+  }
+  const report = await diagnose({ cwd: workspace, env: { HOME: home, ...(source === "environment" ? { OPENAI_API_KEY: secret } : source === "profile" ? { CUSTOM_KEY: secret } : {}) },
+    args: { ...args, model, ...(source === "runtime" ? { apiKey: secret } : source === "profile" ? { profile: "local" } : source === "env-file" ? { envFiles: [envFile] } : {}) }, store: store(null) });
+  expect(check(report, "model")?.status).toBe("ok");
+  expect(check(report, "model")!.summary.length).toBeLessThanOrEqual("Configured model: ".length + 512);
+  for (const output of [JSON.stringify(report), formatDoctor(report)]) {
+    expect(output).not.toContain(secret); expect(output).not.toContain("private-known"); expect(output).not.toContain("\u001b"); expect(output).not.toContain("\\u001b");
+  }
+});
+
+for (const route of ["api-key", "auto", "codex", "grok"] as const) for (const form of ["raw", "trimmed", "controlled", "bound"] as const) test(`model display masks observed ${route} credentials in ${form} form without extra reads`, async () => {
+  const { workspace, home } = await fixture();
+  const access = "fixture-private-access-value", refresh = "fixture-private-refresh-value";
+  const decorate = (value: string) => form === "raw" ? value : form === "controlled" ? ` \u0001${value}\u001b[31m \t` : ` \t${value} \n`;
+  const subscription = route === "codex" || route === "grok";
+  const apiAccount = "api-key:openai", subscriptionAccount = route === "grok" ? "grok-subscription:xai" : "codex-subscription:chatgpt";
+  const reads: string[] = [];
+  const guarded: CredentialStore = { ...store(null), get: async identity => {
+    reads.push(identity.account);
+    if (identity.account === subscriptionAccount && subscription) return JSON.stringify({ accessToken: decorate(access), refreshToken: decorate(refresh), obtainedAt: Date.now(), expiresAt: Date.now() + 30_000 });
+    return identity.account === apiAccount && !subscription ? decorate(access) : null;
+  } };
+  const model = `${form === "bound" ? "x".repeat(504) : ""}${access}${subscription ? `/${refresh}` : ""}`;
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, provider: route === "grok" ? "xai" : "openai", ...(route === "grok" ? { xaiAuth: "grok" } as const : { openaiAuth: route }), model }, store: guarded });
+  expect(reads).toEqual(route === "auto" ? [subscriptionAccount, apiAccount, "api-key:anthropic"] : [subscription ? subscriptionAccount : apiAccount, "api-key:anthropic"]);
+  expect(check(report, "model")?.status).toBe("ok");
+  expect(check(report, "auth")?.status).toBe(subscription ? "warning" : "ok");
+  for (const output of [JSON.stringify(report), formatDoctor(report)]) {
+    expect(output.includes(access)).toBe(false); expect(output.includes(refresh)).toBe(false);
+    expect(output.includes("fixture-")).toBe(false);
+    expect(output.includes("\u001b")).toBe(false); expect(output.includes("\\u001b")).toBe(false);
+  }
+});
+
+for (const route of ["codex", "grok"] as const) test(`model display masks a refresh credential even when ${route} login is invalid`, async () => {
+  const { workspace, home } = await fixture();
+  const credential = "fixture-invalid-login-refresh";
+  const reads: string[] = [];
+  const guarded: CredentialStore = { ...store(null), get: async identity => {
+    reads.push(identity.account);
+    return identity.account === "api-key:anthropic" ? null : JSON.stringify({ refreshToken: ` ${credential} ` });
+  } };
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, model: credential,
+    ...(route === "codex" ? { provider: "openai", openaiAuth: "codex" } as const : { provider: "xai", xaiAuth: "grok" } as const) }, store: guarded });
+  expect(reads).toEqual([route === "codex" ? "codex-subscription:chatgpt" : "grok-subscription:xai", "api-key:anthropic"]);
+  expect(check(report, "model")?.status).toBe("ok"); expect(check(report, "auth")?.status).toBe("error");
+  for (const output of [JSON.stringify(report), formatDoctor(report)]) expect(output.includes(credential)).toBe(false);
+});
+
+test("a fully suppressed configured model has a safe visible label", async () => {
+  const { workspace, home } = await fixture();
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args: { ...args, model: "\u001b[31m" }, store: store(null) });
+  expect(check(report, "model")).toMatchObject({ status: "ok", summary: "Configured model: <redacted>" });
+});
 
 for (const profileScope of ["user", "project"] as const) test(`a credentialEnv reference in invalid ${profileScope} config protects both scopes across diagnostic consumers`, async () => {
   const { root } = await fixture();
@@ -119,6 +253,7 @@ for (const alias of [false, true]) test(`shared user/project config${alias ? " t
   expect((editor as Error).message.match(/Invalid approval.mode/g)).toHaveLength(1);
   expect(report.checks.filter(c => c.id.startsWith("config.") && c.status === "error")).toHaveLength(1);
   expect(check(report, "config.project")).toMatchObject({ status: "warning", remedy: expect.stringContaining("config.user") });
+  expect(check(report, "model")?.status).toBe("warning");
   expect(check(report, "packages")).toMatchObject({ status: "warning", remedy: expect.stringContaining("config.user") });
   expect(report.checks.flatMap(c => c.diagnostics ?? [])).toHaveLength(1);
   let stderr = "";
@@ -159,6 +294,7 @@ for (const scope of ["user", "project", "cli"] as const) test(`${scope} unknown 
   const diagnostic = { source: scope === "cli" ? "CLI settings" : path, path: "profile", category: "constraint", constraint: "Select a configured compatible profile" };
   expect(settings).toMatchObject({ diagnostics: [diagnostic] });
   expect(check(report, "provider")).toMatchObject({ status: "error", summary: "Invalid profile · Select a configured compatible profile", diagnostics: [diagnostic] });
+  expect(check(report, "model")?.status).toBe("warning");
   expect(doctorExitCode(report)).toBe(1);
   expect(JSON.stringify(settings)).not.toContain("private-");
   expect(JSON.stringify(report)).not.toContain("private-");
@@ -317,7 +453,7 @@ test("auth modes isolate selected credentials, locked store and subscription exp
   const run = (override: Record<string, string | undefined>, options: Parameters<typeof diagnose>[0]["args"], value: string | null | Error) =>
     diagnose({ cwd: workspace, env: { HOME: home, ...override }, args: options, store: store(value) });
   expect(check(await run({ OPENAI_API_KEY: "secret-do-not-print" }, args, null), "auth")?.status).toBe("ok");
-  const optional = await run({}, { ...args, provider: "openai-compatible", baseUrl: "https://localhost/v1" }, null);
+  const optional = await run({}, { ...args, provider: "openai-compatible", baseUrl: "https://localhost/v1", model: "custom-model" }, null);
   expect(check(optional, "auth")?.status).toBe("warning"); expect(doctorExitCode(optional)).toBe(0);
   expect(check(await run({}, { ...args, provider: "openai-compatible", baseUrl: "https://localhost/v1", auth: "none" }, new Error("secret")), "auth")?.status).toBe("ok");
   expect(check(await run({}, { ...args, provider: "openai-compatible", baseUrl: "https://localhost/v1", auth: "required" }, new Error("secret")), "auth")?.status).toBe("error");

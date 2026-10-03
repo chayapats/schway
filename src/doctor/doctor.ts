@@ -100,6 +100,10 @@ export async function diagnose(input: {
   }
   const diagnosticContext = { env, secrets };
   configDiagnosticSecrets(diagnosticContext, [input.args]);
+  const rememberCredential = (value: string | null) => {
+    configDiagnosticSecrets(diagnosticContext, [{ apiKey: value }]);
+    return value;
+  };
   if (workspace && report.workspace !== undefined) {
     report.workspace = sourceLabel(workspace);
     const workspaceCheck = checks.find(check => check.id === "workspace");
@@ -170,8 +174,16 @@ export async function diagnose(input: {
     }
   }
   const invalidConfig = checks.some(c => c.id.startsWith("config.") && c.status === "error");
-  const settings = resolveSettings({ user, project, diagnosticContext, cli: cliOverridesFromArgs({ ...input.args, approval: undefined }), configSources: { user: home ? sourceLabel(userConfigPath(home)) : undefined, project: workspace ? sourceLabel(projectConfigPath(workspace)) : undefined } });
+  const settingsInput = { user, project, diagnosticContext, cli: cliOverridesFromArgs({ ...input.args, approval: undefined }), configSources: { user: home ? sourceLabel(userConfigPath(home)) : undefined, project: workspace ? sourceLabel(projectConfigPath(workspace)) : undefined } };
+  const settings = resolveSettings(settingsInput);
   configDiagnosticSecrets(diagnosticContext, [settings]);
+  // Presence uses headless precedence without making model identity depend on reasoning support.
+  // Keep full resolution above for the existing provider/auth/config diagnostics.
+  const modelSettings = resolveSettings({ ...settingsInput,
+    user: user ? { ...user, thinking: undefined } : undefined,
+    project: project ? { ...project, thinking: undefined } : undefined,
+    cli: { ...settingsInput.cli, thinking: undefined },
+  });
   const approval = resolveApprovalSettings({ user, project });
   if (invalidConfig) add("approval-config", "warning", "Approval configuration needs repair", "Fix the config.user or config.project error, then rerun doctor.");
   else if (approval.ignoredProjectApprovalMode !== undefined) add("approval-config", "warning", `Project approval.mode "${approval.ignoredProjectApprovalMode}" is looser than your "${approval.userApprovalMode}" and is ignored.`, `Remove approval.mode from ${sourceLabel(projectConfigPath(workspace!))} or set a stricter mode.`);
@@ -209,10 +221,14 @@ export async function diagnose(input: {
     const none = settings.provider === "openai-compatible" && settings.auth === "none";
     const subscription = async (): Promise<"present" | "missing" | "unavailable" | "refresh" | "expired" | "invalid"> => {
       try {
-        const raw = await store.get(grok ? grokSubscriptionIdentity() : codexSubscriptionIdentity());
+        const raw = rememberCredential(await store.get(grok ? grokSubscriptionIdentity() : codexSubscriptionIdentity()));
         if (!raw?.trim()) return "missing";
         let parsed: unknown;
         try { parsed = JSON.parse(raw); } catch { return "invalid"; }
+        if (typeof parsed === "object" && parsed) configDiagnosticSecrets(diagnosticContext, [
+          { apiKey: "accessToken" in parsed ? parsed.accessToken : undefined },
+          { apiKey: "refreshToken" in parsed ? parsed.refreshToken : undefined },
+        ]);
         if (typeof parsed !== "object" || !parsed || !("accessToken" in parsed) || typeof parsed.accessToken !== "string" || !parsed.accessToken.trim()) return "invalid";
         const token = parsed as { expiresAt?: unknown; refreshToken?: unknown; obtainedAt?: unknown };
         if (grok && (typeof token.obtainedAt !== "number" || !Number.isFinite(token.obtainedAt) || (token.expiresAt !== undefined && (typeof token.expiresAt !== "number" || !Number.isFinite(token.expiresAt))) || (token.refreshToken !== undefined && (typeof token.refreshToken !== "string" || !token.refreshToken.trim())))) return "invalid";
@@ -232,7 +248,7 @@ export async function diagnose(input: {
       // A failure of either read prevents healthy fallback to the other billing mode.
       sub = await subscription();
       if (sub === "unavailable") storeUnavailable = true;
-      else if (!grok || sub === "missing") try { storedOpenAI = await store.get(credentialIdentity({ provider: grok ? "xai" : "openai" })); }
+      else if (!grok || sub === "missing") try { storedOpenAI = rememberCredential(await store.get(credentialIdentity({ provider: grok ? "xai" : "openai" }))); }
       catch { storeUnavailable = true; }
     }
     const useSubscription = preferred === subscriptionRoute || (preferred === "auto" && !runtime?.trim() && !environment?.trim() && (sub === "present" || sub === "refresh" || sub === "expired" || sub === "invalid"));
@@ -259,7 +275,7 @@ export async function diagnose(input: {
     } else {
       try {
         const identity = credentialIdentity(settings);
-        const stored = storedOpenAI !== undefined ? storedOpenAI : await store.get(identity);
+        const stored = storedOpenAI !== undefined ? storedOpenAI : rememberCredential(await store.get(identity));
         if (stored?.trim()) {
           report.authSource = "secure-store";
           add("auth", "ok", "Selected API key present in OS secure store.");
@@ -277,9 +293,14 @@ export async function diagnose(input: {
 
   // Presence only: the removed route's key is never resolved, used or shown.
   try {
-    const leftover = await (input.store ?? createNativeCredentialStore()).get({ account: LEGACY_ANTHROPIC_ACCOUNT, label: "anthropic" });
+    const leftover = rememberCredential(await (input.store ?? createNativeCredentialStore()).get({ account: LEGACY_ANTHROPIC_ACCOUNT, label: "anthropic" }));
     if (leftover?.trim()) add("credentials.anthropic", "warning", "A stored Anthropic API key is unused; the Anthropic provider was removed in 0.4.", `Delete it with: ${LEGACY_ANTHROPIC_REMOVAL_COMMAND}`);
   } catch { /* An unreadable store is already reported by the selected route's auth check. */ }
+
+  // Format only after existing credential reads, so observed secrets are masked before label bounds.
+  if (invalidConfig || "error" in modelSettings) add("model", "warning", "Model configuration needs repair", "Fix configuration or provider/profile settings, then run schway doctor again.");
+  else if (!modelSettings.modelConfigured) add("model", "error", "No model configured", "Pass --model <id> or set model in config, then run schway doctor again.");
+  else add("model", "ok", `Configured model: ${sourceLabel(modelSettings.model) || "<redacted>"}`);
 
   if (workspace) {
     try {
