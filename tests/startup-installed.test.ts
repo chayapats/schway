@@ -318,7 +318,7 @@ void (async () => {
       const args = scenario === "invalid-model" ? ["--provider", "openai", "--openai-auth", "codex", "--model", "invalid-explicit-model"]
         : scenario === "denied" ? ["--provider", "openai", "--model", "gpt-5.4"] : [];
       const output = await run([executable, ...args], work, env);
-      expect(output.stderr).toMatch(/^(?:Latest completed draft checkpoint saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
+      expect(output.stderr).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
       expect(output.exit).toBe(0);
       expect((await Bun.file(result).json()).requests).toBe(scenario === "fresh" ? 1 : 0);
       const sessions = join(home, ".schway/sessions");
