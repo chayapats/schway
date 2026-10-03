@@ -58,8 +58,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let refreshing = false;
   let allExpanded = false;
   const expandedTools = new Set<string>();
-  type InspectionTarget = { id: string; kind: "tool" | "code"; index: number };
+  type InspectionTarget = { id: string; index: number } & ({ kind: "code"; source: string; text: string } | { kind: "tool"; callId?: string; name?: string });
   let inspection: InspectionTarget | undefined;
+  let previousInspection: InspectionTarget | undefined;
+  let inspectionOriginalScroll = 0;
+  type InspectionContent = { target: InspectionTarget; source?: string; text: string };
+  let renderedInspection: InspectionContent | undefined;
+  let paintedInspection: InspectionContent & { node: ReturnType<typeof inspectionNode>; y: number; scroll: number; width: number; height: number } | undefined;
   let scrollToInspection = false;
   let searchOpen = false;
   let searchOriginalScroll = 0;
@@ -272,19 +277,74 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (controller.snapshot().credentialEntry) return false;
     const text = renderer.getSelection()?.getSelectedText();
     if (!text) return false;
-    const copied = renderer.copyToClipboardOSC52(safe(text));
+    let copied = false;
+    try { copied = renderer.copyToClipboardOSC52(safe(text)); } catch { /* Clipboard support is optional. */ }
     showInteractionNotice(copied ? "Copied selection" : "Clipboard unavailable · use the terminal's native selection");
     return true;
   };
   const inspectionTargets = (entries: readonly TuiTranscriptEntry[]): InspectionTarget[] => entries.flatMap<InspectionTarget>(entry =>
-    entry.kind === "tool" ? [{ id: entry.id, kind: "tool" as const, index: 0 }]
-      : entry.kind === "assistant" ? (rows.get(entry.id)?.codeBlocks() ?? []).map((_, index) => ({ id: entry.id, kind: "code" as const, index })) : []);
-  const copyInspection = (entries: readonly TuiTranscriptEntry[]) => {
+    entry.kind === "tool" ? [{ id: entry.id, kind: "tool" as const, index: 0, callId: entry.toolCallId, name: entry.toolName }]
+      : entry.kind === "assistant" ? (rows.get(entry.id)?.codeBlocks() ?? []).map((block, index) => ({ id: entry.id, kind: "code" as const, index, source: safe(entry.text), text: block.text })) : []);
+  const sameInspection = (left: InspectionTarget, right: InspectionTarget) => left.id === right.id && left.kind === right.kind && left.index === right.index;
+  const inspectionNode = (target: InspectionTarget) => target.kind === "tool" ? rows.get(target.id)?.root : rows.get(target.id)?.root.findDescendantById(`code-${target.id}-${target.index}`);
+  const inspectionEntry = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => {
+    const entry = entries.find(item => item.id === target.id);
+    if (target.kind === "tool") return entry?.kind === "tool" && entry.toolCallId === target.callId && entry.toolName === target.name ? entry : undefined;
+    // Ordinals are stable while Markdown appends, but can identify a different
+    // block after replacement. Retain the source witness across renderer reparses.
+    return entry?.kind === "assistant" && safe(entry.text).startsWith(target.source) ? entry : undefined;
+  };
+  const validInspection = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => !!inspectionEntry(target, entries) &&
+    (target.kind === "tool" || !!rows.get(target.id)?.codeBlocks()[target.index]?.text.startsWith(target.text));
+  const clearInspection = () => {
+    inspection = undefined; renderedInspection = undefined; paintedInspection = undefined; scrollToInspection = false;
+    if (!panelMode) editor.focus();
+  };
+  const initialInspection = (entries: readonly TuiTranscriptEntry[]) => {
+    const targets = inspectionTargets(entries);
+    const previous = previousInspection && validInspection(previousInspection, entries) && targets.find(target => sameInspection(target, previousInspection!));
+    if (previous) return previous;
+    const top = transcript.viewport.y, bottom = top + transcript.viewport.height;
+    let nearest: InspectionTarget | undefined, distance = Infinity;
+    for (const target of targets) {
+      const node = inspectionNode(target);
+      if (!node?.visible || !node.height) continue;
+      if (node.y < bottom && node.y + node.height > top) return target;
+      const gap = node.y >= bottom ? node.y - bottom : top - node.y - node.height;
+      if (gap < distance) { nearest = target; distance = gap; }
+    }
+    return nearest;
+  };
+  const inspectionText = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => {
+    const entry = entries.find(item => item.id === target.id);
+    return entry ? target.kind === "tool" ? safe(entry.text) : rows.get(entry.id)?.codeBlocks()[target.index]?.text : undefined;
+  };
+  const inspectionVisible = (target: InspectionTarget) => {
+    const node = inspectionNode(target);
+    // The focus marker lives in the header; seeing only a long block's tail is insufficient.
+    return !!node?.visible && !!node.height && transcript.visible && !panelMode && node.y >= transcript.viewport.y && node.y < transcript.viewport.y + transcript.viewport.height;
+  };
+  const externalPanelFor = (snapshot: TuiSnapshot) => snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
+  const copyInspection = (snapshot: TuiSnapshot) => {
     if (!inspection) return;
-    const entry = entries.find(item => item.id === inspection!.id);
-    if (!entry) return;
-    const text = inspection.kind === "tool" ? safe(entry.text) : rows.get(entry.id)?.codeBlocks()[inspection.index]?.text;
+    const entries = snapshot.transcript;
+    if (sessionKey !== `${snapshot.sessionId}/${snapshot.branchId}` || externalPanelFor(snapshot) || !validInspection(inspection, entries)) {
+      previousInspection = undefined;
+      clearInspection();
+      showInteractionNotice("Selection changed · Alt+I inspect again");
+      return;
+    }
+    const text = inspectionText(inspection, entries);
     if (text === undefined) return;
+    const painted = paintedInspection, node = inspectionNode(inspection);
+    if (!painted || painted.target !== inspection || painted.text !== text || painted.node !== node || painted.y !== node?.y ||
+        inspection.kind === "code" && painted.source !== safe(entries.find(entry => entry.id === inspection!.id)!.text) ||
+        painted.scroll !== transcript.scrollTop || painted.width !== renderer.width || painted.height !== renderer.height || !inspectionVisible(inspection)) {
+      paintedInspection = undefined;
+      scrollToInspection = true;
+      showInteractionNotice("Showing selection · C copy again");
+      return;
+    }
     let copied = false;
     try { copied = renderer.copyToClipboardOSC52(text); } catch { /* Clipboard support is optional. */ }
     const bounded = inspection.kind === "tool" && text.endsWith("… truncated. Full output is in the session file.");
@@ -608,14 +668,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       activeSessionId = snapshot.sessionId;
       if (sessionKey !== key) {
         discoveryOpen = false; completionId = undefined;
-        resetRows(); sessionKey = key; expandedTools.clear(); inspection = undefined; unseen = false; lastTail = "";
+        resetRows(); sessionKey = key; expandedTools.clear(); clearInspection(); previousInspection = undefined; unseen = false; lastTail = "";
         searchOpen = false; searchSelected = -1; searchLastQuery = "";
         searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
         searchIndex.clear();
         latest();
         if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; }
       }
-      const externalPanel = snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
+      const externalPanel = externalPanelFor(snapshot);
+      if (externalPanel && inspection) { previousInspection = inspection; clearInspection(); }
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
       const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && snapshot.toolApproval ? "tool-approval" : "");
@@ -780,7 +841,18 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("Ctrl+I details · Esc keep editing", hintColors(theme.background))] : []),
       ]);
       const ids = new Set(entries.map(entry => entry.id));
+      if (previousInspection && !inspectionEntry(previousInspection, entries)) previousInspection = undefined;
+      if (inspection && !inspectionEntry(inspection, entries)) clearInspection();
       for (const [id, row] of rows) if (!ids.has(id)) { row.root.destroyRecursively(); rows.delete(id); }
+      const updateRow = (row: TranscriptItemView, entry: TuiTranscriptEntry) => {
+        // OpenTUI 0.5.11 caches finalized Markdown prefixes. A notice may follow an
+        // active answer; finalizing that row early permanently splits later deltas.
+        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
+            resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
+          }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,
+          inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
+          inspection?.id === entry.id && inspection.kind === "tool", controller.inlineDiffLines());
+      };
       for (const entry of entries) {
         let row = rows.get(entry.id);
         if (!row) {
@@ -793,18 +865,21 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           rows.set(entry.id, row);
           transcript.add(row.root);
         }
-        // OpenTUI 0.5.11 caches finalized Markdown prefixes. A notice may follow an
-        // active answer; finalizing that row early permanently splits later deltas.
-        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
-            resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
-          }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,
-          inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
-          inspection?.id === entry.id && inspection.kind === "tool", controller.inlineDiffLines());
+        updateRow(row, entry);
       }
-      if (inspection && !inspectionTargets(entries).some(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index)) {
-        inspection = undefined;
-        if (!panelMode) editor.focus();
+      if (inspection) {
+        if (!validInspection(inspection, entries)) {
+          const entry = entries.find(entry => entry.id === inspection!.id), row = rows.get(inspection.id);
+          clearInspection();
+          if (entry && row) updateRow(row, entry);
+        }
+        else if (inspection.kind === "code") {
+          inspection.source = safe(entries.find(entry => entry.id === inspection!.id)!.text);
+          inspection.text = rows.get(inspection.id)!.codeBlocks()[inspection.index]!.text;
+        }
       }
+      const inspectedText = inspection && inspectionText(inspection, entries);
+      renderedInspection = inspection && inspectedText !== undefined ? { target: inspection, source: inspection.kind === "code" ? inspection.source : undefined, text: inspectedText } : undefined;
       if (searchOpen) {
         const query = editor.plainText;
         const previous = searchResult.matches[searchSelected];
@@ -1272,7 +1347,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const targets = inspectionTargets(snapshot.transcript);
       const current = targets.findIndex(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index);
       if (name === "escape" || ((key.meta || key.option) && name === "i")) {
-        inspection = undefined; editor.focus(); handled(); return;
+        previousInspection = inspection; clearInspection();
+        searchRestoreScroll = inspectionOriginalScroll;
+        editor.focus(); handled(); return;
       }
       if (name === "up" || name === "down" || name === "tab") {
         const delta = name === "up" || (name === "tab" && key.shift) ? -1 : 1;
@@ -1286,11 +1363,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             if (expandedTools.has(inspection.id)) expandedTools.delete(inspection.id); else expandedTools.add(inspection.id);
           }
           scrollToInspection = true;
-        } else copyInspection(snapshot.transcript);
+        } else copyInspection(snapshot);
         handled(); return;
       }
       if (key.ctrl && name === "c" && controller.running) { controller.cancel(); handled(); return; }
-      if (name === "c") { copyInspection(snapshot.transcript); handled(); return; }
+      if (name === "c") { copyInspection(snapshot); handled(); return; }
       if (key.ctrl && name === "o") { allExpanded = !allExpanded; expandedTools.clear(); handled(); return; }
       if (key.ctrl && name === "end") { latest(); handled(); return; }
       if (name === "pageup" || name === "pagedown") { transcript.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, transcript.viewport.height - 2)); handled(); return; }
@@ -1324,8 +1401,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (panelMode === "help" && name === "escape") { controller.commandHelpOpen = false; handled(); return; }
     if ((key.meta || key.option) && name === "m") { controller.openModelPicker(); handled(); return; }
     if ((key.meta || key.option) && name === "i" && !panelMode) {
-      inspection = inspectionTargets(snapshot.transcript)[0];
-      if (inspection) { editor.blur(); scrollToInspection = true; }
+      inspection = initialInspection(snapshot.transcript);
+      if (inspection) { inspectionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; editor.blur(); scrollToInspection = true; }
       else showInteractionNotice("Nothing to inspect · Enter send a task");
       handled(); return;
     }
@@ -1435,10 +1512,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (match) scrollToSearchMatch(match);
     }
     if (searchOpen && searchAcceptPending) closeSearch(false);
+    let inspectionScrolled = false;
     if (scrollToInspection && inspection) {
       scrollToInspection = false;
-      transcript.scrollChildIntoView(inspection.kind === "tool" ? `message-${inspection.id}` : `code-${inspection.id}-${inspection.index}`);
+      const node = inspectionNode(inspection);
+      if (node && (node.y < transcript.viewport.y || node.y >= transcript.viewport.y + transcript.viewport.height)) {
+        transcript.scrollTo(transcript.scrollTop + node.y - transcript.viewport.y);
+        inspectionScrolled = true;
+      }
     }
+    if (!inspectionScrolled && inspection && renderedInspection?.target === inspection && inspectionVisible(inspection)) {
+      const node = inspectionNode(inspection)!;
+      paintedInspection = { ...renderedInspection, node, y: node.y, scroll: transcript.scrollTop, width: renderer.width, height: renderer.height };
+    } else paintedInspection = undefined;
     if (paintedCancellationId === undefined) return;
     controller.acknowledgeCancellationFrame(paintedCancellationId);
     paintedCancellationId = undefined;
@@ -1485,6 +1571,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (destroyed) return;
       endSplash();
       destroyed = true;
+      inspection = undefined; previousInspection = undefined; renderedInspection = undefined; paintedInspection = undefined;
       ticker.stop();
       clearInterval(activityTimer);
       renderer.keyInput.off("paste", onPaste);
