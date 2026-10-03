@@ -484,6 +484,64 @@ export interface SessionDiscovery extends SessionSummary {
   state: string;
 }
 
+/** Machine state observed without resuming, repairing, or replaying saved work. */
+export type SessionInventoryState = "ready" | "legacy" | "interrupted" | "empty" | "draft" | "partial" | "unsupported" | "corrupt" | "unreadable";
+
+/** Bounded transcript evidence; a missing header never acquires the caller's workspace identity. */
+export interface TranscriptInspection {
+  header?: SessionHeader;
+  state: SessionInventoryState;
+  previewIncomplete: boolean;
+  activityAt?: string;
+  task?: string;
+}
+
+/** Validate only the supplied transcript window using the durable record validators, without resume side effects. */
+export function inspectSessionTranscript(text: string, id: string, incomplete: boolean, preview = false): TranscriptInspection {
+  const result: TranscriptInspection = { state: "corrupt", previewIncomplete: incomplete };
+  const lines = text.split("\n");
+  let header: unknown;
+  try { header = JSON.parse(lines[0] ?? ""); } catch { return result; }
+  if (!isSessionHeader(header) || header.id !== id || !header.id || !header.workspaceRoot || !Number.isSafeInteger(header.version) || header.version < 1) return result;
+  result.header = header;
+  if (header.version > SESSION_FORMAT_VERSION) return { ...result, state: "unsupported" };
+  let state = emptyBranchState(header.id);
+  let version = header.version;
+  let torn = false;
+  // Only a complete final line can be interpreted when a read window cuts the file.
+  const last = incomplete ? lines.length - 1 : lines.length;
+  for (let index = 1; index < last; index++) {
+    const line = lines[index]!;
+    if (!line.trim()) continue;
+    let record: unknown;
+    try { record = JSON.parse(line); }
+    catch {
+      if (!incomplete && index === lines.length - 1 && !text.endsWith("\n")) { torn = true; break; }
+      return result;
+    }
+    if (!isPlainObject(record)) return result;
+    try {
+      if (record.type === "session_format") {
+        if (!Number.isSafeInteger(record.version) || (record.version as number) <= version || "id" in record || "parentId" in record) return result;
+        if ((record.version as number) > SESSION_FORMAT_VERSION) return { ...result, state: "unsupported" };
+        version = record.version as number;
+      } else if (record.type === "workspace_roots") {
+        if (record.version !== 1 || version < 2 || !isRootList(record.extraRoots) || "id" in record || "parentId" in record) return result;
+      } else {
+        state = version >= 3 ? replayBranchRecord(state, record, version) : replayLegacyRecord(state, record);
+        if (record.type === "branch_append" && typeof record.committedAt === "string" && Number.isFinite(Date.parse(record.committedAt))) result.activityAt = record.committedAt;
+      }
+    } catch { return result; }
+  }
+  const items = branchAncestry(state, state.branches.get(state.activeBranchId)!.headId).map(entry => entry.item);
+  if (preview) {
+    const latestTask = items.findLast(item => item.type === "user");
+    if (latestTask?.type === "user") result.task = latestTask.content.map(block => block.text).join(" ");
+  }
+  result.state = incomplete ? "partial" : torn || pendingCalls(items).length > 0 ? "interrupted" : !items.length ? "empty" : version < SESSION_FORMAT_VERSION ? "legacy" : "ready";
+  return result;
+}
+
 /** Read one batch of at most 100 histories with 64 KiB transcript windows, retaining every file for explicit recovery. */
 export async function discoverSessions(directory: string, offset = 0, home?: string): Promise<SessionDiscovery[]> {
   let names: string[];
