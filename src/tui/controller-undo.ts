@@ -4,8 +4,9 @@ import { diffLines } from "../text/diff.ts";
 import { assertFileUnchanged, FileChangedError, observeFile, writeFileAtomically, type FileObservation } from "../tools/fs.ts";
 import { displayToolPath } from "../tools/path.ts";
 import { undoFailureReason } from "../undo/errors.ts";
+import { collectUndoEvidence } from "../undo/evidence.ts";
 import { buildUndoNote, formatUndoResult } from "../undo/record.ts";
-import { equalUndoHash, hashUndoBytes, openUndoStore, unchangedUndoFile, type UndoManifest, type UndoStore } from "../undo/store.ts";
+import { equalUndoHash, hashUndoBytes, openUndoStore, type UndoManifest, type UndoStore } from "../undo/store.ts";
 import { ChangesLayer } from "./controller-changes.ts";
 import type { UndoPreview, UndoPreviewFile } from "./controller-types.ts";
 
@@ -116,12 +117,9 @@ export abstract class UndoLayer extends ChangesLayer {
 
   /** Select the latest changed turn on this ancestry unless any branch already recorded its undo. */
   private async undoTarget(store: UndoStore): Promise<UndoManifest | undefined> {
-    const users = new Set(this.session.items.filter(item => item.type === "user").map(item => item.id));
+    const users = this.session.items.filter(item => item.type === "user").map(item => item.id);
     const undone = new Set(this.session.entries.flatMap(entry => entry.item.type === "turn_undo" ? [entry.item.turnId] : []));
-    const target = (await store.list(this.session.rootId)).filter(manifest => users.has(manifest.turnId) && !undone.has(manifest.turnId)
-      && manifest.files.some(file => file.after !== undefined && !unchangedUndoFile(file)))
-      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.turnNumber - a.turnNumber)[0];
-    return target;
+    return collectUndoEvidence(await store.list(this.session.rootId), users, undone).target;
   }
 
   /** Describe durable pre-images against current bytes without modifying files or session history. */
