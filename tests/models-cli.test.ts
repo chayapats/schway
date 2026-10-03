@@ -14,6 +14,61 @@ function store(values: Record<string, string> = {}) {
   return { credentials, reads, writes };
 }
 
+for (const status of [200, 401, 403]) test(`short heuristic environment flags preserve catalog identity and HTTP ${status} guidance`, async () => {
+  const fixture = store(), input = { provider: "openai-compatible" as const, baseUrl: "https://fixture.test/v1", auth: "none" as const,
+    profile: "lab-1-false", env: { DISABLE_TOKEN_CACHE: "1", TOKENIZERS_PARALLELISM: "false" } };
+  const result = await discoverModels(input, { store: fixture.credentials,
+    fetch: async () => status === 200 ? Response.json({ data: [{ id: "gpt-4.1" }, { id: "other-1" }, { id: "false-model" }] }) : new Response(null, { status }) });
+  expect(result.catalog.profile).toBe(input.profile);
+  if (status === 200) expect(result.catalog).toMatchObject({ status: "complete", models: [{ id: "false-model" }, { id: "gpt-4.1" }, { id: "other-1" }] });
+  else { expect(result.error).toContain(`HTTP ${status}`); expect(result.error).toContain("Check credentials for this route; no billing fallback was used."); }
+  const offline = await discoverModels({ ...input, offline: true }, { store: fixture.credentials, fetch: async () => { throw new Error("Offline network"); } });
+  expect(offline.catalog).toMatchObject({ status: "complete", profile: input.profile });
+  expect(fixture.reads).toEqual([]); expect(fixture.writes).toEqual([]);
+});
+
+for (const [value, secret, protectedValue] of [["1234567", "1234567", false], ["  1234567  ", "1234567", false],
+  ["12345678", "12345678", true], ["  12345678  ", "12345678", true], ["\u001b[31m1\u001b[0m", "1", false],
+  ["false\u200b\u200b\u200b\u200b", "false", false], ["\u001b[31m12345678\u001b[0m", "12345678", true]] as const)
+test(`heuristic environment threshold checks raw and display-normalized length for ${JSON.stringify(value)}`, async () => {
+  const profile = `lab-${secret}`;
+  const result = await discoverModels({ provider: "openai-compatible", baseUrl: "https://fixture.test/v1", auth: "none", profile, env: { CUSTOM_TOKEN: value } }, {
+    fetch: async () => Response.json({ data: [{ id: `echo-${secret}` }, { id: "safe-exact" }] }),
+  });
+  expect(result.catalog.status).toBe(protectedValue ? "partial" : "complete");
+  expect(result.catalog.profile).toBe(protectedValue ? undefined : profile);
+  expect(result.catalog.models.map(model => model.id)).toEqual(protectedValue ? ["safe-exact"] : [`echo-${secret}`, "safe-exact"]);
+});
+
+for (const [secret, status] of [["1", 401], ["3", 403], ["4", 429]] as const)
+test(`HTTP ${status} repair guidance survives exact redaction of a real one-character credential`, async () => {
+  const result = await discoverModels({ provider: "openai-compatible", baseUrl: "https://fixture.test/v1", auth: "none", env: {}, runtimeApiKey: secret }, {
+    fetch: async () => new Response(null, { status }),
+  });
+  expect(result.catalog).toMatchObject({ status: "error", models: [] });
+  expect(result.error).not.toContain(`HTTP ${status}`);
+  expect(result.error).toContain(status === 429 ? "Wait for the rate limit to reset" : "Check credentials for this route; no billing fallback was used.");
+});
+
+for (const source of ["runtime", "selected-env", "header", "seed", "stored", "OPENAI_API_KEY", "XAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY", "ANTHROPIC_API_KEY"] as const)
+test(`short actual ${source} credentials remain protected independently of the heuristic threshold`, async () => {
+  const secret = "q7", raw = ` ${secret} `, baseUrl = "https://fixture.test/v1", profile = `lab-${secret}`;
+  for (const offline of source === "stored" ? [false] : [false, true]) {
+    const identity = credentialIdentity({ provider: "openai-compatible", baseUrl, profile });
+    const fixture = store(source === "stored" ? { [identity.account]: raw } : {});
+    const input = { provider: "openai-compatible" as const, baseUrl, profile, auth: source === "stored" ? "required" as const : "none" as const, offline,
+      env: source === "selected-env" ? { SERVICE_AUTH: raw } : source.endsWith("API_KEY") ? { [source]: raw } : {},
+      ...(source === "runtime" ? { runtimeApiKey: raw } : source === "selected-env" ? { credentialEnv: "SERVICE_AUTH" }
+        : source === "header" ? { headers: { "X-Fixture": raw } } : source === "seed" ? { knownSecrets: Object.freeze([raw]) } : {}) };
+    const result = await discoverModels(input, { store: fixture.credentials, fetch: async () => {
+      expect(offline).toBe(false); return Response.json({ data: [{ id: `echo-${secret}` }, { id: "safe-exact" }] });
+    } });
+    expect(result.catalog).toMatchObject({ status: "partial", models: offline ? [] : [{ id: "safe-exact" }] });
+    expect(result.catalog.profile).toBeUndefined(); expect(JSON.stringify(result)).not.toContain(secret);
+    expect(fixture.reads).toHaveLength(source === "stored" ? 1 : 0); expect(fixture.writes).toEqual([]);
+  }
+});
+
 describe("models command boundaries", () => {
   test("accepts only catalog and connection options without interpreting literal filters", () => {
     expect(parseModelsCommand(["models", "list", "--provider=xai", "--xai-auth=api-key", "--filter=GROK.[", "--json"]))

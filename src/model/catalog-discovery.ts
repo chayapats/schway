@@ -2,6 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport, type OpenAIAuthPreference, type XaiAuthPreference } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
+import { configDiagnosticSecrets } from "../config/diagnostics.ts";
 import { listCatalog } from "./catalog.ts";
 import { abortableCatalogOperation, fetchProviderModelListResult, requireOpenAIApiKeyModels, requireXaiModels, type ListedModel, type ModelListFetch, type ModelListResult } from "./model-list.ts";
 import type { ThinkingLevel } from "./model.ts";
@@ -50,13 +51,23 @@ function startDeadline(milliseconds: number) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
+function displaySecret(value: string): string {
+  return stripVTControlCharacters(value).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "");
+}
+
 /** Keep raw, trimmed and display-normalized credentials without matching empty or whitespace-only values. */
 function secretVariants(values: readonly (string | undefined)[]): string[] {
   return [...new Set(values.flatMap(value => {
     if (!value?.trim()) return [];
-    const normalized = stripVTControlCharacters(value).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "");
+    const normalized = displaySecret(value);
     return [value, value.trim(), normalized, normalized.trim()].filter(variant => !!variant.trim());
   }))];
+}
+
+/** Infer env-name secrets only when trimmed raw and display-normalized values both contain at least eight characters. */
+export function heuristicCatalogSecrets(env: Record<string, string | undefined>): string[] {
+  return Object.entries(env).flatMap(([name, value]) =>
+    /key|token|secret|password/i.test(name) && value && value.trim().length >= 8 && displaySecret(value).trim().length >= 8 ? [value] : []);
 }
 
 /** Remove raw/trimmed credentials, terminal controls and URLs from operational diagnostics. */
@@ -90,7 +101,8 @@ export async function discoverModels(input: CatalogConnection & {
   /** Already observed invocation secrets, copied before adding selected credential observations. */
   knownSecrets?: readonly string[];
 }, deps: CatalogDiscoveryDeps = {}): Promise<CatalogOutcome> {
-  const secrets = secretVariants([...(input.knownSecrets ?? []), input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)]);
+  const secrets = secretVariants([...(input.knownSecrets ?? []), input.runtimeApiKey, ...Object.values(input.headers ?? {}),
+    ...configDiagnosticSecrets({ env: input.env }, [input]), ...heuristicCatalogSecrets(input.env)]);
   const catalog: ModelCatalog = {
     schemaVersion: 1, provider: input.provider, route: explicitRoute(input),
     ...(input.profile ? { profile: input.profile } : {}), source: input.offline ? "builtin" : "remote",
@@ -209,11 +221,12 @@ export async function discoverModels(input: CatalogConnection & {
     }
     return finish();
   } catch (error) {
-    let message = input.signal?.aborted ? "Model discovery cancelled. Retry schway models list."
+    const failure = input.signal?.aborted ? "Model discovery cancelled. Retry schway models list."
       : deadline.signal.aborted ? "Model discovery timed out after 5 seconds. Retry schway models list."
-        : safeCatalogMessage(error instanceof Error ? error.message : "Model discovery failed. Retry schway models list.", secrets);
-    if (/HTTP (401|403)\b/.test(message)) message += " Check credentials for this route; no billing fallback was used.";
-    else if (/HTTP 429\b/.test(message)) message += " Wait for the rate limit to reset, then retry schway models list.";
+        : error instanceof Error ? error.message : "Model discovery failed. Retry schway models list.";
+    let message = input.signal?.aborted || deadline.signal.aborted ? failure : safeCatalogMessage(failure, secrets);
+    if (/HTTP (401|403)\b/.test(failure)) message += " Check credentials for this route; no billing fallback was used.";
+    else if (/HTTP 429\b/.test(failure)) message += " Wait for the rate limit to reset, then retry schway models list.";
     else if (!/retry|sign in|pass --|set |unlock|select /i.test(message)) message += " Retry schway models list.";
     catalog.status = "error"; catalog.models = []; catalog.warnings = [message];
     return outcome(message);

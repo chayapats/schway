@@ -3,6 +3,28 @@ import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createDiagnosticSink, diagnosticPath } from "../src/diagnostics/sink.ts";
+import { configDiagnosticSecrets, type ConfigDiagnosticContext } from "../src/config/diagnostics.ts";
+
+test("config diagnostics retain explicitly observed environments only for known credential names", () => {
+  const original = Object.freeze({ OPENAI_API_KEY: " k1 ", SERVICE_AUTH: " q7 ", OTHER_AUTH: " r8 ", UNUSED_TOKEN: "1", TOKENIZERS_PARALLELISM: "false" });
+  const effective = Object.freeze({ OPENAI_API_KEY: "k2", SERVICE_AUTH: "q9", OTHER_AUTH: "r0", UNUSED_TOKEN: "1", TOKENIZERS_PARALLELISM: "false" });
+  const retained = ["seed"], context: ConfigDiagnosticContext = { env: effective, secrets: retained, observedEnvs: Object.freeze([original]) };
+  const profiles = { profiles: { selected: { credentialEnv: "SERVICE_AUTH" }, unused: { credentialEnv: "OTHER_AUTH" } } };
+  expect(configDiagnosticSecrets(context, [profiles])).toEqual(expect.arrayContaining(["seed", " k1 ", "k1", "k2", " q7 ", "q7", "q9", " r8 ", "r8", "r0"]));
+  expect(context.secrets).toBe(retained); expect(context.env).toBe(effective);
+  expect(context.secrets).not.toContain("1"); expect(context.secrets).not.toContain("false");
+  expect(configDiagnosticSecrets(context, [profiles])).toEqual(retained);
+  expect(new Set(retained).size).toBe(retained.length);
+  expect(original.SERVICE_AUTH).toBe(" q7 "); expect(effective.SERVICE_AUTH).toBe("q9");
+});
+
+test("diagnostic env observations remain opt-in and do not promote invalid or inherited profile references", () => {
+  const env = { OPENAI_API_KEY: "actual", BAD_NAME: "bad", INHERITED_AUTH: "inherited", UNUSED_KEY: "unreferenced" };
+  const profiles = { profiles: { invalid: { credentialEnv: "BAD-NAME" }, inherited: Object.create({ credentialEnv: "INHERITED_AUTH" }) } };
+  expect(configDiagnosticSecrets({ env }, [profiles])).toEqual(["actual"]);
+  expect(configDiagnosticSecrets({ observedEnvs: [env] }, [profiles])).toEqual(["actual"]);
+  expect(configDiagnosticSecrets({})).toEqual([]);
+});
 
 async function temporary(run: (dir: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "schway-debug-"));

@@ -30,7 +30,7 @@ async function launch(args: string[], cwd: string, env: Record<string, string>, 
 /** Deny execution, secure storage and mutation, with one optional in-process catalog protocol fixture. */
 async function guards(root: string, options: {
   setupFree?: boolean;
-  remote?: { url: string; key: string; header?: string; signal?: "SIGINT" | "SIGTERM" };
+  remote?: { url: string; key: string; header?: string; signal?: "SIGINT" | "SIGTERM"; status?: number; ids?: string[] };
   configRead?: string;
 } = {}): Promise<string> {
   const path = join(root, "models-preload.ts");
@@ -55,7 +55,8 @@ globalThis.fetch = async (url, init) => {
     init.signal.addEventListener("abort", () => controller.error(new Error("Fixture body aborted")), {once:true});
     process.kill(process.pid, options.remote.signal);
   }}));
-  return Response.json({data:[{id:"fixture-z"}, {id:"fixture-a"}, {id:"fixture-z"}]});
+  if (options.remote.status) return new Response(null, {status:options.remote.status});
+  return Response.json({data:(options.remote.ids ?? ["fixture-z", "fixture-a", "fixture-z"]).map(id => ({id}))});
 };
 const realRead = fs.readFile;
 mock.module("node:fs/promises", () => ({ ...fs,
@@ -84,6 +85,62 @@ async function snapshot(root: string): Promise<Record<string, string | null>> {
   }
   return result;
 }
+
+test("real CLI keeps harmless token flags out of model IDs, profiles and credential guidance", async () => withTempDir(async root => {
+  const home = join(root, "home"), work = join(root, "work"), profile = "lab-1-false";
+  await mkdir(home); await mkdir(join(work, ".schway"), { recursive: true });
+  await writeFile(join(work, ".schway/config.json"), JSON.stringify({ profile, profiles: { [profile]: { baseUrl: "https://fixture.invalid/v1", auth: "none" } } }));
+  const before = await snapshot(home), env = buildIsolatedCliEnv(home, { DISABLE_TOKEN_CACHE: "1", TOKENIZERS_PARALLELISM: "false" });
+  for (const mode of ["success", "offline", 401, 403] as const) for (const json of [false, true]) {
+    const preload = await guards(root, mode === "offline" ? {} : { remote: { url: "https://fixture.invalid/v1/models", key: "route-credential", ids: ["gpt-4.1", "other-1", "false-model"], ...(typeof mode === "number" ? { status: mode } : {}) } });
+    const result = await launch(["models", "list", "--api-key=route-credential", ...(json ? ["--json"] : []), ...(mode === "offline" ? ["--offline"] : [])], work, env, preload);
+    expect(result.exit, result.stderr).toBe(typeof mode === "number" ? 1 : 0);
+    if (json) expect(JSON.parse(result.stdout)).toMatchObject({ profile, status: typeof mode === "number" ? "error" : "complete" });
+    if (mode === "success") for (const id of ["gpt-4.1", "other-1", "false-model"]) expect(result.stdout).toContain(id);
+    if (typeof mode === "number") { expect(result.stderr).toContain(`HTTP ${mode}`); expect(result.stderr).toContain("Check credentials for this route; no billing fallback was used."); }
+    else expect(result.stderr).toBe("");
+    expect(result.stdout + result.stderr).not.toContain("Omitted profile");
+  }
+  expect(await snapshot(home)).toEqual(before);
+}));
+
+for (const name of ["OTHER_TOKEN", "ACCOUNT_LOGIN"]) test(`real CLI retains original short ${name} profile credentials overwritten by an explicit env file`, async () => withTempDir(async root => {
+  const home = join(root, "home"), work = join(root, "work"), profile = "lab-q7";
+  await mkdir(home); await mkdir(join(work, ".schway"), { recursive: true });
+  await writeFile(join(work, ".schway/config.json"), JSON.stringify({ profile, profiles: {
+    [profile]: { baseUrl: "https://fixture.invalid/v1", auth: "none" },
+    other: { baseUrl: "https://other.invalid/v1", credentialEnv: name },
+  } }));
+  await writeFile(join(work, "explicit.env"), `${name}=z9\n`);
+  const env = buildIsolatedCliEnv(home, { [name]: " q7 " }), beforeHome = await snapshot(home), beforeWork = await snapshot(work);
+  for (const offline of [false, true]) for (const json of [false, true]) {
+    const preload = await guards(root, offline ? {} : { remote: { url: "https://fixture.invalid/v1/models", key: "route-credential", ids: ["echo-q7", "echo-z9", "safe-exact"] } });
+    const result = await launch(["models", "list", "--api-key=route-credential", "--env-file=explicit.env", ...(json ? ["--json"] : []), ...(offline ? ["--offline"] : [])], work, env, preload);
+    expect(result.exit).toBe(1); expect(result.stdout + result.stderr).not.toContain("q7"); expect(result.stdout + result.stderr).not.toContain("z9");
+    expect(result.stdout).toContain("Omitted profile name containing a credential value");
+    if (json) { const catalog = JSON.parse(result.stdout); expect(catalog.profile).toBeUndefined(); expect(catalog).toMatchObject({ status: "partial", models: offline ? [] : [{ id: "safe-exact" }] }); }
+  }
+  expect(await snapshot(home)).toEqual(beforeHome); expect(await snapshot(work)).toEqual(beforeWork);
+}));
+
+for (const name of ["OTHER_API_KEY", "ACCOUNT_LOGIN"]) test(`real invalid config diagnostics retain original short ${name} profile credentials before source formatting`, async () => withTempDir(async root => {
+  const home = join(root, "toy-home"), work = join(root, "work");
+  await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(work);
+  await writeFile(join(home, ".schway/config.json"), JSON.stringify({ unknownSetting: true, profiles: {
+    unused: { baseUrl: "https://fixture.invalid/v1", credentialEnv: name },
+  } }));
+  await writeFile(join(work, "explicit.env"), `${name}=new-value\n`);
+  const env = buildIsolatedCliEnv(home, { [name]: "toy" }), beforeHome = await snapshot(home), beforeWork = await snapshot(work);
+  const preload = await guards(root);
+  for (const json of [false, true]) {
+    const result = await launch(["models", "list", "--offline", "--env-file=explicit.env", ...(json ? ["--json"] : [])], work, env, preload);
+    expect(result.exit).toBe(1); expect(result.stdout + result.stderr).not.toContain("toy");
+    expect(result.stderr).toContain("Invalid config at"); expect(result.stderr).toContain("Remove this unknown setting");
+    expect(result.stderr).toContain("***-home/.schway/config.json");
+    if (json) expect(JSON.parse(result.stdout)).toMatchObject({ status: "error", source: "builtin", route: "unresolved", models: [] });
+  }
+  expect(await snapshot(home)).toEqual(beforeHome); expect(await snapshot(work)).toEqual(beforeWork);
+}));
 
 test("real models help and strict usage complete before HOME, setup reads, stdin, credentials or network", async () => {
   await withTempDir(async root => {

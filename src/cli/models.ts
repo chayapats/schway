@@ -4,7 +4,7 @@ import { projectConfigPath, readConfigLayers, resolveSettings, userConfigPath, t
 import { configDiagnosticSecrets, type ConfigDiagnosticContext } from "../config/diagnostics.ts";
 import type { ConfigDeprecation } from "../config/deprecations.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
-import { discoverModels, safeCatalogMessage, type CatalogConnection, type CatalogDiscoveryDeps, type ModelCatalog } from "../model/catalog-discovery.ts";
+import { discoverModels, heuristicCatalogSecrets, safeCatalogMessage, type CatalogConnection, type CatalogDiscoveryDeps, type ModelCatalog } from "../model/catalog-discovery.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 
 /** Catalog-only arguments, without task execution, model selection or session options. */
@@ -147,8 +147,7 @@ async function loadModelsConfig(home: string | undefined, io: ModelsCommandIO, d
 /** Collect effective environment secrets before config paths can be truncated by diagnostic formatting. */
 function rememberDiagnosticEnv(context: ConfigDiagnosticContext, env: Record<string, string | undefined>): void {
   context.env = env;
-  (context.secrets ??= []).push(...Object.entries(env).filter(([name]) => /key|token|secret|password/i.test(name))
-    .map(([, value]) => value).filter((value): value is string => !!value));
+  (context.secrets ??= []).push(...heuristicCatalogSecrets(env));
   configDiagnosticSecrets(context);
 }
 
@@ -161,7 +160,7 @@ export async function runModelsCommand(argv: readonly string[], io: ModelsComman
   let provider = args.provider ?? null;
   let env = io.env;
   const home = io.env.HOME;
-  const diagnosticContext: ConfigDiagnosticContext = { env, secrets: [args.apiKey, ...Object.values(args.headers ?? {})]
+  const diagnosticContext: ConfigDiagnosticContext = { env, observedEnvs: [{ ...env }], secrets: [args.apiKey, ...Object.values(args.headers ?? {})]
     .filter((value): value is string => !!value) };
   rememberDiagnosticEnv(diagnosticContext, env);
   configDiagnosticSecrets(diagnosticContext, [{ apiKey: args.apiKey, headers: args.headers }]);
