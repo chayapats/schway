@@ -206,9 +206,10 @@ export async function loginWithDeviceFlow(input: { signal: AbortSignal; deps: Gr
 }
 
 /** Read only Schway's dedicated Grok subscription identity, preserving secure-store failures. */
-export async function loadSubscriptionTokens(store: CredentialStore): Promise<GrokTokens | null> {
+export async function loadSubscriptionTokens(store: CredentialStore, onCredential?: (raw: string) => void): Promise<GrokTokens | null> {
   let raw: string | null;
   try { raw = await store.get(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("read")); }
+  if (raw) onCredential?.(raw);
   return raw?.trim() ? parseSubscriptionTokens(raw) : null;
 }
 type CredentialLifecycle = { generation: number; writes: Promise<void>; refresh?: { generation: number; promise: Promise<GrokTokens> } };
@@ -286,6 +287,8 @@ export async function fetchDiscoveryCatalog(input: {
   store: CredentialStore; fetch?: GrokFetch; signal: AbortSignal;
   /** Original identity owner when reads are memoized for route selection. */
   lifecycleStore?: CredentialStore;
+  /** Register every selected credential read, including fresh reads after concurrent replacement. */
+  onCredential?: (raw: string) => void;
 }): Promise<ModelListResult> {
   const state = credentialLifecycle(input.lifecycleStore ?? input.store);
   const getToken = async (rejectedToken?: string): Promise<string> => {
@@ -296,7 +299,7 @@ export async function fetchDiscoveryCatalog(input: {
     const generation = state.generation;
     // Route-selection reads are reusable only while no in-process credential mutation has occurred.
     const currentStore = input.lifecycleStore && (state.generation !== 0 || state.refresh) ? input.lifecycleStore : input.store;
-    const tokens = await abortableCatalogOperation(loadSubscriptionTokens(currentStore), input.signal);
+    const tokens = await abortableCatalogOperation(loadSubscriptionTokens(currentStore, input.onCredential), input.signal);
     if (generation !== state.generation) return getToken(rejectedToken);
     if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
     if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens)) return tokens.accessToken;

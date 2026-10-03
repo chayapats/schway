@@ -84,10 +84,19 @@ function publicModel(model: ListedModel): CatalogModel {
 export async function discoverModels(input: CatalogConnection & {
   env: Record<string, string | undefined>; runtimeApiKey?: string; offline?: boolean; filter?: string; signal?: AbortSignal;
 }, deps: CatalogDiscoveryDeps = {}): Promise<CatalogOutcome> {
+  const secrets = secretVariants([input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)]);
   const catalog: ModelCatalog = {
     schemaVersion: 1, provider: input.provider, route: explicitRoute(input),
     ...(input.profile ? { profile: input.profile } : {}), source: input.offline ? "builtin" : "remote",
     status: "complete", models: [], warnings: [],
+  };
+  const outcome = (error?: string): CatalogOutcome => {
+    if (catalog.profile && secrets.some(secret => catalog.profile!.includes(secret))) {
+      delete catalog.profile;
+      if (catalog.status === "complete") catalog.status = "partial";
+      catalog.warnings.push("Omitted profile name containing a credential value. Choose a different profile name.");
+    }
+    return { catalog, ...(error ? { error } : {}) };
   };
   const finish = (): CatalogOutcome => {
     catalog.models.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -96,11 +105,12 @@ export async function discoverModels(input: CatalogConnection & {
       catalog.models = catalog.models.filter(model => model.id.toLowerCase().includes(filter));
       if (!catalog.models.length) catalog.warnings.push("No models match. Remove --filter to see the full catalog.");
     }
-    return { catalog };
+    return outcome();
   };
   if (input.signal?.aborted) {
     const error = "Model discovery cancelled. Retry schway models list.";
-    return { catalog: { ...catalog, status: "error", warnings: [error] }, error };
+    catalog.status = "error"; catalog.warnings = [error];
+    return outcome(error);
   }
   if (input.offline) {
     catalog.warnings.push("Built-in; account access unverified. Run without --offline to check the selected account.");
@@ -113,7 +123,6 @@ export async function discoverModels(input: CatalogConnection & {
 
   const deadline = (deps.startDeadline ?? startDeadline)(5_000);
   const signal = input.signal ? AbortSignal.any([input.signal, deadline.signal]) : deadline.signal;
-  const secrets = secretVariants([input.runtimeApiKey, ...Object.values(input.headers ?? {}), ...Object.entries(input.env).filter(([name]) => /key|token|secret|password/i.test(name) || name === input.credentialEnv).map(([, value]) => value)]);
   const rememberCredential = (value: string) => {
     secrets.push(...secretVariants([value]));
     try {
@@ -164,7 +173,7 @@ export async function discoverModels(input: CatalogConnection & {
     } else if (catalog.route === "grok") {
       const provider = await import("./providers/grok-subscription.ts");
       signal.throwIfAborted();
-      result = await provider.fetchDiscoveryCatalog({ store, lifecycleStore: originalStore, fetch: deps.fetch, signal });
+      result = await provider.fetchDiscoveryCatalog({ store, lifecycleStore: originalStore, onCredential: rememberCredential, fetch: deps.fetch, signal });
     } else {
       let url = input.provider === "openai" ? "https://api.openai.com/v1/models" : "https://api.x.ai/v1/models";
       if (input.provider === "openai-compatible") {
@@ -201,6 +210,6 @@ export async function discoverModels(input: CatalogConnection & {
     else if (/HTTP 429\b/.test(message)) message += " Wait for the rate limit to reset, then retry schway models list.";
     else if (!/retry|sign in|pass --|set |unlock|select /i.test(message)) message += " Retry schway models list.";
     catalog.status = "error"; catalog.models = []; catalog.warnings = [message];
-    return { catalog, error: message };
+    return outcome(message);
   } finally { deadline.clear(); }
 }

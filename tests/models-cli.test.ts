@@ -154,6 +154,68 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+for (const mode of ["online", "offline", "cancelled", "failure"] as const) for (const json of [false, true]) {
+  test(`${mode} ${json ? "JSON" : "plain"} catalogs omit profile names containing supplied credentials`, async () => {
+    for (const source of ["runtime", "env", "credential-env", "header"] as const) {
+      const secret = "opaque-profile-credential-92754", profile = `selected-${secret}`, raw = `  ${secret}  `;
+      const fixture = store(), controller = new AbortController();
+      let stdout = "", stderr = "", requests = 0;
+      if (mode === "cancelled") controller.abort();
+      const exit = await runModelsCommand(["models", "list", `--profile=${profile}`, ...(json ? ["--json"] : []), ...(mode === "offline" ? ["--offline"] : []),
+        ...(source === "runtime" ? ["--api-key", raw] : source === "header" ? ["--header", `X-Fixture:${raw}`] : [])], {
+        cwd: "/", env: source === "env" ? { OPENAI_COMPATIBLE_API_KEY: raw } : source === "credential-env" ? { SERVICE_AUTH: raw } : {},
+        signal: controller.signal, store: fixture.credentials,
+        stdout: { write: value => { stdout += value; } }, stderr: { write: value => { stderr += value; } },
+        loadConfig: async () => ({ project: { profiles: { [profile]: { baseUrl: "https://fixture.test/v1", auth: source === "header" ? "none" : "required",
+          ...(source === "credential-env" ? { credentialEnv: "SERVICE_AUTH" } : {}) } } } }),
+        fetch: async () => { requests++; return mode === "failure" ? new Response(null, { status: 401 }) : Response.json({ data: [{ id: "safe-model" }] }); },
+      });
+      expect(exit).toBe(1); expect(stdout + stderr).not.toContain(secret);
+      expect(stdout).toContain("Omitted profile name containing a credential value");
+      if (json) {
+        const catalog = JSON.parse(stdout);
+        expect(catalog.profile).toBeUndefined();
+        expect(catalog.status).toBe(mode === "failure" || mode === "cancelled" ? "error" : "partial");
+        expect(catalog.models).toEqual(mode === "online" ? [{ id: "safe-model" }] : []);
+      }
+      if (mode === "offline" || mode === "cancelled") { expect(requests).toBe(0); expect(fixture.reads).toEqual([]); }
+      expect(fixture.writes).toEqual([]);
+    }
+  });
+}
+
+test("profile privacy also incorporates the selected stored key learned during discovery", async () => {
+  const secret = "opaque-stored-profile-92754", baseUrl = "https://fixture.test/v1";
+  const identity = credentialIdentity({ provider: "openai-compatible", baseUrl, profile: secret });
+  const fixture = store({ [identity.account]: ` ${secret} ` });
+  const result = await discoverModels({ provider: "openai-compatible", baseUrl, profile: secret, auth: "required", env: {} }, {
+    store: fixture.credentials, fetch: async () => Response.json({ data: [{ id: "safe-model" }] }),
+  });
+  expect(result.catalog).toMatchObject({ status: "partial", models: [{ id: "safe-model" }] });
+  expect(result.catalog.profile).toBeUndefined(); expect(JSON.stringify(result)).not.toContain(secret);
+});
+
+test("Grok replacement credentials read through lifecycle fencing cannot appear in model IDs", async () => {
+  const { saveSubscriptionTokens } = await import("../src/model/providers/grok-subscription.ts");
+  const identity = grokSubscriptionIdentity(), next = { accessToken: "opaque-new-access-92754", refreshToken: "opaque-new-refresh-92754", obtainedAt: 0, expiresAt: Date.now() + 600_000 };
+  const fixture = store({ [identity.account]: JSON.stringify({ accessToken: "old-access", refreshToken: "old-refresh", obtainedAt: 0, expiresAt: Date.now() + 600_000 }) });
+  const read = fixture.credentials.get;
+  let firstRead = true;
+  fixture.credentials.get = async selected => {
+    const value = await read(selected);
+    if (firstRead) { firstRead = false; await saveSubscriptionTokens(fixture.credentials, next); }
+    return value;
+  };
+  const result = await discoverModels({ provider: "xai", xaiAuth: "grok", env: {} }, { store: fixture.credentials, fetch: async (_url, init) => {
+    expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${next.accessToken}`);
+    return Response.json({ data: [{ id: `grok-${next.accessToken}` }, { id: `grok-${next.refreshToken}` }, { id: "grok-safe" }] });
+  } });
+  expect(result.catalog).toMatchObject({ status: "partial", models: [{ id: "grok-safe" }] });
+  expect(result.catalog.warnings).toEqual(["Discarded model IDs containing credential values. Check the endpoint and retry schway models list."]);
+  for (const secret of [next.accessToken, next.refreshToken]) expect(JSON.stringify(result)).not.toContain(secret);
+  expect(fixture.reads).toEqual([identity.account, identity.account]); expect(fixture.writes).toEqual([identity.account]);
+});
+
 for (const route of ["codex", "grok"] as const) {
   const provider = route === "codex" ? "openai" as const : "xai" as const;
   const auth = route === "codex" ? { openaiAuth: route } : { xaiAuth: route };
