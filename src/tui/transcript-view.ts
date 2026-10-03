@@ -61,11 +61,11 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
     const block = new BoxRenderable(renderer, { flexDirection: "column", backgroundColor: theme.surface, marginTop: 1, marginBottom: 1 });
     const title = token.lang || "code";
     registerCode(block, token.text ?? "", title);
-    // Header strip: language pill left, copy hint right, on the second surface.
+    // Header strip: language pill left, inspection hint right, on the second surface.
     const header = new BoxRenderable(renderer, { flexDirection: "row", backgroundColor: theme.surface2, paddingX: 1 });
     header.add(new TextRenderable(renderer, { content: codeTitle(title, false, theme), flexShrink: 0 }));
     header.add(new BoxRenderable(renderer, { flexGrow: 1 }));
-    header.add(new TextRenderable(renderer, { content: "Alt+I copy", fg: theme.muted, flexShrink: 1, wrapMode: "none" }));
+    header.add(new TextRenderable(renderer, { content: "Alt+I inspect", fg: theme.muted, flexShrink: 1, wrapMode: "none" }));
     block.add(header);
     const code = new BoxRenderable(renderer, { flexDirection: "column", paddingX: 1 });
     code.add(new TextRenderable(renderer, { content: linkify(highlightCode(token.text ?? "", token.lang, theme)), fg: theme.code, wrapMode: "word" }));
@@ -344,9 +344,19 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
             ? [...prefix, ...keyHintChunks(line, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: theme.error })]
             : [...prefix, fg(color)(line)];
         };
-        body.content = body instanceof MarkdownRenderable ? streamText !== undefined ? caretContent() : displayText(entry.text) : linkify(displayText(entry.text).split("\n").flatMap(errorLines));
-        if (body instanceof MarkdownRenderable) body.streaming = streaming;
-        else body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
+        if (body instanceof MarkdownRenderable) {
+          const content = streamText !== undefined ? caretContent() : displayText(entry.text);
+          if (!body.streaming && body.content !== content) {
+            // Finalized Markdown caches its parsed prefix; changed saved content needs a fresh parse.
+            body.content = "";
+            body.streaming = streaming;
+          }
+          body.content = content;
+          body.streaming = streaming;
+        } else {
+          body.content = linkify(displayText(entry.text).split("\n").flatMap(errorLines));
+          body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
+        }
         if (entry.kind === "assistant") {
           codeBlocks().forEach(({ id }, index) => {
             const code = root.findDescendantById(id) as BoxRenderable;
@@ -355,7 +365,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
             const focused = focusedCode === index;
             label!.content = codeTitle(codeData.get(code)!.title, focused, theme);
             header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
-            hint!.content = focused ? "C copy · Esc back" : "Alt+I copy";
+            hint!.content = focused ? "C copy · Esc back" : "Alt+I inspect";
             hint!.fg = focused ? theme.text : theme.muted;
           });
         }

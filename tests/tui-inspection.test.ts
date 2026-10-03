@@ -11,7 +11,7 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 24) {
+async function setup(width = 80, height = 24, env: Record<string, string | undefined> = {}, secrets = ["secret-sentinel"]) {
   const ui = await createTestRenderer({ width, height, kittyKeyboard: true, exitOnCtrlC: false });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({
@@ -21,11 +21,11 @@ async function setup(width = 80, height = 24) {
   });
   const copied: string[] = [];
   const opened: string[] = [];
-  let clipboardWorks = true;
+  let clipboardWorks: boolean | "throw" = true;
   let quit = false;
-  ui.renderer.copyToClipboardOSC52 = text => { if (clipboardWorks) copied.push(text); return clipboardWorks; };
+  ui.renderer.copyToClipboardOSC52 = text => { if (clipboardWorks === "throw") throw new Error("Clipboard unavailable"); if (clipboardWorks) copied.push(text); return clipboardWorks; };
   const view = createConversationView(ui.renderer, {
-    controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: ["secret-sentinel"],
+    controller, workspaceRoot: "/project", home: "/home/test", env, secrets,
     quit: () => { quit = true; }, submit: async () => {}, openUrl: async url => { opened.push(url); },
   });
   cleanups.push(() => { view.destroy(); controller.dispose(); ui.renderer.destroy(); });
@@ -33,7 +33,7 @@ async function setup(width = 80, height = 24) {
   const editor = ui.renderer.root.findDescendantById("prompt") as TextareaRenderable;
   const transcript = ui.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
   const settle = async () => { view.refresh(); await ui.flush(); };
-  return { ...ui, controller, view, editor, transcript, copied, opened, settle, setClipboard: (works: boolean) => { clipboardWorks = works; }, didQuit: () => quit };
+  return { ...ui, controller, view, editor, transcript, copied, opened, settle, setClipboard: (works: boolean | "throw") => { clipboardWorks = works; }, didQuit: () => quit };
 }
 
 test("keyboard inspects one collapsed result and returns to the original draft and cursor", async () => {
@@ -54,10 +54,14 @@ test("keyboard inspects one collapsed result and returns to the original draft a
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ first");
   expect(ui.captureCharFrame()).not.toContain("ผลลัพธ์ second");
+  expect(ui.copied).toEqual([]);
   ui.mockInput.pressArrow("down");
   ui.mockInput.pressEnter();
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ second");
+  expect(ui.copied).toEqual([]);
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["second\nผลลัพธ์ second"]);
   ui.mockInput.pressEscape();
   await ui.settle();
   expect(ui.editor.plainText).toBe("draft ภาษาไทย");
@@ -70,6 +74,301 @@ test("keyboard inspects one collapsed result and returns to the original draft a
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ second");
 });
 
+for (const [theme, env] of Object.entries({ dark: { SCHWAY_THEME: "dark" }, light: { SCHWAY_THEME: "light" }, nocolor: { NO_COLOR: "1" } })) {
+  for (const width of [120, 80, 50, 40]) test(`code headers describe inspection and only the highlighted block copies at ${theme} ${width}`, async () => {
+    const ui = await setup(width, 24, env);
+    await ui.mockInput.pasteBracketedText("งานถัดไป 🧪");
+    ui.editor.cursorOffset = 3;
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nภาษาไทย 🧪\nบรรทัดสอง\n```\n\n```json\n{\"ok\":true}\n```" } });
+    await ui.settle();
+    const unfocused = ui.captureCharFrame();
+    expect(unfocused.match(/Alt\+I inspect/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(unfocused).not.toContain("Alt+I copy");
+    ui.mockInput.pressKey("i", { meta: true });
+    expect(ui.copied).toEqual([]);
+    await ui.settle();
+    const focused = ui.captureCharFrame();
+    expect(focused.split("\n").find(line => line.includes("› txt"))).toContain("C copy · Esc back");
+    expect(focused.split("\n").find(line => line.includes("json"))).toContain("Alt+I inspect");
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["ภาษาไทย 🧪\nบรรทัดสอง"]);
+    ui.mockInput.pressTab();
+    await ui.settle();
+    expect(ui.captureCharFrame().split("\n").find(line => line.includes("› json"))).toContain("C copy · Esc back");
+    ui.mockInput.pressEnter();
+    expect(ui.copied).toEqual(["ภาษาไทย 🧪\nบรรทัดสอง", "{\"ok\":true}"]);
+    ui.mockInput.pressEscape();
+    await ui.settle();
+    expect(ui.captureCharFrame()).not.toContain("C copy");
+    expect(ui.editor.plainText).toBe("งานถัดไป 🧪");
+    expect(ui.editor.cursorOffset).toBe(3);
+  });
+}
+
+test("opening inspection does not repeat secret scans for every code block in one message", async () => {
+  const scans: number[] = [];
+  for (const blocks of [1, 100]) {
+    let secretScans = 0;
+    const secrets = ["test-known-secret"];
+    // Count consumption of the supplied secrets, without timing the renderer or
+    // replacing its sanitizer. Opening one message must not scale these scans
+    // with the number of code blocks it contains.
+    const iterateSecrets = secrets[Symbol.iterator].bind(secrets);
+    secrets[Symbol.iterator] = () => { secretScans++; return iterateSecrets(); };
+    const ui = await setup(80, 24, {}, secrets);
+    const text = Array.from({ length: blocks }, (_, index) => `\`\`\`txt\nไทย ${index} test-known-secret\n\`\`\`\n\n`).join("");
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text } });
+    await ui.settle();
+    ui.transcript.scrollTo(0);
+    await ui.settle();
+    secretScans = 0;
+    ui.mockInput.pressKey("i", { meta: true });
+    scans.push(secretScans);
+    expect(ui.copied).toEqual([]);
+    await ui.settle();
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["ไทย 0 ***"]);
+  }
+  // Allow incidental fixed-size chrome work without accepting per-block scans.
+  expect(scans[1]).toBeLessThanOrEqual(scans[0]! + 8);
+});
+
+test("inspection starts at the visible code and retains that target when returning", async () => {
+  const ui = await setup(80, 18);
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nfirst\n```\n\n" + "Earlier prose\n\n".repeat(20) + "```txt\nเป้าหมาย 😀\nบรรทัดสอง\n```\n\n" + "Later prose\n\n".repeat(20) } });
+  await ui.settle();
+  const id = ui.controller.snapshot().transcript[0]!.id;
+  const later = ui.transcript.findDescendantById(`code-${id}-1`)!;
+  ui.transcript.scrollTo(ui.transcript.scrollTop + later.y - ui.transcript.viewport.y);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("เป้าหมาย");
+  expect(ui.captureCharFrame()).not.toContain("first");
+  const originalScroll = ui.transcript.scrollTop;
+  ui.mockInput.pressKey("i", { meta: true });
+  expect(ui.copied).toEqual([]);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("› txt");
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["เป้าหมาย 😀\nบรรทัดสอง"]);
+  ui.mockInput.pressEscape();
+  await ui.settle();
+  expect(ui.transcript.scrollTop).toBe(originalScroll);
+  ui.transcript.scrollTo(0);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("first");
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("เป้าหมาย");
+  ui.mockInput.pressEnter();
+  expect(ui.copied).toEqual(["เป้าหมาย 😀\nบรรทัดสอง", "เป้าหมาย 😀\nบรรทัดสอง"]);
+});
+
+test("copy waits for visible focus after opening, navigation, scrolling and resize", async () => {
+  const ui = await setup(80, 18);
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nfirst\n```\n\n" + "Prose\n\n".repeat(20) + "```txt\nsecond\n```" } });
+  await ui.settle();
+  ui.transcript.scrollTo(0);
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual([]);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("› txt");
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["first"]);
+  ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter();
+  expect(ui.copied).toEqual(["first"]);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("second");
+  ui.mockInput.pressEnter();
+  expect(ui.copied).toEqual(["first", "second"]);
+  ui.transcript.scrollTo(0);
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toHaveLength(2);
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("second");
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toHaveLength(3);
+  ui.resize(50, 18);
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toHaveLength(3);
+  await ui.settle();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["first", "second", "second", "second"]);
+});
+
+test("same-index replacement clears active and retained inspection instead of copying a substituted block", async () => {
+  const ui = await setup();
+  const session = (text: string) => createSession([{ type: "assistant", id: "same-message", content: [{ type: "text", text }] }]);
+  ui.controller.replaceSession(session("```txt\noriginal\n```"), "inspection-session");
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["original"]);
+  ui.controller.replaceSession(session("```txt\nreplacement\n```"), "inspection-session");
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["original"]);
+  await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("› txt");
+  expect(ui.editor.focused).toBe(true);
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["original", "replacement"]);
+  ui.mockInput.pressEscape();
+  ui.controller.replaceSession(session("No code remains"), "inspection-session");
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  expect(ui.editor.focused).toBe(true);
+  expect(ui.captureCharFrame()).toContain("Nothing to inspect");
+  expect(ui.copied).toHaveLength(2);
+});
+
+test("inspection chooses the nearest target on either side of a prose-only viewport", async () => {
+  for (const side of ["above", "below"] as const) {
+    const ui = await setup(80, 18);
+    ui.controller.applyEvent({ type: "tool.started", toolCallId: "first", name: "read" });
+    ui.controller.applyEvent({ type: "tool.finished", toolCallId: "first", name: "read", status: "success", content: "first result" });
+    for (let index = 0; index < 30; index++) ui.controller.notice(`Prose ${index}`);
+    ui.controller.applyEvent({ type: "tool.started", toolCallId: "last", name: "read" });
+    ui.controller.applyEvent({ type: "tool.finished", toolCallId: "last", name: "read", status: "success", content: "last result" });
+    await ui.settle();
+    const tools = ui.controller.snapshot().transcript.filter(entry => entry.kind === "tool");
+    const node = ui.transcript.findDescendantById(`message-${tools[side === "above" ? 0 : 1]!.id}`)!;
+    const top = ui.transcript.scrollTop + node.y - ui.transcript.viewport.y;
+    ui.transcript.scrollTo(side === "above" ? top + node.height + 2 : top - ui.transcript.viewport.height - 2);
+    await ui.settle();
+    expect(ui.captureCharFrame()).not.toContain("read");
+    ui.mockInput.pressKey("i", { meta: true });
+    await ui.settle();
+    expect(ui.captureCharFrame()).toContain("›");
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual([side === "above" ? "first result" : "last result"]);
+  }
+});
+
+test("session and branch changes clear retained selection even when message IDs collide", async () => {
+  for (const change of ["session", "branch"] as const) {
+    const ui = await setup(80, 18);
+    const session = createSession([
+      { type: "user", id: "user", content: [{ type: "text", text: "Task" }] },
+      { type: "assistant", id: "same-message", content: [{ type: "text", text: "```txt\nfirst\n```\n\n" + "Prose\n\n".repeat(20) + "```txt\nlast\n```" }] },
+    ]);
+    ui.controller.replaceSession(session, "inspection-session");
+    await ui.settle();
+    ui.mockInput.pressKey("i", { meta: true });
+    await ui.settle();
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["last"]);
+    ui.mockInput.pressEscape();
+    if (change === "branch") session.forkBranch("same-message");
+    ui.controller.replaceSession(session, change === "session" ? "another-session" : "inspection-session");
+    await ui.settle();
+    ui.transcript.scrollTo(0);
+    await ui.settle();
+    ui.mockInput.pressKey("i", { meta: true });
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["last"]);
+    await ui.settle();
+    expect(ui.captureCharFrame()).toContain("first");
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["last", "first"]);
+    if (change === "branch") session.selectBranch("main");
+    ui.controller.replaceSession(session, "inspection-session");
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["last", "first"]);
+    await ui.settle();
+    expect(ui.editor.focused).toBe(true);
+    expect(ui.captureCharFrame()).not.toContain("› txt");
+  }
+});
+
+test("clipboard false and thrown errors preserve code selection, Thai multiline draft and cursor", async () => {
+  const ui = await setup(80, 24);
+  await ui.mockInput.pasteBracketedText("งานภาษาไทย\nอีกบรรทัด 😀");
+  ui.editor.cursorOffset = 3;
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nภาษาไทย 😀\n漢字\n```" } });
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  for (const result of [false, "throw"] as const) {
+    ui.setClipboard(result);
+    ui.mockInput.pressKey("c");
+    await ui.settle();
+    expect(ui.copied).toEqual([]);
+    expect(ui.captureCharFrame()).toContain("Clipboard unavailable");
+    expect(ui.captureCharFrame()).not.toContain("Copied code");
+    expect(ui.captureCharFrame()).toContain("› txt");
+    expect(ui.editor.plainText).toBe("งานภาษาไทย\nอีกบรรทัด 😀");
+    expect(ui.editor.cursorOffset).toBe(3);
+  }
+  ui.setClipboard(true);
+  ui.mockInput.pressEnter();
+  await ui.settle();
+  expect(ui.copied).toEqual(["ภาษาไทย 😀\n漢字"]);
+  expect(ui.captureCharFrame()).toContain("Copied code");
+  ui.mockInput.pressEscape();
+  expect(ui.editor.focused).toBe(true);
+  expect(ui.editor.cursorOffset).toBe(3);
+});
+
+test("long code keeps a visible non-color focus marker across themes and standard widths", async () => {
+  const code = Array.from({ length: 30 }, (_, index) => `ภาษาไทย ${index} 😀`).join("\n");
+  for (const env of [{ SCHWAY_THEME: "dark" }, { SCHWAY_THEME: "light" }, { NO_COLOR: "1" }]) {
+    const ui = await setup(80, 18, env);
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: `\`\`\`txt\n${code}\n\`\`\`` } });
+    await ui.settle();
+    // The initial viewport intersects the block's tail, while its header is offscreen.
+    expect(ui.captureCharFrame()).not.toMatch(/\btxt\s+Alt\+I inspect/);
+    ui.mockInput.pressKey("i", { meta: true });
+    await ui.settle();
+    for (const width of [120, 80, 50]) {
+      ui.resize(width, 18);
+      await ui.settle();
+      expect(ui.captureCharFrame()).toContain("› txt");
+      expect(ui.captureCharFrame()).toContain("C copy");
+      ui.mockInput.pressKey("c");
+      expect(ui.copied.at(-1)).toBe(code);
+    }
+    if (!env.SCHWAY_THEME) {
+      ui.renderer.emit("theme_mode", "light");
+      await ui.settle();
+      expect(ui.editor.focused).toBe(false);
+      expect(ui.captureCharFrame()).toContain("› txt");
+      ui.mockInput.pressKey("c");
+      expect(ui.copied).toHaveLength(4);
+      expect(ui.copied.at(-1)).toBe(code);
+    }
+  }
+});
+
+test("an early copy is never queued after Escape, a modal panel or disposal", async () => {
+  for (const action of ["escape", "panel", "dispose"] as const) {
+    const ui = await setup();
+    await ui.mockInput.pasteBracketedText("งานค้าง\nบรรทัดสอง");
+    ui.editor.cursorOffset = 3;
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\ncode\n```" } });
+    await ui.settle();
+    ui.mockInput.pressKey("i", { meta: true });
+    ui.mockInput.pressKey("c");
+    if (action === "escape") ui.mockInput.pressEscape();
+    else if (action === "panel") ui.controller.openPreferences();
+    else ui.view.destroy();
+    await ui.settle();
+    expect(ui.copied).toEqual([]);
+    if (action === "panel") { ui.mockInput.pressEscape(); await ui.settle(); }
+    if (action !== "dispose") {
+      expect(ui.editor.focused).toBe(true);
+      expect(ui.editor.plainText).toBe("งานค้าง\nบรรทัดสอง");
+      expect(ui.editor.cursorOffset).toBe(3);
+      expect(ui.captureCharFrame()).not.toContain("› txt");
+    }
+  }
+});
+
 test("code and Unicode result copies use displayed content without fences or decoration", async () => {
   const ui = await setup(80, 28);
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "unicode", name: "bash" });
@@ -77,6 +376,7 @@ test("code and Unicode result copies use displayed content without fences or dec
   ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```ts\nconst emoji = '😀';\nsecret-sentinel\n```" } });
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
   ui.mockInput.pressKey("c");
   expect(ui.copied.at(-1)).toBe("ไทย\n漢字 😀\n***");
   ui.mockInput.pressArrow("down");
@@ -96,6 +396,7 @@ test("bounded results and failed clipboard report exactly what happened while th
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: "large", name: "bash", status: "success", content: raw });
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
   ui.mockInput.pressKey("c");
   await ui.settle();
   expect(ui.copied.at(-1)).toBe(boundDisplay(raw));
@@ -127,13 +428,33 @@ test("inspection identity and reading position survive new output and tool compl
   expect(ui.editor.focused).toBe(false);
 });
 
+test("unrelated frames cannot authorize copying tool output that has not reached its row", async () => {
+  const ui = await setup();
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "live", name: "bash" });
+  ui.controller.applyEvent({ type: "tool.delta", toolCallId: "live", name: "bash", stream: "stdout", text: "partial" });
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "live", name: "bash", status: "success", content: "finished" });
+  ui.renderer.requestRender();
+  await ui.flush();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual([]);
+  await ui.settle();
+  ui.mockInput.pressKey("c");
+  expect(ui.copied).toEqual(["finished"]);
+});
+
 test("multiple code blocks navigate individually through streaming and resize", async () => {
   const ui = await setup(44, 18);
   const second = `second 😀 ${"unbroken".repeat(18)}\nlast source line`;
   await ui.mockInput.pasteBracketedText("future draft");
   ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: `\`\`\`txt\nfirst ภาษาไทย\n\`\`\`\n\n\`\`\`txt\n${second}\n\`\`\`` } });
   await ui.settle();
+  ui.transcript.scrollTo(0);
+  await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
   ui.mockInput.pressKey("c");
   expect(ui.copied.at(-1)).toBe("first ภาษาไทย");
   ui.mockInput.pressTab();
@@ -190,6 +511,7 @@ test("nested list, quote and unfinished streamed fences use rendered code target
   expect(frame).toContain("const quoted = 2;");
   expect(frame).toContain("echo unfinished");
   ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
   for (const expected of ["const nested = 1;", "const quoted = 2;", "echo unfinished"]) {
     ui.mockInput.pressKey("c");
     expect(ui.copied.at(-1)).toBe(expected);
@@ -224,8 +546,74 @@ test("links, selection and mouse tool toggles still work during inspection", asy
   expect(ui.opened).toHaveLength(1);
   expect(ui.copied.length).toBeGreaterThan(0);
   expect(ui.editor.focused).toBe(false);
+  const selectedText = ui.renderer.getSelection()!.getSelectedText();
+  const beforeSelectionCopy = ui.copied.length;
+  ui.mockInput.pressKey("c", { ctrl: true });
+  expect(ui.copied).toHaveLength(beforeSelectionCopy + 1);
+  expect(ui.copied.at(-1)).toBe(selectedText);
+  expect(ui.copied.at(-1)).not.toBe("Click result");
   ui.mockInput.pressKey("c");
   expect(ui.copied.at(-1)).toBe("Click result");
+});
+
+for (const kind of ["code", "tool"] as const) for (const action of ["quit", "copy", "uppercase-copy"] as const) {
+  test(`idle ${kind} inspection ${action} preserves the Thai draft and cursor`, async () => {
+    const ui = await setup(50, 24);
+    const text = "canonical ภาษาไทย 🧪";
+    if (kind === "code") {
+      ui.controller.replaceSession(createSession([{ type: "assistant", id: "selected-code", content: [{ type: "text", text: `\`\`\`txt\n${text}\n\`\`\`` }] }]), "inspection-session");
+    } else {
+      ui.controller.applyEvent({ type: "tool.started", toolCallId: "selected-tool", name: "read" });
+      ui.controller.applyEvent({ type: "tool.finished", toolCallId: "selected-tool", name: "read", status: "success", content: text });
+    }
+    await ui.settle();
+    await ui.mockInput.pasteBracketedText("เก็บภาษาไทย\nอีกบรรทัด 😀");
+    ui.editor.cursorOffset = 9;
+    const draft = ui.editor.plainText, cursor = ui.editor.cursorOffset;
+    ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+    expect(ui.controller.running).toBe(false);
+    expect(ui.renderer.getSelection()?.getSelectedText() ?? "").toBe("");
+    expect(ui.editor.focused).toBe(false);
+    expect(ui.captureCharFrame()).toContain("C copy");
+    ui.mockInput.pressKey("c", action === "quit" ? { ctrl: true } : action === "uppercase-copy" ? { shift: true } : {});
+    await ui.settle();
+    expect(ui.didQuit()).toBe(action === "quit");
+    expect(ui.copied).toEqual(action === "quit" ? [] : [text]);
+    expect(ui.editor.plainText).toBe(draft);
+    expect(ui.editor.cursorOffset).toBe(cursor);
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.editor.focused).toBe(true);
+    expect(ui.editor.plainText).toBe(draft);
+    expect(ui.editor.cursorOffset).toBe(cursor);
+  });
+}
+
+for (const clipboard of [true, false, "throw"] as const) test(`selected-text Ctrl+C keeps precedence with clipboard ${clipboard}`, async () => {
+  const ui = await setup();
+  await ui.mockInput.pasteBracketedText("keep draft ภาษาไทย");
+  ui.editor.cursorOffset = 3;
+  const cursor = ui.editor.cursorOffset;
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "Select this text\n\n```txt\ncode\n```" } });
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.settle();
+  const lines = ui.captureCharFrame().split("\n");
+  const y = lines.findIndex(line => line.includes("Select this text"));
+  const x = lines[y]!.indexOf("Select this text");
+  ui.setClipboard(false);
+  await ui.mockMouse.drag(x, y, x + 5, y);
+  const selected = ui.renderer.getSelection()?.getSelectedText();
+  expect(selected).toBeTruthy();
+  ui.setClipboard(clipboard);
+  expect(() => ui.mockInput.pressKey("c", { ctrl: true })).not.toThrow();
+  expect(ui.renderer.getSelection()?.getSelectedText() ?? "").toBe("");
+  await ui.settle();
+  expect(ui.copied).toEqual(clipboard === true ? [selected!] : []);
+  expect(ui.captureCharFrame()).toContain(clipboard === true ? "Copied selection" : "native selection");
+  expect(ui.editor.plainText).toBe("keep draft ภาษาไทย");
+  expect(ui.editor.cursorOffset).toBe(cursor);
+  expect(ui.editor.focused).toBe(false);
+  expect(ui.didQuit()).toBe(false);
 });
 
 test("Ctrl+C cancels a running turn during inspection without copying or losing the draft", async () => {
@@ -235,7 +623,9 @@ test("Ctrl+C cancels a running turn during inspection without copying or losing 
   await ui.waitFor(() => ui.controller.running);
   ui.controller.applyEvent({ type: "tool.started", toolCallId: "previous", name: "read" });
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: "previous", name: "read", status: "success", content: "previous result" });
-  await ui.mockInput.pasteBracketedText("future draft");
+  await ui.mockInput.pasteBracketedText("future draft ภาษาไทย");
+  ui.editor.cursorOffset = 3;
+  const cursor = ui.editor.cursorOffset;
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true });
   await ui.settle();
@@ -247,8 +637,86 @@ test("Ctrl+C cancels a running turn during inspection without copying or losing 
   expect(ui.controller.running).toBe(false);
   expect(ui.copied).toEqual([]);
   expect(ui.didQuit()).toBe(false);
-  expect(ui.editor.plainText).toBe("future draft");
+  expect(ui.editor.plainText).toBe("future draft ภาษาไทย");
+  expect(ui.editor.cursorOffset).toBe(cursor);
   expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("previous result"))).toBe(true);
   ui.mockInput.pressKey("c", { ctrl: true });
-  expect(ui.copied.at(-1)).toBe("previous result");
+  expect(ui.didQuit()).toBe(true);
+  expect(ui.copied).toEqual([]);
+  expect(ui.editor.plainText).toBe("future draft ภาษาไทย");
+  expect(ui.editor.cursorOffset).toBe(cursor);
 });
+
+for (const action of ["inspection-escape", "recovery-escape", "continue", "inspection-continue"] as const) {
+  test(`${action} preserves an unrelated Thai draft after accepted provider recovery`, async () => {
+    const ui = await setup(50, 18);
+    ui.controller.setModel(createScriptedModel({ responses: [
+      { chunks: ["```txt\nfirst\n```\n\n" + "middle prose\n\n".repeat(25) + "```txt\nท้ายสุด 😀\n```"], error: "fixture failed after code", status: 400, throwAfter: "chunks" },
+      { text: "continued accepted task" },
+    ] }), "scripted", "recovery-model");
+    expect(await ui.controller.submit("accepted task")).toBe(true);
+    await ui.settle();
+    const recovery = ui.controller.snapshot().recovery;
+    expect(recovery).toMatchObject({ accepted: true, actions: ["continue", "details", "keep-editing"] });
+    await ui.mockInput.pasteBracketedText("เก็บงานภาษาไทย\nอีกบรรทัด 😀");
+    ui.editor.cursorOffset = 9; ui.editor.setSelection(3, 9);
+    ui.transcript.scrollTo(0); await ui.settle();
+    const before = { draft: ui.editor.plainText, cursor: ui.editor.cursorOffset, selection: ui.editor.getSelectedText(), scroll: ui.transcript.scrollTop };
+    if (action.startsWith("inspection-")) {
+      ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+      ui.mockInput.pressTab(); await ui.settle();
+      expect(ui.captureCharFrame()).toContain("C copy · Esc back");
+      expect(ui.editor.focused).toBe(false);
+      expect(ui.transcript.scrollTop).not.toBe(before.scroll);
+    }
+    if (action.endsWith("continue")) {
+      ui.mockInput.pressKey("r", { ctrl: true }); await ui.controller.waitForIdle(); await ui.settle();
+      expect(ui.controller.snapshot().outcome?.reason).toBe("completed");
+      expect(ui.controller.snapshot().recovery).toBeUndefined();
+      expect(ui.controller.snapshot().transcript.filter(row => row.kind === "user")).toHaveLength(1);
+    } else {
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.editor.focused).toBe(true);
+      expect(ui.captureCharFrame()).not.toContain("C copy · Esc back");
+      expect(ui.transcript.scrollTop).toBe(before.scroll);
+      if (action === "inspection-escape") expect(ui.controller.snapshot().recovery).toEqual(recovery);
+      else expect(ui.controller.snapshot().recovery).toBeUndefined();
+    }
+    expect(ui.editor.plainText).toBe(before.draft);
+    expect(ui.editor.cursorOffset).toBe(before.cursor);
+    expect(ui.editor.getSelectedText()).toBe(before.selection);
+    expect(ui.copied).toEqual([]);
+  });
+}
+
+for (const update of ["stream", "replace"] as const) for (const open of [false, true]) {
+  test(`${update} of a ${open ? "growing" : "closed"} code prefix requires current paint and copies complete canonical text`, async () => {
+    const ui = await setup(50, 24);
+    const original = open ? "```txt\noriginal ไทย" : "```txt\noriginal ไทย\n```";
+    const suffix = open ? "\nappended 🧪 secret-sentinel\n```" : "\n\nLater prose\n\n```txt\nother\n```";
+    const session = (text: string) => createSession([{ type: "assistant", id: "same-message", content: [{ type: "text", text }] }]);
+    if (update === "replace") ui.controller.replaceSession(session(original), "inspection-session");
+    else ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: original } });
+    await ui.settle();
+    ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+    expect(ui.captureCharFrame()).toContain("› txt");
+    expect(ui.copied).toEqual([]);
+    if (update === "replace") ui.controller.replaceSession(session(original + suffix), "inspection-session");
+    else ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: suffix } });
+    ui.renderer.requestRender(); await ui.flush();
+    ui.mockInput.pressKey("c"); expect(ui.copied).toEqual([]);
+    ui.view.refresh(); ui.mockInput.pressEnter(); expect(ui.copied).toEqual([]);
+    await ui.settle(); expect(ui.copied).toEqual([]);
+    const canonical = open ? "original ไทย\nappended 🧪 ***" : "original ไทย";
+    expect(ui.captureCharFrame()).toContain("› txt");
+    expect(ui.captureCharFrame()).not.toContain("```");
+    ui.mockInput.pressKey("c"); expect(ui.copied).toEqual([canonical]);
+    for (const width of [80, 40, 50]) {
+      const count = ui.copied.length;
+      ui.resize(width, 24); ui.mockInput.pressEnter(); expect(ui.copied).toHaveLength(count);
+      await ui.settle(); expect(ui.copied).toHaveLength(count);
+      expect(ui.captureCharFrame()).toContain("› txt");
+      ui.mockInput.pressEnter(); expect(ui.copied).toHaveLength(count + 1); expect(ui.copied.at(-1)).toBe(canonical);
+    }
+  });
+}

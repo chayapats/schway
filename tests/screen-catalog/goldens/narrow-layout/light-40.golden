@@ -13,7 +13,7 @@ cursor 6 17 visible
   Edit      Fast      Change
   Bash      Varies    Verify
 
-   ts                      Alt+I copy
+   ts                   Alt+I inspect
   const lo = 0;
   const hi = 10;
   const n = 12;
@@ -67,8 +67,8 @@ cursor 6 17 visible
 07 0-1 #ffffff #f7f7f4 -
 07 1-2 #ffffff #e1e3df -
 07 2-6 #0a5894 #c7d2d6 b
-07 6-27 #ffffff #e1e3df -
-07 27-37 #545e6c #e1e3df -
+07 6-24 #ffffff #e1e3df -
+07 24-37 #545e6c #e1e3df -
 07 37-38 #ffffff #e1e3df -
 07 38-40 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -

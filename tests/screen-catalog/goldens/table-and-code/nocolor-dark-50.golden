@@ -23,7 +23,7 @@ cursor 6 37 visible
   E Beta                F        G        H Lin
                         done     nine
 
-   ts                                Alt+I copy
+   ts                             Alt+I inspect
   const message =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
   stuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZa
@@ -124,8 +124,8 @@ cursor 6 37 visible
 17 0-1 #ffffff #0e1117 -
 17 1-2 #ffffff #1e2430 -
 17 2-6 #e6eaf0 #4a505a b
-17 6-37 #ffffff #1e2430 -
-17 37-47 #8b95a7 #1e2430 -
+17 6-34 #ffffff #1e2430 -
+17 34-47 #8b95a7 #1e2430 -
 17 47-48 #ffffff #1e2430 -
 17 48-50 #ffffff #0e1117 -
 18 0-1 #ffffff #0e1117 -

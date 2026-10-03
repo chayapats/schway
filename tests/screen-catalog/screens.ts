@@ -35,6 +35,27 @@ const longFailure = async (ui: ScreenHarness, expanded = false) => {
   shellRow(ui, "long-failure", longFailingCommand, "success", "Exit code: 1\nตรวจผลลัพธ์ภาษาไทย 🧪\nThe command returned a nonzero exit.", { exitCode: 1 });
   if (expanded) { await ui.settle(); ui.mockInput.pressKey("o", { ctrl: true }); }
 };
+const inspection = async (ui: ScreenHarness, focus: "none" | "code" | "tool") => {
+  let copies = 0;
+  ui.renderer.copyToClipboardOSC52 = () => { copies++; return true; };
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```txt\nEarlier hidden block\n```\n\n" + "Earlier explanation.\n\n".repeat(24)
+    + "```ts\nconsole.log('เป้าหมาย 🧪');\n// บรรทัดสอง\n```\n\n```json\n{\"next\":true}\n```" } });
+  ui.controller.applyEvent({ type: "model.finished" });
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "inspection-read", name: "read" });
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "inspection-read", name: "read", status: "success", content: "ผลลัพธ์ภาษาไทย 🧪\nSecond result line" });
+  await ui.mockInput.pasteBracketedText("งานถัดไป 🧪");
+  await ui.settle(); ui.mockInput.pressKey("END", { ctrl: true }); await ui.settle();
+  if (focus !== "none") {
+    ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+    if (focus === "tool") {
+      ui.mockInput.pressTab(); await ui.settle();
+      ui.mockInput.pressTab(); await ui.settle();
+      ui.mockInput.pressEnter(); await ui.settle();
+      ui.mockInput.pressKey("\u001b[6~"); await ui.settle();
+    }
+  }
+  if (copies) throw new Error("Inspection opening, navigation and tool expansion must not copy");
+};
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -104,6 +125,9 @@ export const SCREENS: readonly Screen[] = [
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "narrow-layout", title: "Narrow layout", description: "A table and code block fit the narrow conversation layout.", drive: ui => enter(ui, "Compare the options"), ready: completed },
   { id: "table-and-code", title: "Table and code wrapping", description: "Wide table cells and long code lines wrap without losing their text.", rows: 40, noColorWidths: true, drive: ui => enter(ui, "Show wrapping"), ready: completed },
+  { id: "inspection-unfocused", title: "Code before inspection", description: "Visible code headers offer inspection while the original draft remains active.", noColorWidths: true, drive: ui => inspection(ui, "none"), ready: (_s, ui) => ui.editor.focused && ui.captureCharFrame().includes("Alt+I inspect") },
+  { id: "inspection-code", title: "Inspect a visible code block", description: "Inspection highlights a later visible block before an explicit copy and leaves neighboring headers unchanged.", noColorWidths: true, drive: ui => inspection(ui, "code"), ready: (_s, ui) => !ui.editor.focused && ui.captureCharFrame().includes("› ts") },
+  { id: "inspection-tool", title: "Inspect an expanded result", description: "Tab selects a tool result and Enter expands it without copying or changing the draft.", noColorWidths: true, drive: ui => inspection(ui, "tool"), ready: (_s, ui) => !ui.editor.focused && ui.captureCharFrame().includes("Second result line") },
 ];
 /** Enumerate six standard variants and the screen's explicit color or narrow extras. */
 export function variantsFor(screen: Screen): Variant[] {
@@ -112,7 +136,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
-  if (screen.id.startsWith("shell-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
+  if (screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   const shortWidths = screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
