@@ -1,11 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readdir, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
 import { runCli } from "../src/cli/main.ts";
 import { inspectPackages } from "../src/packages/packages.ts";
 import { loadResolvedSettings } from "../src/config/config.ts";
+import { loadConfigEditor } from "../src/config/editing.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { readFile } from "node:fs/promises";
 import type { CredentialStore } from "../src/auth/store.ts";
@@ -25,6 +26,65 @@ const store = (value: string | null | Error): CredentialStore => ({
   delete: async () => { throw Error("unexpected mutation"); },
 });
 const check = (report: Awaited<ReturnType<typeof diagnose>>, id: string) => report.checks.find(item => item.id === id);
+
+for (const label of ["Bearer\nprivate-source-token", "Authorization:\r\nBearer private-source-token", "x-api-key=private-source-token", "x-api-key\u001b[31m=\u001b[0mprivate-source-token"]) test(`source credential form ${JSON.stringify(label)} is hidden across config outputs`, async () => {
+  const { root, home } = await fixture();
+  const workspace = join(root, label); await mkdir(join(workspace, ".schway"), { recursive: true });
+  await writeFile(join(workspace, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace });
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  let stdout = "", stderr = "";
+  const exit = await runCli(["-p", "test"], { cwd: workspace, env: { HOME: home }, stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } } });
+  expect(exit).toBe(1); expect(stdout).toBe("");
+  for (const output of [JSON.stringify(settings), JSON.stringify(report), formatDoctor(report), stderr]) {
+    expect(output).not.toContain("private-source-token"); expect(output).not.toContain("\u001b"); expect(output).not.toContain("\\u001b");
+  }
+});
+
+for (const source of ["environment", "runtime", "env-file", "header"] as const) test(`doctor removes known ${source} credentials from every source label and remedy`, async () => {
+  const { root, home } = await fixture();
+  const secret = "private-known-credential", workspace = join(root, secret);
+  await mkdir(join(workspace, ".schway"), { recursive: true });
+  await writeFile(join(workspace, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const envFile = join(root, "credentials.env"); await writeFile(envFile, `OPENAI_API_KEY=${secret}\n`);
+  const env = { HOME: home, ...(source === "environment" ? { OPENAI_API_KEY: secret } : {}) };
+  const options = { ...args, ...(source === "runtime" ? { apiKey: secret } : source === "env-file" ? { envFiles: [envFile] } : source === "header" ? { headers: { Authorization: `Bearer ${secret}` } } : {}) };
+  const report = await diagnose({ cwd: workspace, env, args: options, store: store(null) });
+  const flags = source === "runtime" ? ["--api-key", secret] : source === "env-file" ? ["--env-file", envFile] : source === "header" ? ["--header", `Authorization:Bearer ${secret}`] : [];
+  let stdout = "", stderr = "";
+  expect(await runCli(["doctor", "--json", ...flags], { cwd: workspace, env, credentialStore: store(null), stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } } })).toBe(1);
+  for (const output of [JSON.stringify(report), formatDoctor(report), stdout, stderr]) expect(output).not.toContain(secret);
+  expect(check(report, "config.project")?.diagnostics?.[0]?.path).toBe("approval.mode");
+});
+
+for (const alias of [false, true]) test(`shared user/project config${alias ? " through a symlink" : ""} has one primary failure and incomplete dependent scopes`, async () => {
+  const { root, home } = await fixture();
+  const workspace = alias ? join(root, "home-alias") : home;
+  if (alias) await symlink(home, workspace);
+  await mkdir(join(home, ".schway")); await writeFile(join(home, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace });
+  const editor = await loadConfigEditor({ home, workspaceRoot: workspace }).catch(error => error as Error);
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(settings).toMatchObject({ diagnostics: [expect.objectContaining({ source: join(home, ".schway/config.json"), path: "approval.mode" })] });
+  expect((editor as Error).message.match(/Invalid approval.mode/g)).toHaveLength(1);
+  expect(report.checks.filter(c => c.id.startsWith("config.") && c.status === "error")).toHaveLength(1);
+  expect(check(report, "config.project")).toMatchObject({ status: "warning", remedy: expect.stringContaining("config.user") });
+  expect(check(report, "packages")).toMatchObject({ status: "warning", remedy: expect.stringContaining("config.user") });
+  expect(report.checks.flatMap(c => c.diagnostics ?? [])).toHaveLength(1);
+  let stderr = "";
+  expect(await runCli(["-p", "test"], { cwd: workspace, env: { HOME: home }, stdout: { write: () => { throw Error("stdout must stay empty"); } }, stderr: { write: text => { stderr += text; } } })).toBe(1);
+  expect(stderr.match(/Invalid approval.mode/g)).toHaveLength(1);
+});
+
+for (const profile of ["constructor", "toString", "hasOwnProperty"]) test(`unconfigured inherited profile ${profile} is an actionable failure before runtime startup`, async () => {
+  const { workspace, home } = await fixture();
+  await mkdir(join(home, ".schway")); await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profile }));
+  const settings = await loadResolvedSettings({ home, workspaceRoot: workspace });
+  expect(settings).toMatchObject({ diagnostics: [{ source: join(home, ".schway/config.json"), path: "profile", category: "constraint", constraint: "Select a configured compatible profile" }] });
+  await expect(loadConfigEditor({ home, workspaceRoot: workspace })).rejects.toThrow("Select a configured compatible profile");
+  const report = await diagnose({ cwd: workspace, env: { HOME: home }, args, store: store(null) });
+  expect(check(report, "provider")?.status).toBe("error"); expect(doctorExitCode(report)).toBe(1);
+});
 
 for (const scope of ["user", "project", "both"] as const) test(`${scope} removed provider retains the exact migration notice and source metadata`, async () => {
   const { workspace, home } = await fixture();

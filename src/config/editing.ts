@@ -59,20 +59,22 @@ function traceOrigins(layers: Layers): { origins: ConfigOrigins; modelFallbackSo
   }
   const selectedName = merged.profile?.trim() || undefined;
   if (selectedName !== undefined && isValidProfileName(selectedName)) {
-    const definitionOrigin = layers.project?.profiles?.[selectedName] !== undefined
+    const ownsProfile = (layer: ConfigLayer | undefined) => !!layer?.profiles && Object.hasOwn(layer.profiles, selectedName);
+    const definitionOrigin = ownsProfile(layers.project)
       ? "project"
-      : layers.user?.profiles?.[selectedName] !== undefined
+      : ownsProfile(layers.user)
         ? "user-global"
-        : layers.cli?.profiles?.[selectedName] !== undefined
+        : ownsProfile(layers.cli)
           ? "CLI"
-          : layers.session?.profiles?.[selectedName] !== undefined
+          : ownsProfile(layers.session)
             ? "current-session override"
             : origins.profiles;
     const profileLabel = `profile "${selectedName}"${definitionOrigin ? ` [${definitionOrigin}]` : ""}`;
     const cliSessionOverrides = layers.memory?.profile === selectedName
       ? mergeConfigLayers(layers.memory, layers.user, layers.project, layers.cli, layers.session)
       : mergeConfigLayers(layers.cli, layers.session);
-    const activeProfile = mergeProfileMaps(layers.user?.profiles, layers.project?.profiles, layers.cli?.profiles, layers.session?.profiles)[selectedName];
+    const profiles = mergeProfileMaps(layers.user?.profiles, layers.project?.profiles, layers.cli?.profiles, layers.session?.profiles);
+    const activeProfile = Object.hasOwn(profiles, selectedName) ? profiles[selectedName] : undefined;
     const profileLayer = activeProfile === undefined ? undefined : profileToLayer(activeProfile);
     // File direct connection keys sit below the selected profile while file budgets stay intact.
     const strippedConnectionKeys = ["baseUrl", "model", "headers", "extraBody", "auth"] as const;
@@ -533,7 +535,7 @@ export async function loadConfigEditor(input: { home: string; workspaceRoot: str
   if ("error" in layers) throw new Error(layers.error);
   const { user, project } = layers;
   const memory = input.interactiveMemory ? await InteractiveMemory.load(input.home, input.workspaceRoot) : undefined;
-  return new ConfigEditor({ memory: memory?.choice, user, project, cli: input.cli }, paths, undefined, memory, input.home, input.configDeprecations, [...(user?.deprecationWarnings ?? []), ...(project?.deprecationWarnings ?? [])]);
+  return new ConfigEditor({ memory: memory?.choice, user, project, cli: input.cli }, paths, undefined, memory, input.home, input.configDeprecations, [...new Set([user, project])].flatMap(layer => layer?.deprecationWarnings ?? []));
 }
 
 /** Resolve layers to settings, throwing a readable error when validation fails. */

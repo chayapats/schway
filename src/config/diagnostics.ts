@@ -1,5 +1,7 @@
 import type { TSchema } from "@sinclair/typebox";
 import { ValueErrorType, type ValueError } from "@sinclair/typebox/errors";
+import { stripVTControlCharacters } from "node:util";
+import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../auth/secrets.ts";
 
 /** Safe configuration repair data; paths contain only schema names and redacted dynamic segments. */
 export interface ConfigDiagnostic {
@@ -14,12 +16,18 @@ export interface ConfigDiagnostic {
 export interface ConfigReadError { error: string; diagnostics: readonly ConfigDiagnostic[] }
 
 /** Bound source labels and remove terminal controls, recognizable credentials and URL secrets. */
-export function safeConfigSource(source: string): string {
-  return source.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+export function safeConfigSource(source: string, secrets: readonly string[] = []): string {
+  const space = "[\\s\\x00-\\x1f\\x7f-\\x9f]";
+  const credentialHeader = new RegExp(`\\b(?:${[...CREDENTIAL_HEADER_NAMES].join("|")})${space}*[:=]${space}*(?:(?:Bearer|Basic|Token)${space}+)?[^\\s\\x00-\\x1f\\x7f-\\x9f]+`, "gi");
+  const credentialScheme = new RegExp(`\\b(?:Bearer|Basic|Token)${space}+[^\\s\\x00-\\x1f\\x7f-\\x9f]+`, "gi");
+  const redactCredentials = (value: string) => value.replace(credentialHeader, "<redacted>").replace(credentialScheme, "<redacted>").replace(/\bsk-[\w-]+/g, "<redacted>");
+  // Preserve separators until credential recognition; normalization must not join a scheme to its token.
+  const redacted = redactCredentials(stripVTControlCharacters(redactSecrets(source, secrets)));
+  return redactCredentials(redacted.replace(/[\x00-\x1f\x7f-\x9f]/g, ""))
     .replace(/https?:\/\/[^\s]+/gi, value => {
       try { const url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.toString(); }
       catch { return "<redacted URL>"; }
-    }).replace(/\bsk-[\w-]+/g, "<redacted>").replace(/\b(?:Bearer|Basic|Token)\s+\S+/gi, "<redacted>").slice(0, 512);
+    }).slice(0, 512);
 }
 
 /** Construct a diagnostic from trusted schema paths and guidance, never invalid input values. */

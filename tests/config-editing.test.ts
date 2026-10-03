@@ -30,6 +30,18 @@ test("interactive unknown profile errors retain source without exposing selected
   });
 });
 
+test("interactive profile origins ignore inherited definitions in another scope", async () => {
+  await withTempDir(async dir => {
+    const home = join(dir, "home"), workspaceRoot = join(dir, "work");
+    await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+    await writeFile(join(home, ".schway/config.json"), JSON.stringify({ profiles: { constructor: { baseUrl: "https://example.com" } } }));
+    await writeFile(join(workspaceRoot, ".schway/config.json"), JSON.stringify({ profile: "constructor", profiles: { other: { baseUrl: "https://other.example.com" } } }));
+    const editor = await loadConfigEditor({ home, workspaceRoot });
+    expect(editor.settings.baseUrl).toBe("https://example.com");
+    expect(editor.origins.baseUrl).toBe('profile "constructor" [user-global]');
+  });
+});
+
 test("ui splash setting and field reset preserve sibling keys in session and disk layers", async () => {
   await withTempDir(async home => {
     const editor = await loadConfigEditor({ home, workspaceRoot: join(home, "project") });

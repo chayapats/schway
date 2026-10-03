@@ -198,6 +198,15 @@ test("selected profile diagnostics identify the definition source across merged 
   expect(JSON.stringify(result)).not.toContain("private-secret");
 });
 
+test("prototype-named profiles resolve only own definitions and retain the owning source", () => {
+  for (const name of ["constructor", "toString", "hasOwnProperty"]) {
+    const input = { user: { profiles: { [name]: { baseUrl: "https://user:private-secret@example.com" } } }, project: { profiles: { unrelated: { baseUrl: "https://example.com" } }, profile: name }, configSources: { user: "/actual/user/config.json", project: "/other/project/config.json" } };
+    expect(resolveSettings(input)).toMatchObject({ diagnostics: [{ source: input.configSources.user, path: "profiles.<unknown setting>.baseUrl", category: "constraint" }] });
+    input.user.profiles[name]!.baseUrl = "https://example.com";
+    expect(resolveSettings(input)).toMatchObject({ profile: name, baseUrl: "https://example.com" });
+  }
+});
+
 test("--profile selects the compatible provider and rejects other providers", () => {
   const parsed = parseArgs(["--profile", "tenant-a"]);
   expect("error" in parsed).toBe(false);

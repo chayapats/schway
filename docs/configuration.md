@@ -38,6 +38,8 @@ affected config file. Doctor reports each invalid source under `config.user` or
 `config.project` and continues independent checks. Package inspection explains
 which config check to repair when that scope could not be inspected; a missing
 package in another valid scope is still reported.
+If both scopes resolve to the same file, its failure is reported once; doctor
+links the dependent scope to the primary config check.
 
 Diagnostics describe expected types, supported values and constraints without
 printing invalid values. Unknown keys and dynamic profile/header names appear as

@@ -47,6 +47,8 @@ to `"read-only"`, then rerun `schway doctor`. Normal startup reports the same
 cause and file, exits 1, and leaves stdout empty.
 
 Both invalid files are reported when user and project configuration need repair.
+When both scopes resolve to the same file, one config check reports the failure
+and the other points to that check for repair.
 Package inspection that depends on an invalid file is marked incomplete and
 points back to its config check; a real missing package in another scope still
 appears. Workspace, storage, skill and extension checks continue when safe.
@@ -61,7 +63,8 @@ schema fields), `category`, and `constraint`; enum failures also include
 as `<unknown setting>`, with known children retained, such as
 `profiles.<unknown setting>.baseUrl`. Invalid values are never included.
 Source identifiers are bounded and stripped of terminal controls and recognized
-credentials. Schema version 1 and each check's required fields remain unchanged.
+credentials. Doctor also redacts known API-key and credential-header values from
+source labels and remedies. Schema version 1 and each check's required fields remain unchanged.
 For automation, use check ID, diagnostic source/path/category and status;
 do not depend on prose or `package.<index>` ordering. See
 [configuration](configuration.md#configuration-files) for another

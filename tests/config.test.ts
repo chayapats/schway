@@ -28,6 +28,15 @@ test("invalid approval config exposes its safe field and supported values", () =
   expect(JSON.stringify(result)).not.toContain("readonly");
 });
 
+test("credential separators survive until source redaction, including controls not allowed in filenames", () => {
+  for (const source of ["Bearer\u0000private-source-token", "x-auth-token\u0000:\u0007private-source-token", "Authorization:\u001b[31mBearer\tprivate-source-token\u001b[0m", "x-access-token=private-source-token", "https://user:private-source-token@example.com/?token=private-source-token"]) {
+    const result = parseConfigObject({ approval: { mode: "readonly" } }, source);
+    expect(result).toMatchObject({ diagnostics: [expect.objectContaining({ path: "approval.mode", category: "enum" })] });
+    expect(JSON.stringify(result)).not.toContain("private-source-token");
+    expect(JSON.stringify(result)).not.toContain("\\u00");
+  }
+});
+
 test("each distinct invalid field has one primary cause even alongside a forbidden secret", () => {
   const result = parseConfigObject({ token: "private-secret", approval: { mode: "readonly" }, profiles: { sample: {} }, profile: "a".repeat(65) }, "/config.json");
   if (!("error" in result)) throw Error("expected invalid config");

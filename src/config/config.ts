@@ -3,8 +3,8 @@ import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, stricterApprovalMode, type Appro
 import { Type, type Static, type TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { configDiagnostic, configReadError, schemaDiagnostics, type ConfigReadError, type ConfigDiagnostic } from "./diagnostics.ts";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
 import {
   type ModelCapability,
@@ -485,7 +485,7 @@ export function resolveSettings(input: {
   const memory = effectiveInteractiveMemory(input);
   const sourceFor = (field: keyof ConfigLayer, profileName?: string): string => {
     for (const [layer, source] of [[input.session, "session settings"], [input.cli, "CLI settings"], [input.project, input.configSources?.project ?? "project settings"], [input.user, input.configSources?.user ?? "user settings"], [memory, "interactive memory"]] as const) {
-      if (profileName ? layer?.profiles?.[profileName] !== undefined : layer?.[field] !== undefined) return source;
+      if (profileName ? layer?.profiles && Object.hasOwn(layer.profiles, profileName) : layer?.[field] !== undefined) return source;
     }
     return "default settings";
   };
@@ -507,7 +507,7 @@ export function resolveSettings(input: {
   if (selectedName === undefined) {
     merged = selection;
   } else {
-    activeProfile = mergedProfiles[selectedName];
+    activeProfile = Object.hasOwn(mergedProfiles, selectedName) ? mergedProfiles[selectedName] : undefined;
     if (activeProfile === undefined) {
       return configReadError([configDiagnostic(sourceFor("profile"), "profile", "constraint", "Select a configured compatible profile")]);
     }
@@ -698,14 +698,29 @@ function omitProfileKeys(layer: ConfigLayer | undefined): ConfigLayer | undefine
   return direct;
 }
 
+/** Read each actual config file once while retaining all requested scope paths as lookup keys. */
+export async function readConfigSources(paths: readonly string[], deprecations?: readonly ConfigDeprecation[]): Promise<Map<string, Awaited<ReturnType<typeof readConfigFile>>>> {
+  const identities = await Promise.all(paths.map(async path => { try { return await realpath(path); } catch { return resolve(path); } }));
+  const reads = new Map<string, ReturnType<typeof readConfigFile>>();
+  const layers = await Promise.all(paths.map((path, index) => {
+    const identity = identities[index]!;
+    let read = reads.get(identity);
+    if (!read) { read = readConfigFile(path, deprecations); reads.set(identity, read); }
+    return read;
+  }));
+  return new Map(paths.map((path, index) => [path, layers[index]]));
+}
+
 /** Read both config sources before reporting failure, so one invalid file cannot hide another. */
 export async function readConfigLayers(input: {
   home: string;
   workspaceRoot: string;
   configDeprecations?: readonly ConfigDeprecation[];
 }): Promise<{ user?: ParsedConfigLayer; project?: ParsedConfigLayer } | ConfigReadError> {
-  const layers = await Promise.all([readConfigFile(userConfigPath(input.home), input.configDeprecations), readConfigFile(projectConfigPath(input.workspaceRoot), input.configDeprecations)]);
-  const failures = layers.filter((layer): layer is ConfigReadError => !!layer && "error" in layer);
+  const paths = [userConfigPath(input.home), projectConfigPath(input.workspaceRoot)];
+  const observations = await readConfigSources(paths, input.configDeprecations);
+  const layers = paths.map(path => observations.get(path));
+  const failures = [...new Set(layers)].filter((layer): layer is ConfigReadError => !!layer && "error" in layer);
   if (failures.length) return { error: failures.map(failure => failure.error).join("\n"), diagnostics: failures.flatMap(failure => failure.diagnostics) };
   const [user, project] = layers as [ParsedConfigLayer | undefined, ParsedConfigLayer | undefined];
   return { user, project };
@@ -726,7 +741,7 @@ export async function loadResolvedSettings(input: {
   const layers = await readConfigLayers(input);
   if ("error" in layers) return layers;
   const { user, project } = layers;
-  for (const warning of [...(user?.deprecationWarnings ?? []), ...(project?.deprecationWarnings ?? [])]) input.onDeprecation?.(warning);
+  for (const layer of new Set([user, project])) for (const warning of layer?.deprecationWarnings ?? []) input.onDeprecation?.(warning);
   const resolved = resolveSettings({
     user,
     project,
