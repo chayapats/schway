@@ -93,6 +93,7 @@ mock.module(fixture, () => ({ ...credentialInput, loadCredentialSafeTui: async (
 const { runCli } = await import("../../src/cli/main.ts");
 const args = mode === "override" ? ["--provider", "openai-compatible", "--base-url", "http://127.0.0.1:1/v1"] : mode === "override-full" ? ["--provider", "openai", "--model", "gpt-4o", "--openai-auth", "api-key"] : [];
 const code = await runCli(args, { cwd: workspace, env: { HOME: home, SCHWAY_MOTION: "off" }, credentialStore: store,
+  terminal: { stdin: true, stdout: true }, // This process uses an injected test renderer.
   fetch: async (url) => String(url).includes("api.openai.com")
     ? Response.json({ data: [{ id: "gpt-5.4" }, { id: "gpt-4o" }] })
     : Response.json({ models: [{ slug: mode === "missing-model" ? "replacement-model" : "account-model", visibility: "list", supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }] }] }),
