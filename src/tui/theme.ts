@@ -69,3 +69,41 @@ export function mixColor(a: string, b: string, t: number): string {
 export function tint(theme: TuiTheme, color: string, base = theme.surface2): string {
   return mixColor(base, color, theme.background === TUI_THEMES.light.background ? 0.12 : 0.22);
 }
+
+function rgb(hex: string): number[] {
+  return [1, 3, 5].map(start => parseInt(hex.slice(start, start + 2), 16));
+}
+
+function luminance(channels: readonly number[]): number {
+  const linear = channels.map(channel => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+}
+
+/** Preserve passing opaque #rrggbb text or adjust it to 4.5:1 against resolved #rrggbb; other color forms return undefined. */
+export function readableForeground(preferred: string, background: string): string | undefined {
+  // Callers must first resolve terminal defaults, indexed colors and alpha composition.
+  if (!/^#[0-9a-f]{6}$/i.test(preferred) || !/^#[0-9a-f]{6}$/i.test(background)) return undefined;
+  const original = rgb(preferred), backgroundLuminance = luminance(rgb(background));
+  const contrast = (channels: readonly number[]) => {
+    const value = luminance(channels);
+    return (Math.max(value, backgroundLuminance) + 0.05) / (Math.min(value, backgroundLuminance) + 0.05);
+  };
+  if (contrast(original) >= 4.5) return preferred;
+  let closest: string | undefined, closestDistance = Infinity;
+  for (const endpoint of ["#000000", "#ffffff"]) {
+    if (contrast(rgb(endpoint)) < 4.5) continue;
+    let low = 0, high = 1, candidate = endpoint;
+    // Each path has one passing boundary; remeasure rounded bytes at every bounded step.
+    for (let step = 0; step < 24; step++) {
+      const midpoint = (low + high) / 2, mixed = mixColor(preferred, endpoint, midpoint);
+      if (contrast(rgb(mixed)) >= 4.5) { high = midpoint; candidate = mixed; }
+      else low = midpoint;
+    }
+    const distance = rgb(candidate).reduce((sum, channel, index) => sum + (channel - original[index]!) ** 2, 0);
+    if (distance < closestDistance) { closest = candidate; closestDistance = distance; }
+  }
+  return closest;
+}
