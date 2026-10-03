@@ -282,9 +282,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     showInteractionNotice(copied ? "Copied selection" : "Clipboard unavailable · use the terminal's native selection");
     return true;
   };
-  const inspectionTargets = (entries: readonly TuiTranscriptEntry[]): InspectionTarget[] => entries.flatMap<InspectionTarget>(entry =>
-    entry.kind === "tool" ? [{ id: entry.id, kind: "tool" as const, index: 0, callId: entry.toolCallId, name: entry.toolName }]
-      : entry.kind === "assistant" ? (rows.get(entry.id)?.codeBlocks() ?? []).map((block, index) => ({ id: entry.id, kind: "code" as const, index, source: safe(entry.text), text: block.text })) : []);
+  const inspectionTargets = (entries: readonly TuiTranscriptEntry[]): InspectionTarget[] => entries.flatMap<InspectionTarget>(entry => {
+    if (entry.kind === "tool") return [{ id: entry.id, kind: "tool", index: 0, callId: entry.toolCallId, name: entry.toolName }];
+    if (entry.kind !== "assistant") return [];
+    const blocks = rows.get(entry.id)?.codeBlocks() ?? [];
+    if (!blocks.length) return [];
+    const source = safe(entry.text);
+    return blocks.map((block, index) => ({ id: entry.id, kind: "code", index, source, text: block.text }));
+  });
   const sameInspection = (left: InspectionTarget, right: InspectionTarget) => left.id === right.id && left.kind === right.kind && left.index === right.index;
   const inspectionNode = (target: InspectionTarget) => target.kind === "tool" ? rows.get(target.id)?.root : rows.get(target.id)?.root.findDescendantById(`code-${target.id}-${target.index}`);
   const inspectionEntry = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => {

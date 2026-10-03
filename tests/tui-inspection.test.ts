@@ -11,7 +11,7 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(width = 80, height = 24, env: Record<string, string | undefined> = {}) {
+async function setup(width = 80, height = 24, env: Record<string, string | undefined> = {}, secrets = ["secret-sentinel"]) {
   const ui = await createTestRenderer({ width, height, kittyKeyboard: true, exitOnCtrlC: false });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({
@@ -25,7 +25,7 @@ async function setup(width = 80, height = 24, env: Record<string, string | undef
   let quit = false;
   ui.renderer.copyToClipboardOSC52 = text => { if (clipboardWorks === "throw") throw new Error("Clipboard unavailable"); if (clipboardWorks) copied.push(text); return clipboardWorks; };
   const view = createConversationView(ui.renderer, {
-    controller, workspaceRoot: "/project", home: "/home/test", env, secrets: ["secret-sentinel"],
+    controller, workspaceRoot: "/project", home: "/home/test", env, secrets,
     quit: () => { quit = true; }, submit: async () => {}, openUrl: async url => { opened.push(url); },
   });
   cleanups.push(() => { view.destroy(); controller.dispose(); ui.renderer.destroy(); });
@@ -68,6 +68,34 @@ test("keyboard inspects one collapsed result and returns to the original draft a
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ first");
   expect(ui.captureCharFrame()).toContain("ผลลัพธ์ second");
+});
+
+test("opening inspection does not repeat secret scans for every code block in one message", async () => {
+  const scans: number[] = [];
+  for (const blocks of [1, 100]) {
+    let secretScans = 0;
+    const secrets = ["test-known-secret"];
+    // Count consumption of the supplied secrets, without timing the renderer or
+    // replacing its sanitizer. Opening one message must not scale these scans
+    // with the number of code blocks it contains.
+    const iterateSecrets = secrets[Symbol.iterator].bind(secrets);
+    secrets[Symbol.iterator] = () => { secretScans++; return iterateSecrets(); };
+    const ui = await setup(80, 24, {}, secrets);
+    const text = Array.from({ length: blocks }, (_, index) => `\`\`\`txt\nไทย ${index} test-known-secret\n\`\`\`\n\n`).join("");
+    ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text } });
+    await ui.settle();
+    ui.transcript.scrollTo(0);
+    await ui.settle();
+    secretScans = 0;
+    ui.mockInput.pressKey("i", { meta: true });
+    scans.push(secretScans);
+    expect(ui.copied).toEqual([]);
+    await ui.settle();
+    ui.mockInput.pressKey("c");
+    expect(ui.copied).toEqual(["ไทย 0 ***"]);
+  }
+  // Allow incidental fixed-size chrome work without accepting per-block scans.
+  expect(scans[1]).toBeLessThanOrEqual(scans[0]! + 8);
 });
 
 test("inspection starts at the visible code and retains that target when returning", async () => {
