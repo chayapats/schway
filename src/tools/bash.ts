@@ -199,14 +199,27 @@ async function runShell(
 
     const stdout = collectStream(child.stdout, "stdout", ctx);
     const stderr = collectStream(child.stderr, "stderr", ctx);
+    const streams = Promise.all([stdout, stderr]);
+    // A pipe may fail before process exit; handle it immediately while retaining the original rejection.
+    void streams.catch(terminate);
 
     let exitCode: number | null;
     try {
       exitCode = await new Promise<number | null>((resolve, reject) => {
-        child!.once("error", reject);
-        child!.once("exit", (code) => {
+        const cleanup = () => {
+          child!.removeListener("error", onError);
+          child!.removeListener("exit", onExit);
+        };
+        const onError = (error: Error) => {
+          cleanup();
+          reject(error);
+        };
+        const onExit = (code: number | null) => {
+          cleanup();
           resolve(code);
-        });
+        };
+        child!.once("error", onError);
+        child!.once("exit", onExit);
       });
     } catch (error) {
       terminate();
@@ -220,7 +233,7 @@ async function runShell(
     let stdoutText: string;
     let stderrText: string;
     try {
-      [stdoutText, stderrText] = await Promise.all([stdout, stderr]);
+      [stdoutText, stderrText] = await streams;
     } finally {
       clearTimeout(drainTimer);
     }
@@ -257,7 +270,14 @@ function collectStream(
   const decoder = new StringDecoder("utf8");
   let text = "";
   return new Promise((resolve, reject) => {
-    stream.on("data", (chunk: Buffer | string) => {
+    let settled = false;
+    const cleanup = () => {
+      stream.removeListener("data", onData);
+      stream.removeListener("error", onError);
+      stream.removeListener("end", onFinish);
+      stream.removeListener("close", onFinish);
+    };
+    const onData = (chunk: Buffer | string) => {
       const piece =
         typeof chunk === "string" ? chunk : decoder.write(chunk);
       if (piece.length === 0) {
@@ -265,16 +285,29 @@ function collectStream(
       }
       text += piece;
       ctx.onOutput?.({ stream: name, text: piece });
-    });
-    stream.once("error", reject);
-    stream.once("end", () => {
+    };
+    const onError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onFinish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       const tail = decoder.end();
       if (tail.length > 0) {
         text += tail;
         ctx.onOutput?.({ stream: name, text: tail });
       }
       resolve(text);
-    });
+    };
+    stream.on("data", onData);
+    stream.once("error", onError);
+    stream.once("end", onFinish);
+    // An unsuccessful spawn can close a pipe without ever emitting end or error.
+    stream.once("close", onFinish);
   });
 }
 

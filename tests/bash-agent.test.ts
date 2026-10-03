@@ -15,11 +15,27 @@ import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
+import { runBashProbe } from "./fixtures/bash-spawn-failure.ts";
 
 /** Build a single-text user message for loop tests. */
 function user(text: string): UserMessage {
   return { type: "user", id: "u1", content: [{ type: "text", text }] };
 }
+
+test("an accepted bash spawn failure produces one harness error and lets the agent continue", async () => {
+  await withTempDir(async root => {
+    const probe = await runBashProbe("agent", root);
+    expect(probe.expired, JSON.stringify(probe)).toBe(false); expect(probe.exit, probe.stderr).toBe(0);
+    const result = JSON.parse(probe.stdout.trim().split("\n").at(-1)!);
+    expect(result.started).toBe(1); expect(result.results).toHaveLength(1); expect(result.finished).toHaveLength(1);
+    expect(result.results[0].content).toContain("ENOENT");
+    expect(result.results[0].content).not.toContain("Exit code:");
+    expect(result.results[0]).toMatchObject({ toolCallId: "spawn", isError: true });
+    expect(result.finished[0]).toMatchObject({ toolCallId: "spawn", status: "error" });
+    expect(result.lastEvent).toEqual({ type: "agent.finished", reason: "completed" });
+    expect(result.lastItem.content).toEqual([{ type: "text", text: "recovered" }]);
+  });
+});
 
 test("agent runs a successful shell command and continues from the result", async () => {
   await withTempDir(async (dir) => {
