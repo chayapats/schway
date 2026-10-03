@@ -1,64 +1,242 @@
 # Headless usage
 
-Schway owns its agent loop, model abstraction, session format, tool execution,
-and context assembly. It does not depend on an orchestration framework.
+Choose credentials, an auth route and an exact model ID before running a task.
+Interactive sign-in saves credentials, but the TUI's remembered workspace model
+choice is intentionally ignored here. `--resume` restores conversation and
+workspace history; it does not restore old credentials or billing settings.
 
-Choose a model with `--model "<id>"`, or save it in
-[configuration](configuration.md#configuration-files), before running a task.
-Use `--provider` to override the default OpenAI provider. Replace `<id>` with a model available to your account or endpoint. Commands
-without those flags use your saved configuration. Headless mode ignores the TUI's
-remembered workspace model choice.
+The examples below use **POSIX shell syntax** (`sh`, Bash or Zsh), not PowerShell
+or Windows Command Prompt. Run them from your project directory. Each `read`
+waits for you to paste the requested exact ID and press Enter. Model IDs vary by
+account and endpoint: choose a returned ID yourself; do not type `$MODEL_ID`,
+`<id>` or an example name as if it were a catalog result.
 
-## Run a task
+## Choose your route, run, and resume
+
+Complete the credential prerequisite for **one** route. Online listing can
+refresh that route's saved subscription token, but never runs inference or
+switches billing when a request fails. A successful listing does not prove that
+inference is available. See [model discovery](#discover-model-ids) for partial,
+error and offline results; offline entries are unverified built-in data.
+
+### OpenAI API key
+
+In interactive Schway, use `/login openai` to save an OpenAI Platform API key,
+then return to your shell. An explicitly supplied `OPENAI_API_KEY` also works;
+keys do not belong in config files. These commands select usage-billed API access,
+even if a ChatGPT subscription is also saved.
+
+<!-- headless-flow:openai-api -->
+```sh
+schway models list --provider openai --openai-auth api-key
+# Paste an exact ID from the list, then press Enter.
+IFS= read -r MODEL_ID
+schway -p "Explain this project" --provider openai --openai-auth api-key --model "$MODEL_ID" --approval read-only --show-session
+schway sessions list
+# Paste the ID from the Session hint (or the matching saved-work row).
+IFS= read -r SESSION_ID
+schway -p "Continue this explanation" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+```
+
+### Existing ChatGPT/Codex subscription
+
+First sign into **Schway** interactively with `/login codex` or
+`/login codex --device`, then return to your shell. Schway does not read another
+CLI's login cache. These commands use only the stored subscription, even when
+`OPENAI_API_KEY` is set. Missing or rejected subscription access needs sign-in or
+an explicit route change; there is no automatic API-key billing fallback.
+
+<!-- headless-flow:codex -->
+```sh
+schway models list --provider openai --openai-auth codex
+IFS= read -r MODEL_ID
+schway -p "Explain this project" --provider openai --openai-auth codex --model "$MODEL_ID" --approval read-only --show-session
+schway sessions list
+IFS= read -r SESSION_ID
+schway -p "Continue this explanation" --provider openai --openai-auth codex --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+```
+
+### xAI API key
+
+Save an xAI API key through interactive `/login xai`, or explicitly supply
+`XAI_API_KEY`, then return to your shell. Native xAI never uses `OPENAI_API_KEY`.
+The API-key route below ignores a saved Grok subscription.
+
+<!-- headless-flow:xai-api -->
+```sh
+schway models list --provider xai --xai-auth api-key
+IFS= read -r MODEL_ID
+schway -p "Explain this project" --provider xai --xai-auth api-key --model "$MODEL_ID" --approval read-only --show-session
+schway sessions list
+IFS= read -r SESSION_ID
+schway -p "Continue this explanation" --provider xai --xai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+```
+
+### Existing Grok subscription
+
+First use interactive `/login grok` or `/login grok --device` in Schway. Your plan
+must permit this access. The explicit `grok` route below uses only that login,
+even when an xAI API key is available. A plan-level rejection does not switch to
+API billing; choose that route yourself if desired.
+
+<!-- headless-flow:grok -->
+```sh
+schway models list --provider xai --xai-auth grok
+IFS= read -r MODEL_ID
+schway -p "Explain this project" --provider xai --xai-auth grok --model "$MODEL_ID" --approval read-only --show-session
+schway sessions list
+IFS= read -r SESSION_ID
+schway -p "Continue this explanation" --provider xai --xai-auth grok --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+```
+
+### Compatible endpoint or profile
+
+Start your compatible server first; Schway does not install or start it. The
+example assumes its API is at `http://127.0.0.1:11434/v1` and requires a key.
+Merge this profile into `~/.schway/config.json` (preserving existing settings),
+and supply the server's key through `LOCAL_MODEL_KEY` or the profile's secure-store
+login. Use `auth: "none"` instead only when your server intentionally needs no key.
+Native OpenAI credentials are never reused for a compatible endpoint.
+
+<!-- headless-config:compatible -->
+```json
+{
+  "profiles": {
+    "local": {
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "auth": "required",
+      "credentialEnv": "LOCAL_MODEL_KEY"
+    }
+  }
+}
+```
+
+<!-- headless-flow:compatible -->
+```sh
+schway models list --profile local
+IFS= read -r MODEL_ID
+schway -p "Explain this project" --profile local --model "$MODEL_ID" --approval read-only --show-session
+schway sessions list
+IFS= read -r SESSION_ID
+schway -p "Continue this explanation" --profile local --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only --show-session
+```
+
+Without a profile, replace **each** `--profile local` above with
+`--provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth required`
+and provide that endpoint's key through `OPENAI_COMPATIBLE_API_KEY` or its own
+secure-store login. Retain the chosen `--model "$MODEL_ID"` on task and resume
+commands. See [profiles](configuration.md#named-openai-compatible-profiles) and
+[credential identities](credentials.md).
+
+### Use explicit saved settings
+
+A flag-light task is also valid when its required settings are saved. For
+example, after the OpenAI API-key discovery above, replace the marked model value
+with your chosen exact ID and merge these settings into `~/.schway/config.json`:
+
+<!-- headless-config:saved -->
+```json
+{
+  "provider": "openai",
+  "openaiAuth": "api-key",
+  "model": "<replace with your chosen exact ID>"
+}
+```
+
+The following commands require that saved config and the API-key credential
+prepared above. The model value in the JSON example is a placeholder, not a
+usable model ID.
+
+<!-- headless-flow:saved -->
+```sh
+schway models list
+schway -p "Explain this project" --approval read-only --show-session
+schway sessions list
+IFS= read -r SESSION_ID
+schway -p "Continue this explanation" --resume "$SESSION_ID" --approval read-only --show-session
+```
+
+Project settings override user settings; explicit CLI flags override both.
+A selected profile supplies its endpoint and model defaults, while an explicit
+`--model` overrides its model. Saved credentials and remembered TUI choices are
+separate from these config layers. Review [configuration precedence](configuration.md)
+and [credential selection](credentials.md) when changing routes.
+
+## Output and session IDs
+
+Default text mode writes model text to stdout and diagnostics to stderr.
+`--show-session` adds one stderr line once a persisted task session is ready:
+`Session <exact-id> · Resume with --resume <exact-id>`. It works for new and resumed
+tasks. Later model/tool failure or cancellation does not remove that hint;
+a setup failure before readiness, an unpersisted session or a `/skills` listing
+prints none. If the exact ID contains an already-observed credential, the hint
+is suppressed rather than redacted into an unusable ID. The hint contains no
+prompt, file path or auth settings. Default text streams are unchanged without
+the flag. It is rejected without `-p`, with `--json`, or on doctor/version/list
+commands; use it only for text tasks.
+
+`--json` already emits runtime events as **JSONL** on stdout, including
+`session.ready` with `sessionId` at the same safe persisted boundary. Its format
+and timing are unchanged; do not add `--show-session`. Errors/retries remain on
+stderr. Capture the complete stream before extracting its exact ID, so a short
+pipeline does not close a running task's stdout early. With the OpenAI API-key
+route and `MODEL_ID` chosen above:
+
+<!-- headless-flow:jsonl -->
+```sh
+schway -p "Explain this project" --provider openai --openai-auth api-key --model "$MODEL_ID" --json > task.jsonl
+SESSION_ID=$(bun -e 'const rows = (await Bun.file("task.jsonl").text()).split("\n").filter(Boolean).map(JSON.parse); const ready = rows.find(row => row.type === "session.ready"); if (!ready) process.exit(1); process.stdout.write(ready.sessionId);')
+schway -p "Continue this explanation" --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --approval read-only
+```
+
+If no safe `session.ready` exists, extraction fails; do not substitute a guessed
+ID. `models list --json` and `sessions list --json` each emit one versioned JSON
+object, unlike task JSONL. Runtime events also differ from durable session JSONL.
+See [saved sessions and branches](sessions.md).
+
+## Task input and recovery
 
 Pass a nonempty task with `-p`. Empty or whitespace-only tasks exit 1 before
-reading setup or changing saved work. Valid tasks keep their leading and trailing
-whitespace, including multiline text. Stdin is not implicitly used as a task.
+reading setup or changing saved work. Valid tasks retain leading/trailing
+whitespace and multiline text. Stdin is not implicitly a task. Explicit tasks
+work with terminal or redirected input/output; without `-p`, both stdin and
+stdout must be terminals. Help, version, doctor and list commands need no TTY.
 
-Explicit tasks work with terminal or redirected input and output. Without `-p`,
-both stdin and stdout must be terminals; stderr may be redirected. Help, version,
-doctor, session listing and model listing do not need a terminal. Embedded `runCli` callers may provide
-`terminal: { stdin: true, stdout: true }` for an interactive renderer; omitted
-capabilities default to false. The executable reads the actual stdin/stdout
-terminal capabilities.
+If a task reports no configured model, run the intended route's `models list`,
+choose an exact ID and retry with that route and `--model`. For local diagnosis
+of the OpenAI API-key example above, use
+`schway doctor --provider openai --openai-auth api-key --model "$MODEL_ID"`.
+Doctor checks local setup; it does not contact a model or prove live access.
+See [doctor](doctor.md) for other routes and exit meanings.
 
-```bash
-export OPENAI_API_KEY=...
-schway -p "explain this repository"
-schway -p "explain this repository" --json
-schway -p "continue this work" --resume <session-id>
-schway -p "continue the alternate path" --resume <session-id> --branch <branch-id>
+`--approval read-only` refuses tools that change files or run commands.
+Headless `ask` denies mutations immediately with
+`approval required; headless cannot ask`; it never waits for input. A tool denial
+alone need not make the task exit nonzero. Use `--approval auto` only when those
+tool actions are intended.
 
-schway -p "explain this repository" --provider openai
-schway -p "explain this repository" --provider openai --model "<id>"
+`--max-turns` bounds agent rounds (default 32); `--max-concurrent-tools` caps
+parallel-safe tools (default 10). Unknown exact model IDs remain accepted by
+`--model` even when absent from a catalog, using conservative budgets of 32768
+context tokens and 16384 output tokens; known models supply richer metadata.
+Override these with `--context-window` and `--max-output` when needed.
 
-export XAI_API_KEY=...
-schway -p "explain this repository" --provider xai --model "<id>"
+Compatible endpoints use Chat Completions. `--header Name:Value` is repeatable,
+`--body` adds JSON request fields, and `--auth` is `required`, `optional` (default)
+or `none`. Runtime `--api-key` wins over environment values (including explicit
+`--env-file` overlays), then the selected secure-store credential. Project `.env`
+files are not loaded automatically. Headless mode never opens a login prompt.
 
-schway -p "explain this repository" --provider openai-compatible \
-  --base-url http://127.0.0.1:11434/v1 --model "<id>"
-schway -p "explain this repository" --provider openai-compatible \
-  --base-url http://127.0.0.1:8080/v1 --auth required --api-key sk-local
-```
+SIGINT/SIGTERM requests cancellation through model streaming, tools and provider
+requests. Transient network/429/5xx failures retry up to three attempts;
+authentication errors and ordinary tool failures do not. Failed/cancelled
+streams are not committed assistant answers. A hint confirms persisted session
+readiness, not that tools were rolled back or the turn succeeded.
 
-`--json` streams normalized runtime events as JSONL on stdout. Errors/retries still appear on stderr. Opt in to local structured diagnostics with `--debug` or `--debug-file ./schway-debug.jsonl` (implies `--debug`); log writes never enter stdout or durable sessions. See [local diagnostics](diagnostics.md) for redaction and retention defaults.
-
-`--provider` selects `openai` (default), `xai`, or `openai-compatible`. `--model` is passed through even if it is not in a catalog. xAI uses `XAI_API_KEY` or `--api-key`, never `OPENAI_API_KEY`, and does not invent a model when `--model` is omitted. See [xAI API key](configuration.md#xai-api-key). Unknown IDs use conservative defaults of a 32768-token context window and 16384 maximum output tokens; known catalog models supply richer context-window metadata. Override either limit with `--context-window`, `--max-output`, or the same keys in config.
-
-OpenAI-compatible endpoints use Schway's own Chat Completions fetch/SSE adapter. `--base-url` is required. `--header Name:Value` may be repeated, `--body` is a JSON object of extra request fields, and `--auth` is `required`, `optional` (default), or `none`. Compatible mode does not read `OPENAI_API_KEY`. Select named endpoint profiles with `--profile <name>` or `/config set profile <name>`;
-see [profiles](configuration.md#named-openai-compatible-profiles).
-
-Runtime credentials (`--api-key`) take precedence over environment variables, including keys loaded with `--env-file`, followed by the OS secure store. Project `.env` files are not loaded automatically. Headless mode never opens a login prompt. Interactive `/login <provider>` and `/logout <provider>` manage credentials; `--openai-auth codex` selects a stored ChatGPT subscription without silent API-key fallback. API keys must not be stored in `config.json`. See [credentials](credentials.md) and [subscription setup](configuration.md#chatgpt-subscription-codex-oauth).
-
-`--max-turns` bounds agent rounds (default 32). `--max-concurrent-tools` caps overlapping parallel-safe tools (default 10).
-
-Headless runs share one `AbortSignal` from the CLI (SIGINT/SIGTERM) through model streaming, tools, and provider requests. Transient provider failures (network resets, 429, 5xx) retry up to three total attempts with exponential backoff and `Retry-After`. Authentication errors, malformed requests, and ordinary tool failures are not retried. Cancelled or failed streams are not written as durable assistant messages; a cancelled run still leaves a resumable session.
-
-From a source checkout with dependencies installed, run:
-
-```bash
-bun run dev -- -p "hello"
-```
+`--debug` or `--debug-file ./schway-debug.jsonl` opts into local diagnostics on a
+separate file; it never adds stdout or session records. See [diagnostics](diagnostics.md).
+From a source checkout with dependencies installed, use `bun run dev --` instead
+of `schway`, keeping the full route/model/task flags from the chosen flow.
 
 ## Browse saved work
 
@@ -66,8 +244,14 @@ bun run dev -- -p "hello"
 schway sessions list
 schway sessions list --workspace ../project --limit 10 --offset 20
 schway sessions list --all --preview --json
-schway --resume <session-id> -p "continue this work"
+# With MODEL_ID and SESSION_ID chosen in the OpenAI API-key flow above:
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" -p "Continue this work"
+schway --provider openai --openai-auth api-key --model "$MODEL_ID" --resume "$SESSION_ID" --branch "$BRANCH_ID" -p "Continue this branch"
 ```
+
+For `--branch`, first copy the exact conversation branch ID shown by interactive
+`/branch list` into `BRANCH_ID`; it is not a Git branch. Omit `--branch` to use the
+saved active branch. Explicit resume validates and restores that history.
 
 Listing uses process `HOME` and defaults to the launch directory's canonical
 primary workspace. `--all` includes other and unknown workspaces; it conflicts

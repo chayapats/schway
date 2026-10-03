@@ -39,6 +39,7 @@ const EXPECTED_OPTIONS = {
   "--branch": { branch: "example-branch", resume: "example-session" },
   "--add-dir": { addDirs: ["../shared"] },
   "--json": { json: true },
+  "--show-session": { showSession: true },
   "--debug": { debug: true },
   "--debug-file": { debugFile: "debug.jsonl", debug: true },
   "--base-url": { baseUrl: "http://localhost:11434/v1" },
@@ -90,6 +91,7 @@ test("main help shows each option once at a shared description column", () => {
     expect(rows.find((row) => row.startsWith(`  ${flag} `))).toContain("(repeatable)");
   }
   expect(rows.find((row) => row.startsWith("  --branch "))).toContain("needs --resume");
+  expect(rows.find((row) => row.startsWith("  --show-session "))).toContain("Print a resume hint to stderr (-p text only)");
 });
 
 test("doctor help contains exactly the diagnostic option subset", () => {

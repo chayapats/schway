@@ -22,15 +22,25 @@ instead. Other combinations, including `doctor --version`, `--version --json`
 and repeated version flags, fail with exit status **1** before setup is read.
 Lowercase `-v` is not supported.
 
-Replace `MODEL_ID` with the model ID you intend to use; doctor checks its local
-configuration without testing remote access.
+Choose an exact ID from the intended route with the [headless route guides](headless.md#choose-your-route-run-and-resume),
+then assign it to `MODEL_ID` in a POSIX shell (`IFS= read -r MODEL_ID`). Doctor
+checks its local configuration without testing remote access. Bare doctor
+commands below diagnose existing config and can report a missing model; they
+are not a promised healthy result after interactive sign-in.
 
 ```bash
 schway doctor
 schway doctor --json
-schway doctor --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none --model MODEL_ID
-schway doctor --provider openai --openai-auth codex --model MODEL_ID
+schway doctor --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none --model "$MODEL_ID"
+schway doctor --provider openai --openai-auth codex --model "$MODEL_ID"
 ```
+
+For a missing-model error, list the intended route's models, choose an exact ID,
+and rerun the task or doctor with that ID and the same auth selector. Interactive
+model memory remains ignored. Doctor has no `--show-session`: only a text task
+can emit a persisted resume hint. See [task output](headless.md#output-and-session-ids),
+[sessions](sessions.md), [credentials](credentials.md) and
+[configuration](configuration.md) for the full run/resume sequence.
 
 ## Options and exit status
 
@@ -60,10 +70,11 @@ failure while the model presence check is `ok`.
 Without an explicit model, doctor reports `No model configured` as an `error`
 and exits **1**. The remedy is `Pass --model <id> or set model in config, then run
 schway doctor again.` This is a repair template, not a recommended model.
-For a configured profile named `local`, for example:
+For the `local` profile shown in the [compatible setup](headless.md#compatible-endpoint-or-profile),
+with `MODEL_ID` chosen from that endpoint, for example:
 
 ```bash
-schway doctor --profile local --model MODEL_ID
+schway doctor --profile local --model "$MODEL_ID"
 ```
 
 Malformed configuration or an unresolved provider/profile produces a `model`

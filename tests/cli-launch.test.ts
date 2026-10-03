@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runCli, type CliIo } from "../src/cli/main.ts";
 import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
@@ -14,6 +14,20 @@ const needsTerminal = 'Interactive mode needs a terminal · Use -p "<task>" to r
 const blanks = ["", " ", "\t\r\n", "\u0085", "\u00a0", "\u1680", "\u2000\u2007\u2028\u2029\u202f\u205f", "\u3000", "\ufeff", " \u0085\t\ufeff\n"];
 const descriptorPairs = [[false, false], [false, true], [true, false], [true, true]] as const;
 
+test("--show-session misuse rejects before help, terminal or environment access", async () => {
+  const env = new Proxy({}, { get() { throw new Error("Session hint misuse read environment"); } });
+  for (const args of [["--show-session"], ["-p", "task", "--show-session", "--json"]]) for (const help of [[], ["--help"]]) {
+    const result = await embedded([...args, ...help], { env, terminal: { stdin: true, stdout: true } });
+    expect(result).toEqual({ exit: 1, stdout: "", stderr: "--show-session needs a text task · Use -p without --json\nRun 'schway --help' for usage.\n" });
+  }
+  for (const help of [[], ["--help"]]) {
+    const result = await embedded(["doctor", "--show-session", ...help], { env });
+    expect(result.exit).toBe(2); expect(result.stdout).toBe("");
+    expect(result.stderr).toContain('Use schway -p "<task>" --show-session');
+  }
+  expect((await embedded(["--show-session=true"], { env })).exit).toBe(1);
+});
+
 /** Capture the embedding boundary without inheriting terminal capabilities. */
 async function embedded(args: string[], options: Partial<CliIo> = {}) {
   let stdout = "", stderr = "";
@@ -27,9 +41,20 @@ async function embedded(args: string[], options: Partial<CliIo> = {}) {
 }
 
 /** Drain both subprocess outputs and bound cleanup, including fixture signal handling. */
-async function subprocess(command: string[], cwd: string, env: Record<string, string>) {
+async function subprocess(command: string[], cwd: string, env: Record<string, string>, signalAfterHint?: "SIGINT" | "SIGTERM") {
   const child = Bun.spawn(command, { cwd, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-  const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const stderr = (async () => {
+    let text = "", signalled = false;
+    const decoder = new TextDecoder();
+    for await (const chunk of child.stderr) {
+      text += decoder.decode(chunk, { stream: true });
+      if (signalAfterHint && !signalled && /^Session \S+ · Resume with --resume \S+\n/m.test(text)) {
+        signalled = true; child.kill(signalAfterHint);
+      }
+    }
+    return text + decoder.decode();
+  })();
+  const output = Promise.all([new Response(child.stdout).text(), stderr]);
   let expired = false;
   let escalation: ReturnType<typeof setTimeout> | undefined;
   const deadline = setTimeout(() => {
@@ -49,6 +74,100 @@ async function subprocess(command: string[], cwd: string, env: Record<string, st
     await child.exited;
   }
 }
+
+test("real text hints preserve durable IDs through execution failure, cancellation and resume", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), cwd = join(root, "work"); await mkdir(home); await mkdir(cwd);
+    const env = buildIsolatedCliEnv(home, { BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/headless-docs-preload.ts")}`,
+      BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", OPENAI_API_KEY: "fixture-openai-key" });
+    for (const mode of ["success", "failure", "tool-failure", "append-failure", "cancel"] as const) {
+      for (const signal of mode === "cancel" ? ["SIGINT", "SIGTERM"] as const : [undefined]) {
+        const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "private task", "--model", "fixture", "--show-session"], cwd,
+          { ...env, SCHWAY_DOCS_MODE: mode }, signal);
+        const matches = [...result.stderr.matchAll(/^Session (\S+) · Resume with --resume \1$/gm)];
+        expect(matches, result.stderr).toHaveLength(1);
+        const id = matches[0]![1]!;
+        expect(result.stdout).not.toContain(id); expect(result.stderr).not.toContain("private task");
+        expect(result.exit).toBe(["success", "tool-failure"].includes(mode) ? 0 : 1);
+        expect(await Bun.file(join(home, ".schway/sessions", `${id}.jsonl`)).exists()).toBe(true);
+        const resume = await subprocess([process.execPath, "--no-env-file", entry, "-p", "continue", "--model", "fixture", "--resume", id, "--show-session"], cwd,
+          { ...env, SCHWAY_DOCS_MODE: "success" });
+        expect(resume).toEqual({ exit: 0, stdout: "Fixture answer\n", stderr: `Session ${id} · Resume with --resume ${id}\n` });
+      }
+    }
+    for (const mode of ["unpersisted", "create-failure"] as const) {
+      const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", "--show-session"], cwd,
+        { ...env, SCHWAY_DOCS_MODE: mode });
+      expect(result.stderr).not.toContain("Resume with"); expect(result.exit).toBe(mode === "unpersisted" ? 0 : 1);
+    }
+    for (const args of [["-p", "/skills"], ["-p", "task", "--env-file", "missing.env"], ["-p", "\u0085"], ["-p", "task", "--resume", "missing"]]) {
+      const result = await subprocess([process.execPath, "--no-env-file", entry, ...args, "--model", "fixture", "--show-session"], cwd,
+        { ...env, SCHWAY_DOCS_MODE: "success" });
+      expect(result.stderr).not.toContain("Resume with"); expect(result.exit).toBe(args.includes("/skills") ? 0 : 1);
+    }
+    const suppressed = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", "--show-session"], cwd,
+      { ...env, SCHWAY_DOCS_MODE: "success", OPENAI_API_KEY: "-" });
+    expect(suppressed).toEqual({ exit: 0, stdout: "Fixture answer\n", stderr: "" });
+  });
+}, 30_000);
+
+test("opt-in hint adds only one stderr line while default text and JSONL bytes stay fixed", async () => {
+  await withTempDir(async root => {
+    const outputs = [];
+    for (const [index, flags] of [[], ["--show-session"], ["--json"]].entries()) {
+      const home = join(root, String(index)); await mkdir(home);
+      outputs.push(await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", ...flags], home,
+        buildIsolatedCliEnv(home, { BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/headless-docs-preload.ts")}`,
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", OPENAI_API_KEY: "fixture-openai-key", SCHWAY_DOCS_MODE: "success", SCHWAY_DOCS_FIXED_IDS: "1" })));
+    }
+    expect(outputs[0]).toEqual({ exit: 0, stdout: "Fixture answer\n", stderr: "" });
+    expect(outputs[1]).toEqual({ ...outputs[0], stderr: "Session 00000000-0000-4000-8000-000000000002 · Resume with --resume 00000000-0000-4000-8000-000000000002\n" });
+    expect(outputs[2]).toEqual({ exit: 0, stderr: "", stdout: [
+      '{"type":"session.ready","sessionId":"00000000-0000-4000-8000-000000000002"}',
+      '{"type":"agent.started"}', '{"type":"model.started","provider":"openai","model":"fixture"}',
+      '{"type":"model.delta","content":{"type":"text","text":"Fixture answer"}}',
+      '{"type":"model.usage","phase":"turn","usage":{"inputTokens":null,"outputTokens":null},"complete":true}',
+      '{"type":"model.finished"}', '{"type":"agent.finished","reason":"completed"}', "",
+    ].join("\n") });
+  });
+});
+
+test("native hint and JSONL preserve original unused-profile secrets after an env overlay without changing selected auth", async () => {
+  await withTempDir(async root => {
+    const home = join(root, "home"), cwd = join(root, "work"), trace = join(root, "trace.jsonl");
+    await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(cwd);
+    const config = JSON.stringify({ profiles: { unused: { baseUrl: "https://unused.invalid/v1", auth: "none", credentialEnv: "OTHER_AUTH" } } });
+    await writeFile(join(home, ".schway/config.json"), config);
+    await writeFile(join(cwd, "overlay.env"), "OTHER_AUTH=replacement-value\n");
+    const env = buildIsolatedCliEnv(home, { OTHER_AUTH: "-", SCHWAY_DOCS_TRACE: trace,
+      BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/headless-docs-preload.ts")}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" });
+    for (const flag of ["--show-session", "--json"]) {
+      const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--provider", "openai", "--openai-auth", "api-key",
+        "--model", "gpt-4.1", "--env-file", "overlay.env", flag], cwd, env);
+      expect(result.exit, result.stderr).toBe(0); expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain("session.ready"); expect(result.stdout).not.toContain("replacement-value");
+      if (flag === "--show-session") expect(result.stdout).toBe("Hello world\n");
+      else expect(result.stdout).toContain('"type":"agent.finished","reason":"completed"');
+    }
+    const calls = (await readFile(trace, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    expect(calls.filter(row => row.kind === "credential").map(row => row.account)).toEqual(["api-key:openai", "api-key:openai"]);
+    expect(calls.filter(row => row.kind === "inference")).toHaveLength(2);
+    expect(await readFile(join(home, ".schway/config.json"), "utf8")).toBe(config);
+    expect(await readFile(join(cwd, "overlay.env"), "utf8")).toBe("OTHER_AUTH=replacement-value\n");
+  });
+});
+
+test("native headless ask denies a mutation without waiting for input or changing files", async () => {
+  await withTempDir(async home => {
+    const result = await subprocess([process.execPath, "--no-env-file", entry, "-p", "task", "--model", "fixture", "--approval", "ask", "--json"], home,
+      buildIsolatedCliEnv(home, { SCHWAY_DOCS_MODE: "ask", OPENAI_API_KEY: "fixture-openai-key",
+        BUN_OPTIONS: `--preload ${join(import.meta.dir, "fixtures/headless-docs-preload.ts")}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }));
+    expect(result.exit, result.stderr).toBe(0); expect(result.stderr).toBe("");
+    const events = result.stdout.trimEnd().split("\n").map(line => JSON.parse(line));
+    expect(events.find(event => event.type === "tool.denied")).toEqual({ type: "tool.denied", toolCallId: "fixture-call", name: "write", mode: "ask", reason: "approval required; headless cannot ask" });
+    expect(await Bun.file(join(home, "must-not-exist")).exists()).toBe(false);
+  });
+});
 
 /** Run with actual OS descriptor capabilities and stderr captured independently. */
 async function descriptors(command: string[], pair: readonly [boolean, boolean], cwd: string, env: Record<string, string>) {
@@ -166,6 +285,15 @@ await Bun.plugin({ name: "launch-import-guard", setup(builder) {
     for (const args of [[], ["--resume", "saved"], ["--debug-file", "debug.jsonl"], ["--env-file", ".env"]]) {
       expect(await subprocess([process.execPath, "--no-env-file", entry, ...args], cwd, env))
         .toEqual({ exit: 1, stdout: "", stderr: needsTerminal });
+    }
+    for (const [args, code] of [
+      [["--show-session", "--help"], 1], [["-p", "task", "--show-session", "--json", "--help"], 1],
+      [["doctor", "--show-session", "--help"], 2], [["models", "list", "--show-session", "--help"], 2],
+      [["sessions", "list", "--show-session", "--help"], 2], [["--version", "--show-session"], 1],
+    ] as const) {
+      const result = await subprocess([process.execPath, "--no-env-file", entry, ...args], cwd, env);
+      expect(result.exit, result.stderr).toBe(code); expect(result.stdout).toBe("");
+      expect(result.stderr).toMatch(/usage|--help|--version/);
     }
     for (const args of [["--help"], ["--help", "-p", ""], ["doctor", "--help"], ["--version"], ["doctor", "-p="]]) {
       const result = await subprocess([process.execPath, "--no-env-file", entry, ...args], cwd, { ...env, HOME: "" });

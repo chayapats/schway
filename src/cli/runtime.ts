@@ -106,6 +106,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       io.stderr.write(`${parsedDoctor.error}\n`);
       return 1;
     }
+    if (!("error" in parsedDoctor) && parsedDoctor.args.showSession) {
+      io.stderr.write('--show-session is for text tasks · Use schway -p "<task>" --show-session\nRun \'schway doctor --help\' for usage.\n');
+      return 2;
+    }
     if ("error" in parsedDoctor || parsedDoctor.args.prompt !== undefined || parsedDoctor.args.resume || parsedDoctor.args.branch) {
       const error = "error" in parsedDoctor ? parsedDoctor.error : "Invalid doctor options. Doctor does not accept prompts or session resume.";
       io.stderr.write(`${error}\nRun 'schway doctor --help' for usage.\n`);
@@ -128,6 +132,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   if ("error" in parsed) {
     io.stderr.write(parsed.error === ANTHROPIC_REMOVED_MESSAGE ? `${parsed.error}\n` : `${parsed.error}\nRun 'schway --help' for usage.\n`);
     if (parsed.error.includes("approval")) io.stderr.write(formatHelp());
+    return 1;
+  }
+
+  if (parsed.args.showSession && (parsed.args.prompt === undefined || parsed.args.json)) {
+    io.stderr.write("--show-session needs a text task · Use -p without --json\nRun 'schway --help' for usage.\n");
     return 1;
   }
 
@@ -388,11 +397,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       diagnosticSessionId = session.header.id;
     }
     diagnostics.record("session", "ready", { resumed: !!parsed.args.resume });
-    if (parsed.args.json && session.persisted) {
+    if ((parsed.args.json || parsed.args.showSession) && session.persisted) {
       const event: HeadlessSessionReadyEvent = { type: "session.ready", sessionId: session.header.id };
       const ready = headlessSessionReadyPreamble(event, secrets);
       if (ready) {
-        io.stdout.write(`${JSON.stringify(ready)}\n`);
+        if (parsed.args.json) io.stdout.write(`${JSON.stringify(ready)}\n`);
+        else io.stderr.write(`Session ${ready.sessionId} · Resume with --resume ${ready.sessionId}\n`);
       }
     }
     session.append({
