@@ -170,6 +170,7 @@ test("native headless ask denies a mutation without waiting for input or changin
   });
 });
 
+// Win32 filenames cannot contain C0 controls; the other exact-ID cases remain portable.
 for (const [name, id, printable] of [
   ["ASCII", "legacy-exact-id", true],
   ["Unicode without normalization", "เซสชัน-🧪-cafe\u0301", true],
@@ -179,7 +180,7 @@ for (const [name, id, printable] of [
   ["format control", "legacy\u200eid", false],
   ["line separator", "legacy\u2028id", false],
   ["paragraph separator", "legacy\u2029id", false],
-] as const) test(`native resumed ${name} ID preserves JSONL and ${printable ? "prints an exact" : "suppresses the entire"} text hint`, async () => {
+] as const) test.skipIf(process.platform === "win32" && /[\u0000-\u001f]/u.test(id))(`native resumed ${name} ID preserves JSONL and ${printable ? "prints an exact" : "suppresses the entire"} text hint`, async () => {
   await withTempDir(async home => {
     const directory = sessionsDirectory(home);
     const created = await createJsonlSession({ directory, workspace: { root: home, launchCwd: home, extraRoots: [] } });

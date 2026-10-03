@@ -103,6 +103,33 @@ test("README flow is executable without saved model config, and placeholder IDs 
   });
 }, 20_000);
 
+test("sessions guide runs, lists, resumes and continues an exact conversation branch with its chosen route", async () => {
+  await withTempDir(async root => {
+    const { home, cwd, env, trace } = await environment(root, "openai-api");
+    const text = await readFile(join(repo, "docs/sessions.md"), "utf8");
+    const result = await guide(block(text, "flow:sessions"), cwd, env, { model: "gpt-4.1", session: true });
+    expect(result.exit, result.stderr).toBe(0);
+    const hints = [...result.stderr.matchAll(/^Session (\S+) · Resume with --resume \1$/gm)];
+    expect(hints).toHaveLength(2); expect(hints[1]![1]).toBe(hints[0]![1]);
+    const id = hints[0]![1]!;
+    expect(result.stdout).toContain(id); expect(result.stdout.match(/Hello world/g)).toHaveLength(2);
+    const session = await loadJsonlSession({ directory: sessionsDirectory(home), id });
+    expect(session.items.filter(item => item.type === "user")).toHaveLength(2);
+    const branch = session.forkBranch(session.items.at(-1)!.id, "documented alternative");
+    const continued = await guide(block(text, "flow:sessions-branch"), cwd, { ...env, MODEL_ID: "gpt-4.1", SESSION_ID: id, BRANCH_ID: branch });
+    expect(continued).toEqual({ exit: 0, stdout: "Hello world\n", stderr: `Session ${id} · Resume with --resume ${id}\n` });
+    const restored = await loadJsonlSession({ directory: sessionsDirectory(home), id, branchId: branch });
+    expect(restored.items.filter(item => item.type === "user")).toHaveLength(3);
+    const calls = (await readFile(trace, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    const inference = calls.filter(row => row.kind === "inference");
+    expect(inference).toHaveLength(3); expect(inference.every(row => row.route === "openai-api" && row.model === "gpt-4.1")).toBe(true);
+    expect(JSON.stringify(inference[2].input)).toContain("Start the migration");
+    expect(JSON.stringify(inference[2].input)).toContain("Continue the migration");
+    expect(JSON.stringify(inference[2].input)).toContain("Continue this approach");
+    expect(result.stdout + result.stderr + continued.stdout + continued.stderr).not.toContain("fixture-openai-key");
+  });
+}, 20_000);
+
 test("the shown saved config supplies its model, CLI overrides it, and JSONL extraction resumes safely", async () => {
   await withTempDir(async root => {
     const { home, cwd, env } = await environment(root, "openai-api");
@@ -176,7 +203,7 @@ test("fresh headless commands ignore and preserve the remembered interactive bil
 
 test("the owned guide pages link to the complete route flow and distinguish task JSONL from catalog objects", async () => {
   const headless = await readFile(join(repo, "docs/headless.md"), "utf8");
-  for (const page of ["README.md", "docs/credentials.md", "docs/configuration.md", "docs/doctor.md"]) {
+  for (const page of ["README.md", "docs/credentials.md", "docs/configuration.md", "docs/doctor.md", "docs/sessions.md"]) {
     expect(await readFile(join(repo, page), "utf8"), page).toContain("headless.md");
   }
   for (const target of ["credentials.md", "configuration.md", "doctor.md", "sessions.md"]) expect(headless).toContain(`](${target}`);

@@ -170,7 +170,8 @@ Default text mode writes model text to stdout and diagnostics to stderr.
 tasks. Later model/tool failure or cancellation does not remove that hint;
 a setup failure before readiness, an unpersisted session or a `/skills` listing
 prints none. If the exact ID contains an already-observed credential, the hint
-is suppressed rather than redacted into an unusable ID. The hint contains no
+is suppressed rather than redacted into an unusable ID. IDs with terminal/format
+controls or line/paragraph separators also produce no text hint. The hint contains no
 prompt, file path or auth settings. Default text streams are unchanged without
 the flag. It is rejected without `-p`, with `--json`, or on doctor/version/list
 commands; use it only for text tasks.
