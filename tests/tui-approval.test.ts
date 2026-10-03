@@ -169,6 +169,47 @@ test("narrow footer retains each mode and the available stop or sign-in action w
   }
 });
 
+for (const [query, status] of [["", "Type a query"], ["Needle", "Find 1/60"], ["absent", "No matches"]] as const) {
+  test(`narrow search retains mode and Escape for ${query || "an empty query"} without changing editor state`, async () => {
+    for (const [mode, label] of [["auto", "Auto"], ["ask", "Ask"], ["read-only", "Read-only"]] as const) {
+      const settings = new ConfigEditor({ cli: { approval: { mode } } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
+      const ui = await setup(80, true, { configEditor: settings }, { env: { SCHWAY_MOTION: "off", NO_COLOR: "1" } });
+      for (let i = 0; i < 60; i++) ui.controller.notice(`Needle ${i}`);
+      const draft = "ช่วยอ่านไฟล์นี้\nแล้วเพิ่มการทดสอบ";
+      await ui.mockInput.pasteBracketedText(draft);
+      ui.editor.cursorOffset = 4;
+      await ui.settle();
+      const transcript = ui.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
+      transcript.scrollTo(8); await ui.settle();
+      const originalScroll = transcript.scrollTop;
+      ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+      if (query) await ui.mockInput.typeText(query);
+      await ui.settle();
+      expect(ui.captureCharFrame()).toContain(status);
+      ui.resize(24, 8); await ui.settle();
+      if (query) ui.editor.setSelection(1, 3);
+      const cursor = ui.editor.cursorOffset, selection = ui.editor.getSelectedText(), searchScroll = transcript.scrollTop;
+      ui.mockInput.pressTab({ shift: true }); await ui.settle();
+      const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+      expect(footer.plainText).toContain(`${label} · Esc restore`);
+      expect(ui.captureCharFrame()).toContain(`${label} · Esc restore`);
+      expect(ui.captureCharFrame()).not.toContain("Enter send");
+      expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+      expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(24);
+      expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+      expect(ui.controller.snapshot().approvalMode).toBe(mode);
+      expect(ui.editor.plainText).toBe(query);
+      expect(ui.editor.cursorOffset).toBe(cursor);
+      expect(ui.editor.getSelectedText()).toBe(selection);
+      expect(transcript.scrollTop).toBe(searchScroll);
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.editor.plainText).toBe(draft);
+      expect(ui.editor.cursorOffset).toBe(4);
+      expect(transcript.scrollTop).toBe(originalScroll);
+    }
+  });
+}
+
 test("configured modes stay visible through disk resume, startup, completed and stopped turns without saving a preference", async () => withTempDir(async home => {
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
   const directory = sessionsDirectory(home);

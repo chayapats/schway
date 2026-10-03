@@ -3,6 +3,9 @@ auto-mode
 read-only-mode
 ask-mode
 approval-modes-help
+read-only-search-empty
+read-only-search-matches
+read-only-search-no-matches
 approval-command
 approval-edit
 sign-in-chooser

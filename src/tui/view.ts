@@ -438,8 +438,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       footer.content = new StyledText([fg(theme.muted)(" "), bold(fg(modeColor)(modeLabel)),
         ...(Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
     };
-    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     if (columns < 30) { compactFooter(footerParts.nextAction); return; }
+    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
     const fill = mixColor(pillFrom, colors.bg, fade);
@@ -683,7 +683,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
-        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : panelMode || inspection ? "Esc back"
+        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stops"
           : snapshot.readiness === "loading" ? "Esc cancel"
           : snapshot.recovery?.actions.includes("details") ? "Ctrl+I details"

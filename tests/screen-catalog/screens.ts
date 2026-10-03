@@ -17,6 +17,12 @@ const grokLogin = async (ui: ScreenHarness, device = false) => {
 const failed = (s: TuiSnapshot) => !!s.recovery;
 const completed = (s: TuiSnapshot) => s.status === "idle" && !!s.outcome;
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
+const search = async (ui: ScreenHarness, query: string) => {
+  ui.controller.notice("Read the project README before making changes.");
+  ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true });
+  ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+  if (query) await ui.mockInput.typeText(query);
+};
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -24,6 +30,9 @@ export const SCREENS: readonly Screen[] = [
   { id: "read-only-mode", title: "Read-only mode", description: "An idle conversation shows the read-only approval chip and mode hint.", noColor: true, drive: async ui => { ui.mockInput.pressTab({ shift: true }); ui.mockInput.pressTab({ shift: true }); }, ready: s => s.approvalMode === "read-only" },
   { id: "ask-mode", title: "Ask mode", description: "An idle conversation shows the ask approval chip and mode hint.", noColor: true, drive: async ui => { ui.mockInput.pressTab({ shift: true }); }, ready: s => s.approvalMode === "ask" },
   { id: "approval-modes-help", title: "Approval mode meanings", description: "Preferences explain the three modes without changing the current mode.", noColor: true, drive: async ui => { ui.mockInput.pressKey("p", { meta: true }); await ui.settle(); ui.mockInput.pressKey("pagedown"); }, ready: s => !!s.preferences && s.approvalMode === "auto" },
+  { id: "read-only-search-empty", title: "Read-only search, empty query", description: "An empty search retains the mode and Escape action at safety widths.", noColor: true, drive: ui => search(ui, ""), ready: (s, ui) => s.approvalMode === "read-only" && ui.editor.placeholder === "Find in this conversation…" },
+  { id: "read-only-search-matches", title: "Read-only search, matching query", description: "A matching query retains the mode and Escape action at safety widths.", noColor: true, drive: ui => search(ui, "README"), ready: (s, ui) => s.approvalMode === "read-only" && ui.editor.plainText === "README" },
+  { id: "read-only-search-no-matches", title: "Read-only search, no matches", description: "An unmatched query retains the mode and Escape action at safety widths.", noColor: true, drive: ui => search(ui, "absent"), ready: (s, ui) => s.approvalMode === "read-only" && ui.editor.plainText === "absent" },
   { id: "approval-command", title: "Approve a command", description: "A mutating command waits for an interactive approval choice.", noColor: true, drive: ui => enter(ui, "Test the clamp fix"), ready: s => s.toolApproval?.content === "bun test --filter clamp" },
   { id: "approval-edit", title: "Approve an edit", description: "The exact clamp replacement is previewed before approval.", noColor: true, drive: ui => enter(ui, "Fix the clamp upper bound"), ready: s => !!s.toolApproval?.diff },
   { id: "sign-in-chooser", title: "Sign-in chooser", description: "The connection chooser groups subscriptions, API keys and a custom endpoint.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); }, ready: s => !!s.loginChooser },
@@ -72,7 +81,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
-  if (["first-run", "auto-mode", "ask-mode", "read-only-mode"].includes(screen.id)) variants.push(
+  if (["first-run", "auto-mode", "ask-mode", "read-only-mode"].includes(screen.id) || screen.id.startsWith("read-only-search-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   return variants;
 }
