@@ -1,12 +1,13 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { countLines } from "../text/diff.ts";
 import {
   abortError,
   filesystemFailure,
   isAbortError,
-  isErrno,
+  observeFileTarget,
+  type FileTarget,
   writeFileAtomically,
 } from "./fs.ts";
 import { resolveToolPath } from "./path.ts";
@@ -65,26 +66,17 @@ export async function executeWrite(
     throw abortError();
   }
 
-  let created = true;
+  let observed: FileTarget | null;
   try {
-    const info = await stat(resolvedPath);
-    if (info.isDirectory()) {
-      return {
-        content: `Path is a directory: ${input.path}`,
-        isError: true,
-        details: { path: input.path, resolvedPath },
-      };
-    }
-    created = false;
+    observed = await observeFileTarget(resolvedPath);
   } catch (error) {
-    if (!isErrno(error, "ENOENT")) {
-      return filesystemFailure(input.path, resolvedPath, error);
-    }
+    if (ctx.signal?.aborted || isAbortError(error)) throw error instanceof Error ? error : abortError();
+    return filesystemFailure(input.path, resolvedPath, error);
   }
 
   try {
     await mkdir(dirname(resolvedPath), { recursive: true });
-    await writeFileAtomically(resolvedPath, input.content, ctx.signal);
+    await writeFileAtomically(resolvedPath, input.content, ctx.signal, undefined, { observed });
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
@@ -97,7 +89,7 @@ export async function executeWrite(
     details: {
       path: input.path,
       resolvedPath,
-      created,
+      created: observed?.target == null,
       lineCount: countLines(input.content),
     } satisfies WriteDetails,
   };

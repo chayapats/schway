@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import { readTool } from "../src/tools/read.ts";
 import type { ToolContext } from "../src/tools/types.ts";
@@ -43,6 +44,46 @@ test("write fully replaces an existing file", async () => {
     expect(read.content.includes("old")).toBe(false);
   });
 });
+
+test.skipIf(process.platform === "win32")("write preserves a write-only destination without adding a read-access requirement", async () => {
+  await withTempDir(async dir => {
+    const path = join(dir, "private"); await writeFile(path, "before"); await chmod(path, 0o200);
+    try {
+      const result = await writeTool.execute({ path: "private", content: "after" }, contextFor(dir));
+      expect(result.isError).toBeUndefined(); expect((await stat(path)).mode & 0o777).toBe(0o200);
+      await chmod(path, 0o600); expect(await readFile(path, "utf8")).toBe("after");
+    } finally { await chmod(path, 0o600); }
+  });
+});
+
+test("write replaces a dangling symlink with a newly created regular file", async () => {
+  await withTempDir(async dir => {
+    const path = join(dir, "link"), absent = join(dir, "absent");
+    await symlink(absent, path);
+    const result = await writeTool.execute({ path: "link", content: "replacement" }, contextFor(dir));
+    expect(result.isError).toBeUndefined(); expect(result.details).toMatchObject({ created: true });
+    expect((await lstat(path)).isFile()).toBe(true); expect(await readFile(path, "utf8")).toBe("replacement");
+    if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o666 & ~process.umask());
+    await expect(lstat(absent)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+for (const kind of ["fifo", "socket"] as const) {
+  test.skipIf(process.platform === "win32")(`write replaces an existing ${kind} without reading it or copying its special-file permissions`, async () => {
+    await withTempDir(async dir => {
+      const path = join(dir, "special"), server = kind === "socket" ? createServer() : undefined;
+      if (server) await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(path, resolve); });
+      else expect(Bun.spawnSync(["mkfifo", path]).exitCode).toBe(0);
+      try {
+        await chmod(path, 0o600);
+        const result = await writeTool.execute({ path: "special", content: "replacement" }, contextFor(dir));
+        expect(result.isError).toBeUndefined(); expect(result.details).toMatchObject({ created: false });
+        expect((await lstat(path)).isFile()).toBe(true); expect(await readFile(path, "utf8")).toBe("replacement");
+        expect((await stat(path)).mode & 0o777).toBe(0o666 & ~process.umask());
+      } finally { if (server) await new Promise<void>(resolve => server.close(() => resolve())); }
+    });
+  });
+}
 
 test.each([
   ["", 0],

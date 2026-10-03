@@ -206,6 +206,33 @@ execution and record the settled hash afterwards, including failed or cancelled
 calls that changed a file. Recovery of the same accepted turn joins its existing
 manifest. Undo reads this store on restart and leaves manifests unchanged.
 
+New version-1 manifests also store optional `beforeMode` and `afterMode` integer
+permissions (`0` through `0777`) beside each content hash. Repeated changes keep
+the first pre-image and its mode, and the latest settled post-image and mode.
+Undo restores original bytes and supported ordinary permissions together. Complete
+restore files stay inside an owner-only staging directory on the destination's
+filesystem until final validation and atomic rename, even when the recorded mode
+allows other users to read the published file. Restore preparation uses the same
+[POSIX parent checks as file tools](tools.md#file-permissions): an exposed shared
+writable parent that lets another user replace staging paths is refused. Use a
+directory protected from other users; shared writable descendants of a private
+ancestor and sticky temporary directories remain supported. These checks use
+ordinary POSIX path access and do not cover ACLs or trusted-owner namespace changes.
+A later chmod is a conflict even
+when the bytes still match, including for a newly
+created file that undo would delete. Preview observations are checked again just
+before restore or deletion, including the file's identity and permissions.
+
+Legacy manifests remain readable without rewriting them. When the original mode
+is absent, undo preserves the destination's current mode recorded at preview and
+rejects mode drift after preview. Details explains that original permissions were
+unavailable and chmod changes before preview cannot be verified. Missing,
+nonregular and symlink destinations are skipped. Windows omits POSIX permission
+metadata and restoration; native access rules apply, without a POSIX fidelity
+guarantee. Undo blobs and manifests remain private (`0600` files and `0700`
+directories) independently of workspace modes. As with file tools, final checks
+and filesystem mutations are separate operations, not an atomic compare-and-swap.
+
 ### Compaction and shared roots
 
 Compaction derives its summary and retained conversation only from selected ancestry. `firstKeptId` must name an earlier user-turn boundary on that path and cannot rewind before the preceding retained boundary. `parentCompactionId` must identify that path's preceding compaction. A post-divergence summary cannot leak into a sibling, including after reload. A cancelled summarizer's late output is discarded.

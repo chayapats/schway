@@ -1,11 +1,11 @@
 import { unlink } from "node:fs/promises";
 import type { TurnUndoRecord } from "../conversation/types.ts";
 import { diffLines } from "../text/diff.ts";
-import { writeFileAtomically } from "../tools/fs.ts";
+import { assertFileUnchanged, FileChangedError, observeFile, writeFileAtomically, type FileObservation } from "../tools/fs.ts";
 import { displayToolPath } from "../tools/path.ts";
 import { undoFailureReason } from "../undo/errors.ts";
 import { buildUndoNote, formatUndoResult } from "../undo/record.ts";
-import { equalUndoHash, hashUndoBytes, openUndoStore, readUndoBytes, type UndoManifest, type UndoStore } from "../undo/store.ts";
+import { equalUndoHash, hashUndoBytes, openUndoStore, unchangedUndoFile, type UndoManifest, type UndoStore } from "../undo/store.ts";
 import { ChangesLayer } from "./controller-changes.ts";
 import type { UndoPreview, UndoPreviewFile } from "./controller-types.ts";
 
@@ -13,6 +13,7 @@ import type { UndoPreview, UndoPreviewFile } from "./controller-types.ts";
 export abstract class UndoLayer extends ChangesLayer {
   protected undoPreview?: UndoPreview;
   protected undoBusy = false;
+  private undoObservations = new WeakMap<UndoPreviewFile, FileObservation>();
 
   /** Open an undo preview from durable data on the active ancestry, refusing arguments and busy execution. */
   async undoCommand(args: string): Promise<boolean> {
@@ -29,6 +30,8 @@ export abstract class UndoLayer extends ChangesLayer {
       if (!target) { this.notice("Nothing to undo"); return true; }
       const files = await Promise.all(target.files.map(file => this.previewUndoFile(store, target, file.path)));
       if (this.disposed || this.session !== session || session.activeBranchId !== branch) return false;
+      const legacy = target.files.filter(file => (file.before !== null && file.beforeMode === undefined) || (file.after != null && file.afterMode === undefined));
+      if (legacy.length) this.retainNoticeDetails(`Original permissions were unavailable for: ${legacy.map(file => displayToolPath(this.workspace!.root, file.path)).join(", ")}. Undo preserves permissions observed at this preview. Permission changes before this preview cannot be verified; changes after preview are checked where POSIX permissions are supported.`);
       if (files.every(file => file.action === "skip")) { this.notice("Nothing to undo · every file changed since"); return true; }
       this.closeChangeReview();
       const shellFiles: UndoPreviewFile[] = target.shell.detection === "git" ? target.shell.paths.map(path => ({
@@ -67,19 +70,22 @@ export abstract class UndoLayer extends ChangesLayer {
         const file = target.files.find(file => file.path === row.absolutePath);
         if (!file || row.action === "skip") { skipped.push({ path: row.path, reason: "changed" }); continue; }
         try {
+          const observed = this.undoObservations.get(row);
+          if (!observed) throw new FileChangedError(file.path);
           const bytes = file.before ? await store.blob(target.sessionId, file.before.sha256) : null;
           /** Reject later saves immediately before the restore or deletion touches the destination. */
           const checkCurrent = async () => {
-            const current = await readUndoBytes(file.path);
-            if (current === null || file.after === undefined || !equalUndoHash(hashUndoBytes(current), file.after)) throw new UndoFileChanged();
+            if (file.after === undefined || !equalUndoHash(hashUndoBytes(observed.bytes), file.after)
+              || (file.afterMode !== undefined && observed.mode !== undefined && file.afterMode !== observed.mode)) throw new FileChangedError(file.path);
+            await assertFileUnchanged(file.path, observed);
           };
           // Prepare replacement bytes first; the final check is immediately before rename or unlink.
           if (bytes === null) { await checkCurrent(); await unlink(file.path); }
-          else await writeFileAtomically(file.path, bytes, undefined, checkCurrent, { mode: 0o600 });
+          else await writeFileAtomically(file.path, bytes, undefined, checkCurrent, { mode: file.beforeMode ?? observed.mode, observed });
           const action = bytes === null ? "deleted" : "restored";
           reverted.push({ path: row.path, action }); row.status = bytes === null ? "Deleted" : "Restored";
         } catch (error) {
-          if (error instanceof UndoFileChanged) {
+          if (error instanceof FileChangedError) {
             row.action = "skip"; row.status = "changed since · skip"; skipped.push({ path: row.path, reason: "changed" });
           } else {
             row.status = `could not restore · ${undoFailureReason(error)}`; skipped.push({ path: row.path, reason: "failed" });
@@ -113,7 +119,7 @@ export abstract class UndoLayer extends ChangesLayer {
     const users = new Set(this.session.items.filter(item => item.type === "user").map(item => item.id));
     const undone = new Set(this.session.entries.flatMap(entry => entry.item.type === "turn_undo" ? [entry.item.turnId] : []));
     const target = (await store.list(this.session.rootId)).filter(manifest => users.has(manifest.turnId) && !undone.has(manifest.turnId)
-      && manifest.files.some(file => file.after !== undefined && !equalUndoHash(file.before, file.after)))
+      && manifest.files.some(file => file.after !== undefined && !unchangedUndoFile(file)))
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.turnNumber - a.turnNumber)[0];
     return target;
   }
@@ -122,9 +128,11 @@ export abstract class UndoLayer extends ChangesLayer {
   private async previewUndoFile(store: UndoStore, manifest: UndoManifest, path: string): Promise<UndoPreviewFile> {
     const file = manifest.files.find(file => file.path === path)!;
     let current: Buffer | null = null, before: Buffer | null = null, readable = true;
-    try { current = await readUndoBytes(path); if (file.before) before = await store.blob(manifest.sessionId, file.before.sha256); }
+    let observed: FileObservation | null = null;
+    try { observed = await observeFile(path, undefined, { regularOnly: true }); current = observed?.bytes ?? null; if (file.before) before = await store.blob(manifest.sessionId, file.before.sha256); }
     catch { readable = false; }
-    const eligible = readable && current !== null && file.after !== undefined && equalUndoHash(hashUndoBytes(current), file.after);
+    const eligible = readable && observed?.entry.isFile() && file.after !== undefined && equalUndoHash(hashUndoBytes(current), file.after)
+      && (file.afterMode === undefined || observed.mode === undefined || file.afterMode === observed.mode);
     const action = eligible ? file.before === null ? "delete" : "restore" : "skip";
     /** Decode absent files as empty text and reject binary or invalid UTF-8 content. */
     const decode = (bytes: Buffer | null) => bytes === null ? "" : bytes.includes(0) ? undefined : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -132,14 +140,13 @@ export abstract class UndoLayer extends ChangesLayer {
     try { oldText = decode(current); newText = decode(before); } catch { /* Binary or invalid UTF-8 has no textual diff. */ }
     const binary = oldText === undefined || newText === undefined;
     const diff = binary ? { rows: [], added: 0, removed: 0 } : diffLines(oldText!, newText!);
-    return { path: displayToolPath(this.workspace!.root, path), absolutePath: path, action,
+    const row: UndoPreviewFile = { path: displayToolPath(this.workspace!.root, path), absolutePath: path, action,
       status: action === "skip" ? "changed since · skip" : action === "delete" ? "new     delete" : binary ? "restore" : `+${diff.added} −${diff.removed}   restore`,
       rows: binary ? [{ sign: " ", text: "Binary file · restore only" }] : diff.rows, binary };
+    if (eligible && observed) this.undoObservations.set(row, observed);
+    return row;
   }
 }
-
-/** Distinguish a later file save from failed I/O without changing preview eligibility semantics. */
-class UndoFileChanged extends Error {}
 
 /** Preserve raw failure diagnostics for the existing details surface. */
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }

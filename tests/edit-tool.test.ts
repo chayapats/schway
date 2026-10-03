@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editTool } from "../src/tools/edit.ts";
 import { readTool } from "../src/tools/read.ts";
@@ -16,6 +16,40 @@ function contextFor(dir: string, launchCwd = dir): ToolContext {
 test("edit declares exclusive execution", () => {
   expect(editTool.execution).toBe("exclusive");
   expect(editTool.name).toBe("edit");
+});
+
+test.skipIf(process.platform === "win32").each([0o755, 0o600, 0o640])("edit preserves ordinary permission bits %o", async mode => {
+  await withTempDir(async dir => {
+    const path = join(dir, "run.sh");
+    await writeFile(path, "before"); await chmod(path, mode);
+    const result = await editTool.execute({ path: "run.sh", edits: [{ oldText: "before", newText: "after" }] }, contextFor(dir));
+    expect(result.isError).toBeUndefined();
+    expect(await readFile(path, "utf8")).toBe("after");
+    expect((await stat(path)).mode & 0o777).toBe(mode);
+  });
+});
+
+test.skipIf(process.platform === "win32")("edit retains the single read of a finite FIFO before replacing it", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "fifo"); expect(Bun.spawnSync(["mkfifo", path]).exitCode).toBe(0);
+    const script = `
+      import { readFile, stat, writeFile } from "node:fs/promises";
+      const { editTool } = await import(${JSON.stringify(join(import.meta.dir, "../src/tools/edit.ts"))});
+      const root = ${JSON.stringify(root)}, path = ${JSON.stringify(path)};
+      const deadline = setTimeout(() => { console.error("FIFO operation did not settle"); process.exit(1); }, 1000);
+      try {
+        const writer = writeFile(path, "before");
+        const result = await editTool.execute({ path, edits: [{ oldText: "before", newText: "after" }] }, { workspace: { root, launchCwd: root, extraRoots: [] } });
+        if (result.isError) throw new Error(result.content);
+        await writer;
+        console.log(JSON.stringify({ bytes: await readFile(path, "utf8"), regular: (await stat(path)).isFile(), mode: (await stat(path)).mode & 0o777 }));
+      } finally { clearTimeout(deadline); }
+    `;
+    const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(err).toBe(""); expect(code).toBe(0);
+    expect(JSON.parse(out)).toEqual({ bytes: "after", regular: true, mode: 0o666 & ~process.umask() });
+  });
 });
 
 test("edit replaces a unique match", async () => {

@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { openSync, closeSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, unlink, writeFile, rm, rmdir, stat } from "node:fs/promises";
 import { basename, join, isAbsolute, relative, sep } from "node:path";
-import { isErrno } from "../tools/fs.ts";
+import { isErrno, observeFile } from "../tools/fs.ts";
 
 /** Content identity, with null representing an absent file. */
 export type UndoHash = { sha256: string } | null;
 /** Accepted user turn identity shared by original execution and recovery. */
 export interface UndoTurn { sessionId: string; turnId: string; turnNumber: number }
 /** First pre-image and latest settled post-image for one absolute file path. */
-export interface UndoFile { path: string; before: UndoHash; after?: UndoHash }
+export interface UndoFile { path: string; before: UndoHash; after?: UndoHash; beforeMode?: number; afterMode?: number }
 /** Durable file pre-images and shell attribution for one accepted turn. */
 export interface UndoManifest extends UndoTurn { version: 1; createdAt: string; files: UndoFile[]; shell: UndoShell }
 /** Shell attribution records paths without storing their content. */
@@ -36,6 +36,11 @@ export function hashUndoBytes(bytes: Uint8Array | null): UndoHash {
 /** Compare content identities, including absent files. */
 export function equalUndoHash(a: UndoHash | undefined, b: UndoHash | undefined): boolean {
   return a === undefined || b === undefined ? a === b : a?.sha256 === b?.sha256;
+}
+/** Compare recorded content and supported permissions, preserving content-only comparison for legacy pre-images. */
+export function unchangedUndoFile(file: UndoFile): boolean {
+  return equalUndoHash(file.before, file.after)
+    && (file.beforeMode === undefined || file.afterMode === undefined || file.beforeMode === file.afterMode);
 }
 /** Read current bytes without treating permission or other I/O failures as absence. */
 export async function readUndoBytes(path: string): Promise<Buffer | null> {
@@ -63,7 +68,8 @@ export function openUndoStore({ home }: { home: string }): UndoStore {
       return withStoreLock(home, async () => {
         const existing = await load(turn);
         if (existing?.files.some(file => file.path === path)) { await save(existing); return { created: false }; }
-        const bytes = await readUndoBytes(path);
+        const observed = await observeFile(path);
+        const bytes = observed?.bytes ?? null;
         const before = hashUndoBytes(bytes);
         await mkdir(join(sessionPath(turn.sessionId), "blobs"), { recursive: true, mode: 0o700 });
         await mkdir(join(sessionPath(turn.sessionId), "turns"), { recursive: true, mode: 0o700 });
@@ -71,7 +77,7 @@ export function openUndoStore({ home }: { home: string }): UndoStore {
           await writePrivateAtomically(join(sessionPath(turn.sessionId), "blobs", before.sha256), bytes);
         }
         const manifest: UndoManifest = existing ?? { version: 1, ...turn, createdAt: new Date().toISOString(), files: [], shell: { detection: "unavailable" } };
-        manifest.files.push({ path, before });
+        manifest.files.push({ path, before, ...(observed?.mode === undefined ? {} : { beforeMode: observed.mode }) });
         await save(manifest);
         return { created: true };
       });
@@ -82,9 +88,11 @@ export function openUndoStore({ home }: { home: string }): UndoStore {
         const manifest = await load(turn);
         const file = manifest?.files.find(file => file.path === path);
         if (!manifest || !file) throw new Error("Undo pre-image is missing");
-        const after = hashUndoBytes(await readUndoBytes(path));
-        if (created && equalUndoHash(after, file.before)) manifest.files = manifest.files.filter(entry => entry !== file);
-        else file.after = after;
+        const observed = await observeFile(path);
+        file.after = hashUndoBytes(observed?.bytes ?? null);
+        if (observed?.mode === undefined) delete file.afterMode;
+        else file.afterMode = observed.mode;
+        if (created && unchangedUndoFile(file)) manifest.files = manifest.files.filter(entry => entry !== file);
         await save(manifest);
       });
     },
@@ -129,8 +137,11 @@ function parseManifest(value: unknown, sessionId: string, turnId: string): UndoM
   const m = value as UndoManifest;
   /** Accept only recorded absence or a complete lowercase SHA-256 identity. */
   const hash = (h: UndoHash | undefined) => h === null || (typeof h === "object" && h !== null && typeof h.sha256 === "string" && /^[a-f0-9]{64}$/.test(h.sha256));
+  const mode = (value: number | undefined, image: UndoHash | undefined) => value === undefined
+    || (image != null && Number.isInteger(value) && value >= 0 && value <= 0o777);
   if (!m || m.version !== 1 || m.sessionId !== validId(sessionId) || m.turnId !== validId(turnId) || !Number.isInteger(m.turnNumber) || m.turnNumber < 1 || typeof m.createdAt !== "string" || !Number.isFinite(Date.parse(m.createdAt)) || !Array.isArray(m.files)
-    || !m.files.every(file => file && typeof file.path === "string" && isAbsolute(file.path) && hash(file.before) && (file.after === undefined || hash(file.after)))) throw new Error("Malformed undo manifest");
+    || !m.files.every(file => file && typeof file.path === "string" && isAbsolute(file.path) && hash(file.before) && (file.after === undefined || hash(file.after))
+      && mode(file.beforeMode, file.before) && mode(file.afterMode, file.after))) throw new Error("Malformed undo manifest");
   if (m.shell === undefined) m.shell = { detection: "unavailable" };
   if (!m.shell || (m.shell.detection !== "unavailable" && (m.shell.detection !== "git" || !Array.isArray(m.shell.paths) || !m.shell.paths.every(path => typeof path === "string" && isAbsolute(path))))) throw new Error("Malformed undo shell metadata");
   return m;

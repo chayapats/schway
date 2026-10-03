@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFile, writeFile, chmod, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, chmod, mkdir, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { openUndoStore, pruneUndoStore } from "../src/undo/store.ts";
 import { executeToolCall } from "../src/tools/executor.ts";
@@ -22,6 +22,45 @@ test("file tools durably capture original bytes and their resulting hash", async
     expect((await store.blob("session", manifest.files[0]!.before!.sha256)).toString()).toBe("before\n");
     expect(manifest).toMatchObject({ version: 1, ...turn, files: [{ path, before: { sha256: expect.any(String) }, after: { sha256: expect.any(String) } }] });
     expect(await readFile(path, "utf8")).toBe("after\n");
+  });
+});
+
+test.skipIf(process.platform === "win32")("permission-only changes are durable and repeated captures keep the first mode and latest settled mode", async () => {
+  await withTempDir(async root => {
+    const path = join(root, "file.txt"), turn = { sessionId: "session", turnId: "user", turnNumber: 1 };
+    const store = openUndoStore({ home: root });
+    await writeFile(path, "same bytes"); await chmod(path, 0o755);
+    await store.capture(turn, path); await chmod(path, 0o600); await store.settle(turn, path, true);
+    expect((await store.list("session"))[0]?.files[0]).toMatchObject({ beforeMode: 0o755, afterMode: 0o600 });
+    expect(await store.capture(turn, path)).toEqual({ created: false });
+    await chmod(path, 0o640); await store.settle(turn, path, false);
+    expect((await openUndoStore({ home: root }).list("session"))[0]?.files[0]).toMatchObject({ beforeMode: 0o755, afterMode: 0o640 });
+  });
+});
+
+test("legacy manifests load without mutation and invalid permission metadata is rejected without mutation", async () => {
+  await withTempDir(async root => {
+    const { store, run } = await fixture(root), path = join(root, "file.txt");
+    await writeFile(path, "before"); await run("write", { path, content: "after" });
+    const manifestPath = join(root, ".schway/undo/session/turns/user.json");
+    const legacy = JSON.parse(await readFile(manifestPath, "utf8"));
+    delete legacy.files[0].beforeMode; delete legacy.files[0].afterMode;
+    const text = JSON.stringify(legacy); await writeFile(manifestPath, text);
+    expect((await store.list("session"))[0]?.files[0]?.beforeMode).toBeUndefined();
+    expect(await readFile(manifestPath, "utf8")).toBe(text);
+    for (const key of ["beforeMode", "afterMode"]) for (const value of [-1, 0o1000, 0o100644, 1.5, "600", null, {}]) {
+      const invalid = structuredClone(legacy); invalid.files[0][key] = value;
+      const invalidText = JSON.stringify(invalid); await writeFile(manifestPath, invalidText);
+      await expect(store.list("session")).rejects.toThrow("Malformed undo manifest");
+      expect(await readFile(manifestPath, "utf8")).toBe(invalidText); expect(await readFile(path, "utf8")).toBe("after");
+    }
+    for (const mode of [0, 0o777]) {
+      const valid = structuredClone(legacy); valid.files[0].beforeMode = mode; valid.files[0].afterMode = mode;
+      await writeFile(manifestPath, JSON.stringify(valid));
+      expect((await store.list("session"))[0]?.files[0]).toMatchObject({ beforeMode: mode, afterMode: mode });
+    }
+    const absent = structuredClone(legacy); absent.files[0].before = null; absent.files[0].beforeMode = 0o600;
+    await writeFile(manifestPath, JSON.stringify(absent)); await expect(store.list("session")).rejects.toThrow("Malformed undo manifest");
   });
 });
 
@@ -48,6 +87,17 @@ test("created files record absence and repeated edits retain only the first pre-
     expect(manifest.files[0]!.before).toBeNull(); expect(manifest.files[0]!.after).toBeDefined();
     expect((await store.blob("session", manifest.files[1]!.before!.sha256)).toString()).toBe("first");
     expect(manifest.files[1]!.after?.sha256).toBe(Bun.CryptoHasher.hash("sha256", "third", "hex"));
+  });
+});
+
+test("write through undo capture preserves dangling-symlink creation behavior", async () => {
+  await withTempDir(async root => {
+    const { store, run } = await fixture(root), path = join(root, "link");
+    await symlink(join(root, "absent"), path);
+    expect((await run("write", { path: "link", content: "created" })).status).toBe("success");
+    const file = (await store.list("session"))[0]!.files[0]!;
+    expect(file.before).toBeNull(); expect(file.beforeMode).toBeUndefined(); expect(file.after).not.toBeNull();
+    expect(await readFile(path, "utf8")).toBe("created");
   });
 });
 
