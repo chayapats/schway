@@ -462,9 +462,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const ctx = footerParts.ctxPercent === undefined
       ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
       : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
-    const esc = footerParts.running ? keyHintChunks(footerParts.toolApproval ? "Ctrl+C cancel" : "Esc stops", hintColors(theme.surface)) : [];
+    const esc = footerParts.running ? keyHintChunks(footerParts.nextAction, hintColors(theme.surface)) : [];
     const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
-    // Keep mode and the stop action; drop route, reasoning, model and context as space tightens.
+    // Keep mode and the active action; drop route, reasoning, model and context as space tightens.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
     const build = (modelChunks = model) => ({
       left: [...approvalPillChunks, fg(theme.muted)(" "), ...modelChunks, ...(include.thinking ? [fg(theme.muted)(" "), ...thinking] : []), ...(include.route ? route : [])],

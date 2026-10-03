@@ -1,0 +1,124 @@
+schway-screen 1
+screen running-search
+title Search during active work
+description Search retains the current mode and offers Escape to restore the draft while the turn keeps running.
+variant light-50
+size 50x30
+cursor 12 27 visible
+== text
+ ⚡ schway  /project
+
+ ▌ You
+ ▌ Explain the config loader
+
+
+ Plan
+ Reading the config loader first.
+   ▸ Check src/config/config.ts
+   ▸ Then▍
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ⌕ Find 1/4 · active branch, displayed text
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › config
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ⠋ Receiving 4.0s     Esc restore  ctx ~7
+ ↑/↓ next/previous · Enter accept · Esc restore
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-50 #ffffff #ecedea -
+01 0-50 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #0a5894 #c5c9cf -
+02 2-3 #ffffff #c5c9cf -
+02 3-6 #0a5894 #c5c9cf b
+02 6-48 #ffffff #c5c9cf -
+02 48-50 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-2 #0a5894 #c5c9cf -
+03 2-3 #ffffff #c5c9cf -
+03 3-28 #1d232c #c5c9cf -
+03 28-48 #ffffff #c5c9cf -
+03 48-50 #ffffff #f7f7f4 -
+04 0-50 #ffffff #f7f7f4 -
+05 0-50 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-5 #1d232c #f7f7f4 b
+06 5-50 #ffffff #f7f7f4 -
+07 0-1 #ffffff #f7f7f4 -
+07 1-13 #1d232c #f7f7f4 -
+07 13-19 #1d232c #f7f7f4 b
+07 19-33 #1d232c #f7f7f4 -
+07 33-50 #ffffff #f7f7f4 -
+08 0-3 #ffffff #f7f7f4 -
+08 3-5 #0a5894 #f7f7f4 -
+08 5-11 #1d232c #f7f7f4 -
+08 11-31 #6a3fb0 #d3cfd9 -
+08 31-50 #ffffff #f7f7f4 -
+09 0-3 #ffffff #f7f7f4 -
+09 3-5 #0a5894 #f7f7f4 -
+09 5-9 #1d232c #f7f7f4 -
+09 9-10 #0a5894 #f7f7f4 -
+09 10-50 #ffffff #f7f7f4 -
+10 0-50 #ffffff #f7f7f4 -
+11 0-50 #ffffff #f7f7f4 -
+12 0-50 #ffffff #f7f7f4 -
+13 0-50 #ffffff #f7f7f4 -
+14 0-50 #ffffff #f7f7f4 -
+15 0-50 #ffffff #f7f7f4 -
+16 0-50 #ffffff #f7f7f4 -
+17 0-50 #ffffff #f7f7f4 -
+18 0-50 #ffffff #f7f7f4 -
+19 0-50 #ffffff #f7f7f4 -
+20 0-50 #ffffff #f7f7f4 -
+21 0-50 #ffffff #f7f7f4 -
+22 0-50 #ffffff #f7f7f4 -
+23 0-50 #ffffff #f7f7f4 -
+24 0-1 #ffffff #f7f7f4 -
+24 1-2 #0a5894 #f7f7f4 b
+24 2-3 #545e6c #f7f7f4 -
+24 3-43 #0a5894 #f7f7f4 -
+24 43-50 #ffffff #f7f7f4 -
+25 0-1 #ffffff #f7f7f4 -
+25 1-49 #ecedea #f7f7f4 -
+25 49-50 #ffffff #f7f7f4 -
+26 0-1 #ffffff #f7f7f4 -
+26 1-5 #0a5894 #ecedea -
+26 5-11 #1d232c #ecedea -
+26 11-49 #ffffff #ecedea -
+26 49-50 #ffffff #f7f7f4 -
+27 0-1 #ffffff #f7f7f4 -
+27 1-49 #ecedea #f7f7f4 -
+27 49-50 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-26 #ffffff #0a5894 b
+28 26-30 #545e6c #ecedea -
+28 30-33 #1d232c #c9cdd2 b
+28 33-49 #545e6c #ecedea -
+28 49-50 #ffffff #f7f7f4 -
+29 0-1 #ffffff #f7f7f4 -
+29 1-4 #1d232c #caced3 b
+29 4-21 #545e6c #f7f7f4 -
+29 21-26 #1d232c #caced3 b
+29 26-36 #545e6c #f7f7f4 -
+29 36-39 #1d232c #caced3 b
+29 39-47 #545e6c #f7f7f4 -
+29 47-50 #ffffff #f7f7f4 -

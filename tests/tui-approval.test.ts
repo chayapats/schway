@@ -225,6 +225,35 @@ for (const [query, status] of [["", "Type a query"], ["Needle", "Find 1/60"], ["
   });
 }
 
+for (const mode of ["auto", "ask", "read-only"] as const) test(`running ${mode} search advertises Escape restoration at every width and leaves the turn running`, async () => {
+  const configEditor = new ConfigEditor({ cli: { approval: { mode } } }, { user: "/tmp/user-config", project: "/tmp/project-config" });
+  const ui = await setup(120, true, { configEditor, model: createScriptedModel({ waitForAbort: true }) });
+  const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+  expect(footer.plainText).not.toContain("Enter send");
+  const turn = ui.controller.submit("Read the project");
+  try {
+    await ui.waitFor(snapshot => snapshot.status === "running");
+    const draft = "ช่วยอ่านไฟล์นี้\nแล้วเพิ่มการทดสอบ";
+    await ui.mockInput.pasteBracketedText(draft); ui.editor.cursorOffset = 4; await ui.settle();
+    ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+    await ui.mockInput.typeText("project"); await ui.settle();
+    for (const [width, height] of [[120, 28], [80, 28], [50, 28], ...shortLayouts]) {
+      ui.resize(width!, height!); await ui.settle();
+      expect(footer.plainText).toContain("Esc restore");
+      expect(ui.captureCharFrame()).not.toContain("Esc stops");
+      expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
+      expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width!);
+      expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
+      expect(ui.controller.snapshot().approvalMode).toBe(mode);
+      expect(ui.controller.running).toBe(true);
+    }
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.editor.plainText).toBe(draft); expect(ui.editor.cursorOffset).toBe(4);
+    expect(ui.controller.running).toBe(true); expect(ui.controller.snapshot().outcome).toBeUndefined();
+    expect(footer.plainText).toContain("Esc stops");
+  } finally { ui.controller.cancel(); await turn; }
+});
+
 test("configured modes stay visible through disk resume, startup, completed and stopped turns without saving a preference", async () => withTempDir(async home => {
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
   const directory = sessionsDirectory(home);
@@ -548,6 +577,14 @@ for (const panel of ["model", "preferences", "help", "search"] as const) test(`$
   expect(ui.captureCharFrame()).not.toContain("Esc stop");
   const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
   expect(hints.plainText).toBe("Esc close to review request");
+  const request = ui.controller.snapshot().toolApproval;
+  const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
+  for (const width of [120, 80, 50]) {
+    ui.resize(width, 28); await ui.settle();
+    expect(footer.plainText).toContain("Ctrl+C cancel");
+    expect(footer.plainText).not.toContain("Esc stops");
+    expect(ui.controller.snapshot().toolApproval).toEqual(request);
+  }
   if (panel === "model") expect(ui.controller.snapshot().modelPicker).toBeDefined();
   ui.mockInput.pressEscape(); await ui.settle();
   expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");

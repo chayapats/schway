@@ -25,6 +25,7 @@ command-palette-groups
 command-palette-query
 thai-composer
 streaming-answer
+running-search
 parallel-tools
 completed-turn
 large-edit
