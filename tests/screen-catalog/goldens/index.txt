@@ -25,6 +25,10 @@ thinking-controls
 command-palette
 command-palette-groups
 command-palette-query
+help-palette-actions
+help-palette-disabled
+help-palette-guidance
+help-palette-no-matches
 thai-composer
 draft-restored
 draft-not-saved

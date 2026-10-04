@@ -35,12 +35,12 @@ test("key aliases describe only the current routes and retain semantic identitie
     [" CTRL+J ", "newline", "Shift+Enter or Ctrl+J"], ["shift+enter", "newline", "Shift+Enter or Ctrl+J"],
     ["alt+i", "inspect-copy", "Alt+I, then C"], ["ctrl+c", "copy-selection", "Ctrl+C"],
     ["shift+tab", "approval-mode", "Shift+Tab"], ["alt+h", "shortcuts", "Alt+H"],
-    ["ctrl+i", "details", "Ctrl+I"], ["alt+r", "review", "Alt+R"], ["escape", "cancel", "Esc; Ctrl+C without selected text"],
+    ["ctrl+i", "details", "F2 or Ctrl+I"], ["f2", "details", "F2 or Ctrl+I"], ["alt+r", "review", "Alt+R"], ["escape", "cancel", "Esc or Ctrl+C"],
   ]) {
     const row = paletteChoices([], observations, query)[0];
     expect(row).toMatchObject({ kind: "keyboard", id: `keyboard:${id}`, shortcut });
   }
-  expect(paletteChoices([], observations, "F2")).toEqual([]);
+  expect(paletteChoices([], observations, "F12")).toEqual([]);
 });
 
 test("unavailable keyboard actions remain readable with the exact observed reason", () => {
@@ -138,6 +138,11 @@ test("keyboard aliases never acquire slash ownership or hide real collisions and
     const rows = paletteChoices(commands, observations, name);
     expect(rows.some(row => row.kind === "keyboard")).toBe(true);
     expect(rows.find(row => row.kind === "command" && row.name === name)).toMatchObject({ available: true, insertion: `/${name} ` });
+  }
+  for (const query of ["/theme", "/duplicate"]) {
+    const rows = paletteChoices(commands, observations, query).filter(row => row.kind === "command" && `/${row.name}` === query);
+    expect(rows).toHaveLength(2);
+    expect(rows.every(row => !row.available)).toBe(true);
   }
   for (const query of ["theme", "duplicate", "broken-extension", "delete-session", "copy-pkg"]) {
     const rows = paletteChoices(commands, observations, query);

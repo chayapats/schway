@@ -107,7 +107,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
     "/login grok [--device] - sign in with a Grok subscription",
     "/logout <openai|xai|openai-compatible|codex|grok> - remove the selected stored credential",
-    "/help - show this help",
+    "/help (Alt+H) - search commands and keyboard actions; Enter inserts a command or shows keys, never runs it",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
     "Esc cancels the running turn. With no selection, Ctrl+C cancels a turn or quits when idle.",

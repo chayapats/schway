@@ -71,6 +71,14 @@ const openDetails = (ui: ScreenHarness) => ui.mockInput.pressKey("\u001bOQ");
 const reviewReady = (s: TuiSnapshot) => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0;
 const resumedReady = (s: TuiSnapshot) => s.changeReview?.scope?.kind === "workspace" && !s.changeReview.loading && s.changeReview.rows.length > 0 && !s.changeReview.rows.some(row => row.text.startsWith("Loading current"));
 const openResumedReview = async (ui: ScreenHarness) => { ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); };
+const helpPalette = async (ui: ScreenHarness, query: string, moves = 0, guide = false) => {
+  ui.mockInput.pressKey("h", { meta: true }); await ui.settle();
+  if (query) await ui.mockInput.typeText(query);
+  await ui.settle();
+  for (let move = 0; move < moves; move++) { ui.mockInput.pressArrow("down"); await ui.settle(); }
+  if (guide) ui.mockInput.pressEnter();
+};
+const helpReady = (ui: ScreenHarness, query: string) => ui.controller.commandHelpOpen && ui.editor.plainText === query;
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -102,6 +110,10 @@ export const SCREENS: readonly Screen[] = [
   { id: "command-palette", title: "Command palette", description: "Typing a slash opens the curated built-in order.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.controller.commandChoices("/").length > 0 && !!ui.renderer.root.findDescendantById("picker")?.visible },
   { id: "command-palette-groups", title: "Command palette groups", description: "Skills and extension owners precede the final destructive command.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/"); await ui.settle(); ui.mockInput.pressArrow("up"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.captureCharFrame().includes("Extensions") },
   { id: "command-palette-query", title: "Command palette search", description: "A typed query ranks matching names without group headers.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/ses"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/ses" && !!ui.renderer.root.findDescendantById("picker")?.visible },
+  { id: "help-palette-actions", title: "Help action results", description: "A help search for review lists keyboard guidance beside matching commands without changing the draft.", noColorWidths: true, drive: ui => helpPalette(ui, "review"), ready: (_s, ui) => helpReady(ui, "review") && ui.captureCharFrame().includes("Enter show keys") },
+  { id: "help-palette-disabled", title: "Help disabled actions", description: "Unavailable keyboard actions stay searchable and the selected one names its reason.", noColorWidths: true, drive: ui => helpPalette(ui, "ctrl", 2), ready: (_s, ui) => helpReady(ui, "ctrl") && ui.captureCharFrame().includes("! No details to show · Esc back") },
+  { id: "help-palette-guidance", title: "Help keyboard guidance", description: "Enter on a keyboard action shows its exact keys and prerequisites without performing it.", noColorWidths: true, drive: ui => helpPalette(ui, "copy", 0, true), ready: (_s, ui) => helpReady(ui, "copy") && ui.captureCharFrame().includes("Copy code or a result · Alt+I, then C") },
+  { id: "help-palette-no-matches", title: "Help without matches", description: "An unmatched help search offers clearing the search or returning to the draft.", noColorWidths: true, drive: ui => helpPalette(ui, "zzqx"), ready: (_s, ui) => helpReady(ui, "zzqx") && ui.captureCharFrame().includes("No matches · Clear search or Esc back") },
   { id: "thai-composer", title: "Thai composer", description: "A multiline Thai draft remains in the composer.", drive: async ui => { await ui.mockInput.pasteBracketedText(thai); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === thai },
   { id: "draft-restored", title: "Restored draft", description: "A saved Thai draft returns to its session without being sent.", noColorWidths: true, drive: async () => {}, ready: (_s, ui) => ui.editor.plainText === "ร่างภาษาไทย\nยังไม่ส่ง 🧪" && ui.captureCharFrame().includes("Draft restored") },
   { id: "draft-not-saved", title: "Draft not saved", description: "A denied draft write retains the latest Thai text and offers explicit selection and copy.", noColorWidths: true, drive: async ui => {

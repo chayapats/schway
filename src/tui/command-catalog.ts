@@ -29,7 +29,7 @@ export const COMMAND_DESCRIPTIONS: Record<SlashCommandName, string> = {
   clear: "Start a new conversation",
   resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Review changes", undo: "Undo the last turn's file edits",
   context: "Inspect context and summary", compact: "Summarize to free context", skills: "List skills", "add-dir": "Attach a workspace",
-  config: "Preferences (Alt+P)", login: "Sign in", logout: "Remove stored credential", help: "Search commands (Alt+H)", quit: "Exit Schway",
+  config: "Preferences (Alt+P)", login: "Sign in", logout: "Remove stored credential", help: "Search commands and actions (Alt+H)", quit: "Exit Schway",
 };
 
 /** Return curated built-ins, skills, extensions and destructive commands without resolving ambiguous owners. */
@@ -82,9 +82,9 @@ const KEYBOARD_GUIDES = {
     aliases: ["shortcuts", "keyboard", "help", "alt+h"],
   },
   details: {
-    label: "Inspect details", shortcut: "Ctrl+I", description: "Read details for the current context",
-    guidance: "Return to the notice, recovery, change review or model panel showing a Ctrl+I details hint, then press Ctrl+I. The available details depend on that context.",
-    aliases: ["details", "diagnostics", "ctrl+i"],
+    label: "Inspect details", shortcut: "F2 or Ctrl+I", description: "Read details for the current context",
+    guidance: "Return to the notice, recovery, change review or model panel showing an F2 details hint, then press F2 or Ctrl+I. Esc returns to the previous view.",
+    aliases: ["details", "diagnostics", "f2", "ctrl+i"],
   },
   review: {
     label: "Review changes", shortcut: "Alt+R", description: "Inspect changed files and command results",
@@ -92,9 +92,9 @@ const KEYBOARD_GUIDES = {
     aliases: ["review", "changes", "diff", "alt+r"],
   },
   cancel: {
-    label: "Cancel running work", shortcut: "Esc; Ctrl+C without selected text", description: "Stop the active turn",
+    label: "Cancel running work", shortcut: "Esc or Ctrl+C", description: "Stop the active turn",
     guidance: "Return to the conversation, then press Esc to stop a running turn. Esc first closes search, inspection or a panel. Ctrl+C copies selected text; without a selection it cancels a turn or quits when idle.",
-    aliases: ["cancel", "stop", "escape", "esc"],
+    aliases: ["cancel", "stop", "escape", "esc", "ctrl+c"],
   },
 } as const;
 
@@ -133,7 +133,8 @@ export function paletteChoices(commands: readonly CommandChoice[], availability:
 
 function paletteRank(row: PaletteChoice, query: string): number | undefined {
   const fields = row.kind === "command"
-    ? [[row.name, row.insertion.trim()], [row.description, row.source, row.provenance ?? ""]]
+    // Unavailable rows have no insertion, so a slash query also matches the spelled name.
+    ? [[row.name, `/${row.name}`, row.insertion.trim()], [row.description, row.source, row.provenance ?? ""]]
     : [[row.label, row.shortcut, ...row.aliases], [row.description]];
   let best = Infinity;
   for (const [priority, values] of fields.entries()) for (const value of values) {

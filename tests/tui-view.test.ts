@@ -1942,7 +1942,8 @@ for (const width of [120, 50]) for (const noColor of [false, true]) {
       ui.mockInput.pressEscape(); ui.editor.setText(""); ui.mockInput.pressKey("h", { meta: true }); await settle(ui);
       expect(selected().plainText).toContain("/model");
       ui.mockInput.pressArrow("up"); await settle(ui);
-      expect(ui.captureCharFrame()).toContain("Skills"); expect(ui.captureCharFrame()).toContain("Extensions");
+      // Help places keyboard guidance between extensions and the final destructive command.
+      expect(ui.captureCharFrame()).toContain("Alt+R"); expect(ui.captureCharFrame()).toContain("Destructive");
       await ui.mockInput.typeText("ses"); await settle(ui);
       expect(rows().slice(0, 3).map(row => row.plainText.match(/\/(\S+)/)?.[1])).toEqual(["sessions", "session", "delete-session"]);
       expect(ui.captureCharFrame()).not.toContain("Skills"); expect(ui.captureCharFrame()).not.toContain("Extensions");
