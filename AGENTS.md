@@ -27,9 +27,9 @@ Before implementing or taking over a tracked issue, read `docs/agents/parallel-i
 
 For implementation PRs, complete this loop before merging. In managed-worker mode, the coordinator owns the loop.
 
-1. After creating the PR and after every push, wait for CodeRabbit to finish reviewing the current PR HEAD. A pending, skipped or unavailable review leaves this gate incomplete; report the blocker if review cannot finish.
-2. Evaluate every CodeRabbit finding against the code and specification. Fix every valid finding regardless of severity. Record evidence for findings dismissed as incorrect or already addressed.
-3. Rerun affected checks, push fixes and repeat the review loop until CodeRabbit has reviewed the latest HEAD, every finding has a recorded disposition, no valid finding remains outstanding and all required checks pass.
+1. Review the final diff against its issue before merging. Use independent spec-compliance and correctness reviews, and check each finding against the code before acting on it.
+2. Fix every valid finding regardless of severity. Record evidence for findings dismissed as incorrect or already addressed.
+3. Rebase onto the current target branch, regenerate affected screen-catalog goldens, and run `bun run typecheck` and the full `bun test` on the final HEAD. Review again any change made after the review.
 4. Merge once these conditions hold and existing user/repository authorization permits it. Otherwise preserve the PR and report the remaining blocker.
 
 ### Triage labels

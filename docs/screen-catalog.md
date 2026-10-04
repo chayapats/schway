@@ -44,7 +44,7 @@ Run `bun run screens:gallery`, then open the printed absolute path in a browser.
 
 In a pull request, inspect the text-section diff for content/layout changes and style runs for unintended color, attribute or column changes. Open the gallery to compare every affected width and both themes. Golden changes should correspond to the intended UI change; investigate unexpected updates before committing. Failure messages name the file and show at most 60 changed lines.
 
-CodeRabbit excludes only generated `.golden` captures through `.coderabbit.yaml`, so a layout change across the catalog does not exceed its file limit. The screen definitions, harness, assertions and `index.txt` remain eligible for review. This filter does not replace the required golden comparison, text/style diff inspection or gallery review above; include that evidence in the PR. The current-HEAD CodeRabbit review and finding-disposition gate still applies to every implementation PR.
+Include that golden comparison, text/style diff inspection and gallery review evidence in the PR. The PR review and merge loop in `AGENTS.md` applies to every implementation PR.
 
 ## Determinism
 
