@@ -1,4 +1,4 @@
-import { BoxRenderable, MarkdownRenderable, RGBA, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, RGBA, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type RenderNodeContext, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { highlightCode } from "./highlight.ts";
 import { HINT_KEY, keyHintChunks } from "./hints.ts";
@@ -122,22 +122,45 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
   return text;
 }
 
+/** Wrap OpenTUI's native top-level table with an inspection header, keeping its layout and options; `paintTable` recolors the native table node. */
+function tableBlock(renderer: CliRenderer, context: RenderNodeContext, theme: TuiTheme, registerTable: (box: BoxRenderable) => void, paintTable: (table: Renderable) => void): BoxRenderable | undefined {
+  const table = context.defaultRender();
+  if (!table) return undefined;
+  paintTable(table);
+  const block = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0, marginTop: typeof table.marginTop === "number" ? table.marginTop : 0 });
+  table.marginTop = 0;
+  table.marginBottom = 0;
+  registerTable(block);
+  const header = new BoxRenderable(renderer, { flexDirection: "row", backgroundColor: theme.surface2, paddingX: 1 });
+  header.add(new TextRenderable(renderer, { content: codeTitle("table", false, theme), flexShrink: 0 }));
+  header.add(new BoxRenderable(renderer, { flexGrow: 1 }));
+  header.add(new TextRenderable(renderer, { content: "Alt+I inspect", fg: theme.muted, flexShrink: 1, wrapMode: "none" }));
+  block.add(header);
+  block.add(table);
+  return block;
+}
+
 /** Language pill for a code block header; focus adds the inspection marker. */
 function codeTitle(title: string, focused: boolean, theme: TuiTheme): StyledText {
   return new StyledText([bold(bg(tint(theme, theme.accent))(fg(theme.accent)(` ${focused ? "› " : ""}${title} `)))]);
 }
+
+/** A rendered code or top-level table block; `index` counts only blocks of the same kind, and table text is undefined when its source span is unproven. */
+export interface ReadableBlock { kind: "code" | "table"; index: number; id: string; text: string | undefined; title: string }
 
 /** A stable transcript item whose text can change without replacing neighboring messages. */
 export interface TranscriptItemView {
   root: BoxRenderable;
   /** Return code blocks in rendered order with the exact sanitized representation shown by Markdown. */
   codeBlocks(): { id: string; text: string }[];
+  /** Return code and top-level tables in rendered order; table text is the sanitized Markdown source without its final newline. */
+  readableBlocks(): ReadableBlock[];
   /** Return visible text blocks and their exact rendered scroll targets. */
   searchSegments(): readonly { text: string; target: Renderable; visualLine: number; lineInfo?: { lineSources: readonly number[]; lineStartCols: readonly number[] } }[];
   /** Mark the selected search row without changing its rendered content. */
   setSearchMatch(selected: boolean): void;
   /** Render the current entry at the supplied width and expansion state using the effective inline diff limit. */
-  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean, inlineDiffLines?: number): void;
+  update(entry: TuiTranscriptEntry, expanded: boolean, streaming: boolean, width: number, focusedCode?: number, focusedTool?: boolean, inlineDiffLines?: number, focusedTable?: number): void;
   /** Advance spinners and completion flashes; returns whether this row still animates. */
   tick(): boolean;
 }
@@ -179,20 +202,20 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       apply(ink);
     },
   };
-  // Native tables keep OpenTUI's own node and in-place updates; their cells are remapped from the base palette to the row ink.
-  const renderMarkdownNode = (token: MarkdownToken, context: { defaultRender(): Renderable | null }) => {
-    if (token.type !== "table") return markdownBlock(renderer, token, theme, registerCode, rowInk);
-    const table = context.defaultRender();
-    if (table instanceof TextTableRenderable) {
-      let applied = theme;
-      rowInk.paint(table, palette => {
-        const next = recolorCells(table.content, [theme, applied], palette);
-        if (next !== table.content) table.content = next;
-        applied = palette;
-      });
-    }
-    return table ?? undefined;
+  const tableData = new WeakSet<BoxRenderable>();
+  // Native tables keep OpenTUI's own node inside the inspection wrapper; their cells are remapped from the base palette to the row ink.
+  const paintTable = (table: Renderable) => {
+    if (!(table instanceof TextTableRenderable)) return;
+    let applied = theme;
+    rowInk.paint(table, palette => {
+      const next = recolorCells(table.content, [theme, applied], palette);
+      if (next !== table.content) table.content = next;
+      applied = palette;
+    });
   };
+  const renderMarkdownNode = (token: MarkdownToken, context: RenderNodeContext) => token.type === "table"
+    ? tableBlock(renderer, context, theme, box => { tableData.add(box); }, paintTable)
+    : markdownBlock(renderer, token, theme, registerCode, rowInk);
   const codeBlocks = () => {
     const blocks: { id: string; text: string }[] = [];
     const visit = (node: BaseRenderable) => {
@@ -202,6 +225,42 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
           const id = `code-${initial.id}-${blocks.length}`;
           node.id = id;
           blocks.push({ id, text: code.text });
+        }
+      }
+      for (const child of node.getChildren()) visit(child);
+    };
+    visit(root);
+    return blocks;
+  };
+  /** Recover a rendered table's original sanitized Markdown from its validated top-level source span. */
+  const tableSource = (node: BoxRenderable): string | undefined => {
+    if (!(body instanceof MarkdownRenderable)) return undefined;
+    const state = body._parseState;
+    const token = body._blockStates.find(block => block.renderable === node)?.token;
+    if (!state || !token?.raw) return undefined;
+    let offset = 0;
+    for (const candidate of state.tokens) {
+      if (candidate === token) break;
+      offset += candidate.raw.length;
+    }
+    if (state.content.slice(offset, offset + token.raw.length) !== token.raw) return undefined;
+    // The streaming caret is presentation appended after the answer, never source.
+    const raw = streamText !== undefined && token.raw.endsWith(STREAM_CARET) && offset + token.raw.length === state.content.length ? token.raw.slice(0, -1) : token.raw;
+    return raw.replace(/\n+$/, "");
+  };
+  const readableBlocks = () => {
+    const blocks: ReadableBlock[] = [];
+    let code = 0, table = 0;
+    const visit = (node: BaseRenderable) => {
+      if (node instanceof BoxRenderable) {
+        const data = codeData.get(node);
+        if (data) {
+          node.id = `code-${initial.id}-${code}`;
+          blocks.push({ kind: "code", index: code++, id: node.id, text: data.text, title: data.title });
+        } else if (tableData.has(node)) {
+          node.id = `table-${initial.id}-${table}`;
+          blocks.push({ kind: "table", index: table++, id: node.id, text: tableSource(node), title: "table" });
+          return;
         }
       }
       for (const child of node.getChildren()) visit(child);
@@ -283,6 +342,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   return {
     root,
     codeBlocks,
+    readableBlocks,
     searchSegments() {
       const segments: { text: string; target: Renderable; visualLine: number; lineInfo?: { lineSources: readonly number[]; lineStartCols: readonly number[] } }[] = [];
       const visit = (node: BaseRenderable) => {
@@ -333,8 +393,8 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       if (flashStart !== undefined && applyBackground()) animating = true;
       return animating;
     },
-    update(entry, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines = DEFAULT_INLINE_DIFF_LINES) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.shellOutcome, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines]);
+    update(entry, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines = DEFAULT_INLINE_DIFF_LINES, focusedTable) {
+      const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.shellOutcome, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines, focusedTable]);
       if (next === fingerprint) return;
       fingerprint = next;
       repaint = undefined;
@@ -400,7 +460,10 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         paintBody();
         repaint = () => { paintLabel?.(); paintBody(); };
       } else {
-        streamText = entry.kind === "assistant" && streaming && motion.mode !== "off" && (displayText(entry.text).match(/```/g)?.length ?? 0) % 2 === 0 ? displayText(entry.text) : undefined;
+        // A caret after a closing fence would turn that fence into code text, changing the
+        // block's canonical source and inspection witness; leave such a frame caret-free.
+        streamText = entry.kind === "assistant" && streaming && motion.mode !== "off" && (displayText(entry.text).match(/```/g)?.length ?? 0) % 2 === 0
+          && !/(?:^|\n)[ \t]*(?:```|~~~)[^\n]*$/.test(displayText(entry.text).trimEnd()) ? displayText(entry.text) : undefined;
         caretOn = undefined;
         // A fill change repaints with the new ink; rendered Markdown recolors in place without reparsing.
         const paintText = (refill: boolean) => {
@@ -441,9 +504,20 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
               const focused = focusedCode === index;
               label!.content = codeTitle(codeData.get(code)!.title, focused, theme);
               header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
-              hint!.content = focused ? "C copy · Esc back" : "Alt+I inspect";
+              hint!.content = focused ? "R read · C copy · Esc back" : "Alt+I inspect";
               hint!.fg = focused ? theme.text : theme.muted;
             });
+            for (const block of readableBlocks()) {
+              if (block.kind !== "table") continue;
+              const table = root.findDescendantById(block.id) as BoxRenderable;
+              const header = table.getChildren()[0] as BoxRenderable;
+              const [label, , hint] = header.getChildren() as TextRenderable[];
+              const focused = focusedTable === block.index;
+              label!.content = codeTitle("table", focused, theme);
+              header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
+              hint!.content = focused ? "R read · C copy · Esc back" : "Alt+I inspect";
+              hint!.fg = focused ? theme.text : theme.muted;
+            }
           }
         };
         paintText(false);

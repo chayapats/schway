@@ -2,7 +2,7 @@ import { formatCount } from "../text/format.ts";
 import { preferenceLines, preferenceHint } from "./preferences-view.ts";
 import type { ExitDraftCheckpoint } from "../drafts/exit.ts";
 import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/store.ts";
-import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type Selection, type TextChunk } from "@opentui/core";
+import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type PasteEvent, type Selection, type TextChunk } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
@@ -24,6 +24,8 @@ import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
 import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
+import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerLayout, revealMatch, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
+import type { ReaderPosition } from "./reader.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -63,7 +65,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let refreshing = false;
   let allExpanded = false;
   const expandedTools = new Set<string>();
-  type InspectionTarget = { id: string; index: number } & ({ kind: "code"; source: string; text: string } | { kind: "tool"; callId?: string; name?: string });
+  type InspectionTarget = { id: string; index: number } & ({ kind: "code" | "table"; source: string; text: string; title?: string } | { kind: "tool"; callId?: string; name?: string });
   let inspection: InspectionTarget | undefined;
   let previousInspection: InspectionTarget | undefined;
   let inspectionOriginalScroll = 0;
@@ -73,6 +75,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let scrollToInspection = false;
   let detailsReturn: { key: string; entryId: string; scroll: number; inspection?: InspectionTarget } | undefined;
   let scrollToDetails = false;
+  // The reader is a read-only layer above inspection; `readerReturn` is the single
+  // checkpoint kept when Esc hands input to a deferred tool approval.
+  type ReaderState = { document: ReaderDocument; target: InspectionTarget; key: string; position: ReaderPosition; wrap: boolean; scroll: number; painted: boolean; layout?: ReaderLayout; search?: ReaderSearch };
+  let reader: ReaderState | undefined;
+  let readerReturn: ReaderState | undefined;
+  let readerMeasured: { width: number; height: number; rows: number } | undefined;
   let searchOpen = false;
   let searchOriginalScroll = 0;
   let searchRestoreScroll: number | undefined;
@@ -206,6 +214,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   transcript.add(empty);
   const taskExamples = new TextRenderable(renderer, { id: "task-examples", content: "", fg: theme.muted, marginTop: 1, wrapMode: "none", visible: false });
   transcript.add(taskExamples);
+  const readerPanel = new BoxRenderable(renderer, { id: "reader-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column", overflow: "hidden" });
+  const readerText = new TextRenderable(renderer, { id: "reader-text", content: "", fg: theme.text, wrapMode: "none", flexShrink: 0 });
+  readerPanel.add(readerText);
+  body.add(readerPanel);
   const tree = new ScrollBoxRenderable(renderer, { id: "branch-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   body.add(tree);
   const preferencePanel = new ScrollBoxRenderable(renderer, { id: "preferences-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
@@ -309,6 +321,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   // Like a primary ScrollView, non-scrollable chrome routes wheel input to the
   // conversation. Preserve native handling over a scroller or multiline editor.
   root.onMouseScroll = event => {
+    if (reader?.layout && (event.scroll?.direction === "up" || event.scroll?.direction === "down")) {
+      const state = reader, layout = reader.layout;
+      state.position = readerBodyPosition(state.document, layout, state.document.view.move(readerBodyPosition(state.document, layout, state.position), layout.viewport, { rows: event.scroll.direction === "up" ? -3 : 3 }));
+      event.stopPropagation(); refresh(); return;
+    }
     for (let target = event.target; target && target !== root; target = target.parent) {
       if (target instanceof ScrollBoxRenderable || target === editor) return;
     }
@@ -333,13 +350,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const inspectionTargets = (entries: readonly TuiTranscriptEntry[]): InspectionTarget[] => entries.flatMap<InspectionTarget>(entry => {
     if (entry.kind === "tool") return [{ id: entry.id, kind: "tool", index: 0, callId: entry.toolCallId, name: entry.toolName }];
     if (entry.kind !== "assistant") return [];
-    const blocks = rows.get(entry.id)?.codeBlocks() ?? [];
+    // Code keeps its own ordinal; tables use a separate ordinal and are offered only with a proven source span.
+    const blocks = (rows.get(entry.id)?.readableBlocks() ?? []).filter(block => block.text !== undefined);
     if (!blocks.length) return [];
     const source = safe(entry.text);
-    return blocks.map((block, index) => ({ id: entry.id, kind: "code", index, source, text: block.text }));
+    return blocks.map(block => ({ id: entry.id, kind: block.kind, index: block.index, source, text: block.text!, title: block.title }));
   });
   const sameInspection = (left: InspectionTarget, right: InspectionTarget) => left.id === right.id && left.kind === right.kind && left.index === right.index;
-  const inspectionNode = (target: InspectionTarget) => target.kind === "tool" ? rows.get(target.id)?.root : rows.get(target.id)?.root.findDescendantById(`code-${target.id}-${target.index}`);
+  const inspectionNode = (target: InspectionTarget) => target.kind === "tool" ? rows.get(target.id)?.root : rows.get(target.id)?.root.findDescendantById(`${target.kind}-${target.id}-${target.index}`);
+  const blockText = (target: InspectionTarget) => target.kind === "tool" ? undefined
+    : target.kind === "code" ? rows.get(target.id)?.codeBlocks()[target.index]?.text
+    : rows.get(target.id)?.readableBlocks().find(block => block.kind === "table" && block.index === target.index)?.text;
   const inspectionEntry = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => {
     const entry = entries.find(item => item.id === target.id);
     if (target.kind === "tool") return entry?.kind === "tool" && entry.toolCallId === target.callId && entry.toolName === target.name ? entry : undefined;
@@ -348,7 +369,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     return entry?.kind === "assistant" && safe(entry.text).startsWith(target.source) ? entry : undefined;
   };
   const validInspection = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => !!inspectionEntry(target, entries) &&
-    (target.kind === "tool" || !!rows.get(target.id)?.codeBlocks()[target.index]?.text.startsWith(target.text));
+    (target.kind === "tool" || !!blockText(target)?.startsWith(target.text));
   const clearInspection = () => {
     inspection = undefined; renderedInspection = undefined; paintedInspection = undefined; scrollToInspection = false;
     if (!panelMode) editor.focus();
@@ -370,7 +391,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   };
   const inspectionText = (target: InspectionTarget, entries: readonly TuiTranscriptEntry[]) => {
     const entry = entries.find(item => item.id === target.id);
-    return entry ? target.kind === "tool" ? safe(entry.text) : rows.get(entry.id)?.codeBlocks()[target.index]?.text : undefined;
+    return entry ? target.kind === "tool" ? safe(entry.text) : blockText(target) : undefined;
   };
   const inspectionVisible = (target: InspectionTarget) => {
     const node = inspectionNode(target);
@@ -378,7 +399,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     return !!node?.visible && !!node.height && transcript.visible && !panelMode && node.y >= transcript.viewport.y && node.y < transcript.viewport.y + transcript.viewport.height;
   };
   const externalPanelFor = (snapshot: TuiSnapshot) => snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
-  const copyInspection = (snapshot: TuiSnapshot) => {
+  /** Return the selected item's text only when its current highlight was painted; otherwise ask for the action again. */
+  const verifiedInspection = (snapshot: TuiSnapshot, again: string): string | undefined => {
     if (!inspection) return;
     const entries = snapshot.transcript;
     if (sessionKey !== `${snapshot.sessionId}/${snapshot.branchId}` || externalPanelFor(snapshot) || !validInspection(inspection, entries)) {
@@ -391,17 +413,72 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (text === undefined) return;
     const painted = paintedInspection, node = inspectionNode(inspection);
     if (!painted || painted.target !== inspection || painted.text !== text || painted.node !== node || painted.y !== node?.y ||
-        inspection.kind === "code" && painted.source !== safe(entries.find(entry => entry.id === inspection!.id)!.text) ||
+        inspection.kind !== "tool" && painted.source !== safe(entries.find(entry => entry.id === inspection!.id)!.text) ||
         painted.scroll !== transcript.scrollTop || painted.width !== renderer.width || painted.height !== renderer.height || !inspectionVisible(inspection)) {
       paintedInspection = undefined;
       scrollToInspection = true;
-      showInteractionNotice("Showing selection · C copy again");
+      showInteractionNotice(again);
       return;
     }
+    return text;
+  };
+  const copyInspection = (snapshot: TuiSnapshot) => {
+    const text = verifiedInspection(snapshot, "Showing selection · C copy again");
+    if (text === undefined || !inspection) return;
     let copied = false;
     try { copied = renderer.copyToClipboardOSC52(text); } catch { /* Clipboard support is optional. */ }
     const bounded = inspection.kind === "tool" && text.endsWith("… truncated. Full output is in the session file.");
-    showInteractionNotice(copied ? bounded ? "Copied bounded result preview · full output is in the session file" : inspection.kind === "tool" ? "Copied displayed result" : "Copied code · Esc back" : "Clipboard unavailable · select text in the terminal");
+    showInteractionNotice(copied ? bounded ? "Copied bounded result preview · full output is in the session file" : inspection.kind === "tool" ? "Copied displayed result" : inspection.kind === "table" ? "Copied table source · Esc back" : "Copied code · Esc back" : "Clipboard unavailable · select text in the terminal");
+  };
+  /** Open a fresh snapshot of the painted code/table target, or restore the checkpoint kept for an approval. */
+  const openReader = (snapshot: TuiSnapshot) => {
+    if (!inspection || inspection.kind === "tool") return;
+    const text = verifiedInspection(snapshot, "Showing selection · R read again");
+    const target = inspection as InspectionTarget | undefined;
+    if (text === undefined || !target || target.kind === "tool") return;
+    const saved = readerReturn;
+    readerReturn = undefined;
+    if (saved && saved.key === sessionKey && sameInspection(saved.target, target) && validInspection(saved.target, snapshot.transcript)) {
+      reader = { ...saved, target, painted: false, scroll: transcript.scrollTop };
+    } else {
+      try {
+        const document = createReaderDocument({ id: `${target.kind}-${target.id}-${target.index}`, messageId: target.id, kind: target.kind }, text,
+          { title: fitLine(safe(target.title ?? target.kind), 24), streaming: target.id === snapshot.streamingAssistantId });
+        reader = { document, target, key: sessionKey, position: { offset: 0, horizontal: 0 }, wrap: false, scroll: transcript.scrollTop, painted: false };
+      } catch { showInteractionNotice("Reader unavailable · C copy"); return; }
+    }
+    transcript.stickyScroll = false;
+    editor.blur();
+  };
+  /** Return to the same inspection target and reading position; the composer was never changed. */
+  const closeReader = () => {
+    if (!reader) return;
+    searchRestoreScroll = reader.scroll;
+    reader = undefined;
+    if (inspection) editor.blur(); else editor.focus();
+  };
+  /** Hand input to a waiting approval, retaining one checkpoint for an explicit Alt+I then R return. */
+  const suspendReader = () => {
+    if (!reader) return;
+    readerReturn = reader;
+    searchRestoreScroll = reader.scroll;
+    reader = undefined;
+    if (inspection) { previousInspection = inspection; clearInspection(); }
+  };
+  const copyReader = () => {
+    if (!reader) return;
+    if (!reader.painted) { showInteractionNotice("Showing reader · C copy again"); return; }
+    const { text, complete } = reader.document.copy.copy();
+    let copied = false;
+    try { copied = renderer.copyToClipboardOSC52(text); } catch { /* Clipboard support is optional. */ }
+    showInteractionNotice(!copied ? "Clipboard unavailable · select text in the terminal" : !complete ? "Copied partial source · Esc back"
+      : reader.document.kind === "table" ? "Copied table source · Esc back" : "Copied code · Esc back");
+  };
+  /** Rows available to the reader panel when it replaces the transcript and composer. */
+  const readerRows = () => {
+    if (readerMeasured && readerMeasured.width === renderer.width && readerMeasured.height === renderer.height) return readerMeasured.rows;
+    return Math.max(1, renderer.height - (topBar.visible ? 1 : 0) - (typeof body.marginTop === "number" ? body.marginTop : 0)
+      - (activity.visible ? 1 + (typeof activity.marginTop === "number" ? activity.marginTop : 0) : 0) - 1 - (hints.visible ? 1 : 0));
   };
   const onSelection = (selection: Selection) => {
     if (selection.isStart && selection.behavior === "cell") return;
@@ -760,6 +837,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (sessionKey !== key) {
         discoveryOpen = false; completionId = undefined;
         resetRows(); sessionKey = key; expandedTools.clear(); clearInspection(); previousInspection = undefined; unseen = false; lastTail = "";
+        reader = undefined; readerReturn = undefined;
         detailsReturn = undefined; scrollToDetails = false; reviewDetailsScroll = undefined; reviewRestoreScroll = undefined;
         searchOpen = false; searchSelected = -1; searchLastQuery = "";
         searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
@@ -771,10 +849,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (detailsReturn && (externalPanel || searchOpen || controller.commandHelpOpen || controller.running || !snapshot.transcript.some(entry => entry.id === detailsReturn!.entryId))) {
         detailsReturn = undefined; scrollToDetails = false;
       }
+      if (externalPanel && reader) reader = undefined;
       if (externalPanel && inspection) { previousInspection = inspection; clearInspection(); }
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
-      const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && snapshot.toolApproval ? "tool-approval" : "");
+      const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && !reader && snapshot.toolApproval ? "tool-approval" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) {
           if (!sessionChanged) {
@@ -805,11 +884,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (!nextPanel && durableDraft?.status === "restore-pending" && editor.plainText === durableDraft.text) durableDraft.status = "restored";
       const secretSurface = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval || !!snapshot.loginChooser;
       observeDraft(panelMode ? savedDraft : editor.plainText, secretSurface);
-      const draftMessage = !panelMode && !durableDraft?.suppressed ? draftNotice(durableDraft, width) : "";
+      const draftMessage = !panelMode && !reader && !durableDraft?.suppressed ? draftNotice(durableDraft, width) : "";
       draftStatus.visible = !!draftMessage;
       draftStatus.height = draftMessage.includes("\n") ? 2 : 1;
       draftStatus.content = draftMessage;
-      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval;
+      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !reader;
+      composerTop.visible = composer.visible = composerBottom.visible = !reader;
       credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
       if (snapshot.undoPreview || snapshot.changeReview || panelMode === "tool-approval" && !snapshot.toolApproval?.enteringReason) { editor.blur(); }
       else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
@@ -824,7 +904,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : snapshot.loginCallbackEntry
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
-      } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
+      } else if (reader) editor.blur();
+      else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
       editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
@@ -853,7 +934,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
-        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection || detailsReturn ? "Esc back"
+        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection || detailsReturn || reader ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stops"
           : snapshot.readiness === "loading" ? "Esc cancel"
           : snapshot.recovery?.actions.includes("details") ? "F2 details"
@@ -866,7 +947,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      transcript.visible = panelMode !== "tool-approval" && !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview;
+      transcript.visible = panelMode !== "tool-approval" && !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview && !reader;
+      readerPanel.visible = !!reader;
+      if (reader) {
+        const panelRows = readerRows();
+        reader.layout = readerLayout(reader.document, reader.wrap, width, panelRows, { approval: !!snapshot.toolApproval, search: !!reader.search });
+        reader.position = readerBodyPosition(reader.document, reader.layout, reader.position);
+        readerText.content = paintReader({ document: reader.document, layout: reader.layout, position: reader.position, columns: width, rows: panelRows, theme, search: reader.search });
+        readerText.height = panelRows;
+      }
       toolApprovalPanel.visible = panelMode === "tool-approval";
       if (toolApprovalPanel.visible && snapshot.toolApproval) {
         const approval = snapshot.toolApproval;
@@ -950,7 +1039,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       empty.visible = entries.length === 0;
       const route = snapshot.modelId ? snapshot.activeRoute ?? (snapshot.provider === "openai-compatible" ? `Compatible endpoint${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : `${snapshot.provider} API key`) : "";
       const connection = snapshot.modelId ? `${snapshot.provider}/${snapshot.modelId}` : "No model yet";
-      returnContext.visible = !panelMode && (!!snapshot.recentSession || !!snapshot.restored);
+      returnContext.visible = !panelMode && !reader && (!!snapshot.recentSession || !!snapshot.restored);
       returnContext.content = (safe(snapshot.recentSession
         ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Resume saved work · Alt+B resume · /sessions browse" : "/sessions for all history"}`
         : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${connection}${route ? ` · ${route}` : ""}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
@@ -985,7 +1074,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
           }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
-          inspection?.id === entry.id && inspection.kind === "tool", controller.inlineDiffLines());
+          inspection?.id === entry.id && inspection.kind === "tool", controller.inlineDiffLines(),
+          inspection?.id === entry.id && inspection.kind === "table" ? inspection.index : undefined);
       };
       for (const entry of entries) {
         let row = rows.get(entry.id);
@@ -1007,13 +1097,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           clearInspection();
           if (entry && row) updateRow(row, entry);
         }
-        else if (inspection.kind === "code") {
+        else if (inspection.kind !== "tool") {
           inspection.source = safe(entries.find(entry => entry.id === inspection!.id)!.text);
-          inspection.text = rows.get(inspection.id)!.codeBlocks()[inspection.index]!.text;
+          inspection.text = blockText(inspection)!;
         }
       }
       const inspectedText = inspection && inspectionText(inspection, entries);
-      renderedInspection = inspection && inspectedText !== undefined ? { target: inspection, source: inspection.kind === "code" ? inspection.source : undefined, text: inspectedText } : undefined;
+      renderedInspection = inspection && inspectedText !== undefined ? { target: inspection, source: inspection.kind !== "tool" ? inspection.source : undefined, text: inspectedText } : undefined;
       if (searchOpen) {
         const query = editor.plainText;
         const previous = searchResult.matches[searchSelected];
@@ -1051,7 +1141,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : outcomeText ? { text: outcomeText.slice(outcomeGlyph!.length + 1), tone: outcomeTone, glyph: outcomeGlyph, outcome: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
-      const browsing = panelMode === "help" || (!panelMode && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery);
+      const browsing = panelMode === "help" || (!panelMode && !reader && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery);
       if (browsing && !discoveryOpen) refreshDiscovery();
       discoveryOpen = browsing;
       // Guidance belongs to the query it was opened from; any query edit returns to results.
@@ -1221,7 +1311,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       hints.height = panelMode === "review" || panelMode === "tool-approval" ? "auto" : 1;
       hints.wrapMode = panelMode === "review" || panelMode === "tool-approval" ? "word" : "none";
-      if (snapshot.toolApproval && panelMode !== "tool-approval") {
+      if (reader) {
+        const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
+          ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
+        hints.content = fittedHints((snapshot.toolApproval ? ["Esc review request", ...navigation] : [...navigation, reader.search ? "Esc restore" : "Esc back"]).join(" · "), width);
+      } else if (snapshot.toolApproval && panelMode !== "tool-approval") {
         hints.content = "Esc close to review request";
       } else if (panelMode === "tool-approval") {
         hints.content = new StyledText(keyHintChunks("Enter choose · Esc deny · Ctrl+C cancel turn", hintColors(theme.background)));
@@ -1382,6 +1476,72 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (restore) transcript.scrollTo(searchOriginalScroll);
   }
 
+  /** Select the first reader match at or after the search origin and reveal it. */
+  function updateReaderSearch() {
+    const state = reader;
+    if (!state?.search || !state.layout) return;
+    const matches = state.search.query ? state.document.view.search(state.search.query).matches : [];
+    const next = matches.findIndex(match => match.start >= state.search!.origin.offset);
+    state.search.selected = matches.length ? next >= 0 ? next : 0 : -1;
+    state.position = state.search.selected >= 0 ? revealMatch(state.document, state.layout, state.search.origin, matches[state.search.selected]!) : state.search.origin;
+  }
+
+  /** The reader owns every key while open; only Ctrl+C keeps its selection, cancel and quit meanings. */
+  function readerKey(key: KeyEvent, name: string, snapshot: TuiSnapshot) {
+    const state = reader!;
+    const layout = state.layout;
+    const plain = !key.ctrl && !key.meta && !key.option;
+    if (key.ctrl && name === "c") {
+      if (copySelection()) renderer.clearSelection();
+      else if (controller.running) controller.cancel();
+      else options.quit();
+      return;
+    }
+    if (name === "escape") {
+      if (snapshot.toolApproval) suspendReader();
+      else if (state.search) { state.position = state.search.origin; state.search = undefined; }
+      else closeReader();
+      return;
+    }
+    if (!layout) return;
+    const document = state.document, viewport = layout.viewport;
+    const move = (rows: number) => {
+      state.position = readerBodyPosition(document, layout, document.view.move(readerBodyPosition(document, layout, state.position), viewport, { rows }));
+    };
+    if (state.search) {
+      const search = state.search;
+      if (name === "return" || name === "kpenter" || key.ctrl && name === "f") { state.search = undefined; return; }
+      if (name === "up" || name === "down" || key.ctrl && (name === "p" || name === "n")) {
+        const matches = search.query ? document.view.search(search.query).matches : [];
+        if (matches.length) {
+          search.selected = (search.selected + (name === "up" || name === "p" ? -1 : 1) + matches.length) % matches.length;
+          state.position = revealMatch(document, layout, state.position, matches[search.selected]!);
+        }
+        return;
+      }
+      if (name === "backspace") {
+        const parts = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(search.query)];
+        search.query = parts.slice(0, -1).map(part => part.segment).join("");
+        updateReaderSearch(); return;
+      }
+      if (plain && key.sequence && displayText(key.sequence) === key.sequence && !/[\r\n\t]/.test(key.sequence) && name !== "pageup" && name !== "pagedown" && name !== "left" && name !== "right" && name !== "home" && name !== "end") {
+        search.query += key.sequence;
+        updateReaderSearch(); return;
+      }
+    }
+    if (name === "up" || name === "down") move(name === "up" ? -1 : 1);
+    else if (name === "pageup" || name === "pagedown") move((name === "pageup" ? -1 : 1) * Math.max(1, viewport.rows - 1));
+    else if (name === "home") state.position = readerBodyPosition(document, layout, { offset: 0, horizontal: 0 });
+    else if (name === "end") {
+      const end = document.view.positionAt(document.view.source.length);
+      state.position = readerBodyPosition(document, layout, document.view.move({ offset: end.offset, horizontal: state.position.horizontal }, viewport, { rows: -(viewport.rows - 1) }));
+    } else if ((name === "left" || name === "right") && !viewport.wrap) {
+      state.position = { offset: state.position.offset, horizontal: panReader(document, layout, state.position.horizontal, name === "left" ? -1 : 1) };
+    } else if (plain && name === "w" && document.kind === "code") state.wrap = !state.wrap;
+    else if (plain && name === "c") copyReader();
+    else if (key.ctrl && name === "f") state.search = { query: "", selected: -1, origin: state.position };
+  }
+
   function onKey(key: KeyEvent) {
     // Any key skips the splash and still reaches the editor or the active panel.
     if (splash) { endSplash(); refresh(); }
@@ -1409,6 +1569,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (key.meta || key.option || key.ctrl && !["a", "e", "u", "k", "w", "j"].includes(name)) { handled(); return; }
       return;
     }
+    if (reader) { readerKey(key, name, snapshot); handled(); return; }
     if ((key.meta || key.option) && name === "d" && !panelMode && options.draftPersistence) {
       if (clearDurableDraft()) { setDraft(""); savedDraft = ""; }
       handled(); return;
@@ -1567,6 +1728,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (key.ctrl && name === "c") { if (controller.running) controller.cancel(); else options.quit(); handled(); return; }
       if (name === "c") { copyInspection(snapshot); handled(); return; }
+      if (name === "r" && !key.ctrl && !key.meta && !key.option) { openReader(snapshot); handled(); return; }
       if (key.ctrl && name === "o") { allExpanded = !allExpanded; expandedTools.clear(); handled(); return; }
       if (key.ctrl && name === "end") { latest(); handled(); return; }
       if (name === "pageup" || name === "pagedown") { transcript.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, transcript.viewport.height - 2)); handled(); return; }
@@ -1707,6 +1869,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;
     }
+    if (reader && readerPanel.visible) {
+      reader.painted = true;
+      if (readerPanel.height > 0 && readerPanel.height !== readerText.height && readerMeasured?.rows !== readerPanel.height) {
+        readerMeasured = { width: renderer.width, height: renderer.height, rows: readerPanel.height };
+        refresh();
+      }
+    }
     if (searchOpen && searchScrollToMatch) {
       searchScrollToMatch = false;
       const match = searchResult.matches[searchSelected];
@@ -1734,7 +1903,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   renderer.setBackgroundColor(theme.background);
   editor.focus();
   const activityTimer = setInterval(() => { if (!destroyed && controller.snapshot().activity) refresh(); }, 250);
-  const onPaste = () => { if (splash) { endSplash(); refresh(); } };
+  const onPaste = (event: PasteEvent) => {
+    if (splash) { endSplash(); refresh(); }
+    if (reader?.search) {
+      event.preventDefault();
+      reader.search.query += displayText(new TextDecoder().decode(event.bytes)).replace(/\s+/g, " ");
+      updateReaderSearch(); refresh();
+    }
+  };
   renderer.keyInput.on("paste", onPaste);
   if (fullSplash) {
     splash = new SplashRenderable(renderer, { now, theme: () => theme, version: options.version, seed: (Math.random() * 2 ** 32) >>> 0 });
@@ -1773,6 +1949,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       endSplash();
       destroyed = true;
       inspection = undefined; previousInspection = undefined; renderedInspection = undefined; paintedInspection = undefined;
+      reader = undefined; readerReturn = undefined;
       detailsReturn = undefined; reviewDetailsScroll = undefined;
       ticker.stop();
       clearInterval(activityTimer);
