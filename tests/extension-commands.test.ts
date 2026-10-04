@@ -7,7 +7,8 @@ import { loadExtensions } from "../src/extensions/loader.ts";
 import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { dispatchEditorInput, helpText, type SlashCommandName } from "../src/tui/commands.ts";
-import { BUILT_IN_COMMAND_ORDER, COMMAND_DESCRIPTIONS, commandCatalog } from "../src/tui/command-catalog.ts";
+import { BUILT_IN_COMMAND_ORDER, COMMAND_DESCRIPTIONS, commandCatalog, paletteChoices } from "../src/tui/command-catalog.ts";
+import { keyboardGuideAvailability } from "../src/tui/palette.ts";
 import type { SkillDiscovery } from "../src/skills/skills.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
@@ -300,11 +301,14 @@ test("controller ranks command names before searchable descriptions, package pro
       const all = fixture.controller.commandChoices("/");
       expect(all.map(entry => entry.name)).toEqual([...BUILT_IN_COMMAND_ORDER.slice(0, -1), "guide", "check", "session-helper", "delete-session"]);
       expect(fixture.controller.commandChoices("/ses").map(entry => entry.name)).toEqual(["sessions", "session", "session-helper", "delete-session"]);
+      // Help searches the live palette ranker; keyboard rows are excluded so the command ordering is pinned.
+      const availability = keyboardGuideAvailability({ running: false, toolApproval: false, inspectable: true, details: true });
+      const help = (query: string) => paletteChoices(all, availability, query).filter(row => row.kind === "command").map(row => row.name);
       // Additional source-only subsequence matches depend on the temporary path; the leading ranking stays fixed.
-      expect(fixture.controller.commandChoices("sessions", true).slice(0, 3).map(entry => entry.name)).toEqual(["sessions", "check", "session"]);
-      expect(fixture.controller.commandChoices("user-only", true).map(entry => entry.name)).toEqual(["guide"]);
-      expect(fixture.controller.commandChoices("project skill", true).map(entry => entry.name)).toEqual(["guide"]);
-      expect(fixture.controller.commandChoices(fixture.path, true).map(entry => entry.name)).toEqual(["check", "session-helper"]);
+      expect(help("sessions").slice(0, 3)).toEqual(["sessions", "check", "session"]);
+      expect(help("user-only")).toEqual(["guide"]);
+      expect(help("project skill")).toEqual(["guide"]);
+      expect(help(fixture.path)).toEqual(["check", "session-helper"]);
     } finally { fixture.controller.dispose(); }
   });
 });

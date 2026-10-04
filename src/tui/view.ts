@@ -18,7 +18,7 @@ import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 import { paletteChoices, type CommandChoice, type KeyboardGuideChoice, type PaletteChoice } from "./command-catalog.ts";
-import { PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceHeight, guidanceLines, keyboardGuideAvailability, keyboardRowParts, nextPaletteSelection, paletteDetail, paletteHint, paletteSections, paletteSelectable } from "./palette.ts";
+import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceHeight, guidanceLines, keyboardGuideAvailability, keyboardRowParts, nextPaletteSelection, paletteDetail, paletteHint, paletteSections, paletteSelectable } from "./palette.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
@@ -1059,7 +1059,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const commandRows = paletteRows(available);
       const helpResults = panelMode === "help" && !helpInserted;
       const guide = helpGuide && available.find((entry): entry is KeyboardGuideChoice => entry.id === helpGuide!.id && entry.kind === "keyboard");
-      const paletteNote = helpResults && !guide && (controller.running || snapshot.status === "running") && available.length ? PALETTE_RUNNING : "";
+      const paletteNote = !helpResults || guide || !available.length ? "" : snapshot.toolApproval ? PALETTE_APPROVAL : controller.running || snapshot.status === "running" ? PALETTE_RUNNING : "";
       const selectedDetail = helpResults && !guide ? paletteDetail(available[completionIndex]) : undefined;
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
       const maxRows = snapshot.modelPicker ? Math.max(1, Math.min(12, renderer.height - 10))
@@ -1260,6 +1260,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (helpGuide) return;
       const selected = helpInserted ? undefined : completions()[completionIndex];
       if (selected?.kind === "keyboard") { helpGuide = { id: selected.id, query: editor.plainText }; refresh(); return; }
+      // A waiting approval owns the editor once help closes, so palette text must never reach its reason field.
+      if (controller.snapshot().toolApproval) return;
       const command = helpInserted ? editor.plainText : selected?.available ? selected.insertion : undefined;
       if (command !== undefined) { controller.commandHelpOpen = false; refresh(); setDraft(command); refresh(); }
       return;

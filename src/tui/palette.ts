@@ -22,7 +22,10 @@ export interface PaletteReturnContext {
   details: boolean;
 }
 
-const APPROVAL_WAITING = "Approval waiting · Esc review request";
+/** Note shown above results while a tool approval waits; commands cannot be inserted until it settles. */
+export const PALETTE_APPROVAL = "Approval waiting · Esc review request";
+
+const APPROVAL_WAITING = PALETTE_APPROVAL;
 const TURN_RUNNING = "Wait for this turn · Esc stop";
 
 /** Project return-context facts into keyboard availability without reading or changing application state. */

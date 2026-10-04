@@ -11,11 +11,13 @@ import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { commandCatalog, paletteChoices, type KeyboardGuideChoice, type PaletteChoice } from "../src/tui/command-catalog.ts";
 import {
-  PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceLines, keyboardGuideAvailability, keyboardRowParts,
+  PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceLines, keyboardGuideAvailability, keyboardRowParts,
   nextPaletteSelection, paletteDetail, paletteHint, paletteSections, type PaletteReturnContext,
 } from "../src/tui/palette.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
+import { editTool } from "../src/tools/edit.ts";
+import { ConfigEditor } from "../src/config/editing.ts";
 import { openDraftStore } from "../src/drafts/store.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
@@ -27,7 +29,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 const idle: PaletteReturnContext = { running: false, toolApproval: false, inspectable: true, details: true };
 const thaiDraft = "ร่างภาษาไทย 🧪\nบรรทัดที่สอง";
 
-type Options = { width?: number; height?: number; env?: Record<string, string>; root?: string; modules?: string[]; responses?: ScriptedTurn[]; drafts?: boolean };
+type Options = { width?: number; height?: number; env?: Record<string, string>; root?: string; modules?: string[]; responses?: ScriptedTurn[]; drafts?: boolean; ask?: boolean };
 
 /** A real renderer whose only dispatch path is counted; builtins record their names instead of acting. */
 async function setup(options: Options = {}) {
@@ -42,6 +44,7 @@ async function setup(options: Options = {}) {
     session, workspace, home, provider: "scripted", modelId: "test-model", sessionId,
     model: createScriptedModel({ responses: options.responses ?? [{ text: "Done.\n\n```ts\nconst answer = 42;\n```" }] }),
     contextManager: createContextManager(workspace, { home }), secrets: ["secret-sentinel"], extensions: loaded?.runtime,
+    ...options.ask ? { tools: createToolRegistry([editTool]), configEditor: new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(root, "user-config"), project: join(root, "project-config") }) } : {},
     credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) },
   });
   const submitted: string[] = [], builtins: string[] = [];
@@ -366,3 +369,39 @@ for (const noColor of [false, true]) test(`50-column palette keeps markers, type
   expect(frame).toContain("Cancel running work · Esc or Ctrl+C");
   expect(frame).toContain("! Nothing running · Enter send a task");
 });
+
+for (const preview of [false, true]) test(`an approval arriving behind help never receives palette text or a decision${preview ? " after Tab preview" : ""}`, async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const ui = await setup({ root, ask: true, responses: [{ toolCalls: [{ id: "pending", name: "edit", arguments: { path: "note.txt", edits: [{ oldText: "before", newText: "after" }] } }] }, { text: "done" }] });
+  await ui.mockInput.pasteBracketedText(thaiDraft); ui.editor.cursorOffset = 5; await ui.settle();
+  await openPalette(ui, "appearance");
+  if (preview) { ui.mockInput.pressTab(); await ui.settle(); expect(ui.editor.plainText).toBe("/theme "); }
+  const turn = ui.controller.submit("edit the note");
+  const deadline = Date.now() + 5000;
+  while (!ui.controller.snapshot().toolApproval?.diff && Date.now() < deadline) await ui.settle();
+  await ui.settle();
+  const request = ui.controller.snapshot().toolApproval;
+  expect(request?.diff).toBeDefined();
+  expect(ui.controller.commandHelpOpen).toBe(true);
+  if (!preview) expect(ui.rows()[0]).toBe(PALETTE_APPROVAL);
+  else expect(ui.editor.plainText).toBe("/theme ");
+  expect(ui.hints.plainText).toBe("Esc close to review request");
+  // Enter on the command, and repeated Enter, neither insert nor decide the approval.
+  ui.mockInput.pressEnter(); await ui.settle(); ui.mockInput.pressEnter(); await ui.settle();
+  expect(ui.controller.commandHelpOpen).toBe(true);
+  expect(ui.controller.snapshot().toolApproval).toEqual(request!);
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.controller.commandHelpOpen).toBe(false);
+  const approval = ui.controller.snapshot().toolApproval!;
+  expect(approval.enteringReason).toBe(false);
+  expect(approval.selected).toBe(0);
+  expect(ui.editor.plainText).toBe("");
+  expect(ui.captureCharFrame()).not.toContain("/theme");
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+  // Denying without a reason settles the turn and returns the original draft, not the palette insertion.
+  ui.controller.denyToolApproval(); await turn; await ui.settle();
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+  expect(ui.editor.plainText).toBe(thaiDraft); expect(ui.editor.cursorOffset).toBe(5);
+  expect(ui.submitted).toEqual([]); expect(ui.builtins).toEqual([]);
+}));
