@@ -954,6 +954,7 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     ui.mockInput.pressEnter();
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("API key · xai");
+    expect(ui.captureCharFrame()).toContain("Enter save · Esc cancel");
     ui.mockInput.pressEscape();
     await settle(ui);
     expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "xai" });
@@ -1100,7 +1101,7 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   expect(ui.editor.cursorOffset).toBe(draftCursor);
   expect(ui.captureCharFrame()).toContain("Attempt 2/3");
   expect(ui.captureCharFrame()).not.toContain("Retry 2/3");
-  expect(ui.captureCharFrame()).toContain("Esc stops");
+  expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).toContain("Esc stop");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
   ui.mockInput.pressEscape();
   await ui.flush();
@@ -1511,8 +1512,12 @@ test("compact preferences show project scope and confirmation before a write", a
     expect(ui.captureCharFrame()).toContain("project");
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
-    expect(ui.controller.snapshot().preferences?.preview).toContain("Enter confirms");
+    expect(ui.controller.snapshot().preferences?.preview).toEndWith(" Enter confirm · Esc cancel");
     expect(ui.captureCharFrame()).toContain("Enter saves");
+    await preferenceEnter(ui);
+    const applied = ui.controller.snapshot().transcript.at(-1)?.text ?? "";
+    expect(applied).toEndWith(" Applied.");
+    expect(applied).not.toContain("Esc cancel");
   });
 });
 
@@ -1752,7 +1757,8 @@ test("preferences at narrow width scroll preview and Escape keeps pasted task an
     ui.mockInput.pressKey("p", { meta: true }); ui.resize(36, 16); await settle(ui);
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
     ui.mockInput.pressKey("pagedown"); await settle(ui);
-    expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Esc cancels");
+    expect(ui.controller.snapshot().preferences?.preview).toEndWith("Enter confirm · Esc cancel");
+    expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Esc cancel");
     expect(ui.editor.y + ui.editor.height).toBeLessThanOrEqual(16);
     await ui.mockInput.pasteBracketedText("paste while viewing");
     ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
@@ -2239,7 +2245,7 @@ test("context inspection uses keyboard input and retains draft and controls duri
     const narrow = ui.captureCharFrame();
     expect(narrow).toContain("ctx ~");
     expect(narrow).toContain("1 tool");
-    expect(narrow).toContain("Esc stops");
+    expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).toContain("Esc stop");
     expect(narrow).toContain("future draft");
     expect(narrow).not.toContain("% complete");
     expect(ui.editor.plainText).toBe("future draft");

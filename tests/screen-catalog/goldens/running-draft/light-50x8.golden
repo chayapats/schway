@@ -13,7 +13,7 @@ cursor 19 6 visible
  ▌ › แล้วสรุปเป็นภาษาไทย
      สั้น ๆ สามบรรทัด
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- Auto · Esc stops
+ Auto · Esc stop
 == styles
 00 0-50 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
@@ -38,5 +38,5 @@ cursor 19 6 visible
 06 49-50 #ffffff #f7f7f4 -
 07 0-1 #545e6c #ecedea -
 07 1-5 #1d232c #ecedea b
-07 5-17 #545e6c #ecedea -
-07 17-50 #ffffff #f7f7f4 -
+07 5-16 #545e6c #ecedea -
+07 16-50 #ffffff #f7f7f4 -

@@ -65,6 +65,26 @@ Counts agree with their noun: `1 file`, `2 files`, `1 command`, `2 commands`; us
 Good: `1 file changed · Esc back`  
 Bad: `1 files changed · Esc back`
 
+## Esc verbs
+
+Pair Esc with the one verb that names what it does on that screen. The definitions below are the contract; `tests/helpers/esc-verbs.ts` lists the same rows, and the catalog lint checks every rendered Esc phrase against them.
+
+| Verb | Use when Esc… | Example |
+| --- | --- | --- |
+| `stop` | interrupts agent work that is running now, such as a turn, tool, retry wait or compaction. Partial results stay. | `Esc stop` |
+| `cancel` | abandons an unfinished flow or pending change before it applies, so nothing is saved, signed in or undone. | `Esc cancel sign-in` |
+| `deny` | rejects the pending tool approval request, so the turn continues without that tool. | `Esc deny` |
+| `back` | leaves a view that changed nothing, one level at a time, until the composer returns with the same draft and reading position. | `Esc back` |
+| `restore` | discards a provisional find or palette position or query and puts back what was there before. It sits beside an Enter that keeps the result. | `Esc restore` |
+| `keep editing` | closes a notice or suggestion list over the composer. The draft and cursor stay as typed. | `Esc keep editing` |
+
+- Write the imperative verb, never a third-person form such as `stops` or `cancels`.
+- Add a short object after the verb only to name the target or destination, for example `Esc cancel sign-in` or `Esc back to request`.
+- Never write a bare `Esc` in a hint or action row.
+- Never use the synonyms `close`, `dismiss`, `exit`, `quit`, `return`, `editor` or `basic` after Esc.
+
+Prose in `/help`, `--help` and docs may conjugate the verb, as in “Esc stops the running turn”; the meaning still matches the table.
+
 ## Before and after
 
 Before values reproduce current UI text on the pinned `main` revision `d8c1340`; interpolated examples use the stated counts. After values are copy targets, not changes made by this guide. `(moved to F2 details)` marks relocation rather than replacement UI text; `<br>` separates the two lines in the readiness target.
@@ -131,5 +151,6 @@ Copy this checklist into a PR that changes user-visible text.
 - [ ] Put evidence and caveats behind F2 details or in docs; check every banned pattern at its stated scope.
 - [ ] Pair every status color with a glyph or word, including without color.
 - [ ] Check singular and plural counts against their nouns.
+- [ ] Use the Esc verb from the Esc verbs table for what Esc does on that screen.
 - [ ] Update screen-catalog goldens with `bun run screens:update` (#135) and review them in the [gallery](screen-catalog.md#review-the-gallery-and-pr-diff).
 - [ ] Check narrow widths so statuses and next actions remain visible.

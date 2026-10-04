@@ -28,7 +28,7 @@ percentage or a hang warning. The activity row above the composer describes the
 current work; parallel tools share a compact count summary. The context
 meter shows the estimated share of known capacity (`ctx ━━━━ 19%`), or the token
 estimate (`ctx ~132`) when capacity is unknown; `/context` explains it. At narrow
-widths the pill, `Esc stops` and the context estimate take priority; the route,
+widths the pill, `Esc stop` and the context estimate take priority; the route,
 reasoning chip and then the model name are shortened first.
 
 Streamed assistant text is a preview until the provider finishes the attempt. A
@@ -84,7 +84,7 @@ a nonblocking bolt accent. Set `ui.splash` to `always`, `first-run` (default), o
 `SCHWAY_MOTION=off` also suppresses startup effects and reduces other animation.
 See [color roles](#color-roles) and [motion and startup splash](#motion-and-startup-splash) for the palette, motion and offline preview.
 
-Esc cancels the running turn through the shared AbortSignal path and returns to
+Esc stops the running turn through the shared AbortSignal path and returns to
 the input editor. Ctrl+C cancels when running and quits when idle. Quitting
 restores the terminal and releases resources. Resume rebuilds history from the
 saved JSONL without replaying old tool effects. Missing credentials and runtime failures appear as actionable errors. Interactive
@@ -472,7 +472,7 @@ selection and keeps action text visible by shortening paths first.
 
 A successful undo appends one durable result and model-visible note; it keeps
 conversation history and the selected branch. Files changed after the preview
-are skipped. Failed operations remain in a result panel until Esc closes it;
+are skipped. Failed operations remain in a result panel until **Esc back** leaves it;
 Enter does not retry them. Empty parent directories remain. A turn already undone
 on any conversation branch cannot be undone again. If every file changed since,
 no undo record is written and the turn remains available.
@@ -502,8 +502,8 @@ When nothing can be undone, `/undo` names the reason:
 
 | Message | Meaning |
 | --- | --- |
-| `No saved undo for these changes · Alt+R review · Esc close` | A read-only list of paths seen without saved copies on this branch. |
-| `Nothing to undo in turn N · Alt+R review · Esc close` | No saved file can be restored; per-file reasons and other paths stay listed. |
+| `No saved undo for these changes · Alt+R review · Esc back` | A read-only list of paths seen without saved copies on this branch. |
+| `Nothing to undo in turn N · Alt+R review · Esc back` | No saved file can be restored; per-file reasons and other paths stay listed. |
 | `Nothing to undo · every file changed since` | Every saved file changed since and nothing else is known. |
 | `Change detection unavailable · F2 details` | No saved file changes, and other changes can't be listed. Files may still have changed. |
 | `No saved undo data · F2 details` | A turn has no undo data. Retention may have removed it, or it was never saved. |
@@ -515,7 +515,7 @@ data as expired, because a missing manifest can't show whether retention removed
 it. When a considered turn has no undo data, the panel adds a note such as
 `No saved undo data for turn 3`, both before an older undo and in the read-only
 list. If Enter reverts nothing because a copy is unavailable rather than changed,
-the result stays open with `Nothing to undo in turn N · Esc close`. The saved undo
+the result stays open with `Nothing to undo in turn N · Esc back`. The saved undo
 result records such files as not reverted, and the model is told they could not
 be reverted, never that they changed.
 
@@ -549,22 +549,22 @@ detected here` marks newer turns with the same limit.
 | Open a web link | Click its label or URL; dragging selects instead of opening |
 | Recall prompt | Up/Down at first/last visual row; up to 100 prompts in memory |
 | Complete command | Type `/`, Up/Down to select, Tab to insert |
-| Dismiss suggestions | Esc |
+| Hide suggestions | Esc keep editing |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
 | Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
-| Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc restores the draft and reading position |
-| Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
-| Browse turn history | `/history`; Up/Down selects a turn or observed file, Enter opens a turn or its current diff, F2 toggles evidence notes, PageUp/PageDown scrolls, Esc steps back then restores the draft |
-| Inspect results, code and tables | Alt+I enters inspection without copying; Up/Down or Tab selects a result, code block or table; C copies the highlighted item; Enter copies selected code or table source, or toggles an expandable tool result; R reads selected code or a table; Esc returns to the draft |
-| Read code or a table | R in inspection; Up/Down and PgUp/PgDn scroll, Home/End jump, Left/Right pan unwrapped code or step table columns, W wraps code, C copies the source, Ctrl+F finds in the block, Esc returns to the same inspection target |
-| Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
+| Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc back to the draft and reading position |
+| Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc cancel before Enter, Esc back from a result |
+| Browse turn history | `/history`; Up/Down selects a turn or observed file, Enter opens a turn or its current diff, F2 toggles evidence notes, PageUp/PageDown scrolls, Esc back one level at a time to the draft |
+| Inspect results, code and tables | Alt+I enters inspection without copying; Up/Down or Tab selects a result, code block or table; C copies the highlighted item; Enter copies selected code or table source, or toggles an expandable tool result; R reads selected code or a table; Esc back to the draft |
+| Read code or a table | R in inspection; Up/Down and PgUp/PgDn scroll, Home/End jump, Left/Right pan unwrapped code or step table columns, W wraps code, C copies the source, Ctrl+F finds in the block, Esc back to the same inspection target |
+| Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
 | Recover stale terminal cells | Ctrl+L; preserves the draft and scroll position |
-| Cancel | Esc or Ctrl+C during a turn when no text is selected |
+| Stop | Esc or Ctrl+C during a turn when no text is selected |
 | Quit | `/quit`, Ctrl+C while idle with no selection, or Ctrl+D with empty input |
 
 Code headers show **Alt+I inspect** until selected. Inspection returns to a
@@ -579,7 +579,7 @@ newlines, without headers, wrapping or focus markers. Bounded tool previews keep
 their truncation notice. `Copied code` means the terminal copy request was
 accepted; clipboard failures leave the selection and draft available for native
 terminal selection. Enter on a tool result only toggles its expandable output.
-Esc restores the draft, cursor and prior reading position. A replaced or removed
+**Esc back** brings back the draft, cursor and prior reading position. A replaced or removed
 target cannot be copied under its old highlight; session and branch changes
 clear the selection.
 
@@ -597,12 +597,14 @@ reading position.
 
 | Panel | Navigation and action |
 | --- | --- |
-| Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc back |
+| Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc cancel a preview, otherwise Esc back |
 | Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery |
 | Tool approval | Up/Down choose, Enter choose or send reason, Esc deny, Ctrl+C cancel turn, PageUp/PageDown scroll |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
-| Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer |
+| Help, search | Panel-specific navigation, Enter chosen action, Esc restore the draft or position |
+| Command completion | Up/Down select, Tab complete, Esc keep editing |
+| Inspection | Up/Down select, Enter chosen action, Esc back to the composer |
 | Reader | Up/Down, PgUp/PgDn, Home/End scroll; Left/Right pan; W wrap code; C copy source; Ctrl+F find; Esc back to inspection |
 
 Open preferences from the task composer. If another panel is open, Escape returns
@@ -686,7 +688,7 @@ the hint leads with `/new start fresh · /sessions browse` instead of Enter send
 When a provider step fails, the error row gives the available recovery keys for
 that operation. Alt+L opens sign-in after an authentication failure, Alt+M opens
 model selection after an unavailable-model failure, F2 shows optional
-redacted diagnostics, and Esc dismisses the controls while keeping the editor.
+redacted diagnostics, and **Esc keep editing** hides the controls while keeping the editor.
 For an accepted turn, Ctrl+R continues from saved conversation progress when
 offered. It does not submit the original user message again or rerun saved tool
 calls. Authentication and model failures offer continuation only after their
@@ -837,8 +839,8 @@ and the draft, cursor and transcript position return unchanged on Esc.
   part reports `Copied partial source`.
 
 If a tool approval arrives while reading, it waits; the reader shows
-`◌ Approval waiting · Esc review request`, the find row names the same Esc
-action, and navigation, copy and resize never answer it. Esc closes the reader and opens the existing approval prompt
+`◌ Approval waiting · Esc back to request`, the find row names the same Esc
+action, and navigation, copy and resize never answer it. Esc leaves the reader and opens the existing approval prompt
 without approving or denying. After the request is handled, the reader never
 reopens on its own: press **Alt+I** then **R** on the same target to return to
 the saved snapshot, position and search. Session and branch changes discard the
@@ -866,7 +868,7 @@ extensions before invoking either meaning of the name. Metadata refreshes when
 browsing reopens, and submission rechecks collisions. Removing or disabling a
 highlighted choice clears its selection: press an arrow before completing again.
 
-Use Up/Down to select and wrap, Tab to insert, and Escape to dismiss. Arrows skip
+Use Up/Down to select and wrap, Tab to insert, and **Esc keep editing** to hide the list. Arrows skip
 group headers and unavailable rows; Tab never inserts them. Completion never
 executes an action. `/thinking ` suggests only validated current model levels
 (and `reset`); subscription levels require advertised account metadata. OpenRouter
@@ -912,7 +914,7 @@ requirements. Keyboard guidance never performs its action, including copying,
 changing mode, cancelling or inserting a newline. In guidance, Esc returns to
 the same search and selection; in results, Esc restores the original draft,
 cursor and reading position. Without matches the palette shows
-`No matches · Clear search or Esc back`. The search field is one line:
+`No matches · Esc restore`. The search field is one line:
 Shift+Enter and Ctrl+J never add a line to the query.
 
 Keyboard rows show their keys and label; the selected row's description or
@@ -922,7 +924,7 @@ composer, such as change review and details, are marked unavailable, and a
 note reminds you to send commands after the turn settles. When the composer
 cannot send (a failed turn or a session that cannot save), reasons name the keys
 the hint row leads with instead of Enter send; the Alt+I notice does the same. When a tool approval
-is waiting behind the palette, Esc closes it to show the request. Credential
+is waiting behind the palette, **Esc back to request** leaves it to show the request. Credential
 and approval prompts keep their own input; the palette cannot open over them,
 and its search text is never saved as a draft.
 
@@ -1038,7 +1040,7 @@ Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **De
 
 Esc denies the current call without stopping the turn. **Deny with reason…** opens an entry with `Why? The agent will see this…`; Enter submits the trimmed reason, including an empty denial. The model receives `Denied by the user.` or `Denied by the user: <reason>`. Reason text stays out of prompt history, composer drafts and draft checkpoints. Every exit restores the draft and cursor saved before the panel opened. **Ctrl+C** cancels the whole turn, including queued calls; **Shift+Tab** is ignored while the approval prompt is open.
 
-Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc close to review request` hint show how to reach the request; closing that view opens the approval prompt immediately. The code and table reader shows `Esc review request` instead and keeps its position for an explicit Alt+I then R return.
+Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc back to request` hint show how to reach the request; leaving that view opens the approval prompt immediately. The code and table reader shows the same `Esc back to request` and keeps its position for an explicit Alt+I then R return.
 
 ### Details keyboard compatibility
 

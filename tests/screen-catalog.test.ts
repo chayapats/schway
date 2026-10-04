@@ -144,11 +144,11 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     // The composer is hidden, not cleared; reading never shows or edits the draft.
     expect(text).not.toContain("งานถัดไป");
     // The way out stays visible at every width: in the hint row, or in the footer when hints are hidden.
-    expect(text).toMatch(/Esc (back|restore|review request)/);
+    expect(text).toMatch(/Esc (back|restore|back to request)/);
     if (screen.id === "reader-code") { expect(text).toContain("‹"); expect(text).toContain("›"); }
     if (screen.id === "reader-table" && variant.rows > 8) { expect(text).toMatch(/‹Owner +│/); expect(text).toMatch(/Columns 2–\d of 8|Col 2–\d\/8/); expect(text).not.toContain("ภาค 1 "); }
     if (screen.id === "reader-no-matches") expect(text).toContain("No matches");
-    if (screen.id === "reader-approval") { expect(text).toMatch(/◌ Approval( waiting)? · Esc review request/); expect(text).not.toContain("Allow bash?"); }
+    if (screen.id === "reader-approval") { expect(text).toMatch(/◌ Approval( waiting)? · Esc back to request/); expect(text).not.toContain("Allow bash?"); }
   }
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") {
     const frame = parseScreen(actual), text = frame.text.join("\n");

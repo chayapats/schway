@@ -28,6 +28,15 @@
   diagnostics gain an optional `cause` (`rate-limit`, `provider` or `offline`)
   that matches the `error` event's categories (#313).
 
+### Changed
+
+- Esc hints use one verb per meaning, from the new Esc verbs table in the voice
+  guide: `Esc stop` in the status bar, `Esc cancel` while an undo is offered and
+  `Esc back` after it, `Esc keep editing` for slash suggestions, `Esc back` in
+  inspection and `Esc back to request` while an approval waits. Narrow activity
+  and reader find rows keep the whole Esc phrase. A catalog lint checks every
+  screen against the table (#315).
+
 ## [1.0.0-rc.1] - 2026-10-02
 
 ### Added

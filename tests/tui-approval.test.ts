@@ -285,7 +285,7 @@ for (const mode of ["auto", "ask", "read-only"] as const) test(`running ${mode} 
     for (const [width, height] of [[120, 28], [80, 28], [50, 28], ...shortLayouts]) {
       ui.resize(width!, height!); await ui.settle();
       expect(footer.plainText).toContain("Esc restore");
-      expect(ui.captureCharFrame()).not.toContain("Esc stops");
+      expect(footer.plainText).not.toContain("Esc stop");
       expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
       expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width!);
       expect(footer.y).toBeGreaterThanOrEqual(ui.editor.y + ui.editor.height);
@@ -295,7 +295,7 @@ for (const mode of ["auto", "ask", "read-only"] as const) test(`running ${mode} 
     ui.mockInput.pressEscape(); await ui.settle();
     expect(ui.editor.plainText).toBe(draft); expect(ui.editor.cursorOffset).toBe(4);
     expect(ui.controller.running).toBe(true); expect(ui.controller.snapshot().outcome).toBeUndefined();
-    expect(footer.plainText).toContain("Esc stops");
+    expect(footer.plainText).toContain("Esc stop");
   } finally { ui.controller.cancel(); await turn; }
 });
 
@@ -590,7 +590,7 @@ test("Shift+Tab cannot change an open request or its ask chip, including after r
   expect(ui.controller.snapshot().toolApproval).toEqual(request);
   expect(ui.captureCharFrame()).toContain("◆ Ask");
   expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
-  expect(ui.captureCharFrame()).not.toContain("Esc stops");
+  expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).not.toContain("Esc stop");
   expect(ui.captureCharFrame()).toContain("Ctrl+C cancel");
   expect(ui.captureCharFrame()).toContain("Enter choose · Esc deny · Ctrl+C cancel turn");
   for (const [width, height] of shortLayouts) {
@@ -599,7 +599,7 @@ test("Shift+Tab cannot change an open request or its ask chip, including after r
     expect(ui.renderer.root.findDescendantById("hints")!.visible).toBe(false);
     expect(footer.plainText).toContain("Ask · Ctrl+C cancel");
     expect(ui.captureCharFrame()).toContain("Ask · Ctrl+C cancel");
-    expect(ui.captureCharFrame()).not.toContain("Esc stops");
+    expect(footer.plainText).not.toContain("Esc stop");
     expect(ui.controller.snapshot().toolApproval).toEqual(request);
     expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width);
   }
@@ -618,16 +618,16 @@ for (const panel of ["model", "preferences", "help", "search"] as const) test(`$
   expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
   expect(statusPill(ui.controller.snapshot())).toMatchObject({ label: "APPROVAL", tone: "stopping" });
   expect(ui.captureCharFrame()).toContain("APPROVAL");
-  expect(ui.captureCharFrame()).not.toContain("Esc stops");
+  expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).not.toContain("Esc stop");
   expect(ui.captureCharFrame()).not.toContain("Esc stop");
   const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
-  expect(hints.plainText).toBe("Esc close to review request");
+  expect(hints.plainText).toBe("Esc back to request");
   const request = ui.controller.snapshot().toolApproval;
   const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
   for (const width of [120, 80, 50]) {
     ui.resize(width, 28); await ui.settle();
     expect(footer.plainText).toContain("Ctrl+C cancel");
-    expect(footer.plainText).not.toContain("Esc stops");
+    expect(footer.plainText).not.toContain("Esc stop");
     expect(ui.controller.snapshot().toolApproval).toEqual(request);
   }
   if (panel === "model") expect(ui.controller.snapshot().modelPicker).toBeDefined();
@@ -733,7 +733,7 @@ for (const panel of ["inspection", "tree"] as const) test(`${panel} preserves a 
   await ui.settle();
   const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
   expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
-  expect((ui.renderer.root.findDescendantById("hints") as TextRenderable).plainText).toBe("Esc close to review request");
+  expect((ui.renderer.root.findDescendantById("hints") as TextRenderable).plainText).toBe("Esc back to request");
   ui.mockInput.pressEscape(); await ui.settle();
   expect(ui.captureCharFrame()).toContain("Allow edit? · ask mode");
   ui.mockInput.pressEscape(); await turn;

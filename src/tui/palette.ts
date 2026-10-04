@@ -4,8 +4,8 @@ import { fitLine } from "./presentation.ts";
 /** Composer prompt shown while the help palette owns the search field. */
 export const PALETTE_PLACEHOLDER = "Search commands and actions…";
 
-/** Empty-result row; it names both ways forward without changing the draft. */
-export const PALETTE_NO_MATCHES = "No matches · Clear search or Esc back";
+/** Empty-result row; Esc restores the draft the palette opened from, as the palette hint row says. */
+export const PALETTE_NO_MATCHES = "No matches · Esc restore";
 
 /** Notice shown above results while a turn runs; commands can be inserted but not sent yet. */
 export const PALETTE_RUNNING = "Turn running · Send commands after it settles";
@@ -25,7 +25,7 @@ export interface PaletteReturnContext {
 }
 
 /** Note shown above results while a tool approval waits; commands cannot be inserted until it settles. */
-export const PALETTE_APPROVAL = "Approval waiting · Esc review request";
+export const PALETTE_APPROVAL = "Approval waiting · Esc back to request";
 
 const APPROVAL_WAITING = PALETTE_APPROVAL;
 const TURN_RUNNING = "Wait for this turn · Esc stop";

@@ -254,7 +254,7 @@ export abstract class UndoLayer extends ChangesLayer {
         const allChanged = skipped.every(file => file.reason === "changed");
         // Keep per-file reasons visible when they differ or paths without saved undo remain; no row counts as reverted.
         if (!failed && allChanged && !preview.files.some(row => row.action === "shell")) this.undoPreview = undefined;
-        this.notice(failed ? "Undo failed · Esc close" : allChanged ? "Nothing to undo · every file changed since" : `Nothing to undo in turn ${target.turnNumber} · Esc close`);
+        this.notice(failed ? "Undo failed · Esc back" : allChanged ? "Nothing to undo · every file changed since" : `Nothing to undo in turn ${target.turnNumber} · Esc back`);
         return;
       }
       const record: TurnUndoRecord = { type: "turn_undo", id: crypto.randomUUID(), turnId: target.turnId, turnNumber: target.turnNumber,
@@ -267,7 +267,7 @@ export abstract class UndoLayer extends ChangesLayer {
         this.fail("Files restored, but the session could not record the undo. The model will not be told.", messageOf(error));
       }
       if (!failed) this.undoPreview = undefined;
-    } catch (error) { this.fail("Undo unavailable · Esc close · /undo retry", messageOf(error)); preview.result = true; }
+    } catch (error) { this.fail("Undo unavailable · Esc back · /undo retry", messageOf(error)); preview.result = true; }
     finally { release(); this.undoBusy = false; }
   }
 

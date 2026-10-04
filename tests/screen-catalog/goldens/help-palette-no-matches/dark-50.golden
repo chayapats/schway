@@ -1,7 +1,7 @@
 schway-screen 1
 screen help-palette-no-matches
 title Help without matches
-description An unmatched help search offers clearing the search or returning to the draft.
+description An unmatched help search offers restoring the draft it opened from.
 variant dark-50
 size 50x30
 cursor 10 27 visible
@@ -30,7 +30,7 @@ cursor 10 27 visible
 
 
 
-  No matches · Clear search or Esc back
+  No matches · Esc restore
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › zzqx
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -75,8 +75,8 @@ cursor 10 27 visible
 23 0-50 #ffffff #0e1117 -
 24 0-1 #ffffff #0e1117 -
 24 1-2 #ffffff #1e2430 -
-24 2-39 #8b95a7 #1e2430 -
-24 39-49 #ffffff #1e2430 -
+24 2-26 #8b95a7 #1e2430 -
+24 26-49 #ffffff #1e2430 -
 24 49-50 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
 25 1-49 #161b24 #0e1117 -

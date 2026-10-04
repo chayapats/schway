@@ -23,7 +23,7 @@ cursor 7 27 visible
   Saved here: Inherited
   Effective now: Provider default (medium)
 
-  Approval modes · Esc back to change
+  Approval modes · Change from the composer
   Auto: Run tools without asking.
   Ask: Ask before tools that need approval.
   Read-only: Allow read-only tools.
@@ -88,8 +88,8 @@ cursor 7 27 visible
 15 42-120 #ffffff #0e1117 -
 16 0-120 #ffffff #0e1117 -
 17 0-2 #ffffff #0e1117 -
-17 2-37 #e6eaf0 #0e1117 -
-17 37-120 #ffffff #0e1117 -
+17 2-43 #e6eaf0 #0e1117 -
+17 43-120 #ffffff #0e1117 -
 18 0-2 #ffffff #0e1117 -
 18 2-33 #e6eaf0 #0e1117 -
 18 33-120 #ffffff #0e1117 -

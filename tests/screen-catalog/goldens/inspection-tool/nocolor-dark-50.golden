@@ -35,7 +35,7 @@ cursor 1 1 hidden
  ▌ › งานถัดไป 🧪
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/scripted-m…    ctx ~0
- ↑↓ move · Enter toggle · C copy · Esc
+ ↑↓ move · Enter toggle · C copy · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #e6eaf0 #161b24 b
@@ -151,4 +151,5 @@ cursor 1 1 hidden
 29 26-27 #e6eaf0 #293140 b
 29 27-35 #8b95a7 #0e1117 -
 29 35-38 #e6eaf0 #293140 b
-29 38-50 #ffffff #0e1117 -
+29 38-43 #8b95a7 #0e1117 -
+29 43-50 #ffffff #0e1117 -

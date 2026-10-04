@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Draft your next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ 3 tools 7.0s        Esc stops  ctx ~24
+ ◆ Auto  ⠋ 3 tools 7.0s   s…    Esc stop  ctx ~24
  Wait, then Enter sends · Esc stop
 == styles
 00 0-1 #ffffff #161b24 -
@@ -119,9 +119,11 @@ cursor 6 27 visible
 28 1-7 #e6eaf0 #161b24 b
 28 7-8 #8b95a7 #161b24 -
 28 8-24 #0e1117 #7cc4ff b
-28 24-31 #8b95a7 #161b24 -
-28 31-34 #e6eaf0 #2a3241 b
-28 34-49 #8b95a7 #161b24 -
+28 24-25 #8b95a7 #161b24 -
+28 25-29 #e6eaf0 #1e2430 -
+28 29-32 #8b95a7 #161b24 -
+28 32-35 #e6eaf0 #2a3241 b
+28 35-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
 29 1-26 #8b95a7 #0e1117 -

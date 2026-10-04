@@ -155,7 +155,7 @@ for (const encoding of encodings) test(`[${encoding}] newline keys in the palett
   await ui.type("x");
   expect(ui.editor.plainText).toBe("copyx");
   expect(ui.controller.commandHelpOpen).toBe(true);
-  expect(ui.frame()).not.toContain("No matches · Clear search");
+  expect(ui.frame()).not.toContain("No matches · Esc restore");
   await ui.input(ui.keys.esc);
   expect(ui.controller.commandHelpOpen).toBe(false);
   expect(ui.editor.plainText).toBe("ร่าง draft");
@@ -211,8 +211,11 @@ for (const encoding of encodings) test(`[${encoding} 40x20] palette, slash sugge
   ui.editor.setText(""); await ui.settle();
   await ui.type("/");
   // Arrows drop first, so completion and the way out both stay.
-  expect(ui.hints()).toBe("Tab complete · Esc dismiss");
+  expect(ui.hints()).toBe("Tab complete · Esc keep editing");
   await ui.input(ui.keys.esc);
+  // Esc keep editing hides the list and leaves the typed draft as it was.
+  expect(ui.editor.plainText).toBe("/");
+  expect(ui.hints()).not.toContain("Esc keep editing");
   ui.editor.setText(""); await ui.settle();
   await ui.input(ui.keys.ctrlF);
   await ui.type("value 3");

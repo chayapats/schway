@@ -277,7 +277,7 @@ void (async () => {
     await settle(() => screenIncludes("Subscription"), "reopened sign-in choices");
     while (!/^\\s*› OpenAI\\s*$/m.test(terminal.captureCharFrame())) { terminal.mockInput.pressArrow("down"); await terminal.flush(); }
     terminal.mockInput.pressEnter();
-    await settle(() => screenIncludes("Enter saves · Esc cancels"), "credential entry");
+    await settle(() => screenIncludes("Enter save · Esc cancel"), "credential entry");
     await terminal.mockInput.pasteBracketedText("installed-fixture-key");
     terminal.mockInput.pressEnter();
     await settle(() => loaderCalls === 1 && editor.focused && screenIncludes("Ready"), "connection activation");

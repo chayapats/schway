@@ -26,9 +26,9 @@ export function preferenceLines(panel: PreferencesSnapshot, compact: boolean): s
     if (advanced || panel.scope === "memory") lines.push(`Saved: ${row.saved}`, `Effective source: ${row.origin}`, row.reset);
     else lines.push(`Saved here: ${row.scopeSaved ?? "Inherited"}`, `Effective now: ${value(row)}`);
   }
-  lines.push("", "Approval modes · Esc back to change", "Auto: Run tools without asking.",
+  lines.push("", "Approval modes · Change from the composer", "Auto: Run tools without asking.",
     "Ask: Ask before tools that need approval.", "Read-only: Allow read-only tools.");
-  lines.push(advanced ? "PgUp/PgDn scroll · Esc basic" : "PgUp/PgDn scroll · Esc back");
+  lines.push("PgUp/PgDn scroll · Esc back");
   return lines;
 }
 

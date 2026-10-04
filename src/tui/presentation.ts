@@ -96,6 +96,21 @@ export function fitLine(text: string, columns: number): string {
   return `${result}…`;
 }
 
+/** Fit a work status row, keeping its trailing `Esc …` action whole by dropping status words first. */
+export function fitStatusAction(text: string, columns: number): string {
+  const line = displayText(text).replace(/\s+/g, " ");
+  const separator = line.lastIndexOf(" · ");
+  const action = separator < 0 ? "" : line.slice(separator + 3);
+  if (Bun.stringWidth(line) <= columns || !action.startsWith("Esc ")) return fitLine(line, columns);
+  const words = line.slice(0, separator).split(" ");
+  while (words.length > 1) {
+    words.pop();
+    const candidate = `${words.join(" ")} · ${action}`;
+    if (Bun.stringWidth(candidate) <= columns) return candidate;
+  }
+  return fitLine(action, columns);
+}
+
 /** Fit a workspace path by dropping middle segments before clipping its final grapheme-safe folder name. */
 export function shortenWorkspacePath(path: string, home: string, columns: number): string {
   const normalizedHome = home.replace(/\/+$/, "") || "/";

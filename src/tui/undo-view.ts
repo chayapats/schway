@@ -3,16 +3,22 @@ import type { UndoPreview } from "./controller-types.ts";
 
 /** Panel heading naming the target or read-only state; Enter undo appears only when an undo applies. */
 export function undoHeading(undo: UndoPreview): string {
-  if (undo.result) return `Undo turn ${undo.turnNumber} · Esc close`;
-  if (undo.readOnlyStatus) return `${undo.readOnlyStatus} · Alt+R review · Esc close`;
+  if (undo.result) return `Undo turn ${undo.turnNumber} · Esc back`;
+  if (undo.readOnlyStatus) return `${undo.readOnlyStatus} · Alt+R review · Esc back`;
   return `Undo ${undo.older ? "older " : ""}turn ${undo.turnNumber} · Enter undo · Esc cancel`;
+}
+
+/** Esc phrase for the undo panel: cancel while an undo is offered, back once a result or read-only list shows. */
+export function undoEscape(undo: UndoPreview | undefined): string {
+  return undo && !undo.result && !undo.readOnlyStatus ? "Esc cancel" : "Esc back";
 }
 
 /** Widest undo hint that fits, dropping scroll help before the review action and never dropping Esc. */
 export function undoHint(undo: UndoPreview | undefined, width: number): string {
+  const escape = undoEscape(undo);
   const choices = undo && !undo.result
-    ? ["↑↓ select · PgUp/PgDn scroll · Alt+R review · Esc close", "↑↓ select · Alt+R review · Esc close", "Alt+R review · Esc close"]
-    : ["↑↓ select · PgUp/PgDn scroll · Esc close", "↑↓ select · Esc close"];
+    ? [`↑↓ select · PgUp/PgDn scroll · Alt+R review · ${escape}`, `↑↓ select · Alt+R review · ${escape}`, `Alt+R review · ${escape}`]
+    : [`↑↓ select · PgUp/PgDn scroll · ${escape}`, `↑↓ select · ${escape}`];
   return choices.find(choice => Bun.stringWidth(choice) <= width) ?? choices.at(-1)!;
 }
 

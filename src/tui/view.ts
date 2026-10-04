@@ -7,7 +7,7 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
-import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
+import { activityDetail, displayText, fitLine, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
 import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
@@ -23,7 +23,7 @@ import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNN
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
-import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
+import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoEscape, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerEnd, readerLayout, revealMatch, scrollReader, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
 import type { ReaderPosition } from "./reader.ts";
 import { createHistoryPanel } from "./history-view.ts";
@@ -758,7 +758,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const color = theme[paint.tone === "muted" ? "muted" : paint.tone];
     const glyph = paint.spin ? spinnerFrame(at, motion) : paint.glyph;
     const lead = glyph ? [bold(fg(color)(glyph)), fg(theme.muted)(" ")] : [];
-    const text = fitLine(paint.text, width - (glyph ? 2 : 0));
+    // Work rows keep their Esc stop whole; status words give way first.
+    const text = (paint.spin ? fitStatusAction : fitLine)(paint.text, width - (glyph ? 2 : 0));
     const labelEnd = text.indexOf(" · ");
     const chunks = paint.outcome ? [bold(fg(color)(labelEnd < 0 ? text : text.slice(0, labelEnd))), ...(labelEnd < 0 ? [] : keyHintChunks(text.slice(labelEnd), hintColors(theme.background)))]
       : paint.spin ? shimmer(text, at, theme.muted, theme.text, motion)
@@ -949,7 +950,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ...(snapshot.endpointUrlEntry.error ? [fg(theme.error)(safe(`\n${snapshot.endpointUrlEntry.error}`))] : []),
           ])
           : snapshot.credentialEntry
-          ? safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter saves · Esc cancels`)
+          ? safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter save · Esc cancel`)
           : snapshot.loginCallbackEntry
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
@@ -983,8 +984,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
-        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen ? "Esc restore" : panelMode || inspection || detailsReturn || reader ? "Esc back"
-          : snapshot.activity || snapshot.status === "running" ? "Esc stops"
+        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview) : panelMode || inspection || detailsReturn || reader ? "Esc back"
+          : snapshot.activity || snapshot.status === "running" ? "Esc stop"
           : snapshot.readiness === "loading" ? "Esc cancel"
           : snapshot.recovery?.actions.includes("details") ? "F2 details"
           : blockedSubmitHint(snapshot) ? blockedSubmitHint(snapshot).split(" · ")[0]!
@@ -1311,7 +1312,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
           const start = Math.max(0, Math.min(selectedRow - Math.floor(maxRows / 2), commandRows.length - maxRows));
           const nameColumns = Math.min(23, Math.max(1, ...available.map(entry => Bun.stringWidth(entry.kind === "keyboard" ? entry.shortcut : `/${safe(entry.name)}`))));
-          if (!available.length) textRow(picker, helpResults ? PALETTE_NO_MATCHES : "No matches · Esc dismiss", theme.muted);
+          if (!available.length) textRow(picker, helpResults ? PALETTE_NO_MATCHES : "No matches · Esc keep editing", theme.muted);
           if (paletteNote) textRow(picker, fitLine(paletteNote, width - 2), theme.muted).wrapMode = "none";
           commandRows.slice(start, start + maxRows).forEach(row => {
             if ("header" in row) textRow(picker, `    ${row.header}`, theme.muted);
@@ -1372,9 +1373,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
           ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
         // Esc leads so narrow hint rows keep the way out when trailing actions are dropped.
-        hints.content = fittedHints([snapshot.toolApproval ? "Esc review request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width, theme.background, true);
+        hints.content = fittedHints([snapshot.toolApproval ? "Esc back to request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width, theme.background, true);
       } else if (snapshot.toolApproval && panelMode !== "tool-approval") {
-        hints.content = "Esc close to review request";
+        hints.content = "Esc back to request";
       } else if (panelMode === "tool-approval") {
         hints.content = new StyledText(keyHintChunks("Enter choose · Esc deny · Ctrl+C cancel turn", hintColors(theme.background)));
       } else if (panelMode === "undo") {
@@ -1408,7 +1409,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · R read · C copy · Esc editor" : available.length ? `↑/↓ select · Tab complete · Esc dismiss${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? `↑/↓ select · Tab complete · Esc keep editing${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

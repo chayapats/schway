@@ -31,7 +31,7 @@ cursor 1 1 hidden
 
 
 
- Find: absent · No matches · Esc resto…
+ No matches · Esc restore
 
 
  ◆ Auto  ● Ready   scripted/…    ctx ~0
@@ -90,8 +90,8 @@ cursor 1 1 hidden
 23 0-40 #ffffff #0e1117 -
 24 0-40 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
-25 1-39 #7cc4ff #0e1117 -
-25 39-40 #ffffff #0e1117 -
+25 1-25 #7cc4ff #0e1117 -
+25 25-40 #ffffff #0e1117 -
 26 0-40 #ffffff #0e1117 -
 27 0-40 #ffffff #0e1117 -
 28 0-1 #8b95a7 #161b24 -

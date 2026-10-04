@@ -5,7 +5,7 @@ import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import { TuiController } from "../src/tui/controller.ts";
-import { activityDetail, statusPill } from "../src/tui/presentation.ts";
+import { activityDetail, fitStatusAction, statusPill } from "../src/tui/presentation.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -303,4 +303,13 @@ test("cancel during parallel tools retains settled results and stale completion 
     controller.cancel();
     await second;
   });
+});
+
+test("narrow work rows drop status words before clipping the Esc stop action", () => {
+  expect(fitStatusAction("Receiving response · Esc stop", 40)).toBe("Receiving response · Esc stop");
+  expect(fitStatusAction("Receiving response · Esc stop", 26)).toBe("Receiving · Esc stop");
+  expect(fitStatusAction("Receiving response · Esc stop", 12)).toBe("Esc stop");
+  expect(fitStatusAction("Receiving response · Esc stop", 5)).toBe("Esc …");
+  // Rows without a trailing Esc action keep the ordinary clipping.
+  expect(fitStatusAction("Running 3 tools in parallel", 12)).toBe("Running 3 t…");
 });

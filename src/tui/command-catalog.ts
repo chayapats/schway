@@ -83,7 +83,7 @@ const KEYBOARD_GUIDES = {
   },
   details: {
     label: "Inspect details", shortcut: "F2 or Ctrl+I", description: "Read details for the current context",
-    guidance: "Return to the notice, recovery, change review or model panel showing an F2 details hint, then press F2 or Ctrl+I. Esc returns to the previous view.",
+    guidance: "Return to the notice, recovery, change review or model panel showing an F2 details hint, then press F2 or Ctrl+I. Esc goes back to the previous view.",
     aliases: ["details", "diagnostics", "f2", "ctrl+i"],
   },
   review: {
@@ -92,8 +92,8 @@ const KEYBOARD_GUIDES = {
     aliases: ["review", "changes", "diff", "alt+r"],
   },
   cancel: {
-    label: "Cancel running work", shortcut: "Esc or Ctrl+C", description: "Stop the active turn",
-    guidance: "Return to the conversation, then press Esc to stop a running turn. Esc first closes search, inspection or a panel. Ctrl+C copies selected text; without a selection it cancels a turn or quits when idle.",
+    label: "Stop running work", shortcut: "Esc or Ctrl+C", description: "Stop the active turn",
+    guidance: "Return to the conversation, then press Esc to stop a running turn. Esc first leaves search, inspection or a panel. Ctrl+C copies selected text; without a selection it cancels a turn or quits when idle.",
     aliases: ["cancel", "stop", "escape", "esc", "ctrl+c"],
   },
 } as const;

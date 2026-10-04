@@ -13,6 +13,8 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { createConversationView } from "../src/tui/view.ts";
+import { undoEscape, undoHeading, undoHint } from "../src/tui/undo-view.ts";
+import type { UndoPreview } from "../src/tui/controller-types.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel, type ScriptedTurn, type ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 
@@ -63,6 +65,8 @@ test("rendered undo previews and restores edited files, deletes created files, a
       await ui.send("/undo"); await ui.waitFor(() => !!ui.controller.snapshot().undoPreview);
       const frame = ui.captureCharFrame();
       expect(frame).toContain("Undo turn 1 · Enter undo · Esc cancel");
+      // The hint row names the same Esc verb as the heading while the undo is still only offered.
+      expect(frame).toContain("Alt+R review · Esc cancel"); expect(frame).not.toContain("Esc close"); expect(frame).not.toContain("Esc back");
       expect(frame).toContain("restore"); expect(frame).toContain("delete");
       expect(frame).toContain("Math.min(hi");
       ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
@@ -307,6 +311,10 @@ test("partial failures stay in a final result panel and Enter never retries them
       await chmod(join(root, "src"), 0o700); ui.mockInput.pressEnter(); await ui.settle();
       expect(await readFile(join(root, "src/new.ts"), "utf8")).toContain("newFile");
       expect(ui.session.items.filter(item => item.type === "turn_undo")).toHaveLength(1);
+      // The result panel offers no undo, so its heading and hint row both go back, never cancel or close.
+      const result = ui.captureCharFrame();
+      expect(result).toContain("Undo turn 1 · Esc back"); expect(result).toContain("↑↓ select · PgUp/PgDn scroll · Esc back");
+      expect(result).not.toContain("Esc cancel"); expect(result).not.toContain("Esc close");
       ui.mockInput.pressEscape(); await ui.settle(); expect(ui.controller.snapshot().undoPreview).toBeUndefined();
     } finally { await chmod(join(root, "src"), 0o700); await ui.dispose(); }
   });
@@ -810,4 +818,17 @@ test("pruned turns are silently skipped by the rendered undo stack", async () =>
       await ui.send("/undo"); expect(ui.captureCharFrame()).toContain("No saved undo data · F2 details");
     } finally { await ui.dispose(); }
   });
+});
+
+test("undo heading and hint row name one Esc verb per state at every width", () => {
+  const base: UndoPreview = { turnId: "t2", turnNumber: 2, files: [], selected: 0, result: false };
+  const states: [UndoPreview, string][] = [
+    [base, "Esc cancel"], [{ ...base, older: true }, "Esc cancel"],
+    [{ ...base, readOnlyStatus: "No saved undo for these changes" }, "Esc back"], [{ ...base, result: true }, "Esc back"],
+  ];
+  for (const [undo, escape] of states) {
+    expect(undoEscape(undo)).toBe(escape);
+    expect(undoHeading(undo)).toEndWith(escape);
+    for (const width of [120, 50, 40, 20]) expect(undoHint(undo, width)).toEndWith(escape);
+  }
 });

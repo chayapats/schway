@@ -640,7 +640,7 @@ test("table alignment preserves every cell and labels the copied Markdown source
   expect(layout.pinned).toBe(true);
   const text = paintReader({ document, layout, position: { offset: 0, horizontal: 0 }, columns: 60, rows: 10, theme: TUI_THEMES.dark }).chunks.map(chunk => chunk.text).join("");
   expect(text.split("\n")).toHaveLength(10);
-  expect(text).toContain("◌ Approval waiting · Esc review request");
+  expect(text).toContain("◌ Approval waiting · Esc back to request");
   expect(text).toContain("Aligned columns · C copies Markdown source");
 });
 
@@ -681,8 +681,8 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   await ui.waitFor(() => !!ui.controller.snapshot().toolApproval && !ui.controller.snapshot().toolApproval!.loading, "approval");
   const request = ui.controller.snapshot().toolApproval;
   expect(ui.reading()).toBe(true);
-  expect(ui.readerText()).toContain("◌ Approval waiting · Esc review request");
-  expect(ui.hints()).toStartWith("Esc review request");
+  expect(ui.readerText()).toContain("◌ Approval waiting · Esc back to request");
+  expect(ui.hints()).toStartWith("Esc back to request");
   expect(ui.captureCharFrame()).toContain("APPROVAL");
   expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
   // Navigation, copy and resize never answer the request.
@@ -690,7 +690,7 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   ui.mockInput.pressKey("c");
   await ui.settle();
   expect(ui.copied).toEqual([]);
-  for (const width of [120, 50, 80]) { ui.resize(width, 24); await ui.settle(); expect(ui.readerText()).toContain("Esc review request"); }
+  for (const width of [120, 50, 80]) { ui.resize(width, 24); await ui.settle(); expect(ui.readerText()).toContain("Esc back to request"); }
   expect(ui.controller.snapshot().toolApproval).toEqual(request);
   expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
   // Leave search (Enter keeps the position), copy while the request waits, then search again for the checkpoint.
@@ -731,8 +731,8 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   const restored = ui.readerText().split("\n"), before = checkpoint.split("\n");
   expect(restored.slice(1, before.length - 1)).toEqual(before.slice(1, -1));
   // While the approval waited, the find row named the Esc action it had then; once settled, Esc restores again.
-  expect(before.at(-1)).toEndWith("Esc review request");
-  expect(restored.at(-1)).toBe(before.at(-1)!.replace("Esc review request", "Esc restore"));
+  expect(before.at(-1)).toEndWith("Esc back to request");
+  expect(restored.at(-1)).toBe(before.at(-1)!.replace("Esc back to request", "Esc restore"));
   expect(restored.at(-1)).toContain("Find: value 2c");
   ui.mockInput.pressEscape(); await ui.settle();
   ui.mockInput.pressEscape(); await ui.settle();

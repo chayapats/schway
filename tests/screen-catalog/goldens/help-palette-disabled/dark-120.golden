@@ -27,7 +27,7 @@ cursor 11 27 visible
        Shift+Enter or Ctrl+J Insert a newline · Continue your draft on another line
        Ctrl+C                Copy selected text · Copy selected conversation text
    › ! F2 or Ctrl+I          Inspect details · No details to show · Esc back
-     ! Esc or Ctrl+C         Cancel running work · Nothing running · Enter send a task
+     ! Esc or Ctrl+C         Stop running work · Nothing running · Enter send a task
        Shift+Tab             Change approval mode · Cycle auto, ask and read-only
        Alt+R                 Review changes · Inspect changed files and command results
    ! No details to show · Esc back
@@ -89,9 +89,9 @@ cursor 11 27 visible
 20 118-120 #ffffff #0e1117 -
 21 0-2 #ffffff #0e1117 -
 21 2-3 #ffffff #1e2430 -
-21 3-48 #8b95a7 #1e2430 -
-21 48-86 #f0c674 #1e2430 -
-21 86-118 #ffffff #1e2430 -
+21 3-46 #8b95a7 #1e2430 -
+21 46-84 #f0c674 #1e2430 -
+21 84-118 #ffffff #1e2430 -
 21 118-120 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -

@@ -18,13 +18,13 @@ cursor 19 17 visible
  Enter sends
 
 
- ⠋ Receiving response · Esc …
+ ⠋ Receiving · Esc stop
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › ช่วยอ่านไฟล์ README.md
      แล้วสรุปเป็นภาษาไทย
      สั้น ๆ สามบรรทัด
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- Auto · Esc stops
+ Auto · Esc stop
  Working · Esc stop
 == styles
 00 0-1 #ffffff #ecedea -
@@ -66,8 +66,8 @@ cursor 19 17 visible
 11 0-30 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
 12 1-2 #0a5894 #f7f7f4 b
-12 2-29 #545e6c #f7f7f4 -
-12 29-30 #ffffff #f7f7f4 -
+12 2-23 #545e6c #f7f7f4 -
+12 23-30 #ffffff #f7f7f4 -
 13 0-1 #ffffff #f7f7f4 -
 13 1-29 #ecedea #f7f7f4 -
 13 29-30 #ffffff #f7f7f4 -
@@ -91,8 +91,8 @@ cursor 19 17 visible
 17 29-30 #ffffff #f7f7f4 -
 18 0-1 #545e6c #ecedea -
 18 1-5 #1d232c #ecedea b
-18 5-17 #545e6c #ecedea -
-18 17-30 #ffffff #f7f7f4 -
+18 5-16 #545e6c #ecedea -
+18 16-30 #ffffff #f7f7f4 -
 19 0-1 #ffffff #f7f7f4 -
 19 1-11 #545e6c #f7f7f4 -
 19 11-14 #1d232c #caced3 b
