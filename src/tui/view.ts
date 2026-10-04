@@ -52,6 +52,11 @@ export interface ConversationViewOptions {
   version?: string;
 }
 
+/** Every panel mode the view can show in place of the conversation body; adding a mode requires a catalog screen for it. */
+export const PANEL_MODES = Object.freeze(["endpoint", "credential", "callback", "login", "approval", "sessions", "model", "preferences", "tree", "history", "undo", "review", "search", "help", "tool-approval"] as const);
+/** One panel mode from `PANEL_MODES`; the view uses "" when the conversation owns the body. */
+export type PanelMode = (typeof PANEL_MODES)[number];
+
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
 export function createConversationView(renderer: CliRenderer, options: ConversationViewOptions) {
   const controller = options.controller;
@@ -101,7 +106,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let sessionKey = "";
   let activeSessionId = "";
   const sessionViewState = new Map<string, { draft: string; cursor: number; scroll: number }>();
-  let panelMode = "";
+  let panelMode: PanelMode | "" = "";
   let savedDraft = "";
   let savedDraftCursor = 0;
   let savedDraftSelection: ReturnType<TextareaRenderable["getSelection"]> = null;
@@ -414,7 +419,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     // The focus marker lives in the header; seeing only a long block's tail is insufficient.
     return !!node?.visible && !!node.height && transcript.visible && !panelMode && node.y >= transcript.viewport.y && node.y < transcript.viewport.y + transcript.viewport.height;
   };
-  const externalPanelFor = (snapshot: TuiSnapshot) => snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.history ? "history" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
+  const externalPanelFor = (snapshot: TuiSnapshot): PanelMode | "" => snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.history ? "history" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
   /** Return the selected item's text only when its current highlight was painted; otherwise ask for the action again. */
   const verifiedInspection = (snapshot: TuiSnapshot, again: string): string | undefined => {
     if (!inspection) return;
@@ -895,7 +900,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (externalPanel && inspection) { previousInspection = inspection; clearInspection(); }
       if (externalPanel || searchOpen) controller.commandHelpOpen = false;
       if (searchOpen && externalPanel) { searchOpen = false; searchScrollToMatch = false; searchAcceptPending = false; searchIndex.clear(); }
-      const nextPanel = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && !reader && snapshot.toolApproval ? "tool-approval" : "");
+      const nextPanel: PanelMode | "" = externalPanel || (searchOpen ? "search" : controller.commandHelpOpen ? "help" : !inspection && !reader && snapshot.toolApproval ? "tool-approval" : "");
       if (nextPanel !== panelMode) {
         if (!panelMode && nextPanel) {
           if (!sessionChanged) {
@@ -1272,7 +1277,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           if (!selected) textRow(picker, fitLine("No results · ^W scope", width - 2), theme.muted);
           const activity = selected?.activityAt ? selected.activityAt.slice(0, 16).replace("T", " ") : "Activity unknown";
           textRow(picker, fitLine(width >= 50 ? `Last activity: ${selected?.activityAt ?? "unknown"}` : activity, width - 2), theme.muted);
-          if (renderer.height >= 14) textRow(picker, fitLine(selected ? `${selected.workspaceRoot || "Unknown workspace"} · ${selected.id}` : "Ctrl+W includes other workspaces and recovery files", width - 2), theme.muted);
+          if (renderer.height >= 14) textRow(picker, fitLine(selected ? `${selected.workspaceRoot ? shortenWorkspacePath(selected.workspaceRoot, options.home, width - 2) : "Unknown workspace"} · ${selected.id}` : "Ctrl+W includes other workspaces and recovery files", width - 2), theme.muted);
           if (renderer.height >= 10) textRow(picker, fitLine(sessions.error ?? (sessions.loading ? "Loading…" : selected?.state ?? "Nothing selected"), width - 2), sessions.error ? theme.error : theme.muted);
           textRow(picker, fitLine(width < 60 ? "↑↓ Enter Esc ^W ^L" : `↑↓ preview · PgUp/PgDn page · Enter resume · Esc restore · ${sessions.total ? sessions.offset + sessions.selectedIndex + 1 : 0}/${sessions.total}`, width - 2), theme.muted);
         } else if (snapshot.modelPicker) {
@@ -2004,6 +2009,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   refresh();
   return {
     refresh,
+    /** Report the panel mode shown in place of the conversation body, or "" when none is open. */
+    panelMode: (): PanelMode | "" => panelMode,
     /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */
     freezeDraftForExit(): { task?: ExitDraftCheckpoint; saved: boolean; failed: boolean } {
       const snapshot = controller.snapshot();

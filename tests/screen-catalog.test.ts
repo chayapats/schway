@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { SCREENS, variantsFor } from "./screen-catalog/screens.ts";
-import { renderScreen } from "./screen-catalog/harness.ts";
+import { CATALOG_API_KEY, CATALOG_CALLBACK, catalogCaptures, panelCoverageGaps, renderScreen } from "./screen-catalog/harness.ts";
 import { parseScreen, serializeScreen } from "./screen-catalog/format.ts";
 import { TUI_THEMES } from "../src/tui/theme.ts";
 import { buildGallery } from "./screen-catalog/gallery.ts";
@@ -194,18 +194,19 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "history-list", "history-detail", "history-stopped-turn", "history-undo-note", "history-missing-evidence", "history-truncation", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool", "reader-code", "reader-code-wrapped", "reader-table", "reader-no-matches", "reader-approval"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "approval-deny-reason", "approval-diff-overflow", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "api-key-entry", "callback-entry", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "history-list", "history-detail", "history-stopped-turn", "history-undo-note", "history-missing-evidence", "history-truncation", "delete-session-busy", "session-picker", "branch-tree-continue", "branch-tree-fork", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool", "reader-code", "reader-code-wrapped", "reader-table", "reader-no-matches", "reader-approval"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);
 });
 test("catalog repeated renders are byte-identical", async () => {
-  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "review-multi-turn", "inspection-code", "stopped-streaming", "stopped-tool", "draft-restored", "draft-not-saved", "details-model", "details-review", "details-notice", "details-recovery", "details-unavailable"]) {
+  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "review-multi-turn", "inspection-code", "stopped-streaming", "stopped-tool", "draft-restored", "draft-not-saved", "details-model", "details-review", "details-notice", "details-recovery", "details-unavailable",
+    "api-key-entry", "callback-entry", "session-picker", "branch-tree-continue", "branch-tree-fork", "approval-deny-reason", "approval-diff-overflow"]) {
     const screen = SCREENS.find(s => s.id === id)!, variant = variantsFor(screen).find(v => v.id === "dark-80")!;
     setSystemTime(new Date(fixedTime)); const first = await renderScreen(screen, variant);
     setSystemTime(new Date(fixedTime)); expect(await renderScreen(screen, variant)).toBe(first);
   }
-}, 15_000);
+}, 60_000);
 test("catalog goldens contain no host paths, identities or changing timestamps", async () => {
   const username = userInfo().username;
   for (const file of await files(directory)) {
@@ -216,6 +217,28 @@ test("catalog goldens contain no host paths, identities or changing timestamps",
     expect([...text.matchAll(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z/g)].map(match => match[0]).filter(time => time !== fixedTime)).toEqual([]);
   }
 });
+test("catalog goldens never show the fixture API key or browser callback", async () => {
+  // Any typed or pasted prefix is distinctive enough to prove the masked surfaces leaked nothing.
+  const needles = [CATALOG_API_KEY, CATALOG_CALLBACK, CATALOG_API_KEY.slice(0, 8), "catalog-fixture", "localhost:1455"];
+  for (const file of await files(directory)) {
+    const text = await readFile(join(directory, file), "utf8");
+    for (const needle of needles) expect(text.includes(needle), `${file} contains ${needle}`).toBe(false);
+  }
+  for (const id of ["api-key-entry", "callback-entry"]) expect(await readFile(join(directory, id, "dark-80.golden"), "utf8")).toContain("••••");
+});
+test("every panel mode and required sub-state has a catalog screen", async () => {
+  // A focused run captures only some screens; render each missing one once so the gate always sees the whole catalog.
+  for (const screen of SCREENS) if (!catalogCaptures.has(screen.id)) {
+    setSystemTime(new Date(fixedTime)); const variants = variantsFor(screen); await renderScreen(screen, variants.find(variant => variant.id === "dark-80") ?? variants[0]!);
+  }
+  const gaps = panelCoverageGaps(SCREENS.map(screen => screen.id), catalogCaptures);
+  if (gaps.length) throw new Error(`No catalog screen shows ${gaps.join(", ")}. Add a screen that reaches each one.`);
+  // The gate fails, by name, when the only screen for a mode or sub-state is removed.
+  const without = (id: string) => panelCoverageGaps(SCREENS.map(screen => screen.id).filter(screenId => screenId !== id), catalogCaptures);
+  expect(without("callback-entry")).toEqual(['panel mode "callback"']);
+  expect(without("approval-deny-reason")).toEqual(['sub-state "tool approval with reason entry"']);
+  expect(without("branch-tree-fork")).toEqual(['sub-state "branch tree after Tab switches to a new fork"']);
+}, 600_000);
 const fixture: CapturedFrame = { cols: 5, rows: 1, cursor: [4, 1], lines: [{ spans: [
   { text: "ก้", width: 1, fg: RGBA.fromInts(12, 34, 56, 128), bg: RGBA.defaultBackground(), attributes: 0x1ff },
   { text: "⚡", width: 2, fg: RGBA.fromInts(12, 34, 56, 128), bg: RGBA.defaultBackground(), attributes: 0xff },

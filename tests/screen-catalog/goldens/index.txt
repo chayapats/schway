@@ -9,9 +9,13 @@ read-only-search-matches
 read-only-search-no-matches
 approval-command
 approval-edit
+approval-deny-reason
+approval-diff-overflow
 sign-in-chooser
 chatgpt-more-options
 grok-more-options
+api-key-entry
+callback-entry
 endpoint-url-empty
 endpoint-url-error
 subscription-sign-in
@@ -73,6 +77,9 @@ history-undo-note
 history-missing-evidence
 history-truncation
 delete-session-busy
+session-picker
+branch-tree-continue
+branch-tree-fork
 recent-work-resume
 compaction
 no-color
