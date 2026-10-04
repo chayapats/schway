@@ -1,0 +1,137 @@
+schway-screen 1
+screen sign-in-chooser
+title Sign-in chooser
+description The connection chooser groups subscriptions, API keys and a custom endpoint.
+variant light-40
+size 40x30
+cursor 6 27 visible
+== text
+ ⚡ schway  /project
+
+
+ Not connected
+ Connect a provider · Alt+L
+
+
+
+
+
+
+
+
+
+
+
+  Sign in
+    Subscription
+      › ChatGPT
+        Grok
+    API key
+        OpenAI
+        xAI
+    Custom endpoint
+        OpenAI-compatible
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ○ Not connected  Esc back
+ Enter · Tab more options · Esc back
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-40 #ffffff #ecedea -
+01 0-40 #ffffff #f7f7f4 -
+02 0-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-14 #1d232c #f7f7f4 b
+03 14-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-22 #545e6c #f7f7f4 -
+04 22-27 #1d232c #caced3 b
+04 27-40 #ffffff #f7f7f4 -
+05 0-40 #ffffff #f7f7f4 -
+06 0-40 #ffffff #f7f7f4 -
+07 0-40 #ffffff #f7f7f4 -
+08 0-40 #ffffff #f7f7f4 -
+09 0-40 #ffffff #f7f7f4 -
+10 0-40 #ffffff #f7f7f4 -
+11 0-40 #ffffff #f7f7f4 -
+12 0-40 #ffffff #f7f7f4 -
+13 0-40 #ffffff #f7f7f4 -
+14 0-40 #ffffff #f7f7f4 -
+15 0-40 #ffffff #f7f7f4 -
+16 0-1 #ffffff #f7f7f4 -
+16 1-2 #ffffff #e1e3df -
+16 2-9 #0a5894 #e1e3df -
+16 9-39 #ffffff #e1e3df -
+16 39-40 #ffffff #f7f7f4 -
+17 0-1 #ffffff #f7f7f4 -
+17 1-2 #ffffff #e1e3df -
+17 2-16 #545e6c #e1e3df -
+17 16-39 #ffffff #e1e3df -
+17 39-40 #ffffff #f7f7f4 -
+18 0-1 #ffffff #f7f7f4 -
+18 1-2 #ffffff #e1e3df -
+18 2-15 #0a5894 #c7d2d6 -
+18 15-39 #ffffff #e1e3df -
+18 39-40 #ffffff #f7f7f4 -
+19 0-1 #ffffff #f7f7f4 -
+19 1-2 #ffffff #e1e3df -
+19 2-12 #1d232c #e1e3df -
+19 12-39 #ffffff #e1e3df -
+19 39-40 #ffffff #f7f7f4 -
+20 0-1 #ffffff #f7f7f4 -
+20 1-2 #ffffff #e1e3df -
+20 2-11 #545e6c #e1e3df -
+20 11-39 #ffffff #e1e3df -
+20 39-40 #ffffff #f7f7f4 -
+21 0-1 #ffffff #f7f7f4 -
+21 1-2 #ffffff #e1e3df -
+21 2-14 #1d232c #e1e3df -
+21 14-39 #ffffff #e1e3df -
+21 39-40 #ffffff #f7f7f4 -
+22 0-1 #ffffff #f7f7f4 -
+22 1-2 #ffffff #e1e3df -
+22 2-11 #1d232c #e1e3df -
+22 11-39 #ffffff #e1e3df -
+22 39-40 #ffffff #f7f7f4 -
+23 0-1 #ffffff #f7f7f4 -
+23 1-2 #ffffff #e1e3df -
+23 2-19 #545e6c #e1e3df -
+23 19-39 #ffffff #e1e3df -
+23 39-40 #ffffff #f7f7f4 -
+24 0-1 #ffffff #f7f7f4 -
+24 1-2 #ffffff #e1e3df -
+24 2-25 #1d232c #e1e3df -
+24 25-39 #ffffff #e1e3df -
+24 39-40 #ffffff #f7f7f4 -
+25 0-1 #ffffff #f7f7f4 -
+25 1-39 #ecedea #f7f7f4 -
+25 39-40 #ffffff #f7f7f4 -
+26 0-1 #ffffff #f7f7f4 -
+26 1-5 #0a5894 #ecedea -
+26 5-16 #545e6c #ecedea -
+26 16-39 #ffffff #ecedea -
+26 39-40 #ffffff #f7f7f4 -
+27 0-1 #ffffff #f7f7f4 -
+27 1-39 #ecedea #f7f7f4 -
+27 39-40 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-25 #545e6c #dadcdb b
+28 25-26 #545e6c #ecedea -
+28 26-29 #1d232c #c9cdd2 b
+28 29-34 #545e6c #ecedea -
+28 34-40 #ffffff #f7f7f4 -
+29 0-1 #ffffff #f7f7f4 -
+29 1-6 #1d232c #caced3 b
+29 6-9 #545e6c #f7f7f4 -
+29 9-12 #1d232c #caced3 b
+29 12-28 #545e6c #f7f7f4 -
+29 28-31 #1d232c #caced3 b
+29 31-36 #545e6c #f7f7f4 -
+29 36-40 #ffffff #f7f7f4 -

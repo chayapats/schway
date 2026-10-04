@@ -14,6 +14,7 @@ import { getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import type { TurnOutcome } from "./controller-types.ts";
 import { LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_STATES, pathStateNote } from "./review-scope.ts";
 import { TurnLayer } from "./controller-turn.ts";
+import { SESSION_BLOCKED_HINT } from "./running-hints.ts";
 
 /** History has no reload key, so a failed current read names Esc; Enter on the file then reads it again. */
 export const HISTORY_CURRENT_DIFF_FAILED = "Current diff unavailable · Esc back";
@@ -114,7 +115,7 @@ export function historyUndoLine(turn: Pick<HistoryTurn, "turnId" | "undo" | "fil
   }
   // Missing or unfinalized evidence cannot show whether the turn edited files.
   if (turn.evidence === "missing" || turn.attempts.length <= turn.incompleteAttempts || !undo.known) return "Undo status unknown · /undo preview";
-  if (undo.blocked === "session-write") return "Undo blocked · /resume reload saved work";
+  if (undo.blocked === "session-write") return `Undo blocked · ${SESSION_BLOCKED_HINT}`;
   if (undo.blocked === "no-workspace") return "Nothing to undo now";
   if (!turn.incompleteAttempts && !turn.files.items.some(file => file.source === "tool")) return "No file edits to undo";
   if (undo.targetTurnId === turn.turnId) return undo.targetVerdict === "preview" ? "Undo available · /undo previews this turn"

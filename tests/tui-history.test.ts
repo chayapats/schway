@@ -431,7 +431,7 @@ test("history labels distinguish outcomes, unknown time and every undo state", (
   expect(historyUndoLine(base, { ...undo, targetTurnId: "t", targetVerdict: "changed-since" })).toBe("Every file changed since · nothing to undo");
   expect(historyUndoLine(base, { ...undo, targetTurnId: "t", targetVerdict: "read-only" })).toBe("Nothing to undo · /undo shows why");
   expect(historyUndoLine(base, { ...undo, targetVerdict: "changed-since" })).toBe("Nothing to undo now");
-  expect(historyUndoLine(base, { known: true, blocked: "session-write", preImages: [] })).toBe("Undo blocked · /resume reload saved work");
+  expect(historyUndoLine(base, { known: true, blocked: "session-write", preImages: [] })).toBe("Undo blocked · /new start fresh · /sessions browse");
   expect(historyUndoLine({ ...base, incompleteAttempts: 1 }, undo)).toBe("Undo status unknown · /undo preview");
   expect(historyUndoLine({ ...base, files: { total: 1, truncated: false, items: [{ path: "a", source: "shell" }] } }, undo)).toBe("No file edits to undo");
   expect(historyCommandLine({ id: "0".repeat(16), command: "bun test", exitCode: 1, ended: "exit", status: "success" }).text).toBe("bun test · Exit 1");

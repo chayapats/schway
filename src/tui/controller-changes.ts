@@ -4,7 +4,7 @@ import { openUndoStore } from "../undo/store.ts";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { stat } from "node:fs/promises";
 import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../config/config.ts";
-import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
+import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus, workspaceDirectoryExists } from "../workspace/git.ts";
 import type { ChangeReview, TurnOutcome } from "./controller-types.ts";
 import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
 import { CURRENT_DIFF_FAILED, DETECTED_FILE_NOTE, LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_HEADING, WORKSPACE_REVIEW_STATES, gitFileState, workspacePartialNote, pathStateNote, reviewScopeDetails, workspaceFailedRows, workspaceReviewDetails, workspaceUnavailableRows, type ReviewScope, type WorkspaceReviewRead } from "./review-scope.ts";
@@ -23,6 +23,11 @@ interface ReviewContext {
   /** Explanation shown for every file when current Git content cannot be read. */
   unavailable?: string;
   identity: string;
+}
+
+/** /changes error for a missing primary workspace directory; it matches review's status and names the retry. */
+export function workspaceUnavailableCommand(root: string): string {
+  return `Workspace unavailable · Restore ${root}, then run /changes again`;
 }
 
 /** Working-tree change review and per-turn outcome capture. */
@@ -50,6 +55,11 @@ export abstract class ChangesLayer extends BranchesLayer {
     const trimmed = args.trim();
     const [sub, ...rest] = trimmed.split(/\s+/);
     const action = !sub ? "status" : sub.toLowerCase();
+    // A missing workspace directory is not a Git failure; name it the way review does.
+    if ((action === "status" || action === "diff") && !await workspaceDirectoryExists(this.workspace.root)) {
+      this.fail(workspaceUnavailableCommand(this.workspace.root));
+      return false;
+    }
     if (action === "mode") {
       const origin = this.configEditor?.origins.git ? ` [${this.configEditor.origins.git}]` : "";
       this.notice(`Change tracking: ${mode} · /changes review · F2 details`, `${origin ? `Configuration source:${origin}.\n` : ""}Off disables inspection; on-demand and snapshot capture paths and hashes before and after each turn, never file content. Snapshot also shows the comparison in /changes status. Diffs load only when requested.`);

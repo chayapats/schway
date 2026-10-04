@@ -15,6 +15,7 @@ import { ChangesLayer } from "./controller-changes.ts";
 import type { ChangeReview, UndoPreview, UndoPreviewFile } from "./controller-types.ts";
 import { CURRENT_DIFF_FAILED, LOADING_CURRENT_DIFF, pathStateNote } from "./review-scope.ts";
 import { UNDO_REVIEW_OUTSIDE } from "./undo-view.ts";
+import { SESSION_BLOCKED_HINT } from "./running-hints.ts";
 
 /** Review opened from the undo panel: its paths, Git query paths and the identity it began in. */
 interface UndoReviewContext {
@@ -45,7 +46,7 @@ export abstract class UndoLayer extends ChangesLayer {
   async undoCommand(args: string): Promise<boolean> {
     if (this.disposed || this.running) return false;
     if (args.trim()) { this.fail("Usage: /undo"); return false; }
-    if (this.sessionWriteBlocked) { this.fail("Session storage blocked · /resume reload saved work"); return false; }
+    if (this.sessionWriteBlocked) { this.fail(`Session storage blocked · ${SESSION_BLOCKED_HINT}`); return false; }
     if (!this.home || !this.workspace) { this.notice("Nothing to undo"); return true; }
     this.undoBusy = true;
     const session = this.session, branch = session.activeBranchId;
@@ -140,7 +141,7 @@ export abstract class UndoLayer extends ChangesLayer {
     const generation = ++this.reviewGeneration;
     const review: ChangeReview = { heading: "Review · current changes", fromUndo: true, files: files.map(file => ({ ...file })),
       selected: prior && prior.selected < files.length ? prior.selected : 0, detail: "", rows: [], showingDetails: prior?.showingDetails ?? false, loading: true,
-      details: "Review shows current working-tree diffs for paths in the undo panel. Undo restores only edit and write changes with saved copies; other paths stay as they are. Changes seen during a turn may include edits made outside Schway. Current diff is read from Git when review opens, when you select a file and when Ctrl+R reloads." };
+      details: undoReviewDetails("loading") };
     const context: UndoReviewContext = { review, absolute, queries: [...absolute], ready: false, identity: this.undoReviewIdentity() };
     this.changeReview = review;
     this.undoReview = context;
@@ -161,6 +162,7 @@ export abstract class UndoLayer extends ChangesLayer {
     }
     context.ready = true;
     review.loading = false;
+    review.details = undoReviewDetails(!files.length ? "outside" : this.gitChangeTracking() === "off" ? "off" : context.gitRoot !== undefined ? "read" : context.unavailable?.startsWith(CURRENT_DIFF_FAILED) ? "failed" : "non-git");
     if (!files.length) {
       review.detail = redactSecrets(context.unavailable ?? "", this.secrets);
       review.rows = [{ sign: " ", text: review.detail }];
@@ -344,6 +346,20 @@ function turnList(ordinals: readonly number[]): string {
 
 /** Skip badge for a post-image that no longer matches current bytes or permissions. */
 const CHANGED_SINCE = "changed since · skip";
+
+/** F2 details for an undo-panel review; only a review that read Git says when Git is read. */
+export function undoReviewDetails(state: "loading" | "outside" | "off" | "non-git" | "failed" | "read"): string {
+  const scope = "Review shows current working-tree diffs for paths in the undo panel. Undo restores only edit and write changes with saved copies; other paths stay as they are. Changes seen during a turn may include edits made outside Schway.";
+  const read = {
+    loading: "Reading current Git status for this workspace.",
+    outside: "No listed path is inside this workspace, so review read no Git state.",
+    off: 'Change tracking is off (git.changeTracking="off"), so review read no Git state. Set it to on-demand or snapshot to see current diffs.',
+    "non-git": "Git found no repository enclosing this workspace, so no current Git diff is shown. Undo still works.",
+    failed: "Git could not read this workspace. The diff pane shows Git's reason; press Ctrl+R to reload.",
+    read: "Current diff is read from Git when review opens, when you select a file and when Ctrl+R reloads.",
+  }[state];
+  return `${scope} ${read}`;
+}
 
 /** Preserve raw failure diagnostics for the existing details surface. */
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }

@@ -20,6 +20,8 @@ export interface PaletteReturnContext {
   inspectable: boolean;
   /** F2 would open retained notice or recovery details from the composer. */
   details: boolean;
+  /** Keys that lead the composer instead of Enter send (see `blockedSubmitHint`); absent or empty when Enter can send. */
+  blockedSubmit?: string;
 }
 
 /** Note shown above results while a tool approval waits; commands cannot be inserted until it settles. */
@@ -30,6 +32,11 @@ const TURN_RUNNING = "Wait for this turn · Esc stop";
 // While work runs Enter cannot send, so an empty conversation names stopping instead.
 const NOTHING_TO_INSPECT_RUNNING = "Nothing to inspect yet · Esc stop";
 
+/** Reason Alt+I has nothing to select; it names Enter only when the composer can send. */
+export function nothingToInspectReason(context: Pick<PaletteReturnContext, "running" | "blockedSubmit">): string {
+  return context.running ? NOTHING_TO_INSPECT_RUNNING : `Nothing to inspect · ${context.blockedSubmit || "Enter send a task"}`;
+}
+
 /** Project return-context facts into keyboard availability without reading or changing application state. */
 export function keyboardGuideAvailability(context: PaletteReturnContext): Readonly<Record<KeyboardGuideId, KeyboardGuideAvailability>> {
   const ok = { available: true } as const;
@@ -37,13 +44,13 @@ export function keyboardGuideAvailability(context: PaletteReturnContext): Readon
   const approval = context.toolApproval ? blocked(APPROVAL_WAITING) : undefined;
   return {
     newline: approval ?? ok,
-    "inspect-copy": approval ?? (context.inspectable ? ok : blocked(context.running ? NOTHING_TO_INSPECT_RUNNING : "Nothing to inspect · Enter send a task")),
+    "inspect-copy": approval ?? (context.inspectable ? ok : blocked(nothingToInspectReason(context))),
     "copy-selection": approval ?? ok,
     "approval-mode": approval ?? ok,
     shortcuts: approval ?? ok,
     details: approval ?? (context.running ? blocked(TURN_RUNNING) : context.details ? ok : blocked("No details to show · Esc back")),
     review: approval ?? (context.running ? blocked(TURN_RUNNING) : ok),
-    cancel: context.running ? ok : blocked("Nothing running · Enter send a task"),
+    cancel: context.running ? ok : blocked(`Nothing running · ${context.blockedSubmit || "Enter send a task"}`),
   };
 }
 
@@ -128,7 +135,10 @@ export function paletteHint(state: { guide: boolean; inserted: boolean; selected
     : state.selected?.kind === "keyboard" ? ["↑↓ select", "Enter show keys", "Esc restore"]
     : state.selected ? ["↑↓ select", "Tab preview", "Enter insert", "Esc restore"]
     : ["Esc restore"];
-  // Keep the actions that change layers; arrows are the first hint to drop at narrow widths.
-  if (Bun.stringWidth(segments.join(" · ")) > columns && segments[0] === "↑↓ select") segments.shift();
+  // Keep Enter and the Esc way out; arrows drop first at narrow widths, then the Tab shortcut.
+  for (const optional of ["↑↓ select", "Tab preview", "Tab complete"]) {
+    const index = segments.indexOf(optional);
+    if (Bun.stringWidth(segments.join(" · ")) > columns && index >= 0) segments.splice(index, 1);
+  }
   return segments.join(" · ");
 }

@@ -169,7 +169,10 @@ export function readerBodyPosition(document: ReaderDocument, layout: ReaderLayou
   return layout.pinned && position.offset < document.bodyStart ? { offset: document.bodyStart, horizontal: position.horizontal } : position;
 }
 
-/** Position that reveals a match a third of the way down the body, scrolling horizontally only when needed. */
+/**
+ * Position that reveals a match a third of the way down the body, scrolling horizontally only when needed.
+ * Near the end it stops at the last full page, so the body never shows blank rows that earlier lines could fill.
+ */
 export function revealMatch(document: ReaderDocument, layout: ReaderLayout, current: ReaderPosition, match: ReaderSearchMatch): ReaderPosition {
   const at = document.view.positionAt(match.start);
   const end = document.view.positionAt(match.end);
@@ -177,7 +180,9 @@ export function revealMatch(document: ReaderDocument, layout: ReaderLayout, curr
   const visible = layout.viewport.wrap || at.horizontal >= current.horizontal && end.horizontal <= current.horizontal + columns;
   const horizontal = visible ? current.horizontal : Math.max(0, at.horizontal - Math.floor(columns / 3));
   const moved = document.view.move({ offset: at.offset, horizontal }, layout.viewport, { rows: -Math.floor((layout.viewport.rows - 1) / 3) });
-  return readerBodyPosition(document, layout, { offset: moved.offset, horizontal });
+  const revealed = readerBodyPosition(document, layout, { offset: moved.offset, horizontal });
+  const last = readerEnd(document, layout, horizontal);
+  return last.offset < revealed.offset ? { offset: last.offset, horizontal } : revealed;
 }
 
 function matchesIn(matches: readonly ReaderSearchMatch[], start: number, end: number): number[] {
@@ -278,9 +283,12 @@ export function paintReader(input: {
   for (let index = window.rows.length; index < layout.viewport.rows; index++) lines.push([]);
   if (layout.search) {
     const query = fitLine(input.search?.query ?? "", Math.max(1, Math.floor(columns / 2)));
-    const text = !input.search?.query ? "Find in this block · Type a query · Esc back"
-      : result.matches.length ? `Find: ${query} · ${selected + 1}/${result.matches.length}${result.limited ? "+" : ""} · ↑↓ next · Enter keep · Esc restore`
-      : `Find: ${query} · No matches · Esc restore`;
+    // While an approval waits, Esc hands input to it instead of restoring, as the header and hint row say.
+    const approval = layout.status.includes("approval");
+    const escape = approval ? "Esc review request" : "Esc restore";
+    const text = !input.search?.query ? `Find in this block · Type a query · ${approval ? escape : "Esc back"}`
+      : result.matches.length ? `Find: ${query} · ${selected + 1}/${result.matches.length}${result.limited ? "+" : ""} · ↑↓ next · Enter keep · ${escape}`
+      : `Find: ${query} · No matches · ${escape}`;
     lines.push([fg(theme.accent)(fitLine(text, columns))]);
   }
   return new StyledText(lines.flatMap((chunks, index) => index ? [fg(theme.muted)("\n"), ...chunks] : chunks));
