@@ -101,9 +101,11 @@ export interface ChangeReview {
   scope?: ReviewScope;
   /** Listed path whose current Git content `rows` show, set together with `selected`. */
   currentPath?: string;
+  /** Paths came from the undo panel, not one turn's record; the list shows no source badges and `scope` stays unset. */
+  fromUndo?: true;
 }
 
-/** One file-tool diff or non-undoable shell row with its action badge. */
+/** One file-tool diff, or a read-only `shell` row for a path without saved undo, with its action badge. */
 export interface UndoPreviewFile {
   path: string;
   absolutePath: string;
@@ -120,6 +122,12 @@ export interface UndoPreview {
   files: UndoPreviewFile[];
   selected: number;
   result: boolean;
+  /** The target precedes the latest accepted turn on this branch. */
+  older?: boolean;
+  /** Read-only state with no applicable undo; Enter does nothing while present. */
+  readOnlyStatus?: string;
+  /** Short explanations shown above the selected file. */
+  notes?: string[];
 }
 
 /** Renderable controller state with a readonly transcript array; entries are not guaranteed to be deep copies. */

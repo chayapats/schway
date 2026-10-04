@@ -166,7 +166,7 @@ export const SCREENS: readonly Screen[] = [
     await writeFile(join(ui.root, "clamp.ts"), `${await readFile(join(ui.root, "clamp.ts"), "utf8")}export default clamp;\n`);
     ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush();
   }, ready: s => reviewReady(s) && s.changeReview!.rows.filter(row => row.comparison).length === 2 },
-  { id: "undo-preview", title: "Undo preview", description: "Undo previews file restores, a deletion and a shell change.", drive: async ui => {
+  { id: "undo-preview", title: "Undo preview", description: "Undo previews file restores, a deletion and a change without saved undo.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
     await writeFile(join(ui.root, "README.md"), "Changes made afterwards.\n");
     await enter(ui, "/undo");
@@ -174,6 +174,21 @@ export const SCREENS: readonly Screen[] = [
   { id: "undo-preview-no-git", title: "Undo without Git", description: "Undo restores file-tool changes when shell detection is unavailable.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); await enter(ui, "/undo");
   }, ready: s => !!s.undoPreview },
+  { id: "undo-shell-only", title: "Undo without saved changes", description: "A change without saved undo lists its path read-only with review and close actions.", drive: async ui => {
+    await enter(ui, "Generate the output"); await ui.waitFor(completed); await enter(ui, "/undo");
+  }, ready: s => s.undoPreview?.readOnlyStatus === "No saved undo for these changes" },
+  { id: "undo-shell-only-review", title: "Review from undo", description: "Alt+R from the undo panel shows current diffs for its paths without source badges.", drive: async ui => {
+    await enter(ui, "Generate the output"); await ui.waitFor(completed); await enter(ui, "/undo");
+    await ui.waitFor(s => !!s.undoPreview); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush();
+  }, ready: s => reviewReady(s) && !!s.changeReview!.fromUndo && s.changeReview!.rows.some(row => row.text === "generated") },
+  { id: "undo-older-target", title: "Undo an older turn", description: "Undo names an older target turn and the newer change that stays.", drive: async ui => {
+    await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
+    await enter(ui, "Generate the output"); await ui.waitFor(s => completed(s) && s.transcript.some(row => row.text.includes("Generated the output file.")));
+    await enter(ui, "/undo");
+  }, ready: s => s.undoPreview?.older === true },
+  { id: "undo-detection-unavailable", title: "Undo without change detection", description: "Without change detection, undo names the limit and its details action.", noColor: true, drive: async ui => {
+    await enter(ui, "Generate the output"); await ui.waitFor(completed); await enter(ui, "/undo");
+  }, ready: s => s.transcript.at(-1)?.text === "Change detection unavailable · F2 details" },
   { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion names its reason, retry command and details action.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session: Undo store busy ·")) },
   { id: "recent-work-resume", title: "Recent work resume", description: "A saved conversation is offered for resumption.", drive: async ui => { await ui.controller.offerRecentSession(ui.sessionDirectory!); }, ready: s => !!s.recentSession },
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },

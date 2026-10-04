@@ -71,7 +71,8 @@ test("rendered undo previews and restores edited files, deletes created files, a
       expect(ui.session.items.filter(item => item.type === "turn_undo")).toHaveLength(1);
       expect(ui.captureCharFrame()).toContain("Undid turn 1 · 2 files");
       await ui.send("Continue"); expect(sawNote).toBe(true);
-      await ui.send("/undo"); expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo");
+      // Tracking is off, so the later turn's other changes can't be ruled out.
+      await ui.send("/undo"); expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Change detection unavailable · F2 details");
     } finally { await ui.dispose(); }
   });
 });
@@ -365,8 +366,10 @@ test("one later-modified file opens no panel and missing blobs are skipped", asy
       await writeFile(join(root, "clamp.ts"), modified);
       const directory = join(ui.home, ".schway/undo", ui.session.rootId, "blobs");
       for (const blob of await readdir(directory)) await rm(join(directory, blob));
-      await ui.send("/undo"); expect(ui.controller.snapshot().undoPreview).toBeUndefined();
-      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo · every file changed since");
+      await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "Nothing to undo in turn 1", files: [{ path: "clamp.ts", action: "skip", status: "no saved copy · skip" }] });
+      ui.mockInput.pressEnter(); await ui.settle(); ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.session.items.some(item => item.type === "turn_undo")).toBe(false);
       expect(await readFile(join(root, "clamp.ts"), "utf8")).toBe(modified);
     } finally { await ui.dispose(); }
   });
@@ -665,9 +668,9 @@ test("shell paths are previewed without diffs or writes and shell-only turns are
       await ui.send("Edit and generate"); await ui.send("Generate another"); await ui.send("/undo");
       expect(ui.controller.snapshot().undoPreview?.turnNumber).toBe(1);
       expect(ui.captureCharFrame()).toContain("gen/out.json");
-      expect(ui.captureCharFrame()).toContain("changed by shell · not undoable");
+      expect(ui.captureCharFrame()).toContain("no saved undo");
       ui.mockInput.pressArrow("down"); await ui.settle();
-      expect(ui.controller.snapshot().undoPreview?.files[1]?.rows).toEqual([]);
+      expect(ui.controller.snapshot().undoPreview?.files[1]?.rows.map(row => row.text)).toEqual(["Seen during turn 1 · no saved undo", "Undo leaves this file as it is · Alt+R review"]);
       ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
       expect(await readFile(join(root, "a.ts"), "utf8")).toBe("before");
       expect(await readFile(join(root, "gen/out.json"), "utf8")).toBe("x\n");
@@ -803,7 +806,8 @@ test("pruned turns are silently skipped by the rendered undo stack", async () =>
       ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
       await expect(access(join(root, "a.ts"))).rejects.toThrow();
       expect(await readFile(join(root, "b.ts"), "utf8")).toBe("second");
-      await ui.send("/undo"); expect(ui.captureCharFrame()).toContain("Nothing to undo");
+      // A pruned manifest is indistinguishable from data that was never saved, so nothing claims expiry.
+      await ui.send("/undo"); expect(ui.captureCharFrame()).toContain("No saved undo data · F2 details");
     } finally { await ui.dispose(); }
   });
 });

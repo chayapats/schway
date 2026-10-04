@@ -49,6 +49,10 @@ review-multi-turn
 review-staged-unstaged
 undo-preview
 undo-preview-no-git
+undo-shell-only
+undo-shell-only-review
+undo-older-target
+undo-detection-unavailable
 delete-session-busy
 recent-work-resume
 compaction
