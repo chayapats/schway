@@ -122,6 +122,13 @@ async function selectPath(c: TuiController, path: string) {
   await c.selectReviewFile(index - review.selected);
   return c.snapshot().changeReview!;
 }
+/** Details for a review that read no working-tree content must not describe one. */
+function expectNoGitClaims(details: string) {
+  expect(details).not.toContain("shows the current working tree");
+  expect(details).not.toContain("read from Git when review opens");
+  expect(details).not.toContain("Review scope:");
+  expect(details).not.toContain("Branch:");
+}
 /** Workspace bytes, Git index and refs that review must never change. */
 async function fingerprint(root: string) {
   const files: Record<string, string> = {};
@@ -276,7 +283,10 @@ test("change tracking off opens the fallback without starting Git or reading the
   expect(review.rows.map(row => row.text)).toEqual(["Change tracking is off · /config set git {\"changeTracking\":\"on-demand\"} enable", "No Git state was read. Esc back"]);
   expect(await c.refreshChangeReview()).toBe(true);
   expect(c.toggleReviewDetails()).toBe(true);
-  expect(c.snapshot().changeReview!.details).toStartWith("Previous turn details unavailable");
+  const details = c.snapshot().changeReview!.details;
+  expect(details).toStartWith("Previous turn details unavailable");
+  expect(details).toContain('Change tracking is off (git.changeTracking="off"), so review read no Git state');
+  expectNoGitClaims(details);
   expect(spy.commands).toEqual([]);
 });
 
@@ -287,6 +297,8 @@ test("non-Git, missing, unreadable and failed workspaces each get a distinct sta
   const nonGit = controller(createSession(), workspaceOf(plain), "plain");
   await nonGit.openChangeReview();
   expect(nonGit.snapshot().changeReview!.rows.map(row => row.text)).toEqual(["Not a Git workspace · Esc back", "Current changes need Git. Coding and undo still work."]);
+  expect(nonGit.snapshot().changeReview!.details).toContain("Git found no repository enclosing this workspace");
+  expectNoGitClaims(nonGit.snapshot().changeReview!.details);
 
   const none = controller(createSession(), undefined as unknown as Workspace, "none", { workspace: undefined, contextManager: createContextManager(workspaceOf(plain)) });
   await none.openChangeReview();
@@ -299,6 +311,8 @@ test("non-Git, missing, unreadable and failed workspaces each get a distinct sta
   await rename(root, moved);
   await missing.openChangeReview();
   expect(missing.snapshot().changeReview!.rows.map(row => row.text)).toEqual(["Workspace unavailable · Ctrl+R reload", `Restore ${root}, then reload.`]);
+  expect(missing.snapshot().changeReview!.details).toContain("missing or unreadable, so review read no Git state");
+  expectNoGitClaims(missing.snapshot().changeReview!.details);
   await rename(moved, root);
   await missing.refreshChangeReview();
   expect(missing.snapshot().changeReview!.files.map(file => file.path)).toEqual(["tracked.txt"]);
@@ -311,6 +325,10 @@ test("non-Git, missing, unreadable and failed workspaces each get a distinct sta
   expect(rows[0]).toBe("Current changes unavailable · Ctrl+R reload");
   expect(rows[1]).toStartWith("Git status failed:");
   expect(failed.snapshot().changeReview!.files).toEqual([]);
+  expect(failed.snapshot().changeReview!.details).toContain("Git could not read this workspace");
+  expectNoGitClaims(failed.snapshot().changeReview!.details);
+  expect(none.snapshot().changeReview!.details).toContain("No workspace is active");
+  expectNoGitClaims(none.snapshot().changeReview!.details);
 });
 
 test("resume reads the resumed workspace, not the launch checkout", async () => {
@@ -461,4 +479,40 @@ for (const version of (await readdir(fixtureRoot)).sort()) test(`published ${ver
   expect(c.toggleReviewDetails()).toBe(true);
   expect(await readFile(path, "utf8")).toBe(bytes);
   expect(counted.calls()).toBe(0);
+});
+
+test("a repository Git refuses to read is a failed inspection, not a non-Git workspace", async () => {
+  const dir = await temp(), root = join(dir, "project"), bin = join(dir, "bin");
+  await repo(root); await writeFile(join(root, "tracked.txt"), "dirty\n");
+  await mkdir(bin);
+  await writeFile(join(bin, "git"), "#!/bin/sh\necho \"fatal: detected dubious ownership in repository at '$PWD'\" >&2\nexit 128\n", { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  cleanups.push(() => { process.env.PATH = path; });
+  const c = controller(createSession(), workspaceOf(root), "dubious");
+  await c.openChangeReview();
+  const review = c.snapshot().changeReview!;
+  expect(review.rows.map(row => row.text)).toEqual(["Current changes unavailable · Ctrl+R reload", `Git inspection failed: detected dubious ownership in repository at '${root}'`]);
+  expect(review.files).toEqual([]);
+  expectNoGitClaims(review.details);
+  process.env.PATH = path;
+  await c.refreshChangeReview();
+  expect(c.snapshot().changeReview!.files.map(file => file.path)).toEqual(["tracked.txt"]);
+});
+
+test("more than 50 changed paths shows a partial-list marker beside the capped list and Details count", async () => {
+  const dir = await temp(), root = join(dir, "project");
+  await repo(root);
+  for (let i = 0; i < 57; i++) await writeFile(join(root, `new-${String(i).padStart(2, "0")}.txt`), `${i}\n`);
+  const c = controller(createSession(), workspaceOf(root), "many");
+  const ui = await view(c, root, 100, 28);
+  ui.mockInput.pressKey("r", { meta: true });
+  await ui.waitFor(idle(c));
+  const review = c.snapshot().changeReview!;
+  expect(review.files).toHaveLength(50);
+  expect(review.heading).toBe("Review · current changes · First 50 of 57 · F2 details");
+  expect(ui.captureCharFrame()).toContain("Review · current changes · First 50 of 57 · F2 details");
+  expect(review.details).toContain("Showing the first 50 of 57 changed paths.");
+  await ui.f2();
+  expect(ui.captureCharFrame()).toContain("Showing the first 50 of 57 changed paths.");
 });

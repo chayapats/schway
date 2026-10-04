@@ -12,14 +12,14 @@ cursor 1 1 hidden
 
   Current working tree  │ Current changes details
   › clamp.ts   unstaged │ Previous turn details unavailable                  █
-    notes.md  untracked │ No live turn record is held, so this review shows  ▀
-                        │ the current working tree instead. Schway keeps
-                        │ file-tool counts, snapshots, elapsed time and
-                        │ command exits only in memory for the latest turn of
-                        │ this run. After restart, resume or a session or
-                        │ branch switch it cannot show what an earlier turn
-                        │ changed, and it does not rebuild that from saved
-                        │ conversation text.
+    notes.md  untracked │ No live turn record is held. Schway keeps file-tool
+                        │ counts, snapshots, elapsed time and command exits
+                        │ only in memory for the latest turn of this run.
+                        │ After restart, resume or a session or branch switch
+                        │ it cannot show what an earlier turn changed, and it
+                        │ does not rebuild that from saved conversation text.
+                        │
+                        │ This review shows the current working tree instead.
                         │
                         │ Workspace: ***/home/demo
                         │ Branch: main
@@ -65,20 +65,19 @@ cursor 1 1 hidden
 06 0-2 #ffffff #0e1117 -
 06 2-23 #e6eaf0 #0e1117 -
 06 23-26 #2c3444 #0e1117 -
-06 26-76 #e6eaf0 #0e1117 -
-06 76-77 #ffffff #0e1117 -
-06 77-78 #9a9ea3 #252527 -
+06 26-77 #e6eaf0 #0e1117 -
+06 77-78 #ffffff #252527 -
 06 78-80 #ffffff #0e1117 -
 07 0-23 #ffffff #0e1117 -
 07 23-26 #2c3444 #0e1117 -
-07 26-73 #e6eaf0 #0e1117 -
-07 73-77 #ffffff #0e1117 -
+07 26-76 #e6eaf0 #0e1117 -
+07 76-77 #ffffff #0e1117 -
 07 77-78 #ffffff #252527 -
 07 78-80 #ffffff #0e1117 -
 08 0-23 #ffffff #0e1117 -
 08 23-26 #2c3444 #0e1117 -
-08 26-72 #e6eaf0 #0e1117 -
-08 72-77 #ffffff #0e1117 -
+08 26-74 #e6eaf0 #0e1117 -
+08 74-77 #ffffff #0e1117 -
 08 77-78 #ffffff #252527 -
 08 78-80 #ffffff #0e1117 -
 09 0-23 #ffffff #0e1117 -
@@ -88,26 +87,22 @@ cursor 1 1 hidden
 09 78-80 #ffffff #0e1117 -
 10 0-23 #ffffff #0e1117 -
 10 23-26 #2c3444 #0e1117 -
-10 26-74 #e6eaf0 #0e1117 -
-10 74-77 #ffffff #0e1117 -
+10 26-77 #e6eaf0 #0e1117 -
 10 77-78 #ffffff #252527 -
 10 78-80 #ffffff #0e1117 -
 11 0-23 #ffffff #0e1117 -
 11 23-26 #2c3444 #0e1117 -
-11 26-76 #e6eaf0 #0e1117 -
-11 76-77 #ffffff #0e1117 -
+11 26-77 #e6eaf0 #0e1117 -
 11 77-78 #ffffff #252527 -
 11 78-80 #ffffff #0e1117 -
 12 0-23 #ffffff #0e1117 -
 12 23-26 #2c3444 #0e1117 -
-12 26-75 #e6eaf0 #0e1117 -
-12 75-77 #ffffff #0e1117 -
+12 26-77 #ffffff #0e1117 -
 12 77-78 #ffffff #252527 -
 12 78-80 #ffffff #0e1117 -
 13 0-23 #ffffff #0e1117 -
 13 23-26 #2c3444 #0e1117 -
-13 26-44 #e6eaf0 #0e1117 -
-13 44-77 #ffffff #0e1117 -
+13 26-77 #e6eaf0 #0e1117 -
 13 77-78 #ffffff #252527 -
 13 78-80 #ffffff #0e1117 -
 14 0-23 #ffffff #0e1117 -

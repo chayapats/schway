@@ -573,8 +573,9 @@ test("missing git leaves turns usable and the next submit recovers", async () =>
       await controller.submit("hello without git");
       expect(controller.snapshot().status).toBe("idle");
       expect(controller.running).toBe(false);
-      expect(await controller.changesCommand("")).toBe(true);
-      expect(lastNotice(controller)).toContain("Snapshot unavailable");
+      // Without a git binary, status reports the inspection failure rather than calling the checkout non-Git.
+      expect(await controller.changesCommand("")).toBe(false);
+      expect(controller.snapshot().transcript.at(-1)!.text).toContain("Git inspection failed: git unavailable: spawn git ENOENT");
     } finally {
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = realSpawn;
     }
@@ -891,5 +892,52 @@ test("/changes diff reports why a literal path has no comparison instead of impl
       expect(primary).not.toContain("No textual diff");
     }
     controller.dispose();
+  });
+});
+
+/** Run `fn` with a fake `git` first on PATH (or no `git` at all), restoring PATH afterwards. */
+async function withFakeGit(dir: string, script: string | undefined, fn: () => Promise<void>) {
+  const bin = join(dir, script === undefined ? "empty-bin" : "fake-bin");
+  await mkdir(bin, { recursive: true });
+  if (script !== undefined) {
+    await writeFile(join(bin, "git"), `#!/bin/sh\n${script}\n`);
+    await Bun.$`chmod +x ${join(bin, "git")}`.quiet();
+  }
+  const path = process.env.PATH;
+  process.env.PATH = script === undefined ? bin : `${bin}:${path}`;
+  try { await fn(); } finally { process.env.PATH = path; }
+}
+
+test("dubious ownership and a missing git binary are inspection failures, not non-Git workspaces", async () => {
+  await withTempDir(async dir => {
+    await initRepo(dir);
+    const dubious = `echo "fatal: detected dubious ownership in repository at '$PWD'" >&2\necho "To add an exception for this directory, call:" >&2\nexit 128`;
+    await withFakeGit(dir, dubious, async () => {
+      const status = await inspectGitStatus(dir);
+      expect(status).toEqual({ error: `Git inspection failed: detected dubious ownership in repository at '${dir}'` });
+      const snapshot = await captureGitSnapshot(dir);
+      expect("error" in snapshot && snapshot.error).toBe(`Git inspection failed: detected dubious ownership in repository at '${dir}'`);
+      const preview = await getGitDiffPreview(dir, "tracked.txt");
+      expect("error" in preview && preview.error).toStartWith("Git inspection failed: detected dubious ownership");
+      // /changes status and diff report the failure instead of calling the checkout non-Git.
+      const controller = controllerFor(dir, "on-demand", createScriptedModel({ text: "ok" }));
+      expect(await controller.changesCommand("status")).toBe(false);
+      expect(controller.snapshot().transcript.at(-1)!.text).toContain("Git inspection failed: detected dubious ownership");
+      expect(controller.snapshot().transcript.at(-1)!.text).not.toContain("Not a Git workspace");
+      expect(await controller.changesCommand("diff")).toBe(false);
+      expect(controller.snapshot().transcript.at(-1)!.text).not.toContain("Not a Git workspace");
+      controller.dispose();
+    });
+    await withFakeGit(dir, undefined, async () => {
+      const status = await inspectGitStatus(dir);
+      expect("error" in status && status.error).toStartWith("Git inspection failed: git unavailable");
+    });
+    // A directory outside any repository is still a plain non-Git workspace.
+    const plain = join(dir, "..", `${dir.split("/").at(-1)}-plain`);
+    await mkdir(plain, { recursive: true });
+    try {
+      const status = await inspectGitStatus(plain);
+      expect(status).toEqual({ isGit: false, root: plain });
+    } finally { await rm(plain, { recursive: true, force: true }); }
   });
 });

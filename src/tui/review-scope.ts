@@ -111,17 +111,48 @@ export function workspaceFailedRows(error: string): string[] {
   return ["Current changes unavailable · Ctrl+R reload", error];
 }
 
-/** Details for current changes: why turn details are absent, the live workspace identity, then the scope notes. */
-export function workspaceReviewDetails(identity: { root?: string; branch?: string; detached?: boolean; shown?: number; total?: number }): string {
+/** What a current-changes review actually read, so Details never claim Git content that was not read. */
+export type WorkspaceReviewRead =
+  | { kind: "loading"; root: string }
+  | { kind: "read"; root: string; branch?: string; detached?: boolean; shown: number; total: number }
+  | { kind: "off" }
+  | { kind: "no-workspace" }
+  | { kind: "unavailable"; root: string }
+  | { kind: "non-git"; root: string }
+  | { kind: "failed"; root: string };
+
+/** Short heading suffix when Git reported more changed paths than the list shows; absent for a complete list. */
+export function workspacePartialNote(shown: number, total: number): string | undefined {
+  return total > shown ? `First ${shown} of ${total} · F2 details` : undefined;
+}
+
+/** Details for current changes: why turn details are absent, then only what this review really read. */
+export function workspaceReviewDetails(read: WorkspaceReviewRead): string {
+  const workspace = "root" in read ? [`Workspace: ${read.root}`] : [];
+  const lines = ((): string[] => {
+    switch (read.kind) {
+      case "loading": return [...workspace, "Reading current Git status for this workspace."];
+      case "off": return ['Change tracking is off (git.changeTracking="off"), so review read no Git state and lists no paths. Set it to on-demand or snapshot to review current changes.'];
+      case "no-workspace": return ["No workspace is active, so review read nothing and lists no paths."];
+      case "unavailable": return [...workspace, "The workspace directory is missing or unreadable, so review read no Git state. Restore it, then press Ctrl+R to reload."];
+      case "non-git": return [...workspace, "Git found no repository enclosing this workspace, so there are no Git changes to list. Coding and undo still work."];
+      case "failed": return [...workspace, "Git could not read this workspace, so review lists no paths. The current diff pane shows Git's reason; press Ctrl+R to reload."];
+      case "read": return [
+        "This review shows the current working tree instead.",
+        "",
+        ...workspace,
+        read.detached ? "Branch: detached HEAD" : read.branch === undefined ? "Branch: unknown" : `Branch: ${read.branch}`,
+        ...(read.total > read.shown ? [`Showing the first ${read.shown} of ${read.total} changed paths. /changes status shows the staged, unstaged and untracked counts.`] : []),
+        "",
+        reviewScopeDetails({ kind: "workspace" }),
+      ];
+    }
+  })();
   return [
     "Previous turn details unavailable",
-    "No live turn record is held, so this review shows the current working tree instead. Schway keeps file-tool counts, snapshots, elapsed time and command exits only in memory for the latest turn of this run. After restart, resume or a session or branch switch it cannot show what an earlier turn changed, and it does not rebuild that from saved conversation text.",
+    "No live turn record is held. Schway keeps file-tool counts, snapshots, elapsed time and command exits only in memory for the latest turn of this run. After restart, resume or a session or branch switch it cannot show what an earlier turn changed, and it does not rebuild that from saved conversation text.",
     "",
-    ...(identity.root === undefined ? [] : [`Workspace: ${identity.root}`]),
-    ...(identity.detached ? ["Branch: detached HEAD"] : identity.branch === undefined ? [] : [`Branch: ${identity.branch}`]),
-    ...(identity.total !== undefined && identity.shown !== undefined && identity.total > identity.shown ? [`Showing the first ${identity.shown} of ${identity.total} changed paths. /changes status lists the counts.`] : []),
-    ...(identity.root === undefined && identity.branch === undefined && !identity.detached ? [] : [""]),
-    reviewScopeDetails({ kind: "workspace" }),
+    ...lines,
   ].join("\n");
 }
 

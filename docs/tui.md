@@ -279,11 +279,15 @@ counts, hashes, elapsed time, exit codes or authorship from saved conversation t
 After resume, review reads the resumed session's workspace, not the directory
 Schway was launched from.
 
-Each state names its next step: `No current changes · Esc back` for a clean tree,
-`Not a Git workspace · Esc back`, `Workspace unavailable · Ctrl+R reload` when the
-directory is missing, `Current changes unavailable · Ctrl+R reload` when Git status
-fails, and `No workspace active · Esc back`. With `git.changeTracking` set to `off`,
-review says so and reads no Git state. Opening review never calls the model, adds a
+The list shows at most 50 paths, like `/changes status`; a longer list adds
+`First 50 of N · F2 details` to the heading. Each state names its next step:
+`No current changes · Esc back` for a clean tree, `Not a Git workspace · Esc back`
+when no repository encloses the workspace, `Workspace unavailable · Ctrl+R reload`
+when the directory is missing, `Current changes unavailable · Ctrl+R reload` with
+Git's reason when Git cannot read the repository (for example dubious ownership or
+a missing `git` binary), and `No workspace active · Esc back`. With
+`git.changeTracking` set to `off`, review says so and reads no Git state. Details
+then describe only what was read. Opening review never calls the model, adds a
 turn, writes the session, stages content or changes files or refs.
 
 ## Color roles

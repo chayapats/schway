@@ -6,7 +6,7 @@ import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TuiController, type TuiSnapshot, type TuiControllerOptions } from "../../src/tui/controller.ts";
@@ -73,6 +73,9 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     const saved = await createJsonlSession({ directory: sessionsDirectory(home), workspace });
     saved.append({ type: "user", id: "saved-user", content: [{ type: "text", text: "Fix the clamp upper bound" }] }, { type: "assistant", id: "saved-answer", content: [{ type: "text", text: "Fixed clamp so it respects the upper bound." }] });
     resumed = await loadJsonlSession({ directory: sessionsDirectory(home), id: saved.header.id });
+    // Error states: Git refuses a corrupt index, or the saved workspace disappears after resume.
+    if (screen.id === "resumed-review-git-failed") await writeFile(join(root, ".git", "index"), "not an index");
+    if (screen.id === "resumed-review-unavailable") await rename(root, `${root}-moved`);
   }
   const durableSession = draft ? await createJsonlSession({ directory: sessionsDirectory(home), workspace }) : undefined;
   const session = durableSession ?? resumed ?? createSession();
@@ -157,7 +160,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await stopped(signal); return { ok: false, message: "Cancelled." };
     }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
-  if (screen.id === "details-recovery") options.changeTracking = "off";
+  if (screen.id === "details-recovery" || screen.id === "resumed-review-off") options.changeTracking = "off";
   // Exercise real diagnostic redaction before layout so temporary-root bytes never enter goldens.
   if (screen.id === "details-review" || resumedReview) options.secrets = [temp!];
   if (screen.id === "approval-command" || screen.id === "approval-edit") options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });

@@ -11,7 +11,7 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { writeTool } from "../src/tools/write.ts";
-import { currentDiffLabel, emptyFilesLabel, fitPathStart, gitFileState, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel, reviewScopeDetails, turnFileBadge, workspaceReviewDetails } from "../src/tui/review-scope.ts";
+import { currentDiffLabel, emptyFilesLabel, fitPathStart, gitFileState, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel, reviewScopeDetails, turnFileBadge, workspacePartialNote, workspaceReviewDetails } from "../src/tui/review-scope.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 
@@ -108,14 +108,24 @@ test("workspace scope labels name the current working tree and its details never
   const change = (staged: string, unstaged: string, untracked = false) => gitFileState({ path: "a", staged, unstaged, untracked, binary: false });
   expect([change("?", "?", true), change("M", "."), change(".", "M"), change("M", "M"), change("D", "."), change(".", "D"), change("R", "."), change("U", "U"), change("A", "A")])
     .toEqual(["untracked", "staged", "unstaged", "partly staged", "deleted", "deleted", "renamed", "conflict", "conflict"]);
-  const details = workspaceReviewDetails({ root: "/work/ไทย", branch: "feature/ไทย", shown: 50, total: 51 });
+  const details = workspaceReviewDetails({ kind: "read", root: "/work/ไทย", branch: "feature/ไทย", shown: 50, total: 51 });
   expect(details.split("\n")[0]).toBe("Previous turn details unavailable");
   expect(details).toContain("Workspace: /work/ไทย");
   expect(details).toContain("Branch: feature/ไทย");
   expect(details).toContain("Showing the first 50 of 51 changed paths.");
   expect(details).toContain("never the exact patch of a resumed turn");
   expect(details).not.toContain("Files from turn");
-  expect(workspaceReviewDetails({ root: "/w", detached: true })).toContain("Branch: detached HEAD");
+  expect(workspaceReviewDetails({ kind: "read", root: "/w", detached: true, shown: 1, total: 1 })).toContain("Branch: detached HEAD");
+  expect(workspacePartialNote(50, 120)).toBe("First 50 of 120 · F2 details");
+  expect(workspacePartialNote(3, 3)).toBeUndefined();
+  // Details that read no Git content never describe the working tree or Git reads.
+  for (const read of [{ kind: "off" }, { kind: "no-workspace" }, { kind: "unavailable", root: "/w" }, { kind: "non-git", root: "/w" }, { kind: "failed", root: "/w" }, { kind: "loading", root: "/w" }] as const) {
+    const text = workspaceReviewDetails(read);
+    expect(text.split("\n")[0]).toBe("Previous turn details unavailable");
+    expect(text).not.toContain("shows the current working tree");
+    expect(text).not.toContain("read from Git when review opens");
+    expect(text).not.toContain("Review scope:");
+  }
   expect(reviewScopeDetails(scope)).not.toContain("detected");
 });
 

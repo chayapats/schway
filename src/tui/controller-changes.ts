@@ -7,7 +7,7 @@ import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../conf
 import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import type { ChangeReview, TurnOutcome } from "./controller-types.ts";
 import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
-import { CURRENT_DIFF_FAILED, DETECTED_FILE_NOTE, LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_HEADING, WORKSPACE_REVIEW_STATES, gitFileState, pathStateNote, reviewScopeDetails, workspaceFailedRows, workspaceReviewDetails, workspaceUnavailableRows, type ReviewScope } from "./review-scope.ts";
+import { CURRENT_DIFF_FAILED, DETECTED_FILE_NOTE, LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_HEADING, WORKSPACE_REVIEW_STATES, gitFileState, workspacePartialNote, pathStateNote, reviewScopeDetails, workspaceFailedRows, workspaceReviewDetails, workspaceUnavailableRows, type ReviewScope, type WorkspaceReviewRead } from "./review-scope.ts";
 import { buildOutcomeDetails } from "./outcome-details.ts";
 import { BranchesLayer } from "./controller-branches.ts";
 
@@ -174,12 +174,14 @@ export abstract class ChangesLayer extends BranchesLayer {
     const root = this.workspace?.root;
     // A reload keeps the earlier list visible but marks content as pending, so nothing older looks live.
     const review: ChangeReview = { heading: WORKSPACE_REVIEW_HEADING, scope, files: reload ? reload.files.map(file => ({ ...file })) : [], selected: reload?.selected ?? 0,
-      detail: WORKSPACE_REVIEW_STATES.loading, rows: [{ sign: " ", text: WORKSPACE_REVIEW_STATES.loading }], details: redactSecrets(workspaceReviewDetails({ root }), this.secrets),
+      detail: WORKSPACE_REVIEW_STATES.loading, rows: [{ sign: " ", text: WORKSPACE_REVIEW_STATES.loading }], details: "",
       showingDetails: reload?.showingDetails ?? false, loading: true, ...(reload?.currentPath === undefined ? {} : { currentPath: reload.currentPath }) };
     const context: ReviewContext = { review, ready: false, queries: [], identity: this.reviewIdentity() };
     this.changeReview = review;
     this.reviewContext = context;
-    const settle = (rows: readonly string[]) => {
+    const describe = (read: WorkspaceReviewRead) => { review.details = redactSecrets(workspaceReviewDetails(read), this.secrets); };
+    const settle = (rows: readonly string[], read: WorkspaceReviewRead) => {
+      describe(read);
       review.files = [];
       review.selected = 0;
       review.currentPath = undefined;
@@ -190,18 +192,23 @@ export abstract class ChangesLayer extends BranchesLayer {
       return true;
     };
     // Off mode reads nothing at all, so opening review after resume never inspects the workspace.
-    if (this.gitChangeTracking() === "off") return settle(WORKSPACE_REVIEW_STATES.off);
-    if (root === undefined) return settle(WORKSPACE_REVIEW_STATES.noWorkspace);
+    if (this.gitChangeTracking() === "off") return settle(WORKSPACE_REVIEW_STATES.off, { kind: "off" });
+    if (root === undefined) return settle(WORKSPACE_REVIEW_STATES.noWorkspace, { kind: "no-workspace" });
+    describe({ kind: "loading", root });
     const available = await stat(root).then(info => info.isDirectory(), () => false);
     if (!this.reviewCurrent(context, generation)) return false;
-    if (!available) return settle(workspaceUnavailableRows(root));
+    if (!available) return settle(workspaceUnavailableRows(root), { kind: "unavailable", root });
     const status = await inspectGitStatus(root);
     if (!this.reviewCurrent(context, generation)) return false;
-    if ("error" in status) return settle(workspaceFailedRows(status.error));
-    if (!status.isGit) return settle(WORKSPACE_REVIEW_STATES.nonGit);
-    review.details = redactSecrets(workspaceReviewDetails({ root: status.root, branch: status.branch, detached: status.detached, shown: status.files.length, total: status.totalFiles }), this.secrets);
-    if (!status.files.length) return settle(WORKSPACE_REVIEW_STATES.clean);
+    if ("error" in status) return settle(workspaceFailedRows(status.error), { kind: "failed", root });
+    if (!status.isGit) return settle(WORKSPACE_REVIEW_STATES.nonGit, { kind: "non-git", root });
+    const read: WorkspaceReviewRead = { kind: "read", root: status.root, branch: status.branch, detached: status.detached, shown: status.files.length, total: status.totalFiles };
+    if (!status.files.length) return settle(WORKSPACE_REVIEW_STATES.clean, read);
+    describe(read);
     review.files = status.files.map(file => ({ path: file.path, source: "git" as const, state: gitFileState(file) }));
+    // A partial list says so in the always-visible heading, matching the /changes status cap.
+    const partial = workspacePartialNote(review.files.length, status.totalFiles);
+    if (partial) review.heading = `${WORKSPACE_REVIEW_HEADING} · ${partial}`;
     context.queries = review.files.map(file => file.path);
     context.gitRoot = status.root;
     // Keep the selected path across reloads when Git still lists it; otherwise clamp to the new list.

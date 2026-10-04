@@ -177,6 +177,12 @@ export const SCREENS: readonly Screen[] = [
     ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("No current changes") },
   { id: "resumed-review-no-git", title: "Resumed review outside Git", description: "Outside Git, review names why current changes are unavailable and how to go back.", noColor: true, drive: openResumedReview,
     ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Not a Git workspace") },
+  { id: "resumed-review-off", title: "Resumed review, tracking off", description: "With change tracking off, review reads no Git state and names the setting that enables it.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Change tracking is off") },
+  { id: "resumed-review-unavailable", title: "Resumed review, workspace missing", description: "A saved workspace removed after resume names the directory to restore and the reload key.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Workspace unavailable") },
+  { id: "resumed-review-git-failed", title: "Resumed review, Git failed", description: "When Git cannot read the repository, review shows Git's reason and the reload key instead of calling it non-Git.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Current changes unavailable") },
   { id: "undo-preview", title: "Undo preview", description: "Undo previews file restores, a deletion and a change without saved undo.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
     await writeFile(join(ui.root, "README.md"), "Changes made afterwards.\n");
@@ -217,7 +223,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
-  if (screen.id === "review-multi-turn" || screen.id === "resumed-review") variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
+  if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
