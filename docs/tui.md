@@ -417,18 +417,25 @@ When nothing can be undone, `/undo` names the reason:
 | Message | Meaning |
 | --- | --- |
 | `No saved undo for these changes · Alt+R review · Esc close` | A read-only list of paths seen without saved copies on this branch. |
-| `Nothing to undo in turn N · Alt+R review · Esc close` | Every saved file changed since or its saved copy is missing; other paths stay listed. |
+| `Nothing to undo in turn N · Alt+R review · Esc close` | No saved file can be restored; per-file reasons and other paths stay listed. |
 | `Nothing to undo · every file changed since` | Every saved file changed since and nothing else is known. |
 | `Change detection unavailable · F2 details` | No saved file changes, and other changes can't be listed. Files may still have changed. |
 | `No saved undo data · F2 details` | A turn has no undo data. Retention may have removed it, or it was never saved. |
 | `Nothing to undo` | No saved changes remain on this branch. |
 
-Per-file badges distinguish `changed since · skip`, `no saved copy · skip` and
-`can't read · skip`. Schway never reports undo data as expired, because a missing
-manifest can't show whether retention removed it.
+Per-file badges distinguish `changed since · skip`, `no saved copy · skip`,
+`undo data incomplete · skip` and `can't read · skip`. Schway never reports undo
+data as expired, because a missing manifest can't show whether retention removed
+it. When a considered turn has no undo data, the panel adds a note such as
+`No saved undo data for turn 3`, both before an older undo and in the read-only
+list. If Enter reverts nothing because a copy is unavailable rather than changed,
+the result stays open with `Nothing to undo in turn N · Esc close`. The saved undo
+result records such files as not reverted, and the model is told they could not
+be reverted, never that they changed.
 
 **Alt+R** in any undo panel opens `Review · current changes`, the current diff for
-each listed workspace path, including after restart. Esc returns to the same undo
+each listed workspace path, including after restart. Paths without saved undo
+appear there without a `shell` badge or shell attribution. Esc returns to the same undo
 panel; Esc again closes it and restores the draft. Reviewing, selecting and
 closing never write files, Git, the session or undo data. Undo never runs inverse
 shell commands, `git reset` or `git checkout`.

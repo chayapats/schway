@@ -401,7 +401,10 @@ test("a shell-only change lists its path read-only with a reachable review and l
       ui.mockInput.pressEnter(); await ui.settle();
       expect(ui.controller.snapshot().undoPreview?.readOnlyStatus).toBe("No saved undo for these changes");
       ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
-      expect(ui.controller.snapshot().changeReview).toMatchObject({ heading: "Review · current changes", files: [{ path: "generated.txt", source: "shell" }] });
+      expect(ui.controller.snapshot().changeReview).toMatchObject({ heading: "Review · current changes", files: [{ path: "generated.txt", source: "observed" }] });
+      const review = ui.captureCharFrame();
+      expect(review).toContain("Review · current changes"); expect(review).not.toContain("changed by shell"); expect(review).not.toMatch(/\bshell\b/i);
+      expect(ui.controller.snapshot().changeReview?.rows.map(row => row.text).join("\n")).not.toContain("shell");
       expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "generated" }));
       ui.mockInput.pressEscape(); await ui.settle();
       expect(ui.controller.snapshot().changeReview).toBeUndefined();
@@ -542,7 +545,8 @@ test("reload from durable manifests rebuilds the read-only list and review for t
       await ui.undo();
       expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "No saved undo for these changes", files: [{ path: "gen.txt", status: "turn 1 · no saved undo" }] });
       ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
-      expect(ui.controller.snapshot().changeReview?.files).toEqual([{ path: "gen.txt", source: "shell" }]);
+      expect(ui.controller.snapshot().changeReview?.files).toEqual([{ path: "gen.txt", source: "observed" }]);
+      expect(ui.captureCharFrame()).not.toMatch(/\bshell\b/i);
       expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "x" }));
       ui.mockInput.pressEscape(); await ui.settle(); ui.mockInput.pressEscape(); await ui.settle();
       expect(await ui.state()).toEqual(before);
@@ -591,5 +595,74 @@ test("secret and control-sequence paths are redacted in the read-only list and r
       frame = ui.captureCharFrame();
       expect(frame).not.toContain("SECRET123"); expect(frame).not.toContain("\u001b");
     } finally { await ui.dispose(); }
+  });
+});
+
+test("newer turns without saved undo data are named before an older undo and in the read-only list", async () => {
+  await withTempDir(async root => {
+    const f = await fixture(root), first = f.addTurn("first");
+    await change(f.store, first, join(f.work, "edited.txt"), "before", "after");
+    await f.store.recordShell(first, { detection: "git", paths: [] });
+    f.addTurn("headless-shell");
+    const c = f.controller();
+    try {
+      expect(await c.undoCommand("")).toBe(true);
+      expect(c.snapshot().undoPreview).toMatchObject({ turnId: "first", older: true, notes: ["No saved undo data for turn 2"] });
+      c.closeUndoPreview();
+    } finally { c.dispose(); await c.waitForIdle(); }
+  });
+  await withTempDir(async root => {
+    const f = await fixture(root), first = f.addTurn("observed");
+    await f.store.recordShell(first, { detection: "git", paths: [join(f.work, "seen.txt")] });
+    f.addTurn("never-saved");
+    const before = await inventory(root), c = f.controller();
+    try {
+      expect(await c.undoCommand("")).toBe(true);
+      expect(c.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "No saved undo for these changes", notes: ["No saved undo data for turn 2"],
+        files: [{ path: "seen.txt", status: "turn 1 · no saved undo" }] });
+      c.closeUndoPreview();
+      expect(await inventory(root)).toEqual(before);
+    } finally { c.dispose(); await c.waitForIdle(); }
+  });
+});
+
+test("an incomplete target entry is labelled incomplete and recorded without claiming it changed", async () => {
+  await withTempDir(async root => {
+    const f = await fixture(root), turn = f.addTurn("partial");
+    await change(f.store, turn, join(f.work, "a.txt"), "before", "after");
+    await writeFile(join(f.work, "b.txt"), "unsettled");
+    await f.store.capture(turn, join(f.work, "b.txt"));
+    const c = f.controller();
+    try {
+      expect(await c.undoCommand("")).toBe(true);
+      const row = c.snapshot().undoPreview?.files.find(file => file.path === "b.txt");
+      expect(row).toMatchObject({ action: "skip", status: "undo data incomplete · skip", rows: [{ text: "Turn 1 undo data is incomplete · undo leaves this file as it is" }] });
+      await c.applyUndo();
+      expect(await readFile(join(f.work, "a.txt"), "utf8")).toBe("before");
+      expect(await readFile(join(f.work, "b.txt"), "utf8")).toBe("unsettled");
+      const record = f.session.items.at(-1);
+      expect(record).toMatchObject({ type: "turn_undo", reverted: [{ path: "a.txt", action: "restored" }], skipped: [{ path: "b.txt", reason: "failed" }] });
+      expect(record?.type === "turn_undo" && record.note).toBe("The user undid your file changes from the previous turn: a.txt. b.txt could not be reverted.");
+      expect(c.snapshot().undoPreview).toBeUndefined();
+    } finally { c.dispose(); await c.waitForIdle(); }
+  });
+});
+
+test("when nothing is reverted, an unavailable copy keeps the panel and never claims every file changed", async () => {
+  await withTempDir(async root => {
+    const f = await fixture(root), turn = f.addTurn("partial");
+    await change(f.store, turn, join(f.work, "a.txt"), "before", "after");
+    await writeFile(join(f.work, "b.txt"), "unsettled");
+    await f.store.capture(turn, join(f.work, "b.txt"));
+    const c = f.controller();
+    try {
+      expect(await c.undoCommand("")).toBe(true);
+      await writeFile(join(f.work, "a.txt"), "raced");
+      await c.applyUndo();
+      expect(c.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo in turn 1 · Esc close");
+      expect(c.snapshot().undoPreview).toMatchObject({ result: true, files: [{ path: "a.txt", status: "changed since · skip" }, { path: "b.txt", status: "undo data incomplete · skip" }] });
+      expect(f.session.items.some(item => item.type === "turn_undo")).toBe(false);
+      expect(await readFile(join(f.work, "a.txt"), "utf8")).toBe("raced");
+    } finally { c.dispose(); await c.waitForIdle(); }
   });
 });

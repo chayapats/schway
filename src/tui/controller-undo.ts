@@ -42,6 +42,7 @@ export abstract class UndoLayer extends ChangesLayer {
       const notes = [
         ...(unsaved.length ? [`${formatCount(unsaved.length, "change")} without saved undo ${unsaved.length === 1 ? "stays" : "stay"}`] : []),
         ...(limits.undetected.length ? ["Later changes can't be detected here"] : []),
+        ...(limits.missing.length ? [`No saved undo data for ${turnList(limits.missing)}`] : []),
       ];
       const nothing = files.every(file => file.action === "skip");
       // Without known paths left in place, an all-conflict turn keeps the established one-line explanation.
@@ -84,7 +85,8 @@ export abstract class UndoLayer extends ChangesLayer {
     for (const row of preview.files) {
       const path = relative(root, row.absolutePath);
       if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path) || seen.has(path)) continue;
-      seen.add(path); files.push({ path, source: row.action === "shell" ? "shell" : "tool" });
+      // Read-only rows are observations, so review shows no shell attribution for them.
+      seen.add(path); files.push({ path, source: row.action === "shell" ? "observed" : "tool" });
     }
     this.closeChangeReview();
     this.undoPreview = undefined;
@@ -106,6 +108,7 @@ export abstract class UndoLayer extends ChangesLayer {
     this.undoBusy = true;
     const release = this.session.acquireOperation();
     const reverted: TurnUndoRecord["reverted"] = [], skipped: TurnUndoRecord["skipped"] = [];
+    let restoreFailed = false;
     try {
       const store = openUndoStore({ home: this.home });
       const target = (await this.undoEvidence(store)).target;
@@ -113,7 +116,9 @@ export abstract class UndoLayer extends ChangesLayer {
       for (const row of preview.files) {
         if (row.action === "shell") continue;
         const file = target.files.find(file => file.path === row.absolutePath);
-        if (!file || row.action === "skip") { skipped.push({ path: row.path, reason: "changed" }); continue; }
+        // The durable schema has only changed/failed; a missing, incomplete or unreadable copy is recorded as
+        // failed so the model note says it "could not be reverted" rather than claiming the file changed.
+        if (!file || row.action === "skip") { skipped.push({ path: row.path, reason: !file || row.status === CHANGED_SINCE ? "changed" : "failed" }); continue; }
         try {
           const observed = this.undoObservations.get(row);
           if (!observed) throw new FileChangedError(file.path);
@@ -133,17 +138,18 @@ export abstract class UndoLayer extends ChangesLayer {
           if (error instanceof FileChangedError) {
             row.action = "skip"; row.status = "changed since · skip"; skipped.push({ path: row.path, reason: "changed" });
           } else {
-            row.status = `could not restore · ${undoFailureReason(error)}`; skipped.push({ path: row.path, reason: "failed" });
+            row.status = `could not restore · ${undoFailureReason(error)}`; skipped.push({ path: row.path, reason: "failed" }); restoreFailed = true;
             this.retainNoticeDetails(`${row.path}: ${messageOf(error)}`);
           }
         }
       }
-      const failed = skipped.some(file => file.reason === "failed");
+      const failed = restoreFailed;
       preview.result = true;
       if (!reverted.length) {
-        // Keep per-file reasons visible when paths without saved undo remain; no row counts as reverted.
-        if (!failed && !preview.files.some(row => row.action === "shell")) this.undoPreview = undefined;
-        this.notice(failed ? "Undo failed · Esc close" : "Nothing to undo · every file changed since");
+        const allChanged = skipped.every(file => file.reason === "changed");
+        // Keep per-file reasons visible when they differ or paths without saved undo remain; no row counts as reverted.
+        if (!failed && allChanged && !preview.files.some(row => row.action === "shell")) this.undoPreview = undefined;
+        this.notice(failed ? "Undo failed · Esc close" : allChanged ? "Nothing to undo · every file changed since" : `Nothing to undo in turn ${target.turnNumber} · Esc close`);
         return;
       }
       const record: TurnUndoRecord = { type: "turn_undo", id: crypto.randomUUID(), turnId: target.turnId, turnNumber: target.turnNumber,
@@ -184,21 +190,20 @@ export abstract class UndoLayer extends ChangesLayer {
 
   /** Explain why no file-tool undo applies, opening a read-only list only for known paths without saved undo. */
   private explainNothingToUndo(limits: UndoLimits, unsaved: UndoPreviewFile[]): boolean {
-    const turns = (ordinals: number[]) => `${ordinals.length === 1 ? "turn" : "turns"} ${ordinals.slice(0, 10).join(", ")}${ordinals.length > 10 ? ` and ${ordinals.length - 10} more` : ""}`;
     if (unsaved.length) {
       this.undoReturn = undefined;
       this.closeChangeReview();
       this.undoPreview = { turnId: "", turnNumber: limits.unsaved[0]!.ordinal, files: unsaved, selected: 0, result: false, readOnlyStatus: "No saved undo for these changes",
-        notes: limits.undetected.length ? ["Some changes can't be detected here"] : [] };
+        notes: [...(limits.undetected.length ? ["Some changes can't be detected here"] : []), ...(limits.missing.length ? [`No saved undo data for ${turnList(limits.missing)}`] : [])] };
       return true;
     }
     if (limits.undetected.length) {
       const off = this.gitChangeTracking() === "off";
-      this.notice("Change detection unavailable · F2 details", `Undo saves edit and write changes only, and none can be undone on this branch. Change detection was unavailable for ${turns(limits.undetected)}, so files changed in other ways can't be listed. They may still have changed.${limits.missing.length ? ` No undo data is saved for ${turns(limits.missing)}.` : ""} ${off ? 'Change tracking is off; turn it on with /config set git {"changeTracking":"on-demand"}.' : "Detection needs a Git workspace and a completed status capture."}`);
+      this.notice("Change detection unavailable · F2 details", `Undo saves edit and write changes only, and none can be undone on this branch. Change detection was unavailable for ${turnList(limits.undetected)}, so files changed in other ways can't be listed. They may still have changed.${limits.missing.length ? ` No undo data is saved for ${turnList(limits.missing)}.` : ""} ${off ? 'Change tracking is off; turn it on with /config set git {"changeTracking":"on-demand"}.' : "Detection needs a Git workspace and a completed status capture."}`);
       return true;
     }
     if (limits.missing.length) {
-      this.notice("No saved undo data · F2 details", `No undo data is saved for ${turns(limits.missing)}. Retention may have removed it, or it was never saved. Undo can't tell which, and files are left as they are.`);
+      this.notice("No saved undo data · F2 details", `No undo data is saved for ${turnList(limits.missing)}. Retention may have removed it, or it was never saved. Undo can't tell which, and files are left as they are.`);
       return true;
     }
     this.notice("Nothing to undo");
@@ -209,7 +214,7 @@ export abstract class UndoLayer extends ChangesLayer {
   private async previewUndoFile(store: UndoStore, manifest: UndoManifest, path: string): Promise<UndoPreviewFile> {
     const file = manifest.files.find(file => file.path === path)!;
     let current: Buffer | null = null, before: Buffer | null = null;
-    let observed: FileObservation | null = null, unavailable: "missing" | "unreadable" | undefined = file.after === undefined ? "missing" : undefined;
+    let observed: FileObservation | null = null, unavailable: "incomplete" | "missing" | "unreadable" | undefined = file.after === undefined ? "incomplete" : undefined;
     try { observed = await observeFile(path, undefined, { regularOnly: true }); current = observed?.bytes ?? null; }
     catch (error) {
       // Replacement by a directory, link or other entry is a later change; only real read failures are unreadable.
@@ -221,8 +226,9 @@ export abstract class UndoLayer extends ChangesLayer {
       && (file.afterMode === undefined || observed.mode === undefined || file.afterMode === observed.mode);
     const action = eligible ? file.before === null ? "delete" : "restore" : "skip";
     if (unavailable) return { path: displayToolPath(this.workspace!.root, path), absolutePath: path, action: "skip", binary: false,
-      status: unavailable === "missing" ? "no saved copy · skip" : "can't read · skip",
-      rows: [{ sign: " ", text: unavailable === "missing" ? "Saved copy is missing · undo leaves this file as it is" : "Can't read this file · undo leaves it as it is" }] };
+      status: { incomplete: "undo data incomplete · skip", missing: "no saved copy · skip", unreadable: "can't read · skip" }[unavailable],
+      rows: [{ sign: " ", text: { incomplete: `Turn ${manifest.turnNumber} undo data is incomplete · undo leaves this file as it is`,
+        missing: "Saved copy is missing · undo leaves this file as it is", unreadable: "Can't read this file · undo leaves it as it is" }[unavailable] }] };
     /** Decode absent files as empty text and reject binary or invalid UTF-8 content. */
     const decode = (bytes: Buffer | null) => bytes === null ? "" : bytes.includes(0) ? undefined : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     let oldText: string | undefined, newText: string | undefined;
@@ -235,6 +241,11 @@ export abstract class UndoLayer extends ChangesLayer {
     if (eligible && observed) this.undoObservations.set(row, observed);
     return row;
   }
+}
+
+/** Name up to ten turn ordinals, counting the rest. */
+function turnList(ordinals: readonly number[]): string {
+  return `${ordinals.length === 1 ? "turn" : "turns"} ${ordinals.slice(0, 10).join(", ")}${ordinals.length > 10 ? ` and ${ordinals.length - 10} more` : ""}`;
 }
 
 /** Skip badge for a post-image that no longer matches current bytes or permissions. */
