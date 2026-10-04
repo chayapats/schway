@@ -4,6 +4,7 @@ import { removedProviderMessage } from "../config/removed-provider.ts";
 import type { ExtensionCommandInfo } from "../extensions/host.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 import type { TuiController } from "./controller.ts";
+import { runningSubmitNotice } from "./running-hints.ts";
 
 /** Slash command requested from the TUI input editor. */
 export type SlashCommandName =
@@ -137,7 +138,7 @@ export async function dispatchEditorInput(
   const accept = () => { if (!notified) { notified = true; accepted(); } };
   const slash = parseSlashCommand(text);
   const invocation = splitSlashCommand(text);
-  if (controller.running) { controller.notice(invocation?.name === "login" || invocation?.name === "logout" ? "Wait for this turn · Esc stop" : invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Command not run · Esc stop · /${invocation.name} retry` : "Wait for this turn · Esc stop"); return false; }
+  if (controller.running) { controller.notice(invocation?.name === "login" || invocation?.name === "logout" ? "Wait for this turn · Esc stop" : invocation && controller.extensionCommands().some(command => command.name === invocation.name) ? `Command not run · Esc stop · /${invocation.name} retry` : invocation ? "Wait for this turn · Esc stop" : runningSubmitNotice(controller.snapshot().activity?.phase === "stopping")); return false; }
   if (invocation && await controller.commandCollision(invocation.name)) return false;
   if (invocation && controller.extensionCommands().some((command) => command.name === invocation.name)) {
     const executed = await controller.runExtensionCommand(invocation.name, invocation.args, accept);

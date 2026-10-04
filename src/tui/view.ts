@@ -9,6 +9,7 @@ import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscript
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
+import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, recoveryHint, runningPlaceholder } from "./running-hints.ts";
 import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
 import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { SPLASH_DURATION_MS, SPLASH_ACCENT_DURATION_MS, SPLASH_MIN_SIZE, SplashRenderable } from "./splash.ts";
@@ -824,7 +825,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -856,6 +857,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : snapshot.activity || snapshot.status === "running" ? "Esc stops"
           : snapshot.readiness === "loading" ? "Esc cancel"
           : snapshot.recovery?.actions.includes("details") ? "F2 details"
+          : snapshot.status === "error" && snapshot.recovery ? recoveryHint(snapshot.recovery).split(" · ")[0] || "Esc keep editing"
           : snapshot.readiness === "ready" ? "Enter send"
           : snapshot.readiness === "not-connected" || snapshot.readiness === "connect" ? "Alt+L sign in" : "Alt+M model",
       };
@@ -1238,7 +1240,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
         const modeHint = "Shift+Tab change mode · ";
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        const working = !!snapshot.activity || snapshot.status === "running";
+        // Text typed during work is an unsent draft; failed work leads with recovery rather than promising Enter sends.
+        const recoveryKeys = snapshot.status === "error" && snapshot.recovery ? recoveryHint(snapshot.recovery) : "";
+        const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
+          : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? `↑/↓ select · Tab complete · Esc dismiss${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

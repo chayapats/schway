@@ -1,0 +1,100 @@
+schway-screen 1
+screen running-draft
+title Running draft kept
+description Enter during work keeps the multiline Thai draft unsent and names waiting and stopping.
+variant dark-30
+size 30x20
+cursor 19 17 visible
+== text
+ ⚡ schway  /project
+
+ Reading the config loader
+ first.
+   ▸ Check src/config/
+     config.ts
+   ▸ Then▍
+
+ Still working · Wait, then
+ Enter sends
+
+
+ ⠋ Receiving response · Esc …
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › ช่วยอ่านไฟล์ README.md
+     แล้วสรุปเป็นภาษาไทย
+     สั้น ๆ สามบรรทัด
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc stops
+ Working · Esc stop
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-30 #ffffff #161b24 -
+01 0-30 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-13 #e6eaf0 #0e1117 -
+02 13-19 #e6eaf0 #0e1117 b
+02 19-27 #e6eaf0 #0e1117 -
+02 27-30 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-7 #e6eaf0 #0e1117 -
+03 7-30 #ffffff #0e1117 -
+04 0-3 #ffffff #0e1117 -
+04 3-5 #7cc4ff #0e1117 -
+04 5-11 #e6eaf0 #0e1117 -
+04 11-22 #c0acff #42425e -
+04 22-30 #ffffff #0e1117 -
+05 0-5 #ffffff #0e1117 -
+05 5-14 #c0acff #42425e -
+05 14-30 #ffffff #0e1117 -
+06 0-3 #ffffff #0e1117 -
+06 3-5 #7cc4ff #0e1117 -
+06 5-9 #e6eaf0 #0e1117 -
+06 9-10 #7cc4ff #0e1117 -
+06 10-30 #ffffff #0e1117 -
+07 0-30 #ffffff #0e1117 -
+08 0-1 #ffffff #0e1117 -
+08 1-28 #8b95a7 #0e1117 -
+08 28-30 #ffffff #0e1117 -
+09 0-1 #ffffff #0e1117 -
+09 1-12 #8b95a7 #0e1117 -
+09 12-30 #ffffff #0e1117 -
+10 0-30 #ffffff #0e1117 -
+11 0-30 #ffffff #0e1117 -
+12 0-1 #ffffff #0e1117 -
+12 1-2 #7cc4ff #0e1117 b
+12 2-29 #8b95a7 #0e1117 -
+12 29-30 #ffffff #0e1117 -
+13 0-1 #ffffff #0e1117 -
+13 1-29 #161b24 #0e1117 -
+13 29-30 #ffffff #0e1117 -
+14 0-1 #ffffff #0e1117 -
+14 1-5 #7cc4ff #161b24 -
+14 5-24 #e6eaf0 #161b24 -
+14 24-29 #ffffff #161b24 -
+14 29-30 #ffffff #0e1117 -
+15 0-1 #ffffff #0e1117 -
+15 1-5 #ffffff #161b24 -
+15 5-21 #e6eaf0 #161b24 -
+15 21-29 #ffffff #161b24 -
+15 29-30 #ffffff #0e1117 -
+16 0-1 #ffffff #0e1117 -
+16 1-5 #ffffff #161b24 -
+16 5-18 #e6eaf0 #161b24 -
+16 18-29 #ffffff #161b24 -
+16 29-30 #ffffff #0e1117 -
+17 0-1 #ffffff #0e1117 -
+17 1-29 #161b24 #0e1117 -
+17 29-30 #ffffff #0e1117 -
+18 0-1 #8b95a7 #161b24 -
+18 1-5 #e6eaf0 #161b24 b
+18 5-17 #8b95a7 #161b24 -
+18 17-30 #ffffff #0e1117 -
+19 0-1 #ffffff #0e1117 -
+19 1-11 #8b95a7 #0e1117 -
+19 11-14 #e6eaf0 #293140 b
+19 14-19 #8b95a7 #0e1117 -
+19 19-30 #ffffff #0e1117 -

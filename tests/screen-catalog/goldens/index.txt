@@ -34,6 +34,8 @@ draft-restored
 draft-not-saved
 streaming-answer
 running-search
+running-empty
+running-draft
 parallel-tools
 completed-turn
 shell-long-failure
