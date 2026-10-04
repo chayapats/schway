@@ -1,10 +1,10 @@
-import { BoxRenderable, MarkdownRenderable, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, RGBA, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { highlightCode } from "./highlight.ts";
 import { HINT_KEY, keyHintChunks } from "./hints.ts";
 import { easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
-import { mixColor, textOn, themeOn, tint, type TuiTheme } from "./theme.ts";
+import { mixColor, TEXT_ROLES, textOn, themeOn, tint, type TuiTheme } from "./theme.ts";
 import { browserUrl, linkify } from "./links.ts";
 import { boundDisplay, formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { DEFAULT_INLINE_DIFF_LINES } from "../config/config.ts";
@@ -52,6 +52,21 @@ function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { str
     if (next.url) chunk = link(next.url)(chunk);
     return [chunk];
   });
+}
+
+/** Remap native table cell colors from one palette's text roles to another's; returns the same content when nothing changes. */
+function recolorCells(content: TextTableRenderable["content"], from: readonly TuiTheme[], to: TuiTheme): TextTableRenderable["content"] {
+  const map = new Map<string, string>();
+  for (const palette of from) for (const role of TEXT_ROLES) map.set(palette[role], to[role]);
+  const hex = (color: RGBA) => `#${color.toInts().slice(0, 3).map(n => n.toString(16).padStart(2, "0")).join("")}`;
+  let changed = false;
+  const next = content.map(row => row.map(cell => cell?.map(chunk => {
+    const target = chunk.fg && map.get(hex(chunk.fg));
+    if (!target || target === hex(chunk.fg!)) return chunk;
+    changed = true;
+    return { ...chunk, fg: RGBA.fromHex(target) };
+  })));
+  return changed ? next : content;
 }
 
 /** Live text palette for one row; painters recolor rendered Markdown in place so search targets survive fill changes. */
@@ -155,14 +170,29 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   let ink = theme;
   let repaint: (() => void) | undefined;
   let painters: { node: Renderable; apply: (ink: TuiTheme) => void }[] = [];
+  let pruneAt = 64;
   const rowInk: RowInk = {
     paint(node, apply) {
-      if (painters.length > 64) painters = painters.filter(painter => !painter.node.isDestroyed);
+      // Prune destroyed nodes at a doubling threshold so long answers stay linear.
+      if (painters.length >= pruneAt) { painters = painters.filter(painter => !painter.node.isDestroyed); pruneAt = Math.max(64, painters.length * 2); }
       painters.push({ node, apply });
       apply(ink);
     },
   };
-  const renderMarkdownNode = (token: MarkdownToken) => markdownBlock(renderer, token, theme, registerCode, rowInk);
+  // Native tables keep OpenTUI's own node and in-place updates; their cells are remapped from the base palette to the row ink.
+  const renderMarkdownNode = (token: MarkdownToken, context: { defaultRender(): Renderable | null }) => {
+    if (token.type !== "table") return markdownBlock(renderer, token, theme, registerCode, rowInk);
+    const table = context.defaultRender();
+    if (table instanceof TextTableRenderable) {
+      let applied = theme;
+      rowInk.paint(table, palette => {
+        const next = recolorCells(table.content, [theme, applied], palette);
+        if (next !== table.content) table.content = next;
+        applied = palette;
+      });
+    }
+    return table ?? undefined;
+  };
   const codeBlocks = () => {
     const blocks: { id: string; text: string }[] = [];
     const visit = (node: BaseRenderable) => {
@@ -388,6 +418,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
           };
           if (body instanceof MarkdownRenderable && refill) {
             painters = painters.filter(painter => !painter.node.isDestroyed);
+            pruneAt = Math.max(64, painters.length * 2);
             for (const painter of painters) painter.apply(ink);
           } else if (body instanceof MarkdownRenderable) {
             const content = streamText !== undefined ? caretContent() : displayText(entry.text);

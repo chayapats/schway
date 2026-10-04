@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { BoxRenderable, type CapturedFrame } from "@opentui/core";
+import { BoxRenderable, TextTableRenderable, type CapturedFrame } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createTranscriptItem, markdownStyle } from "../src/tui/transcript-view.ts";
 import type { TuiTranscriptEntry } from "../src/tui/controller-types.ts";
@@ -291,8 +291,8 @@ function capture(terminal: { captureSpans(): CapturedFrame }, variant: string): 
   return parseScreen(serializeScreen(terminal.captureSpans(), { screen: "live", title: "Live", description: "Live frame.", variant, cursor: { x: 1, y: 1, visible: false } }));
 }
 
-async function transcriptRow(theme: TuiTheme, entry: TuiTranscriptEntry, clock = { now: 0 }) {
-  const terminal = await createTestRenderer({ width: 60, height: 12 });
+async function transcriptRow(theme: TuiTheme, entry: TuiTranscriptEntry, clock = { now: 0 }, height = 12) {
+  const terminal = await createTestRenderer({ width: 60, height });
   terminal.renderer.setBackgroundColor(theme.background);
   const syntax = markdownStyle(theme);
   cleanups.push(() => { syntax.destroy(); terminal.renderer.destroy(); });
@@ -303,30 +303,42 @@ async function transcriptRow(theme: TuiTheme, entry: TuiTranscriptEntry, clock =
   return { terminal, row };
 }
 
-const ANSWER = "Plan:\n\n- check the [guide](https://example.com/guide) first\n- run `bun test`\n\n1. Read the README\n2. Ship";
+const ANSWER = "Plan:\n\n- check the [guide](https://example.com/guide) first\n- run `bun test`\n\n1. Read the README\n2. Ship\n\n| Step | Where |\n| --- | --- |\n| run `bun test` | [docs](https://example.com/docs) |\n\n---\n\nDone.";
 
 for (const [label, theme] of themes) {
   const variant = `${label.startsWith("NO_COLOR") ? "nocolor-" : ""}${label.includes("light") ? "light" : "dark"}-60`;
   test(`${label} search-highlighted answers recolor Markdown text in place and restore it`, async () => {
     const entry: TuiTranscriptEntry = { id: "answer", kind: "assistant", text: ANSWER };
-    const { terminal, row } = await transcriptRow(theme, entry);
+    const { terminal, row } = await transcriptRow(theme, entry, { now: 0 }, 24);
     row.update(entry, false, false, 58);
     await terminal.renderOnce();
     const plain = terminal.captureCharFrame();
+    expect(plain).toContain("docs (https://example.com/docs)");
+    expect(plain).toContain("Done.");
     const target = row.searchSegments()[0]!.target;
+    const targets = row.searchSegments().map(segment => segment.target);
+    expect(targets.some(node => node instanceof TextTableRenderable)).toBe(true);
     row.setSearchMatch(true);
     await terminal.renderOnce();
     // Same text and the same search targets: only colors change.
     expect(terminal.captureCharFrame()).toBe(plain);
     expect(row.searchSegments()[0]!.target).toBe(target);
     expect(target.isDestroyed).toBe(false);
+    expect(row.searchSegments().map(segment => segment.target)).toEqual(targets);
+    expect(targets.every(node => !node.isDestroyed)).toBe(true);
     const selected = capture(terminal, variant);
     expect(textRuns(selected).some(run => run.bg === theme.border)).toBe(true);
+    // Native table cells (inline code, link label and URL) sit on the search fill too.
+    const tableRow = selected.text.findIndex(line => line.includes("example.com/docs"));
+    for (const cell of ["bun test", "docs", "https://example.com/docs"]) {
+      expect(textRuns(selected).some(run => run.text.includes(cell) && run.bg === theme.border && run.row === tableRow), cell).toBe(true);
+    }
     expect(unreadableRuns(selected, theme)).toEqual([]);
     row.setSearchMatch(false);
     await terminal.renderOnce();
     const restored = capture(terminal, variant);
     expect(textRuns(restored).find(run => run.text.includes("(https://example.com/guide)"))?.fg).toBe(theme.muted);
+    expect(textRuns(restored).find(run => run.text.includes("https://example.com/docs"))?.fg).toBe(theme.muted);
     expect(unreadableRuns(restored, theme)).toEqual([]);
   });
 
