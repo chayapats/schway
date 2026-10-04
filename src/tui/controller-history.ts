@@ -12,8 +12,11 @@ import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
 import { openUndoStore } from "../undo/store.ts";
 import { getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import type { TurnOutcome } from "./controller-types.ts";
-import { CURRENT_DIFF_FAILED, LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_STATES, pathStateNote } from "./review-scope.ts";
+import { LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_STATES, pathStateNote } from "./review-scope.ts";
 import { TurnLayer } from "./controller-turn.ts";
+
+/** History has no reload key, so a failed current read names Esc; Enter on the file then reads it again. */
+export const HISTORY_CURRENT_DIFF_FAILED = "Current diff unavailable · Esc back";
 
 /** What `/undo` would do now, read from durable undo manifests without changing them. */
 export interface HistoryUndoState {
@@ -356,14 +359,14 @@ export abstract class HistoryLayer extends TurnLayer {
     const absolute = isAbsolute(file.path) ? file.path : resolve(root, file.path);
     const status = await inspectGitStatus(this.workspace.root);
     if (stale()) return false;
-    if ("error" in status) return settle([CURRENT_DIFF_FAILED, status.error]);
+    if ("error" in status) return settle([HISTORY_CURRENT_DIFF_FAILED, status.error]);
     if (!status.isGit) return settle(WORKSPACE_REVIEW_STATES.nonGit);
     const inside = relative(status.root, absolute);
     if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return settle([pathStateNote("outside")]);
     const preview = await getGitDiffPreview(status.root, inside);
     if (stale()) return false;
-    if ("error" in preview) return settle([CURRENT_DIFF_FAILED, preview.error]);
-    if (preview.pathState) return settle([pathStateNote(preview.pathState)]);
+    if ("error" in preview) return settle([HISTORY_CURRENT_DIFF_FAILED, preview.error]);
+    if (preview.pathState) return settle([preview.pathState === "unavailable" ? HISTORY_CURRENT_DIFF_FAILED : pathStateNote(preview.pathState)]);
     return settle(parseGitDiff(preview, { includeComparisons: true }));
   }
 

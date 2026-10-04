@@ -297,6 +297,29 @@ test.each([["tracking off", "off"], ["non-Git workspace", "non-git"], ["failed c
   }
 });
 
+test("a failed Git inspection keeps current content truthful and offers no reload key history lacks", async () => {
+  const dir = await temp();
+  const home = join(dir, "home"), root = join(dir, "work");
+  await repo(root);
+  const session = await savedSession(home, root);
+  const c = controller(session, root, home, { sessionId: session.header.id,
+    model: countingModel([{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "t.txt", content: "t\n" } }] }, { text: "ok" }]).model });
+  expect(await c.submit("Write t")).toBe(true);
+  // An invalid gitfile is a lookup failure, not a missing repository.
+  await rm(join(root, ".git"), { recursive: true, force: true });
+  await writeFile(join(root, ".git"), "garbage\n");
+  expect(await c.historyCommand("")).toBe(true);
+  expect(c.openHistoryDetail()).toBe(true);
+  const ui = await view(c, root, home, 100, 30);
+  await ui.press("return");
+  await ui.waitFor(() => c.snapshot().history?.current?.loading === false);
+  const rows = c.snapshot().history!.current!.rows.map(row => row.text);
+  expect(rows[0]).toBe("Current diff unavailable · Esc back");
+  expect(rows[1]).toStartWith("Git inspection failed: invalid gitfile format");
+  expect(ui.frame()).toContain("Current content · not turn 1's patch");
+  expect(ui.frame()).not.toContain("Ctrl+R");
+});
+
 test("a live history storage failure is reported without claiming the turn was saved", async () => {
   const dir = await temp();
   const home = join(dir, "home"), root = join(dir, "work");
