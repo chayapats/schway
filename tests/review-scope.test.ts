@@ -11,7 +11,7 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { writeTool } from "../src/tools/write.ts";
-import { currentDiffLabel, reviewDetailsLabel, reviewFilesLabel, reviewScopeDetails, turnFileBadge } from "../src/tui/review-scope.ts";
+import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, reviewScopeDetails, turnFileBadge } from "../src/tui/review-scope.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 
@@ -95,6 +95,38 @@ test("scope helpers keep turn counts with turn evidence and never invent unknown
   expect(details).toContain("repeated edits can exceed the net current diff");
   expect(details).toContain("does not identify which command or process changed them");
   expect(details).toContain("does not update live");
+});
+
+test("left-truncated paths keep distinct Thai and emoji file names within their cell budget", () => {
+  const dir = "src/" + "ส่วนประกอบ-ยาวมาก/".repeat(3);
+  const a = fitPathStart(`${dir}ไฟล์-ก-😀.ts`, 16), b = fitPathStart(`${dir}ไฟล์-ข-😀.ts`, 16);
+  expect(a).toStartWith("…");
+  expect(a).toEndWith("ไฟล์-ก-😀.ts");
+  expect(b).toEndWith("ไฟล์-ข-😀.ts");
+  expect(a).not.toBe(b);
+  for (const value of [a, b]) expect(Bun.stringWidth(value)).toBeLessThanOrEqual(16);
+  expect(fitPathStart("short.ts", 16)).toBe("short.ts");
+  expect(fitPathStart("anything", 0)).toBe("");
+});
+
+test("empty turn evidence and a read-only turn in a dirty repository show distinct empty states", async () => {
+  await withTempDir(async dir => {
+    await repo(dir);
+    await writeFile(join(dir, "two.txt"), "pre-existing dirt\n");
+    const c = controller(dir, [{ text: "read-only answer" }]);
+    await c.submit("explain");
+    const ui = await view(c, dir);
+    ui.mockInput.pressKey("r", { meta: true });
+    await ui.waitFor(idle(c));
+    expect(c.snapshot().changeReview!.files).toEqual([]);
+    expect(c.snapshot().changeReview!.detail).toBe("No file changes observed · /changes status");
+    const frame = ui.captureCharFrame();
+    expect(frame).toContain("Files from turn 1");
+    expect(frame).toContain("None observed");
+    expect(frame).toContain("No file changes observed · /changes status");
+    expect(frame).not.toContain("two.txt");
+    expect(frame).not.toContain("› None observed");
+  });
 });
 
 test("two turns and a later external edit show turn evidence beside the cumulative current diff", async () => {
@@ -321,7 +353,7 @@ test("Ctrl+R reloads newer current content without changing turn evidence, and E
     await ui.waitFor(() => idle(c)() && c.snapshot().changeReview!.detail.includes("first"));
     let frame = ui.captureCharFrame();
     expect(frame).toContain("Files from turn 1");
-    expect(frame).toContain("Current diff · ชื่อ/");
+    expect(frame).toMatch(/Current diff · …\S*ไฟล์ 😀\.txt/);
     expect(frame).toContain("Ctrl+R reload");
     expect(frame).toContain("Esc back");
     const before = structuredClone(c.snapshot().changeReview!.files);
@@ -360,7 +392,8 @@ test("scope labels stay visible in the stacked narrow layout with long Unicode p
     await repo(dir);
     const path = "src/" + "ส่วนประกอบ-ยาวมาก/".repeat(4) + "ไฟล์-😀.ts";
     for (const [width, height] of [[40, 20], [50, 24]] as const) {
-      const c = controller(dir, [write("w", path, "export const value = 1;\n"), { text: "done" }]);
+      const sibling = path.replace("ไฟล์-😀", "ไฟล์-อื่น");
+      const c = controller(dir, [write("w", path, "export const value = 1;\n"), write("s", sibling, "export const other = 2;\n"), { text: "done" }]);
       await c.submit("write");
       const ui = await view(c, dir, width, height);
       ui.mockInput.pressKey("r", { meta: true });
@@ -369,6 +402,12 @@ test("scope labels stay visible in the stacked narrow layout with long Unicode p
       expect(frame).toContain("Files from turn 1");
       expect(frame).toContain("Current diff");
       expect(frame).toContain("Untracked · current file");
+      // Both titles and list rows keep the distinct file names of siblings under one long directory.
+      expect(frame).toMatch(/Current diff · …\S*ไฟล์-😀\.ts/);
+      expect(frame).toContain("ไฟล์-อื่น.ts");
+      ui.mockInput.pressArrow("down");
+      await ui.waitFor(() => idle(c)() && c.snapshot().changeReview!.currentPath === sibling);
+      expect(ui.captureCharFrame()).toMatch(/Current diff · …\S*ไฟล์-อื่น\.ts/);
       expect(frame).toContain("Esc back");
       for (const line of frame.split("\n")) expect(Bun.stringWidth(line)).toBeLessThanOrEqual(width);
       const files = ui.renderer.root.findDescendantById("change-review-files")!;

@@ -8,6 +8,9 @@ cursor 17 27 visible
 == text
  ⚡ schway  ~/demo
 
+  ▌ Request failed · Inspect details before continuing
+  ▌ Ctrl+R continue · F2 details · Esc keep editing
+
   ✗ Failed
   0 tool results; 0 failed tools.
   Commands: 0 exit 0 / 0 nonzero / 0 unknown (entire turn).
@@ -26,9 +29,6 @@ cursor 17 27 visible
   Failure details: Provider request failed after 3 transient attempts:
   Service unavailable
 
-  Review scope:
-  Files from turn 1: paths observed during that turn from successful file-
-  tool records and before/after Git snapshots. It is not a record of
 
   ✗ Failed · 0.0s · Alt+R review · F2 details
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -45,62 +45,71 @@ cursor 17 27 visible
 00 18-80 #ffffff #ecedea -
 01 0-80 #ffffff #f7f7f4 -
 02 0-2 #ffffff #f7f7f4 -
-02 2-10 #545e6c #f7f7f4 -
-02 10-80 #ffffff #f7f7f4 -
+02 2-3 #a61f16 #edddd9 -
+02 3-4 #ffffff #edddd9 -
+02 4-54 #a61f16 #edddd9 -
+02 54-77 #ffffff #edddd9 -
+02 77-80 #ffffff #f7f7f4 -
 03 0-2 #ffffff #f7f7f4 -
-03 2-33 #545e6c #f7f7f4 -
-03 33-80 #ffffff #f7f7f4 -
-04 0-2 #ffffff #f7f7f4 -
-04 2-59 #545e6c #f7f7f4 -
-04 59-80 #ffffff #f7f7f4 -
+03 2-3 #a61f16 #edddd9 -
+03 3-4 #ffffff #edddd9 -
+03 4-10 #1d232c #c9cbd0 b
+03 10-22 #a61f16 #edddd9 -
+03 22-24 #1d232c #c9cbd0 b
+03 24-35 #a61f16 #edddd9 -
+03 35-38 #1d232c #c9cbd0 b
+03 38-51 #a61f16 #edddd9 -
+03 51-77 #ffffff #edddd9 -
+03 77-80 #ffffff #f7f7f4 -
+04 0-80 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
-05 2-70 #545e6c #f7f7f4 -
-05 70-80 #ffffff #f7f7f4 -
+05 2-10 #545e6c #f7f7f4 -
+05 10-80 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
-06 2-27 #545e6c #f7f7f4 -
-06 27-80 #ffffff #f7f7f4 -
-07 0-80 #ffffff #f7f7f4 -
+06 2-33 #545e6c #f7f7f4 -
+06 33-80 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-59 #545e6c #f7f7f4 -
+07 59-80 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
 08 2-70 #545e6c #f7f7f4 -
 08 70-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
-09 2-11 #545e6c #f7f7f4 -
-09 11-80 #ffffff #f7f7f4 -
-10 0-2 #ffffff #f7f7f4 -
-10 2-72 #545e6c #f7f7f4 -
-10 72-80 #ffffff #f7f7f4 -
+09 2-27 #545e6c #f7f7f4 -
+09 27-80 #ffffff #f7f7f4 -
+10 0-80 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
-11 2-52 #545e6c #f7f7f4 -
-11 52-80 #ffffff #f7f7f4 -
+11 2-70 #545e6c #f7f7f4 -
+11 70-80 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
-12 2-72 #545e6c #f7f7f4 -
-12 72-80 #ffffff #f7f7f4 -
+12 2-11 #545e6c #f7f7f4 -
+12 11-80 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
-13 2-48 #545e6c #f7f7f4 -
-13 48-80 #ffffff #f7f7f4 -
+13 2-72 #545e6c #f7f7f4 -
+13 72-80 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
-14 2-66 #545e6c #f7f7f4 -
-14 66-80 #ffffff #f7f7f4 -
+14 2-52 #545e6c #f7f7f4 -
+14 52-80 #ffffff #f7f7f4 -
 15 0-2 #ffffff #f7f7f4 -
-15 2-24 #545e6c #f7f7f4 -
-15 24-80 #ffffff #f7f7f4 -
-16 0-80 #ffffff #f7f7f4 -
+15 2-72 #545e6c #f7f7f4 -
+15 72-80 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-48 #545e6c #f7f7f4 -
+16 48-80 #ffffff #f7f7f4 -
 17 0-2 #ffffff #f7f7f4 -
-17 2-71 #545e6c #f7f7f4 -
-17 71-80 #ffffff #f7f7f4 -
+17 2-66 #545e6c #f7f7f4 -
+17 66-80 #ffffff #f7f7f4 -
 18 0-2 #ffffff #f7f7f4 -
-18 2-21 #545e6c #f7f7f4 -
-18 21-80 #ffffff #f7f7f4 -
+18 2-24 #545e6c #f7f7f4 -
+18 24-80 #ffffff #f7f7f4 -
 19 0-80 #ffffff #f7f7f4 -
 20 0-2 #ffffff #f7f7f4 -
-20 2-15 #545e6c #f7f7f4 -
-20 15-80 #ffffff #f7f7f4 -
+20 2-71 #545e6c #f7f7f4 -
+20 71-80 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
-21 2-74 #545e6c #f7f7f4 -
-21 74-80 #ffffff #f7f7f4 -
-22 0-2 #ffffff #f7f7f4 -
-22 2-69 #545e6c #f7f7f4 -
-22 69-80 #ffffff #f7f7f4 -
+21 2-21 #545e6c #f7f7f4 -
+21 21-80 #ffffff #f7f7f4 -
+22 0-80 #ffffff #f7f7f4 -
 23 0-80 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #a61f16 #f7f7f4 b

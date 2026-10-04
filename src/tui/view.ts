@@ -20,7 +20,7 @@ import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMa
 import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
-import { currentDiffLabel, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
+import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -216,7 +216,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const reviewFiles = new ScrollBoxRenderable(renderer, { id: "change-review-files", width: 20, flexShrink: 0, scrollX: false });
   const reviewList = new TextRenderable(renderer, { id: "change-review-list", content: "", fg: theme.text, wrapMode: "none" });
   const reviewDivider = new TextRenderable(renderer, { id: "change-review-divider", width: 3, flexShrink: 0, content: "", fg: theme.border });
-  const reviewDiff = new ScrollBoxRenderable(renderer, { id: "change-review-diff", flexGrow: 1, minHeight: 1, minWidth: 0, scrollX: false });
+  // Reserve the scrollbar column so its thumb never covers the last character of a diff or Details line.
+  const reviewDiff = new ScrollBoxRenderable(renderer, { id: "change-review-diff", flexGrow: 1, minHeight: 1, minWidth: 0, scrollX: false, contentOptions: { paddingRight: 1 } });
   const reviewText = new TextRenderable(renderer, { id: "change-review-text", content: "", fg: theme.text, wrapMode: "word" });
   reviewFiles.add(reviewList);
   reviewFiles.verticalScrollBar.visible = false;
@@ -877,8 +878,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (scope) {
           const currentPath = snapshot.changeReview!.currentPath;
           reviewFilesTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(filesTitle, fileWidth)))]);
-          const diffTitle = review.showingDetails ? reviewDetailsLabel(scope) : currentDiffLabel(currentPath === undefined ? undefined : safe(currentPath));
-          reviewDiffTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(diffTitle, stacked ? width : Math.max(1, width - fileWidth - 3))))]);
+          const titleWidth = stacked ? width : Math.max(1, width - fileWidth - 3);
+          // Truncate the path from the left so the file name stays visible beside the fixed label.
+          const diffTitle = review.showingDetails ? reviewDetailsLabel(scope) : currentPath === undefined ? currentDiffLabel()
+            : currentDiffLabel(fitPathStart(safe(currentPath), titleWidth - Bun.stringWidth(currentDiffLabel(""))));
+          reviewDiffTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(diffTitle, titleWidth)))]);
           if (!fileRows.length) fileRows.push({ path: "None observed", badge: "" });
         }
         reviewFilesColumn.width = fileWidth;
@@ -890,9 +894,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewFiles.marginBottom = stacked && fileRows.length && !scope ? 1 : 0;
         reviewList.content = fileRows.map((row, index) => {
           if (!review.files.length && scope) return `  ${fitLine(row.path, fileWidth - 2)}`;
-          if (!row.badge) return `${index === review.selected ? "›" : " "} ${fitLine(row.path, fileWidth - 2)}`;
+          const fitRow = (text: string, columns: number) => scope ? fitPathStart(text, columns) : fitLine(text, columns);
+          if (!row.badge) return `${index === review.selected ? "›" : " "} ${fitRow(row.path, fileWidth - 2)}`;
           const pathWidth = Math.max(1, fileWidth - 4 - Bun.stringWidth(row.badge));
-          const path = fitLine(row.path, pathWidth);
+          const path = fitRow(row.path, pathWidth);
           return `${index === review.selected ? "›" : " "} ${path}${" ".repeat(Math.max(0, pathWidth - Bun.stringWidth(path)))}  ${row.badge}`;
         }).join("\n");
         reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));

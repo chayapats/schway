@@ -15,11 +15,11 @@ cursor 1 1 hidden
 
  Current diff · clamp.ts
  Unstaged · index → worktree
-   1 - export function clamp(n: number, lo: numbe
- r, hi: number) {
+   1 - export function clamp(n: number, lo: numb
+ er, hi: number) {
    2 -   return Math.max(lo, n);
-   1 + export function clamp(n: number, lo: numbe
- r, hi: number): number {
+   1 + export function clamp(n: number, lo: numb
+ er, hi: number): number {
    2 +   return Math.min(hi, Math.max(lo, n));
    3   }
    4 + export default clamp;
@@ -63,20 +63,20 @@ cursor 1 1 hidden
 08 1-28 #0a5894 #f7f7f4 b
 08 28-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
-09 1-49 #a61f16 #f7f7f4 -
-09 49-50 #ffffff #f7f7f4 -
+09 1-48 #a61f16 #f7f7f4 -
+09 48-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
-10 1-17 #a61f16 #f7f7f4 -
-10 17-50 #ffffff #f7f7f4 -
+10 1-18 #a61f16 #f7f7f4 -
+10 18-50 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
 11 1-32 #a61f16 #f7f7f4 -
 11 32-50 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
-12 1-49 #19612f #f7f7f4 -
-12 49-50 #ffffff #f7f7f4 -
+12 1-48 #19612f #f7f7f4 -
+12 48-50 #ffffff #f7f7f4 -
 13 0-1 #ffffff #f7f7f4 -
-13 1-25 #19612f #f7f7f4 -
-13 25-50 #ffffff #f7f7f4 -
+13 1-26 #19612f #f7f7f4 -
+13 26-50 #ffffff #f7f7f4 -
 14 0-1 #ffffff #f7f7f4 -
 14 1-46 #19612f #f7f7f4 -
 14 46-50 #ffffff #f7f7f4 -

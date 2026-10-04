@@ -876,3 +876,20 @@ test("literal paths without a current section report why, using read-only querie
     expect(await readFile(join(dir, ".git", "index"))).toEqual(index);
   });
 });
+
+test("/changes diff reports why a literal path has no comparison instead of implying it is unchanged", async () => {
+  await withTempDir(async base => {
+    const dir = join(base, "repo");
+    await mkdir(dir);
+    await initRepo(dir);
+    await writeFile(join(base, "outside.txt"), "outside\n");
+    const controller = controllerFor(dir, "on-demand", createScriptedModel({ text: "ok" }));
+    for (const [path, note] of [["../outside.txt", "Outside the Git repository · no diff"], ["tracked.txt", "No current changes · file matches HEAD"], ["gone.txt", "File not found · nothing to compare"]] as const) {
+      expect(await controller.changesCommand(`diff -- ${path}`)).toBe(true);
+      const primary = lastNotice(controller);
+      expect(primary).toBe(`${note}\n${path}`);
+      expect(primary).not.toContain("No textual diff");
+    }
+    controller.dispose();
+  });
+});

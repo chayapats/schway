@@ -14,6 +14,22 @@ export function currentDiffLabel(path?: string): string {
   return path === undefined ? "Current diff" : `Current diff · ${path}`;
 }
 
+/** Fit a display path to `columns` cells by dropping leading graphemes behind `…`, keeping the file name visible. */
+export function fitPathStart(path: string, columns: number): string {
+  const line = path.replace(/\s+/g, " ");
+  if (columns <= 0) return "";
+  if (Bun.stringWidth(line) <= columns) return line;
+  const graphemes = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(line)].map(part => part.segment);
+  let tail = "", width = 0;
+  for (let index = graphemes.length - 1; index >= 0; index--) {
+    const next = Bun.stringWidth(graphemes[index]!);
+    if (width + next > columns - 1) break;
+    tail = graphemes[index]! + tail;
+    width += next;
+  }
+  return `…${tail}`;
+}
+
 /** Visible title while Details replaces the current diff, so turn evidence is never labelled as Git content. */
 export function reviewDetailsLabel(scope: ReviewScope): string {
   return `Turn ${scope.turn} details`;

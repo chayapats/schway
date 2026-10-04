@@ -237,7 +237,8 @@ arrives after you select another file, close review or switch session is discard
 **F2** swaps the diff for turn details, titled `Turn N details`; F2 again or Esc
 returns to the diff. Esc from the diff restores the same conversation position,
 unsent draft, and cursor. After a failed turn, F2 in the conversation appends the
-same details, including any recovery diagnostics and the review scope notes.
+same turn details, including any recovery diagnostics; review Details also add the
+review scope notes.
 Details contain tool counts, whole-turn exit-zero/nonzero/unknown totals, and the
 retained commands without tool-call IDs. **Alt+I** still inspects individual tools.
 Selected filenames are literal paths, including glob characters and Git pathspec

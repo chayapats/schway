@@ -25,8 +25,8 @@ cursor 1 1 hidden
                        │ exclusive Schway authorship. Current diffs may
                        │ include later edits.
                        │ Review is read-only. Files remain changed after
-                       │ failure/cancellation; conversation branching does no
-                       │ restore files.
+                       │ failure/cancellation; conversation branching does
+                       │ not restore files.
                        │
                        │ Snapshot comparison for ***/home/demo
 
@@ -140,13 +140,14 @@ cursor 1 1 hidden
 18 78-80 #ffffff #0e1117 -
 19 0-22 #ffffff #0e1117 -
 19 22-25 #2c3444 #0e1117 -
-19 25-77 #e6eaf0 #0e1117 -
+19 25-75 #e6eaf0 #0e1117 -
+19 75-77 #ffffff #0e1117 -
 19 77-78 #ffffff #252527 -
 19 78-80 #ffffff #0e1117 -
 20 0-22 #ffffff #0e1117 -
 20 22-25 #2c3444 #0e1117 -
-20 25-39 #e6eaf0 #0e1117 -
-20 39-77 #ffffff #0e1117 -
+20 25-43 #e6eaf0 #0e1117 -
+20 43-77 #ffffff #0e1117 -
 20 77-78 #ffffff #252527 -
 20 78-80 #ffffff #0e1117 -
 21 0-22 #ffffff #0e1117 -

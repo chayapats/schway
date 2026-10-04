@@ -65,6 +65,12 @@ export abstract class ChangesLayer extends BranchesLayer {
         this.fail(preview.error);
         return false;
       }
+      if (path && preview.pathState) {
+        // A path with no comparison was never diffed; say why instead of implying it is unchanged.
+        const note = preview.pathState === "unavailable" ? "Diff unavailable · /changes status" : pathStateNote(preview.pathState);
+        this.notice(redactSecrets(`${note}\n${path}`, this.secrets), formatGitDiffPreview(preview));
+        return true;
+      }
       const rows = parseGitDiff(preview, { includePaths: !path, includeSections: true }).map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`);
       this.notice(redactSecrets(["Review diff · F2 details · Enter continue", ...(path ? [path] : []), ...rows].join("\n"), this.secrets).slice(0, 50_000), formatGitDiffPreview(preview));
       return true;
@@ -126,7 +132,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     // The observed turn record is the list; current Git state can explain each file but never replaces it.
     const files = outcome.files.map(file => ({ ...file }));
     const review: ChangeReview = { heading: `Review · turn ${ordinal}`, scope, files, selected: prior && prior.selected < files.length ? prior.selected : 0,
-      detail: files.length ? LOADING_CURRENT_DIFF : "", rows: files.length ? [{ sign: " ", text: LOADING_CURRENT_DIFF }] : [], details: this.turnDetails(), showingDetails: prior?.showingDetails ?? false, loading: true };
+      detail: files.length ? LOADING_CURRENT_DIFF : "", rows: files.length ? [{ sign: " ", text: LOADING_CURRENT_DIFF }] : [], details: `${this.turnDetails()}\n\n${reviewScopeDetails(scope)}`, showingDetails: prior?.showingDetails ?? false, loading: true };
     const context: ReviewContext = { review, ready: false, queries: files.map(file => file.path), identity: this.reviewIdentity() };
     this.changeReview = review;
     this.reviewContext = context;
@@ -171,19 +177,18 @@ export abstract class ChangesLayer extends BranchesLayer {
     return true;
   }
 
-  /** Build one redacted evidence view for review and the failed-turn transcript notice. */
+  /** Build one redacted evidence view shared by failed-turn Details; review Details append the review scope notes. */
   protected turnDetails(): string {
     if (!this.outcome) return "No turn to review yet";
     const mode = this.gitChangeTracking();
     const shellUnavailable = mode === "off" ? 'change tracking is off (git.changeTracking="off").'
       : !this.workspace ? "no workspace is active."
       : this.gitSnapshotError ?? (!this.gitComparison ? `Snapshot attribution unavailable (${mode}); no completed capture.` : undefined);
-    const turn = this.session.items.filter(item => item.type === "user").findIndex(item => item.id === this.outcomeUserId) + 1;
-    return redactSecrets(`${buildOutcomeDetails(this.outcome, {
+    return redactSecrets(buildOutcomeDetails(this.outcome, {
       shellUnavailable,
       comparison: this.gitBaseline && this.gitAfter && this.gitComparison ? formatGitComparison(this.gitBaseline, this.gitAfter, this.gitComparison) : undefined,
       recovery: this.outcomeDiagnostics,
-    })}\n\n${reviewScopeDetails({ kind: "turn", turn })}`, this.secrets);
+    }), this.secrets);
   }
 
   /** Select a retained turn path and load numbered current diff rows or a plain explanation. */

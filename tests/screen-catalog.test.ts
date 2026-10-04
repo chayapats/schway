@@ -81,7 +81,14 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     } else {
       expect(text).toContain("Esc back");
       if (screen.id === "details-model") { expect(text).toContain("gpt-6-astra"); expect(text).toContain("1,050,000 context"); }
-      if (screen.id === "details-review") expect(text).toContain("Commands:");
+      if (screen.id === "details-review") {
+        expect(text).toContain("Commands:");
+        // Rejoin the word-wrapped Details column; a scrollbar over the last column would drop letters.
+        const lines = parseScreen(actual).text.map(line => (line.includes("│") ? line.slice(line.indexOf("│") + 1) : line).replace(/[▀▄█▐▌]+\s*$/, "").trim());
+        expect(lines.some(line => line.endsWith("does no"))).toBe(false);
+        // The stacked 50-column layout scrolls this sentence below the fold; side-by-side widths show it whole.
+        if (variant.cols >= 80) expect(lines.join(" ")).toContain("does not restore files");
+      }
       if (screen.id === "details-notice" || screen.id === "details-recovery") {
         expect(text).toContain("งานถัดไป 🧪");
         if (variant.rows > 8) expect(text).toContain(screen.id === "details-notice" ? "The choice could not be saved." : "No command exit evidence.");
