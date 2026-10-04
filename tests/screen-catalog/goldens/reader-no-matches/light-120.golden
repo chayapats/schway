@@ -1,0 +1,112 @@
+schway-screen 1
+screen reader-no-matches
+title Read code, no matches
+description Reader search reports no matches and offers to restore the reading position.
+variant light-120
+size 120x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  /project
+
+  Read code · ts                                                                                        Lines 1–5 of 5
+  1  export function summarize(rows: readonly Row[], options: { locale: string; currency: string; includeArchived: bo›
+  2    const label = 'สรุปยอดขาย 🧪 ' + options.locale; // Thai and emoji stay whole graphemes when the view pans or w›
+  3    const totals = rows.filter(row => options.includeArchived || !row.archived).map(row => row.amount * row.quanti›
+  4    return { label, total: totals.reduce((sum, value) => sum + value, 0).toFixed(options.precision), currency: opt›
+  5  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Find: absent · No matches · Esc restore
+
+
+ ◆ Auto  ● Ready   scripted/scripted-model                                                                       ctx ~0
+  Esc restore · ↑↓ next · Enter keep
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-2 #ffffff #f7f7f4 -
+02 2-16 #1d232c #f7f7f4 b
+02 16-118 #545e6c #f7f7f4 -
+02 118-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-5 #545e6c #f7f7f4 -
+03 5-117 #6a3fb0 #f7f7f4 -
+03 117-118 #545e6c #f7f7f4 -
+03 118-120 #ffffff #f7f7f4 -
+04 0-2 #ffffff #f7f7f4 -
+04 2-5 #545e6c #f7f7f4 -
+04 5-117 #6a3fb0 #f7f7f4 -
+04 117-118 #545e6c #f7f7f4 -
+04 118-120 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-5 #545e6c #f7f7f4 -
+05 5-117 #6a3fb0 #f7f7f4 -
+05 117-118 #545e6c #f7f7f4 -
+05 118-120 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-5 #545e6c #f7f7f4 -
+06 5-117 #6a3fb0 #f7f7f4 -
+06 117-118 #545e6c #f7f7f4 -
+06 118-120 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-5 #545e6c #f7f7f4 -
+07 5-6 #6a3fb0 #f7f7f4 -
+07 6-120 #ffffff #f7f7f4 -
+08 0-120 #ffffff #f7f7f4 -
+09 0-120 #ffffff #f7f7f4 -
+10 0-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
+12 0-120 #ffffff #f7f7f4 -
+13 0-120 #ffffff #f7f7f4 -
+14 0-120 #ffffff #f7f7f4 -
+15 0-120 #ffffff #f7f7f4 -
+16 0-120 #ffffff #f7f7f4 -
+17 0-120 #ffffff #f7f7f4 -
+18 0-120 #ffffff #f7f7f4 -
+19 0-120 #ffffff #f7f7f4 -
+20 0-120 #ffffff #f7f7f4 -
+21 0-120 #ffffff #f7f7f4 -
+22 0-120 #ffffff #f7f7f4 -
+23 0-120 #ffffff #f7f7f4 -
+24 0-120 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-41 #0a5894 #f7f7f4 -
+25 41-120 #ffffff #f7f7f4 -
+26 0-120 #ffffff #f7f7f4 -
+27 0-120 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-119 #545e6c #ecedea -
+28 119-120 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-5 #1d232c #caced3 b
+29 5-16 #545e6c #f7f7f4 -
+29 16-18 #1d232c #caced3 b
+29 18-26 #545e6c #f7f7f4 -
+29 26-31 #1d232c #caced3 b
+29 31-36 #545e6c #f7f7f4 -
+29 36-120 #ffffff #f7f7f4 -

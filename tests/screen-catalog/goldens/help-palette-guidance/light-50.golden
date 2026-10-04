@@ -22,14 +22,14 @@ cursor 10 27 visible
 
 
 
-
-
   Copy code or a result · Alt+I, then C
   Inspect a block before copying it
   Return to the conversation and press Alt+I.
-  Use ↑↓ to select a code block or tool result,
-  then C to copy the highlighted block. Enter
-  copies code; it does not copy tool results.
+  Use ↑↓ to select a code block, table or tool
+  result, then C to copy the highlighted block.
+  Enter copies code and tables; it does not copy
+  tool results. R opens a code block or table in
+  the reader.
   ! Nothing to inspect · Enter send a task
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › copy
@@ -65,22 +65,30 @@ cursor 10 27 visible
 13 0-50 #ffffff #f7f7f4 -
 14 0-50 #ffffff #f7f7f4 -
 15 0-50 #ffffff #f7f7f4 -
-16 0-50 #ffffff #f7f7f4 -
-17 0-50 #ffffff #f7f7f4 -
+16 0-1 #ffffff #f7f7f4 -
+16 1-2 #ffffff #e1e3df -
+16 2-39 #0a5894 #e1e3df -
+16 39-49 #ffffff #e1e3df -
+16 49-50 #ffffff #f7f7f4 -
+17 0-1 #ffffff #f7f7f4 -
+17 1-2 #ffffff #e1e3df -
+17 2-35 #545e6c #e1e3df -
+17 35-49 #ffffff #e1e3df -
+17 49-50 #ffffff #f7f7f4 -
 18 0-1 #ffffff #f7f7f4 -
 18 1-2 #ffffff #e1e3df -
-18 2-39 #0a5894 #e1e3df -
-18 39-49 #ffffff #e1e3df -
+18 2-46 #1d232c #e1e3df -
+18 46-49 #ffffff #e1e3df -
 18 49-50 #ffffff #f7f7f4 -
 19 0-1 #ffffff #f7f7f4 -
 19 1-2 #ffffff #e1e3df -
-19 2-35 #545e6c #e1e3df -
-19 35-49 #ffffff #e1e3df -
+19 2-47 #1d232c #e1e3df -
+19 47-49 #ffffff #e1e3df -
 19 49-50 #ffffff #f7f7f4 -
 20 0-1 #ffffff #f7f7f4 -
 20 1-2 #ffffff #e1e3df -
-20 2-46 #1d232c #e1e3df -
-20 46-49 #ffffff #e1e3df -
+20 2-48 #1d232c #e1e3df -
+20 48-49 #ffffff #e1e3df -
 20 49-50 #ffffff #f7f7f4 -
 21 0-1 #ffffff #f7f7f4 -
 21 1-2 #ffffff #e1e3df -
@@ -89,13 +97,13 @@ cursor 10 27 visible
 21 49-50 #ffffff #f7f7f4 -
 22 0-1 #ffffff #f7f7f4 -
 22 1-2 #ffffff #e1e3df -
-22 2-46 #1d232c #e1e3df -
-22 46-49 #ffffff #e1e3df -
+22 2-48 #1d232c #e1e3df -
+22 48-49 #ffffff #e1e3df -
 22 49-50 #ffffff #f7f7f4 -
 23 0-1 #ffffff #f7f7f4 -
 23 1-2 #ffffff #e1e3df -
-23 2-45 #1d232c #e1e3df -
-23 45-49 #ffffff #e1e3df -
+23 2-13 #1d232c #e1e3df -
+23 13-49 #ffffff #e1e3df -
 23 49-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #ffffff #e1e3df -

@@ -14,6 +14,7 @@ cursor 7 37 visible
 
   Wrapping report
 
+    table                                                                                              Alt+I inspect
    Name                                                                         State      Count      Owner
    A pneumonoultramicroscopicsilicovolcanoconiosis-with-an-extra-long-suffix    B ready    C seven    D Ada
    E Beta                                                                       F done     G nine     H Lin
@@ -24,7 +25,6 @@ cursor 7 37 visible
    yz0123456789";
    console.log(message);
   End of wrapping report
-
 
 
 
@@ -72,72 +72,78 @@ cursor 7 37 visible
 06 2-17 #e6eaf0 #0e1117 -
 06 17-120 #ffffff #0e1117 -
 07 0-120 #ffffff #0e1117 -
-08 0-3 #ffffff #0e1117 -
-08 3-7 #e6eaf0 #0e1117 b
-08 7-80 #ffffff #0e1117 -
-08 80-85 #e6eaf0 #0e1117 b
-08 85-91 #ffffff #0e1117 -
-08 91-96 #e6eaf0 #0e1117 b
-08 96-102 #ffffff #0e1117 -
-08 102-107 #e6eaf0 #0e1117 b
-08 107-120 #ffffff #0e1117 -
+08 0-2 #ffffff #0e1117 -
+08 2-3 #ffffff #1e2430 -
+08 3-10 #7cc4ff #33475e b
+08 10-103 #ffffff #1e2430 -
+08 103-116 #8b95a7 #1e2430 -
+08 116-117 #ffffff #1e2430 -
+08 117-120 #ffffff #0e1117 -
 09 0-3 #ffffff #0e1117 -
-09 3-76 #e6eaf0 #0e1117 -
-09 76-80 #ffffff #0e1117 -
-09 80-87 #e6eaf0 #0e1117 -
-09 87-91 #ffffff #0e1117 -
-09 91-98 #e6eaf0 #0e1117 -
-09 98-102 #ffffff #0e1117 -
-09 102-107 #e6eaf0 #0e1117 -
+09 3-7 #e6eaf0 #0e1117 b
+09 7-80 #ffffff #0e1117 -
+09 80-85 #e6eaf0 #0e1117 b
+09 85-91 #ffffff #0e1117 -
+09 91-96 #e6eaf0 #0e1117 b
+09 96-102 #ffffff #0e1117 -
+09 102-107 #e6eaf0 #0e1117 b
 09 107-120 #ffffff #0e1117 -
 10 0-3 #ffffff #0e1117 -
-10 3-9 #e6eaf0 #0e1117 -
-10 9-80 #ffffff #0e1117 -
-10 80-86 #e6eaf0 #0e1117 -
-10 86-91 #ffffff #0e1117 -
-10 91-97 #e6eaf0 #0e1117 -
-10 97-102 #ffffff #0e1117 -
+10 3-76 #e6eaf0 #0e1117 -
+10 76-80 #ffffff #0e1117 -
+10 80-87 #e6eaf0 #0e1117 -
+10 87-91 #ffffff #0e1117 -
+10 91-98 #e6eaf0 #0e1117 -
+10 98-102 #ffffff #0e1117 -
 10 102-107 #e6eaf0 #0e1117 -
 10 107-120 #ffffff #0e1117 -
-11 0-120 #ffffff #0e1117 -
-12 0-2 #ffffff #0e1117 -
-12 2-3 #ffffff #1e2430 -
-12 3-7 #7cc4ff #33475e b
-12 7-103 #ffffff #1e2430 -
-12 103-116 #8b95a7 #1e2430 -
-12 116-117 #ffffff #1e2430 -
-12 117-120 #ffffff #0e1117 -
+11 0-3 #ffffff #0e1117 -
+11 3-9 #e6eaf0 #0e1117 -
+11 9-80 #ffffff #0e1117 -
+11 80-86 #e6eaf0 #0e1117 -
+11 86-91 #ffffff #0e1117 -
+11 91-97 #e6eaf0 #0e1117 -
+11 97-102 #ffffff #0e1117 -
+11 102-107 #e6eaf0 #0e1117 -
+11 107-120 #ffffff #0e1117 -
+12 0-120 #ffffff #0e1117 -
 13 0-2 #ffffff #0e1117 -
-13 2-3 #ffffff #161b24 -
-13 3-9 #c0acff #161b24 -
-13 9-16 #e6eaf0 #161b24 -
-13 16-19 #c0acff #161b24 -
-13 19-117 #ffffff #161b24 -
+13 2-3 #ffffff #1e2430 -
+13 3-7 #7cc4ff #33475e b
+13 7-103 #ffffff #1e2430 -
+13 103-116 #8b95a7 #1e2430 -
+13 116-117 #ffffff #1e2430 -
 13 117-120 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
 14 2-3 #ffffff #161b24 -
-14 3-116 #8fd19e #161b24 -
-14 116-117 #ffffff #161b24 -
+14 3-9 #c0acff #161b24 -
+14 9-16 #e6eaf0 #161b24 -
+14 16-19 #c0acff #161b24 -
+14 19-117 #ffffff #161b24 -
 14 117-120 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
 15 2-3 #ffffff #161b24 -
-15 3-16 #8fd19e #161b24 -
-15 16-17 #c0acff #161b24 -
-15 17-117 #ffffff #161b24 -
+15 3-116 #8fd19e #161b24 -
+15 116-117 #ffffff #161b24 -
 15 117-120 #ffffff #0e1117 -
 16 0-2 #ffffff #0e1117 -
 16 2-3 #ffffff #161b24 -
-16 3-10 #e6eaf0 #161b24 -
-16 10-11 #c0acff #161b24 -
-16 11-14 #7cc4ff #161b24 -
-16 14-22 #e6eaf0 #161b24 -
-16 22-24 #c0acff #161b24 -
-16 24-117 #ffffff #161b24 -
+16 3-16 #8fd19e #161b24 -
+16 16-17 #c0acff #161b24 -
+16 17-117 #ffffff #161b24 -
 16 117-120 #ffffff #0e1117 -
 17 0-2 #ffffff #0e1117 -
-17 2-24 #e6eaf0 #0e1117 -
-17 24-120 #ffffff #0e1117 -
-18 0-120 #ffffff #0e1117 -
+17 2-3 #ffffff #161b24 -
+17 3-10 #e6eaf0 #161b24 -
+17 10-11 #c0acff #161b24 -
+17 11-14 #7cc4ff #161b24 -
+17 14-22 #e6eaf0 #161b24 -
+17 22-24 #c0acff #161b24 -
+17 24-117 #ffffff #161b24 -
+17 117-120 #ffffff #0e1117 -
+18 0-2 #ffffff #0e1117 -
+18 2-24 #e6eaf0 #0e1117 -
+18 24-120 #ffffff #0e1117 -
 19 0-120 #ffffff #0e1117 -
 20 0-120 #ffffff #0e1117 -
 21 0-120 #ffffff #0e1117 -

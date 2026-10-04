@@ -25,11 +25,11 @@ cursor 11 27 visible
 
 
 
-
    Copy code or a result · Alt+I, then C
    Inspect a block before copying it
-   Return to the conversation and press Alt+I. Use ↑↓ to select a code block or tool result, then C to copy the
-   highlighted block. Enter copies code; it does not copy tool results.
+   Return to the conversation and press Alt+I. Use ↑↓ to select a code block, table or tool result, then C to copy
+   the highlighted block. Enter copies code and tables; it does not copy tool results. R opens a code block or table
+   in the reader.
    ! Nothing to inspect · Enter send a task
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › copy
@@ -68,26 +68,30 @@ cursor 11 27 visible
 16 0-120 #ffffff #f7f7f4 -
 17 0-120 #ffffff #f7f7f4 -
 18 0-120 #ffffff #f7f7f4 -
-19 0-120 #ffffff #f7f7f4 -
+19 0-2 #ffffff #f7f7f4 -
+19 2-3 #ffffff #e1e3df -
+19 3-40 #0a5894 #e1e3df -
+19 40-118 #ffffff #e1e3df -
+19 118-120 #ffffff #f7f7f4 -
 20 0-2 #ffffff #f7f7f4 -
 20 2-3 #ffffff #e1e3df -
-20 3-40 #0a5894 #e1e3df -
-20 40-118 #ffffff #e1e3df -
+20 3-36 #545e6c #e1e3df -
+20 36-118 #ffffff #e1e3df -
 20 118-120 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
 21 2-3 #ffffff #e1e3df -
-21 3-36 #545e6c #e1e3df -
-21 36-118 #ffffff #e1e3df -
+21 3-115 #1d232c #e1e3df -
+21 115-118 #ffffff #e1e3df -
 21 118-120 #ffffff #f7f7f4 -
 22 0-2 #ffffff #f7f7f4 -
 22 2-3 #ffffff #e1e3df -
-22 3-112 #1d232c #e1e3df -
-22 112-118 #ffffff #e1e3df -
+22 3-117 #1d232c #e1e3df -
+22 117-118 #ffffff #e1e3df -
 22 118-120 #ffffff #f7f7f4 -
 23 0-2 #ffffff #f7f7f4 -
 23 2-3 #ffffff #e1e3df -
-23 3-71 #1d232c #e1e3df -
-23 71-118 #ffffff #e1e3df -
+23 3-17 #1d232c #e1e3df -
+23 17-118 #ffffff #e1e3df -
 23 118-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #ffffff #e1e3df -

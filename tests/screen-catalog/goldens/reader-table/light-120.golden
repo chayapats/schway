@@ -1,0 +1,182 @@
+schway-screen 1
+screen reader-table
+title Read table, pinned headers
+description A wide table keeps its header and column position visible while scrolled down and right.
+variant light-120
+size 120x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  /project
+
+  Read table                                                                       Rows 17–36 of 36 · Columns 2–8 of 8
+  Aligned columns · C copies Markdown source
+  ‹Owner │ Q1 revenue │ Q2 revenue │ Change │ Status    │ Notes                                      │ Follow-up
+  ‹──────┼────────────┼────────────┼────────┼───────────┼────────────────────────────────────────────┼───────────────›
+  ‹Dana  │ 1,792      │ 1,956      │ +8%    │ Review 🧪 │ [details](https://example.test/regions/17) │ Confirm the qu›
+  ‹Dana  │ 1,829      │ 1,997      │ +9%    │ On track  │ [details](https://example.test/regions/18) │ Confirm the qu›
+  ‹      │ 1,866      │ 2,038      │ +1%    │ On track  │ [details](https://example.test/regions/19) │ Confirm the qu›
+  ‹Dana  │ 1,903      │ 2,079      │ +2%    │ On track  │ [details](https://example.test/regions/20) │ Confirm the qu›
+  ‹Dana  │ 1,940      │ 2,120      │ +3%    │ Review 🧪 │ [details](https://example.test/regions/21) │ Confirm the qu›
+  ‹      │ 1,977      │ 2,161      │ +4%    │ On track  │ [details](https://example.test/regions/22) │ Confirm the qu›
+  ‹Dana  │ 2,014      │ 2,202      │ +5%    │ On track  │ [details](https://example.test/regions/23) │ Confirm the qu›
+  ‹Dana  │ 2,051      │ 2,243      │ +6%    │ On track  │ [details](https://example.test/regions/24) │ Confirm the qu›
+  ‹      │ 2,088      │ 2,284      │ +7%    │ Review 🧪 │ [details](https://example.test/regions/25) │ Confirm the qu›
+  ‹Dana  │ 2,125      │ 2,325      │ +8%    │ On track  │ [details](https://example.test/regions/26) │ Confirm the qu›
+  ‹Dana  │ 2,162      │ 2,366      │ +9%    │ On track  │ [details](https://example.test/regions/27) │ Confirm the qu›
+  ‹      │ 2,199      │ 2,407      │ +1%    │ On track  │ [details](https://example.test/regions/28) │ Confirm the qu›
+  ‹Dana  │ 2,236      │ 2,448      │ +2%    │ Review 🧪 │ [details](https://example.test/regions/29) │ Confirm the qu›
+  ‹Dana  │ 2,273      │ 2,489      │ +3%    │ On track  │ [details](https://example.test/regions/30) │ Confirm the qu›
+  ‹      │ 2,310      │ 2,530      │ +4%    │ On track  │ [details](https://example.test/regions/31) │ Confirm the qu›
+  ‹Dana  │ 2,347      │ 2,571      │ +5%    │ On track  │ [details](https://example.test/regions/32) │ Confirm the qu›
+  ‹Dana  │ 2,384      │ 2,612      │ +6%    │ Review 🧪 │ [details](https://example.test/regions/33) │ Confirm the qu›
+  ‹      │ 2,421      │ 2,653      │ +7%    │ On track  │ [details](https://example.test/regions/34) │ Confirm the qu›
+  ‹Dana  │ 2,458      │ 2,694      │ +8%    │ On track  │ [details](https://example.test/regions/35) │ Confirm the qu›
+  ‹Dana  │ 2,495      │ 2,735      │ +9%    │ On track  │ [details](https://example.test/regions/36) │ Confirm the qu›
+
+
+ ◆ Auto  ● Ready   scripted/scripted-model                                                                       ctx ~0
+  Esc back · ↑↓ scroll · ←→ columns · C copy · Ctrl+F find
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-2 #ffffff #f7f7f4 -
+02 2-12 #1d232c #f7f7f4 b
+02 12-118 #545e6c #f7f7f4 -
+02 118-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-44 #545e6c #f7f7f4 -
+03 44-120 #ffffff #f7f7f4 -
+04 0-2 #ffffff #f7f7f4 -
+04 2-3 #545e6c #f7f7f4 -
+04 3-112 #1d232c #f7f7f4 b
+04 112-120 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-118 #545e6c #f7f7f4 -
+05 118-120 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-3 #545e6c #f7f7f4 -
+06 3-117 #1d232c #f7f7f4 -
+06 117-118 #545e6c #f7f7f4 -
+06 118-120 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-3 #545e6c #f7f7f4 -
+07 3-117 #1d232c #f7f7f4 -
+07 117-118 #545e6c #f7f7f4 -
+07 118-120 #ffffff #f7f7f4 -
+08 0-2 #ffffff #f7f7f4 -
+08 2-3 #545e6c #f7f7f4 -
+08 3-117 #1d232c #f7f7f4 -
+08 117-118 #545e6c #f7f7f4 -
+08 118-120 #ffffff #f7f7f4 -
+09 0-2 #ffffff #f7f7f4 -
+09 2-3 #545e6c #f7f7f4 -
+09 3-117 #1d232c #f7f7f4 -
+09 117-118 #545e6c #f7f7f4 -
+09 118-120 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-3 #545e6c #f7f7f4 -
+10 3-117 #1d232c #f7f7f4 -
+10 117-118 #545e6c #f7f7f4 -
+10 118-120 #ffffff #f7f7f4 -
+11 0-2 #ffffff #f7f7f4 -
+11 2-3 #545e6c #f7f7f4 -
+11 3-117 #1d232c #f7f7f4 -
+11 117-118 #545e6c #f7f7f4 -
+11 118-120 #ffffff #f7f7f4 -
+12 0-2 #ffffff #f7f7f4 -
+12 2-3 #545e6c #f7f7f4 -
+12 3-117 #1d232c #f7f7f4 -
+12 117-118 #545e6c #f7f7f4 -
+12 118-120 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-3 #545e6c #f7f7f4 -
+13 3-117 #1d232c #f7f7f4 -
+13 117-118 #545e6c #f7f7f4 -
+13 118-120 #ffffff #f7f7f4 -
+14 0-2 #ffffff #f7f7f4 -
+14 2-3 #545e6c #f7f7f4 -
+14 3-117 #1d232c #f7f7f4 -
+14 117-118 #545e6c #f7f7f4 -
+14 118-120 #ffffff #f7f7f4 -
+15 0-2 #ffffff #f7f7f4 -
+15 2-3 #545e6c #f7f7f4 -
+15 3-117 #1d232c #f7f7f4 -
+15 117-118 #545e6c #f7f7f4 -
+15 118-120 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-3 #545e6c #f7f7f4 -
+16 3-117 #1d232c #f7f7f4 -
+16 117-118 #545e6c #f7f7f4 -
+16 118-120 #ffffff #f7f7f4 -
+17 0-2 #ffffff #f7f7f4 -
+17 2-3 #545e6c #f7f7f4 -
+17 3-117 #1d232c #f7f7f4 -
+17 117-118 #545e6c #f7f7f4 -
+17 118-120 #ffffff #f7f7f4 -
+18 0-2 #ffffff #f7f7f4 -
+18 2-3 #545e6c #f7f7f4 -
+18 3-117 #1d232c #f7f7f4 -
+18 117-118 #545e6c #f7f7f4 -
+18 118-120 #ffffff #f7f7f4 -
+19 0-2 #ffffff #f7f7f4 -
+19 2-3 #545e6c #f7f7f4 -
+19 3-117 #1d232c #f7f7f4 -
+19 117-118 #545e6c #f7f7f4 -
+19 118-120 #ffffff #f7f7f4 -
+20 0-2 #ffffff #f7f7f4 -
+20 2-3 #545e6c #f7f7f4 -
+20 3-117 #1d232c #f7f7f4 -
+20 117-118 #545e6c #f7f7f4 -
+20 118-120 #ffffff #f7f7f4 -
+21 0-2 #ffffff #f7f7f4 -
+21 2-3 #545e6c #f7f7f4 -
+21 3-117 #1d232c #f7f7f4 -
+21 117-118 #545e6c #f7f7f4 -
+21 118-120 #ffffff #f7f7f4 -
+22 0-2 #ffffff #f7f7f4 -
+22 2-3 #545e6c #f7f7f4 -
+22 3-117 #1d232c #f7f7f4 -
+22 117-118 #545e6c #f7f7f4 -
+22 118-120 #ffffff #f7f7f4 -
+23 0-2 #ffffff #f7f7f4 -
+23 2-3 #545e6c #f7f7f4 -
+23 3-117 #1d232c #f7f7f4 -
+23 117-118 #545e6c #f7f7f4 -
+23 118-120 #ffffff #f7f7f4 -
+24 0-2 #ffffff #f7f7f4 -
+24 2-3 #545e6c #f7f7f4 -
+24 3-117 #1d232c #f7f7f4 -
+24 117-118 #545e6c #f7f7f4 -
+24 118-120 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-3 #545e6c #f7f7f4 -
+25 3-117 #1d232c #f7f7f4 -
+25 117-118 #545e6c #f7f7f4 -
+25 118-120 #ffffff #f7f7f4 -
+26 0-120 #ffffff #f7f7f4 -
+27 0-120 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-119 #545e6c #ecedea -
+28 119-120 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-5 #1d232c #caced3 b
+29 5-13 #545e6c #f7f7f4 -
+29 13-15 #1d232c #caced3 b
+29 15-25 #545e6c #f7f7f4 -
+29 25-27 #1d232c #caced3 b
+29 27-38 #545e6c #f7f7f4 -
+29 38-39 #1d232c #caced3 b
+29 39-47 #545e6c #f7f7f4 -
+29 47-53 #1d232c #caced3 b
+29 53-58 #545e6c #f7f7f4 -
+29 58-120 #ffffff #f7f7f4 -

@@ -14,6 +14,7 @@ cursor 7 37 visible
 
   Wrapping report
 
+    table                                                      Alt+I inspect
    Name                                          State      Count      Owner
    A                                             B ready    C seven    D Ada
    pneumonoultramicroscopicsilicovolcanoconio
@@ -26,7 +27,6 @@ cursor 7 37 visible
    KLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
    console.log(message);
   End of wrapping report
-
 
 
 
@@ -72,71 +72,77 @@ cursor 7 37 visible
 06 2-17 #e6eaf0 #0e1117 -
 06 17-80 #ffffff #0e1117 -
 07 0-80 #ffffff #0e1117 -
-08 0-3 #ffffff #0e1117 -
-08 3-7 #e6eaf0 #0e1117 b
-08 7-49 #ffffff #0e1117 -
-08 49-54 #e6eaf0 #0e1117 b
-08 54-60 #ffffff #0e1117 -
-08 60-65 #e6eaf0 #0e1117 b
-08 65-71 #ffffff #0e1117 -
-08 71-76 #e6eaf0 #0e1117 b
-08 76-80 #ffffff #0e1117 -
+08 0-2 #ffffff #0e1117 -
+08 2-3 #ffffff #1e2430 -
+08 3-10 #e6eaf0 #4a505a b
+08 10-63 #ffffff #1e2430 -
+08 63-76 #8b95a7 #1e2430 -
+08 76-77 #ffffff #1e2430 -
+08 77-80 #ffffff #0e1117 -
 09 0-3 #ffffff #0e1117 -
-09 3-5 #e6eaf0 #0e1117 -
-09 5-49 #ffffff #0e1117 -
-09 49-56 #e6eaf0 #0e1117 -
-09 56-60 #ffffff #0e1117 -
-09 60-67 #e6eaf0 #0e1117 -
-09 67-71 #ffffff #0e1117 -
-09 71-76 #e6eaf0 #0e1117 -
+09 3-7 #e6eaf0 #0e1117 b
+09 7-49 #ffffff #0e1117 -
+09 49-54 #e6eaf0 #0e1117 b
+09 54-60 #ffffff #0e1117 -
+09 60-65 #e6eaf0 #0e1117 b
+09 65-71 #ffffff #0e1117 -
+09 71-76 #e6eaf0 #0e1117 b
 09 76-80 #ffffff #0e1117 -
 10 0-3 #ffffff #0e1117 -
-10 3-45 #e6eaf0 #0e1117 -
-10 45-80 #ffffff #0e1117 -
+10 3-5 #e6eaf0 #0e1117 -
+10 5-49 #ffffff #0e1117 -
+10 49-56 #e6eaf0 #0e1117 -
+10 56-60 #ffffff #0e1117 -
+10 60-67 #e6eaf0 #0e1117 -
+10 67-71 #ffffff #0e1117 -
+10 71-76 #e6eaf0 #0e1117 -
+10 76-80 #ffffff #0e1117 -
 11 0-3 #ffffff #0e1117 -
-11 3-32 #e6eaf0 #0e1117 -
-11 32-80 #ffffff #0e1117 -
+11 3-45 #e6eaf0 #0e1117 -
+11 45-80 #ffffff #0e1117 -
 12 0-3 #ffffff #0e1117 -
-12 3-9 #e6eaf0 #0e1117 -
-12 9-49 #ffffff #0e1117 -
-12 49-55 #e6eaf0 #0e1117 -
-12 55-60 #ffffff #0e1117 -
-12 60-66 #e6eaf0 #0e1117 -
-12 66-71 #ffffff #0e1117 -
-12 71-76 #e6eaf0 #0e1117 -
-12 76-80 #ffffff #0e1117 -
-13 0-80 #ffffff #0e1117 -
-14 0-2 #ffffff #0e1117 -
-14 2-3 #ffffff #1e2430 -
-14 3-7 #e6eaf0 #4a505a b
-14 7-63 #ffffff #1e2430 -
-14 63-76 #8b95a7 #1e2430 -
-14 76-77 #ffffff #1e2430 -
-14 77-80 #ffffff #0e1117 -
+12 3-32 #e6eaf0 #0e1117 -
+12 32-80 #ffffff #0e1117 -
+13 0-3 #ffffff #0e1117 -
+13 3-9 #e6eaf0 #0e1117 -
+13 9-49 #ffffff #0e1117 -
+13 49-55 #e6eaf0 #0e1117 -
+13 55-60 #ffffff #0e1117 -
+13 60-66 #e6eaf0 #0e1117 -
+13 66-71 #ffffff #0e1117 -
+13 71-76 #e6eaf0 #0e1117 -
+13 76-80 #ffffff #0e1117 -
+14 0-80 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
-15 2-3 #ffffff #161b24 -
-15 3-19 #e6eaf0 #161b24 -
-15 19-77 #ffffff #161b24 -
+15 2-3 #ffffff #1e2430 -
+15 3-7 #e6eaf0 #4a505a b
+15 7-63 #ffffff #1e2430 -
+15 63-76 #8b95a7 #1e2430 -
+15 76-77 #ffffff #1e2430 -
 15 77-80 #ffffff #0e1117 -
 16 0-2 #ffffff #0e1117 -
 16 2-3 #ffffff #161b24 -
-16 3-76 #e6eaf0 #161b24 -
-16 76-77 #ffffff #161b24 -
+16 3-19 #e6eaf0 #161b24 -
+16 19-77 #ffffff #161b24 -
 16 77-80 #ffffff #0e1117 -
 17 0-2 #ffffff #0e1117 -
 17 2-3 #ffffff #161b24 -
-17 3-57 #e6eaf0 #161b24 -
-17 57-77 #ffffff #161b24 -
+17 3-76 #e6eaf0 #161b24 -
+17 76-77 #ffffff #161b24 -
 17 77-80 #ffffff #0e1117 -
 18 0-2 #ffffff #0e1117 -
 18 2-3 #ffffff #161b24 -
-18 3-24 #e6eaf0 #161b24 -
-18 24-77 #ffffff #161b24 -
+18 3-57 #e6eaf0 #161b24 -
+18 57-77 #ffffff #161b24 -
 18 77-80 #ffffff #0e1117 -
 19 0-2 #ffffff #0e1117 -
-19 2-24 #e6eaf0 #0e1117 -
-19 24-80 #ffffff #0e1117 -
-20 0-80 #ffffff #0e1117 -
+19 2-3 #ffffff #161b24 -
+19 3-24 #e6eaf0 #161b24 -
+19 24-77 #ffffff #161b24 -
+19 77-80 #ffffff #0e1117 -
+20 0-2 #ffffff #0e1117 -
+20 2-24 #e6eaf0 #0e1117 -
+20 24-80 #ffffff #0e1117 -
 21 0-80 #ffffff #0e1117 -
 22 0-80 #ffffff #0e1117 -
 23 0-80 #ffffff #0e1117 -

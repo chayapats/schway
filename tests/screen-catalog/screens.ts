@@ -71,6 +71,33 @@ const inspection = async (ui: ScreenHarness, focus: "none" | "code" | "tool") =>
   }
   if (copies) throw new Error("Inspection opening, navigation and tool expansion must not copy");
 };
+const readerCode = [
+  "export function summarize(rows: readonly Row[], options: { locale: string; currency: string; includeArchived: boolean; precision: number; groupBy: \"region\" | \"owner\"; timezone: string }): Summary {",
+  "  const label = 'สรุปยอดขาย 🧪 ' + options.locale; // Thai and emoji stay whole graphemes when the view pans or wraps",
+  "  const totals = rows.filter(row => options.includeArchived || !row.archived).map(row => row.amount * row.quantity);",
+  "  return { label, total: totals.reduce((sum, value) => sum + value, 0).toFixed(options.precision), currency: options.currency };",
+  "}",
+].join("\n");
+const readerTable = ["| Region | Owner | Q1 revenue | Q2 revenue | Change | Status | Notes | Follow-up |", "| --- | --- | ---: | ---: | ---: | --- | --- | --- |",
+  ...Array.from({ length: 36 }, (_, index) => `| ภาค ${index + 1} | ${index % 3 ? "Dana" : ""} | ${(1200 + index * 37).toLocaleString("en-US")} | ${(1300 + index * 41).toLocaleString("en-US")} | +${(index % 9) + 1}% | ${index % 4 ? "On track" : "Review 🧪"} | [details](https://example.test/regions/${index + 1}) | Confirm the quarter-end forecast with finance |`)].join("\n");
+const reader = async (ui: ScreenHarness, mode: "code" | "wrapped" | "table" | "search" | "approval") => {
+  let copies = 0;
+  ui.renderer.copyToClipboardOSC52 = () => { copies++; return true; };
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: mode === "table" ? readerTable : "```ts\n" + readerCode + "\n```" } });
+  ui.controller.applyEvent({ type: "model.finished" });
+  await ui.mockInput.pasteBracketedText("งานถัดไป 🧪");
+  if (mode === "approval") ui.mockInput.pressTab({ shift: true });
+  await ui.settle(); ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+  ui.mockInput.pressKey("r"); await ui.settle();
+  if (mode === "code") ui.mockInput.pressArrow("right");
+  if (mode === "wrapped") ui.mockInput.pressKey("w");
+  if (mode === "table") { ui.mockInput.pressKey("\u001b[6~"); await ui.settle(); ui.mockInput.pressArrow("right"); }
+  if (mode === "search") { ui.mockInput.pressKey("f", { ctrl: true }); await ui.mockInput.typeText("absent"); }
+  if (mode === "approval") void ui.controller.submit("Run the clamp test");
+  await ui.settle();
+  if (copies) throw new Error("Opening and navigating the reader must not copy");
+};
+const reading = (ui: ScreenHarness, text: string) => !!ui.renderer.root.findDescendantById("reader-panel")?.visible && ui.captureCharFrame().includes(text);
 const openDetails = (ui: ScreenHarness) => ui.mockInput.pressKey("\u001bOQ");
 const reviewReady = (s: TuiSnapshot) => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0;
 const resumedReady = (s: TuiSnapshot) => s.changeReview?.scope?.kind === "workspace" && !s.changeReview.loading && s.changeReview.rows.length > 0 && !s.changeReview.rows.some(row => row.text.startsWith("Loading current"));
@@ -236,6 +263,11 @@ export const SCREENS: readonly Screen[] = [
   { id: "inspection-unfocused", title: "Code before inspection", description: "Visible code headers offer inspection while the original draft remains active.", noColorWidths: true, drive: ui => inspection(ui, "none"), ready: (_s, ui) => ui.editor.focused && ui.captureCharFrame().includes("Alt+I inspect") },
   { id: "inspection-code", title: "Inspect a visible code block", description: "Inspection highlights a later visible block before an explicit copy and leaves neighboring headers unchanged.", noColorWidths: true, drive: ui => inspection(ui, "code"), ready: (_s, ui) => !ui.editor.focused && ui.captureCharFrame().includes("› ts") },
   { id: "inspection-tool", title: "Inspect an expanded result", description: "Tab selects a tool result and Enter expands it without copying or changing the draft.", noColorWidths: true, drive: ui => inspection(ui, "tool"), ready: (_s, ui) => !ui.editor.focused && ui.captureCharFrame().includes("Second result line") },
+  { id: "reader-code", title: "Read code, horizontal clipping", description: "The reader pans unwrapped code and marks clipped edges without changing the draft.", noColorWidths: true, drive: ui => reader(ui, "code"), ready: (_s, ui) => reading(ui, "Col ") },
+  { id: "reader-code-wrapped", title: "Read code, wrapped", description: "W wraps long code lines in the reader while line numbers keep each source line.", noColorWidths: true, drive: ui => reader(ui, "wrapped"), ready: (_s, ui) => reading(ui, "W unwrap") || reading(ui, "Read code") && ui.renderer.width < 60 },
+  { id: "reader-table", title: "Read table, pinned headers", description: "A wide table keeps its header and column position visible while scrolled down and right.", noColorWidths: true, drive: ui => reader(ui, "table"), ready: (_s, ui) => reading(ui, "Read table") && reading(ui, "‹") },
+  { id: "reader-no-matches", title: "Read code, no matches", description: "Reader search reports no matches and offers to restore the reading position.", noColorWidths: true, drive: ui => reader(ui, "search"), ready: (_s, ui) => reading(ui, "No matches") },
+  { id: "reader-approval", title: "Read code, approval waiting", description: "A deferred tool approval stays pending while the reader names the action that reviews it.", noColorWidths: true, drive: ui => reader(ui, "approval"), ready: (s, ui) => !!s.toolApproval && !s.toolApproval.loading && reading(ui, "Esc review request") },
 ];
 /** Enumerate six standard variants and the screen's explicit color or narrow extras. */
 export function variantsFor(screen: Screen): Variant[] {
@@ -247,6 +279,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
+  if (screen.id.startsWith("reader-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true), make("dark", 40, 8), make("light", 40, 8));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search", "running-empty", "running-draft"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   if (["details-notice", "details-recovery", "details-unavailable"].includes(screen.id)) variants.push(make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
