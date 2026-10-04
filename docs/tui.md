@@ -511,7 +511,11 @@ each listed workspace path, including after restart. The list is titled
 `Files from undo panel` and the diff `Current diff · <path>`; no row carries a
 `detected` badge or a source note, because the undo panel does not say which tool
 or process changed a path. Up/Down selects a file and **Ctrl+R** rereads Git for
-the same paths. Esc returns to the same undo panel; Esc again closes it and restores the draft. Reviewing, selecting and
+the same paths. F2 details say what review read: with change tracking off,
+outside Git or when Git fails, they say no current Git diff was read instead of
+describing Git reads. In a session that cannot save, `/undo` and `/history` point
+to `/new start fresh · /sessions browse`, like the hint row.
+Esc returns to the same undo panel; Esc again closes it and restores the draft. Reviewing, selecting and
 closing never write files, Git, the session or undo data. Undo never runs inverse
 shell commands, `git reset` or `git checkout`.
 

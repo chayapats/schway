@@ -18,7 +18,7 @@ import { keyboardGuideAvailability, nothingToInspectReason } from "../src/tui/pa
 import { getGitDiffPreview, inspectGitStatus } from "../src/workspace/git.ts";
 import { SESSION_BLOCKED_HINT } from "../src/tui/running-hints.ts";
 
-type Outcome = { text: string } | { error: string; status: number };
+type Outcome = { text: string } | { error: string; status: number } | { toolCalls: { id: string; name: string; arguments: unknown }[] };
 
 /** A model whose turns wait until the test releases an outcome, so input can arrive mid-turn. */
 function gatedModel() {
@@ -36,6 +36,10 @@ function gatedModel() {
       });
       count++;
       if ("error" in outcome) throw Object.assign(new Error(outcome.error), { status: outcome.status });
+      if ("toolCalls" in outcome) {
+        yield { type: "message_complete", message: { type: "assistant", id: `assistant-${count}`, content: outcome.toolCalls.map(call => ({ type: "tool_call", ...call })) } };
+        return;
+      }
       yield { type: "text_delta", text: outcome.text };
       yield { type: "message_complete", message: { type: "assistant", id: `assistant-${count}`, content: [{ type: "text", text: outcome.text }] } };
     },
@@ -52,30 +56,30 @@ function git(work: string, ...args: string[]) {
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function repository() {
+async function repository(initGit = true) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "schway-241-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "home"), work = join(root, "work");
   await mkdir(work, { recursive: true });
   await writeFile(join(work, "note.txt"), "before\n");
-  git(work, "init", "-q", "-b", "main"); git(work, "add", "."); git(work, "-c", "commit.gpgsign=false", "commit", "-qm", "base");
+  if (initGit) { git(work, "init", "-q", "-b", "main"); git(work, "add", "."); git(work, "-c", "commit.gpgsign=false", "commit", "-qm", "base"); }
   return { root, home, work };
 }
 
 const KEYS = {
-  kitty: { altH: "\x1b[104;3u", altI: "\x1b[105;3u", ctrlF: "\x1b[102;5u", ctrlR: "\x1b[114;5u", f2: "\x1b[57365;1u\x1b[57365;1:3u", newline: "\x1b[13;2u", esc: "\x1b[27u" },
-  legacy: { altH: "\x1bh", altI: "\x1bi", ctrlF: "\x06", ctrlR: "\x12", f2: "\x1bOQ", newline: "\n", esc: "\x1b" },
+  kitty: { altR: "\x1b[114;3u", altH: "\x1b[104;3u", altI: "\x1b[105;3u", ctrlF: "\x1b[102;5u", ctrlR: "\x1b[114;5u", f2: "\x1b[57365;1u\x1b[57365;1:3u", newline: "\x1b[13;2u", esc: "\x1b[27u" },
+  legacy: { altR: "\x1br", altH: "\x1bh", altI: "\x1bi", ctrlF: "\x06", ctrlR: "\x12", f2: "\x1bOQ", newline: "\n", esc: "\x1b" },
 } as const;
 type Encoding = keyof typeof KEYS;
 
-async function setup(encoding: Encoding, width = 100, height = 30) {
-  const { home, work } = await repository();
+async function setup(encoding: Encoding, width = 100, height = 30, options: { git?: boolean; tracking?: "off" | "on-demand" } = {}) {
+  const { home, work } = await repository(options.git ?? true);
   const workspace = { root: work, launchCwd: work, extraRoots: [] };
   const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace, deferred: true });
   const gate = gatedModel();
   const controller = new TuiController({
     home, session, workspace, sessionId: session.header.id, provider: "scripted", modelId: "gated", model: gate.model,
-    contextManager: createContextManager(workspace, { home }), tools: createToolRegistry([editTool]), changeTracking: "on-demand", secrets: [],
+    contextManager: createContextManager(workspace, { home }), tools: createToolRegistry([editTool]), changeTracking: options.tracking ?? "on-demand", secrets: [],
     agentClock: { now: () => 0, sleep: async (_ms: number, signal?: AbortSignal) => signal?.throwIfAborted() },
   } as never);
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: encoding === "kitty", exitOnCtrlC: false });
@@ -83,7 +87,7 @@ async function setup(encoding: Encoding, width = 100, height = 30) {
   let submission: Promise<unknown> = Promise.resolve();
   const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: work, env: { NO_COLOR: "1" }, secrets: [], motion: "off", quit() {},
     submit: (value, accepted) => submission = dispatchEditorInput(value, controller, command =>
-      command.name === "changes" ? controller.changesCommand(command.args) : Promise.resolve(false), accepted) });
+      command.name === "changes" ? controller.changesCommand(command.args) : command.name === "undo" ? controller.undoCommand(command.args) : Promise.resolve(false), accepted) });
   const find = <T>(id: string) => terminal.renderer.root.findDescendantById(id) as T;
   const editor = find<TextareaRenderable>("prompt");
   const settle = async () => { await Bun.sleep(2); view.refresh(); await terminal.flush(); view.refresh(); await terminal.flush(); };
@@ -96,11 +100,12 @@ async function setup(encoding: Encoding, width = 100, height = 30) {
   const input = async (bytes: string) => { terminal.renderer.stdin.emit("data", Buffer.from(bytes)); await Bun.sleep(30); await settle(); };
   const enter = async () => { terminal.mockInput.pressEnter(); await Promise.race([submission, Bun.sleep(30)]); await settle(); };
   const type = async (text: string) => { await terminal.mockInput.typeText(text); await settle(); };
-  /** Send a task and finish it with `outcome` (retrying failures until the turn settles). */
-  const turn = async (prompt: string, outcome: Outcome) => {
+  /** Send a task and answer its model calls with the outcomes in order, repeating the last until the turn settles. */
+  const turn = async (prompt: string, outcome: Outcome, ...more: Outcome[]) => {
     await type(prompt); await enter();
     await waitFor(() => gate.waiting() === 1, "turn waiting");
-    while (controller.running) { if (gate.waiting()) gate.release(outcome); await Bun.sleep(5); }
+    const outcomes = [outcome, ...more];
+    while (controller.running) { if (gate.waiting()) gate.release(outcomes.length > 1 ? outcomes.shift()! : outcomes[0]!); await Bun.sleep(5); }
     await settle();
   };
   let closed = false;
@@ -337,3 +342,44 @@ test("an expired notice is repainted away without further input", async () => {
   await ui.flush();
   expect(ui.frame()).not.toContain("Copied code");
 }, 10_000);
+
+// D2: Details for a review opened from the undo panel describe what was actually read.
+const editTurn: Outcome[] = [{ toolCalls: [{ id: "edit-1", name: "edit", arguments: { path: "note.txt", edits: [{ oldText: "before", newText: "after" }] } }] }, { text: "Edited." }];
+const undoReviewCases = [
+  { name: "tracking off", git: true, tracking: "off" as const, says: "review read no Git state" },
+  { name: "non-Git", git: false, tracking: "on-demand" as const, says: "Git found no repository enclosing this workspace" },
+  { name: "Git", git: true, tracking: "on-demand" as const, says: "Current diff is read from Git when review opens" },
+];
+for (const encoding of encodings) for (const scenario of undoReviewCases) test(`[${encoding}] undo-panel review Details stay truthful (${scenario.name})`, async () => {
+  const ui = await setup(encoding, 100, 30, scenario);
+  await ui.turn("edit the note", editTurn[0]!, editTurn[1]!);
+  expect(ui.controller.snapshot().outcome).toBeDefined();
+  await ui.type("/undo");
+  await ui.input(ui.keys.esc);
+  await ui.enter();
+  await ui.waitFor(() => !!ui.controller.snapshot().undoPreview, "undo panel");
+  await ui.input(ui.keys.altR);
+  await ui.waitFor(() => ui.controller.snapshot().changeReview?.loading === false, "undo review");
+  await ui.input(ui.keys.f2);
+  const review = ui.controller.snapshot().changeReview!;
+  expect(review.showingDetails).toBe(true);
+  expect(review.details).toContain(scenario.says);
+  if (scenario.name !== "Git") expect(review.details).not.toContain("read from Git");
+  expect(ui.frame()).toContain("paths in the undo panel");
+});
+
+// D9: a write-blocked session points /undo at commands that work as typed.
+test("blocked session /undo names the same next step as the hint row", async () => {
+  const ui = await setup("legacy");
+  await ui.turn("first task", { text: "plain answer" });
+  ui.session.append = () => { throw new Error("disk full"); };
+  await ui.type("draft"); await ui.enter();
+  expect(ui.controller.snapshot().sessionWriteBlocked).toBe(true);
+  ui.editor.setText(""); await ui.settle();
+  await ui.type("/undo");
+  await ui.input(ui.keys.esc);
+  await ui.enter();
+  expect(ui.controller.snapshot().transcript.at(-1)!.text).toBe(`Session storage blocked · ${SESSION_BLOCKED_HINT}`);
+  ui.editor.setText(""); await ui.settle();
+  expect(ui.hints()).toStartWith(SESSION_BLOCKED_HINT);
+});
