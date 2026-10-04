@@ -16,11 +16,11 @@ cursor 12 6 visible
  Read-only · Esc restore
 == styles
 00 0-1 #ffffff #0e1117 -
-00 1-25 #8b95a7 #2c3444 -
+00 1-25 #929cac #2c3444 -
 00 25-27 #ffffff #2c3444 -
 00 27-29 #ffffff #0e1117 -
 01 0-1 #ffffff #0e1117 -
-01 1-23 #8b95a7 #2c3444 -
+01 1-23 #929cac #2c3444 -
 01 23-27 #ffffff #2c3444 -
 01 27-29 #ffffff #0e1117 -
 02 0-29 #ffffff #0e1117 -

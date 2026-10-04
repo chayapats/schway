@@ -1222,8 +1222,11 @@ model prose and command invocation alone provide no verification evidence.
 
 #### Color roles
 
-Every text role meets a 4.5:1 contrast ratio on the canvas, both
-surfaces and every tint it is used on; `tests/tui-view.test.ts` checks the pairs.
+Every text role meets a 4.5:1 contrast ratio on the canvas, both surfaces and the
+composed fill it is drawn on, including selection, diff, search, pill-fade and flash
+fills. `tests/tui-contrast.test.ts` checks each role, the documented decorative
+exceptions and every text style run in the committed screen catalog. Terminal-default
+or remapped colors remain a manual inspection.
 
 #### Motion and startup splash
 

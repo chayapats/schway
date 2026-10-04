@@ -107,3 +107,21 @@ export function readableForeground(preferred: string, background: string): strin
   }
   return closest;
 }
+
+/** Return a text color with at least 4.5:1 on the resolved background, keeping passing or unresolvable colors unchanged. */
+export function textOn(color: string, background: string): string {
+  return readableForeground(color, background) ?? color;
+}
+
+/** Foreground roles drawn as readable text; surfaces, borders and decorative tokens are excluded. */
+export const TEXT_ROLES = ["text", "muted", "accent", "success", "warning", "error", "code", "cyan", "violet"] as const;
+
+/** Return the palette with every text role readable on the composed background; returns the same object when nothing changes. */
+export function themeOn(theme: TuiTheme, background: string): TuiTheme {
+  let adjusted: TuiTheme | undefined;
+  for (const role of TEXT_ROLES) {
+    const color = textOn(theme[role], background);
+    if (color !== theme[role]) (adjusted ??= { ...theme })[role] = color;
+  }
+  return adjusted ?? theme;
+}
