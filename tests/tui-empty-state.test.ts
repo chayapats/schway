@@ -129,10 +129,12 @@ test("ready empty conversation shows examples below readiness at 120/80/50 and o
 
 test("examples respect the visible mode and never claim a mode is required", async () => {
   const ui = await setup(80, 30);
-  for (const mode of ["Ask", "Read-only", "Auto"]) {
+  for (const [mode, chip] of [["ask", "◆ Ask "], ["read-only", "◆ Read-only "], ["auto", "◆ Auto "]] as const) {
     ui.mockInput.pressTab({ shift: true });
     await ui.settle();
-    expect(ui.captureCharFrame()).toContain(mode);
+    expect(ui.controller.snapshot().approvalMode).toBe(mode);
+    const footer = frameRows(ui).find(row => row.includes("● Ready"));
+    expect(footer).toContain(chip);
     expect(expectSafeLayout(ui)).toBe(3);
   }
   const text = ui.examples.chunks.map(chunk => chunk.text).join("");
