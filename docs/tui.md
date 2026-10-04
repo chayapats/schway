@@ -193,6 +193,9 @@ command results, elapsed time, and **Alt+R review**. Failed turns also offer
 ✗ Failed · 2 files +8 −3 · 1 command failed · Alt+R review · F2 details
 ```
 
+While a panel or the reader is open, those keys belong to it, so the line keeps
+the outcome and counts but drops **Alt+R review** and **F2 details**.
+
 Counts include successful file-tool changes and paths detected as changed by shell
 commands, extension tools, or other processes. Created writes and edits contribute
 known additions and removals; overwritten writes have no line counts. Commands can
@@ -312,7 +315,10 @@ timeline: a turn shows its durable undo outcome, `Undo available · /undo previe
 this turn` when `/undo` would target it, which turn `/undo` previews instead, or
 `Undo unavailable · pre-images not kept` after pruning. It uses the same target
 selection and per-file check as `/undo`, so a target whose files all changed since
-says `Every file changed since · nothing to undo`, exactly as `/undo` would. A completed turn or an
+says `Every file changed since · nothing to undo`, exactly as `/undo` would. When `/undo` would
+instead open its read-only `Nothing to undo in turn N` panel, because saved undo data is incomplete,
+a saved copy is missing, a file can't be read or changes without saved undo stay, the turn says
+`Nothing to undo · /undo shows why`. A completed turn or an
 `Exit 0` row is not proof that tests passed.
 
 In a turn, Up/Down selects an observed file and Enter shows its

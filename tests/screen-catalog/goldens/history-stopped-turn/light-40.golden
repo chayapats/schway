@@ -19,7 +19,7 @@ cursor 1 1 hidden
  Commands · 1
    − printf 'Ready to stop\n'; sleep …
 
- − Stopped · Alt+R review
+ − Stopped · 1 file +1 −0
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -80,9 +80,7 @@ cursor 1 1 hidden
 13 1-2 #545e6c #f7f7f4 b
 13 2-3 #545e6c #f7f7f4 -
 13 3-10 #545e6c #f7f7f4 b
-13 10-13 #545e6c #f7f7f4 -
-13 13-18 #1d232c #caced3 b
-13 18-25 #545e6c #f7f7f4 -
+13 10-25 #545e6c #f7f7f4 -
 13 25-40 #ffffff #f7f7f4 -
 14 0-1 #ffffff #f7f7f4 -
 14 1-39 #ecedea #f7f7f4 -

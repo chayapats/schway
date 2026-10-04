@@ -30,7 +30,7 @@ cursor 1 1 hidden
  Review is read-only. Files remain changed after
  failure/cancellation; conversation branching
 
- ✓ Done · 1 file +1 −1 · Alt+R review
+ ✓ Done · 1 file +1 −1 · 1 command ok · 3.6s
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -135,10 +135,8 @@ cursor 1 1 hidden
 24 1-2 #19612f #f7f7f4 b
 24 2-3 #545e6c #f7f7f4 -
 24 3-7 #19612f #f7f7f4 b
-24 7-25 #545e6c #f7f7f4 -
-24 25-30 #1d232c #caced3 b
-24 30-37 #545e6c #f7f7f4 -
-24 37-50 #ffffff #f7f7f4 -
+24 7-44 #545e6c #f7f7f4 -
+24 44-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -
 25 49-50 #ffffff #f7f7f4 -

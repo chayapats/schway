@@ -5,7 +5,7 @@ import { createHistoryCollector, historyGitFailure, historyTurnIdentity, type Hi
 import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome } from "../history/records.ts";
 import { openHistoryStore, type HistoryRead } from "../history/store.ts";
 import { buildHistoryTimeline, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
-import { collectUndoEvidence, observeUndoFile } from "../undo/evidence.ts";
+import { collectUndoEvidence, describeUndoLimits, observeUndoFile, undoTargetVerdict, type UndoTargetVerdict } from "../undo/evidence.ts";
 import type { Session } from "../session/session.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
 import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
@@ -27,8 +27,8 @@ export interface HistoryUndoState {
   /** Accepted turn `/undo` selects now, if any. */
   targetTurnId?: string;
   targetOrdinal?: number;
-  /** At least one target file still matches its saved post-image, so `/undo` opens a preview instead of reporting nothing to undo. */
-  targetRestorable?: boolean;
+  /** What `/undo` shows for the target now: a preview, the all-changed-since note, or a read-only nothing-to-undo panel. */
+  targetVerdict?: UndoTargetVerdict;
   /** Turns that still have saved file pre-images. */
   preImages: readonly string[];
 }
@@ -117,9 +117,10 @@ export function historyUndoLine(turn: Pick<HistoryTurn, "turnId" | "undo" | "fil
   if (undo.blocked === "session-write") return "Undo blocked · /resume reload saved work";
   if (undo.blocked === "no-workspace") return "Nothing to undo now";
   if (!turn.incompleteAttempts && !turn.files.items.some(file => file.source === "tool")) return "No file edits to undo";
-  if (undo.targetTurnId === turn.turnId) return undo.targetRestorable ? "Undo available · /undo previews this turn" : "Every file changed since · nothing to undo";
+  if (undo.targetTurnId === turn.turnId) return undo.targetVerdict === "preview" ? "Undo available · /undo previews this turn"
+    : undo.targetVerdict === "changed-since" ? "Every file changed since · nothing to undo" : "Nothing to undo · /undo shows why";
   if (!undo.preImages.includes(turn.turnId)) return "Undo unavailable · pre-images not kept";
-  return undo.targetOrdinal && undo.targetRestorable ? `Not the undo target · /undo previews turn ${undo.targetOrdinal}` : "Nothing to undo now";
+  return undo.targetOrdinal && undo.targetVerdict === "preview" ? `Not the undo target · /undo previews turn ${undo.targetOrdinal}` : "Nothing to undo now";
 }
 
 /** Build F2 evidence notes for the list or one turn; caveats stay here instead of the primary view. */
@@ -258,9 +259,9 @@ export abstract class HistoryLayer extends TurnLayer {
       const manifests = await store.list(session.rootId);
       const users = session.items.filter(item => item.type === "user").map(item => item.id);
       const undone = new Set(session.entries.flatMap(entry => entry.item.type === "turn_undo" ? [entry.item.turnId] : []));
-      const target = collectUndoEvidence(manifests, users, undone).target;
-      const restorable = target ? (await Promise.all(target.files.map(file => observeUndoFile(store, target, file)))).some(file => file.eligible) : false;
-      return { known: true, ...(target ? { targetTurnId: target.turnId, targetRestorable: restorable } : {}), preImages: manifests.map(manifest => manifest.turnId) };
+      const evidence = collectUndoEvidence(manifests, users, undone), target = evidence.target;
+      const verdict = target ? undoTargetVerdict(await Promise.all(target.files.map(file => observeUndoFile(store, target, file))), describeUndoLimits(evidence).unsaved.length) : undefined;
+      return { known: true, ...(target ? { targetTurnId: target.turnId, targetVerdict: verdict } : {}), preImages: manifests.map(manifest => manifest.turnId) };
     } catch { return { known: false, preImages: [] }; }
   }
 

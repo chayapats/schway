@@ -20,7 +20,7 @@ cursor 1 1 hidden
  unknown (entire turn).
  Command results (latest 50; exit
 
- ✓ Done · 1 file +1 −1 · Alt+R review
+ ✓ Done · 1 file +1 −1 · 1 command ok
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -79,9 +79,7 @@ cursor 1 1 hidden
 14 1-2 #19612f #f7f7f4 b
 14 2-3 #545e6c #f7f7f4 -
 14 3-7 #19612f #f7f7f4 b
-14 7-25 #545e6c #f7f7f4 -
-14 25-30 #1d232c #caced3 b
-14 30-37 #545e6c #f7f7f4 -
+14 7-37 #545e6c #f7f7f4 -
 14 37-40 #ffffff #f7f7f4 -
 15 0-1 #ffffff #f7f7f4 -
 15 1-39 #ecedea #f7f7f4 -

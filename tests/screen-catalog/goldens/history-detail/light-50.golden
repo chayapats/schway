@@ -29,7 +29,7 @@ cursor 1 1 hidden
 
 
 
- − Stopped · 1 file +1 −0 · Alt+R review
+ − Stopped · 1 file +1 −0 · 1 command stopped
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -89,10 +89,8 @@ cursor 1 1 hidden
 23 1-2 #545e6c #f7f7f4 b
 23 2-3 #545e6c #f7f7f4 -
 23 3-10 #545e6c #f7f7f4 b
-23 10-28 #545e6c #f7f7f4 -
-23 28-33 #1d232c #caced3 b
-23 33-40 #545e6c #f7f7f4 -
-23 40-50 #ffffff #f7f7f4 -
+23 10-45 #545e6c #f7f7f4 -
+23 45-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-49 #ecedea #f7f7f4 -
 24 49-50 #ffffff #f7f7f4 -

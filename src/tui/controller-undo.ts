@@ -8,7 +8,7 @@ import { getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import { assertFileUnchanged, FileChangedError, writeFileAtomically, type FileObservation } from "../tools/fs.ts";
 import { displayToolPath } from "../tools/path.ts";
 import { undoFailureReason } from "../undo/errors.ts";
-import { collectUndoEvidence, describeUndoLimits, observeUndoFile, type UndoEvidence, type UndoLimits } from "../undo/evidence.ts";
+import { collectUndoEvidence, describeUndoLimits, observeUndoFile, undoTargetVerdict, type UndoEvidence, type UndoLimits } from "../undo/evidence.ts";
 import { buildUndoNote, formatUndoResult } from "../undo/record.ts";
 import { equalUndoHash, hashUndoBytes, openUndoStore, type UndoManifest, type UndoStore } from "../undo/store.ts";
 import { ChangesLayer } from "./controller-changes.ts";
@@ -65,9 +65,11 @@ export abstract class UndoLayer extends ChangesLayer {
         ...(limits.undetected.length ? ["Later changes can't be detected here"] : []),
         ...(limits.missing.length ? [`No saved undo data for ${turnList(limits.missing)}`] : []),
       ];
-      const nothing = files.every(file => file.action === "skip");
+      // Skipped rows other than CHANGED_SINCE carry an unavailable reason; the shared verdict keeps /history's line in step.
+      const verdict = undoTargetVerdict(files.map(file => ({ eligible: file.action !== "skip", unavailable: file.action === "skip" && file.status !== CHANGED_SINCE ? file.status : undefined })), unsaved.length);
+      const nothing = verdict !== "preview";
       // Without known paths left in place, an all-conflict turn keeps the established one-line explanation.
-      if (nothing && !unsaved.length && files.every(file => file.status === CHANGED_SINCE)) { this.notice("Nothing to undo · every file changed since"); return true; }
+      if (verdict === "changed-since") { this.notice("Nothing to undo · every file changed since"); return true; }
       this.undoReturn = undefined;
       this.closeChangeReview();
       this.undoPreview = { shellUnavailable: target.shell.detection === "unavailable", turnId: target.turnId, turnNumber: target.turnNumber, files: [...files, ...unsaved], selected: 0, result: false,

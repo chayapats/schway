@@ -107,3 +107,13 @@ export async function observeUndoFile(store: UndoStore, manifest: UndoManifest, 
     && (file.afterMode === undefined || observed!.mode === undefined || file.afterMode === observed!.mode);
   return { unavailable, observed, current, before, eligible };
 }
+
+/** How `/undo` presents a selected target: a preview, the one-line all-changed-since note, or a read-only panel naming each file's reason. */
+export type UndoTargetVerdict = "preview" | "changed-since" | "read-only";
+
+/** Classify a target from its per-file observations and the count of known paths without saved undo, exactly as `/undo` decides. */
+export function undoTargetVerdict(files: readonly { eligible: boolean; unavailable?: string }[], unsavedPaths: number): UndoTargetVerdict {
+  if (files.some(file => file.eligible)) return "preview";
+  // Only an all-conflict target without unsaved paths or unusable saved data gets the one-line note.
+  return !unsavedPaths && files.every(file => !file.unavailable) ? "changed-since" : "read-only";
+}

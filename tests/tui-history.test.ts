@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
@@ -183,9 +183,13 @@ test("Esc steps back through current content, details and the list, then restore
   expect(await c.submit("Add a file")).toBe(true);
   const ui = await view(c, root, home, 80, 24);
   await ui.type("draft in progress");
+  expect(ui.frame()).toContain("Alt+R review");
   expect(await c.historyCommand("")).toBe(true);
   await ui.settle();
   expect(ui.editor.visible).toBe(false);
+  // History owns Alt+R, so the outcome strip keeps its outcome but names no dead review action.
+  expect(ui.frame()).toContain("✓ Done · 1 file +1 −0");
+  expect(ui.frame()).not.toContain("Alt+R review");
   await ui.press("return");
   await ui.press("f2");
   expect(c.snapshot().history?.showingDetails).toBe(true);
@@ -198,6 +202,7 @@ test("Esc steps back through current content, details and the list, then restore
   expect(c.snapshot().history).toBeUndefined();
   expect(ui.editor.visible).toBe(true);
   expect(ui.editor.plainText).toBe("draft in progress");
+  expect(ui.frame()).toContain("Alt+R review");
 });
 
 test("more than one page reveals older turns on request and absent evidence stays explicit", async () => {
@@ -417,14 +422,15 @@ test("history labels distinguish outcomes, unknown time and every undo state", (
   const attempt = { attemptId: "a", mode: "tui" as const, workspaceRoot: "/w", startedAt: "2026-01-15T09:30:00.000Z", activeMs: null };
   expect(historyDurationLabel({ evidence: "recorded", activeMs: 1500, unknownDurations: 1, attempts: [attempt, { ...attempt, activeMs: 1500 }] })).toBe("1.5s + unknown");
   expect(historyDurationLabel({ evidence: "recorded", activeMs: 0, unknownDurations: 1, attempts: [attempt] })).toBe("Time unknown");
-  const undo = { known: true, preImages: ["t", "u"], targetTurnId: "u", targetOrdinal: 4, targetRestorable: true };
+  const undo = { known: true, preImages: ["t", "u"], targetTurnId: "u", targetOrdinal: 4, targetVerdict: "preview" as const };
   expect(historyUndoLine({ ...base, undo: [{ reverted: [{ path: "a", action: "restored" }], skipped: [{ path: "b", reason: "changed" }] }] }, undo)).toBe("Undone · 1 file reverted · 1 skipped");
   expect(historyUndoLine(base, { ...undo, targetTurnId: "t" })).toBe("Undo available · /undo previews this turn");
   expect(historyUndoLine(base, undo)).toBe("Not the undo target · /undo previews turn 4");
   expect(historyUndoLine(base, { known: true, preImages: [] })).toBe("Undo unavailable · pre-images not kept");
   expect(historyUndoLine(base, { known: false, preImages: [] })).toBe("Undo status unknown · /undo preview");
-  expect(historyUndoLine(base, { ...undo, targetTurnId: "t", targetRestorable: false })).toBe("Every file changed since · nothing to undo");
-  expect(historyUndoLine(base, { ...undo, targetRestorable: false })).toBe("Nothing to undo now");
+  expect(historyUndoLine(base, { ...undo, targetTurnId: "t", targetVerdict: "changed-since" })).toBe("Every file changed since · nothing to undo");
+  expect(historyUndoLine(base, { ...undo, targetTurnId: "t", targetVerdict: "read-only" })).toBe("Nothing to undo · /undo shows why");
+  expect(historyUndoLine(base, { ...undo, targetVerdict: "changed-since" })).toBe("Nothing to undo now");
   expect(historyUndoLine(base, { known: true, blocked: "session-write", preImages: [] })).toBe("Undo blocked · /resume reload saved work");
   expect(historyUndoLine({ ...base, incompleteAttempts: 1 }, undo)).toBe("Undo status unknown · /undo preview");
   expect(historyUndoLine({ ...base, files: { total: 1, truncated: false, items: [{ path: "a", source: "shell" }] } }, undo)).toBe("No file edits to undo");
@@ -492,10 +498,47 @@ test("history undo eligibility matches what /undo previews after files changed s
   // An external edit after the turn: the target stays selected, but no file still matches its saved post-image.
   await writeFile(join(root, "u.txt"), "edited later\n");
   expect(await c.historyCommand("")).toBe(true);
-  expect(c.snapshot().history!.undo).toMatchObject({ targetTurnId: session.items[0]!.id, targetRestorable: false });
+  expect(c.snapshot().history!.undo).toMatchObject({ targetTurnId: session.items[0]!.id, targetVerdict: "changed-since" });
   expect(historyUndoLine(turn(), c.snapshot().history!.undo)).toBe("Every file changed since · nothing to undo");
   c.closeHistory();
   expect(await c.undoCommand("")).toBe(true);
   expect(c.snapshot().undoPreview).toBeUndefined();
   expect(c.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo · every file changed since");
+});
+
+const unavailableUndo = [
+  ["an incomplete entry", "incomplete", "undo data incomplete · skip"],
+  ["a missing saved copy", "missing", "no saved copy · skip"],
+  ["an unreadable file", "unreadable", "can't read · skip"],
+] as const;
+test.each(unavailableUndo)("history never says every file changed since for %s, matching the read-only /undo panel", async (_name, kind, status) => {
+  if (kind === "unreadable" && (process.platform === "win32" || process.getuid?.() === 0)) return;
+  const dir = await temp();
+  const home = join(dir, "home"), root = join(dir, "work");
+  await repo(root);
+  const session = await savedSession(home, root);
+  const c = controller(session, root, home, { sessionId: session.header.id,
+    model: countingModel([{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "README.md", content: "turn\n" } }, ...(kind === "incomplete" ? [{ id: "w2", name: "write", arguments: { path: "notes.txt", content: "notes\n" } }] : [])] }, { text: "ok" }]).model });
+  expect(await c.submit("Rewrite the readme")).toBe(true);
+  const store = join(home, ".schway", "undo", session.rootId);
+  if (kind === "incomplete") {
+    // A target needs one settled entry: README.md changed since, notes.txt never settled. /undo shows both reasons.
+    const turns = join(store, "turns"), [name] = await readdir(turns);
+    const manifest = JSON.parse(await readFile(join(turns, name!), "utf8"));
+    const notes = manifest.files.find((entry: { path: string }) => entry.path.endsWith("notes.txt"));
+    delete notes.after; delete notes.afterMode;
+    await writeFile(join(turns, name!), JSON.stringify(manifest));
+    await writeFile(join(root, "README.md"), "edited later\n");
+  }
+  if (kind === "missing") for (const blob of await readdir(join(store, "blobs"))) await rm(join(store, "blobs", blob));
+  const file = join(root, "README.md");
+  if (kind === "unreadable") { await chmod(file, 0o000); cleanups.push(() => chmod(file, 0o600)); }
+  expect(await c.historyCommand("")).toBe(true);
+  expect(c.snapshot().history!.undo).toMatchObject({ targetTurnId: session.items[0]!.id, targetVerdict: "read-only" });
+  expect(historyUndoLine(c.snapshot().history!.turns[0]!, c.snapshot().history!.undo)).toBe("Nothing to undo · /undo shows why");
+  c.closeHistory();
+  expect(await c.undoCommand("")).toBe(true);
+  expect(c.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "Nothing to undo in turn 1", files: kind === "incomplete"
+    ? [{ path: "README.md", action: "skip", status: "changed since · skip" }, { path: "notes.txt", action: "skip", status }]
+    : [{ path: "README.md", action: "skip", status }] });
 });
