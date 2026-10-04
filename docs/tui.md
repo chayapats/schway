@@ -614,7 +614,8 @@ Slash and extension commands keep their own busy messages and stay unrun. When
 the turn completes, stops or fails, the draft remains in the editor until you
 press Enter again. After a completed or stopped turn the hint returns to Enter
 send; after a failure it leads with that failure's recovery keys, such as
-Ctrl+R continue or Alt+L connect.
+Ctrl+R continue or Alt+L connect. When the session cannot save another turn,
+the hint leads with `/new start fresh · /sessions browse` instead of Enter send.
 
 When a provider step fails, the error row gives the available recovery keys for
 that operation. Alt+L opens sign-in after an authentication failure, Alt+M opens

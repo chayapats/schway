@@ -54,7 +54,8 @@ async function setup(root: string, size = { width: 80, height: 24 }) {
   const extension = await import(pathToFileURL(modulePath).href) as { ran: number };
   const session = await createJsonlSession({ directory: sessionsDirectory(home), workspace, deferred: true });
   const gate = gatedModel();
-  const controller = new TuiController({ ...loaded, extensions: loaded.runtime, home, session, workspace, sessionId: session.header.id, provider: "scripted", modelId: "gated", model: gate.model, contextManager: createContextManager(workspace, { home }) });
+  const controller = new TuiController({ ...loaded, extensions: loaded.runtime, home, session, workspace, sessionId: session.header.id, provider: "scripted", modelId: "gated", model: gate.model, contextManager: createContextManager(workspace, { home }),
+    agentClock: { now: () => 0, sleep: async (_ms, signal) => signal?.throwIfAborted() } });
   await controller.refreshCommands();
   const terminal = await createTestRenderer({ ...size, kittyKeyboard: true, exitOnCtrlC: false, exitSignals: [] });
   const config = await loadConfigEditor({ home, workspaceRoot: home });
@@ -116,10 +117,12 @@ async function expectUnsentUntilEnter(ui: Ui, cursor: number, draft = thai) {
   expect(ui.editor.cursorOffset).toBe(cursor);
   expect(ui.saved()).toBe(draft);
   expect(ui.userTurns()).toBe(1);
-  expect(ui.prompts).toEqual(["first task"]);
+  // Provider retries may repeat the first request; none of them may carry the draft.
+  expect(ui.prompts.every(prompt => prompt === "first task")).toBe(true);
+  const requests = ui.prompts.length;
   await ui.enter();
   await ui.until(() => ui.waiting() === 1);
-  expect(ui.prompts).toEqual(["first task", draft]);
+  expect(ui.prompts.slice(requests)).toEqual([draft]);
   expect(ui.userTurns()).toBe(2);
   expect(ui.editor.plainText).toBe("");
   ui.release({ text: "second answer" });
@@ -211,6 +214,66 @@ test("a recovery-required failure leads with its repair action and still never s
     expect(hint).toStartWith("Alt+L connect");
     expect(hint).not.toContain("Enter send");
     await expectUnsentUntilEnter(ui, cursor);
+  } finally { ui.close(); }
+}));
+
+test("exhausted provider retries settle with the draft unsent and recovery leading the hint", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    await startTurn(ui);
+    const cursor = await rejectDraft(ui);
+    let attempts = 0;
+    while (ui.controller.running) {
+      if (ui.waiting()) { attempts++; ui.release({ error: "Service unavailable", status: 503 }); }
+      await Bun.sleep(5);
+    }
+    expect(attempts).toBeGreaterThan(1);
+    await ui.controller.waitForIdle();
+    expect(ui.controller.snapshot().status).toBe("error");
+    expect(ui.controller.snapshot().recovery).toBeDefined();
+    expect(ui.editor.plainText).toBe(thai);
+    const hint = await ui.hintRow();
+    expect(hint).not.toContain("Enter send");
+    expect(hint).toStartWith("Ctrl+R continue");
+    await expectUnsentUntilEnter(ui, cursor);
+  } finally { ui.close(); }
+}));
+
+test("a session that cannot save another turn never promises Enter sends and keeps the draft", async () => withTempDir(async home => {
+  const ui = await setup(home);
+  try {
+    await startTurn(ui);
+    const cursor = await rejectDraft(ui);
+    ui.release({ text: "first answer" });
+    await ui.controller.waitForIdle();
+    expect(await ui.hintRow()).toContain("Enter send");
+    const append = ui.session.append.bind(ui.session);
+    let appendAttempts = 0;
+    ui.session.append = () => { appendAttempts++; throw new Error("disk full"); };
+    await ui.enter();
+    expect(appendAttempts).toBe(1);
+    const snapshot = ui.controller.snapshot();
+    expect(snapshot.status).toBe("error");
+    expect(snapshot.sessionWriteBlocked).toBe(true);
+    expect(snapshot.recovery?.category).toBe("session-write");
+    expect(snapshot.recovery?.actions).toEqual(["keep-editing"]);
+    expect(ui.editor.plainText).toBe(thai);
+    expect(ui.editor.cursorOffset).toBe(cursor);
+    let hint = await ui.hintRow();
+    expect(hint).toStartWith("/new start fresh · /sessions browse");
+    expect(hint).not.toContain("Enter send");
+    // Escape dismisses the error controls, but the session is still blocked, so Enter is still not offered.
+    ui.mockInput.pressEscape();
+    hint = await ui.hintRow();
+    expect(hint).toStartWith("/new start fresh");
+    expect(hint).not.toContain("Enter send");
+    await ui.enter();
+    expect(appendAttempts).toBe(1);
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toContain("Open a new or repaired session");
+    expect(ui.editor.plainText).toBe(thai);
+    expect(ui.userTurns()).toBe(1);
+    expect(ui.prompts).toEqual(["first task"]);
+    ui.session.append = append;
   } finally { ui.close(); }
 }));
 

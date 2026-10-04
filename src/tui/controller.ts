@@ -84,6 +84,7 @@ export class TuiController extends TurnLayer {
       ...(branchTree.tree !== undefined ? { branchTree: branchTree.tree } : {}),
       ...(branchTree.error !== undefined ? { branchTreeError: branchTree.error } : {}),
       ...(recovery ? { recovery } : {}),
+      ...(this.sessionWriteBlocked ? { sessionWriteBlocked: true as const } : {}),
     };
   }
 
