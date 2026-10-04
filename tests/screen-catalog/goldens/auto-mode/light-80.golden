@@ -13,10 +13,10 @@ cursor 7 27 visible
 
   Type a task · Enter sends
 
-
-
-
-
+  Try a task
+    Explain how this project starts.
+    Find a bug and suggest a fix.
+    Add a test for an edge case.
 
 
 
@@ -56,10 +56,18 @@ cursor 7 27 visible
 05 21-27 #545e6c #f7f7f4 -
 05 27-80 #ffffff #f7f7f4 -
 06 0-80 #ffffff #f7f7f4 -
-07 0-80 #ffffff #f7f7f4 -
-08 0-80 #ffffff #f7f7f4 -
-09 0-80 #ffffff #f7f7f4 -
-10 0-80 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-12 #545e6c #f7f7f4 -
+07 12-80 #ffffff #f7f7f4 -
+08 0-2 #ffffff #f7f7f4 -
+08 2-36 #545e6c #f7f7f4 -
+08 36-80 #ffffff #f7f7f4 -
+09 0-2 #ffffff #f7f7f4 -
+09 2-33 #545e6c #f7f7f4 -
+09 33-80 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-32 #545e6c #f7f7f4 -
+10 32-80 #ffffff #f7f7f4 -
 11 0-80 #ffffff #f7f7f4 -
 12 0-80 #ffffff #f7f7f4 -
 13 0-80 #ffffff #f7f7f4 -

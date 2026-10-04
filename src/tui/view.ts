@@ -19,6 +19,7 @@ import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
+import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -197,6 +198,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   body.add(transcript);
   const empty = new TextRenderable(renderer, { id: "empty-conversation", content: "Start a task · / browse commands", fg: theme.muted, marginTop: 1 });
   transcript.add(empty);
+  const taskExamples = new TextRenderable(renderer, { id: "task-examples", content: "", fg: theme.muted, marginTop: 1, wrapMode: "none", visible: false });
+  transcript.add(taskExamples);
   const tree = new ScrollBoxRenderable(renderer, { id: "branch-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
   body.add(tree);
   const preferencePanel = new ScrollBoxRenderable(renderer, { id: "preferences-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, scrollX: false, contentOptions: { flexDirection: "column" } });
@@ -645,6 +648,23 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     renderer.dropLive();
   }
 
+  // Task examples are static decoration below readiness: they only use rows the
+  // empty conversation leaves free above the composer and never touch the editor.
+  function paintTaskExamples(snapshot: TuiSnapshot, path: string, connection: string, route: string, action: string, width: number, draftRows: number) {
+    const eligible = transcript.visible && taskExamplesEligible(snapshot, { draft: editor.plainText,
+      owned: !!panelMode || !!inspection || !!detailsReturn, draftNotice: draftRows > 0 });
+    const lineWidth = width - 1;
+    const rowsFor = (text: string) => { const cells = Bun.stringWidth(text); return cells <= lineWidth ? 1 : Math.ceil(cells / lineWidth) + 1; };
+    const margin = (value: number | string) => typeof value === "number" ? value : 0;
+    const readinessRows = margin(empty.marginTop) + (topBar.visible ? 0 : rowsFor(safe(path))) + rowsFor(safe(`${connection} · ${route}`)) + 1 + rowsFor(action);
+    // One-row chrome: top bar, activity, composer caps around one empty editor row, footer, hints and draft status.
+    const transcriptRows = renderer.height - (topBar.visible ? 1 : 0) - margin(body.marginTop) - (activity.visible ? 1 + margin(activity.marginTop) : 0)
+      - 3 - 1 - (hints.visible ? 1 : 0) - draftRows;
+    const lines = eligible ? taskExampleLines(lineWidth, transcriptRows - readinessRows) : [];
+    taskExamples.visible = lines.length > 0;
+    taskExamples.content = new StyledText(lines.map((line, index) => fg(theme.muted)(`${index ? "\n" : ""}${line}`)));
+  }
+
   function refresh() {
     if (destroyed || refreshing) return;
     refreshing = true;
@@ -891,6 +911,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ...keyHintChunks(safe(action), hintColors(theme.background)),
         ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("F2 details · Esc keep editing", hintColors(theme.background))] : []),
       ]);
+      paintTaskExamples(snapshot, path, connection, route, action, width, draftStatus.visible ? draftStatus.height : 0);
       const ids = new Set(entries.map(entry => entry.id));
       if (previousInspection && !inspectionEntry(previousInspection, entries)) previousInspection = undefined;
       if (inspection && !inspectionEntry(inspection, entries)) clearInspection();
