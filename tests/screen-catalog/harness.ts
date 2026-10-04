@@ -154,6 +154,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "stopped-streaming") responses = [{ chunks: ["## Partial answer\n\n", "อ่านไฟล์แล้ว 🧪\n\n", "The next step is"], waitForAbort: true }];
   if (["failed-turn", "no-color", "details-recovery"].includes(screen.id)) responses = Array.from({ length: 3 }, () => ({ error: "Service unavailable", status: 503 }));
   if (screen.id === "retry-countdown") responses = [{ error: "busy", status: 503, headers: { "Retry-After": "3" } }];
+  if (screen.id === "retry-rate-limit") responses = [{ error: "Too many requests", status: 429, headers: { "Retry-After": "20" } }];
+  if (screen.id === "retry-network") responses = [{ error: "socket hang up", code: "ECONNRESET" }];
   if (screen.id === "compaction") responses = [{ waitForAbort: true }];
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
   if (screen.id === "table-and-code") responses = [{ text: MARKDOWN_ANSWER }];
@@ -230,7 +232,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     onRuntimeEvent: event => { if (event.type === "tool.finished") activityTime += 1200; },
-    agentClock: { now: () => 10_000, sleep: async (_ms, signal) => { if (screen.id === "retry-countdown") await stopped(signal); } },
+    agentClock: { now: () => 10_000, sleep: async (_ms, signal) => { if (screen.id.startsWith("retry-")) await stopped(signal); } },
     credentials: { store, grokLogin: async ({ device, signal, onApproval, onSaved }) => {
       if (screen.id === "grok-plan-error") {
         await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-access", obtainedAt: 1 })); onSaved?.();

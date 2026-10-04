@@ -53,6 +53,8 @@ details-notice
 details-recovery
 details-unavailable
 retry-countdown
+retry-rate-limit
+retry-network
 review-panel
 details-review
 review-multi-turn

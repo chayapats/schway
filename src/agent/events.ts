@@ -33,6 +33,8 @@ export type RuntimeEvent =
       maxAttempts: number;
       delayMs: number;
       message: string;
+      /** Why the failed attempt is retried, using `error.category` names: HTTP 429, HTTP 5xx, or a network failure with no HTTP status. Optional so events built without it stay valid. */
+      cause?: "rate-limit" | "provider" | "offline";
     }
   | { type: "tool.denied"; toolCallId: string; name: string; mode: ApprovalMode; reason: string }
   | { type: "tool.started"; toolCallId: string; name: string }
@@ -66,3 +68,6 @@ export type RuntimeEvent =
       message?: string;
     }
   | { type: "error"; message: string; origin?: "model" | "harness"; category?: "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" | "session-write" };
+
+/** Cause of a transient provider failure carried by `model.retry`; it shares the `error` event's category names. */
+export type ModelRetryCause = NonNullable<Extract<RuntimeEvent, { type: "model.retry" }>["cause"]>;

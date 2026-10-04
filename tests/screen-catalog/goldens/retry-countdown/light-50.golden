@@ -11,7 +11,7 @@ cursor 6 27 visible
  ▌ You
  ▌ Summarize the changes
 
- Retrying connection · Attempt 2/3 · Esc stop
+ Provider unavailable · Attempt 2/3 · Esc stop
 
 
 
@@ -30,11 +30,11 @@ cursor 6 27 visible
 
 
 
- ⠋ Retry 2/3 · Esc stop
+ ⠋ Provider unavailable · Attempt 2/3 · Esc stop
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Draft your next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Retry 2/3 · 1.8s     Esc stops  ctx ~6
+ ◆ Auto  ⠋ Retry · Attempt 2/3 in 2s    Esc stops
  Wait, then Enter sends · Esc stop
 == styles
 00 0-1 #ffffff #ecedea -
@@ -58,8 +58,8 @@ cursor 6 27 visible
 03 48-50 #ffffff #f7f7f4 -
 04 0-50 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
-05 1-45 #545e6c #f7f7f4 -
-05 45-50 #ffffff #f7f7f4 -
+05 1-46 #545e6c #f7f7f4 -
+05 46-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -
 07 0-50 #ffffff #f7f7f4 -
 08 0-50 #ffffff #f7f7f4 -
@@ -80,8 +80,8 @@ cursor 6 27 visible
 23 0-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #0a5894 #f7f7f4 b
-24 2-23 #545e6c #f7f7f4 -
-24 23-50 #ffffff #f7f7f4 -
+24 2-48 #545e6c #f7f7f4 -
+24 48-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -
 25 49-50 #ffffff #f7f7f4 -
@@ -97,10 +97,10 @@ cursor 6 27 visible
 28 0-1 #545e6c #ecedea -
 28 1-7 #1d232c #ecedea b
 28 7-8 #545e6c #ecedea -
-28 8-28 #ffffff #7a5000 b
-28 28-32 #545e6c #ecedea -
-28 32-35 #1d232c #c9cdd2 b
-28 35-49 #545e6c #ecedea -
+28 8-37 #ffffff #7a5000 b
+28 37-40 #545e6c #ecedea -
+28 40-43 #1d232c #c9cdd2 b
+28 43-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-26 #545e6c #f7f7f4 -

@@ -1,5 +1,6 @@
 import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
+import { formatRetryWait, retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import type { TurnOutcome } from "./controller-types.ts";
 
 /** Return the visible completion word and glyph without implying verification. */
@@ -43,7 +44,7 @@ export function statusPill(state: { readiness: string; status: string; activity?
   if (activity.phase === "stopping") return { label: activity.cancellation === "requested" ? "Stop requested" : `Stopping${duration}`, tone: "stopping", spinning: false };
   if (activity.phase === "retry") {
     const label = activity.retry
-      ? `Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts}${tiny ? "" : ` · ${formatDuration(activity.retry.remainingMs)}`}`
+      ? `Retry · ${retryAttemptLabel(activity.retry.failedAttempt, activity.retry.maxAttempts)}${tiny ? "" : ` ${formatRetryWait(activity.retry.remainingMs)}`}`
       : `Retrying${duration}`;
     return { label, tone: "stopping", spinning: true };
   }
@@ -67,8 +68,8 @@ function currentWorkDetail(activity: TuiActivity): string {
   if (activity.phase === "tools") {
     return `Running ${formatCount(activity.activeTools, "tool")}`;
   }
-  if (activity.phase === "retry" && activity.retry) return `Retry ${activity.retry.failedAttempt + 1}/${activity.retry.maxAttempts} · Esc stop`;
-  if (activity.phase === "retry") return "Retrying connection · Esc stop";
+  if (activity.phase === "retry" && activity.retry) return `${retryCauseLabel(activity.retry.cause)} · ${retryAttemptLabel(activity.retry.failedAttempt, activity.retry.maxAttempts)} · Esc stop`;
+  if (activity.phase === "retry") return `${retryCauseLabel(undefined)} · Esc stop`;
   return { preparing: "Preparing request · Esc stop", waiting: "Waiting for response · Esc stop", streaming: "Receiving response · Esc stop" }[activity.phase];
 }
 

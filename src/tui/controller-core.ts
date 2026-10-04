@@ -6,7 +6,7 @@ import { isGrokModel } from "../model/loader.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
 import type { PreferencesSnapshot } from "./preferences.ts";
 import type { AgentClock } from "../agent/retry.ts";
-import type { RuntimeEvent } from "../agent/events.ts";
+import type { ModelRetryCause, RuntimeEvent } from "../agent/events.ts";
 import { MaskedCredentialEntry } from "../auth/management.ts";
 import type { CredentialTarget } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
@@ -108,7 +108,7 @@ export abstract class ControllerCore {
   protected compactionNotice?: { identity: string; text: string };
   protected contextEstimate?: { session: Session; branch: string; last?: SessionRecord; tokens: number; summaryId?: string; firstKeptId?: string };
   protected reportedUsage?: { identity: string; usage: ModelUsage };
-  protected activity?: { compactionOutcome?: CompactionOutcome; compactionReason?: "pressure" | "overflow" | "manual"; id: number; phase: TuiActivityPhase; startedAt: number; elapsedMs: number; activeTools: Map<string, string>; retry?: { failedAttempt: number; maxAttempts: number; until: number }; cancellation: "none" | "requested" | "settling" };
+  protected activity?: { compactionOutcome?: CompactionOutcome; compactionReason?: "pressure" | "overflow" | "manual"; id: number; phase: TuiActivityPhase; startedAt: number; elapsedMs: number; activeTools: Map<string, string>; retry?: { failedAttempt: number; maxAttempts: number; until: number; cause?: ModelRetryCause }; cancellation: "none" | "requested" | "settling" };
   protected operationSequence = 0;
   protected activeAbort?: AbortController;
   protected activeTurn?: Promise<void>;
@@ -286,7 +286,7 @@ export abstract class ControllerCore {
       elapsedMs: activity.elapsedMs,
       activeTools: activity.activeTools.size,
       toolNames: [...activity.activeTools.values()].map(name => redactSecrets(name, this.secrets)),
-      ...(activity.retry ? { retry: { failedAttempt: activity.retry.failedAttempt, maxAttempts: activity.retry.maxAttempts, remainingMs: Math.max(0, activity.retry.until - now) } } : {}),
+      ...(activity.retry ? { retry: { failedAttempt: activity.retry.failedAttempt, maxAttempts: activity.retry.maxAttempts, remainingMs: Math.max(0, activity.retry.until - now), ...(activity.retry.cause ? { cause: activity.retry.cause } : {}) } } : {}),
       cancellation: activity.cancellation,
       compactionReason: activity.compactionReason,
       compactionOutcome: activity.compactionOutcome,

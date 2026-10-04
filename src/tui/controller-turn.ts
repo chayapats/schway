@@ -3,6 +3,7 @@ import { runAgentLoop } from "../agent/loop.ts";
 import { relative } from "node:path";
 import { toolTarget } from "./presentation.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
+import { retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import { credentialStoreError } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { TuiRecovery, TuiTranscriptEntry, TuiControllerOptions } from "./controller-types.ts";
@@ -349,7 +350,7 @@ export abstract class TurnLayer extends CompactionLayer {
         case "model.started": activity.phase = "waiting"; activity.retry = undefined; break;
         case "model.delta": activity.phase = "streaming"; break;
         case "model.finished": activity.phase = "preparing"; break;
-        case "model.retry": activity.phase = "retry"; activity.retry = { failedAttempt: event.attempt, maxAttempts: event.maxAttempts, until: this.activityClock() + event.delayMs }; break;
+        case "model.retry": activity.phase = "retry"; activity.retry = { failedAttempt: event.attempt, maxAttempts: event.maxAttempts, until: this.activityClock() + event.delayMs, cause: event.cause }; break;
         case "tool.started": activity.activeTools.set(event.toolCallId, event.name); activity.phase = "tools"; break;
         case "tool.finished": activity.activeTools.delete(event.toolCallId); activity.phase = activity.activeTools.size ? "tools" : "preparing"; break;
         case "compaction.started": activity.phase = "compacting"; activity.compactionReason = event.reason; activity.compactionOutcome = undefined; break;
@@ -398,7 +399,7 @@ export abstract class TurnLayer extends CompactionLayer {
       }
       case "model.retry": {
         this.markProvisionalIncomplete();
-        this.showRetryNotice(`Retrying connection · Attempt ${event.attempt + 1}/${event.maxAttempts} · Esc stop`);
+        this.showRetryNotice(`${retryCauseLabel(event.cause)} · ${retryAttemptLabel(event.attempt, event.maxAttempts)} · Esc stop`);
         return;
       }
       case "tool.started": {

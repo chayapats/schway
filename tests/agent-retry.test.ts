@@ -125,6 +125,7 @@ test("transient provider failures retry then persist only the successful assista
       maxAttempts: 3,
       delayMs: 1000,
       message: "overloaded",
+      cause: "provider",
     },
     {
       type: "model.retry",
@@ -132,6 +133,7 @@ test("transient provider failures retry then persist only the successful assista
       maxAttempts: 3,
       delayMs: 2000,
       message: "rate limited",
+      cause: "rate-limit",
     },
   ]);
   expect(clock.delays).toEqual([1000, 2000]);
@@ -141,6 +143,47 @@ test("transient provider failures retry then persist only the successful assista
   );
   expect(assistants).toHaveLength(1);
   expect(assistants[0]?.content).toEqual([{ type: "text", text: "ok" }]);
+});
+
+test("model.retry names the cause of each transient failure without changing existing fields", async () => {
+  const cases = [
+    { name: "rate limit", turn: { error: "slow down", status: 429, headers: { "retry-after": "2" } }, delayMs: 2000, cause: "rate-limit" },
+    { name: "server error", turn: { error: "service unavailable", status: 503 }, delayMs: 1000, cause: "provider" },
+    { name: "network reset", turn: { error: "socket closed", code: "ECONNRESET" }, delayMs: 1000, cause: "offline" },
+  ] as const;
+  for (const item of cases) {
+    const events = await collect(runAgentLoop({
+      session: createSession([user("hello")]),
+      model: createScriptedModel({ responses: [item.turn, { text: "ok" }] }),
+      contextManager: createContextManager(workspace),
+      clock: recordingClock(),
+    }));
+    expect(events.filter((event) => event.type === "model.retry"), item.name).toEqual([
+      { type: "model.retry", attempt: 1, maxAttempts: 3, delayMs: item.delayMs, message: item.turn.error, cause: item.cause },
+    ]);
+  }
+});
+
+test("retry cause follows the first HTTP status in the error chain before network signals", async () => {
+  const wrapped = (cause: unknown, message = "fetch failed") => Object.assign(new Error(message, { cause }), { code: "ECONNRESET" });
+  const cases: Array<{ error: unknown; cause: string }> = [
+    { error: wrapped(Object.assign(new Error("busy"), { status: 502 })), cause: "provider" },
+    { error: wrapped(Object.assign(new Error("slow down"), { status: 429 })), cause: "rate-limit" },
+    { error: Object.assign(new Error("gateway"), { status: 504, cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) }), cause: "provider" },
+    { error: wrapped(new Error("socket hang up")), cause: "offline" },
+  ];
+  for (const item of cases) {
+    let thrown = false;
+    const model = { provider: "scripted", id: "scripted", async *stream() {
+      if (!thrown) { thrown = true; throw item.error; }
+      yield { type: "message_complete" as const, message: { type: "assistant" as const, id: "a1", content: [{ type: "text" as const, text: "ok" }] } };
+    } };
+    const events = await collect(runAgentLoop({
+      session: createSession([user("hello")]), model,
+      contextManager: createContextManager(workspace), clock: recordingClock(),
+    }));
+    expect(events.find((event) => event.type === "model.retry")).toMatchObject({ cause: item.cause });
+  }
 });
 
 test("transient attempts stop at three and do not start a fourth stream", async () => {
@@ -164,6 +207,7 @@ test("transient attempts stop at three and do not start a fourth stream", async 
 
   expect(events.filter((event) => event.type === "model.started")).toHaveLength(3);
   expect(events.filter((event) => event.type === "model.retry")).toHaveLength(2);
+  expect(events.filter((event) => event.type === "model.retry").map((event) => event.type === "model.retry" && event.cause)).toEqual(["offline", "offline"]);
   expect(events).toContainEqual({
     type: "error",
     message:
@@ -204,6 +248,7 @@ test("Retry-After seconds override exponential backoff", async () => {
     maxAttempts: 3,
     delayMs: 5000,
     message: "rate limited",
+    cause: "rate-limit",
   });
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
 });
@@ -236,6 +281,7 @@ test("Retry-After longer than 30s is capped so a provider cannot stall the run",
     maxAttempts: 3,
     delayMs: 30_000,
     message: "rate limited",
+    cause: "rate-limit",
   });
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
 });

@@ -233,6 +233,7 @@ export type RuntimeEvent = {
     maxAttempts: number;
     delayMs: number;
     message: string;
+    cause?: "rate-limit" | "provider" | "offline";
 } | {
     type: "tool.denied";
     toolCallId: string;

@@ -5,7 +5,7 @@ import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import { TuiController } from "../src/tui/controller.ts";
-import { statusPill } from "../src/tui/presentation.ts";
+import { activityDetail, statusPill } from "../src/tui/presentation.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -124,10 +124,18 @@ test("retry countdown uses the emitted delay and injected clock, then clears on 
     });
     const task = controller.submit("retry");
     await until(() => controller.snapshot().activity?.phase === "retry");
-    expect(controller.snapshot().activity?.retry).toMatchObject({ failedAttempt: 1, maxAttempts: 3, remainingMs: 3_000 });
+    expect(controller.snapshot().activity?.retry).toMatchObject({ failedAttempt: 1, maxAttempts: 3, remainingMs: 3_000, cause: "provider" });
+    expect(statusPill(controller.snapshot()).label).toBe("Retry · Attempt 2/3 in 3s");
     now += 1_200;
     expect(controller.snapshot().activity?.retry?.remainingMs).toBe(1_800);
-    expect(statusPill(controller.snapshot()).label).toBe("Retry 2/3 · 1.8s");
+    expect(statusPill(controller.snapshot()).label).toBe("Retry · Attempt 2/3 in 2s");
+    expect(statusPill(controller.snapshot(), true).label).toBe("Retry · Attempt 2/3");
+    now += 1_800;
+    expect(controller.snapshot().activity?.retry?.remainingMs).toBe(0);
+    expect(statusPill(controller.snapshot()).label).toBe("Retry · Attempt 2/3 now");
+    now += 500;
+    expect(statusPill(controller.snapshot()).label).toBe("Retry · Attempt 2/3 now");
+    expect(statusPill(controller.snapshot()).label).not.toMatch(/in 0s|-/);
     wake.open();
     await until(() => controller.snapshot().activity?.phase === "waiting");
     expect(controller.snapshot().activity?.retry).toBeUndefined();
@@ -135,6 +143,66 @@ test("retry countdown uses the emitted delay and injected clock, then clears on 
     await task;
     expect(controller.snapshot().status).toBe("idle");
   });
+});
+
+/** Drive one real turn through the scripted model and injected clocks, pausing at each retry wait. */
+async function retrySurfaces(failures: { error: string; status?: number; code?: string; headers?: Record<string, string> }[]) {
+  const results: { notice: string | undefined; detail: string; pill: string }[] = [];
+  await withTempDir(async dir => {
+    const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
+    let now = 10_000, waits = 0, wake = new Gate();
+    const controller = new TuiController({
+      session: createSession(), model: createScriptedModel({ responses: [...failures, { text: "done" }] }),
+      contextManager: createContextManager(workspace), workspace,
+      provider: "scripted", modelId: "retry", sessionId: "retry", activityClock: () => now,
+      agentClock: { now: () => now, sleep: async () => { waits++; await wake.promise; } },
+    });
+    const task = controller.submit("retry");
+    for (let index = 1; index <= failures.length; index++) {
+      await until(() => waits === index && controller.snapshot().activity?.phase === "retry");
+      now += 1_200;
+      const snapshot = controller.snapshot();
+      const notices = snapshot.transcript.filter(entry => entry.kind === "system");
+      expect(notices).toHaveLength(1);
+      results.push({ notice: notices[0]?.text, detail: activityDetail(snapshot.activity!), pill: statusPill(snapshot).label });
+      const current = wake;
+      wake = new Gate();
+      current.open();
+    }
+    await task;
+    expect(controller.snapshot().transcript.some(entry => entry.kind === "system")).toBe(false);
+    controller.dispose();
+  });
+  return results;
+}
+
+test("retry notice, activity row and pill name each cause and the upcoming attempt", async () => {
+  const cases = [
+    { failure: { error: "slow down", status: 429, headers: { "Retry-After": "3" } }, cause: "Rate limited", pill: "Retry · Attempt 2/3 in 2s" },
+    { failure: { error: "busy", status: 503, headers: { "Retry-After": "3" } }, cause: "Provider unavailable", pill: "Retry · Attempt 2/3 in 2s" },
+    { failure: { error: "socket closed", code: "ECONNRESET" }, cause: "Connection lost", pill: "Retry · Attempt 2/3 now" },
+  ];
+  for (const item of cases) {
+    const [surfaces] = await retrySurfaces([item.failure]);
+    expect(surfaces).toEqual({ notice: `${item.cause} · Attempt 2/3 · Esc stop`, detail: `${item.cause} · Attempt 2/3 · Esc stop`, pill: item.pill });
+    if (item.cause !== "Connection lost") expect(JSON.stringify(surfaces).toLowerCase()).not.toContain("connection");
+    expect(JSON.stringify(surfaces)).not.toContain(item.failure.error);
+  }
+});
+
+test("every retry surface shows the same upcoming attempt after the first and second failures", async () => {
+  const surfaces = await retrySurfaces([
+    { error: "busy", status: 503, headers: { "Retry-After": "3" } },
+    { error: "slow down", status: 429, headers: { "Retry-After": "3" } },
+  ]);
+  expect(surfaces).toEqual([
+    { notice: "Provider unavailable · Attempt 2/3 · Esc stop", detail: "Provider unavailable · Attempt 2/3 · Esc stop", pill: "Retry · Attempt 2/3 in 2s" },
+    { notice: "Rate limited · Attempt 3/3 · Esc stop", detail: "Rate limited · Attempt 3/3 · Esc stop", pill: "Retry · Attempt 3/3 in 2s" },
+  ]);
+  for (const [index, item] of surfaces.entries()) {
+    const attempt = `${index + 2}/3`;
+    for (const text of Object.values(item)) expect(text?.match(/\d\/\d/g)).toEqual([attempt]);
+  }
 });
 
 test("cancel during retry backoff replaces countdown with stopping and prevents another attempt", async () => {

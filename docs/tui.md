@@ -11,13 +11,18 @@ action, the hint row can drop its own. `/session` reveals session IDs, the conve
 workspace paths. A conversation branch is distinct from a Git branch.
 
 The status pill follows the active operation's runtime events: `Preparing`,
-`Waiting` for the provider, `Receiving` a response, `N tools`, `Retry a/b`,
+`Waiting` for the provider, `Receiving` a response, `N tools`, `Retry · Attempt a/b in Ns`,
 `Compacting`, `Stop requested` and `Stopping`; otherwise it reads `Ready`,
 `Checking` (connection check), `Not connected` (the neutral no-model state) or
 `Attention` (a failure needs you). It is the only saturated block on screen: filled accent while working, warning while stopping,
 error when attention is needed, a quiet green tint when ready, and a muted tint
 with `○` when not connected. The not-connected status bar shows only its pill.
-Active operations show elapsed time; provider retry countdowns use the reported delay and attempt. Quiet providers
+Active operations show elapsed time, except a provider retry: its pill counts down to the
+next attempt in whole seconds rounded up (`Retry · Attempt 2/3 in 2s`, then `now`) and
+names that attempt out of the total. The activity row and transcript notice name the
+retry's cause and keep `Esc stop`: `Rate limited` (HTTP 429), `Provider unavailable`
+(HTTP 5xx) or `Connection lost` (a network failure). The provider's own message stays out of the
+primary view; if retries run out, F2 details shows it. Quiet providers
 and tools remain in their current phase with elapsed time, without an estimated
 percentage or a hang warning. The activity row above the composer describes the
 current work; parallel tools share a compact count summary. The context

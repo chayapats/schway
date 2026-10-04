@@ -234,6 +234,10 @@ export const SCREENS: readonly Screen[] = [
     await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); openDetails(ui);
   }, ready: (s, ui) => s.status === "idle" && !s.noticeDetailsAvailable && !s.recovery && !s.outcome && ui.editor.plainText === "งานถัดไป 🧪" && s.transcript.length === 0 },
   { id: "retry-countdown", title: "Retry countdown", description: "A transient failure waits before the next attempt.", elapsed: 1200, drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.phase === "retry" },
+  { id: "retry-rate-limit", title: "Rate-limit retry", description: "A rate limit waits for the provider's requested delay before the next attempt.", noColor: true, elapsed: 1200,
+    drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.retry?.cause === "rate-limit" },
+  { id: "retry-network", title: "Network retry", description: "A lost connection retries after the default backoff.", noColor: true, elapsed: 400,
+    drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.retry?.cause === "offline" },
   // Render the loading panel before yielding to Git so scrollbar initialization has a fixed order.
   { id: "review-panel", title: "Review panel", description: "The change review displays the completed clamp fix.", noColor: true, drive: async ui => { await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); }, ready: s => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0 },
   { id: "details-review", title: "Review details", description: "F2 shows the completed turn's tool evidence from the selected file review.", noColorWidths: true, drive: async ui => {

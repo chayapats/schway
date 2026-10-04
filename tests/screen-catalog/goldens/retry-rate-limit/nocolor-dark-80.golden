@@ -1,0 +1,114 @@
+schway-screen 1
+screen retry-rate-limit
+title Rate-limit retry
+description A rate limit waits for the provider's requested delay before the next attempt.
+variant nocolor-dark-80
+size 80x30
+cursor 7 27 visible
+== text
+ ⚡ schway  /project
+
+  ▌ You
+  ▌ Summarize the changes
+
+  Rate limited · Attempt 2/3 · Esc stop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ⠋ Rate limited · Attempt 2/3 · Esc stop
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › Draft your next task…
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ⠋ Retry · Attempt 2/3 in 19s   scripted/scripted…    Esc stops  ctx ~6
+  Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #e6eaf0 #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-80 #ffffff #161b24 -
+01 0-80 #ffffff #0e1117 -
+02 0-2 #ffffff #0e1117 -
+02 2-3 #e6eaf0 #161b24 -
+02 3-4 #ffffff #161b24 -
+02 4-7 #e6eaf0 #161b24 b
+02 7-77 #ffffff #161b24 -
+02 77-80 #ffffff #0e1117 -
+03 0-2 #ffffff #0e1117 -
+03 2-3 #e6eaf0 #161b24 -
+03 3-4 #ffffff #161b24 -
+03 4-25 #e6eaf0 #161b24 -
+03 25-77 #ffffff #161b24 -
+03 77-80 #ffffff #0e1117 -
+04 0-80 #ffffff #0e1117 -
+05 0-2 #ffffff #0e1117 -
+05 2-39 #8b95a7 #0e1117 -
+05 39-80 #ffffff #0e1117 -
+06 0-80 #ffffff #0e1117 -
+07 0-80 #ffffff #0e1117 -
+08 0-80 #ffffff #0e1117 -
+09 0-80 #ffffff #0e1117 -
+10 0-80 #ffffff #0e1117 -
+11 0-80 #ffffff #0e1117 -
+12 0-80 #ffffff #0e1117 -
+13 0-80 #ffffff #0e1117 -
+14 0-80 #ffffff #0e1117 -
+15 0-80 #ffffff #0e1117 -
+16 0-80 #ffffff #0e1117 -
+17 0-80 #ffffff #0e1117 -
+18 0-80 #ffffff #0e1117 -
+19 0-80 #ffffff #0e1117 -
+20 0-80 #ffffff #0e1117 -
+21 0-80 #ffffff #0e1117 -
+22 0-80 #ffffff #0e1117 -
+23 0-80 #ffffff #0e1117 -
+24 0-2 #ffffff #0e1117 -
+24 2-3 #e6eaf0 #0e1117 b
+24 3-41 #8b95a7 #0e1117 -
+24 41-80 #ffffff #0e1117 -
+25 0-2 #ffffff #0e1117 -
+25 2-78 #161b24 #0e1117 -
+25 78-80 #ffffff #0e1117 -
+26 0-2 #ffffff #0e1117 -
+26 2-6 #e6eaf0 #161b24 -
+26 6-27 #8b95a7 #161b24 -
+26 27-78 #ffffff #161b24 -
+26 78-80 #ffffff #0e1117 -
+27 0-2 #ffffff #0e1117 -
+27 2-78 #161b24 #0e1117 -
+27 78-80 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-38 #0e1117 #e6eaf0 b
+28 38-39 #8b95a7 #161b24 -
+28 39-59 #e6eaf0 #1e2430 -
+28 59-62 #8b95a7 #161b24 -
+28 62-65 #e6eaf0 #2a3241 b
+28 65-79 #8b95a7 #161b24 -
+28 79-80 #ffffff #0e1117 -
+29 0-2 #ffffff #0e1117 -
+29 2-27 #8b95a7 #0e1117 -
+29 27-30 #e6eaf0 #293140 b
+29 30-38 #8b95a7 #0e1117 -
+29 38-47 #e6eaf0 #293140 b
+29 47-62 #8b95a7 #0e1117 -
+29 62-68 #e6eaf0 #293140 b
+29 68-73 #8b95a7 #0e1117 -
+29 73-80 #ffffff #0e1117 -
