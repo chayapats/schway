@@ -397,20 +397,47 @@ shell or extension tool effects, or restore modes or directories. `/undo` accept
 settles like other interactive commands.
 
 Running `/undo` again walks back to the next older eligible turn. Cancelling a
-preview leaves that candidate available; when the stack is empty, Schway shows
-`Nothing to undo`. Shell-only turns, turns without file-tool changes, and pruned
-turns are skipped. A partial undo consumes the turn, including skipped files;
-an older turn still checks each file's current hash before writing.
+preview leaves that candidate available. When the target is not the latest turn
+on the branch, the heading reads `Undo older turn N`, and the panel lists newer
+paths that stay as they are before Enter applies anything. Shell-only turns,
+turns without file-tool changes, and pruned turns are never selected. A partial
+undo consumes the turn, including skipped files; an older turn still checks each
+file's current hash before writing.
 
-Detected shell paths follow the file-tool rows in display-path order with
-`changed by shell · not undoable`. Selecting one shows no diff, and Enter leaves
-its bytes in place. Shell detection covers only the primary workspace root;
-file-tool edits under attached roots remain undoable.
+Paths seen by change detection without a saved copy follow the file-tool rows
+with `no saved undo`, or `turn N · no saved undo` when they come from a newer
+turn. A note such as `1 change without saved undo stays` counts them. These rows
+are read-only: selecting one explains that undo leaves the file as it is, Enter
+never touches it and no result counts it as reverted. Being seen during a turn
+does not prove which tool changed a path. Shell detection covers only the
+primary workspace root; file-tool edits under attached roots remain undoable.
+
+When nothing can be undone, `/undo` names the reason:
+
+| Message | Meaning |
+| --- | --- |
+| `No saved undo for these changes · Alt+R review · Esc close` | A read-only list of paths seen without saved copies on this branch. |
+| `Nothing to undo in turn N · Alt+R review · Esc close` | Every saved file changed since or its saved copy is missing; other paths stay listed. |
+| `Nothing to undo · every file changed since` | Every saved file changed since and nothing else is known. |
+| `Change detection unavailable · F2 details` | No saved file changes, and other changes can't be listed. Files may still have changed. |
+| `No saved undo data · F2 details` | A turn has no undo data. Retention may have removed it, or it was never saved. |
+| `Nothing to undo` | No saved changes remain on this branch. |
+
+Per-file badges distinguish `changed since · skip`, `no saved copy · skip` and
+`can't read · skip`. Schway never reports undo data as expired, because a missing
+manifest can't show whether retention removed it.
+
+**Alt+R** in any undo panel opens `Review · current changes`, the current diff for
+each listed workspace path, including after restart. Esc returns to the same undo
+panel; Esc again closes it and restores the draft. Reviewing, selecting and
+closing never write files, Git, the session or undo data. Undo never runs inverse
+shell commands, `git reset` or `git checkout`.
 
 Undo works outside Git. The preview shows `Shell changes can't be detected here`
-below the file rows when the workspace is not in Git, change tracking is off,
+above the selected file when the workspace is not in Git, change tracking is off,
 status capture failed, or the turn came from headless execution or an older
-manifest. File-tool undo still works in each case.
+manifest. File-tool undo still works in each case. `Later changes can't be
+detected here` marks newer turns with the same limit.
 
 ## Interaction
 

@@ -21,6 +21,7 @@ import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
+import { undoHeading, undoHint, undoRows } from "./undo-view.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -870,8 +871,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (snapshot.changeReview || snapshot.undoPreview) {
         const undo = snapshot.undoPreview;
         const selected = undo?.files[undo.selected];
-        const review = undo ? { heading: `Undo turn ${undo.turnNumber} · ${undo.result ? "Esc close" : "Enter undo · Esc cancel"}`, selected: undo.selected,
-          rows: [...(undo.shellUnavailable ? [{ sign: " " as const, text: "Shell changes can't be detected here" }] : []), { sign: " " as const, text: `─ ${selected?.path ?? ""} ─` }, ...(selected?.rows ?? [])], showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
+        const review = undo ? { heading: undoHeading(undo), selected: undo.selected,
+          rows: undoRows(undo), showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
         const stacked = !!undo || renderer.width < 80;
         const scope = undo ? undefined : snapshot.changeReview!.scope;
         const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: turnFileBadge(file) }));
@@ -1190,7 +1191,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "tool-approval") {
         hints.content = new StyledText(keyHintChunks("Enter choose · Esc deny · Ctrl+C cancel turn", hintColors(theme.background)));
       } else if (panelMode === "undo") {
-        hints.content = "↑↓ select · PgUp/PgDn scroll · Esc close";
+        hints.content = undoHint(snapshot.undoPreview, width);
       } else if (panelMode === "review") {
         const navigation = snapshot.changeReview?.showingDetails ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
         const reload = snapshot.changeReview?.scope && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
@@ -1377,6 +1378,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (snapshot.undoPreview) {
       if (name === "escape") controller.closeUndoPreview();
       else if (name === "return" || name === "enter") void controller.applyUndo().then(refresh, fail);
+      else if ((key.meta || key.option) && name === "r") void controller.reviewUndoChanges().then(refresh, fail);
       else if (name === "up" || name === "down") { controller.selectUndoFile(name === "up" ? -1 : 1); reviewDiff.scrollTo(0); }
       else if (name === "pageup" || name === "pagedown") reviewDiff.scrollBy((name === "pageup" ? -1 : 1) * Math.max(1, reviewDiff.viewport.height - 2));
       handled(); return;

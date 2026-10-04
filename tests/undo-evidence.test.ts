@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
 import { lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { collectUndoEvidence } from "../src/undo/evidence.ts";
+import { createTestRenderer } from "@opentui/core/testing";
+import type { TextareaRenderable } from "@opentui/core";
+import { collectUndoEvidence, describeUndoLimits } from "../src/undo/evidence.ts";
+import { bashTool } from "../src/tools/bash.ts";
+import { editTool } from "../src/tools/edit.ts";
+import { createToolRegistry } from "../src/tools/registry.ts";
+import { dispatchEditorInput } from "../src/tui/commands.ts";
+import { createConversationView } from "../src/tui/view.ts";
+import type { ScriptedTurn } from "./helpers/scripted-model.ts";
 import { hashUndoBytes, openUndoStore, pruneUndoStore, type UndoFile, type UndoStore, type UndoTurn } from "../src/undo/store.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import type { Session } from "../src/session/session.ts";
@@ -310,3 +318,278 @@ test("real controller preview and apply each read the manifest list exactly once
     } finally { clearTimeout(timeout); if (child.exitCode === null) child.kill(); await child.exited; }
   });
 }, 7000);
+
+const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com",
+  GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com" };
+/** Run one isolated Git command in the workspace and return trimmed output. */
+function git(work: string, ...args: string[]): string {
+  const result = Bun.spawnSync(["git", ...args], { cwd: work, env: gitEnv });
+  if (result.exitCode) throw new Error(result.stderr.toString());
+  return result.stdout.toString().trim();
+}
+/** Commit tracked fixtures in a fresh repository whose private home stays outside status output. */
+async function gitWorkspace(work: string, files: Record<string, string>) {
+  git(work, "init", "-q", "-b", "main");
+  for (const [path, content] of Object.entries(files)) await writeFile(join(work, path), content);
+  git(work, "add", "."); git(work, "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture");
+}
+const bash = (id: string, command: string): ScriptedTurn => ({ toolCalls: [{ id, name: "bash", arguments: { command } }] });
+const edit = (id: string, path: string): ScriptedTurn => ({ toolCalls: [{ id, name: "edit", arguments: { path, edits: [{ oldText: "before", newText: "after" }] } }] });
+
+/** Render a scripted conversation over a separate workspace and durable home, as an interactive user sees it. */
+async function rendered(root: string, turns: ScriptedTurn[], options: { tracking?: "off" | "on-demand"; session?: Session; secrets?: string[] } = {}) {
+  const home = join(root, "home"), work = join(root, "work"), directory = join(home, "sessions");
+  await mkdir(work, { recursive: true });
+  const workspace = { root: work, launchCwd: work, extraRoots: [] };
+  const session = options.session ?? await createJsonlSession({ directory, workspace });
+  const secrets = options.secrets ?? [];
+  const controller = new TuiController({ session, sessionId: session.rootId, workspace, home, provider: "scripted", modelId: "scripted", secrets,
+    model: createScriptedModel({ responses: turns }), contextManager: createContextManager(workspace, { home }),
+    tools: createToolRegistry([editTool, bashTool]), changeTracking: options.tracking ?? "on-demand" });
+  const terminal = await createTestRenderer({ width: 80, height: 30, kittyKeyboard: true });
+  const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: work, env: {}, secrets, quit() {},
+    submit: (value, accepted) => dispatchEditorInput(value, controller, command => command.name === "undo" ? controller.undoCommand(command.args) : Promise.resolve(false), accepted) });
+  const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
+  const settle = async () => { view.refresh(); await terminal.flush(); };
+  const waitFor = async (ready: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!ready() && Date.now() < deadline) { await Bun.sleep(5); await settle(); }
+    expect(ready()).toBe(true); await settle();
+  };
+  const send = async (text: string) => { await terminal.mockInput.typeText(text); terminal.mockInput.pressEnter(); await waitFor(() => editor.plainText !== text); await controller.waitForIdle(); await settle(); };
+  const undo = async () => { await controller.undoCommand(""); await settle(); };
+  const reviewReady = () => !!controller.snapshot().changeReview && !controller.snapshot().changeReview!.loading;
+  /** Capture workspace bytes, durable session/undo data and Git's semantic state; Git's stat cache may refresh. */
+  const state = async () => ({ files: (await inventory(root)).filter(entry => !String((entry as { name: string }).name).startsWith("work/.git")),
+    git: await Bun.file(join(work, ".git")).exists() ? [git(work, "status", "--porcelain=v1", "-uall"), git(work, "rev-parse", "HEAD")] : [] });
+  return { ...terminal, home, work, directory, session, controller, editor, settle, waitFor, send, undo, reviewReady, state,
+    records: () => session.items.filter(item => item.type === "turn_undo"),
+    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); } };
+}
+
+test("limits keep the target's observed paths first, newer turns newest first and no expiry facts", () => {
+  const manifest = (turnId: string, turnNumber: number, files: UndoFile[], paths?: string[]) => ({ version: 1 as const, sessionId: "s", turnId, turnNumber,
+    createdAt: `2026-01-0${turnNumber}T00:00:00Z`, files, shell: paths ? { detection: "git" as const, paths } : { detection: "unavailable" as const } });
+  const changed = { path: "/w/a", before: hashUndoBytes(Buffer.from("a")), after: hashUndoBytes(Buffer.from("b")) };
+  const manifests = [manifest("t1", 1, [changed], ["/w/own"]), manifest("t2", 2, [{ path: "/w/incomplete", before: null }], ["/w/later"]), manifest("t4", 4, [])];
+  const limits = describeUndoLimits(collectUndoEvidence(manifests, ["t1", "t2", "t3", "t4"], new Set()));
+  expect(limits).toEqual({ targetOrdinal: 1, latestOrdinal: 4, undetected: [4], missing: [3], unsaved: [
+    { turnId: "t1", ordinal: 1, path: "/w/own", kind: "observed" },
+    { turnId: "t2", ordinal: 2, path: "/w/incomplete", kind: "incomplete" }, { turnId: "t2", ordinal: 2, path: "/w/later", kind: "observed" },
+  ] });
+  const none = describeUndoLimits(collectUndoEvidence(manifests.slice(1), ["t1", "t2", "t3", "t4"], new Set(["t2"])));
+  expect(none).toEqual({ targetOrdinal: undefined, latestOrdinal: 4, unsaved: [], undetected: [4], missing: [3, 1] });
+  expect(JSON.stringify([limits, none])).not.toContain("expire");
+});
+
+test("a shell-only change lists its path read-only with a reachable review and leaves every store untouched", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [bash("generate", "printf 'generated\\n' > generated.txt"), { text: "Generated." }]);
+    try {
+      await ui.send("Generate a file");
+      await ui.mockInput.pasteBracketedText("Keep this draft");
+      ui.editor.cursorOffset = 4;
+      const before = await ui.state();
+      await ui.undo();
+      const frame = ui.captureCharFrame();
+      expect(frame).toContain("No saved undo for these changes · Alt+R review · Esc close");
+      expect(frame).toContain("generated.txt"); expect(frame).toContain("turn 1 · no saved undo");
+      expect(frame).toContain("Seen during turn 1 · no saved undo");
+      expect(frame).not.toContain("Enter undo"); expect(frame).not.toContain("Nothing to undo"); expect(frame).not.toContain("changed by shell");
+      ui.mockInput.pressEnter(); await ui.settle();
+      expect(ui.controller.snapshot().undoPreview?.readOnlyStatus).toBe("No saved undo for these changes");
+      ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
+      expect(ui.controller.snapshot().changeReview).toMatchObject({ heading: "Review · current changes", files: [{ path: "generated.txt", source: "shell" }] });
+      expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "generated" }));
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.controller.snapshot().changeReview).toBeUndefined();
+      expect(ui.controller.snapshot().undoPreview?.files.map(file => file.path)).toEqual(["generated.txt"]);
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      expect(ui.editor.plainText).toBe("Keep this draft"); expect(ui.editor.cursorOffset).toBe(4);
+      expect(await ui.state()).toEqual(before);
+      expect(await readFile(join(ui.work, "generated.txt"), "utf8")).toBe("generated\n");
+      expect(ui.records()).toEqual([]);
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("a mixed turn separates read-only rows and applying changes only pre-image-backed files", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [{ toolCalls: [...edit("edit", "a.ts").toolCalls!, ...bash("generate", "printf 'x\\n' > gen.txt").toolCalls!] }, { text: "Done." }]);
+    try {
+      await ui.send("Edit and generate"); await ui.undo();
+      expect(ui.controller.snapshot().undoPreview).toMatchObject({ older: false, notes: ["1 change without saved undo stays"],
+        files: [{ path: "a.ts", action: "restore" }, { path: "gen.txt", action: "shell", status: "no saved undo" }] });
+      expect(ui.controller.snapshot().undoPreview?.readOnlyStatus).toBeUndefined();
+      expect(ui.captureCharFrame()).toContain("Undo turn 1 · Enter undo · Esc cancel");
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(ui.work, "a.ts"), "utf8")).toBe("before");
+      expect(await readFile(join(ui.work, "gen.txt"), "utf8")).toBe("x\n");
+      expect(ui.records()).toEqual([expect.objectContaining({ turnNumber: 1, reverted: [{ path: "a.ts", action: "restored" }], skipped: [] })]);
+      // The undone turn's remaining path does not reappear as a fresh candidate.
+      await ui.undo(); expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo");
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("an older target names itself and lists newer changes that remain before it can be applied", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [edit("edit", "a.ts"), { text: "Edited." }, bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
+    try {
+      await ui.send("Edit"); await ui.send("Generate"); await ui.undo();
+      const frame = ui.captureCharFrame();
+      expect(frame).toContain("Undo older turn 1 · Enter undo · Esc cancel");
+      expect(frame).toContain("turn 2 · no saved undo"); expect(frame).toContain("1 change without saved undo stays");
+      expect(ui.controller.snapshot().undoPreview?.files.map(file => [file.path, file.action])).toEqual([["a.ts", "restore"], ["gen.txt", "shell"]]);
+      ui.mockInput.pressEnter(); await ui.waitFor(() => !ui.controller.snapshot().undoPreview);
+      expect(await readFile(join(ui.work, "a.ts"), "utf8")).toBe("before");
+      expect(await readFile(join(ui.work, "gen.txt"), "utf8")).toBe("x\n");
+      expect(ui.records()).toEqual([expect.objectContaining({ turnNumber: 1, reverted: [{ path: "a.ts", action: "restored" }], skipped: [] })]);
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("when every file conflicts the remaining paths and per-file reasons stay visible without an undo record", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [{ toolCalls: [...edit("edit", "a.ts").toolCalls!, ...bash("generate", "printf 'x\\n' > gen.txt").toolCalls!] }, { text: "Done." }]);
+    try {
+      await ui.send("Edit and generate");
+      await writeFile(join(ui.work, "a.ts"), "external");
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "Nothing to undo in turn 1",
+        files: [{ path: "a.ts", status: "changed since · skip" }, { path: "gen.txt", status: "no saved undo" }] });
+      expect(ui.captureCharFrame()).toContain("Nothing to undo in turn 1 · Alt+R review · Esc close");
+      ui.mockInput.pressEnter(); await ui.settle(); ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.records()).toEqual([]); expect(await readFile(join(ui.work, "a.ts"), "utf8")).toBe("external");
+      // A conflict found only at apply time keeps the result panel and its remaining context.
+      await writeFile(join(ui.work, "a.ts"), "after");
+      await ui.undo(); expect(ui.controller.snapshot().undoPreview?.readOnlyStatus).toBeUndefined();
+      await writeFile(join(ui.work, "a.ts"), "raced");
+      ui.mockInput.pressEnter(); await ui.waitFor(() => ui.controller.snapshot().undoPreview?.result === true);
+      expect(ui.controller.snapshot().undoPreview?.files.map(file => file.status)).toEqual(["changed since · skip", "no saved undo"]);
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo · every file changed since");
+      expect(ui.records()).toEqual([]); expect(await readFile(join(ui.work, "a.ts"), "utf8")).toBe("raced");
+      expect(await readFile(join(ui.work, "gen.txt"), "utf8")).toBe("x\n");
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("a missing manifest reports no saved undo data and never claims expiry", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
+    try {
+      await ui.send("Generate");
+      await rm(join(ui.home, ".schway/undo", ui.session.rootId, "turns"), { recursive: true });
+      const before = await ui.state();
+      await ui.undo();
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("No saved undo data · F2 details");
+      expect(ui.controller.inspectNoticeDetails()).toBe(true);
+      const details = ui.controller.snapshot().transcript.at(-1)!.text;
+      expect(details).toContain("No undo data is saved for turn 1"); expect(details).not.toMatch(/expire/i);
+      expect(await ui.state()).toEqual(before);
+    } finally { await ui.dispose(); }
+  });
+});
+
+for (const scenario of ["non-Git workspace", "tracking off"] as const) test(`a ${scenario} reports unavailable detection without asserting that nothing changed`, async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    if (scenario === "tracking off") await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }], { tracking: scenario === "tracking off" ? "off" : "on-demand" });
+    try {
+      await ui.send("Generate");
+      const before = await ui.state();
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Change detection unavailable · F2 details");
+      ui.mockInput.pressKey("\u001bOQ"); await ui.settle();
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toStartWith("Details · Esc keep editing\n");
+      const details = ui.controller.snapshot().transcript.at(-1)!.text;
+      expect(details).toContain("Change detection was unavailable for turn 1"); expect(details).toContain("They may still have changed.");
+      expect(details).not.toContain("Nothing to undo"); expect(details).not.toMatch(/no files changed/i);
+      if (scenario === "tracking off") expect(details).toContain('/config set git {"changeTracking":"on-demand"}');
+      expect(await ui.state()).toEqual(before);
+      expect(await readFile(join(ui.work, "gen.txt"), "utf8")).toBe("x\n");
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("reload from durable manifests rebuilds the read-only list and review for the current branch only", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const first = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
+    await first.send("Generate");
+    const { directory } = first, id = first.session.rootId;
+    await first.dispose();
+    const session = await loadJsonlSession({ directory, id });
+    const ui = await rendered(root, [], { session });
+    try {
+      expect(ui.controller.snapshot().outcome).toBeUndefined();
+      const before = await ui.state();
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "No saved undo for these changes", files: [{ path: "gen.txt", status: "turn 1 · no saved undo" }] });
+      ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
+      expect(ui.controller.snapshot().changeReview?.files).toEqual([{ path: "gen.txt", source: "shell" }]);
+      expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "x" }));
+      ui.mockInput.pressEscape(); await ui.settle(); ui.mockInput.pressEscape(); await ui.settle();
+      expect(await ui.state()).toEqual(before);
+      session.forkBranch(session.rootId); ui.controller.replaceSession(session, session.rootId);
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo");
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("session replacement discards a pending read and a review opened from the undo panel", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
+    try {
+      await ui.send("Generate");
+      const pending = ui.controller.undoCommand("");
+      ui.controller.replaceSession(ui.session, ui.session.rootId);
+      ui.session.forkBranch(ui.session.rootId);
+      expect(await pending).toBe(false);
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+      ui.session.selectBranch("main"); ui.controller.replaceSession(ui.session, ui.session.rootId);
+      await ui.undo(); expect(await ui.controller.reviewUndoChanges()).toBe(true);
+      ui.controller.replaceSession(ui.session, ui.session.rootId);
+      expect(ui.controller.snapshot().changeReview).toBeUndefined();
+      expect(ui.controller.snapshot().undoPreview).toBeUndefined();
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("secret and control-sequence paths are redacted in the read-only list and review", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const name = "token-SECRET123-\u001b[31mred.txt";
+    const ui = await rendered(root, [bash("generate", `printf 'x\\n' > '${name}'`), { text: "Generated." }], { secrets: ["SECRET123"] });
+    try {
+      await ui.send("Generate");
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview?.readOnlyStatus).toBe("No saved undo for these changes");
+      let frame = ui.captureCharFrame();
+      expect(frame).toContain("token-***-"); expect(frame).not.toContain("SECRET123"); expect(frame).not.toContain("\u001b");
+      ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
+      frame = ui.captureCharFrame();
+      expect(frame).not.toContain("SECRET123"); expect(frame).not.toContain("\u001b");
+    } finally { await ui.dispose(); }
+  });
+});
