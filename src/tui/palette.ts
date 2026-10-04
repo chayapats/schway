@@ -27,6 +27,8 @@ export const PALETTE_APPROVAL = "Approval waiting · Esc review request";
 
 const APPROVAL_WAITING = PALETTE_APPROVAL;
 const TURN_RUNNING = "Wait for this turn · Esc stop";
+// While work runs Enter cannot send, so an empty conversation names stopping instead.
+const NOTHING_TO_INSPECT_RUNNING = "Nothing to inspect yet · Esc stop";
 
 /** Project return-context facts into keyboard availability without reading or changing application state. */
 export function keyboardGuideAvailability(context: PaletteReturnContext): Readonly<Record<KeyboardGuideId, KeyboardGuideAvailability>> {
@@ -35,7 +37,7 @@ export function keyboardGuideAvailability(context: PaletteReturnContext): Readon
   const approval = context.toolApproval ? blocked(APPROVAL_WAITING) : undefined;
   return {
     newline: approval ?? ok,
-    "inspect-copy": approval ?? (context.inspectable ? ok : blocked("Nothing to inspect · Enter send a task")),
+    "inspect-copy": approval ?? (context.inspectable ? ok : blocked(context.running ? NOTHING_TO_INSPECT_RUNNING : "Nothing to inspect · Enter send a task")),
     "copy-selection": approval ?? ok,
     "approval-mode": approval ?? ok,
     shortcuts: approval ?? ok,

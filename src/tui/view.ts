@@ -1602,7 +1602,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if ((key.meta || key.option) && name === "i" && !panelMode) {
       inspection = initialInspection(snapshot.transcript);
       if (inspection) { inspectionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; editor.blur(); scrollToInspection = true; }
-      else showInteractionNotice("Nothing to inspect · Enter send a task");
+      else showInteractionNotice(controller.running || snapshot.status === "running" ? "Nothing to inspect yet · Esc stop" : "Nothing to inspect · Enter send a task");
       handled(); return;
     }
     if (snapshot.modelPicker && key.ctrl && name === "p") { controller.togglePickerFavorite(); handled(); return; }

@@ -58,7 +58,7 @@ export function commandCatalog(extensions: readonly ExtensionCommandInfo[], skil
 const KEYBOARD_GUIDES = {
   newline: {
     label: "Insert a newline", shortcut: "Shift+Enter or Ctrl+J", description: "Continue your draft on another line",
-    guidance: "Return to the composer, then press Shift+Enter or Ctrl+J. Enter sends the draft.",
+    guidance: "Return to the composer, then press Shift+Enter or Ctrl+J. Enter sends the draft when no turn is running.",
     aliases: ["newline", "line break", "ctrl+j", "control j", "shift+enter"],
   },
   "inspect-copy": {
