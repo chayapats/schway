@@ -1314,7 +1314,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (reader) {
         const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
           ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
-        hints.content = fittedHints((snapshot.toolApproval ? ["Esc review request", ...navigation] : [...navigation, reader.search ? "Esc restore" : "Esc back"]).join(" · "), width);
+        // Esc leads so narrow hint rows keep the way out when trailing actions are dropped.
+        hints.content = fittedHints([snapshot.toolApproval ? "Esc review request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width);
       } else if (snapshot.toolApproval && panelMode !== "tool-approval") {
         hints.content = "Esc close to review request";
       } else if (panelMode === "tool-approval") {
@@ -1532,7 +1533,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     else if (name === "home") state.position = readerBodyPosition(document, layout, { offset: 0, horizontal: 0 });
     else if (name === "end") state.position = readerEnd(document, layout, state.position.horizontal);
     else if ((name === "left" || name === "right") && !viewport.wrap) {
-      state.position = { offset: state.position.offset, horizontal: panReader(document, layout, state.position.horizontal, name === "left" ? -1 : 1) };
+      state.position = { offset: state.position.offset, horizontal: panReader(document, layout, state.position, name === "left" ? -1 : 1) };
     } else if (plain && name === "w" && document.kind === "code") state.wrap = !state.wrap;
     else if (plain && name === "c") copyReader();
     else if (key.ctrl && name === "f") state.search = { query: "", selected: -1, origin: state.position };

@@ -35,7 +35,7 @@ cursor 1 1 hidden
 
 
  ◆ Auto  ● Ready   scripted/scripted-m…    ctx ~0
- ↑↓ scroll · ←→ columns · C copy · Ctrl+F find
+ Esc back · ↑↓ scroll · ←→ columns · C copy
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -170,12 +170,12 @@ cursor 1 1 hidden
 28 40-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
-29 1-3 #1d232c #caced3 b
-29 3-13 #545e6c #f7f7f4 -
-29 13-15 #1d232c #caced3 b
-29 15-26 #545e6c #f7f7f4 -
-29 26-27 #1d232c #caced3 b
-29 27-35 #545e6c #f7f7f4 -
-29 35-41 #1d232c #caced3 b
-29 41-46 #545e6c #f7f7f4 -
-29 46-50 #ffffff #f7f7f4 -
+29 1-4 #1d232c #caced3 b
+29 4-12 #545e6c #f7f7f4 -
+29 12-14 #1d232c #caced3 b
+29 14-24 #545e6c #f7f7f4 -
+29 24-26 #1d232c #caced3 b
+29 26-37 #545e6c #f7f7f4 -
+29 37-38 #1d232c #caced3 b
+29 38-43 #545e6c #f7f7f4 -
+29 43-50 #ffffff #f7f7f4 -

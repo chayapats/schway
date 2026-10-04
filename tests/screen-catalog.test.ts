@@ -134,6 +134,8 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     expect(text).not.toContain("Copied");
     // The composer is hidden, not cleared; reading never shows or edits the draft.
     expect(text).not.toContain("งานถัดไป");
+    // The way out stays visible at every width: in the hint row, or in the footer when hints are hidden.
+    expect(text).toMatch(/Esc (back|restore|review request)/);
     if (screen.id === "reader-code") { expect(text).toContain("‹"); expect(text).toContain("›"); }
     if (screen.id === "reader-table" && variant.rows > 8) { expect(text).toMatch(/‹Owner +│/); expect(text).toMatch(/Columns 2–\d of 8|Col 2–\d\/8/); expect(text).not.toContain("ภาค 1 "); }
     if (screen.id === "reader-no-matches") expect(text).toContain("No matches");

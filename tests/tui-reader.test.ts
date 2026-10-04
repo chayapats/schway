@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createTestRenderer } from "@opentui/core/testing";
 import { ScrollBoxRenderable, TextareaRenderable, TextRenderable } from "@opentui/core";
 import { ReaderSnapshot, READER_SOURCE_LIMIT, type ReaderPosition } from "../src/tui/reader.ts";
-import { alignTable, createReaderDocument, paintReader, readerLayout } from "../src/tui/reader-view.ts";
+import { alignTable, createReaderDocument, paintReader, panReader, readerLayout } from "../src/tui/reader-view.ts";
 import { createConversationView } from "../src/tui/view.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import type { MotionMode } from "../src/tui/motion.ts";
@@ -594,9 +594,31 @@ test("Ctrl+C in the reader copies a selection first, then cancels work or quits"
   await ui.settle();
   ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
   ui.mockInput.pressKey("r"); await ui.settle();
+  const text = ui.renderer.root.findDescendantById("reader-text")!;
+  const row = ui.captureCharFrame().split("\n").findIndex(line => line.includes("select me"));
+  const column = ui.captureCharFrame().split("\n")[row]!.indexOf("select me");
+  expect(row).toBeGreaterThan(text.y - 1);
+  await ui.mockMouse.drag(column, row, column + 5, row); await ui.settle();
+  ui.mockInput.pressKey("c", { ctrl: true }); await ui.settle();
+  expect(ui.copied).toEqual(["select"]);
+  expect(ui.didQuit()).toBe(false);
+  expect(ui.reading()).toBe(true);
   ui.mockInput.pressKey("c", { ctrl: true }); await ui.settle();
   expect(ui.didQuit()).toBe(true);
-  expect(ui.copied).toEqual([]);
+  expect(ui.copied).toEqual(["select"]);
+});
+
+test("Ctrl+C in the reader cancels running work without closing the reader", async () => {
+  const ui = await setup(80, 24, { overrides: { model: createScriptedModel({ responses: [{ text: "```txt\nrunning\n```" }, { chunks: ["partial"], waitForAbort: true }] }) } });
+  await ui.controller.submit("first"); await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+  ui.mockInput.pressKey("r"); await ui.settle();
+  const turn = ui.controller.submit("second");
+  await ui.waitFor(() => ui.controller.running, "running turn");
+  ui.mockInput.pressKey("c", { ctrl: true }); await turn; await ui.settle();
+  expect(ui.controller.running).toBe(false);
+  expect(ui.didQuit()).toBe(false);
+  expect(ui.reading()).toBe(true);
 });
 
 test("table alignment preserves every cell and labels the copied Markdown source", () => {
@@ -666,9 +688,18 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   // Navigation, copy and resize never answer the request.
   ui.mockInput.pressKey("\u001b[6~"); ui.mockInput.pressArrow("up"); ui.mockInput.pressArrow("down");
   ui.mockInput.pressKey("c");
+  await ui.settle();
+  expect(ui.copied).toEqual([]);
   for (const width of [120, 50, 80]) { ui.resize(width, 24); await ui.settle(); expect(ui.readerText()).toContain("Esc review request"); }
   expect(ui.controller.snapshot().toolApproval).toEqual(request);
   expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+  // Leave search (Enter keeps the position), copy while the request waits, then search again for the checkpoint.
+  ui.mockInput.pressEnter(); await ui.settle();
+  ui.mockInput.pressKey("c"); await ui.settle();
+  expect(ui.copied).toEqual([longCode]);
+  expect(ui.controller.snapshot().toolApproval).toEqual(request);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("value 2c"); await ui.settle();
   const checkpoint = ui.readerText().split("\n").slice(1).join("\n");
   if (outcome === "cancel") {
     ui.mockInput.pressKey("c", { ctrl: true });
@@ -719,4 +750,85 @@ test("reader search highlights matches with attributes visible without color and
   expect(new Set(marked.map(chunk => chunk.attributes)).size).toBe(2);
   expect(chunks.map(chunk => chunk.text).join("")).toContain("Find: needle · 2/3");
   expect(document.copy.copy().text).toBe(source);
+});
+
+const catalogTable = ["| Region | Owner | Q1 revenue | Q2 revenue | Change | Status | Notes | Follow-up |", "| --- | --- | ---: | ---: | ---: | --- | --- | --- |",
+  ...Array.from({ length: 36 }, (_, index) => `| ภาค ${index + 1} | ${index % 3 ? "Dana" : ""} | ${(1200 + index * 37).toLocaleString("en-US")} | ${(1300 + index * 41).toLocaleString("en-US")} | +${(index % 9) + 1}% | ${index % 4 ? "On track" : "Review 🧪"} | [details](https://example.test/regions/${index + 1}) | Confirm the quarter-end forecast with finance |`)].join("\n");
+const wideColumnTable = `| Key | Wide | Tail |\n| --- | --- | --- |\n| a | ${Array.from({ length: 30 }, (_, index) => `w${String(index).padStart(2, "0")}`).join(" ")} ${"z".repeat(38)} | end |`;
+
+for (const width of [40, 50, 80, 120]) test(`horizontal navigation alone paints every table and code cell at ${width} columns`, () => {
+  for (const [kind, source] of [["table", catalogTable], ["table", wideColumnTable], ["code", longCode]] as const) {
+    const document = createReaderDocument({ id: `${kind}-m-0`, messageId: "m", kind }, source, { title: kind, streaming: false });
+    const layout = readerLayout(document, false, width, 12, { approval: false, search: false });
+    const columns = layout.viewport.columns;
+    const covered = new Uint8Array(document.maxWidth);
+    let horizontal = 0;
+    for (let step = 0; step < 500; step++) {
+      for (let cell = horizontal; cell < Math.min(document.maxWidth, horizontal + columns); cell++) covered[cell] = 1;
+      const next = panReader(document, layout, { offset: 0, horizontal }, 1);
+      if (next === horizontal) break;
+      expect(next).toBeGreaterThan(horizontal);
+      horizontal = next;
+    }
+    expect(covered.indexOf(0), `${kind} gap at ${width}`).toBe(-1);
+    // Left mirrors Right back to the first column without skipping cells.
+    const back = new Uint8Array(document.maxWidth);
+    for (let step = 0; step < 500; step++) {
+      for (let cell = horizontal; cell < Math.min(document.maxWidth, horizontal + columns); cell++) back[cell] = 1;
+      const next = panReader(document, layout, { offset: 0, horizontal }, -1);
+      if (next === horizontal) break;
+      expect(next).toBeLessThan(horizontal);
+      horizontal = next;
+    }
+    expect(horizontal).toBe(0);
+    expect(back.indexOf(0), `${kind} gap leftwards at ${width}`).toBe(-1);
+  }
+});
+
+test("the catalog table's widest cells are painted by Right alone in the 40-column app", async () => {
+  const ui = await setup(40, 24);
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: catalogTable } });
+  ui.controller.applyEvent({ type: "model.finished" });
+  await ui.settle();
+  ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+  ui.mockInput.pressKey("r"); await ui.settle();
+  let painted = "";
+  for (let step = 0; step < 40; step++) { painted += ui.readerText(); ui.mockInput.pressArrow("right"); await ui.settle(); }
+  for (const fragment of ["https://e", "xample.test/regi", "ons/1)", "Confirm the quarter-", "end forecast with finance"]) expect(painted).toContain(fragment);
+  expect(ui.hints()).toStartWith("Esc back");
+});
+
+test("conversation search ignores code and table header chrome", async () => {
+  const ui = await setup(80, 24);
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "```ts\nconst x = 1;\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |" } });
+  ui.controller.applyEvent({ type: "model.finished" });
+  await ui.settle();
+  for (const query of ["inspect", "table", "Alt+I"]) {
+    ui.mockInput.pressKey("f", { ctrl: true }); await ui.mockInput.typeText(query); await ui.settle();
+    expect(ui.captureCharFrame()).toContain("No matches in this branch");
+    ui.mockInput.pressEscape(); await ui.settle();
+  }
+  ui.mockInput.pressKey("f", { ctrl: true }); await ui.mockInput.typeText("const"); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Find 1/1");
+});
+
+test("panning a source too large to measure stops at the widest line in view", () => {
+  const source = Array.from({ length: 21_000 }, (_, index) => `${index % 7 ? "a" : "b"}`.repeat(100)).join("\n");
+  const document = createReaderDocument({ id: "code-m-0", messageId: "m", kind: "code" }, source, { title: "txt", streaming: false });
+  expect(document.maxWidth).toBe(Infinity);
+  const layout = readerLayout(document, false, 50, 10, { approval: false, search: false });
+  let horizontal = 0;
+  for (let step = 0; step < 50; step++) horizontal = panReader(document, layout, { offset: 0, horizontal }, 1);
+  expect(horizontal).toBe(100 - layout.viewport.columns);
+});
+
+test("pinned header matches stay distinguishable without color", () => {
+  const source = "| Alpha | Beta | Alpha2 |\n| --- | --- | --- |\n| x | y | z |";
+  const document = createReaderDocument({ id: "table-m-0", messageId: "m", kind: "table" }, source, { title: "table", streaming: false });
+  const layout = readerLayout(document, false, 60, 10, { approval: false, search: true });
+  const chunks = paintReader({ document, layout, position: { offset: 0, horizontal: 0 }, columns: 60, rows: 10, theme: TUI_THEMES.dark, search: { query: "alpha", selected: 0, origin: { offset: 0, horizontal: 0 } } }).chunks;
+  const matches = chunks.filter(chunk => chunk.text === "Alpha");
+  expect(matches).toHaveLength(2);
+  expect(matches[0]!.attributes).not.toBe(matches[1]!.attributes);
+  expect(chunks.find(chunk => chunk.text.includes("Beta"))!.attributes).not.toBe(0);
 });

@@ -119,13 +119,32 @@ export function readerLayout(document: ReaderDocument, wrap: boolean, columns: n
   return { viewport: { columns: Math.max(1, columns - gutter - (markers ? 2 : 0)), rows: body, wrap: effectiveWrap }, gutter, markers, pinned, title, status, search };
 }
 
-/** Next horizontal offset: tables step by aligned column, code by half a page, both bounded by the widest line. */
-export function panReader(document: ReaderDocument, layout: ReaderLayout, horizontal: number, direction: -1 | 1): number {
-  const limit = Math.max(0, document.maxWidth - layout.viewport.columns);
+/**
+ * Next horizontal offset. Tables step to the next column start once the rest of the current column has been
+ * visible, otherwise by nearly a viewport inside that column; code steps by half a page. Both stop at the widest
+ * line (for sources too large to measure up front, the widest line in the current window).
+ */
+export function panReader(document: ReaderDocument, layout: ReaderLayout, position: ReaderPosition, direction: -1 | 1): number {
+  const columns = layout.viewport.columns, horizontal = position.horizontal;
+  let widest = document.maxWidth;
+  if (!Number.isFinite(widest)) {
+    widest = 0;
+    for (const row of document.view.view(readerBodyPosition(document, layout, position), layout.viewport).rows) widest = Math.max(widest, document.view.positionAt(row.end).horizontal);
+  }
+  const limit = Math.max(0, widest - columns);
   const starts = document.columnStarts;
-  const next = starts.length > 1
-    ? direction > 0 ? starts.find(start => start > horizontal) ?? horizontal : [...starts].reverse().find(start => start < horizontal) ?? 0
-    : horizontal + direction * Math.max(4, Math.floor(layout.viewport.columns / 2));
+  let next: number;
+  if (starts.length > 1) {
+    const step = Math.max(1, columns - Math.min(4, Math.floor(columns / 4)));
+    if (direction > 0) {
+      const start = starts.find(candidate => candidate > horizontal);
+      next = start !== undefined && start <= horizontal + columns ? start : horizontal + step;
+      if (start !== undefined) next = Math.min(next, start);
+    } else {
+      const start = [...starts].reverse().find(candidate => candidate < horizontal) ?? 0;
+      next = horizontal - start <= columns ? start : Math.max(start, horizontal - step);
+    }
+  } else next = horizontal + direction * Math.max(4, Math.floor(columns / 2));
   return Math.max(0, Math.min(limit, next));
 }
 
@@ -169,19 +188,21 @@ function matchesIn(matches: readonly ReaderSearchMatch[], start: number, end: nu
   return found;
 }
 
-function rowChunks(document: ReaderDocument, row: ReaderRow, viewStart: number, columns: number, color: string, theme: TuiTheme, matches: readonly ReaderSearchMatch[], selected: number): TextChunk[] {
+function rowChunks(document: ReaderDocument, row: ReaderRow, viewStart: number, columns: number, color: string, theme: TuiTheme, matches: readonly ReaderSearchMatch[], selected: number, strong = false): TextChunk[] {
+  // Only unhighlighted text takes the header's bold, keeping selected (bold) and other (underline) matches distinct without color.
+  const plain = (text: string) => strong ? bold(fg(color)(text)) : fg(color)(text);
   const ranges = matchesIn(matches, row.start, row.end).map(index => {
     const match = matches[index]!;
     const from = document.view.positionAt(Math.max(match.start, row.start)).horizontal - viewStart;
     const to = match.end >= row.end ? Infinity : document.view.positionAt(match.end).horizontal - viewStart;
     return { from, to, selected: index === selected };
   }).filter(range => range.to > 0 && range.from < columns);
-  if (!ranges.length) return [fg(color)(row.text)];
+  if (!ranges.length) return [plain(row.text)];
   const chunks: TextChunk[] = [];
   let column = 0, text = "", style = 0;
   const flush = () => {
     if (!text) return;
-    if (style === 0) chunks.push(fg(color)(text));
+    if (style === 0) chunks.push(plain(text));
     else chunks.push(style === 2 ? bold(underline(bg(tint(theme, theme.accent))(fg(theme.text)(text)))) : underline(bg(theme.border)(fg(theme.text)(text))));
     text = "";
   };
@@ -242,11 +263,11 @@ export function paintReader(input: {
   const gutter = (row: ReaderRow | undefined) => layout.gutter ? [fg(theme.muted)(row && !row.continuation ? String(row.line).padStart(layout.gutter - 1) + " " : " ".repeat(layout.gutter))] : [];
   const paintRow = (row: ReaderRow, color: string, header = false) => {
     const viewStart = layout.viewport.wrap ? document.view.positionAt(row.start).horizontal : position.horizontal;
-    const content = rowChunks(document, row, viewStart, layout.viewport.columns, color, theme, result.matches, selected);
+    const content = rowChunks(document, row, viewStart, layout.viewport.columns, color, theme, result.matches, selected, header);
     const pad = " ".repeat(Math.max(0, layout.viewport.columns - width(row.text)));
     lines.push([...gutter(row),
       ...(layout.markers ? [fg(theme.muted)(row.clippedLeft ? "‹" : " ")] : []),
-      ...(header ? content.map(chunk => bold(chunk)) : content),
+      ...content,
       ...(layout.markers && row.clippedRight ? [fg(theme.muted)(pad + "›")] : [])]);
   };
   if (layout.pinned) {

@@ -370,7 +370,9 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
           }
           return;
         }
-        for (const child of node.getChildren()) visit(child);
+        // Code and table header strips are inspection chrome, not message content.
+        const chrome = node instanceof BoxRenderable && (codeData.has(node) || tableData.has(node));
+        for (const child of node.getChildren().slice(chrome ? 1 : 0)) visit(child);
       };
       visit(root);
       return segments;
