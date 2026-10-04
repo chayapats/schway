@@ -27,5 +27,11 @@ export function undoRows(undo: UndoPreview): GitDiffRow[] {
 /** File-list title for a review opened from the undo panel, naming where its paths came from. */
 export const UNDO_REVIEW_FILES = "Files from undo panel";
 
+/** File-list placeholder when none of the undo panel's paths are inside the workspace. */
+export const UNDO_REVIEW_NO_FILES = "No workspace files";
+
+/** Current-diff row for that empty case; the panel's paths exist but are outside the workspace. */
+export const UNDO_REVIEW_OUTSIDE = "Paths in the undo panel are outside the workspace.";
+
 /** Content title while Details replaces the current diff in a review opened from the undo panel. */
 export const UNDO_REVIEW_DETAILS = "Review details";

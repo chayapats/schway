@@ -588,6 +588,105 @@ test("Ctrl+R rereads an undo-panel review in place, and a stale read never reope
   });
 });
 
+/** Hold Git reads whose arguments include `marker` until released, leaving every other command untouched. */
+function gateGit(marker: string) {
+  const realSpawn = Bun.spawn, gate = Promise.withResolvers<void>(), commands: string[][] = [];
+  let held = 0;
+  Bun.spawn = ((command: string[], options: Parameters<typeof Bun.spawn>[1]) => {
+    const child = realSpawn(command, options);
+    if (command[0] === "git") commands.push(command);
+    if (command[0] !== "git" || !command.includes(marker)) return child;
+    held++;
+    return { pid: child.pid, stdout: child.stdout, stderr: child.stderr, kill: child.kill.bind(child), exited: gate.promise.then(() => child.exited) };
+  }) as typeof Bun.spawn;
+  return { release: () => gate.resolve(), held: () => held, commands, restore: () => { Bun.spawn = realSpawn; } };
+}
+
+test("a slow undo-review diff for one path never appears after selection moves to another", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [bash("generate", "printf 'a evidence\\n' > a.txt; printf 'b evidence\\n' > b.txt"), { text: "Generated." }]);
+    try {
+      await ui.send("Generate");
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview?.files.map(file => file.path)).toEqual(["a.txt", "b.txt"]);
+      const gate = gateGit("a.txt");
+      try {
+        const opening = ui.controller.reviewUndoChanges();
+        while (!gate.held()) await Bun.sleep(1);
+        expect(ui.controller.snapshot().changeReview).toMatchObject({ currentPath: "a.txt", detail: "Loading current diff…" });
+        await ui.controller.selectReviewFile(1);
+        expect(ui.controller.snapshot().changeReview?.currentPath).toBe("b.txt");
+        expect(ui.controller.snapshot().changeReview?.detail).toContain("b evidence");
+        gate.release(); expect(await opening).toBe(true);
+        const review = ui.controller.snapshot().changeReview!;
+        expect(review).toMatchObject({ fromUndo: true, selected: 1, currentPath: "b.txt" });
+        expect(review.detail).toContain("b evidence"); expect(review.detail).not.toContain("a evidence");
+      } finally { gate.restore(); }
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("a pending undo-review Git read is discarded when the session is replaced or the branch changes", async () => {
+  for (const [marker, boundary] of [["status", "session"], ["status", "branch"], ["gen.txt", "session"], ["gen.txt", "branch"]] as const) {
+    await withTempDir(async root => {
+      await mkdir(join(root, "work"));
+      await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+      const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
+      try {
+        await ui.send("Generate");
+        await ui.undo();
+        const before = await ui.state();
+        const gate = gateGit(marker);
+        try {
+          const opening = ui.controller.reviewUndoChanges();
+          while (!gate.held()) await Bun.sleep(1);
+          if (boundary === "session") ui.controller.replaceSession(ui.session, ui.session.rootId);
+          else ui.session.forkBranch(ui.session.rootId);
+          gate.release(); await opening;
+          // A discarded status read never goes on to read a file diff for the old review.
+          if (marker === "status") expect(gate.commands.some(command => command.includes("gen.txt"))).toBe(false);
+          const review = ui.controller.snapshot().changeReview;
+          if (boundary === "session") { expect(review).toBeUndefined(); expect(ui.controller.snapshot().undoPreview).toBeUndefined(); }
+          else {
+            // The branch moved under an open review: its Git read is dropped and never shown as current.
+            expect(review?.rows.some(row => row.text === "x")).toBe(false);
+            expect(review?.detail ?? "").not.toContain("x\n");
+          }
+        } finally { gate.restore(); }
+        expect(ui.records()).toEqual([]);
+        // Forking the branch is the test's own session write; replacing the session writes nothing.
+        if (boundary === "session") expect(await ui.state()).toEqual(before);
+      } finally { await ui.dispose(); }
+    });
+  }
+});
+
+test("an undo review whose listed paths are all outside the workspace says so instead of claiming none were seen", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [{ text: "Nothing to change." }]);
+    try {
+      await ui.send("Look around");
+      const turnId = ui.session.items.findLast(item => item.type === "user")!.id, outside = join(root, "outside.txt");
+      await writeFile(outside, "outside\n");
+      await openUndoStore({ home: ui.home }).recordShell({ sessionId: ui.session.rootId, turnId, turnNumber: 1 }, { detection: "git", paths: [outside] });
+      await ui.undo();
+      expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "No saved undo for these changes", files: [{ absolutePath: outside }] });
+      ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
+      expect(ui.controller.snapshot().changeReview).toMatchObject({ fromUndo: true, files: [], detail: "Paths in the undo panel are outside the workspace." });
+      const frame = ui.captureCharFrame();
+      expect(frame).toContain("Files from undo panel"); expect(frame).toContain("No workspace files");
+      expect(frame).not.toContain("None observed");
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.controller.snapshot().undoPreview?.files).toHaveLength(1);
+      expect(ui.records()).toEqual([]);
+    } finally { await ui.dispose(); }
+  });
+});
+
 test("session replacement discards a pending read and a review opened from the undo panel", async () => {
   await withTempDir(async root => {
     await mkdir(join(root, "work"));

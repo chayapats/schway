@@ -42,7 +42,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const palette = screen.id.startsWith("command-palette");
   const draft = screen.id.startsWith("draft-");
   const reviewScope = screen.id === "review-multi-turn" || screen.id === "review-staged-unstaged";
-  const undoLimit = ["undo-shell-only", "undo-older-target", "undo-detection-unavailable"].includes(screen.id);
+  const undoLimit = ["undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable"].includes(screen.id);
   const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit;
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));

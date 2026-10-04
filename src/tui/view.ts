@@ -21,7 +21,7 @@ import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
-import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
+import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -893,7 +893,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const diffTitle = review.showingDetails ? scope ? reviewDetailsLabel(scope) : UNDO_REVIEW_DETAILS : currentPath === undefined ? currentDiffLabel()
             : currentDiffLabel(fitPathStart(safe(currentPath), titleWidth - Bun.stringWidth(currentDiffLabel(""))));
           reviewDiffTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(diffTitle, titleWidth)))]);
-          if (!fileRows.length) fileRows.push({ path: "None observed", badge: "" });
+          // The undo panel did list paths; an empty undo review means none were inside the workspace.
+          if (!fileRows.length) fileRows.push({ path: fromUndo ? UNDO_REVIEW_NO_FILES : "None observed", badge: "" });
         }
         reviewFilesColumn.width = fileWidth;
         reviewFilesColumn.marginBottom = stacked && titled ? 1 : 0;

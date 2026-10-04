@@ -14,6 +14,7 @@ import { equalUndoHash, hashUndoBytes, openUndoStore, type UndoManifest, type Un
 import { ChangesLayer } from "./controller-changes.ts";
 import type { ChangeReview, UndoPreview, UndoPreviewFile } from "./controller-types.ts";
 import { CURRENT_DIFF_FAILED, LOADING_CURRENT_DIFF, pathStateNote } from "./review-scope.ts";
+import { UNDO_REVIEW_OUTSIDE } from "./undo-view.ts";
 
 /** Review opened from the undo panel: its paths, Git query paths and the identity it began in. */
 interface UndoReviewContext {
@@ -141,8 +142,8 @@ export abstract class UndoLayer extends ChangesLayer {
     const context: UndoReviewContext = { review, absolute, queries: [...absolute], ready: false, identity: this.undoReviewIdentity() };
     this.changeReview = review;
     this.undoReview = context;
-    if (this.gitChangeTracking() === "off") context.unavailable = "Change tracking off. No Git state read.";
-    else if (!files.length) context.unavailable = "No workspace files to review.";
+    if (!files.length) context.unavailable = UNDO_REVIEW_OUTSIDE;
+    else if (this.gitChangeTracking() === "off") context.unavailable = "Change tracking off. No Git state read.";
     else {
       const status = await inspectGitStatus(this.workspace!.root);
       if (!this.undoReviewCurrent(context, generation)) return false;

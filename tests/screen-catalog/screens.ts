@@ -177,6 +177,10 @@ export const SCREENS: readonly Screen[] = [
   { id: "undo-shell-only", title: "Undo without saved changes", description: "A change without saved undo lists its path read-only with review and close actions.", drive: async ui => {
     await enter(ui, "Generate the output"); await ui.waitFor(completed); await enter(ui, "/undo");
   }, ready: s => s.undoPreview?.readOnlyStatus === "No saved undo for these changes" },
+  { id: "undo-shell-only-review", title: "Review from undo", description: "Alt+R from the undo panel shows current diffs for its paths without source badges.", drive: async ui => {
+    await enter(ui, "Generate the output"); await ui.waitFor(completed); await enter(ui, "/undo");
+    await ui.waitFor(s => !!s.undoPreview); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush();
+  }, ready: s => reviewReady(s) && !!s.changeReview!.fromUndo && s.changeReview!.rows.some(row => row.text === "generated") },
   { id: "undo-older-target", title: "Undo an older turn", description: "Undo names an older target turn and the newer change that stays.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
     await enter(ui, "Generate the output"); await ui.waitFor(s => completed(s) && s.transcript.some(row => row.text.includes("Generated the output file.")));
