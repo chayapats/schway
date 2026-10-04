@@ -197,7 +197,9 @@ command results, elapsed time, and **Alt+R review**. Failed turns also offer
 ```
 
 While a panel or the reader is open, those keys belong to it, so the line keeps
-the outcome and counts but drops **Alt+R review** and **F2 details**.
+the outcome and counts but drops **Alt+R review** and **F2 details**. While F2
+details are open, F2 does nothing, so the line drops **F2 details** and keeps
+**Alt+R review**, which still opens review.
 
 Counts include successful file-tool changes and paths detected as changed by shell
 commands, extension tools, or other processes. Created writes and edits contribute
@@ -246,7 +248,11 @@ unsent draft, and cursor. After a failed turn, F2 in the conversation appends th
 same turn details, including any recovery diagnostics; review Details also add the
 review scope notes.
 Details contain tool counts, whole-turn exit-zero/nonzero/unknown totals, and the
-retained commands without tool-call IDs. **Alt+I** still inspects individual tools.
+retained commands without tool-call IDs. When a turn has no tool results and no
+commands, those lines become `No tool results or commands.` Failed-turn details
+lead with the outcome and the cause (`Failure details: …`), so F2 shows the cause
+in its first screen, even at narrow widths; the counts, commands and evidence notes
+follow. **Alt+I** still inspects individual tools.
 Selected filenames are literal paths, including glob characters and Git pathspec
 syntax. `/changes status` and `/changes diff -- <path>` remain available.
 

@@ -9,18 +9,18 @@ cursor 16 17 visible
  ⚡ schway  ~/demo
 
  ✗ Failed
- 0 tool results; 0 failed tools.
- Commands: 0 exit 0 / 0 nonzero / 0
- unknown (entire turn).
- Command results (latest 50; exit
- codes, not a test-suite guarantee):
- No command exit evidence.
+ Failure details: Provider request
+ failed after 3 transient attempts:
+ Service unavailable
+ No tool results or commands.
 
  Current working-tree content is
  unattributed; external edits may be
  included.
+ Snapshots show changes observed
+ during the turn, not exclusive Schway
 
- ✗ Failed · Alt+R review · F2 details
+ ✗ Failed · 0.0s · Alt+R review
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › งานถัดไป 🧪
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -38,44 +38,42 @@ cursor 16 17 visible
 02 1-9 #545e6c #f7f7f4 -
 02 9-40 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-32 #545e6c #f7f7f4 -
-03 32-40 #ffffff #f7f7f4 -
+03 1-35 #545e6c #f7f7f4 -
+03 35-40 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-36 #545e6c #f7f7f4 -
 04 36-40 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
-05 1-23 #545e6c #f7f7f4 -
-05 23-40 #ffffff #f7f7f4 -
+05 1-20 #545e6c #f7f7f4 -
+05 20-40 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
-06 1-34 #545e6c #f7f7f4 -
-06 34-40 #ffffff #f7f7f4 -
-07 0-1 #ffffff #f7f7f4 -
-07 1-36 #545e6c #f7f7f4 -
-07 36-40 #ffffff #f7f7f4 -
+06 1-29 #545e6c #f7f7f4 -
+06 29-40 #ffffff #f7f7f4 -
+07 0-40 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -
-08 1-26 #545e6c #f7f7f4 -
-08 26-40 #ffffff #f7f7f4 -
-09 0-40 #ffffff #f7f7f4 -
+08 1-33 #545e6c #f7f7f4 -
+08 33-40 #ffffff #f7f7f4 -
+09 0-1 #ffffff #f7f7f4 -
+09 1-37 #545e6c #f7f7f4 -
+09 37-40 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
-10 1-33 #545e6c #f7f7f4 -
-10 33-40 #ffffff #f7f7f4 -
+10 1-10 #545e6c #f7f7f4 -
+10 10-40 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
-11 1-37 #545e6c #f7f7f4 -
-11 37-40 #ffffff #f7f7f4 -
+11 1-33 #545e6c #f7f7f4 -
+11 33-40 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
-12 1-10 #545e6c #f7f7f4 -
-12 10-40 #ffffff #f7f7f4 -
+12 1-38 #545e6c #f7f7f4 -
+12 38-40 #ffffff #f7f7f4 -
 13 0-40 #ffffff #f7f7f4 -
 14 0-1 #ffffff #f7f7f4 -
 14 1-2 #a61f16 #f7f7f4 b
 14 2-3 #545e6c #f7f7f4 -
 14 3-9 #a61f16 #f7f7f4 b
-14 9-12 #545e6c #f7f7f4 -
-14 12-17 #1d232c #caced3 b
-14 17-27 #545e6c #f7f7f4 -
-14 27-29 #1d232c #caced3 b
-14 29-37 #545e6c #f7f7f4 -
-14 37-40 #ffffff #f7f7f4 -
+14 9-19 #545e6c #f7f7f4 -
+14 19-24 #1d232c #caced3 b
+14 24-31 #545e6c #f7f7f4 -
+14 31-40 #ffffff #f7f7f4 -
 15 0-1 #ffffff #f7f7f4 -
 15 1-39 #ecedea #f7f7f4 -
 15 39-40 #ffffff #f7f7f4 -

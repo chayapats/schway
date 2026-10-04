@@ -2793,6 +2793,12 @@ test("failed outcome details append once and review details escape returns to th
   expect(details).toContain("check → exit 7");
   expect(details).toContain("fixture diagnostic");
   expect(details).not.toContain("call_fixture_failure");
+  // The cause leads the details, and open details ignore F2, so the strip names only the live Alt+R action.
+  expect(details.split("\n")[0]).toBe("✗ Failed");
+  expect(details.split("\n")[1]).toStartWith("Failure details: ");
+  const strip = () => (ui.renderer.root.findDescendantById("activity") as TextRenderable).plainText;
+  expect(strip()).toContain("Alt+R review");
+  expect(strip()).not.toContain("F2 details");
   ui.mockInput.pressKey("r", { meta: true });
   await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview!.loading, "failed review");
   ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
@@ -2808,6 +2814,8 @@ test("failed outcome details append once and review details escape returns to th
   expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(false);
   ui.mockInput.pressEscape(); await settle(ui);
   expect(ui.controller.snapshot().changeReview).toBeUndefined();
+  // Opening review closed details, so F2 works again and the strip names it.
+  expect(strip()).toContain("Alt+R review · F2 details");
 });
 
 test("review pages reveal long unbroken and Thai line tails at two-column and stacked widths", async () => {

@@ -8,14 +8,17 @@ cursor 17 27 visible
 == text
  ⚡ schway  ~/demo
 
+  ▌ You
+  ▌ Summarize the changes
+
+  ▌ ! Error
   ▌ Request failed · Inspect details before continuing
   ▌ Ctrl+R continue · F2 details · Esc keep editing
 
   ✗ Failed
-  0 tool results; 0 failed tools.
-  Commands: 0 exit 0 / 0 nonzero / 0 unknown (entire turn).
-  Command results (latest 50; exit codes, not a test-suite guarantee):
-  No command exit evidence.
+  Failure details: Provider request failed after 3 transient attempts:
+  Service unavailable
+  No tool results or commands.
 
   Current working-tree content is unattributed; external edits may be
   included.
@@ -26,11 +29,8 @@ cursor 17 27 visible
   Shell-change detection unavailable: change tracking is off (git.
   changeTracking="off").
 
-  Failure details: Provider request failed after 3 transient attempts:
-  Service unavailable
 
-
-  ✗ Failed · 0.0s · Alt+R review · F2 details
+  ✗ Failed · 0.0s · Alt+R review
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › งานถัดไป 🧪
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -45,70 +45,79 @@ cursor 17 27 visible
 00 18-80 #ffffff #ecedea -
 01 0-80 #ffffff #f7f7f4 -
 02 0-2 #ffffff #f7f7f4 -
-02 2-3 #a61f16 #edddd9 -
-02 3-4 #ffffff #edddd9 -
-02 4-54 #a61f16 #edddd9 -
-02 54-77 #ffffff #edddd9 -
+02 2-3 #0a5894 #ecedea -
+02 3-4 #ffffff #ecedea -
+02 4-7 #0a5894 #ecedea b
+02 7-77 #ffffff #ecedea -
 02 77-80 #ffffff #f7f7f4 -
 03 0-2 #ffffff #f7f7f4 -
-03 2-3 #a61f16 #edddd9 -
-03 3-4 #ffffff #edddd9 -
-03 4-10 #1d232c #c9cbd0 b
-03 10-22 #a61f16 #edddd9 -
-03 22-24 #1d232c #c9cbd0 b
-03 24-35 #a61f16 #edddd9 -
-03 35-38 #1d232c #c9cbd0 b
-03 38-51 #a61f16 #edddd9 -
-03 51-77 #ffffff #edddd9 -
+03 2-3 #0a5894 #ecedea -
+03 3-4 #ffffff #ecedea -
+03 4-25 #1d232c #ecedea -
+03 25-77 #ffffff #ecedea -
 03 77-80 #ffffff #f7f7f4 -
 04 0-80 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
-05 2-10 #545e6c #f7f7f4 -
-05 10-80 #ffffff #f7f7f4 -
+05 2-3 #a61f16 #edddd9 -
+05 3-4 #ffffff #edddd9 -
+05 4-11 #a61f16 #edddd9 b
+05 11-77 #ffffff #edddd9 -
+05 77-80 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
-06 2-33 #545e6c #f7f7f4 -
-06 33-80 #ffffff #f7f7f4 -
+06 2-3 #a61f16 #edddd9 -
+06 3-4 #ffffff #edddd9 -
+06 4-54 #a61f16 #edddd9 -
+06 54-77 #ffffff #edddd9 -
+06 77-80 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
-07 2-59 #545e6c #f7f7f4 -
-07 59-80 #ffffff #f7f7f4 -
-08 0-2 #ffffff #f7f7f4 -
-08 2-70 #545e6c #f7f7f4 -
-08 70-80 #ffffff #f7f7f4 -
+07 2-3 #a61f16 #edddd9 -
+07 3-4 #ffffff #edddd9 -
+07 4-10 #1d232c #c9cbd0 b
+07 10-22 #a61f16 #edddd9 -
+07 22-24 #1d232c #c9cbd0 b
+07 24-35 #a61f16 #edddd9 -
+07 35-38 #1d232c #c9cbd0 b
+07 38-51 #a61f16 #edddd9 -
+07 51-77 #ffffff #edddd9 -
+07 77-80 #ffffff #f7f7f4 -
+08 0-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
-09 2-27 #545e6c #f7f7f4 -
-09 27-80 #ffffff #f7f7f4 -
-10 0-80 #ffffff #f7f7f4 -
+09 2-10 #545e6c #f7f7f4 -
+09 10-80 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-71 #545e6c #f7f7f4 -
+10 71-80 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
-11 2-70 #545e6c #f7f7f4 -
-11 70-80 #ffffff #f7f7f4 -
+11 2-21 #545e6c #f7f7f4 -
+11 21-80 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
-12 2-11 #545e6c #f7f7f4 -
-12 11-80 #ffffff #f7f7f4 -
-13 0-2 #ffffff #f7f7f4 -
-13 2-72 #545e6c #f7f7f4 -
-13 72-80 #ffffff #f7f7f4 -
+12 2-30 #545e6c #f7f7f4 -
+12 30-80 #ffffff #f7f7f4 -
+13 0-80 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
-14 2-52 #545e6c #f7f7f4 -
-14 52-80 #ffffff #f7f7f4 -
+14 2-70 #545e6c #f7f7f4 -
+14 70-80 #ffffff #f7f7f4 -
 15 0-2 #ffffff #f7f7f4 -
-15 2-72 #545e6c #f7f7f4 -
-15 72-80 #ffffff #f7f7f4 -
+15 2-11 #545e6c #f7f7f4 -
+15 11-80 #ffffff #f7f7f4 -
 16 0-2 #ffffff #f7f7f4 -
-16 2-48 #545e6c #f7f7f4 -
-16 48-80 #ffffff #f7f7f4 -
+16 2-72 #545e6c #f7f7f4 -
+16 72-80 #ffffff #f7f7f4 -
 17 0-2 #ffffff #f7f7f4 -
-17 2-66 #545e6c #f7f7f4 -
-17 66-80 #ffffff #f7f7f4 -
+17 2-52 #545e6c #f7f7f4 -
+17 52-80 #ffffff #f7f7f4 -
 18 0-2 #ffffff #f7f7f4 -
-18 2-24 #545e6c #f7f7f4 -
-18 24-80 #ffffff #f7f7f4 -
-19 0-80 #ffffff #f7f7f4 -
+18 2-72 #545e6c #f7f7f4 -
+18 72-80 #ffffff #f7f7f4 -
+19 0-2 #ffffff #f7f7f4 -
+19 2-48 #545e6c #f7f7f4 -
+19 48-80 #ffffff #f7f7f4 -
 20 0-2 #ffffff #f7f7f4 -
-20 2-71 #545e6c #f7f7f4 -
-20 71-80 #ffffff #f7f7f4 -
+20 2-66 #545e6c #f7f7f4 -
+20 66-80 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
-21 2-21 #545e6c #f7f7f4 -
-21 21-80 #ffffff #f7f7f4 -
+21 2-24 #545e6c #f7f7f4 -
+21 24-80 #ffffff #f7f7f4 -
 22 0-80 #ffffff #f7f7f4 -
 23 0-80 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
@@ -117,10 +126,8 @@ cursor 17 27 visible
 24 4-10 #a61f16 #f7f7f4 b
 24 10-20 #545e6c #f7f7f4 -
 24 20-25 #1d232c #caced3 b
-24 25-35 #545e6c #f7f7f4 -
-24 35-37 #1d232c #caced3 b
-24 37-45 #545e6c #f7f7f4 -
-24 45-80 #ffffff #f7f7f4 -
+24 25-32 #545e6c #f7f7f4 -
+24 32-80 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
 25 2-78 #ecedea #f7f7f4 -
 25 78-80 #ffffff #f7f7f4 -

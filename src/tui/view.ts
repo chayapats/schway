@@ -1182,8 +1182,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : `No matches${searchResult.limited ? " in searched portion" : " in this branch"} · Edit query · Esc back`;
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
-      // Alt+R review and F2 details act only from the conversation; panels and the reader own those keys.
-      const outcomeText = completed ? formatOutcomeLine(completed, width, !panelMode && !reader) : "";
+      // Alt+R review and F2 details act only from the conversation; panels and the reader own those keys, and open details ignore F2.
+      const outcomeText = completed ? formatOutcomeLine(completed, width, !panelMode && !reader, !!detailsReturn) : "";
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
