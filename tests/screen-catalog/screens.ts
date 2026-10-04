@@ -153,6 +153,19 @@ export const SCREENS: readonly Screen[] = [
     ui.secrets.push(...ui.controller.snapshot().changeReview!.details.matchAll(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g).map(match => match[0]));
     openDetails(ui);
   }, ready: s => reviewReady(s) && s.changeReview!.showingDetails },
+  { id: "review-multi-turn", title: "Multi-turn review", description: "The turn 2 file list keeps that turn's count while the current diff also shows the first turn and a later external edit.", noColor: true, drive: async ui => {
+    await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
+    await enter(ui, "Add a return type"); await ui.waitFor(s => completed(s) && s.transcript.some(row => row.text.includes("Added the return type.")));
+    await writeFile(join(ui.root, "clamp.ts"), `${await readFile(join(ui.root, "clamp.ts"), "utf8")}export default clamp;\n`);
+    ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush();
+  }, ready: s => reviewReady(s) && s.changeReview!.detail.includes("export default clamp;") },
+  { id: "review-staged-unstaged", title: "Staged and unstaged review", description: "The current diff names its unstaged and staged comparisons for a file the turn edited.", noColor: true, drive: async ui => {
+    await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
+    const staged = Bun.spawnSync(["git", "add", "clamp.ts"], { cwd: ui.root });
+    if (staged.exitCode) throw new Error(staged.stderr.toString());
+    await writeFile(join(ui.root, "clamp.ts"), `${await readFile(join(ui.root, "clamp.ts"), "utf8")}export default clamp;\n`);
+    ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush();
+  }, ready: s => reviewReady(s) && s.changeReview!.rows.filter(row => row.comparison).length === 2 },
   { id: "undo-preview", title: "Undo preview", description: "Undo previews file restores, a deletion and a shell change.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
     await writeFile(join(ui.root, "README.md"), "Changes made afterwards.\n");
@@ -178,6 +191,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
+  if (screen.id === "review-multi-turn") variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(

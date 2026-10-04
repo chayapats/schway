@@ -11,9 +11,9 @@ test("comparison labels use structured scope and leave legacy parsing opt-in", (
     { sign: "-", line: 1, text: "legacy old" }, { sign: "+", line: 1, text: "legacy new" },
   ]);
   expect(parseGitDiff(preview, { includeComparisons: true, includeSections: true })).toEqual([
-    { sign: " ", text: "Unstaged · index → worktree" },
+    { sign: " ", text: "Unstaged · index → worktree", comparison: "index-to-worktree" },
     { sign: "-", line: 1, text: "index text" }, { sign: "+", line: 1, text: "worktree text" },
-    { sign: " ", text: "Staged · HEAD → index" },
+    { sign: " ", text: "Staged · HEAD → index", comparison: "head-to-index" },
     { sign: "-", line: 1, text: "HEAD text" }, { sign: "+", line: 1, text: "index text" },
   ]);
   // A legacy preview has no trusted provenance from which to invent a comparison label.
@@ -27,13 +27,13 @@ test("structured comparisons retain literal Unicode source and per-section unava
     { comparison: "head-to-index", diff: "", truncated: true, binaryFiles: [] },
   ];
   expect(parseGitDiff({ diff: "ignored", truncated: true, binaryFiles: [], sections }, { includeComparisons: true })).toEqual([
-    { sign: " ", text: "Untracked · current file" },
+    { sign: " ", text: "Untracked · current file", comparison: "untracked" },
     { sign: "+", line: 1, text: "Staged:" },
     { sign: "+", line: 2, text: "@@ -1 +1 @@" },
     { sign: "+", line: 3, text: "สวัสดี 😀" },
-    { sign: " ", text: "Unstaged · index → worktree" },
+    { sign: " ", text: "Unstaged · index → worktree", comparison: "index-to-worktree" },
     { sign: " ", text: "Binary file · content not shown" },
-    { sign: " ", text: "Staged · HEAD → index" },
+    { sign: " ", text: "Staged · HEAD → index", comparison: "head-to-index" },
     { sign: " ", text: "Preview truncated · use git diff for full content" },
   ]);
 });
@@ -43,7 +43,7 @@ test("comparison parsing preserves raw source for the existing caller redaction 
   const section: GitDiffSection = { comparison: "untracked", diff: "", untrackedContent: source, truncated: false, binaryFiles: [] };
   const rows = parseGitDiff({ ...section, sections: [section] }, { includeComparisons: true });
   expect(rows[1]).toEqual({ sign: "+", line: 1, text: source });
-  expect(rows[0]).toEqual({ sign: " ", text: "Untracked · current file" });
+  expect(rows[0]).toEqual({ sign: " ", text: "Untracked · current file", comparison: "untracked" });
 });
 
 test("Git review drops metadata and stats and numbers each hunk using old removals and new context", () => {

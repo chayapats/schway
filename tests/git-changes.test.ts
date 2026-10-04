@@ -786,7 +786,7 @@ test("one preview budget keeps omitted comparison scope and avoids splitting a s
     expect(preview.diff.isWellFormed()).toBe(true);
     expect(preview.sections!.every(section => section.diff.isWellFormed())).toBe(true);
     expect(parseGitDiff(preview, { includeComparisons: true }).slice(-2)).toEqual([
-      { sign: " ", text: "Staged · HEAD → index" },
+      { sign: " ", text: "Staged · HEAD → index", comparison: "head-to-index" },
       { sign: " ", text: "Preview truncated · use git diff for full content" },
     ]);
   });
@@ -851,5 +851,28 @@ test("empty, clean, deleted and binary current sections do not invent textual co
     expect(literal.sections![0]!.binaryFiles).toEqual([]);
     expect(literal.binaryFiles).toEqual([]);
     expect(parseGitDiff(literal, { includeComparisons: true })).toContainEqual({ sign: "+", line: 1, text: "Binary files some text differ" });
+  });
+});
+
+test("literal paths without a current section report why, using read-only queries", async () => {
+  await withTempDir(async base => {
+    const dir = join(base, "repo");
+    await mkdir(dir);
+    await initRepo(dir);
+    await writeFile(join(dir, ".gitignore"), "*.log\n");
+    await writeFile(join(dir, "skipped [1].log"), "ignored\n");
+    const index = await readFile(join(dir, ".git", "index"));
+    const states: Record<string, string | undefined> = {};
+    for (const path of ["tracked.txt", "gone ไทย.txt", "skipped [1].log", "../outside.txt", join(base, "outside.txt"), ".gitignore"]) {
+      const preview = await getGitDiffPreview(dir, path);
+      if ("error" in preview) throw new Error(preview.error);
+      states[path] = preview.pathState;
+      if (preview.pathState) expect(preview.sections).toEqual([]);
+    }
+    expect(states).toEqual({ "tracked.txt": "clean", "gone ไทย.txt": "missing", "skipped [1].log": "ignored", "../outside.txt": "outside", [join(base, "outside.txt")]: "outside", ".gitignore": undefined });
+    const whole = await getGitDiffPreview(dir);
+    if ("error" in whole) throw new Error(whole.error);
+    expect(whole.pathState).toBeUndefined();
+    expect(await readFile(join(dir, ".git", "index"))).toEqual(index);
   });
 });

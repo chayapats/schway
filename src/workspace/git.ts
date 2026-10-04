@@ -1,7 +1,7 @@
 import { formatCount } from "../text/format.ts";
 import type { GitDiffSection } from "../text/diff.ts";
 import { stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /** Change-tracking mode for observational Git inspection without managing commits or branches. */
 export type GitChangeTrackingMode = "off" | "on-demand" | "snapshot";
@@ -108,7 +108,12 @@ export interface GitDiffPreview {
   untrackedContent?: string;
   /** Command-owned current comparisons; optional for callers supplying legacy previews. */
   sections?: GitDiffSection[];
+  /** Why a literal path has no current comparison section; absent when a section exists or no path was given. */
+  pathState?: GitPathState;
 }
+
+/** Read-only reason a requested path has no current Git comparison: clean, absent, ignored, outside the repository or unreadable. */
+export type GitPathState = "clean" | "missing" | "ignored" | "outside" | "unavailable";
 
 
 /**
@@ -513,6 +518,13 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}).` };
   const toplevel = resolved.toplevel;
+  if (path !== undefined) {
+    const inside = relative(toplevel, resolve(toplevel, path));
+    // Git rejects outside pathspecs with prose; report the scope instead of reading anything.
+    if (inside === ".." || inside.startsWith("../") || isAbsolute(inside)) {
+      return { path, diff: `${path} is outside the Git repository at ${toplevel}.`, truncated: false, binaryFiles: [], sections: [], pathState: "outside" };
+    }
+  }
   // Both names must participate in the pathspec or Git presents a rename as an added file.
   const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"]);
   if (status.exitCode !== 0) return { error: `Git diff failed: ${(status.stderr.trim() || "could not read repository state").slice(0, 500)}` };
@@ -560,7 +572,20 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
     return { ...(path !== undefined ? { path } : {}), diff: `${boundedDiffText(source, maxChars)}\n… truncated at ${maxChars} chars. Use git diff -- ${path ?? "--stat"} in ${toplevel} for the full diff.`, truncated: true, binaryFiles, sections };
   }
   const diff = source.trim().length === 0 ? "No textual diff. Staged, untracked, or binary-only changes may still be listed by /changes status." : source;
-  return { ...(path !== undefined ? { path } : {}), diff, truncated: false, binaryFiles, sections };
+  const pathState = path !== undefined && sections.length === 0 ? await gitPathState(toplevel, path) : undefined;
+  return { ...(path !== undefined ? { path } : {}), diff, truncated: false, binaryFiles, sections, ...(pathState ? { pathState } : {}) };
+}
+
+/** Classify a literal path with no unstaged, staged or untracked section using read-only Git queries. */
+async function gitPathState(root: string, path: string): Promise<GitPathState> {
+  const tracked = await runGit(root, ["--literal-pathspecs", "ls-files", "-z", "--cached", "--", path]);
+  if (tracked.exitCode !== 0) return "unavailable";
+  // A tracked path without staged or unstaged output matches HEAD; a deleted one would have a section.
+  if (tracked.stdout.split("\0").includes(path)) return "clean";
+  const present = await stat(join(root, path)).then(() => true, () => false);
+  if (!present) return "missing";
+  const ignored = await runGit(root, ["--literal-pathspecs", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", path]);
+  return ignored.exitCode === 0 && ignored.stdout.split("\0").includes(path) ? "ignored" : "unavailable";
 }
 
 /** Bound UTF-16 text without leaving half of a valid surrogate pair at the cutoff. */

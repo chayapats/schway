@@ -41,7 +41,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   let activityTime = 10_000, loginCalled = false;
   const palette = screen.id.startsWith("command-palette");
   const draft = screen.id.startsWith("draft-");
-  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id);
+  const reviewScope = screen.id === "review-multi-turn" || screen.id === "review-staged-unstaged";
+  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope;
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -50,7 +51,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await mkdir(join(root, ".git"), { recursive: true });
       await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/feature/a-very-long-branch-name-for-testing\n");
     }
-    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id)) {
+    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id) || reviewScope) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
       if (screen.id !== "undo-preview-no-git") for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
@@ -96,6 +97,13 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       { toolCalls: [{ id: "b1234", name: "bash", arguments: { command: screen.id === "undo-preview" ? "mkdir -p gen; printf 'generated\\n' > gen/out.json" : "printf 'ok\\n'" } }] },
       { text: screen.id === "large-edit" ? "Updated the clamp implementation." : "Fixed clamp so it respects the upper bound." },
     ];
+  }
+  if (reviewScope) {
+    tools = createToolRegistry([editTool, writeTool]);
+    const fix = { toolCalls: [{ id: "call_fixture_fix", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: "return Math.min(hi, Math.max(lo, n));" }] } }] };
+    responses = screen.id === "review-multi-turn"
+      ? [fix, { text: "Fixed the upper bound." }, { toolCalls: [{ id: "call_fixture_type", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "hi: number) {", newText: "hi: number): number {" }] } }] }, { text: "Added the return type." }]
+      : [fix, { toolCalls: [{ id: "call_fixture_notes", name: "write", arguments: { path: "notes.md", content: "Clamp respects the upper bound.\n" } }] }, { text: "Fixed clamp and added notes." }];
   }
   if (screen.id === "approval-command" || screen.id === "approval-edit") {
     tools = createToolRegistry([editTool, bashTool]);

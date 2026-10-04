@@ -1,17 +1,33 @@
 import { formatCount } from "../text/format.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { openUndoStore } from "../undo/store.ts";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../config/config.ts";
 import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
-import type { TurnOutcome } from "./controller-types.ts";
-import { parseGitDiff } from "../text/diff.ts";
+import type { ChangeReview, TurnOutcome } from "./controller-types.ts";
+import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
+import { CURRENT_DIFF_FAILED, DETECTED_FILE_NOTE, LOADING_CURRENT_DIFF, pathStateNote, reviewScopeDetails, type ReviewScope } from "./review-scope.ts";
 import { buildOutcomeDetails } from "./outcome-details.ts";
 import { BranchesLayer } from "./controller-branches.ts";
 
 
+/** Controller-private ownership of one open review: Git query paths, availability and the identity it began in. */
+interface ReviewContext {
+  review: ChangeReview;
+  /** False until the Git availability check settles; selection waits so paths pair with the right root. */
+  ready: boolean;
+  /** Literal Git query path per listed file, relative to `gitRoot` or absolute when outside it. */
+  queries: string[];
+  gitRoot?: string;
+  /** Explanation shown for every file when current Git content cannot be read. */
+  unavailable?: string;
+  identity: string;
+}
+
 /** Working-tree change review and per-turn outcome capture. */
 export abstract class ChangesLayer extends BranchesLayer {
+  private reviewContext?: ReviewContext;
+
   /** Return the effective observational change-tracking mode with on-demand as the default. */
   gitChangeTracking(): GitChangeTrackingMode {
     return this.configEditor?.settings.gitChangeTracking ?? this.explicitChangeTracking ?? DEFAULT_GIT_CHANGE_TRACKING;
@@ -85,33 +101,66 @@ export abstract class ChangesLayer extends BranchesLayer {
 
   /** Open read-only review of the retained turn, loading current content only on request. */
   async openChangeReview(): Promise<boolean> {
+    return this.loadChangeReview();
+  }
+
+  /** Reread Git state and the selected file's current diff while keeping the retained turn list and selection. */
+  async refreshChangeReview(): Promise<boolean> {
+    const prior = this.changeReview;
+    if (!prior?.scope || this.disposed || this.running) return false;
+    return this.loadChangeReview(prior);
+  }
+
+  /** Build turn evidence before any Git read, then fence every async step to this review and identity. */
+  private async loadChangeReview(prior?: ChangeReview): Promise<boolean> {
     if (this.disposed || this.running) return false;
     const generation = ++this.reviewGeneration;
     const outcome = this.snapshot().outcome;
     const ordinal = this.session.items.filter(item => item.type === "user").findIndex(item => item.id === this.outcomeUserId) + 1;
-    const review = { heading: outcome ? `Review · turn ${ordinal}` : "No turn to review yet", files: [] as TurnOutcome["files"], selected: 0, detail: "", rows: [] as import("../text/diff.ts").GitDiffRow[], details: outcome ? this.turnDetails() : "", showingDetails: false, loading: !!outcome };
+    if (!outcome) {
+      this.reviewContext = undefined;
+      this.changeReview = { heading: "No turn to review yet", files: [], selected: 0, detail: "", rows: [], details: "", showingDetails: false, loading: false };
+      return true;
+    }
+    const scope: ReviewScope = { kind: "turn", turn: ordinal };
+    // The observed turn record is the list; current Git state can explain each file but never replaces it.
+    const files = outcome.files.map(file => ({ ...file }));
+    const review: ChangeReview = { heading: `Review · turn ${ordinal}`, scope, files, selected: prior && prior.selected < files.length ? prior.selected : 0,
+      detail: files.length ? LOADING_CURRENT_DIFF : "", rows: files.length ? [{ sign: " ", text: LOADING_CURRENT_DIFF }] : [], details: this.turnDetails(), showingDetails: prior?.showingDetails ?? false, loading: true };
+    const context: ReviewContext = { review, ready: false, queries: files.map(file => file.path), identity: this.reviewIdentity() };
     this.changeReview = review;
-    if (!outcome) return true;
+    this.reviewContext = context;
     const mode = this.gitChangeTracking();
-    let unavailable = mode === "off" ? "Change tracking off. No Git state read; attribution unavailable." : !this.workspace ? "No workspace; changes unavailable." : "";
-    if (!unavailable && this.workspace) {
+    let dirty = false;
+    if (mode === "off") context.unavailable = "Change tracking off. No Git state read.";
+    else if (!this.workspace) context.unavailable = "No workspace · Restart Schway in a workspace";
+    else {
       const status = await inspectGitStatus(this.workspace.root);
-      if (generation !== this.reviewGeneration || this.disposed) return false;
-      if ("error" in status) unavailable = `Changes unavailable: ${status.error}`;
-      else if (!status.isGit) unavailable = "Non-Git workspace. Git changes and attribution unavailable.";
+      if (!this.reviewCurrent(context, generation)) return false;
+      if ("error" in status) context.unavailable = `${CURRENT_DIFF_FAILED}\n${status.error}`;
+      else if (!status.isGit) context.unavailable = "Non-Git workspace. Current Git diff unavailable.";
       else {
-        review.files = outcome.files.map(file => {
+        context.gitRoot = status.root;
+        dirty = status.dirty;
+        review.files = outcome.files.map((file, index) => {
           const resolvedPath = file.source === "tool" ? this.successfulToolPaths.get(file.path) : undefined;
-          return { ...file, path: resolvedPath === undefined ? file.path : relative(status.root, resolvedPath) };
+          if (resolvedPath === undefined) return { ...file };
+          const inside = relative(status.root, resolvedPath);
+          // Keep the recorded name for a path outside the repository; Git reports it as outside, not as missing.
+          if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) { context.queries[index] = resolvedPath; return { ...file }; }
+          context.queries[index] = inside;
+          return { ...file, path: inside };
         });
-        if (!review.files.length) review.detail = status.dirty ? "No files changed during this turn." : "No working-tree changes.";
       }
     }
-    if (generation !== this.reviewGeneration || this.disposed) return false;
-    if (unavailable) review.detail = redactSecrets(unavailable, this.secrets);
-    review.rows = review.detail ? [{ sign: " ", text: review.detail }] : [];
+    context.ready = true;
     review.loading = false;
-    await this.selectReviewFile(0);
+    if (!review.files.length) {
+      review.detail = redactSecrets(context.unavailable ?? (dirty ? "No file changes observed · /changes status" : "No working-tree changes"), this.secrets);
+      review.rows = [{ sign: " ", text: review.detail }];
+      return true;
+    }
+    await this.loadReviewFile(context, generation);
     return true;
   }
 
@@ -129,36 +178,62 @@ export abstract class ChangesLayer extends BranchesLayer {
     const shellUnavailable = mode === "off" ? 'change tracking is off (git.changeTracking="off").'
       : !this.workspace ? "no workspace is active."
       : this.gitSnapshotError ?? (!this.gitComparison ? `Snapshot attribution unavailable (${mode}); no completed capture.` : undefined);
-    return redactSecrets(buildOutcomeDetails(this.outcome, {
+    const turn = this.session.items.filter(item => item.type === "user").findIndex(item => item.id === this.outcomeUserId) + 1;
+    return redactSecrets(`${buildOutcomeDetails(this.outcome, {
       shellUnavailable,
       comparison: this.gitBaseline && this.gitAfter && this.gitComparison ? formatGitComparison(this.gitBaseline, this.gitAfter, this.gitComparison) : undefined,
       recovery: this.outcomeDiagnostics,
-    }), this.secrets);
+    })}\n\n${reviewScopeDetails({ kind: "turn", turn })}`, this.secrets);
   }
 
   /** Select a retained turn path and load numbered current diff rows or a plain explanation. */
   async selectReviewFile(delta: number): Promise<void> {
-    const review = this.changeReview;
-    if (!review || !review.files.length || !this.workspace) return;
+    const review = this.changeReview, context = this.reviewContext;
+    // Selection waits for the Git availability check so a path never pairs with the wrong query root.
+    if (!review || !review.files.length || context?.review !== review || !context.ready || this.disposed) return;
     review.selected = (review.selected + delta + review.files.length) % review.files.length;
-    const file = review.files[review.selected]!;
-    const generation = ++this.reviewGeneration;
-    review.loading = true;
-    review.detail = "Loading diff…";
-    review.rows = [{ sign: " ", text: review.detail }];
-    const preview = await getGitDiffPreview(this.workspace.root, file.path);
-    if (this.changeReview !== review || generation !== this.reviewGeneration || this.disposed) return;
-    review.rows = "error" in preview ? [{ sign: " ", text: preview.error }] : parseGitDiff(preview);
-    if (file.source === "shell") review.rows.unshift({ sign: " ", text: "changed by shell · not undoable" });
-    review.rows = review.rows.map(row => ({ ...row, text: redactSecrets(row.text, this.secrets) }));
-    review.detail = review.rows.map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`).join("\n");
-    review.loading = false;
+    await this.loadReviewFile(context, ++this.reviewGeneration);
+  }
+
+  /** Load the selected path's current content, discarding the result if selection, review or identity moved on. */
+  private async loadReviewFile(context: ReviewContext, generation: number): Promise<void> {
+    const review = context.review;
+    const index = review.selected, file = review.files[index]!;
+    const notes: GitDiffRow[] = file.source === "shell" ? [{ sign: " ", text: DETECTED_FILE_NOTE }] : [];
+    const show = (rows: GitDiffRow[], loading = false) => {
+      review.rows = [...notes, ...rows].map(row => ({ ...row, text: redactSecrets(row.text, this.secrets) }));
+      review.detail = review.rows.map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`).join("\n");
+      review.loading = loading;
+    };
+    review.currentPath = file.path;
+    if (context.unavailable !== undefined || context.gitRoot === undefined) {
+      show(context.unavailable === undefined ? [] : context.unavailable.split("\n").map(text => ({ sign: " " as const, text })));
+      return;
+    }
+    // Clear earlier rows before awaiting so a pending reload never presents older content as current.
+    show([{ sign: " ", text: LOADING_CURRENT_DIFF }], true);
+    const preview = await getGitDiffPreview(context.gitRoot, context.queries[index]!);
+    if (!this.reviewCurrent(context, generation) || review.selected !== index || review.currentPath !== file.path) return;
+    if ("error" in preview) show([{ sign: " ", text: CURRENT_DIFF_FAILED }, { sign: " ", text: preview.error }]);
+    else if (preview.pathState) show([{ sign: " ", text: pathStateNote(preview.pathState) }]);
+    else show(parseGitDiff(preview, { includeComparisons: true }));
+  }
+
+  /** Whether an async review step still owns the open review, its generation and the session/workspace it began in. */
+  private reviewCurrent(context: ReviewContext, generation: number): boolean {
+    return !this.disposed && this.changeReview === context.review && this.reviewContext === context && generation === this.reviewGeneration && context.identity === this.reviewIdentity();
+  }
+
+  /** Conversation and workspace identity that a pending review read must still match. */
+  private reviewIdentity(): string {
+    return JSON.stringify([this.sessionId, this.session.rootId, this.session.activeBranchId, this.workspace?.root ?? null, this.outcomeUserId ?? null]);
   }
 
   /** Close review while leaving the conversation, draft, files, and Git state untouched. */
   closeChangeReview(): void {
     this.reviewGeneration++;
     this.changeReview = undefined;
+    this.reviewContext = undefined;
   }
 
   /** Settle duration, retained diagnostics, and observed file evidence for the latest accepted turn. */

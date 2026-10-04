@@ -24,6 +24,8 @@ export interface GitDiffRow {
   sign: "+" | "-" | " ";
   line?: number;
   text: string;
+  /** Present only on a section heading naming the comparison of the rows that follow. */
+  comparison?: GitDiffComparison;
 }
 
 /** Current Git comparison chosen by its command, never inferred from patch or source text. */
@@ -42,17 +44,23 @@ export interface GitDiffSection extends GitDiffSource {
   comparison: GitDiffComparison;
 }
 
+const COMPARISON_LABELS: Record<GitDiffComparison, string> = {
+  "index-to-worktree": "Unstaged · index → worktree",
+  "head-to-index": "Staged · HEAD → index",
+  "empty-to-index": "Staged · empty tree → index",
+  untracked: "Untracked · current file",
+};
+
+/** Short section label naming the Git state on each side of one current comparison. */
+export function gitComparisonLabel(comparison: GitDiffComparison): string {
+  return COMPARISON_LABELS[comparison];
+}
+
 /** Number Git patch hunks or bounded raw untracked source without interpreting CLI explanation prose. */
 export function parseGitDiff(preview: GitDiffSource & { sections?: readonly GitDiffSection[] }, options: { includePaths?: boolean; includeSections?: boolean; includeComparisons?: boolean } = {}): GitDiffRow[] {
   if (options.includeComparisons && preview.sections?.length) {
-    const labels: Record<GitDiffComparison, string> = {
-      "index-to-worktree": "Unstaged · index → worktree",
-      "head-to-index": "Staged · HEAD → index",
-      "empty-to-index": "Staged · empty tree → index",
-      untracked: "Untracked · current file",
-    };
     return preview.sections.flatMap(section => [
-      { sign: " " as const, text: labels[section.comparison] },
+      { sign: " " as const, text: gitComparisonLabel(section.comparison), comparison: section.comparison },
       ...parseGitDiff(section, { includePaths: options.includePaths }),
     ]);
   }

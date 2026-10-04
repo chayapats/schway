@@ -45,6 +45,8 @@ details-unavailable
 retry-countdown
 review-panel
 details-review
+review-multi-turn
+review-staged-unstaged
 undo-preview
 undo-preview-no-git
 delete-session-busy

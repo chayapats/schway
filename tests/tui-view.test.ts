@@ -2763,7 +2763,7 @@ test("completed outcome and responsive numbered review preserve draft and hide f
     await waitForUiState(ui, () => ui.controller.snapshot().changeReview?.selected === 1 && !ui.controller.snapshot().changeReview!.loading, "second shell file");
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("› shell.txt");
-    expect(ui.captureCharFrame()).toContain("changed by shell · not undoable");
+    expect(ui.captureCharFrame()).toContain("Found by Git snapshot · not undoable");
     expect(ui.captureCharFrame()).toContain("1 + generated");
     expect(ui.captureCharFrame()).not.toContain("call_fixture_");
   });

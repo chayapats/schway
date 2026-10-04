@@ -202,18 +202,42 @@ At narrow widths, elapsed time drops first, then commands, then files; the outco
 and actions stay until the terminal is too narrow even for those.
 
 **Alt+R** or `/changes review` opens `Review · turn N`, numbered by user messages on
-the active conversation branch. The left column lists this turn's files, with `›`
-marking the selection and line counts or a `shell` badge. The right column shows
-the selected file's current, numbered diff: removals use old line numbers, additions
-and context use new line numbers. Colors and ASCII `-`/`+` signs distinguish changes.
-Below 80 terminal columns, the file list stacks above the diff. Binary, deleted,
-renamed, and truncated previews have short explanations instead of Git metadata.
-Shell files begin with `changed by shell · not undoable`.
+the active conversation branch. Review shows two scopes, each with its own label:
 
-Up/Down selects files; PageUp/PageDown scrolls the diff. **F2** swaps the diff for
-turn details; F2 again or Esc returns to the diff. Esc from the diff restores the
-same conversation position, unsent draft, and cursor. After a failed turn, F2 in
-the conversation appends the same details, including any recovery diagnostics.
+- **`Files from turn N`** is turn evidence: the paths observed during that turn,
+  with `›` marking the selection. Line counts beside a path are the turn's observed file-tool
+  edits and stay with the turn list. Repeated edits add up, so they can exceed the
+  net current diff. A blank count, or `?` for one side, is unknown. Paths seen only
+  by the turn's Git snapshots show `detected`.
+- **`Current diff · <path>`** is what Git shows for that path now. It is read when
+  review opens, when you select a file and when you press **Ctrl+R** to reload. It
+  does not update live, so it can include earlier turns, later turns or edits made
+  outside Schway.
+
+The current diff names each comparison it shows: `Unstaged · index → worktree`,
+`Staged · HEAD → index` (`Staged · empty tree → index` before the first commit) and
+`Untracked · current file`. Removals use old line numbers; additions and context use
+new line numbers. Colors and ASCII `-`/`+` signs distinguish changes. Below 80
+terminal columns, the file list stacks above the diff and both labels stay visible.
+Binary, deleted, renamed and truncated previews have short explanations instead of
+Git metadata. Detected paths begin with `Found by Git snapshot · not undoable`.
+
+A listed path keeps its turn record even when Git no longer has a diff for it. The
+current diff then explains why: `No current changes · file matches HEAD`, `File not
+found · nothing to compare`, `Ignored by Git · content not shown`, `Outside the Git
+repository · no diff`, or `Current diff unavailable · Ctrl+R reload`. A renamed path
+shows the rename. Review never swaps the turn list for other working-tree files.
+With change tracking off or outside Git, the turn list remains and the current diff
+says why Git content is unavailable; off mode reads no Git state.
+
+Up/Down selects files; PageUp/PageDown scrolls the diff; **Ctrl+R** reloads the
+current diff without changing the turn list or counts. While a read is pending the
+pane shows `Loading current diff…` instead of earlier content, and a result that
+arrives after you select another file, close review or switch session is discarded.
+**F2** swaps the diff for turn details, titled `Turn N details`; F2 again or Esc
+returns to the diff. Esc from the diff restores the same conversation position,
+unsent draft, and cursor. After a failed turn, F2 in the conversation appends the
+same details, including any recovery diagnostics and the review scope notes.
 Details contain tool counts, whole-turn exit-zero/nonzero/unknown totals, and the
 retained commands without tool-call IDs. **Alt+I** still inspects individual tools.
 Selected filenames are literal paths, including glob characters and Git pathspec
@@ -228,7 +252,9 @@ failures, and expose the latest before/after comparison.
 
 Review is read-only. Current content is unattributed and may include earlier,
 concurrent, or later external edits; snapshots do not prove exclusive Schway
-authorship. Exit codes are observed command results, not a test-suite guarantee.
+authorship. A `detected` path changed between the turn's snapshots without a matching
+file-tool record; it does not show which command or process changed it. Review does
+not store historical file contents, so it cannot show an exact patch for one turn. Exit codes are observed command results, not a test-suite guarantee.
 Failure, cancellation, and conversation branching leave completed filesystem
 effects in place. Review does not commit, undo, or restore files. Only the latest
 turn pair is retained, and switching a session or branch clears it. Fresh and resumed
@@ -388,7 +414,7 @@ manifest. File-tool undo still works in each case.
 | Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
-| Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Esc restores the draft and reading position |
+| Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc restores the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
 | Inspect results and code | Alt+I enters inspection without copying; Up/Down or Tab selects a result or code block; C copies the highlighted item; Enter copies selected code or toggles an expandable tool result; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
@@ -432,7 +458,7 @@ reading position.
 | Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery |
 | Tool approval | Up/Down choose, Enter choose or send reason, Esc deny, Ctrl+C cancel turn, PageUp/PageDown scroll |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
-| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown |
+| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
 | Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer |
 
 Open preferences from the task composer. If another panel is open, Escape returns

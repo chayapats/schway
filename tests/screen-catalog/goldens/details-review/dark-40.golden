@@ -10,15 +10,15 @@ cursor 1 1 hidden
 
  Review · turn 1
 
+ Files from turn 1
  › clamp.ts                       +1 −1
 
+ Turn 1 details
  ✓ Done                               ▀
  3 tool results; 0 failed tools.
  Commands: 1 exit 0 / 0 nonzero / 0
  unknown (entire turn).
  Command results (latest 50; exit
- codes, not a test-suite guarantee):
- printf 'ok\n' → exit 0
 
  ✓ Done · 1 file +1 −1 · Alt+R review
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -40,42 +40,38 @@ cursor 1 1 hidden
 02 16-40 #ffffff #0e1117 -
 03 0-40 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-39 #e6eaf0 #0e1117 -
-04 39-40 #ffffff #0e1117 -
-05 0-40 #ffffff #0e1117 -
-06 0-1 #ffffff #0e1117 -
-06 1-7 #e6eaf0 #0e1117 -
-06 7-38 #ffffff #0e1117 -
-06 38-39 #9a9ea3 #252527 -
-06 39-40 #ffffff #0e1117 -
+04 1-18 #7cc4ff #0e1117 b
+04 18-40 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-39 #e6eaf0 #0e1117 -
+05 39-40 #ffffff #0e1117 -
+06 0-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-32 #e6eaf0 #0e1117 -
-07 32-38 #ffffff #0e1117 -
-07 38-39 #ffffff #252527 -
-07 39-40 #ffffff #0e1117 -
+07 1-15 #7cc4ff #0e1117 b
+07 15-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-36 #e6eaf0 #0e1117 -
-08 36-38 #ffffff #0e1117 -
-08 38-39 #ffffff #252527 -
+08 1-7 #e6eaf0 #0e1117 -
+08 7-38 #ffffff #0e1117 -
+08 38-39 #9a9ea3 #252527 -
 08 39-40 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-23 #e6eaf0 #0e1117 -
-09 23-38 #ffffff #0e1117 -
+09 1-32 #e6eaf0 #0e1117 -
+09 32-38 #ffffff #0e1117 -
 09 38-39 #ffffff #252527 -
 09 39-40 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-34 #e6eaf0 #0e1117 -
-10 34-38 #ffffff #0e1117 -
+10 1-36 #e6eaf0 #0e1117 -
+10 36-38 #ffffff #0e1117 -
 10 38-39 #ffffff #252527 -
 10 39-40 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-36 #e6eaf0 #0e1117 -
-11 36-38 #ffffff #0e1117 -
+11 1-23 #e6eaf0 #0e1117 -
+11 23-38 #ffffff #0e1117 -
 11 38-39 #ffffff #252527 -
 11 39-40 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-23 #e6eaf0 #0e1117 -
-12 23-38 #ffffff #0e1117 -
+12 1-34 #e6eaf0 #0e1117 -
+12 34-38 #ffffff #0e1117 -
 12 38-39 #ffffff #252527 -
 12 39-40 #ffffff #0e1117 -
 13 0-40 #ffffff #0e1117 -

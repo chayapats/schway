@@ -8,12 +8,6 @@ cursor 17 27 visible
 == text
  ⚡ schway  ~/demo
 
-  ▌ Summarize the changes
-
-  ▌ ! Error
-  ▌ Request failed · Inspect details before continuing
-  ▌ Ctrl+R continue · F2 details · Esc keep editing
-
   ✗ Failed
   0 tool results; 0 failed tools.
   Commands: 0 exit 0 / 0 nonzero / 0 unknown (entire turn).
@@ -29,6 +23,12 @@ cursor 17 27 visible
 
   Failure details: Provider request failed after 3 transient attempts: Service unavailable
 
+  Review scope:
+  Files from turn 1: paths observed during that turn from successful file-tool records and before/after Git
+  snapshots. It is not a record of exclusive authorship.
+  Line counts add up every file-tool edit observed in the turn, so repeated edits can exceed the net current diff. A
+  blank or ? count is unknown.
+  Paths marked detected changed between the turn's snapshots without a matching file-tool record. The marker does not
 
   ✗ Failed · 0.0s · Alt+R review · F2 details
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -45,75 +45,62 @@ cursor 17 27 visible
 00 18-120 #ffffff #ecedea -
 01 0-120 #ffffff #f7f7f4 -
 02 0-2 #ffffff #f7f7f4 -
-02 2-3 #0a5894 #ecedea -
-02 3-4 #ffffff #ecedea -
-02 4-25 #1d232c #ecedea -
-02 25-117 #ffffff #ecedea -
-02 117-120 #ffffff #f7f7f4 -
-03 0-120 #ffffff #f7f7f4 -
+02 2-10 #545e6c #f7f7f4 -
+02 10-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-33 #545e6c #f7f7f4 -
+03 33-120 #ffffff #f7f7f4 -
 04 0-2 #ffffff #f7f7f4 -
-04 2-3 #a61f16 #edddd9 -
-04 3-4 #ffffff #edddd9 -
-04 4-11 #a61f16 #edddd9 b
-04 11-117 #ffffff #edddd9 -
-04 117-120 #ffffff #f7f7f4 -
+04 2-59 #545e6c #f7f7f4 -
+04 59-120 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
-05 2-3 #a61f16 #edddd9 -
-05 3-4 #ffffff #edddd9 -
-05 4-54 #a61f16 #edddd9 -
-05 54-117 #ffffff #edddd9 -
-05 117-120 #ffffff #f7f7f4 -
+05 2-70 #545e6c #f7f7f4 -
+05 70-120 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
-06 2-3 #a61f16 #edddd9 -
-06 3-4 #ffffff #edddd9 -
-06 4-10 #1d232c #c9cbd0 b
-06 10-22 #a61f16 #edddd9 -
-06 22-24 #1d232c #c9cbd0 b
-06 24-35 #a61f16 #edddd9 -
-06 35-38 #1d232c #c9cbd0 b
-06 38-51 #a61f16 #edddd9 -
-06 51-117 #ffffff #edddd9 -
-06 117-120 #ffffff #f7f7f4 -
+06 2-27 #545e6c #f7f7f4 -
+06 27-120 #ffffff #f7f7f4 -
 07 0-120 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
-08 2-10 #545e6c #f7f7f4 -
-08 10-120 #ffffff #f7f7f4 -
+08 2-79 #545e6c #f7f7f4 -
+08 79-120 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
-09 2-33 #545e6c #f7f7f4 -
-09 33-120 #ffffff #f7f7f4 -
+09 2-116 #545e6c #f7f7f4 -
+09 116-120 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
-10 2-59 #545e6c #f7f7f4 -
-10 59-120 #ffffff #f7f7f4 -
+10 2-8 #545e6c #f7f7f4 -
+10 8-120 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
-11 2-70 #545e6c #f7f7f4 -
-11 70-120 #ffffff #f7f7f4 -
+11 2-112 #545e6c #f7f7f4 -
+11 112-120 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
-12 2-27 #545e6c #f7f7f4 -
-12 27-120 #ffffff #f7f7f4 -
-13 0-120 #ffffff #f7f7f4 -
-14 0-2 #ffffff #f7f7f4 -
-14 2-79 #545e6c #f7f7f4 -
-14 79-120 #ffffff #f7f7f4 -
+12 2-8 #545e6c #f7f7f4 -
+12 8-120 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-88 #545e6c #f7f7f4 -
+13 88-120 #ffffff #f7f7f4 -
+14 0-120 #ffffff #f7f7f4 -
 15 0-2 #ffffff #f7f7f4 -
-15 2-116 #545e6c #f7f7f4 -
-15 116-120 #ffffff #f7f7f4 -
-16 0-2 #ffffff #f7f7f4 -
-16 2-8 #545e6c #f7f7f4 -
-16 8-120 #ffffff #f7f7f4 -
+15 2-90 #545e6c #f7f7f4 -
+15 90-120 #ffffff #f7f7f4 -
+16 0-120 #ffffff #f7f7f4 -
 17 0-2 #ffffff #f7f7f4 -
-17 2-112 #545e6c #f7f7f4 -
-17 112-120 #ffffff #f7f7f4 -
+17 2-15 #545e6c #f7f7f4 -
+17 15-120 #ffffff #f7f7f4 -
 18 0-2 #ffffff #f7f7f4 -
-18 2-8 #545e6c #f7f7f4 -
-18 8-120 #ffffff #f7f7f4 -
+18 2-108 #545e6c #f7f7f4 -
+18 108-120 #ffffff #f7f7f4 -
 19 0-2 #ffffff #f7f7f4 -
-19 2-88 #545e6c #f7f7f4 -
-19 88-120 #ffffff #f7f7f4 -
-20 0-120 #ffffff #f7f7f4 -
+19 2-56 #545e6c #f7f7f4 -
+19 56-120 #ffffff #f7f7f4 -
+20 0-2 #ffffff #f7f7f4 -
+20 2-117 #545e6c #f7f7f4 -
+20 117-120 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
-21 2-90 #545e6c #f7f7f4 -
-21 90-120 #ffffff #f7f7f4 -
-22 0-120 #ffffff #f7f7f4 -
+21 2-30 #545e6c #f7f7f4 -
+21 30-120 #ffffff #f7f7f4 -
+22 0-2 #ffffff #f7f7f4 -
+22 2-117 #545e6c #f7f7f4 -
+22 117-120 #ffffff #f7f7f4 -
 23 0-120 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #a61f16 #f7f7f4 b
