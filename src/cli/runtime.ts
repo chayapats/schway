@@ -1,6 +1,8 @@
 import { configDiagnosticSecrets } from "../config/diagnostics.ts";
 import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/deprecations.ts";
 import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
+import { createHistoryCollector, historyTurnIdentity } from "../history/collector.ts";
+import { openHistoryStore } from "../history/store.ts";
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
 import { formatDuration } from "../text/format.ts";
 import { resolve } from "node:path";
@@ -429,6 +431,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       });
     }
     const approvalSettings = settings;
+    // History is ancillary: its start is persisted first, and no history failure changes execution or the exit code.
+    const historyIdentity = historyTurnIdentity(session, workspace.root, "headless");
+    const history = historyIdentity ? createHistoryCollector({ store: openHistoryStore({ home }), identity: historyIdentity, secrets }) : undefined;
+    const historyStart = await history?.start();
+    if (historyStart?.state === "unsaved") io.stderr.write(`History not saved for this turn: ${redactSecrets(historyStart.reason, secrets)}\n`);
     try {
       for await (const event of runAgentLoop({
         approval: { interactive: false, mode: () => approvalSettings.approvalMode },
@@ -444,6 +451,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         maxConcurrentTools: settings.maxConcurrentTools,
       })) {
         diagnostics.runtime(event);
+        history?.observe(event);
         const safeEvent = redactEvent(event, secrets);
         if (parsed.args.json) {
           io.stdout.write(`${JSON.stringify(safeEvent)}\n`);
@@ -479,6 +487,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }
     } finally {
       contextManager.clearActiveSkill();
+      // Headless runs take no Git snapshots, so observational evidence is recorded as unavailable with its reason.
+      if (historyStart?.state === "saved") {
+        const finalized = await history!.finalize({ observation: { status: "unavailable", reason: settings.gitChangeTracking === "off" ? "off" : "headless" } });
+        if (finalized.state === "unsaved") io.stderr.write(`History outcome not saved: ${redactSecrets(finalized.reason, secrets)}\n`);
+      }
     }
 
     if (!parsed.args.json && printedText && !failed) {
