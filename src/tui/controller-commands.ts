@@ -82,13 +82,9 @@ export abstract class CommandsLayer extends CredentialsLayer {
     return true;
   }
 
-  /** Return curated discovery or name-first fuzzy results without loading providers or activating skills. */
-  commandChoices(input = "/", help = false): CommandChoice[] {
+  /** Return curated slash discovery, argument choices or name-only fuzzy results without loading providers or activating skills. */
+  commandChoices(input = "/"): CommandChoice[] {
     const commands = commandCatalog(this.extensionCommands(), this.discoveredCommands);
-    if (help) {
-      const query = input.trim().toLowerCase();
-      return rankCommands(commands, query, true);
-    }
     const match = /^\/(thinking|theme|login|logout)\s+([^\s]*)$/.exec(input);
     if (match) {
       const name = match[1]!;
@@ -183,13 +179,11 @@ export abstract class CommandsLayer extends CredentialsLayer {
   }
 }
 
-/** Keep curated ties stable and put metadata-only help matches after every matching command name. */
-function rankCommands(commands: CommandChoice[], query: string, help = false): CommandChoice[] {
+/** Rank slash completion by command name only, keeping curated ties stable. */
+function rankCommands(commands: CommandChoice[], query: string): CommandChoice[] {
   if (!query) return commands;
   return commands.flatMap((entry, order) => {
-    const nameRank = fuzzyRank(query, entry.name);
-    const metadataRank = help ? fuzzyRank(query, `${entry.description} ${entry.source} ${entry.provenance ?? ""}`) : undefined;
-    const rank = nameRank ?? (metadataRank === undefined ? undefined : 5 + metadataRank);
+    const rank = fuzzyRank(query, entry.name);
     return rank === undefined ? [] : [{ entry, order, rank }];
   }).sort((left, right) => left.rank - right.rank || left.order - right.order).map(({ entry }) => entry);
 }

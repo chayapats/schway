@@ -17,7 +17,8 @@ import { readGitHead } from "./git-head.ts";
 import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./transcript-view.ts";
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
-import type { CommandChoice } from "./command-catalog.ts";
+import { paletteChoices, type CommandChoice, type KeyboardGuideChoice, type PaletteChoice } from "./command-catalog.ts";
+import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceHeight, guidanceLines, keyboardGuideAvailability, keyboardRowParts, nextPaletteSelection, paletteDetail, paletteHint, paletteSections, paletteSelectable } from "./palette.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
@@ -109,6 +110,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let sessionOriginalScroll = 0;
   let reviewContent = "";
   let helpInserted = false;
+  // Read-only keyboard guidance opened from the help palette; it remembers the query it returns to.
+  let helpGuide: { id: KeyboardGuideChoice["id"]; query: string } | undefined;
   let lastQuery: string | undefined;
   let dismissedQuery: string | undefined;
   let unseen = false;
@@ -444,24 +447,37 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     rows.clear();
   };
 
-  function completions() {
+  function completions(): PaletteChoice[] {
     if (panelMode && panelMode !== "help" || editor.plainText === dismissedQuery) return [];
-    return controller.commandChoices(editor.plainText, panelMode === "help" && !helpInserted);
+    if (panelMode === "help" && !helpInserted) return helpChoices();
+    return controller.commandChoices(editor.plainText).map(entry => ({ ...entry, kind: "command" as const }));
   }
 
-  function paletteRows(choices: readonly CommandChoice[]) {
-    const grouped = panelMode === "help" && !helpInserted ? !editor.plainText.trim() : editor.plainText === "/";
-    const result: Array<{ header: string } | { entry: CommandChoice; index: number }> = [];
-    let group: CommandChoice["group"];
-    choices.forEach((entry, index) => {
-      if (grouped && entry.group !== group) {
-        if (entry.group === "skills") result.push({ header: "Skills" });
-        if (entry.group === "extensions") result.push({ header: "Extensions" });
-        group = entry.group;
-      }
-      result.push({ entry, index });
+  /** Searchable help rows; keyboard availability describes the composer this palette returns to. */
+  function helpChoices(): PaletteChoice[] {
+    const snapshot = controller.snapshot();
+    const availability = keyboardGuideAvailability({
+      running: controller.running || snapshot.status === "running", toolApproval: !!snapshot.toolApproval,
+      inspectable: inspectionTargets(snapshot.transcript).length > 0,
+      details: !!snapshot.noticeDetailsAvailable || !!snapshot.recovery?.actions.includes("details") || snapshot.outcome?.reason === "failed",
     });
-    return result;
+    return paletteChoices(controller.commandChoices("/"), availability, editor.plainText);
+  }
+
+  function paletteRows(choices: readonly PaletteChoice[]) {
+    return paletteSections(choices, panelMode === "help" && !helpInserted ? !editor.plainText.trim() : editor.plainText === "/");
+  }
+
+  function keyboardRow(entry: KeyboardGuideChoice, selected: boolean, nameColumns: number, columns: number) {
+    const parts = keyboardRowParts(entry, selected, nameColumns, columns);
+    // Detail keeps its quieter or warning role but is re-measured on the selection fill it sits on.
+    const detail = entry.available ? theme.muted : theme.warning;
+    const row = new TextRenderable(renderer, { content: new StyledText([
+      fg(selected ? theme.text : theme.muted)(parts.lead), fg(selected ? theme.text : entry.available ? theme.text : theme.muted)(parts.label),
+      fg(selected ? textOn(detail, tint(theme, theme.accent)) : detail)(parts.detail),
+    ]), flexShrink: 0, height: 1, wrapMode: "none" });
+    if (selected) row.bg = tint(theme, theme.accent);
+    picker.add(row);
   }
 
   function commandRow(entry: CommandChoice, selected: boolean, nameColumns: number, columns: number) {
@@ -773,6 +789,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (nextPanel === "review" || nextPanel === "undo") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; reviewDetailsScroll = undefined; reviewRestoreScroll = undefined; }
         if ((panelMode === "review" || panelMode === "undo") && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
         if (nextPanel === "help") { helpInserted = false; lastQuery = undefined; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (nextPanel !== "help") helpGuide = undefined;
         if (panelMode === "help" && !nextPanel && !sessionChanged) searchRestoreScroll = helpOriginalScroll;
         panelMode = nextPanel;
         setDraft(panelMode === "model" ? snapshot.modelPicker?.query ?? "" : panelMode ? "" : savedDraft);
@@ -807,7 +824,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
             : "Approval pending · Esc cancels";
       } else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? "Search commands, skills, sources…" : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" && renderer.width >= 60 ? "Type ahead · Enter sends after this turn settles" : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -1035,11 +1052,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const browsing = panelMode === "help" || (!panelMode && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery);
       if (browsing && !discoveryOpen) refreshDiscovery();
       discoveryOpen = browsing;
+      // Guidance belongs to the query it was opened from; any query edit returns to results.
+      if (helpGuide && (panelMode !== "help" || helpInserted || editor.plainText !== helpGuide.query)) helpGuide = undefined;
       const available = completions();
-      if (editor.plainText !== lastQuery) { completionIndex = available.findIndex(entry => entry.available); completionId = available[completionIndex]?.id; lastQuery = editor.plainText; }
-      else if (completionId) completionIndex = available.findIndex(entry => entry.id === completionId && entry.available);
+      if (editor.plainText !== lastQuery) { completionIndex = available.findIndex(paletteSelectable); completionId = available[completionIndex]?.id; lastQuery = editor.plainText; }
+      else if (completionId) completionIndex = available.findIndex(entry => entry.id === completionId && paletteSelectable(entry));
       else completionIndex = -1;
       const commandRows = paletteRows(available);
+      const helpResults = panelMode === "help" && !helpInserted;
+      const guide = helpGuide && available.find((entry): entry is KeyboardGuideChoice => entry.id === helpGuide!.id && entry.kind === "keyboard");
+      const paletteNote = !helpResults || guide || !available.length ? "" : snapshot.toolApproval ? PALETTE_APPROVAL : controller.running || snapshot.status === "running" ? PALETTE_RUNNING : "";
+      const selectedDetail = helpResults && !guide ? paletteDetail(available[completionIndex]) : undefined;
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
       const maxRows = snapshot.modelPicker ? Math.max(1, Math.min(12, renderer.height - 10))
         : Math.max(1, Math.min(snapshot.loginChooser ? 8 : 6, Math.floor(renderer.height / 3) - 2));
@@ -1052,12 +1075,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ? (!snapshot.loginApprovalData && renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval!.code)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval!.address)/(width - 2))
         : snapshot.loginApprovalData ? Math.max(1, Math.ceil(Bun.stringWidth(snapshot.loginApproval ?? "")/(width - 2))) : 2;
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
-      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : Math.max(1, Math.min(maxRows, commandRows.length));
+      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : guide ? guidanceHeight(guide, width - 2) : Math.max(1, Math.min(maxRows, commandRows.length)) + (paletteNote ? 1 : 0) + (selectedDetail ? 1 : 0);
       const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + (draftStatus.visible ? draftStatus.height : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.sessionPicker, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.sessionPicker, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, guide?.id, paletteNote, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
@@ -1132,15 +1155,21 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             ? `${selected.modelId} · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`
             : models.loading ? "Checking models · Esc back" : models.connecting ? "Type to search · ↑↓ select · Esc back" : selected?.kind === "model" ? `Type to search · Ctrl+P ${selected.favorite ? "unpin" : "pin"} · F2 details` : "↑↓ select · Enter open · Esc back";
           textRow(picker, fitLine(models.error ?? detail, room), models.error ? theme.error : theme.muted);
+        } else if (browsing && guide) {
+          const tones = { accent: theme.accent, text: theme.text, muted: theme.muted, warning: theme.warning, success: theme.success };
+          for (const line of guidanceLines(guide)) textRow(picker, line.text, tones[line.tone]);
         } else if (browsing) {
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
           const start = Math.max(0, Math.min(selectedRow - Math.floor(maxRows / 2), commandRows.length - maxRows));
-          const nameColumns = Math.min(23, Math.max(1, ...available.map(entry => Bun.stringWidth(`/${safe(entry.name)}`))));
-          if (!available.length) textRow(picker, "No matches · Esc dismiss", theme.muted);
+          const nameColumns = Math.min(23, Math.max(1, ...available.map(entry => Bun.stringWidth(entry.kind === "keyboard" ? entry.shortcut : `/${safe(entry.name)}`))));
+          if (!available.length) textRow(picker, helpResults ? PALETTE_NO_MATCHES : "No matches · Esc dismiss", theme.muted);
+          if (paletteNote) textRow(picker, fitLine(paletteNote, width - 2), theme.muted).wrapMode = "none";
           commandRows.slice(start, start + maxRows).forEach(row => {
             if ("header" in row) textRow(picker, `    ${row.header}`, theme.muted);
+            else if (row.entry.kind === "keyboard") keyboardRow(row.entry, row.index === completionIndex, nameColumns, width - 2);
             else commandRow(row.entry, row.index === completionIndex, nameColumns, width - 2);
           });
+          if (selectedDetail) textRow(picker, fitLine(selectedDetail.text, width - 2), selectedDetail.warning ? theme.warning : theme.muted).wrapMode = "none";
         }
         // Selected choices become a tinted row so the highlight reads as a block, not only a marker.
         for (const child of picker.getChildren()) {
@@ -1209,7 +1238,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
         const modeHint = "Shift+Tab change mode · ";
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? helpInserted ? "Enter use · Tab complete · Esc restore" : "↑↓ select · Tab preview · Esc restore" : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? "↑/↓ select · Tab complete · Esc dismiss · Enter send" : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1229,7 +1258,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       refresh(); return;
     }
     if (panelMode === "help") {
-      if (helpInserted) { const command = editor.plainText; controller.commandHelpOpen = false; refresh(); setDraft(command); refresh(); }
+      // Help only explains keys or inserts commands; a later ordinary Enter owns dispatch and confirmation.
+      if (helpGuide) return;
+      const selected = helpInserted ? undefined : completions()[completionIndex];
+      if (selected?.kind === "keyboard") { helpGuide = { id: selected.id, query: editor.plainText }; refresh(); return; }
+      // A waiting approval owns the editor once help closes, so palette text must never reach its reason field.
+      if (controller.snapshot().toolApproval) return;
+      const command = helpInserted ? editor.plainText : selected?.available ? selected.insertion : undefined;
+      if (command !== undefined) { controller.commandHelpOpen = false; refresh(); setDraft(command); refresh(); }
       return;
     }
     if (searchOpen) {
@@ -1473,6 +1509,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if (panelMode === "help" && ((key.meta || key.option) || key.ctrl && !["c", "a", "e", "u", "k", "w"].includes(name))) { handled(); return; }
+    if (panelMode === "help" && helpGuide && !(key.ctrl && name === "c")) {
+      // Guidance is read-only: Esc returns to the same query and selection, unless approval is waiting behind help.
+      if (name === "escape") { helpGuide = undefined; if (snapshot.toolApproval) controller.commandHelpOpen = false; }
+      handled(); return;
+    }
     if (snapshot.recovery && !panelMode && !controller.running && !snapshot.modelPicker && !snapshot.loginChooser && !snapshot.preferences) {
       if (key.ctrl && name === "r" && snapshot.recovery.actions.includes("retry-credentials")) {
         void controller.retryCredentialRecovery().then(refresh, fail); handled(); return;
@@ -1587,10 +1628,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (snapshot.branchTree) { controller.moveBranchTreeAction(delta); handled(); return; }
       const choices = completions();
       if (choices.length) {
-        const selectable = choices.map((entry, index) => entry.available ? index : -1).filter(index => index >= 0);
-        const selected = selectable.indexOf(completionIndex);
-        const next = selected < 0 ? (delta > 0 ? 0 : selectable.length - 1) : (selected + delta + selectable.length) % selectable.length;
-        completionIndex = selectable[next] ?? -1; completionId = choices[completionIndex]?.id; handled(); return;
+        completionIndex = nextPaletteSelection(choices, completionIndex, delta); completionId = choices[completionIndex]?.id; handled(); return;
       }
       if (panelMode === "help") { handled(); return; }
       if (!key.shift && !key.ctrl && !key.meta && history.length && (name === "up" ? editor.visualCursor.visualRow === 0 : editor.visualCursor.visualRow >= editor.virtualLineCount - 1)) {
@@ -1612,10 +1650,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if (name === "tab" && !key.shift) {
       const selected = completions()[completionIndex];
-      if (selected?.available) {
+      if (selected?.kind === "command" && selected.available) {
         if (panelMode === "help") helpInserted = true;
         setDraft(selected.insertion); handled();
-      }
+      } else if (panelMode === "help") handled();
     }
   }
 

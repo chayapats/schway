@@ -54,7 +54,7 @@ headless runs never initialize it.
 /model - open the model/profile picker
 /theme [auto|dark|light] - change appearance for this session
 /session - show session, branch, and workspace details
-/help - show commands and keyboard shortcuts
+/help - search commands and keyboard actions (Alt+H)
 /quit - quit schway
 ```
 
@@ -733,8 +733,8 @@ including without color. `/logout` stays with ordinary built-ins.
 Type after `/` to search a flat list with case-insensitive fuzzy matching. Exact
 names rank first, then prefixes, word starts after a hyphen, substrings and other
 subsequences. Ties keep the fixed order. Clearing the search restores the groups
-and selects the first command. In Alt+H help, names rank before matches in
-descriptions or sources such as `project skill`, `global skill` and `user-only`.
+and selects the first command. Alt+H help ranks differently; see
+[search commands and keyboard actions](#search-commands-and-keyboard-actions).
 
 `!` marks a collision or unavailable action in the Skills group. Rename conflicting skills or
 extensions before invoking either meaning of the name. Metadata refreshes when
@@ -754,12 +754,49 @@ provider default usable, but an explicit effort requires verified support.
 connection names, never keys or callback payloads. Enter explicitly submits;
 rejected or busy commands remain in the editor for correction.
 
-**Alt+H** opens searchable ephemeral help while retaining your task and cursor;
-`/help` opens the same surface. Search names, descriptions, or sources. Escape
-restores the task and viewport. Tab previews the selected command within help,
-so Escape still restores the task. Enter transfers that preview to the composer;
-press Enter again to submit it. Help does not append repeated command lists to the transcript.
 Skill browsing reads bounded frontmatter; full body validation happens on invocation.
+
+### Search commands and keyboard actions
+
+**Alt+H** opens a searchable palette while retaining your task, cursor and
+reading position; `/help` opens the same palette when idle. Alt+H also works
+while a turn runs; opening or leaving the palette never cancels work. The
+palette lists commands, skills and extension commands, then a **Keyboard**
+group of built-in keyboard actions, then `/delete-session` under
+**Destructive**. Help does not append command lists to the transcript.
+
+Search matches command names, descriptions and sources, and each keyboard
+action's label, description, keys and curated intents such as `newline`,
+`line break`, `copy`, `approval`, `mode`, `shortcuts`, `details` and `review`.
+Exact key spellings such as `ctrl+j`, `shift+tab`, `f2` or `alt+r` find their
+action. Ranking is deterministic: exact matches first, then prefixes, word
+starts, substrings and subsequences, with names and keys ahead of descriptions
+at the same quality. Ties keep the catalogue order. Unavailable entries and
+collisions stay in the results with `!` and their reason; an action ID or alias
+never claims a slash name. A new search selects the best match, and refreshes
+that do not change the query keep the selected entry.
+
+| Row | Tab | Enter |
+| --- | --- | --- |
+| Command, skill or extension | Preview its insertion in the search field | Insert it (or the preview) into the composer and close; nothing runs |
+| Keyboard action | Nothing | Show its exact keys, prerequisites and current availability |
+
+Commands run only after you press Enter again in the ordinary composer, with
+the usual collision checks, busy-turn restrictions and `/delete-session`
+requirements. Keyboard guidance never performs its action, including copying,
+changing mode, cancelling or inserting a newline. In guidance, Esc returns to
+the same search and selection; in results, Esc restores the original draft,
+cursor and reading position. Without matches the palette shows
+`No matches · Clear search or Esc back`.
+
+Keyboard rows show their keys and label; the selected row's description or
+unavailable reason appears beneath the results so it stays readable at narrow
+widths and without color. While a turn runs, actions that need an idle
+composer, such as change review and details, are marked unavailable, and a
+note reminds you to send commands after the turn settles. When a tool approval
+is waiting behind the palette, Esc closes it to show the request. Credential
+and approval prompts keep their own input; the palette cannot open over them,
+and its search text is never saved as a draft.
 
 ## Context and conversation continuity
 
