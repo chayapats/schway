@@ -16,7 +16,7 @@ export interface PaletteReturnContext {
   running: boolean;
   /** A tool approval request owns input once the palette closes. */
   toolApproval: boolean;
-  /** The conversation has a code block or tool result that Alt+I can select. */
+  /** The conversation has a code block, table or tool result that Alt+I can select. */
   inspectable: boolean;
   /** F2 would open retained notice or recovery details from the composer. */
   details: boolean;

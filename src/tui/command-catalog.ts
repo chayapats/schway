@@ -63,8 +63,8 @@ const KEYBOARD_GUIDES = {
   },
   "inspect-copy": {
     label: "Copy code or a result", shortcut: "Alt+I, then C", description: "Inspect a block before copying it",
-    guidance: "Return to the conversation and press Alt+I. Use ↑↓ to select a code block or tool result, then C to copy the highlighted block. Enter copies code; it does not copy tool results.",
-    aliases: ["copy", "copy code", "copy result", "inspect", "alt+i"],
+    guidance: "Return to the conversation and press Alt+I. Use ↑↓ to select a code block, table or tool result, then C to copy the highlighted block. Enter copies code and tables; it does not copy tool results. R opens a code block or table in the reader.",
+    aliases: ["copy", "copy code", "copy table", "copy result", "inspect", "read", "reader", "alt+i"],
   },
   "copy-selection": {
     label: "Copy selected text", shortcut: "Ctrl+C", description: "Copy selected conversation text",
