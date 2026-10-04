@@ -17,6 +17,7 @@ import { dispatchEditorInput, helpText, parseSkillInvocation, parseSlashCommand 
 import { commandCatalog } from "../src/tui/command-catalog.ts";
 import { handleSlashCommand } from "../src/tui/app.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
+import { historyCommandLine, historyDurationLabel, historyOutcomeLabel, historyUndoLine } from "../src/tui/controller-history.ts";
 import { createConversationView } from "../src/tui/view.ts";
 import type { Workspace } from "../src/workspace/workspace.ts";
 import { RESERVED_SKILL_NAMES } from "../src/skills/skills.ts";
@@ -363,4 +364,42 @@ test("history snapshots redact known secrets in tasks, commands and paths", asyn
   expect(await c.historyCommand("")).toBe(true);
   expect(JSON.stringify(c.snapshot().history)).not.toContain(secret);
   expect(c.snapshot().history!.turns[0]!.task).toBe("Use *** carefully");
+});
+
+test("a path changed outside the file tools is marked detected and never counted as tool authorship", async () => {
+  const dir = await temp();
+  const home = join(dir, "home"), root = join(dir, "work");
+  await repo(root);
+  const session = await savedSession(home, root);
+  const c = controller(session, root, home, { sessionId: session.header.id, model: countingModel([
+    { toolCalls: [{ id: "w1", name: "write", arguments: { path: "tool.txt", content: "tool\n" } }, { id: "b1", name: "bash", arguments: { command: "printf 'external\\n' > external.txt" } }] }, { text: "ok" }]).model });
+  expect(await c.submit("Change two files")).toBe(true);
+  expect(await c.historyCommand("")).toBe(true);
+  const turn = c.snapshot().history!.turns[0]!;
+  expect(turn.files.items).toEqual([{ path: "tool.txt", source: "tool", added: 1, removed: 0 }, { path: "external.txt", source: "shell" }]);
+  expect(turn.attempts[0]!.git).toEqual({ status: "captured" });
+  expect(c.openHistoryDetail()).toBe(true);
+  const ui = await view(c, root, home, 80, 24);
+  expect(ui.frame()).toMatch(/external\.txt\s+detected/);
+  expect(c.snapshot().history!.details).toContain("They do not identify exclusive authorship; concurrent external edits can appear.");
+});
+
+test("history labels distinguish outcomes, unknown time and every undo state", () => {
+  const base = { turnId: "t", evidence: "recorded" as const, undo: [], files: { total: 1, truncated: false, items: [{ path: "a", source: "tool" as const }] } };
+  expect(["completed", "failed", "stopped", "limit", "incomplete"].map(outcome => historyOutcomeLabel({ evidence: "recorded", outcome: outcome as never })))
+    .toEqual(["✓ Done", "✗ Failed", "− Stopped", "◌ Limit reached", "! Incomplete"]);
+  expect(historyOutcomeLabel({ evidence: "missing" })).toBe("○ Details unavailable");
+  expect(historyOutcomeLabel({ evidence: "missing" }, true)).toBe("! Not saved");
+  const attempt = { attemptId: "a", mode: "tui" as const, workspaceRoot: "/w", startedAt: "2026-01-15T09:30:00.000Z", activeMs: null };
+  expect(historyDurationLabel({ evidence: "recorded", activeMs: 1500, unknownDurations: 1, attempts: [attempt, { ...attempt, activeMs: 1500 }] })).toBe("1.5s + unknown");
+  expect(historyDurationLabel({ evidence: "recorded", activeMs: 0, unknownDurations: 1, attempts: [attempt] })).toBe("Time unknown");
+  const undo = { known: true, preImages: ["t", "u"], targetTurnId: "u", targetOrdinal: 4 };
+  expect(historyUndoLine({ ...base, undo: [{ reverted: [{ path: "a", action: "restored" }], skipped: [{ path: "b", reason: "changed" }] }] }, undo)).toBe("Undone · 1 file reverted · 1 skipped");
+  expect(historyUndoLine(base, { ...undo, targetTurnId: "t" })).toBe("Undo available · /undo previews this turn");
+  expect(historyUndoLine(base, undo)).toBe("Not the undo target · /undo previews turn 4");
+  expect(historyUndoLine(base, { known: true, preImages: [] })).toBe("Undo unavailable · pre-images not kept");
+  expect(historyUndoLine(base, { known: false, preImages: [] })).toBe("Undo status unknown · /undo preview");
+  expect(historyUndoLine({ ...base, files: { total: 1, truncated: false, items: [{ path: "a", source: "shell" }] } }, undo)).toBe("No file edits to undo");
+  expect(historyCommandLine({ id: "0".repeat(16), command: "bun test", exitCode: 1, ended: "exit", status: "success" }).text).toBe("bun test · Exit 1");
+  expect(historyCommandLine({ id: "0".repeat(16), command: "sleep 9", exitCode: null, ended: "timed-out", status: "error" }).text).toBe("sleep 9 · Timed out");
 });

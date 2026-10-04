@@ -152,6 +152,7 @@ export abstract class HistoryLayer extends TurnLayer {
   private readonly historyUnsaved = new Map<string, string>();
   private historyState?: { generation: number; identity: string; snapshot: HistorySnapshot; timeline?: HistoryTimeline; revealed: number };
   private historyGeneration = 0;
+  private historyCache?: { state: object; key: string; snapshot: HistorySnapshot };
 
   /** History follows the saved-session lifecycle: only a persisted session under this home gets a sidecar. */
   private historyEnabled(session: Session = this.session): boolean {
@@ -238,7 +239,19 @@ export abstract class HistoryLayer extends TurnLayer {
   protected historySnapshot(): HistorySnapshot | undefined {
     const state = this.historyState;
     if (!state) return undefined;
-    const snapshot = structuredClone({ ...state.snapshot, turns: state.timeline?.turns.slice(0, state.revealed) ?? [] });
+    // Renders read the snapshot many times per key; reuse one frozen copy until the panel state changes.
+    const live = state.snapshot;
+    const key = JSON.stringify([state.generation, state.revealed, live.view, live.loading, live.selected, live.file, live.showingDetails, live.details, live.notice,
+      live.current?.path, live.current?.loading, live.current?.rows.length, this.secrets.length]);
+    if (this.historyCache?.state === state && this.historyCache.key === key) return this.historyCache.snapshot;
+    const snapshot = this.redactHistory(structuredClone({ ...live, turns: state.timeline?.turns.slice(0, state.revealed) ?? [] }));
+    deepFreeze(snapshot);
+    this.historyCache = { state, key, snapshot };
+    return snapshot;
+  }
+
+  /** Mask known secrets in every user-derived string of a copied snapshot. */
+  private redactHistory(snapshot: HistorySnapshot): HistorySnapshot {
     if (!this.secrets.length) return snapshot;
     const redact = (text: string) => redactSecrets(text, this.secrets);
     snapshot.details = redact(snapshot.details);
@@ -363,4 +376,11 @@ export abstract class HistoryLayer extends TurnLayer {
   private historyIdentity(): string {
     return JSON.stringify([this.sessionId, this.session.rootId, this.session.activeBranchId, this.session.items.length]);
   }
+}
+
+/** Freeze a shared snapshot copy so no reader can change what later renders see. */
+function deepFreeze(value: unknown): void {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const child of Object.values(value)) deepFreeze(child);
 }
