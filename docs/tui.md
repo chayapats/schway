@@ -100,6 +100,15 @@ failure details; its hint appears only when those details exist. The ready scree
 does not add a recurring welcome or restored-choice message to the transcript; `/config` retains setting provenance and `/model forget`
 clears remembered interactive choices.
 
+A ready, empty conversation with an empty composer also lists up to three fixed
+examples under **Try a task**. They are plain text: type or paste one, or write
+your own task in any language. Examples disappear as soon as you type, once the
+conversation has messages, or while a panel or search owns the screen. They never
+replace connection, loading, recovery, approval, saved-draft, recent-work or
+restored-workspace guidance. Shorter or narrower terminals show fewer whole
+examples, or none, so the next action and composer stay visible. Showing them
+does not inspect the project or start a model or command.
+
 The selected connection is checked after the editor opens. While a catalog or
 credential check is pending, you can type, paste and resize; **Esc** cancels the
 check. Setup actions wait for that check to finish or be cancelled. No browser or
