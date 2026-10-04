@@ -4,8 +4,10 @@ Schway uses one conversation column with a persistent multiline editor. The scre
 is divided into color blocks: a top bar names the workspace and checked-out Git
 branch; the conversation sits on the canvas; the composer is a raised block; the
 status bar below it carries the state pill, model, reasoning preference, and context
-meter; key hints sit on the last row. At narrow widths trailing hints drop first,
-but an Esc way out stays visible beside the leading hint. `/session` reveals session IDs, the conversation branch, and attached
+meter; key hints sit on the last row. At narrow widths arrow and paging hints drop
+first, then trailing actions; the main action, disclosures such as `Tab more
+options` and the Esc way out stay. When the status bar already names an Esc
+action, the hint row can drop its own. `/session` reveals session IDs, the conversation branch, and attached
 workspace paths. A conversation branch is distinct from a Git branch.
 
 The status pill follows the active operation's runtime events: `Preparing`,
@@ -609,7 +611,7 @@ Textual `/config set`, `/config reset` and `/config show` remain available.
 The conversation follows new output until you scroll back. Streaming then keeps
 your reading position; Ctrl+End resumes following. If the conversation was
 following when a panel, inspection, the reader, search or F2 details opened,
-Esc returns to following. Wheel input over non-scrollable
+Esc returns to following and shows any output that arrived meanwhile. Wheel input over non-scrollable
 chrome, including the footer, also scrolls the conversation. The multiline editor
 retains its own scrolling. The transcript has a fixed-width viewport so starting
 to overflow does not introduce a scrollbar and rewrap earlier messages.

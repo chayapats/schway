@@ -89,6 +89,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let restoreFollow = true;
   // A restored follower whose view no longer reaches the bottom (F2 details below it); new output returns to latest.
   let resumeFollowTop: number | undefined;
+  // New output arrived while a layer was open; a follower's restore then jumps to the latest output.
+  let grewWhileLayered = false;
   let searchScrollToMatch = false;
   let searchAcceptPending = false;
   let searchSelected = -1;
@@ -642,17 +644,31 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const chunkWidth = (chunks: readonly TextChunk[]) => chunks.reduce((sum, chunk) => sum + Bun.stringWidth(chunk.text), 0);
   const hintColors = (base: string) => ({ key: theme.text, chip: mixColor(base, theme.border, 0.9), action: theme.muted });
 
+  /** The status bar already shows an Esc action (compact footer, hidden hint row, sign-in or running work). */
+  const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") &&
+    (renderer.width < 30 || !hints.visible || footerParts.override === undefined && (footerParts.notConnected || footerParts.running));
+
   /**
-   * Key-chip hints that fit `columns`, dropping trailing hints before clipping text. The leading hint and an Esc
-   * way out stay longest; Esc goes only when it cannot fit beside the leading hint (the footer then names it).
+   * Key-chip hints that fit `columns`. Arrow and paging hints drop first, then trailing actions; primary actions
+   * and disclosures such as `Tab more options` stay. The Esc way out stays last unless the footer already names one.
+   * A row already written in priority order (the reader, where scrolling is the main action) drops from the end.
    */
-  function fittedHints(text: string, columns: number, base = theme.background): StyledText {
+  function fittedHints(text: string, columns: number, base = theme.background, ordered = false): StyledText {
     const segments = text.split(" · ");
     const escape = (segment: string) => segment === "Esc" || segment.startsWith("Esc ");
-    while (segments.length > 1 && chunkWidth(keyHintChunks(segments.join(" · "), hintColors(base))) > columns) {
-      const drop = segments.findLastIndex((segment, index) => index > 0 && !escape(segment));
-      segments.splice(drop > 0 ? drop : segments.length - 1, 1);
-    }
+    const navigation = (segment: string) => /^(?:[↑↓←→]|PgUp|PgDn|PageUp|PageDown|Home|End)/.test(segment);
+    const pinned = !footerNamesEsc();
+    const fits = () => chunkWidth(keyHintChunks(segments.join(" · "), hintColors(base))) <= columns;
+    const dropLast = (droppable: (segment: string) => boolean) => {
+      const index = segments.findLastIndex(droppable);
+      if (index < 0 || segments.length < 2) return false;
+      segments.splice(index, 1);
+      return true;
+    };
+    while (!ordered && !fits() && dropLast(navigation));
+    while (!fits() && segments.filter(segment => !escape(segment)).length > 1 && dropLast(segment => !escape(segment) || !pinned));
+    while (!fits() && !pinned && dropLast(escape));
+    while (!fits() && dropLast(segment => !escape(segment)));
     const chunks = keyHintChunks(segments.join(" · "), hintColors(base));
     return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
   }
@@ -973,6 +989,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const tail = entries.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
       if (resumeFollowTop !== undefined && (layered() || transcript.scrollTop !== resumeFollowTop)) resumeFollowTop = undefined;
+      if (lastTail && lastTail !== tailKey && layered() && tail?.id !== detailsReturn?.entryId) grewWhileLayered = true;
       if (lastTail && lastTail !== tailKey && resumeFollowTop !== undefined) { resumeFollowTop = undefined; latest(); }
       else if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
@@ -1350,7 +1367,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
           ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
         // Esc leads so narrow hint rows keep the way out when trailing actions are dropped.
-        hints.content = fittedHints([snapshot.toolApproval ? "Esc review request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width);
+        hints.content = fittedHints([snapshot.toolApproval ? "Esc review request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width, theme.background, true);
       } else if (snapshot.toolApproval && panelMode !== "tool-approval") {
         hints.content = "Esc close to review request";
       } else if (panelMode === "tool-approval") {
@@ -1928,9 +1945,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;
       if (restoreFollow && !layered()) {
-        if (atBottom()) transcript.stickyScroll = true; else resumeFollowTop = transcript.scrollTop;
+        if (grewWhileLayered) latest();
+        else if (atBottom()) transcript.stickyScroll = true; else resumeFollowTop = transcript.scrollTop;
       }
-    } else if (!layered()) restoreFollow = transcript.stickyScroll && atBottom() || resumeFollowTop !== undefined;
+      if (!layered()) grewWhileLayered = false;
+    } else if (!layered()) { restoreFollow = transcript.stickyScroll && atBottom() || resumeFollowTop !== undefined; grewWhileLayered = false; }
     if (reader && readerPanel.visible) {
       reader.painted = true;
       if (readerPanel.height > 0 && readerPanel.height !== readerText.height && readerMeasured?.rows !== readerPanel.height) {

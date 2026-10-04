@@ -210,12 +210,22 @@ for (const encoding of encodings) test(`[${encoding} 40x20] palette, slash sugge
   expect(ui.editor.plainText).toBe("keep me");
   ui.editor.setText(""); await ui.settle();
   await ui.type("/");
-  expect(ui.hints()).toContain("Esc dismiss");
+  // Arrows drop first, so completion and the way out both stay.
+  expect(ui.hints()).toBe("Tab complete · Esc dismiss");
   await ui.input(ui.keys.esc);
   ui.editor.setText(""); await ui.settle();
   await ui.input(ui.keys.ctrlF);
   await ui.type("value 3");
-  expect(ui.hints()).toContain("Esc restore");
+  expect(ui.hints()).toBe("Enter accept · Esc restore");
+});
+
+for (const width of [40, 44, 48]) test(`[legacy ${width}x30] the sign-in chooser keeps Tab more options in its hint row`, async () => {
+  const ui = await setup("legacy", width, 30);
+  await ui.input("\x1bl");
+  expect(ui.controller.snapshot().loginChooser).toBeDefined();
+  expect(ui.hints()).toContain("Enter · Tab more options");
+  // The Esc exit stays visible in the hint row or the status bar.
+  expect(`${ui.hints()}\n${ui.frame().split("\n").at(-3)}`).toContain("Esc back");
 });
 
 test("every 40-column catalog hint row keeps the Esc exit its 50-column variant shows", async () => {
@@ -223,6 +233,11 @@ test("every 40-column catalog hint row keeps the Esc exit its 50-column variant 
   const lastRow = async (path: string) => {
     const text = (await readFile(path, "utf8")).split("== text\n")[1]!.split("\n== styles")[0]!;
     return text.trimEnd().split("\n").at(-1)!.trim();
+  };
+  // The exit may sit in the status bar instead when it already names an Esc action (sign-in, running work).
+  const exitShown = async (path: string) => {
+    const rows = (await readFile(path, "utf8")).split("== text\n")[1]!.split("\n== styles")[0]!.trimEnd().split("\n");
+    return escExit.test(rows.at(-1)!.trim()) || /(^|\s|· )Esc /.test(rows.at(-2) ?? "");
   };
   let compared = 0;
   for (const screen of await readdir(goldens, { withFileTypes: true })) {
@@ -232,7 +247,7 @@ test("every 40-column catalog hint row keeps the Esc exit its 50-column variant 
       const wide = narrow.replace("-40", "-50");
       if (!files.includes(wide) || !escExit.test(await lastRow(join(goldens, screen.name, wide)))) continue;
       compared++;
-      expect(await lastRow(join(goldens, screen.name, narrow)), `${screen.name}/${narrow}`).toMatch(escExit);
+      expect(await exitShown(join(goldens, screen.name, narrow)), `${screen.name}/${narrow}`).toBe(true);
     }
   }
   // Palette, reader, inspection, search and draft screens all have narrow variants to compare.
@@ -382,4 +397,18 @@ test("blocked session /undo names the same next step as the hint row", async () 
   expect(ui.controller.snapshot().transcript.at(-1)!.text).toBe(`Session storage blocked · ${SESSION_BLOCKED_HINT}`);
   ui.editor.setText(""); await ui.settle();
   expect(ui.hints()).toStartWith(SESSION_BLOCKED_HINT);
+});
+
+// D11 follow-up: output that arrives in full while a layer is open is shown when the layer closes.
+for (const encoding of encodings) for (const layer of ["palette", "inspection"] as const) test(`[${encoding}] an answer that finishes while the ${layer} is open is shown on Esc`, async () => {
+  const ui = await setup(encoding);
+  await ui.turn("first task", { text: "ok\n\n```ts\nconst y = 2;\n```" });
+  await ui.type("second task"); await ui.enter();
+  await ui.waitFor(() => ui.waiting() === 1, "turn waiting");
+  await ui.input(layer === "palette" ? ui.keys.altH : ui.keys.altI);
+  expect(layer === "palette" ? ui.controller.commandHelpOpen : ui.hints().includes("R read")).toBe(true);
+  ui.release({ text: longAnswer });
+  await ui.waitFor(() => !ui.controller.running, "turn done");
+  await ui.input(ui.keys.esc);
+  expect(ui.frame()).toContain("END-MARKER");
 });
