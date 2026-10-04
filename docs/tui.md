@@ -4,7 +4,8 @@ Schway uses one conversation column with a persistent multiline editor. The scre
 is divided into color blocks: a top bar names the workspace and checked-out Git
 branch; the conversation sits on the canvas; the composer is a raised block; the
 status bar below it carries the state pill, model, reasoning preference, and context
-meter; key hints sit on the last row. `/session` reveals session IDs, the conversation branch, and attached
+meter; key hints sit on the last row. At narrow widths trailing hints drop first,
+but an Esc way out stays visible beside the leading hint. `/session` reveals session IDs, the conversation branch, and attached
 workspace paths. A conversation branch is distinct from a Git branch.
 
 The status pill follows the active operation's runtime events: `Preparing`,
@@ -288,7 +289,9 @@ The list shows at most 50 paths, like `/changes status`; a longer list adds
 when no repository encloses the workspace, `Workspace unavailable · Ctrl+R reload`
 when the directory is missing, `Current changes unavailable · Ctrl+R reload` with
 Git's reason when Git cannot read the repository (for example dubious ownership or
-a missing `git` binary), and `No workspace active · Esc back`. With
+a missing `git` binary), and `No workspace active · Esc back`. `/changes status`
+and `/changes diff` report a missing directory the same way:
+`Workspace unavailable · Restore <path>, then run /changes again`. With
 `git.changeTracking` set to `off`, review says so and reads no Git state. Details
 then describe only what was read. Opening review never calls the model, adds a
 turn, writes the session, stages content or changes files or refs.
@@ -600,7 +603,9 @@ The basic list shows Model, Thinking, Connections, Appearance, Track file change
 Textual `/config set`, `/config reset` and `/config show` remain available.
 
 The conversation follows new output until you scroll back. Streaming then keeps
-your reading position; Ctrl+End resumes following. Wheel input over non-scrollable
+your reading position; Ctrl+End resumes following. If the conversation was
+following when a panel, inspection, the reader, search or F2 details opened,
+Esc returns to following. Wheel input over non-scrollable
 chrome, including the footer, also scrolls the conversation. The multiline editor
 retains its own scrolling. The transcript has a fixed-width viewport so starting
 to overflow does not introduce a scrollbar and rewrap earlier messages.
@@ -804,7 +809,8 @@ and the draft, cursor and transcript position return unchanged on Esc.
   the same position.
 - **Ctrl+F** searches the captured block with the conversation search's
   Unicode folding. Up/Down move between matches, Enter keeps the result in view
-  and Esc restores the previous position. Reader search never adds rows to the
+  and Esc restores the previous position. A match near the end shows the last
+  full page, so the body never ends in blank rows. Reader search never adds rows to the
   conversation search or changes history.
 - Opening a block that is still streaming captures a snapshot labelled
   `Snapshot · Esc back`. The conversation keeps streaming behind it; closing
@@ -814,8 +820,8 @@ and the draft, cursor and transcript position return unchanged on Esc.
   part reports `Copied partial source`.
 
 If a tool approval arrives while reading, it waits; the reader shows
-`◌ Approval waiting · Esc review request`, and navigation, copy and resize
-never answer it. Esc closes the reader and opens the existing approval prompt
+`◌ Approval waiting · Esc review request`, the find row names the same Esc
+action, and navigation, copy and resize never answer it. Esc closes the reader and opens the existing approval prompt
 without approving or denying. After the request is handled, the reader never
 reopens on its own: press **Alt+I** then **R** on the same target to return to
 the saved snapshot, position and search. Session and branch changes discard the
@@ -889,13 +895,16 @@ requirements. Keyboard guidance never performs its action, including copying,
 changing mode, cancelling or inserting a newline. In guidance, Esc returns to
 the same search and selection; in results, Esc restores the original draft,
 cursor and reading position. Without matches the palette shows
-`No matches · Clear search or Esc back`.
+`No matches · Clear search or Esc back`. The search field is one line:
+Shift+Enter and Ctrl+J never add a line to the query.
 
 Keyboard rows show their keys and label; the selected row's description or
 unavailable reason appears beneath the results so it stays readable at narrow
 widths and without color. While a turn runs, actions that need an idle
 composer, such as change review and details, are marked unavailable, and a
-note reminds you to send commands after the turn settles. When a tool approval
+note reminds you to send commands after the turn settles. When the composer
+cannot send (a failed turn or a session that cannot save), reasons name the keys
+the hint row leads with instead of Enter send; the Alt+I notice does the same. When a tool approval
 is waiting behind the palette, Esc closes it to show the request. Credential
 and approval prompts keep their own input; the palette cannot open over them,
 and its search text is never saved as a draft.

@@ -730,7 +730,9 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   // The saved snapshot, anchor and local search return; the body gains the row the approval status used.
   const restored = ui.readerText().split("\n"), before = checkpoint.split("\n");
   expect(restored.slice(1, before.length - 1)).toEqual(before.slice(1, -1));
-  expect(restored.at(-1)).toBe(before.at(-1));
+  // While the approval waited, the find row named the Esc action it had then; once settled, Esc restores again.
+  expect(before.at(-1)).toEndWith("Esc review request");
+  expect(restored.at(-1)).toBe(before.at(-1)!.replace("Esc review request", "Esc restore"));
   expect(restored.at(-1)).toContain("Find: value 2c");
   ui.mockInput.pressEscape(); await ui.settle();
   ui.mockInput.pressEscape(); await ui.settle();

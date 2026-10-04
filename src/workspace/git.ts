@@ -136,6 +136,11 @@ export async function findGitRoot(start: string): Promise<string | undefined> {
   }
 }
 
+/** True when `root` is an existing directory; any filesystem failure counts as missing. */
+export async function workspaceDirectoryExists(root: string): Promise<boolean> {
+  return stat(root).then(info => info.isDirectory(), () => false);
+}
+
 /** Run one observational Git command without touching index, HEAD, branches, or config. */
 async function runGit(root: string, args: readonly string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const env: Record<string, string | undefined> = { ...process.env };
@@ -157,6 +162,8 @@ async function runGit(root: string, args: readonly string[]): Promise<{ exitCode
       env: env as Record<string, string>,
     });
   } catch (error) {
+    // Bun reports a missing cwd and a missing binary with the same ENOENT, so check the directory before blaming Git.
+    if (!await workspaceDirectoryExists(root)) return { exitCode: -1, stdout: "", stderr: `workspace unavailable: ${root} is missing` };
     const message = error instanceof Error ? error.message : String(error);
     return { exitCode: -1, stdout: "", stderr: `git unavailable: ${message}` };
   }

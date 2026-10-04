@@ -19,7 +19,7 @@ import { createTranscriptItem, markdownStyle, type TranscriptItemView } from "./
 import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 import { paletteChoices, type CommandChoice, type KeyboardGuideChoice, type PaletteChoice } from "./command-catalog.ts";
-import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceHeight, guidanceLines, keyboardGuideAvailability, keyboardRowParts, nextPaletteSelection, paletteDetail, paletteHint, paletteSections, paletteSelectable } from "./palette.ts";
+import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceHeight, guidanceLines, keyboardGuideAvailability, keyboardRowParts, nextPaletteSelection, nothingToInspectReason, paletteDetail, paletteHint, paletteSections, paletteSelectable } from "./palette.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
@@ -85,6 +85,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let searchOpen = false;
   let searchOriginalScroll = 0;
   let searchRestoreScroll: number | undefined;
+  // Whether the transcript followed the latest output before the open layer paused it; a restore resumes following.
+  let restoreFollow = true;
+  // A restored follower whose view no longer reaches the bottom (F2 details below it); new output returns to latest.
+  let resumeFollowTop: number | undefined;
   let searchScrollToMatch = false;
   let searchAcceptPending = false;
   let searchSelected = -1;
@@ -129,6 +133,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let lastTail = "";
   let interactionNotice = "";
   let interactionNoticeUntil = 0;
+  let interactionNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   let paintedCancellationId: number | undefined;
   type DraftStatus = "empty" | "dirty" | "saved" | "restore-pending" | "restored" | "save-failed" | "cleanup-failed" | "unavailable";
   type DraftState = { store?: DraftStore; target: ReturnType<TuiController["draftCheckpointTarget"]>; text: string; revision: number; dirty: boolean; suppressed: boolean; status: DraftStatus; timer?: ReturnType<typeof setTimeout> };
@@ -340,8 +345,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const showInteractionNotice = (text: string) => {
     interactionNotice = text;
     interactionNoticeUntil = Date.now() + 2500;
+    // Repaint when the notice expires so it does not linger until the next unrelated event.
+    clearTimeout(interactionNoticeTimer);
+    interactionNoticeTimer = setTimeout(() => { if (!destroyed) refresh(); }, 2510);
     refresh();
   };
+  /** A notice from a layer that just closed names keys that no longer apply, so it ends with the layer. */
+  const clearInteractionNotice = () => { interactionNoticeUntil = 0; clearTimeout(interactionNoticeTimer); };
   const copySelection = () => {
     if (controller.snapshot().credentialEntry) return false;
     const text = renderer.getSelection()?.getSelectedText();
@@ -459,6 +469,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (!reader) return;
     searchRestoreScroll = reader.scroll;
     reader = undefined;
+    clearInteractionNotice();
     if (inspection) editor.blur(); else editor.focus();
   };
   /** Hand input to a waiting approval, retaining one checkpoint for an explicit Alt+I then R return. */
@@ -467,6 +478,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     readerReturn = reader;
     searchRestoreScroll = reader.scroll;
     reader = undefined;
+    clearInteractionNotice();
     if (inspection) { previousInspection = inspection; clearInspection(); }
   };
   const copyReader = () => {
@@ -519,6 +531,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const setDraft = (value: string) => { editor.setText(value); editor.gotoBufferEnd(); };
   const atBottom = () => transcript.scrollTop >= Math.max(0, transcript.scrollHeight - transcript.viewport.height) - 1;
   const latest = () => { transcript.stickyScroll = true; transcript.scrollTo(transcript.scrollHeight); unseen = false; };
+  /** A panel, inspection, reader, search or details view owns the transcript position and pauses following. */
+  const layered = () => !!panelMode || !!inspection || !!reader || searchOpen || !!detailsReturn;
   const textRow = (box: BoxRenderable, text: string, color = theme.text) => {
     const row = new TextRenderable(renderer, { content: safe(text), fg: color, flexShrink: 0, wrapMode: "word" });
     box.add(row);
@@ -542,6 +556,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       running: controller.running || snapshot.status === "running", toolApproval: !!snapshot.toolApproval,
       inspectable: inspectionTargets(snapshot.transcript).length > 0,
       details: !!snapshot.noticeDetailsAvailable || !!snapshot.recovery?.actions.includes("details") || snapshot.outcome?.reason === "failed",
+      blockedSubmit: blockedSubmitHint(snapshot),
     });
     return paletteChoices(controller.commandChoices("/"), availability, editor.plainText);
   }
@@ -627,10 +642,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const chunkWidth = (chunks: readonly TextChunk[]) => chunks.reduce((sum, chunk) => sum + Bun.stringWidth(chunk.text), 0);
   const hintColors = (base: string) => ({ key: theme.text, chip: mixColor(base, theme.border, 0.9), action: theme.muted });
 
-  /** Key-chip hints that fit `columns`, dropping trailing hints before clipping text. */
+  /**
+   * Key-chip hints that fit `columns`, dropping trailing hints before clipping text. The leading hint and an Esc
+   * way out stay longest; Esc goes only when it cannot fit beside the leading hint (the footer then names it).
+   */
   function fittedHints(text: string, columns: number, base = theme.background): StyledText {
     const segments = text.split(" · ");
-    while (segments.length > 1 && chunkWidth(keyHintChunks(segments.join(" · "), hintColors(base))) > columns) segments.pop();
+    const escape = (segment: string) => segment === "Esc" || segment.startsWith("Esc ");
+    while (segments.length > 1 && chunkWidth(keyHintChunks(segments.join(" · "), hintColors(base))) > columns) {
+      const drop = segments.findLastIndex((segment, index) => index > 0 && !escape(segment));
+      segments.splice(drop > 0 ? drop : segments.length - 1, 1);
+    }
     const chunks = keyHintChunks(segments.join(" · "), hintColors(base));
     return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
   }
@@ -847,7 +869,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         searchRestoreScroll = undefined; searchScrollToMatch = false; searchAcceptPending = false;
         searchIndex.clear();
         latest();
-        if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; }
+        if (sessionChanged && destination) { searchRestoreScroll = destination.scroll; transcript.stickyScroll = false; restoreFollow = false; }
       }
       const externalPanel = externalPanelFor(snapshot);
       if (detailsReturn && (externalPanel || searchOpen || controller.commandHelpOpen || controller.running || !snapshot.transcript.some(entry => entry.id === detailsReturn!.entryId))) {
@@ -950,7 +972,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       };
       const tail = entries.at(-1);
       const tailKey = `${tail?.id}:${tail?.text.length}:${tail?.toolStatus}`;
-      if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
+      if (resumeFollowTop !== undefined && (layered() || transcript.scrollTop !== resumeFollowTop)) resumeFollowTop = undefined;
+      if (lastTail && lastTail !== tailKey && resumeFollowTop !== undefined) { resumeFollowTop = undefined; latest(); }
+      else if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
       transcript.visible = panelMode !== "tool-approval" && !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview && !snapshot.history && !reader;
@@ -959,6 +983,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const panelRows = readerRows();
         reader.layout = readerLayout(reader.document, reader.wrap, width, panelRows, { approval: !!snapshot.toolApproval, search: !!reader.search });
         reader.position = readerBodyPosition(reader.document, reader.layout, reader.position);
+        // A taller body (find row closed, terminal resized) still fills from the last full page, like End.
+        const last = readerEnd(reader.document, reader.layout, reader.position.horizontal);
+        if (last.offset < reader.position.offset) reader.position = { offset: last.offset, horizontal: reader.position.horizontal };
         readerText.content = paintReader({ document: reader.document, layout: reader.layout, position: reader.position, columns: width, rows: panelRows, theme, search: reader.search });
         readerText.height = panelRows;
       }
@@ -1704,7 +1731,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       searchScrollToMatch = false;
       handled(); return;
     }
-    if (panelMode === "help" && ((key.meta || key.option) || key.ctrl && !["c", "a", "e", "u", "k", "w"].includes(name))) { handled(); return; }
+    // The search field is one line: Shift+Enter and a legacy Ctrl+J (linefeed) never add a line to the query.
+    if (panelMode === "help" && ((key.meta || key.option) || key.ctrl && !["c", "a", "e", "u", "k", "w"].includes(name) || name === "linefeed" || key.shift && (name === "return" || name === "kpenter"))) { handled(); return; }
     if (panelMode === "help" && helpGuide && !(key.ctrl && name === "c")) {
       // Guidance is read-only: Esc returns to the same query and selection, unless approval is waiting behind help.
       if (name === "escape") { helpGuide = undefined; if (snapshot.toolApproval) controller.commandHelpOpen = false; }
@@ -1735,7 +1763,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const targets = inspectionTargets(snapshot.transcript);
       const current = targets.findIndex(target => target.id === inspection!.id && target.kind === inspection!.kind && target.index === inspection!.index);
       if (name === "escape" || ((key.meta || key.option) && name === "i")) {
-        previousInspection = inspection; clearInspection();
+        previousInspection = inspection; clearInspection(); clearInteractionNotice();
         searchRestoreScroll = inspectionOriginalScroll;
         editor.focus(); handled(); return;
       }
@@ -1792,7 +1820,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if ((key.meta || key.option) && name === "i" && !panelMode) {
       inspection = initialInspection(snapshot.transcript);
       if (inspection) { inspectionOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; editor.blur(); scrollToInspection = true; }
-      else showInteractionNotice(controller.running || snapshot.status === "running" ? "Nothing to inspect yet · Esc stop" : "Nothing to inspect · Enter send a task");
+      else showInteractionNotice(nothingToInspectReason({ running: controller.running || snapshot.status === "running", blockedSubmit: blockedSubmitHint(snapshot) }));
       handled(); return;
     }
     if (snapshot.modelPicker && key.ctrl && name === "p") { controller.togglePickerFavorite(); handled(); return; }
@@ -1828,7 +1856,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         completionIndex = nextPaletteSelection(choices, completionIndex, delta); completionId = choices[completionIndex]?.id; handled(); return;
       }
       if (panelMode === "help") { handled(); return; }
-      if (!key.shift && !key.ctrl && !key.meta && history.length && (name === "up" ? editor.visualCursor.visualRow === 0 : editor.visualCursor.visualRow >= editor.virtualLineCount - 1)) {
+      // The visual row is relative to the editor viewport, which only follows edits on the next render, so
+      // add the viewport offset and compare against every wrapped row of the current text.
+      const visualRow = editor.visualCursor.visualRow + editor.editorView.getViewport().offsetY;
+      if (!key.shift && !key.ctrl && !key.meta && history.length && (name === "up" ? visualRow === 0 : visualRow >= editor.editorView.getTotalVirtualLineCount() - 1)) {
         if (historyIndex === -1 && name === "down") return;
         if (historyIndex === -1) { historyDraft = editor.plainText; historyIndex = history.length; }
         historyIndex = Math.max(0, Math.min(history.length, historyIndex + delta));
@@ -1896,7 +1927,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (searchRestoreScroll !== undefined) {
       transcript.scrollTo(searchRestoreScroll);
       searchRestoreScroll = undefined;
-    }
+      if (restoreFollow && !layered()) {
+        if (atBottom()) transcript.stickyScroll = true; else resumeFollowTop = transcript.scrollTop;
+      }
+    } else if (!layered()) restoreFollow = transcript.stickyScroll && atBottom() || resumeFollowTop !== undefined;
     if (reader && readerPanel.visible) {
       reader.painted = true;
       if (readerPanel.height > 0 && readerPanel.height !== readerText.height && readerMeasured?.rows !== readerPanel.height) {
@@ -1981,6 +2015,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       detailsReturn = undefined; reviewDetailsScroll = undefined;
       ticker.stop();
       clearInterval(activityTimer);
+      clearTimeout(interactionNoticeTimer);
       renderer.keyInput.off("paste", onPaste);
       for (const state of durableDrafts.values()) clearTimeout(state.timer);
       unbindCredential();
