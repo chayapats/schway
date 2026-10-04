@@ -14,7 +14,7 @@ import { createConversationView } from "../../src/tui/view.ts";
 import { dispatchEditorInput } from "../../src/tui/commands.ts";
 import { createContextManager } from "../../src/context/manager.ts";
 import { createSession } from "../../src/session/session.ts";
-import { createJsonlSession, sessionsDirectory } from "../../src/session/jsonl.ts";
+import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../../src/session/jsonl.ts";
 import { createToolRegistry } from "../../src/tools/registry.ts";
 import { loadExtensions } from "../../src/extensions/loader.ts";
 import { readTool } from "../../src/tools/read.ts";
@@ -43,7 +43,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const draft = screen.id.startsWith("draft-");
   const reviewScope = screen.id === "review-multi-turn" || screen.id === "review-staged-unstaged";
   const undoLimit = ["undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable"].includes(screen.id);
-  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit;
+  const resumedReview = screen.id.startsWith("resumed-review");
+  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview;
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -52,18 +53,29 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await mkdir(join(root, ".git"), { recursive: true });
       await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/feature/a-very-long-branch-name-for-testing\n");
     }
-    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id) || reviewScope || undoLimit) {
+    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id) || reviewScope || undoLimit || resumedReview) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
-      if (screen.id !== "undo-preview-no-git" && screen.id !== "undo-detection-unavailable") for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
+      if (screen.id !== "undo-preview-no-git" && screen.id !== "undo-detection-unavailable" && screen.id !== "resumed-review-no-git") for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
         const result = Bun.spawnSync(["git", ...args], { cwd: root, env });
         if (result.exitCode) throw new Error(result.stderr.toString());
       }
     }
   }
   const workspace = { root, launchCwd: root, extraRoots: [] };
+  // A resumed review reloads a saved conversation from disk, so no live turn record exists; the earlier edit is still in the working tree.
+  let resumed: Awaited<ReturnType<typeof loadJsonlSession>> | undefined;
+  if (resumedReview) {
+    if (screen.id !== "resumed-review-clean") {
+      await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.min(hi, Math.max(lo, n));\n}\n");
+      await writeFile(join(root, "notes.md"), "Clamp respects the upper bound.\n");
+    }
+    const saved = await createJsonlSession({ directory: sessionsDirectory(home), workspace });
+    saved.append({ type: "user", id: "saved-user", content: [{ type: "text", text: "Fix the clamp upper bound" }] }, { type: "assistant", id: "saved-answer", content: [{ type: "text", text: "Fixed clamp so it respects the upper bound." }] });
+    resumed = await loadJsonlSession({ directory: sessionsDirectory(home), id: saved.header.id });
+  }
   const durableSession = draft ? await createJsonlSession({ directory: sessionsDirectory(home), workspace }) : undefined;
-  const session = durableSession ?? createSession();
+  const session = durableSession ?? resumed ?? createSession();
   const draftStore = durableSession ? openDraftStore({ home, workspaceRoot: root, sessionId: durableSession.header.id }) : undefined;
   if (draftStore) draftStore.save(screen.id === "draft-restored" ? "ร่างภาษาไทย\nยังไม่ส่ง 🧪" : "Previously saved", 1);
   if (screen.id === "recent-work-resume") {
@@ -131,7 +143,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
-    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? "catalog-session",
+    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? resumed?.header.id ?? "catalog-session",
     model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     onRuntimeEvent: event => { if (event.type === "tool.finished") activityTime += 1200; },
@@ -147,7 +159,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   };
   if (screen.id === "details-recovery") options.changeTracking = "off";
   // Exercise real diagnostic redaction before layout so temporary-root bytes never enter goldens.
-  if (screen.id === "details-review") options.secrets = [temp!];
+  if (screen.id === "details-review" || resumedReview) options.secrets = [temp!];
   if (screen.id === "approval-command" || screen.id === "approval-edit") options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (screen.id === "approval-modes-help") options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (picker || unconnectedPicker) {

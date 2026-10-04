@@ -258,8 +258,33 @@ file-tool record; it does not show which command or process changed it. Review d
 not store historical file contents, so it cannot show an exact patch for one turn. Exit codes are observed command results, not a test-suite guarantee.
 Failure, cancellation, and conversation branching leave completed filesystem
 effects in place. Review does not commit, undo, or restore files. Only the latest
-turn pair is retained, and switching a session or branch clears it. Fresh and resumed
-sessions show `No turn to review yet`; saved tool results remain in the conversation.
+turn pair is retained, and switching a session or branch clears it; saved tool
+results remain in the conversation.
+
+### Current changes after resume
+
+When no live turn record is held — after a restart, resume, session or branch
+switch, or before the first turn — **Alt+R** and `/changes review` open
+`Review · current changes` instead. Its file list, **`Current working tree`**, is
+what Git reports as changed now in the active workspace, each path marked
+`staged`, `unstaged`, `partly staged`, `untracked`, `deleted`, `renamed` or
+`conflict`. It is not the resumed turn's patch: it can include edits from earlier
+turns or outside Schway and omits changes since committed or reverted. Only the
+selected file's current diff is read, with the same comparison labels, selection,
+**Ctrl+R** reload and stale-result handling as turn review.
+
+**F2** opens `Current changes details`, which starts with `Previous turn details
+unavailable` and names the workspace and branch read. Schway does not rebuild line
+counts, hashes, elapsed time, exit codes or authorship from saved conversation text.
+After resume, review reads the resumed session's workspace, not the directory
+Schway was launched from.
+
+Each state names its next step: `No current changes · Esc back` for a clean tree,
+`Not a Git workspace · Esc back`, `Workspace unavailable · Ctrl+R reload` when the
+directory is missing, `Current changes unavailable · Ctrl+R reload` when Git status
+fails, and `No workspace active · Esc back`. With `git.changeTracking` set to `off`,
+review says so and reads no Git state. Opening review never calls the model, adds a
+turn, writes the session, stages content or changes files or refs.
 
 ## Color roles
 
@@ -465,7 +490,7 @@ detected here` marks newer turns with the same limit.
 | Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery, Esc goes back |
 | Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
-| Review turn changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc restores the draft and reading position |
+| Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc restores the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
 | Inspect results and code | Alt+I enters inspection without copying; Up/Down or Tab selects a result or code block; C copies the highlighted item; Enter copies selected code or toggles an expandable tool result; Esc returns to the draft |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |

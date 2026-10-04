@@ -11,7 +11,7 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { writeTool } from "../src/tools/write.ts";
-import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, reviewScopeDetails, turnFileBadge } from "../src/tui/review-scope.ts";
+import { currentDiffLabel, emptyFilesLabel, fitPathStart, gitFileState, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel, reviewScopeDetails, turnFileBadge, workspaceReviewDetails } from "../src/tui/review-scope.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 
@@ -95,6 +95,28 @@ test("scope helpers keep turn counts with turn evidence and never invent unknown
   expect(details).toContain("repeated edits can exceed the net current diff");
   expect(details).toContain("does not identify which command or process changed them");
   expect(details).toContain("does not update live");
+});
+
+test("workspace scope labels name the current working tree and its details never claim turn evidence", () => {
+  const scope = { kind: "workspace" } as const;
+  expect(reviewFilesLabel(scope)).toBe("Current working tree");
+  expect(reviewDetailsLabel(scope)).toBe("Current changes details");
+  expect(emptyFilesLabel(scope)).toBe("None listed");
+  expect(emptyFilesLabel({ kind: "turn", turn: 1 })).toBe("None observed");
+  expect(reviewFileBadge({ path: "a", source: "git", state: "staged" })).toBe("staged");
+  expect(reviewFileBadge({ path: "a", source: "shell" })).toBe("detected");
+  const change = (staged: string, unstaged: string, untracked = false) => gitFileState({ path: "a", staged, unstaged, untracked, binary: false });
+  expect([change("?", "?", true), change("M", "."), change(".", "M"), change("M", "M"), change("D", "."), change(".", "D"), change("R", "."), change("U", "U"), change("A", "A")])
+    .toEqual(["untracked", "staged", "unstaged", "partly staged", "deleted", "deleted", "renamed", "conflict", "conflict"]);
+  const details = workspaceReviewDetails({ root: "/work/ไทย", branch: "feature/ไทย", shown: 50, total: 51 });
+  expect(details.split("\n")[0]).toBe("Previous turn details unavailable");
+  expect(details).toContain("Workspace: /work/ไทย");
+  expect(details).toContain("Branch: feature/ไทย");
+  expect(details).toContain("Showing the first 50 of 51 changed paths.");
+  expect(details).toContain("never the exact patch of a resumed turn");
+  expect(details).not.toContain("Files from turn");
+  expect(workspaceReviewDetails({ root: "/w", detached: true })).toContain("Branch: detached HEAD");
+  expect(reviewScopeDetails(scope)).not.toContain("detected");
 });
 
 test("left-truncated paths keep distinct Thai and emoji file names within their cell budget", () => {
@@ -231,7 +253,7 @@ test("repeated edits keep accumulated turn counts while the current diff shows t
     expect(review.detail).not.toContain("draft");
     expect(review.detail).not.toContain("1 - line one");
     const copy = review.files.find(file => file.path === "two-copy.txt")!;
-    expect(turnFileBadge(copy)).toBe("");
+    expect(reviewFileBadge(copy)).toBe("");
     const ui = await view(c, dir);
     await ui.settle();
     const copyRow = ui.captureCharFrame().split("\n").find(line => line.includes("two-copy.txt"))!;

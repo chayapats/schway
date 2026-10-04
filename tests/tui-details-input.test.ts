@@ -294,10 +294,16 @@ test("pending approval still owns Details while inspection hides its panel", asy
   } finally { ui.controller.cancel(); await turn; ui.close(); }
 });
 
-test("an empty review keeps both aliases inert without advertising unavailable Details", async () => {
+test("review without a live turn toggles Details through both aliases and explains the missing turn record", async () => {
   const ui = await setup(); await ui.controller.openChangeReview(); await ui.settle();
-  expect(ui.captureCharFrame()).not.toContain("F2 details");
-  for (const bytes of ["\x1bOQ", "\x1b[27;5;105~"]) await ui.input(bytes);
-  expect(ui.controller.snapshot().changeReview?.showingDetails).toBe(false);
+  expect(ui.controller.snapshot().outcome).toBeUndefined();
+  expect(ui.captureCharFrame()).toContain("F2 details");
+  for (const bytes of ["\x1bOQ", "\x1b[27;5;105~"]) {
+    await ui.input(bytes);
+    expect(ui.controller.snapshot().changeReview?.showingDetails).toBe(true);
+    expect(ui.captureCharFrame()).toContain("Previous turn details unavailable");
+    await ui.input(bytes);
+    expect(ui.controller.snapshot().changeReview?.showingDetails).toBe(false);
+  }
   expect(ui.session.items).toHaveLength(0);
 });

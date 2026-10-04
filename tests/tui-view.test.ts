@@ -2900,12 +2900,14 @@ test("new unaccepted recovery details take priority over retained completed and 
   }
 });
 
-test("fresh review has exactly its empty message and no files", async () => {
+test("fresh review opens current changes and names an unavailable workspace without files", async () => {
   const ui = await setup();
-  ui.mockInput.pressKey("r", { meta: true }); await settle(ui);
-  expect(ui.controller.snapshot().changeReview!.heading).toBe("No turn to review yet");
+  ui.mockInput.pressKey("r", { meta: true });
+  for (let i = 0; i < 200 && ui.controller.snapshot().changeReview?.loading !== false; i++) await settle(ui);
+  await settle(ui);
+  expect(ui.controller.snapshot().changeReview!.heading).toBe("Review · current changes");
   expect(ui.controller.snapshot().changeReview!.files).toEqual([]);
-  expect(ui.captureCharFrame()).toContain("No turn to review yet");
+  expect(ui.captureCharFrame()).toContain("Workspace unavailable · Ctrl+R reload");
   ui.mockInput.pressEscape(); await settle(ui);
   expect(ui.controller.snapshot().changeReview).toBeUndefined();
 });

@@ -20,7 +20,7 @@ import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMa
 import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
-import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
+import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
 import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
@@ -877,7 +877,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const scope = undo ? undefined : snapshot.changeReview!.scope;
         // A review opened from the undo panel lists that panel's paths with current-diff titles but no turn source badges.
         const fromUndo = !undo && !!snapshot.changeReview!.fromUndo, titled = !!scope || fromUndo;
-        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: fromUndo ? "" : turnFileBadge(file) }));
+        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: fromUndo ? "" : reviewFileBadge(file) }));
         const filesTitle = scope ? reviewFilesLabel(scope) : fromUndo ? UNDO_REVIEW_FILES : "";
         const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), Math.max(20, Bun.stringWidth(filesTitle)));
         const fileWidth = stacked ? width : Math.min(Math.floor(width * 0.4), longestFile);
@@ -894,7 +894,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             : currentDiffLabel(fitPathStart(safe(currentPath), titleWidth - Bun.stringWidth(currentDiffLabel(""))));
           reviewDiffTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(diffTitle, titleWidth)))]);
           // The undo panel did list paths; an empty undo review means none were inside the workspace.
-          if (!fileRows.length) fileRows.push({ path: fromUndo ? UNDO_REVIEW_NO_FILES : "None observed", badge: "" });
+          if (!fileRows.length) fileRows.push({ path: fromUndo ? UNDO_REVIEW_NO_FILES : scope ? emptyFilesLabel(scope) : "None observed", badge: "" });
         }
         reviewFilesColumn.width = fileWidth;
         reviewFilesColumn.marginBottom = stacked && titled ? 1 : 0;
@@ -914,7 +914,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));
         reviewDivider.visible = !stacked && fileRows.length > 0;
         reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
-        reviewText.wrapMode = review.showingDetails ? "word" : "char";
+        // Explanations without a file list wrap at words; diff rows wrap anywhere to keep line numbers aligned.
+        reviewText.wrapMode = review.showingDetails || (!undo && !review.files.length) ? "word" : "char";
         const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode]);
         if (content !== reviewContent) {
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
@@ -1196,9 +1197,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "undo") {
         hints.content = undoHint(snapshot.undoPreview, width);
       } else if (panelMode === "review") {
-        const navigation = snapshot.changeReview?.showingDetails ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
+        const navigation = snapshot.changeReview?.showingDetails || !snapshot.changeReview?.files.length ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
         const reload = (snapshot.changeReview?.scope || snapshot.changeReview?.fromUndo) && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
-        const actions = `${reload}${snapshot.outcome ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
+        // An undo-panel review keeps its Details gated on a live turn, as before current-changes review existed.
+        const details = !!snapshot.changeReview?.scope || !!snapshot.changeReview?.fromUndo && !!snapshot.outcome;
+        const actions = `${reload}${details ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
         // Keep each key with its action when the review hint needs a second row.
         const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
         hints.content = new StyledText([...keyHintChunks(navigation, hintColors(theme.background)), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
