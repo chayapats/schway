@@ -73,6 +73,19 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     expect(text).toContain("Current diff");
     expect(text).toContain("Esc back");
   }
+  if (screen.id.startsWith("resumed-review")) {
+    // Current changes are titled as the working tree now and never as the resumed turn's patch.
+    const text = parseScreen(actual).text.join("\n");
+    expect(text).toContain("Review · current changes");
+    expect(text).toContain("Esc back");
+    expect(text).not.toMatch(/Files from turn|Turn \d+ details|No turn to review yet/);
+    if (screen.id === "resumed-review-details") expect(text).toContain("Previous turn details unavailable");
+    const status = { "resumed-review-clean": "No current changes · Esc back", "resumed-review-no-git": "Not a Git workspace · Esc back", "resumed-review-off": "Change tracking is off",
+      "resumed-review-unavailable": "Workspace unavailable · Ctrl+R reload", "resumed-review-git-failed": "Current changes unavailable · Ctrl+R reload" }[screen.id];
+    // The status stays whole at every width; its action may wrap but also remains in the hint row.
+    if (status) { expect(text).toContain(variant.cols < 50 ? status.split(" · ")[0]! : status); expect(text).toContain("None listed"); }
+    if (screen.id === "resumed-review-git-failed") expect(text).not.toContain("Not a Git workspace");
+  }
   if (screen.id.startsWith("details-")) {
     const text = parseScreen(actual).text.join("\n");
     expect(text).not.toContain("Ctrl+I");
@@ -168,7 +181,7 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);

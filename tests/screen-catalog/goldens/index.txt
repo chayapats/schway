@@ -47,6 +47,13 @@ review-panel
 details-review
 review-multi-turn
 review-staged-unstaged
+resumed-review
+resumed-review-details
+resumed-review-clean
+resumed-review-no-git
+resumed-review-off
+resumed-review-unavailable
+resumed-review-git-failed
 undo-preview
 undo-preview-no-git
 undo-shell-only

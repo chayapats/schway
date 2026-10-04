@@ -412,7 +412,7 @@ test("review ordinal follows active-branch user records and switches clear retai
     const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
     const c = new TuiController({ session, workspace, sessionId: "ordinal", provider: "scripted", modelId: "scripted", model: createScriptedModel(), contextManager: createContextManager(workspace) });
     await c.openChangeReview();
-    expect(c.snapshot().changeReview!.heading).toBe("No turn to review yet");
+    expect(c.snapshot().changeReview!.heading).toBe("Review · current changes");
     c.closeChangeReview();
     await c.submit("second turn");
     await c.openChangeReview();
@@ -420,11 +420,11 @@ test("review ordinal follows active-branch user records and switches clear retai
     c.closeChangeReview();
     expect(c.branchCommand(`switch ${original}`)).toBe(true);
     await c.openChangeReview();
-    expect(c.snapshot().changeReview!.heading).toBe("No turn to review yet");
-    expect(c.snapshot().changeReview!.files).toEqual([]);
+    expect(c.snapshot().changeReview!.heading).toBe("Review · current changes");
+    expect(c.snapshot().changeReview!.scope).toEqual({ kind: "workspace" });
     c.replaceSession(createSession(), "new-session");
     await c.openChangeReview();
-    expect(c.snapshot().changeReview!.heading).toBe("No turn to review yet");
+    expect(c.snapshot().changeReview!.heading).toBe("Review · current changes");
     c.dispose();
   });
 });
@@ -451,8 +451,9 @@ test("retained failure diagnostics stay sanitized and clear with the next turn o
       if (boundary === "branch") expect(c.branchCommand(`fork ${session.rootId}`)).toBe(true);
       if (boundary !== "turn") {
         await c.openChangeReview();
-        expect(c.snapshot().changeReview!.heading).toBe("No turn to review yet");
-        expect(c.snapshot().changeReview!.details).toBe("");
+        expect(c.snapshot().changeReview!.heading).toBe("Review · current changes");
+        expect(c.snapshot().changeReview!.details).toStartWith("Previous turn details unavailable");
+        expect(c.snapshot().changeReview!.details).not.toContain("retained fixture diagnostic");
       }
       await c.submit("continue with a new task");
       await c.openChangeReview();

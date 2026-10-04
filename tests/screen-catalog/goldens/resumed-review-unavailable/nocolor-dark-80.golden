@@ -1,0 +1,143 @@
+schway-screen 1
+screen resumed-review-unavailable
+title Resumed review, workspace missing
+description A saved workspace removed after resume names the directory to restore and the reload key.
+variant nocolor-dark-80
+size 80x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ***/home/demo
+
+  Review · current changes
+
+  Current working tree │ Current diff
+    None listed        │ Workspace unavailable · Ctrl+R reload
+                       │ Restore ***/home/demo, then reload.
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+                       │
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ ›
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                              ctx ~18
+  PgUp/PgDn scroll · Ctrl+R reload · F2 details · Esc back
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #e6eaf0 #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-25 #8b95a7 #161b24 -
+00 25-80 #ffffff #161b24 -
+01 0-80 #ffffff #0e1117 -
+02 0-2 #ffffff #0e1117 -
+02 2-26 #e6eaf0 #0e1117 -
+02 26-80 #ffffff #0e1117 -
+03 0-80 #ffffff #0e1117 -
+04 0-2 #ffffff #0e1117 -
+04 2-22 #e6eaf0 #0e1117 b
+04 22-25 #2c3444 #0e1117 -
+04 25-37 #e6eaf0 #0e1117 b
+04 37-80 #ffffff #0e1117 -
+05 0-2 #ffffff #0e1117 -
+05 2-15 #e6eaf0 #0e1117 -
+05 15-22 #ffffff #0e1117 -
+05 22-25 #2c3444 #0e1117 -
+05 25-62 #e6eaf0 #0e1117 -
+05 62-80 #ffffff #0e1117 -
+06 0-22 #ffffff #0e1117 -
+06 22-25 #2c3444 #0e1117 -
+06 25-60 #e6eaf0 #0e1117 -
+06 60-80 #ffffff #0e1117 -
+07 0-22 #ffffff #0e1117 -
+07 22-25 #2c3444 #0e1117 -
+07 25-80 #ffffff #0e1117 -
+08 0-22 #ffffff #0e1117 -
+08 22-25 #2c3444 #0e1117 -
+08 25-80 #ffffff #0e1117 -
+09 0-22 #ffffff #0e1117 -
+09 22-25 #2c3444 #0e1117 -
+09 25-80 #ffffff #0e1117 -
+10 0-22 #ffffff #0e1117 -
+10 22-25 #2c3444 #0e1117 -
+10 25-80 #ffffff #0e1117 -
+11 0-22 #ffffff #0e1117 -
+11 22-25 #2c3444 #0e1117 -
+11 25-80 #ffffff #0e1117 -
+12 0-22 #ffffff #0e1117 -
+12 22-25 #2c3444 #0e1117 -
+12 25-80 #ffffff #0e1117 -
+13 0-22 #ffffff #0e1117 -
+13 22-25 #2c3444 #0e1117 -
+13 25-80 #ffffff #0e1117 -
+14 0-22 #ffffff #0e1117 -
+14 22-25 #2c3444 #0e1117 -
+14 25-80 #ffffff #0e1117 -
+15 0-22 #ffffff #0e1117 -
+15 22-25 #2c3444 #0e1117 -
+15 25-80 #ffffff #0e1117 -
+16 0-22 #ffffff #0e1117 -
+16 22-25 #2c3444 #0e1117 -
+16 25-80 #ffffff #0e1117 -
+17 0-22 #ffffff #0e1117 -
+17 22-25 #2c3444 #0e1117 -
+17 25-80 #ffffff #0e1117 -
+18 0-22 #ffffff #0e1117 -
+18 22-25 #2c3444 #0e1117 -
+18 25-80 #ffffff #0e1117 -
+19 0-22 #ffffff #0e1117 -
+19 22-25 #2c3444 #0e1117 -
+19 25-80 #ffffff #0e1117 -
+20 0-22 #ffffff #0e1117 -
+20 22-25 #2c3444 #0e1117 -
+20 25-80 #ffffff #0e1117 -
+21 0-22 #ffffff #0e1117 -
+21 22-25 #2c3444 #0e1117 -
+21 25-80 #ffffff #0e1117 -
+22 0-22 #ffffff #0e1117 -
+22 22-25 #2c3444 #0e1117 -
+22 25-80 #ffffff #0e1117 -
+23 0-80 #ffffff #0e1117 -
+24 0-80 #ffffff #0e1117 -
+25 0-2 #ffffff #0e1117 -
+25 2-78 #161b24 #0e1117 -
+25 78-80 #ffffff #0e1117 -
+26 0-2 #ffffff #0e1117 -
+26 2-6 #e6eaf0 #161b24 -
+26 6-78 #ffffff #161b24 -
+26 78-80 #ffffff #0e1117 -
+27 0-2 #ffffff #0e1117 -
+27 2-78 #161b24 #0e1117 -
+27 78-80 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-17 #e6eaf0 #444951 b
+28 17-18 #8b95a7 #161b24 -
+28 18-43 #e6eaf0 #1e2430 -
+28 43-79 #8b95a7 #161b24 -
+28 79-80 #ffffff #0e1117 -
+29 0-2 #ffffff #0e1117 -
+29 2-11 #e6eaf0 #293140 b
+29 11-21 #8b95a7 #0e1117 -
+29 21-27 #e6eaf0 #293140 b
+29 27-37 #8b95a7 #0e1117 -
+29 37-39 #e6eaf0 #293140 b
+29 39-50 #8b95a7 #0e1117 -
+29 50-53 #e6eaf0 #293140 b
+29 53-58 #8b95a7 #0e1117 -
+29 58-80 #ffffff #0e1117 -

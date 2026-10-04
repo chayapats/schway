@@ -1,0 +1,123 @@
+schway-screen 1
+screen resumed-review
+title Resumed review
+description After resume there is no live turn record, so review lists current Git changes and the selected file's current diff.
+variant light-50
+size 50x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ***/home/demo on main
+
+ Review · current changes
+
+ Current working tree
+ › clamp.ts                              unstaged
+   notes.md                             untracked
+
+ Current diff · clamp.ts
+ Unstaged · index → worktree
+   1   export function clamp(n: number, lo: numb
+ er, hi: number) {
+   2 -   return Math.max(lo, n);
+   2 +   return Math.min(hi, Math.max(lo, n));
+   3   }
+
+
+
+
+
+
+
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ ›
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-…    ctx ~18
+ ↑↓ files · PgUp/PgDn scroll
+ Ctrl+R reload · F2 details · Esc back
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-29 #545e6c #ecedea -
+00 29-33 #6a3fb0 #ecedea -
+00 33-50 #ffffff #ecedea -
+01 0-50 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-25 #1d232c #f7f7f4 -
+02 25-50 #ffffff #f7f7f4 -
+03 0-50 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-21 #0a5894 #f7f7f4 b
+04 21-50 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-49 #1d232c #f7f7f4 -
+05 49-50 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-49 #1d232c #f7f7f4 -
+06 49-50 #ffffff #f7f7f4 -
+07 0-50 #ffffff #f7f7f4 -
+08 0-1 #ffffff #f7f7f4 -
+08 1-24 #0a5894 #f7f7f4 b
+08 24-50 #ffffff #f7f7f4 -
+09 0-1 #ffffff #f7f7f4 -
+09 1-28 #0a5894 #f7f7f4 b
+09 28-50 #ffffff #f7f7f4 -
+10 0-1 #ffffff #f7f7f4 -
+10 1-48 #1d232c #f7f7f4 -
+10 48-50 #ffffff #f7f7f4 -
+11 0-1 #ffffff #f7f7f4 -
+11 1-18 #1d232c #f7f7f4 -
+11 18-50 #ffffff #f7f7f4 -
+12 0-1 #ffffff #f7f7f4 -
+12 1-32 #a61f16 #f7f7f4 -
+12 32-50 #ffffff #f7f7f4 -
+13 0-1 #ffffff #f7f7f4 -
+13 1-46 #19612f #f7f7f4 -
+13 46-50 #ffffff #f7f7f4 -
+14 0-1 #ffffff #f7f7f4 -
+14 1-8 #1d232c #f7f7f4 -
+14 8-50 #ffffff #f7f7f4 -
+15 0-50 #ffffff #f7f7f4 -
+16 0-50 #ffffff #f7f7f4 -
+17 0-50 #ffffff #f7f7f4 -
+18 0-50 #ffffff #f7f7f4 -
+19 0-50 #ffffff #f7f7f4 -
+20 0-50 #ffffff #f7f7f4 -
+21 0-50 #ffffff #f7f7f4 -
+22 0-50 #ffffff #f7f7f4 -
+23 0-50 #ffffff #f7f7f4 -
+24 0-1 #ffffff #f7f7f4 -
+24 1-49 #ecedea #f7f7f4 -
+24 49-50 #ffffff #f7f7f4 -
+25 0-1 #ffffff #f7f7f4 -
+25 1-5 #0a5894 #ecedea -
+25 5-49 #ffffff #ecedea -
+25 49-50 #ffffff #f7f7f4 -
+26 0-1 #ffffff #f7f7f4 -
+26 1-49 #ecedea #f7f7f4 -
+26 49-50 #ffffff #f7f7f4 -
+27 0-1 #545e6c #ecedea -
+27 1-7 #1d232c #ecedea b
+27 7-8 #545e6c #ecedea -
+27 8-17 #19612f #d3dcd4 b
+27 17-18 #545e6c #ecedea -
+27 18-39 #1d232c #e1e3df -
+27 39-49 #545e6c #ecedea -
+27 49-50 #ffffff #f7f7f4 -
+28 0-1 #ffffff #f7f7f4 -
+28 1-3 #1d232c #caced3 b
+28 3-12 #545e6c #f7f7f4 -
+28 12-21 #1d232c #caced3 b
+28 21-28 #545e6c #f7f7f4 -
+28 28-50 #ffffff #f7f7f4 -
+29 0-1 #ffffff #f7f7f4 -
+29 1-7 #1d232c #caced3 b
+29 7-17 #545e6c #f7f7f4 -
+29 17-19 #1d232c #caced3 b
+29 19-30 #545e6c #f7f7f4 -
+29 30-33 #1d232c #caced3 b
+29 33-38 #545e6c #f7f7f4 -
+29 38-50 #ffffff #f7f7f4 -

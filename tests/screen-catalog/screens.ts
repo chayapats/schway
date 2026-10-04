@@ -69,6 +69,8 @@ const inspection = async (ui: ScreenHarness, focus: "none" | "code" | "tool") =>
 };
 const openDetails = (ui: ScreenHarness) => ui.mockInput.pressKey("\u001bOQ");
 const reviewReady = (s: TuiSnapshot) => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0;
+const resumedReady = (s: TuiSnapshot) => s.changeReview?.scope?.kind === "workspace" && !s.changeReview.loading && s.changeReview.rows.length > 0 && !s.changeReview.rows.some(row => row.text.startsWith("Loading current"));
+const openResumedReview = async (ui: ScreenHarness) => { ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); };
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -166,6 +168,21 @@ export const SCREENS: readonly Screen[] = [
     await writeFile(join(ui.root, "clamp.ts"), `${await readFile(join(ui.root, "clamp.ts"), "utf8")}export default clamp;\n`);
     ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush();
   }, ready: s => reviewReady(s) && s.changeReview!.rows.filter(row => row.comparison).length === 2 },
+  { id: "resumed-review", title: "Resumed review", description: "After resume there is no live turn record, so review lists current Git changes and the selected file's current diff.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.files.length === 2 && s.changeReview!.rows.some(row => row.comparison) },
+  { id: "resumed-review-details", title: "Resumed review details", description: "F2 explains that previous turn details are unavailable and names the current workspace and branch.", noColor: true, drive: async ui => {
+    await openResumedReview(ui); await ui.waitFor(s => resumedReady(s) && s.changeReview!.files.length === 2); openDetails(ui);
+  }, ready: s => resumedReady(s) && s.changeReview!.showingDetails },
+  { id: "resumed-review-clean", title: "Resumed review, clean tree", description: "A clean working tree after resume says there are no current changes without implying earlier turns changed nothing.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("No current changes") },
+  { id: "resumed-review-no-git", title: "Resumed review outside Git", description: "Outside Git, review names why current changes are unavailable and how to go back.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Not a Git workspace") },
+  { id: "resumed-review-off", title: "Resumed review, tracking off", description: "With change tracking off, review reads no Git state and names the setting that enables it.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Change tracking is off") },
+  { id: "resumed-review-unavailable", title: "Resumed review, workspace missing", description: "A saved workspace removed after resume names the directory to restore and the reload key.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Workspace unavailable") },
+  { id: "resumed-review-git-failed", title: "Resumed review, Git failed", description: "When Git cannot read the repository, review shows Git's reason and the reload key instead of calling it non-Git.", noColor: true, drive: openResumedReview,
+    ready: s => resumedReady(s) && s.changeReview!.rows[0]!.text.startsWith("Current changes unavailable") },
   { id: "undo-preview", title: "Undo preview", description: "Undo previews file restores, a deletion and a change without saved undo.", drive: async ui => {
     await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
     await writeFile(join(ui.root, "README.md"), "Changes made afterwards.\n");
@@ -206,7 +223,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
-  if (screen.id === "review-multi-turn") variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
+  if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(

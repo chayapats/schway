@@ -2,11 +2,12 @@ import { formatCount } from "../text/format.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { openUndoStore } from "../undo/store.ts";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { stat } from "node:fs/promises";
 import { DEFAULT_GIT_CHANGE_TRACKING, type GitChangeTrackingMode } from "../config/config.ts";
 import { captureGitSnapshot, compareGitSnapshots, formatGitComparison, formatGitDiffPreview, formatGitStatus, getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import type { ChangeReview, TurnOutcome } from "./controller-types.ts";
 import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
-import { CURRENT_DIFF_FAILED, DETECTED_FILE_NOTE, LOADING_CURRENT_DIFF, pathStateNote, reviewScopeDetails, type ReviewScope } from "./review-scope.ts";
+import { CURRENT_DIFF_FAILED, DETECTED_FILE_NOTE, LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_HEADING, WORKSPACE_REVIEW_STATES, gitFileState, workspacePartialNote, pathStateNote, reviewScopeDetails, workspaceFailedRows, workspaceReviewDetails, workspaceUnavailableRows, type ReviewScope, type WorkspaceReviewRead } from "./review-scope.ts";
 import { buildOutcomeDetails } from "./outcome-details.ts";
 import { BranchesLayer } from "./controller-branches.ts";
 
@@ -105,7 +106,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     return true;
   }
 
-  /** Open read-only review of the retained turn, loading current content only on request. */
+  /** Open read-only review of the retained turn, or of current Git changes when none is held, loading content only on request. */
   async openChangeReview(): Promise<boolean> {
     return this.loadChangeReview();
   }
@@ -123,11 +124,7 @@ export abstract class ChangesLayer extends BranchesLayer {
     const generation = ++this.reviewGeneration;
     const outcome = this.snapshot().outcome;
     const ordinal = this.session.items.filter(item => item.type === "user").findIndex(item => item.id === this.outcomeUserId) + 1;
-    if (!outcome) {
-      this.reviewContext = undefined;
-      this.changeReview = { heading: "No turn to review yet", files: [], selected: 0, detail: "", rows: [], details: "", showingDetails: false, loading: false };
-      return true;
-    }
+    if (!outcome) return this.loadWorkspaceReview(generation, prior);
     const scope: ReviewScope = { kind: "turn", turn: ordinal };
     // The observed turn record is the list; current Git state can explain each file but never replaces it.
     const files = outcome.files.map(file => ({ ...file }));
@@ -170,10 +167,64 @@ export abstract class ChangesLayer extends BranchesLayer {
     return true;
   }
 
-  /** Toggle the shared turn evidence in place without closing review or changing its file selection. */
+  /** List current Git changes for the active workspace without any live turn record, fencing each read like turn review. */
+  private async loadWorkspaceReview(generation: number, prior?: ChangeReview): Promise<boolean> {
+    const scope: ReviewScope = { kind: "workspace" };
+    const reload = prior?.scope?.kind === "workspace" ? prior : undefined;
+    const root = this.workspace?.root;
+    // A reload keeps the earlier list visible but marks content as pending, so nothing older looks live.
+    const review: ChangeReview = { heading: WORKSPACE_REVIEW_HEADING, scope, files: reload ? reload.files.map(file => ({ ...file })) : [], selected: reload?.selected ?? 0,
+      detail: WORKSPACE_REVIEW_STATES.loading, rows: [{ sign: " ", text: WORKSPACE_REVIEW_STATES.loading }], details: "",
+      showingDetails: reload?.showingDetails ?? false, loading: true, ...(reload?.currentPath === undefined ? {} : { currentPath: reload.currentPath }) };
+    const context: ReviewContext = { review, ready: false, queries: [], identity: this.reviewIdentity() };
+    this.changeReview = review;
+    this.reviewContext = context;
+    const describe = (read: WorkspaceReviewRead) => { review.details = redactSecrets(workspaceReviewDetails(read), this.secrets); };
+    const settle = (rows: readonly string[], read: WorkspaceReviewRead) => {
+      describe(read);
+      review.files = [];
+      review.selected = 0;
+      review.currentPath = undefined;
+      review.rows = rows.map(text => ({ sign: " " as const, text: redactSecrets(text, this.secrets) }));
+      review.detail = review.rows.map(row => row.text).join("\n");
+      review.loading = false;
+      context.ready = true;
+      return true;
+    };
+    // Off mode reads nothing at all, so opening review after resume never inspects the workspace.
+    if (this.gitChangeTracking() === "off") return settle(WORKSPACE_REVIEW_STATES.off, { kind: "off" });
+    if (root === undefined) return settle(WORKSPACE_REVIEW_STATES.noWorkspace, { kind: "no-workspace" });
+    describe({ kind: "loading", root });
+    const available = await stat(root).then(info => info.isDirectory(), () => false);
+    if (!this.reviewCurrent(context, generation)) return false;
+    if (!available) return settle(workspaceUnavailableRows(root), { kind: "unavailable", root });
+    const status = await inspectGitStatus(root);
+    if (!this.reviewCurrent(context, generation)) return false;
+    if ("error" in status) return settle(workspaceFailedRows(status.error), { kind: "failed", root });
+    if (!status.isGit) return settle(WORKSPACE_REVIEW_STATES.nonGit, { kind: "non-git", root });
+    const read: WorkspaceReviewRead = { kind: "read", root: status.root, branch: status.branch, detached: status.detached, shown: status.files.length, total: status.totalFiles };
+    if (!status.files.length) return settle(WORKSPACE_REVIEW_STATES.clean, read);
+    describe(read);
+    review.files = status.files.map(file => ({ path: file.path, source: "git" as const, state: gitFileState(file) }));
+    // A partial list says so in the always-visible heading, matching the /changes status cap.
+    const partial = workspacePartialNote(review.files.length, status.totalFiles);
+    if (partial) review.heading = `${WORKSPACE_REVIEW_HEADING} · ${partial}`;
+    context.queries = review.files.map(file => file.path);
+    context.gitRoot = status.root;
+    // Keep the selected path across reloads when Git still lists it; otherwise clamp to the new list.
+    const kept = reload?.currentPath === undefined ? -1 : review.files.findIndex(file => file.path === reload.currentPath);
+    review.selected = kept >= 0 ? kept : Math.min(review.selected, review.files.length - 1);
+    context.ready = true;
+    review.loading = false;
+    await this.loadReviewFile(context, generation);
+    return true;
+  }
+
+  /** Toggle review Details in place without closing review or changing its file selection; scoped reviews work without a live turn, undo-panel reviews need one. */
   toggleReviewDetails(): boolean {
-    if (!this.changeReview || !this.snapshot().outcome) return false;
-    this.changeReview.showingDetails = !this.changeReview.showingDetails;
+    const review = this.changeReview;
+    if (!review || !review.scope && !(review.fromUndo && this.snapshot().outcome)) return false;
+    review.showingDetails = !review.showingDetails;
     return true;
   }
 

@@ -410,6 +410,13 @@ test("a shell-only change lists its path read-only with a reachable review and l
       for (const claim of [/\bshell\b/i, /\bdetected\b/, /Git snapshot/, /Files from turn/]) expect(review).not.toMatch(claim);
       expect(ui.controller.snapshot().changeReview?.rows.map(row => row.text).join("\n")).not.toMatch(/shell|Git snapshot/);
       expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "generated" }));
+      // With a live turn, F2 swaps in the undo-panel review's own Details and back; Esc first leaves Details.
+      expect(review).toContain("F2 details");
+      ui.mockInput.pressKey("\u001bOQ"); await ui.settle();
+      expect(ui.controller.snapshot().changeReview?.showingDetails).toBe(true);
+      expect(ui.captureCharFrame()).toContain("Review details");
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(ui.controller.snapshot().changeReview).toMatchObject({ fromUndo: true, showingDetails: false });
       ui.mockInput.pressEscape(); await ui.settle();
       expect(ui.controller.snapshot().changeReview).toBeUndefined();
       expect(ui.controller.snapshot().undoPreview?.files.map(file => file.path)).toEqual(["generated.txt"]);

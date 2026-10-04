@@ -319,22 +319,32 @@ async function worktreeHashes(root: string, paths: readonly string[]): Promise<M
   return hashes;
 }
 
-/** Resolve the canonical toplevel or report a non-Git workspace without blocking. */
-async function resolveGitRoot(root: string): Promise<{ ok: true; toplevel: string } | { ok: false; reason: string }> {
+/**
+ * Resolve the canonical toplevel without blocking. `notRepository` is true only when Git reports that no
+ * repository encloses `root`; ownership, permission and missing-binary failures are inspection errors instead.
+ */
+async function resolveGitRoot(root: string): Promise<{ ok: true; toplevel: string } | { ok: false; notRepository: boolean; reason: string }> {
   const result = await runGit(root, ["rev-parse", "--show-toplevel"]);
   if (result.exitCode !== 0) {
-    const detail = result.stderr.trim() || result.stdout.trim() || "not a git repository";
-    return { ok: false, reason: detail.split("\n")[0] ?? "not a git repository" };
+    const output = result.stderr.trim() || result.stdout.trim();
+    const notRepository = output === "" || /not a git repository/i.test(output);
+    const reason = (output.split("\n")[0] ?? "").replace(/^(fatal|error):\s*/i, "").trim().slice(0, 500) || "not a git repository";
+    return { ok: false, notRepository, reason };
   }
   const toplevel = result.stdout.trim().split("\n")[0]?.trim();
-  if (!toplevel) return { ok: false, reason: "git toplevel is empty" };
+  if (!toplevel) return { ok: false, notRepository: false, reason: "git toplevel is empty" };
   return { ok: true, toplevel };
 }
 
-/** Read branch, HEAD, dirty state, and bounded changed files without writing anything. */
+/** Error for a repository lookup that failed for a reason other than there being no repository. */
+function gitInspectionFailure(reason: string): string {
+  return `Git inspection failed: ${reason}`;
+}
+
+/** Read branch, HEAD, dirty state, and bounded changed files without writing anything; only a missing repository is non-Git, other lookup failures are errors. */
 export async function inspectGitStatus(root: string): Promise<GitStatusSummary | { error: string }> {
   const resolved = await resolveGitRoot(root);
-  if (!resolved.ok) return { isGit: false, root } as GitStatusSummary;
+  if (!resolved.ok) return resolved.notRepository ? { isGit: false, root } as GitStatusSummary : { error: gitInspectionFailure(resolved.reason) };
   const toplevel = resolved.toplevel;
   const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"]);
   if (status.exitCode !== 0) {
@@ -378,7 +388,7 @@ export async function inspectGitStatus(root: string): Promise<GitStatusSummary |
 /** Capture a snapshot with content hashes sufficient to distinguish pre-existing dirt from turn edits. */
 export async function captureGitSnapshot(root: string): Promise<GitSnapshot | { error: string }> {
   const resolved = await resolveGitRoot(root);
-  if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}). Coding continues; use /changes in a Git checkout for inspection.` };
+  if (!resolved.ok) return { error: resolved.notRepository ? `Not a Git workspace (${resolved.reason}). Coding continues; use /changes in a Git checkout for inspection.` : gitInspectionFailure(resolved.reason) };
   const toplevel = resolved.toplevel;
   const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"]);
   if (status.exitCode !== 0) {
@@ -516,7 +526,7 @@ export function formatGitComparison(before: GitSnapshot, after: GitSnapshot, com
 export async function getGitDiffPreview(root: string, path?: string, maxChars: number = MAX_GIT_DIFF_CHARS): Promise<GitDiffPreview | { error: string }> {
   maxChars = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : MAX_GIT_DIFF_CHARS;
   const resolved = await resolveGitRoot(root);
-  if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}).` };
+  if (!resolved.ok) return { error: resolved.notRepository ? `Not a Git workspace (${resolved.reason}).` : gitInspectionFailure(resolved.reason) };
   const toplevel = resolved.toplevel;
   if (path !== undefined) {
     const inside = relative(toplevel, resolve(toplevel, path));
