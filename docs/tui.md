@@ -434,9 +434,11 @@ result records such files as not reverted, and the model is told they could not
 be reverted, never that they changed.
 
 **Alt+R** in any undo panel opens `Review · current changes`, the current diff for
-each listed workspace path, including after restart. Paths without saved undo
-appear there without a `shell` badge or shell attribution. Esc returns to the same undo
-panel; Esc again closes it and restores the draft. Reviewing, selecting and
+each listed workspace path, including after restart. The list is titled
+`Files from undo panel` and the diff `Current diff · <path>`; no row carries a
+`detected` badge or a source note, because the undo panel does not say which tool
+or process changed a path. Up/Down selects a file and **Ctrl+R** rereads Git for
+the same paths. Esc returns to the same undo panel; Esc again closes it and restores the draft. Reviewing, selecting and
 closing never write files, Git, the session or undo data. Undo never runs inverse
 shell commands, `git reset` or `git checkout`.
 

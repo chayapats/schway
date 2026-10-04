@@ -21,7 +21,7 @@ import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
-import { undoHeading, undoHint, undoRows } from "./undo-view.ts";
+import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -875,34 +875,36 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           rows: undoRows(undo), showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
         const stacked = !!undo || renderer.width < 80;
         const scope = undo ? undefined : snapshot.changeReview!.scope;
-        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: turnFileBadge(file) }));
-        const filesTitle = scope ? reviewFilesLabel(scope) : "";
+        // A review opened from the undo panel lists that panel's paths with current-diff titles but no turn source badges.
+        const fromUndo = !undo && !!snapshot.changeReview!.fromUndo, titled = !!scope || fromUndo;
+        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: fromUndo ? "" : turnFileBadge(file) }));
+        const filesTitle = scope ? reviewFilesLabel(scope) : fromUndo ? UNDO_REVIEW_FILES : "";
         const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), Math.max(20, Bun.stringWidth(filesTitle)));
         const fileWidth = stacked ? width : Math.min(Math.floor(width * 0.4), longestFile);
         reviewHeading.content = safe(review.heading);
         reviewColumns.flexDirection = stacked ? "column" : "row";
         // Turn evidence keeps its own title and empty state; current content is titled by the path it was loaded for.
-        reviewFilesTitle.visible = reviewDiffTitle.visible = !!scope;
-        if (scope) {
+        reviewFilesTitle.visible = reviewDiffTitle.visible = titled;
+        if (titled) {
           const currentPath = snapshot.changeReview!.currentPath;
           reviewFilesTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(filesTitle, fileWidth)))]);
           const titleWidth = stacked ? width : Math.max(1, width - fileWidth - 3);
           // Truncate the path from the left so the file name stays visible beside the fixed label.
-          const diffTitle = review.showingDetails ? reviewDetailsLabel(scope) : currentPath === undefined ? currentDiffLabel()
+          const diffTitle = review.showingDetails ? scope ? reviewDetailsLabel(scope) : UNDO_REVIEW_DETAILS : currentPath === undefined ? currentDiffLabel()
             : currentDiffLabel(fitPathStart(safe(currentPath), titleWidth - Bun.stringWidth(currentDiffLabel(""))));
           reviewDiffTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(diffTitle, titleWidth)))]);
           if (!fileRows.length) fileRows.push({ path: "None observed", badge: "" });
         }
         reviewFilesColumn.width = fileWidth;
-        reviewFilesColumn.marginBottom = stacked && scope ? 1 : 0;
+        reviewFilesColumn.marginBottom = stacked && titled ? 1 : 0;
         reviewFiles.visible = fileRows.length > 0;
         reviewFiles.width = fileWidth;
-        reviewFiles.height = stacked ? Math.min(fileRows.length, Math.max(1, Math.floor((renderer.height - 8) / 3))) : scope ? "auto" : "100%";
-        reviewFiles.flexGrow = !stacked && scope ? 1 : 0;
-        reviewFiles.marginBottom = stacked && fileRows.length && !scope ? 1 : 0;
+        reviewFiles.height = stacked ? Math.min(fileRows.length, Math.max(1, Math.floor((renderer.height - 8) / 3))) : titled ? "auto" : "100%";
+        reviewFiles.flexGrow = !stacked && titled ? 1 : 0;
+        reviewFiles.marginBottom = stacked && fileRows.length && !titled ? 1 : 0;
         reviewList.content = fileRows.map((row, index) => {
-          if (!review.files.length && scope) return `  ${fitLine(row.path, fileWidth - 2)}`;
-          const fitRow = (text: string, columns: number) => scope ? fitPathStart(text, columns) : fitLine(text, columns);
+          if (!review.files.length && titled) return `  ${fitLine(row.path, fileWidth - 2)}`;
+          const fitRow = (text: string, columns: number) => titled ? fitPathStart(text, columns) : fitLine(text, columns);
           if (!row.badge) return `${index === review.selected ? "›" : " "} ${fitRow(row.path, fileWidth - 2)}`;
           const pathWidth = Math.max(1, fileWidth - 4 - Bun.stringWidth(row.badge));
           const path = fitRow(row.path, pathWidth);
@@ -1194,7 +1196,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = undoHint(snapshot.undoPreview, width);
       } else if (panelMode === "review") {
         const navigation = snapshot.changeReview?.showingDetails ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
-        const reload = snapshot.changeReview?.scope && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
+        const reload = (snapshot.changeReview?.scope || snapshot.changeReview?.fromUndo) && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
         const actions = `${reload}${snapshot.outcome ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
         // Keep each key with its action when the review hint needs a second row.
         const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
@@ -1394,7 +1396,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (name === "escape") { controller.closeChangeReview(); handled(); return; }
       // Reload rereads Git on request only; the turn list and its counts stay as recorded.
-      if (key.ctrl && name === "r" && !key.meta && !key.option && !snapshot.changeReview.showingDetails && snapshot.changeReview.scope) {
+      if (key.ctrl && name === "r" && !key.meta && !key.option && !snapshot.changeReview.showingDetails && (snapshot.changeReview.scope || snapshot.changeReview.fromUndo)) {
         void controller.refreshChangeReview().then(refresh, fail); reviewDiff.scrollTo(0); handled(); return;
       }
       if (!snapshot.changeReview.showingDetails && (name === "up" || name === "down")) { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewDiff.scrollTo(0); }

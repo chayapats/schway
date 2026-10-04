@@ -2,7 +2,9 @@ import { unlink } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import type { TurnUndoRecord } from "../conversation/types.ts";
 import { formatCount } from "../text/format.ts";
-import { diffLines } from "../text/diff.ts";
+import { diffLines, parseGitDiff, type GitDiffRow } from "../text/diff.ts";
+import { redactSecrets } from "../auth/secrets.ts";
+import { getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
 import { assertFileUnchanged, FileChangedError, isErrno, observeFile, writeFileAtomically, type FileObservation } from "../tools/fs.ts";
 import { displayToolPath } from "../tools/path.ts";
 import { undoFailureReason } from "../undo/errors.ts";
@@ -11,6 +13,22 @@ import { buildUndoNote, formatUndoResult } from "../undo/record.ts";
 import { equalUndoHash, hashUndoBytes, openUndoStore, type UndoManifest, type UndoStore } from "../undo/store.ts";
 import { ChangesLayer } from "./controller-changes.ts";
 import type { ChangeReview, UndoPreview, UndoPreviewFile } from "./controller-types.ts";
+import { CURRENT_DIFF_FAILED, LOADING_CURRENT_DIFF, pathStateNote } from "./review-scope.ts";
+
+/** Review opened from the undo panel: its paths, Git query paths and the identity it began in. */
+interface UndoReviewContext {
+  review: ChangeReview;
+  /** Canonical path per listed file, kept for reload. */
+  absolute: string[];
+  /** Literal Git query path per listed file, relative to `gitRoot` or absolute when outside it. */
+  queries: string[];
+  /** False until the Git availability check settles; selection waits so paths pair with the right root. */
+  ready: boolean;
+  gitRoot?: string;
+  /** Explanation shown for every file when current Git content cannot be read. */
+  unavailable?: string;
+  identity: string;
+}
 
 /** Preview and apply the latest eligible accepted turn's file undo without rewinding history. */
 export abstract class UndoLayer extends ChangesLayer {
@@ -19,6 +37,8 @@ export abstract class UndoLayer extends ChangesLayer {
   private undoObservations = new WeakMap<UndoPreviewFile, FileObservation>();
   /** The undo panel that review replaced, restored when that review closes. */
   private undoReturn?: UndoPreview;
+  /** Git query state for a review opened from the undo panel; turn review keeps its own context. */
+  private undoReview?: UndoReviewContext;
 
   /** Open an undo preview from durable data on the active ancestry, refusing arguments and busy execution. */
   async undoCommand(args: string): Promise<boolean> {
@@ -71,6 +91,7 @@ export abstract class UndoLayer extends ChangesLayer {
   /** Close review and return to the undo panel that opened it, if any, without rereading or writing anything. */
   override closeChangeReview(): void {
     super.closeChangeReview();
+    this.undoReview = undefined;
     const back = this.undoReturn;
     this.undoReturn = undefined;
     if (back && !this.disposed) this.undoPreview = back;
@@ -81,23 +102,102 @@ export abstract class UndoLayer extends ChangesLayer {
     const preview = this.undoPreview;
     if (!preview || preview.result || this.undoBusy || this.running || this.disposed || !this.workspace) return false;
     const root = this.workspace.root, seen = new Set<string>();
-    const files: ChangeReview["files"] = [];
+    const files: ChangeReview["files"] = [], absolute: string[] = [];
     for (const row of preview.files) {
       const path = relative(root, row.absolutePath);
       if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path) || seen.has(path)) continue;
-      // Read-only rows are observations, so review shows no shell attribution for them.
-      seen.add(path); files.push({ path, source: row.action === "shell" ? "observed" : "tool" });
+      // Rows keep the undo panel's own split; an undo-panel review never shows a source badge or source note.
+      seen.add(path); files.push({ path, source: row.action === "shell" ? "shell" : "tool" }); absolute.push(row.absolutePath);
     }
     this.closeChangeReview();
     this.undoPreview = undefined;
     this.undoReturn = preview;
-    const review: ChangeReview = { heading: "Review · current changes", files, selected: 0, detail: "", rows: [], showingDetails: false, loading: false,
-      details: "Review shows current working-tree diffs for paths in the undo panel. Undo restores only edit and write changes with saved copies; other paths stay as they are. Changes seen during a turn may include edits made outside Schway." };
+    return this.loadUndoReview(files, absolute);
+  }
+
+  /** Move through an undo-panel review's paths, or defer to turn review when that is open. */
+  override async selectReviewFile(delta: number): Promise<void> {
+    const context = this.undoReview, review = this.changeReview;
+    if (!context || context.review !== review) return super.selectReviewFile(delta);
+    if (!review.files.length || !context.ready || this.disposed) return;
+    review.selected = (review.selected + delta + review.files.length) % review.files.length;
+    await this.loadUndoReviewFile(context, ++this.reviewGeneration);
+  }
+
+  /** Reread Git state for an undo-panel review, keeping its paths and selection, or defer to turn review. */
+  override async refreshChangeReview(): Promise<boolean> {
+    const context = this.undoReview;
+    if (!context || context.review !== this.changeReview) return super.refreshChangeReview();
+    if (this.disposed || this.running) return false;
+    return this.loadUndoReview(context.review.files, context.absolute, context.review);
+  }
+
+  /** Open or reload the undo-panel review, fencing every Git read to this review, generation and identity. */
+  private async loadUndoReview(files: ChangeReview["files"], absolute: string[], prior?: ChangeReview): Promise<boolean> {
+    const generation = ++this.reviewGeneration;
+    const review: ChangeReview = { heading: "Review · current changes", fromUndo: true, files: files.map(file => ({ ...file })),
+      selected: prior && prior.selected < files.length ? prior.selected : 0, detail: "", rows: [], showingDetails: prior?.showingDetails ?? false, loading: true,
+      details: "Review shows current working-tree diffs for paths in the undo panel. Undo restores only edit and write changes with saved copies; other paths stay as they are. Changes seen during a turn may include edits made outside Schway. Current diff is read from Git when review opens, when you select a file and when Ctrl+R reloads." };
+    const context: UndoReviewContext = { review, absolute, queries: [...absolute], ready: false, identity: this.undoReviewIdentity() };
     this.changeReview = review;
-    const unavailable = this.gitChangeTracking() === "off" ? "Change tracking off. No Git state read." : !files.length ? "No workspace files to review." : "";
-    if (unavailable) { review.detail = unavailable; review.rows = [{ sign: " ", text: unavailable }]; return true; }
-    await this.selectReviewFile(0);
+    this.undoReview = context;
+    if (this.gitChangeTracking() === "off") context.unavailable = "Change tracking off. No Git state read.";
+    else if (!files.length) context.unavailable = "No workspace files to review.";
+    else {
+      const status = await inspectGitStatus(this.workspace!.root);
+      if (!this.undoReviewCurrent(context, generation)) return false;
+      if ("error" in status) context.unavailable = `${CURRENT_DIFF_FAILED}\n${status.error}`;
+      else if (!status.isGit) context.unavailable = "Non-Git workspace. Current Git diff unavailable.";
+      else {
+        context.gitRoot = status.root;
+        context.queries = absolute.map(path => {
+          const inside = relative(status.root, path);
+          return inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside) ? path : inside;
+        });
+      }
+    }
+    context.ready = true;
+    review.loading = false;
+    if (!files.length) {
+      review.detail = redactSecrets(context.unavailable ?? "", this.secrets);
+      review.rows = [{ sign: " ", text: review.detail }];
+      return true;
+    }
+    await this.loadUndoReviewFile(context, generation);
     return true;
+  }
+
+  /** Load the selected path's current diff, discarding the result once selection, review or identity moves on. */
+  private async loadUndoReviewFile(context: UndoReviewContext, generation: number): Promise<void> {
+    const review = context.review, index = review.selected, file = review.files[index]!;
+    const show = (rows: GitDiffRow[], loading = false) => {
+      review.rows = rows.map(row => ({ ...row, text: redactSecrets(row.text, this.secrets) }));
+      review.detail = review.rows.map(row => row.line === undefined ? row.text : `${row.line} ${row.sign} ${row.text}`).join("\n");
+      review.loading = loading;
+    };
+    review.currentPath = file.path;
+    if (context.unavailable !== undefined || context.gitRoot === undefined) {
+      show((context.unavailable ?? "").split("\n").map(text => ({ sign: " " as const, text })));
+      return;
+    }
+    // Clear earlier rows before awaiting so a pending reload never presents older content as current.
+    show([{ sign: " ", text: LOADING_CURRENT_DIFF }], true);
+    const preview = await getGitDiffPreview(context.gitRoot, context.queries[index]!);
+    if (!this.undoReviewCurrent(context, generation) || review.selected !== index || review.currentPath !== file.path) return;
+    if ("error" in preview) show([{ sign: " ", text: CURRENT_DIFF_FAILED }, { sign: " ", text: preview.error }]);
+    else if (preview.pathState) show([{ sign: " ", text: pathStateNote(preview.pathState) }]);
+    else show(parseGitDiff(preview, { includeComparisons: true }));
+  }
+
+  /** Whether an async undo-review step still owns the open review, its generation and the conversation it began in. */
+  private undoReviewCurrent(context: UndoReviewContext, generation: number): boolean {
+    return !this.disposed && this.changeReview === context.review && this.undoReview === context && generation === this.reviewGeneration
+      && context.identity === this.undoReviewIdentity();
+  }
+
+  /** Conversation and workspace identity that a pending undo-review read must still match. */
+  private undoReviewIdentity(): string {
+    return JSON.stringify([this.sessionId, this.session.rootId, this.session.activeBranchId, this.workspace?.root ?? null]);
   }
 
   /** Recheck each post-image and apply one durable undo outcome under the session's operation lease. */

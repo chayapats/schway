@@ -90,7 +90,7 @@ export interface TurnOutcome {
 /** Bounded read-only working-tree review; file contents are current, never a rollback preview. */
 export interface ChangeReview {
   heading: string;
-  files: ChangeReviewFile[];
+  files: TurnOutcome["files"];
   selected: number;
   detail: string;
   rows: GitDiffRow[];
@@ -101,10 +101,9 @@ export interface ChangeReview {
   scope?: ReviewScope;
   /** Listed path whose current Git content `rows` show, set together with `selected`. */
   currentPath?: string;
+  /** Paths came from the undo panel, not one turn's record; the list shows no source badges and `scope` stays unset. */
+  fromUndo?: true;
 }
-
-/** One reviewed path; `observed` paths were seen during a turn without claiming which tool changed them. */
-export type ChangeReviewFile = Omit<TurnOutcome["files"][number], "source"> & { source: TurnOutcome["files"][number]["source"] | "observed" };
 
 /** One file-tool diff, or a read-only `shell` row for a path without saved undo, with its action badge. */
 export interface UndoPreviewFile {

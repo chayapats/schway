@@ -401,10 +401,14 @@ test("a shell-only change lists its path read-only with a reachable review and l
       ui.mockInput.pressEnter(); await ui.settle();
       expect(ui.controller.snapshot().undoPreview?.readOnlyStatus).toBe("No saved undo for these changes");
       ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
-      expect(ui.controller.snapshot().changeReview).toMatchObject({ heading: "Review · current changes", files: [{ path: "generated.txt", source: "observed" }] });
+      expect(ui.controller.snapshot().changeReview).toMatchObject({ heading: "Review · current changes", fromUndo: true, files: [{ path: "generated.txt" }] });
+      expect(ui.controller.snapshot().changeReview?.scope).toBeUndefined();
       const review = ui.captureCharFrame();
-      expect(review).toContain("Review · current changes"); expect(review).not.toContain("changed by shell"); expect(review).not.toMatch(/\bshell\b/i);
-      expect(ui.controller.snapshot().changeReview?.rows.map(row => row.text).join("\n")).not.toContain("shell");
+      expect(review).toContain("Review · current changes"); expect(review).toContain("Files from undo panel"); expect(review).toContain("Current diff · generated.txt");
+      expect(review).toContain("Ctrl+R reload");
+      // An undo-panel path carries no turn attribution: no shell, detected or snapshot claims.
+      for (const claim of [/\bshell\b/i, /\bdetected\b/, /Git snapshot/, /Files from turn/]) expect(review).not.toMatch(claim);
+      expect(ui.controller.snapshot().changeReview?.rows.map(row => row.text).join("\n")).not.toMatch(/shell|Git snapshot/);
       expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "generated" }));
       ui.mockInput.pressEscape(); await ui.settle();
       expect(ui.controller.snapshot().changeReview).toBeUndefined();
@@ -545,8 +549,8 @@ test("reload from durable manifests rebuilds the read-only list and review for t
       await ui.undo();
       expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "No saved undo for these changes", files: [{ path: "gen.txt", status: "turn 1 · no saved undo" }] });
       ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
-      expect(ui.controller.snapshot().changeReview?.files).toEqual([{ path: "gen.txt", source: "observed" }]);
-      expect(ui.captureCharFrame()).not.toMatch(/\bshell\b/i);
+      expect(ui.controller.snapshot().changeReview?.files.map(file => file.path)).toEqual(["gen.txt"]);
+      expect(ui.captureCharFrame()).not.toMatch(/\bshell\b|\bdetected\b|Git snapshot/i);
       expect(ui.controller.snapshot().changeReview?.rows).toContainEqual(expect.objectContaining({ sign: "+", text: "x" }));
       ui.mockInput.pressEscape(); await ui.settle(); ui.mockInput.pressEscape(); await ui.settle();
       expect(await ui.state()).toEqual(before);
@@ -554,6 +558,32 @@ test("reload from durable manifests rebuilds the read-only list and review for t
       await ui.undo();
       expect(ui.controller.snapshot().undoPreview).toBeUndefined();
       expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo");
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("Ctrl+R rereads an undo-panel review in place, and a stale read never reopens a closed review", async () => {
+  await withTempDir(async root => {
+    await mkdir(join(root, "work"));
+    await gitWorkspace(join(root, "work"), { "a.ts": "before" });
+    const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
+    try {
+      await ui.send("Generate");
+      await ui.undo();
+      ui.mockInput.pressKey("r", { meta: true }); await ui.waitFor(ui.reviewReady);
+      ui.mockInput.pressKey("down"); await ui.waitFor(ui.reviewReady);
+      await writeFile(join(ui.work, "gen.txt"), "y\n");
+      ui.mockInput.pressKey("r", { ctrl: true });
+      await ui.waitFor(() => !!ui.controller.snapshot().changeReview?.rows.some(row => row.sign === "+" && row.text === "y"));
+      expect(ui.controller.snapshot().changeReview).toMatchObject({ heading: "Review · current changes", fromUndo: true, selected: 0, currentPath: "gen.txt", files: [{ path: "gen.txt" }] });
+      expect(ui.controller.snapshot().changeReview?.scope).toBeUndefined();
+      // A reload still pending when review closes is discarded; Esc returns to the same undo panel.
+      const pending = ui.controller.refreshChangeReview();
+      ui.mockInput.pressEscape(); await ui.settle();
+      expect(await pending).toBe(false);
+      expect(ui.controller.snapshot().changeReview).toBeUndefined();
+      expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "No saved undo for these changes", files: [{ path: "gen.txt" }] });
+      expect(ui.records()).toEqual([]);
     } finally { await ui.dispose(); }
   });
 });

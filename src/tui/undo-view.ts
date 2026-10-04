@@ -23,3 +23,9 @@ export function undoRows(undo: UndoPreview): GitDiffRow[] {
     ...(undo.shellUnavailable ? [{ sign: " " as const, text: "Shell changes can't be detected here" }] : []),
     { sign: " ", text: `─ ${selected?.path ?? ""} ─` }, ...(selected?.rows ?? [])];
 }
+
+/** File-list title for a review opened from the undo panel, naming where its paths came from. */
+export const UNDO_REVIEW_FILES = "Files from undo panel";
+
+/** Content title while Details replaces the current diff in a review opened from the undo panel. */
+export const UNDO_REVIEW_DETAILS = "Review details";
