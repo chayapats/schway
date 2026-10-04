@@ -9,7 +9,8 @@ import { createContextManager } from "../src/context/manager.ts";
 import { createHistoryCollector, historyTurnIdentity, type HistoryObservation } from "../src/history/collector.ts";
 import { HISTORY_PAGE_SIZE, type HistoryTurnFinalize } from "../src/history/records.ts";
 import { historyFilePath, openHistoryStore, type HistoryStore } from "../src/history/store.ts";
-import { buildHistoryTimeline, historyUndoTarget } from "../src/history/timeline.ts";
+import { buildHistoryTimeline } from "../src/history/timeline.ts";
+import { collectUndoEvidence } from "../src/undo/evidence.ts";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory, type JsonlSession } from "../src/session/jsonl.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -197,10 +198,11 @@ test("pruned undo pre-images leave observed history truthful while undo becomes 
   const ctx = await setup();
   await turn(ctx, "Edit for undo", [{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "u.txt", content: "u\n" } }] }, { text: "ok" }]);
   const manifests = await openUndoStore({ home: ctx.home }).list(ctx.session.rootId);
-  expect(historyUndoTarget(ctx.session, manifests)).toBe(ctx.session.items[0]!.id);
+  const users = ctx.session.items.filter(item => item.type === "user").map(item => item.id);
+  expect(collectUndoEvidence(manifests, users, new Set()).target?.turnId).toBe(ctx.session.items[0]!.id);
   await pruneUndoStore({ home: ctx.home, maxAgeDays: 0, maxSizeBytes: 0, now: new Date(Date.now() + 86_400_000) });
   expect(await openUndoStore({ home: ctx.home }).list(ctx.session.rootId)).toEqual([]);
-  expect(historyUndoTarget(ctx.session, [])).toBeUndefined();
+  expect(collectUndoEvidence([], users, new Set()).target).toBeUndefined();
   const view = await timeline(ctx);
   expect(view.turns[0]!.files.items).toEqual([{ path: "u.txt", source: "tool", added: 1, removed: 0 }]);
 });
@@ -267,7 +269,8 @@ test("a headless history failure is reported on stderr without changing the run 
   await writeFile(join(home, ".schway", "history"), "blocked");
   const result = await headless(home, root, [{ text: "Fine." }]);
   expect(result.code).toBe(0);
-  expect(result.stderr).toContain("History not saved for this turn");
+  expect(result.stderr).toContain("History not saved · Check ~/.schway/history access (");
+  expect(result.stderr).toContain("· Task continues");
   expect(result.stdout).toContain('"agent.finished"');
 });
 
@@ -278,4 +281,36 @@ test("history core modules never import the renderer or provider wire types", as
     expect(source).not.toContain("/tui/");
     expect(source).not.toContain("providers/");
   }
+});
+
+test("a saved start whose finalization failed or tore stays incomplete with unknown counts", async () => {
+  const ctx = await setup();
+  // The outcome write fails after the start was saved.
+  const failing: HistoryStore = { start: ctx.store.start, finalize: async () => { throw Object.assign(new Error("full"), { code: "ENOSPC" }); }, read: ctx.store.read };
+  const failed = await turn(ctx, "Outcome lost", [{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "lost.txt", content: "x\n" } }] }, { text: "ok" }], { store: failing });
+  expect(failed.started.state).toBe("saved");
+  expect(failed.finalized).toEqual({ state: "unsaved", reason: "No space left on device" });
+  let view = await timeline(ctx);
+  expect(view.turns[0]).toMatchObject({ evidence: "recorded", outcome: "incomplete", incompleteAttempts: 1, unknownDurations: 1, files: { total: 0, items: [] } });
+  // A torn outcome line (crash mid-append) is skipped, not trusted.
+  const torn = await turn(ctx, "Outcome torn", [{ text: "ok" }], { store: { ...ctx.store, finalize: async () => {} } });
+  expect(torn.finalized.state).toBe("saved");
+  const path = historyFilePath(ctx.home, ctx.session.rootId);
+  await appendFile(path, `{"type":"turn_finalize","version":1,"turnId":"${torn.identity.turnId}","attemptId":"${torn.collector.attemptId}","revision":1,"outc`);
+  view = await timeline(ctx);
+  expect(view.tornTail).toBe(true);
+  expect(view.turns[0]).toMatchObject({ outcome: "incomplete", incompleteAttempts: 1 });
+  expect(view.turns[1]).toMatchObject({ outcome: "incomplete", incompleteAttempts: 1 });
+});
+
+test("an omitted oversized path still counts in the file total", async () => {
+  const ctx = await setup();
+  ctx.session.append({ type: "user", id: "big", content: [{ type: "text", text: "Write a deep path" }] });
+  const collector = createHistoryCollector({ store: ctx.store, identity: historyTurnIdentity(ctx.session, ctx.root, "tui")! });
+  await collector.start();
+  collector.observe({ type: "tool.finished", toolCallId: "w1", name: "write", status: "success", content: "ok", details: { resolvedPath: join(ctx.root, "d".repeat(5000)), created: true, lineCount: 1 } });
+  collector.observe({ type: "agent.finished", reason: "completed" });
+  expect((await collector.finalize({ observation: NOT_CAPTURED })).state).toBe("saved");
+  const view = await timeline(ctx);
+  expect(view.turns[0]).toMatchObject({ files: { total: 1, truncated: true, items: [] }, oversized: 1 });
 });

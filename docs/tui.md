@@ -296,7 +296,11 @@ turn, writes the session, stages content or changes files or refs.
 conversation branch, newest first. Each row shows the turn number, its recorded
 outcome (`✓ Done`, `✗ Failed`, `− Stopped`, `◌ Limit reached`, `! Incomplete`),
 the recorded start time in UTC and active duration when known, file and command
-counts, and a short task excerpt. Turns without saved evidence, such as those from
+counts, and a short task excerpt. Below 100 columns the time drops its year and
+`UTC` and counts use `cmd`/`cmds`; below 60 columns each turn takes two lines.
+A turn whose latest attempt saved no outcome shows `Counts unknown` and
+`Time unknown`; a turn with an unfinished attempt shows lower bounds such as
+`2+ files` and `1.2s + unknown`. Unknown counts are never shown as zero. Turns without saved evidence, such as those from
 before history was recorded, say `○ Details unavailable`; a turn whose evidence
 could not be saved in this run says `! Not saved`. Fifty turns are shown at a
 time; moving below the last row reveals the next page.
@@ -306,7 +310,9 @@ file-tool line counts or `detected` for snapshot paths, command summaries with t
 exit each one showed, and the turn's undo state. Undo is never offered from the
 timeline: a turn shows its durable undo outcome, `Undo available · /undo previews
 this turn` when `/undo` would target it, which turn `/undo` previews instead, or
-`Undo unavailable · pre-images not kept` after pruning. A completed turn or an
+`Undo unavailable · pre-images not kept` after pruning. It uses the same target
+selection and per-file check as `/undo`, so a target whose files all changed since
+says `Every file changed since · nothing to undo`, exactly as `/undo` would. A completed turn or an
 `Exit 0` row is not proof that tests passed.
 
 In a turn, Up/Down selects an observed file and Enter shows its

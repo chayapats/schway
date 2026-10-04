@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import { HISTORY_PAGE_SIZE } from "../src/history/records.ts";
-import { historyFilePath } from "../src/history/store.ts";
+import { historyFilePath, openHistoryStore } from "../src/history/store.ts";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory, type JsonlSession } from "../src/session/jsonl.ts";
 import { createSession } from "../src/session/session.ts";
 import { bashTool } from "../src/tools/bash.ts";
@@ -385,7 +385,8 @@ test("a path changed outside the file tools is marked detected and never counted
 });
 
 test("history labels distinguish outcomes, unknown time and every undo state", () => {
-  const base = { turnId: "t", evidence: "recorded" as const, undo: [], files: { total: 1, truncated: false, items: [{ path: "a", source: "tool" as const }] } };
+  const finished = { attemptId: "f", mode: "tui" as const, workspaceRoot: "/w", startedAt: "2026-01-15T09:30:00.000Z", activeMs: 10, outcome: "completed" as const };
+  const base = { turnId: "t", evidence: "recorded" as const, undo: [], attempts: [finished], incompleteAttempts: 0, files: { total: 1, truncated: false, items: [{ path: "a", source: "tool" as const }] } };
   expect(["completed", "failed", "stopped", "limit", "incomplete"].map(outcome => historyOutcomeLabel({ evidence: "recorded", outcome: outcome as never })))
     .toEqual(["✓ Done", "✗ Failed", "− Stopped", "◌ Limit reached", "! Incomplete"]);
   expect(historyOutcomeLabel({ evidence: "missing" })).toBe("○ Details unavailable");
@@ -393,13 +394,85 @@ test("history labels distinguish outcomes, unknown time and every undo state", (
   const attempt = { attemptId: "a", mode: "tui" as const, workspaceRoot: "/w", startedAt: "2026-01-15T09:30:00.000Z", activeMs: null };
   expect(historyDurationLabel({ evidence: "recorded", activeMs: 1500, unknownDurations: 1, attempts: [attempt, { ...attempt, activeMs: 1500 }] })).toBe("1.5s + unknown");
   expect(historyDurationLabel({ evidence: "recorded", activeMs: 0, unknownDurations: 1, attempts: [attempt] })).toBe("Time unknown");
-  const undo = { known: true, preImages: ["t", "u"], targetTurnId: "u", targetOrdinal: 4 };
+  const undo = { known: true, preImages: ["t", "u"], targetTurnId: "u", targetOrdinal: 4, targetRestorable: true };
   expect(historyUndoLine({ ...base, undo: [{ reverted: [{ path: "a", action: "restored" }], skipped: [{ path: "b", reason: "changed" }] }] }, undo)).toBe("Undone · 1 file reverted · 1 skipped");
   expect(historyUndoLine(base, { ...undo, targetTurnId: "t" })).toBe("Undo available · /undo previews this turn");
   expect(historyUndoLine(base, undo)).toBe("Not the undo target · /undo previews turn 4");
   expect(historyUndoLine(base, { known: true, preImages: [] })).toBe("Undo unavailable · pre-images not kept");
   expect(historyUndoLine(base, { known: false, preImages: [] })).toBe("Undo status unknown · /undo preview");
+  expect(historyUndoLine(base, { ...undo, targetTurnId: "t", targetRestorable: false })).toBe("Every file changed since · nothing to undo");
+  expect(historyUndoLine(base, { ...undo, targetRestorable: false })).toBe("Nothing to undo now");
+  expect(historyUndoLine(base, { known: true, blocked: "session-write", preImages: [] })).toBe("Undo blocked · /resume reload saved work");
+  expect(historyUndoLine({ ...base, incompleteAttempts: 1 }, undo)).toBe("Undo status unknown · /undo preview");
   expect(historyUndoLine({ ...base, files: { total: 1, truncated: false, items: [{ path: "a", source: "shell" }] } }, undo)).toBe("No file edits to undo");
   expect(historyCommandLine({ id: "0".repeat(16), command: "bun test", exitCode: 1, ended: "exit", status: "success" }).text).toBe("bun test · Exit 1");
   expect(historyCommandLine({ id: "0".repeat(16), command: "sleep 9", exitCode: null, ended: "timed-out", status: "error" }).text).toBe("sleep 9 · Timed out");
+});
+
+test("incomplete and partially finalized turns show unknown or lower-bound evidence, never zero", async () => {
+  const dir = await temp();
+  const home = join(dir, "home"), root = join(dir, "work");
+  await mkdir(root, { recursive: true });
+  const session = await savedSession(home, root);
+  const store = openHistoryStore({ home });
+  // Turn 1: one finished attempt with a file, then a continuation that never saved its outcome.
+  // Turn 2: a start whose outcome write failed.
+  session.append({ type: "user", id: "u1", content: [{ type: "text", text: "Partly recorded" }] }, { type: "assistant", id: "a1", content: [{ type: "text", text: "ok" }] },
+    { type: "user", id: "u2", content: [{ type: "text", text: "Never finished" }] });
+  const begin = (turnId: string, parentId: string, attemptId: string, ordinal: number) => store.start(session.header.id, { type: "turn_start", version: 1, turnId, attemptId, ordinal, branchId: "main", parentId,
+    workspaceRoot: root, mode: "tui", startedAt: "2026-01-15T09:30:00.000Z" });
+  await begin("u1", session.rootId, "u1-first", 1);
+  await store.finalize(session.header.id, { type: "turn_finalize", version: 1, turnId: "u1", attemptId: "u1-first", revision: 1, outcome: "failed", finishedAt: "2026-01-15T09:31:00.000Z", activeMs: 1200,
+    toolResults: 1, failedTools: 0, commands: { total: 0, exitZero: 0, nonzero: 0, unknown: 0, truncated: false, items: [] }, files: { total: 1, truncated: false, items: [{ path: "kept.txt", source: "tool", added: 1, removed: 0 }] }, git: { status: "captured" } });
+  await begin("u1", session.rootId, "u1-second", 1);
+  await begin("u2", "a1", "u2-only", 2);
+  const c = controller(session, root, home, { sessionId: session.header.id });
+  const ui = await view(c, root, home, 80, 30);
+  expect(await c.historyCommand("")).toBe(true);
+  await ui.settle();
+  let frame = ui.frame();
+  expect(frame).toMatch(/2 +! Incomplete .*Counts unknown/);
+  expect(frame).toMatch(/1 +! Incomplete .*1\+ files · 0\+ cmds +1\.2s \+ unknown/);
+  expect(frame).not.toContain("0 files");
+  await ui.press("return");
+  frame = ui.frame();
+  expect(frame).toContain("Files · unknown");
+  expect(frame).toContain("Commands · unknown");
+  expect(frame).toContain("No outcome recorded · F2 details");
+  expect(frame).toContain("Time unknown");
+  expect(frame).toContain("Undo status unknown · /undo preview");
+  expect(frame).not.toContain("No commands ran");
+  expect(frame).not.toContain("No file edits to undo");
+  expect(c.snapshot().history!.details).toContain("saved a start but no outcome");
+  await ui.press("escape");
+  await ui.press("down");
+  await ui.press("return");
+  frame = ui.frame();
+  expect(frame).toContain("Files · 1+");
+  expect(frame).toContain("kept.txt");
+  expect(frame).toContain("Commands · 0+");
+  expect(frame).toContain("None recorded · an attempt did not finish");
+  expect(frame).toContain("An attempt did not finish · more may be missing");
+});
+
+test("history undo eligibility matches what /undo previews after files changed since", async () => {
+  const dir = await temp();
+  const home = join(dir, "home"), root = join(dir, "work");
+  await repo(root);
+  const session = await savedSession(home, root);
+  const c = controller(session, root, home, { sessionId: session.header.id, model: countingModel([{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "u.txt", content: "turn\n" } }] }, { text: "ok" }]).model });
+  expect(await c.submit("Write u")).toBe(true);
+  const turn = () => c.snapshot().history!.turns[0]!;
+  expect(await c.historyCommand("")).toBe(true);
+  expect(historyUndoLine(turn(), c.snapshot().history!.undo)).toBe("Undo available · /undo previews this turn");
+  c.closeHistory();
+  // An external edit after the turn: the target stays selected, but no file still matches its saved post-image.
+  await writeFile(join(root, "u.txt"), "edited later\n");
+  expect(await c.historyCommand("")).toBe(true);
+  expect(c.snapshot().history!.undo).toMatchObject({ targetTurnId: session.items[0]!.id, targetRestorable: false });
+  expect(historyUndoLine(turn(), c.snapshot().history!.undo)).toBe("Every file changed since · nothing to undo");
+  c.closeHistory();
+  expect(await c.undoCommand("")).toBe(true);
+  expect(c.snapshot().undoPreview).toBeUndefined();
+  expect(c.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo · every file changed since");
 });

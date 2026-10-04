@@ -10,12 +10,12 @@ cursor 1 1 hidden
 
  History · 3 turns
 
- › 3  − Stopped · 2.4s
-      Save clamp notes ไทย 🧪, then w…
-   2  ✓ Done · 1.2s
-      Run the clamp tests
-   1  ✓ Done · 2.4s
-      Fix the clamp upper bound
+ › 3  − Stopped · 01-15 09:30 · 2.4s
+      1 file · 1 cmd · Save clamp not…
+   2  ✓ Done · 01-15 09:30 · 1.2s
+      0 files · 1 cmd · Run the clamp…
+   1  ✓ Done · 01-15 09:30 · 2.4s
+      1 file · 1 cmd · Fix the clamp …
 
 
 
@@ -40,23 +40,23 @@ cursor 1 1 hidden
 02 18-40 #ffffff #0e1117 -
 03 0-40 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-22 #7cc4ff #0e1117 -
-04 22-40 #ffffff #0e1117 -
+04 1-36 #7cc4ff #0e1117 -
+04 36-40 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
 05 1-38 #7cc4ff #0e1117 -
 05 38-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-19 #8fd19e #0e1117 -
-06 19-40 #ffffff #0e1117 -
+06 1-33 #8fd19e #0e1117 -
+06 33-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-25 #e6eaf0 #0e1117 -
-07 25-40 #ffffff #0e1117 -
+07 1-38 #e6eaf0 #0e1117 -
+07 38-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-19 #8fd19e #0e1117 -
-08 19-40 #ffffff #0e1117 -
+08 1-33 #8fd19e #0e1117 -
+08 33-40 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-31 #e6eaf0 #0e1117 -
-09 31-40 #ffffff #0e1117 -
+09 1-38 #e6eaf0 #0e1117 -
+09 38-40 #ffffff #0e1117 -
 10 0-40 #ffffff #0e1117 -
 11 0-40 #ffffff #0e1117 -
 12 0-40 #ffffff #0e1117 -

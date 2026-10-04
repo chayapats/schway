@@ -11,7 +11,7 @@ export const MAX_HISTORY_COMMANDS = 50;
 export const MAX_HISTORY_COMMAND_CHARS = 200;
 /** Observed file rows retained per record; totals still count every observed path. */
 export const MAX_HISTORY_FILES = 200;
-/** Graphemes kept in a task excerpt; the stricter code-point limit of saved-session previews also applies. */
+/** Graphemes kept in a task excerpt; a cluster longer than 32 code points keeps only its base character. */
 export const MAX_HISTORY_EXCERPT_GRAPHEMES = 160;
 /** UTF-8 bytes allowed for one serialized JSONL record, including its trailing LF. */
 export const MAX_HISTORY_RECORD_BYTES = 128 * 1024;
@@ -212,7 +212,7 @@ function validRecord(value: unknown): value is HistoryRecord {
     return isHistoryId(record.turnId) && isHistoryId(record.attemptId) && COUNT(record.ordinal) && (record.ordinal as number) >= 1
       && isHistoryId(record.branchId) && isHistoryId(record.parentId) && isHistoryRoot(record.workspaceRoot)
       && (record.mode === "tui" || record.mode === "headless") && ISO(record.startedAt)
-      && (record.task === undefined || (typeof record.task === "string" && boundedText(record.task, MAX_HISTORY_EXCERPT_GRAPHEMES)))
+      && (record.task === undefined || (typeof record.task === "string" && boundedText(record.task, MAX_HISTORY_EXCERPT_GRAPHEMES * 32) && graphemes(record.task) <= MAX_HISTORY_EXCERPT_GRAPHEMES))
       && (record.taskTruncated === undefined || record.taskTruncated === true) && (record.taskHidden === undefined || record.taskHidden === true);
   }
   if (record.type !== "turn_finalize") return false;
@@ -256,4 +256,11 @@ function boundedText(value: string, max: number): boolean {
   let count = 0;
   for (const _ of value) if (++count > max) return false;
   return true;
+}
+
+/** Count grapheme clusters, the unit excerpts are bounded in. */
+function graphemes(value: string): number {
+  let count = 0;
+  for (const _ of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value)) count++;
+  return count;
 }

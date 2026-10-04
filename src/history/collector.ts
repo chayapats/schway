@@ -151,7 +151,8 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
         activeMs: Math.max(0, Math.round(clock() - startedAt)),
         toolResults, failedTools,
         commands: { total: commandTotal, ...counts, truncated: commandTotal > commands.length, items: commands.map(command => ({ ...command })) },
-        files: { total: fileItems.length, truncated: fileItems.length > MAX_HISTORY_FILES || oversized > 0, items: fileItems.slice(0, MAX_HISTORY_FILES).map(file => ({ ...file })) },
+        // Omitted oversized paths still count as observations.
+        files: { total: fileItems.length + oversized, truncated: fileItems.length > MAX_HISTORY_FILES || oversized > 0, items: fileItems.slice(0, MAX_HISTORY_FILES).map(file => ({ ...file })) },
         git,
         ...(oversized ? { oversized } : {}),
       };

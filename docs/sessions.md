@@ -346,7 +346,9 @@ root; later lines are attempt starts and revisioned outcomes:
 - **Bounds.** Each record keeps at most 50 command summaries of 200 characters
   and 200 file rows; totals still count every observation and each shortened
   list sets `truncated`. Task excerpts keep at most 160 graphemes, cut only at
-  grapheme boundaries. Every serialized line, including its LF, fits 128 KiB of
+  grapheme boundaries; a grapheme stacking more than 32 code points (for
+  example many combining marks) keeps only its base character, so a nonempty
+  task never becomes empty. Every serialized line, including its LF, fits 128 KiB of
   UTF-8: item counts apply first, then whole trailing entries are omitted until
   the escaped JSON fits. A single path over 4096 bytes is omitted and counted.
   Identity fields are validated, never truncated. Readers use a bounded line
@@ -358,12 +360,19 @@ root; later lines are attempt starts and revisioned outcomes:
   excerpt.
 - **Locking and deletion.** Appends and deletion share a cross-process lock at
   `~/.schway/history.lock`. A sidecar is created only while its saved session
-  exists, and `/delete-session` removes the session file and its evidence inside
-  that lock, so evidence is never recreated afterwards.
+  exists. Its header and first record are written to a temporary file, synced and
+  hard-linked into place, so a failed creation never leaves a torn sidecar;
+  appends retry short writes and report failure instead of a torn record.
+  `/delete-session` takes the lock before clearing the draft, undo data, session
+  file and evidence, so evidence is never recreated afterwards.
 - **Failures.** A history write failure never blocks execution or changes the
   session-write rules. The conversation and tool results are saved as usual; the
   TUI shows `History not saved · /history shows gaps · F2 details` and headless
-  runs print `History not saved for this turn: <reason>` on stderr.
+  runs print `History not saved · Check ~/.schway/history access (<reason>) · Task continues`
+  on stderr. An outcome that cannot be appended leaves the attempt incomplete:
+  its counts and time read as unknown, never as zero. If another process holds
+  the history lock, `/delete-session` stops before deleting anything and shows
+  `Session not deleted: history busy · /delete-session retry · F2 details`.
 
 History follows the saved-session lifecycle. There is no separate retention timer
 or automatic pruning; per-record bounds and 50-turn pages do not cap a session's

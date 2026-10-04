@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { closeSync, constants, openSync } from "node:fs";
-import { chmod, lstat, mkdir, open, rm, stat } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, open, rm, stat, unlink } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { HISTORY_FORMAT_VERSION, MAX_HISTORY_RECORD_BYTES, isHistorySessionId, parseHistoryLine, serializeHistoryFinalize, serializeHistoryRecord,
   type HistoryHeader, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
@@ -61,8 +62,14 @@ export function openHistoryStore({ home, lockWaitMs = 1000 }: { home: string; lo
         await mkdir(historyDirectory(home), { recursive: true, mode: 0o700 });
         await chmod(historyDirectory(home), 0o700);
         const header: HistoryHeader = { type: "history", version: HISTORY_FORMAT_VERSION, sessionId, createdAt: new Date().toISOString() };
-        const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-        try { await file.writeFile(serializeHistoryRecord(header) + line); await file.sync(); } finally { await file.close(); }
+        // Publish the header and first record atomically: a crash or full disk leaves at most a temporary file, never a torn sidecar.
+        const temp = join(historyDirectory(home), `.${sessionId}.${crypto.randomUUID()}.tmp`);
+        try {
+          const file = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+          try { await writeAll(file, serializeHistoryRecord(header) + line); await file.sync(); } finally { await file.close(); }
+          // A hard link never replaces an existing sidecar, unlike rename.
+          await link(temp, path);
+        } finally { await unlink(temp).catch(() => {}); }
         return;
       }
       if (!existing.isFile()) throw new Error("History sidecar is not a regular file");
@@ -76,7 +83,7 @@ export function openHistoryStore({ home, lockWaitMs = 1000 }: { home: string; lo
         if (header?.type !== "history" || header.sessionId !== sessionId || !head.includes(10)) throw new Error("History sidecar header does not match its session");
         const last = Buffer.alloc(1);
         if (info.size > 0) await file.read(last, 0, 1, info.size - 1);
-        await file.write(info.size > 0 && last[0] !== 10 ? `\n${line}` : line);
+        await writeAll(file, info.size > 0 && last[0] !== 10 ? `\n${line}` : line);
         await file.sync();
       } finally { await file.close(); }
     });
@@ -86,6 +93,16 @@ export function openHistoryStore({ home, lockWaitMs = 1000 }: { home: string; lo
     async finalize(sessionId, record) { await append(sessionId, serializeHistoryFinalize(record), false); },
     read: sessionId => readHistory(home, sessionId),
   };
+}
+
+/** Write every byte, retrying short writes; a write that makes no progress fails so a torn append is never reported as saved. */
+async function writeAll(file: FileHandle, text: string): Promise<void> {
+  const bytes = Buffer.from(text, "utf8");
+  for (let offset = 0; offset < bytes.length;) {
+    const { bytesWritten } = await file.write(bytes, offset, bytes.length - offset);
+    if (bytesWritten <= 0) throw Object.assign(new Error("History write made no progress"), { code: "EIO" });
+    offset += bytesWritten;
+  }
 }
 
 /** Stream complete LF-terminated lines, discarding any line over 128 KiB without buffering it whole. */
@@ -141,19 +158,15 @@ async function readHistory(home: string, sessionId: string): Promise<HistoryRead
 }
 
 /**
- * Remove a session's history evidence and run the remaining session deletion under the same history lock,
- * so a concurrent writer can neither recreate nor append to evidence for the deleted session. Without any
- * history store, deletion proceeds without creating or locking one.
+ * Run a session deletion while holding the history lock, then remove its evidence, so a concurrent first
+ * writer can neither create nor append evidence for the deleted session. The lock is always taken, even
+ * before any history exists, and is acquired before `remove` runs, so a busy lock changes nothing.
  */
 export async function deleteHistorySession({ home, sessionId, lockWaitMs = 1000 }: { home: string; sessionId: string; lockWaitMs?: number }, remove: () => Promise<void> = async () => {}): Promise<void> {
-  // An identity the store could never write has no evidence to remove.
-  if (!isHistorySessionId(sessionId)) return remove();
-  const path = historyFilePath(home, sessionId);
-  const present = await stat(historyDirectory(home)).then(() => true, error => { if (isErrno(error, "ENOENT")) return false; throw error; });
-  if (!present) return remove();
   return withHistoryLock(home, lockWaitMs, async () => {
     await remove();
-    await rm(path, { force: true });
+    // An identity the store could never write has no evidence to remove.
+    if (isHistorySessionId(sessionId)) await rm(historyFilePath(home, sessionId), { force: true });
   });
 }
 

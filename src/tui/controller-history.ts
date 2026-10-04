@@ -4,7 +4,8 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { createHistoryCollector, historyGitFailure, historyTurnIdentity, type HistoryCollector, type HistoryObservation } from "../history/collector.ts";
 import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome } from "../history/records.ts";
 import { openHistoryStore, type HistoryRead } from "../history/store.ts";
-import { buildHistoryTimeline, historyUndoTarget, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
+import { buildHistoryTimeline, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
+import { collectUndoEvidence, observeUndoFile } from "../undo/evidence.ts";
 import type { Session } from "../session/session.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
 import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
@@ -18,9 +19,13 @@ import { TurnLayer } from "./controller-turn.ts";
 export interface HistoryUndoState {
   /** False when undo data could not be read, so no eligibility is claimed. */
   known: boolean;
-  /** Accepted turn `/undo` previews now, if any. */
+  /** `/undo` refuses before selecting a turn: no workspace or home, or blocked session storage. */
+  blocked?: "no-workspace" | "session-write";
+  /** Accepted turn `/undo` selects now, if any. */
   targetTurnId?: string;
   targetOrdinal?: number;
+  /** At least one target file still matches its saved post-image, so `/undo` opens a preview instead of reporting nothing to undo. */
+  targetRestorable?: boolean;
   /** Turns that still have saved file pre-images. */
   preImages: readonly string[];
 }
@@ -67,14 +72,18 @@ export function historyDurationLabel(turn: Pick<HistoryTurn, "evidence" | "activ
 }
 
 /** Recorded start time in UTC minutes, matching the session picker's activity format. */
-export function historyTimeLabel(turn: Pick<HistoryTurn, "startedAt">): string {
-  return turn.startedAt ? `${turn.startedAt.slice(0, 16).replace("T", " ")} UTC` : "";
+export function historyTimeLabel(turn: Pick<HistoryTurn, "startedAt">, compact = false): string {
+  if (!turn.startedAt) return "";
+  return compact ? turn.startedAt.slice(5, 16).replace("T", " ") : `${turn.startedAt.slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** Concise file and command totals; totals cover every observation even when lists were shortened. */
-export function historyCountsLabel(turn: Pick<HistoryTurn, "evidence" | "files" | "commands">): string {
+export function historyCountsLabel(turn: Pick<HistoryTurn, "evidence" | "files" | "commands" | "attempts" | "incompleteAttempts">, compact = false): string {
   if (turn.evidence === "missing") return "";
-  return `${formatCount(turn.files.total, "file")} · ${formatCount(turn.commands.total, "command")}`;
+  // Without any saved outcome the counts are unknown, never zero; a later incomplete attempt makes them lower bounds.
+  if (turn.attempts.length <= turn.incompleteAttempts) return "Counts unknown";
+  const count = (value: number, singular: string, plural: string) => turn.incompleteAttempts ? `${value}+ ${plural}` : formatCount(value, singular, plural);
+  return `${count(turn.files.total, "file", "files")} · ${compact ? count(turn.commands.total, "cmd", "cmds") : count(turn.commands.total, "command", "commands")}`;
 }
 
 /** Task excerpt for display, marking shortened and hidden tasks. */
@@ -94,18 +103,20 @@ export function historyCommandLine(command: HistoryCommand): { glyph: string; te
 }
 
 /** Durable undo outcome or current `/undo` eligibility for one turn, never offering rollback from the timeline. */
-export function historyUndoLine(turn: Pick<HistoryTurn, "turnId" | "undo" | "files" | "evidence">, undo: HistoryUndoState): string {
+export function historyUndoLine(turn: Pick<HistoryTurn, "turnId" | "undo" | "files" | "evidence" | "attempts" | "incompleteAttempts">, undo: HistoryUndoState): string {
   const recorded = turn.undo.at(-1);
   if (recorded) {
     const reverted = recorded.reverted.length, skipped = recorded.skipped.length;
     return `Undone · ${formatCount(reverted, "file")} reverted${skipped ? ` · ${skipped} skipped` : ""}`;
   }
-  if (turn.evidence === "missing") return "Undo status unknown · /undo preview";
-  if (!turn.files.items.some(file => file.source === "tool")) return "No file edits to undo";
-  if (!undo.known) return "Undo status unknown · /undo preview";
-  if (undo.targetTurnId === turn.turnId) return "Undo available · /undo previews this turn";
+  // Missing or unfinalized evidence cannot show whether the turn edited files.
+  if (turn.evidence === "missing" || turn.attempts.length <= turn.incompleteAttempts || !undo.known) return "Undo status unknown · /undo preview";
+  if (undo.blocked === "session-write") return "Undo blocked · /resume reload saved work";
+  if (undo.blocked === "no-workspace") return "Nothing to undo now";
+  if (!turn.incompleteAttempts && !turn.files.items.some(file => file.source === "tool")) return "No file edits to undo";
+  if (undo.targetTurnId === turn.turnId) return undo.targetRestorable ? "Undo available · /undo previews this turn" : "Every file changed since · nothing to undo";
   if (!undo.preImages.includes(turn.turnId)) return "Undo unavailable · pre-images not kept";
-  return undo.targetOrdinal ? `Not the undo target · /undo previews turn ${undo.targetOrdinal}` : "Nothing to undo now";
+  return undo.targetOrdinal && undo.targetRestorable ? `Not the undo target · /undo previews turn ${undo.targetOrdinal}` : "Nothing to undo now";
 }
 
 /** Build F2 evidence notes for the list or one turn; caveats stay here instead of the primary view. */
@@ -124,6 +135,7 @@ export function historyDetailsText(state: Pick<HistorySnapshot, "unsaved"> & { r
         lines.push(`Attempt ${index + 1}: ${attempt.mode === "tui" ? "interactive" : "headless"} · ${attempt.workspaceRoot} · started ${historyTimeLabel(attempt)} · ${attempt.outcome ? historyOutcomeLabel({ evidence: "recorded", outcome: attempt.outcome }) : "no outcome recorded"} · ${attempt.activeMs === null ? "time unknown" : formatDuration(attempt.activeMs)}`);
         lines.push(`  ${git}`);
       });
+      if (turn.incompleteAttempts) lines.push(`${formatCount(turn.incompleteAttempts, "attempt")} saved a start but no outcome, after a crash, forced quit or failed write. Its files, commands and time are unknown, so counts below are lower bounds.`);
       lines.push(`${formatCount(turn.toolResults, "tool result")}; ${formatCount(turn.failedTools, "failed tool")}.`);
       lines.push(`Commands: ${turn.commands.exitZero} exited 0, ${turn.commands.nonzero} nonzero, ${turn.commands.unknown} without an observed exit.`);
       if (turn.commands.truncated) lines.push(`The command list shows ${turn.commands.items.length} of ${turn.commands.total} summaries; each keeps at most 200 characters.`);
@@ -217,22 +229,36 @@ export abstract class HistoryLayer extends TurnLayer {
     this.historyState = { generation, identity, snapshot, revealed: 0 };
     const empty: HistoryRead = { status: "missing", starts: [], finalizes: [], rejected: 0, tornTail: false };
     const read = this.historyEnabled(session) ? await openHistoryStore({ home: this.home! }).read(session.rootId).catch((): HistoryRead => ({ ...empty, status: "unreadable" })) : empty;
-    const manifests = this.home ? await openUndoStore({ home: this.home }).list(session.rootId).catch(() => undefined) : undefined;
+    const undo = await this.historyUndoState(session);
     const state = this.historyState;
     if (this.disposed || state?.generation !== generation || this.historyIdentity() !== identity) return false;
     const timeline = buildHistoryTimeline(read, session, this.secrets);
-    const target = manifests ? historyUndoTarget(session, manifests) : undefined;
     state.timeline = timeline;
     state.revealed = Math.min(HISTORY_PAGE_SIZE, timeline.turns.length);
     snapshot.loading = false;
     snapshot.total = timeline.turns.length;
-    snapshot.undo = { known: !!manifests, ...(target ? { targetTurnId: target, targetOrdinal: timeline.turns.find(turn => turn.turnId === target)?.ordinal } : {}), preImages: manifests?.map(manifest => manifest.turnId) ?? [] };
+    snapshot.undo = { ...undo, ...(undo.targetTurnId ? { targetOrdinal: timeline.turns.find(turn => turn.turnId === undo.targetTurnId)?.ordinal } : {}) };
     snapshot.unsaved = Object.fromEntries([...this.historyUnsaved].filter(([key]) => key.startsWith(`${session.rootId}/`)).map(([key, reason]) => [key.slice(session.rootId.length + 1), reason]));
     snapshot.notice = timeline.status === "unsupported" ? "Newer history format · F2 details"
       : timeline.status === "unreadable" ? "History unreadable · F2 details"
       : timeline.rejected || timeline.tornTail ? "Some records skipped · F2 details" : undefined;
     this.refreshHistoryDetails();
     return true;
+  }
+
+  /** Decide what `/undo` would do now with the same gates, target selection and per-file check, reading but never writing. */
+  private async historyUndoState(session: Session): Promise<HistoryUndoState> {
+    if (this.sessionWriteBlocked) return { known: true, blocked: "session-write", preImages: [] };
+    if (!this.home || !this.workspace) return { known: true, blocked: "no-workspace", preImages: [] };
+    try {
+      const store = openUndoStore({ home: this.home });
+      const manifests = await store.list(session.rootId);
+      const users = session.items.filter(item => item.type === "user").map(item => item.id);
+      const undone = new Set(session.entries.flatMap(entry => entry.item.type === "turn_undo" ? [entry.item.turnId] : []));
+      const target = collectUndoEvidence(manifests, users, undone).target;
+      const restorable = target ? (await Promise.all(target.files.map(file => observeUndoFile(store, target, file)))).some(file => file.eligible) : false;
+      return { known: true, ...(target ? { targetTurnId: target.turnId, targetRestorable: restorable } : {}), preImages: manifests.map(manifest => manifest.turnId) };
+    } catch { return { known: false, preImages: [] }; }
   }
 
   /** Return a redacted copy of the open history panel. */

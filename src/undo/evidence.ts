@@ -1,4 +1,5 @@
-import { unchangedUndoFile, type UndoManifest } from "./store.ts";
+import { equalUndoHash, hashUndoBytes, unchangedUndoFile, type UndoFile, type UndoManifest, type UndoStore } from "./store.ts";
+import { FileChangedError, isErrno, observeFile, type FileObservation } from "../tools/fs.ts";
 
 /** One active turn's retained evidence or missing data, without inferring expiry or current applicability. */
 export type UndoTurnEvidence = {
@@ -78,4 +79,31 @@ export function describeUndoLimits(evidence: UndoEvidence): UndoLimits {
     else if (turn !== target) undetected.push(turn.ordinal);
   }
   return { targetOrdinal: target?.ordinal, latestOrdinal: evidence.turns.length, unsaved, undetected, missing };
+}
+
+/** Current bytes, the saved pre-image and whether `/undo` would restore or delete one target file now. */
+export interface UndoFileObservation {
+  /** Why undo cannot act on this file at all: incomplete saved data, a missing pre-image or an unreadable current file. */
+  unavailable?: "incomplete" | "missing" | "unreadable";
+  observed: FileObservation | null;
+  current: Buffer | null;
+  before: Buffer | null;
+  /** The current file still matches the saved post-image, so undo would act on it. */
+  eligible: boolean;
+}
+
+/** Read one target file and its pre-image the way `/undo` previews it, without writing anything. */
+export async function observeUndoFile(store: UndoStore, manifest: UndoManifest, file: UndoFile): Promise<UndoFileObservation> {
+  let current: Buffer | null = null, before: Buffer | null = null;
+  let observed: FileObservation | null = null, unavailable: UndoFileObservation["unavailable"] = file.after === undefined ? "incomplete" : undefined;
+  try { observed = await observeFile(file.path, undefined, { regularOnly: true }); current = observed?.bytes ?? null; }
+  catch (error) {
+    // Replacement by a directory, link or other entry is a later change; only real read failures are unreadable.
+    if (!(error instanceof FileChangedError) && !["ENOENT", "EISDIR", "EINVAL"].some(code => isErrno(error, code))) unavailable ??= "unreadable";
+  }
+  try { if (!unavailable && file.before) before = await store.blob(manifest.sessionId, file.before.sha256); }
+  catch { unavailable = "missing"; }
+  const eligible = !unavailable && !!observed?.entry.isFile() && file.after !== undefined && equalUndoHash(hashUndoBytes(current), file.after)
+    && (file.afterMode === undefined || observed!.mode === undefined || file.afterMode === observed!.mode);
+  return { unavailable, observed, current, before, eligible };
 }

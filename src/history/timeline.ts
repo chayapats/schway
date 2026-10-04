@@ -1,6 +1,5 @@
 import type { TurnUndoRecord } from "../conversation/types.ts";
 import type { Session } from "../session/session.ts";
-import { unchangedUndoFile, type UndoManifest } from "../undo/store.ts";
 import { MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCollection, type HistoryCommand, type HistoryFile, type HistoryGitEvidence, type HistoryMode,
   type HistoryOutcome, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
 import { historyExcerpt } from "./sanitize.ts";
@@ -36,6 +35,8 @@ export interface HistoryTurn {
   activeMs: number;
   /** Attempts whose active duration is unknown, including incomplete ones. */
   unknownDurations: number;
+  /** Attempts with a saved start but no saved outcome; their counts are unknown, so totals are lower bounds. */
+  incompleteAttempts: number;
   attempts: HistoryAttempt[];
   toolResults: number;
   failedTools: number;
@@ -86,7 +87,7 @@ export function buildHistoryTimeline(read: HistoryRead, session: Pick<Session, "
     const excerpt = first ? { text: first.task, truncated: !!first.taskTruncated, hidden: !!first.taskHidden }
       : historyExcerpt(user.type === "user" ? user.content.map(block => block.text).join(" ") : "", secrets);
     const turn: HistoryTurn = { turnId: user.id, ordinal: index + 1, ...(excerpt.text ? { task: excerpt.text } : {}), taskTruncated: excerpt.truncated, taskHidden: excerpt.hidden,
-      evidence: attempts.length ? "recorded" : "missing", activeMs: 0, unknownDurations: 0, attempts: [], toolResults: 0, failedTools: 0,
+      evidence: attempts.length ? "recorded" : "missing", activeMs: 0, unknownDurations: 0, incompleteAttempts: 0, attempts: [], toolResults: 0, failedTools: 0,
       commands: { total: 0, exitZero: 0, nonzero: 0, unknown: 0, truncated: false, items: [] }, files: { total: 0, truncated: false, items: [] }, oversized: 0,
       undo: undo.get(user.id) ?? [] };
     const seenCommands = new Set<string>();
@@ -97,7 +98,7 @@ export function buildHistoryTimeline(read: HistoryRead, session: Pick<Session, "
       turn.attempts.push({ attemptId: start.attemptId, mode: start.mode, workspaceRoot: start.workspaceRoot, startedAt: start.startedAt, activeMs: final?.activeMs ?? null,
         ...(final ? { outcome: final.outcome, finishedAt: final.finishedAt, git: final.git } : {}) });
       if (!final || final.activeMs === null) turn.unknownDurations++;
-      if (!final) continue;
+      if (!final) { turn.incompleteAttempts++; continue; }
       turn.activeMs += final.activeMs ?? 0;
       turn.toolResults += final.toolResults;
       turn.failedTools += final.failedTools;
@@ -133,13 +134,4 @@ export function buildHistoryTimeline(read: HistoryRead, session: Pick<Session, "
     return turn;
   });
   return { status: read.status, turns: turns.reverse(), rejected: read.rejected, tornTail: read.tornTail, elsewhere };
-}
-
-/** Return the accepted turn `/undo` would preview now, using the same selection rule as the undo command. */
-export function historyUndoTarget(session: Pick<Session, "items" | "entries">, manifests: readonly UndoManifest[]): string | undefined {
-  const users = new Set(session.items.filter(item => item.type === "user").map(item => item.id));
-  const undone = new Set(session.entries.flatMap(entry => entry.item.type === "turn_undo" ? [entry.item.turnId] : []));
-  return manifests.filter(manifest => users.has(manifest.turnId) && !undone.has(manifest.turnId)
-    && manifest.files.some(file => file.after !== undefined && !unchangedUndoFile(file)))
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.turnNumber - a.turnNumber)[0]?.turnId;
 }

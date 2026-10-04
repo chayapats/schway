@@ -110,8 +110,14 @@ export function createHistoryPanel(renderer: CliRenderer) {
         const meta = [historyTimeLabel(turn), historyDurationLabel(turn), turn.attempts.length > 1 ? formatCount(turn.attempts.length, "attempt") : ""].filter(Boolean).join(" · ");
         lines.push({ text: clip(meta, inner), color: theme.muted }, { text: "", color: theme.text });
         const files = turn.files;
-        lines.push({ text: clip(files.truncated ? `Files · ${files.items.length} of ${files.total} shown` : `Files · ${files.total}`, inner), color: theme.accent, bold: true });
-        if (!files.items.length) lines.push({ text: `  ${files.total ? "Not stored · F2 details" : "No file changes observed"}`, color: theme.muted });
+        // Unfinalized attempts recorded no counts: show them as unknown or lower bounds, never as zero.
+        const recorded = turn.attempts.length > turn.incompleteAttempts, partial = recorded && turn.incompleteAttempts > 0;
+        const missingNote = "  No outcome recorded · F2 details", partialNote = "  An attempt did not finish · more may be missing";
+        const header = (label: string, collection: { total: number; truncated: boolean; items: unknown[] }) => !recorded ? `${label} · unknown`
+          : collection.truncated ? `${label} · ${collection.items.length} of ${collection.total}${partial ? "+" : ""} shown` : `${label} · ${collection.total}${partial ? "+" : ""}`;
+        lines.push({ text: clip(header("Files", files), inner), color: theme.accent, bold: true });
+        if (!recorded) lines.push({ text: clip(missingNote, inner), color: theme.muted });
+        else if (!files.items.length) lines.push({ text: clip(`  ${files.total ? "Not stored · F2 details" : partial ? "None recorded · an attempt did not finish" : "No file changes observed"}`, inner), color: theme.muted });
         const badgeOf = (file: HistoryTurn["files"]["items"][number]) => file.source === "shell" ? "detected" : file.added === undefined && file.removed === undefined ? "edited" : `+${file.added ?? "?"} −${file.removed ?? "?"}`;
         // Keep badges beside their paths instead of at the far edge of a wide terminal.
         const rowWidth = Math.min(inner, Math.max(36, ...files.items.map(file => Bun.stringWidth(safe(file.path)) + 4 + Bun.stringWidth(badgeOf(file)))));
@@ -122,14 +128,17 @@ export function createHistoryPanel(renderer: CliRenderer) {
           if (index === history.file) focus = lines.length;
           lines.push({ text: `${index === history.file ? "›" : " "} ${path}${" ".repeat(Math.max(0, room - Bun.stringWidth(path)))}  ${badge}`, color: index === history.file ? theme.accent : theme.text });
         });
+        if (partial && files.items.length) lines.push({ text: clip(partialNote, inner), color: theme.muted });
         lines.push({ text: "", color: theme.text });
         const commands = turn.commands;
-        lines.push({ text: clip(commands.truncated ? `Commands · ${commands.items.length} of ${commands.total} shown` : `Commands · ${commands.total}`, inner), color: theme.accent, bold: true });
-        if (!commands.items.length) lines.push({ text: `  ${commands.total ? "Not stored · F2 details" : "No commands ran"}`, color: theme.muted });
+        lines.push({ text: clip(header("Commands", commands), inner), color: theme.accent, bold: true });
+        if (!recorded) lines.push({ text: clip(missingNote, inner), color: theme.muted });
+        else if (!commands.items.length) lines.push({ text: clip(`  ${commands.total ? "Not stored · F2 details" : partial ? "None recorded · an attempt did not finish" : "No commands ran"}`, inner), color: theme.muted });
         for (const command of commands.items) {
           const line = historyCommandLine(command);
           lines.push({ text: clip(`  ${line.glyph} ${safe(line.text)}`, inner), color: ({ success: theme.success, warning: theme.warning, muted: theme.muted, error: theme.error })[line.tone] });
         }
+        if (partial && commands.items.length) lines.push({ text: clip(partialNote, inner), color: theme.muted });
         lines.push({ text: "", color: theme.text });
       }
       lines.push({ text: "Undo", color: theme.accent, bold: true }, { text: clip(`  ${historyUndoLine(turn, history.undo)}`, inner), color: theme.text });
@@ -139,23 +148,25 @@ export function createHistoryPanel(renderer: CliRenderer) {
       if (!history.total) lines.push({ text: clip("Accepted tasks appear here after they run.", inner), color: theme.muted });
       const ordinals = Math.max(1, ...history.turns.map(item => String(item.ordinal).length));
       const labels = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyOutcomeLabel(item, history.unsaved[item.turnId] !== undefined))));
-      const timeWidth = Math.max(0, ...history.turns.map(item => historyTimeLabel(item).length));
-      const countsWidth = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyCountsLabel(item))));
+      // Wide rows use full forms; medium and narrow rows keep time and counts in compact forms.
+      const compact = width < 100;
+      const timeWidth = Math.max(0, ...history.turns.map(item => historyTimeLabel(item, compact).length));
+      const countsWidth = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyCountsLabel(item, compact))));
       const durationWidth = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyDurationLabel(item))));
       history.turns.forEach((item, index) => {
         const selected = index === history.selected;
         const label = historyOutcomeLabel(item, history.unsaved[item.turnId] !== undefined);
         const prefix = `${selected ? "›" : " "} ${String(item.ordinal).padStart(ordinals)}  `;
         const task = safe(historyTaskLabel(item));
-        const counts = historyCountsLabel(item), duration = historyDurationLabel(item), time = historyTimeLabel(item);
+        const counts = historyCountsLabel(item, compact), duration = historyDurationLabel(item), time = historyTimeLabel(item, compact);
         if (selected) focus = lines.length;
         if (width < 60) {
           // Narrow terminals keep the outcome word and its glyph on the first line and the task below.
-          lines.push({ text: clip(`${prefix}${label}${duration ? ` · ${duration}` : ""}`, inner), color: selected ? theme.accent : tone(item) });
-          lines.push({ text: clip(`${" ".repeat(prefix.length)}${task}`, inner), color: selected ? theme.accent : theme.text });
+          lines.push({ text: clip([`${prefix}${label}`, time, duration].filter(Boolean).join(" · "), inner), color: selected ? theme.accent : tone(item) });
+          lines.push({ text: clip(`${" ".repeat(prefix.length)}${[counts, task].filter(Boolean).join(" · ")}`, inner), color: selected ? theme.accent : theme.text });
           return;
         }
-        const columns = [label.padEnd(labels), ...(width >= 100 ? [time.padEnd(timeWidth)] : []), counts.padEnd(countsWidth), duration.padEnd(durationWidth)].filter(column => column.length);
+        const columns = [label.padEnd(labels), time.padEnd(timeWidth), counts.padEnd(countsWidth), duration.padEnd(durationWidth)].filter(column => column.length);
         lines.push({ text: clip(`${prefix}${columns.join("  ")}  ${task}`, inner), color: selected ? theme.accent : theme.text });
       });
       if (history.turns.length < history.total && history.selected === history.turns.length - 1) focusMore = true;

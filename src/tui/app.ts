@@ -639,6 +639,7 @@ export async function handleSlashCommand(
       try { await deleteJsonlSession({ directory: ctx.sessionsDir, home: ctx.home, id }); ctx.controller.notice("Session and draft deleted · /sessions browse"); return true; }
       catch (error) {
         if (isErrno(error, "UNDO_STORE_BUSY")) ctx.controller.fail("Cannot delete session: Undo store busy · /delete-session retry · F2 details", messageOf(error));
+        else if (isErrno(error, "HISTORY_STORE_BUSY")) ctx.controller.fail("Session not deleted: history busy · /delete-session retry · F2 details", `Another Schway process is writing turn history. Nothing was deleted. ${messageOf(error)}`);
         else ctx.controller.fail(`Cannot delete session: ${messageOf(error)}`);
         return false;
       }

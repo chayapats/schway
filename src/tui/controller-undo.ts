@@ -5,10 +5,10 @@ import { formatCount } from "../text/format.ts";
 import { diffLines, parseGitDiff, type GitDiffRow } from "../text/diff.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
-import { assertFileUnchanged, FileChangedError, isErrno, observeFile, writeFileAtomically, type FileObservation } from "../tools/fs.ts";
+import { assertFileUnchanged, FileChangedError, writeFileAtomically, type FileObservation } from "../tools/fs.ts";
 import { displayToolPath } from "../tools/path.ts";
 import { undoFailureReason } from "../undo/errors.ts";
-import { collectUndoEvidence, describeUndoLimits, type UndoEvidence, type UndoLimits } from "../undo/evidence.ts";
+import { collectUndoEvidence, describeUndoLimits, observeUndoFile, type UndoEvidence, type UndoLimits } from "../undo/evidence.ts";
 import { buildUndoNote, formatUndoResult } from "../undo/record.ts";
 import { equalUndoHash, hashUndoBytes, openUndoStore, type UndoManifest, type UndoStore } from "../undo/store.ts";
 import { ChangesLayer } from "./controller-changes.ts";
@@ -314,17 +314,8 @@ export abstract class UndoLayer extends ChangesLayer {
   /** Describe durable pre-images against current bytes without modifying files or session history. */
   private async previewUndoFile(store: UndoStore, manifest: UndoManifest, path: string): Promise<UndoPreviewFile> {
     const file = manifest.files.find(file => file.path === path)!;
-    let current: Buffer | null = null, before: Buffer | null = null;
-    let observed: FileObservation | null = null, unavailable: "incomplete" | "missing" | "unreadable" | undefined = file.after === undefined ? "incomplete" : undefined;
-    try { observed = await observeFile(path, undefined, { regularOnly: true }); current = observed?.bytes ?? null; }
-    catch (error) {
-      // Replacement by a directory, link or other entry is a later change; only real read failures are unreadable.
-      if (!(error instanceof FileChangedError) && !["ENOENT", "EISDIR", "EINVAL"].some(code => isErrno(error, code))) unavailable ??= "unreadable";
-    }
-    try { if (!unavailable && file.before) before = await store.blob(manifest.sessionId, file.before.sha256); }
-    catch { unavailable = "missing"; }
-    const eligible = !unavailable && observed?.entry.isFile() && file.after !== undefined && equalUndoHash(hashUndoBytes(current), file.after)
-      && (file.afterMode === undefined || observed.mode === undefined || file.afterMode === observed.mode);
+    // The shared observation keeps history's undo eligibility identical to this preview.
+    const { observed, current, before, eligible, unavailable } = await observeUndoFile(store, manifest, file);
     const action = eligible ? file.before === null ? "delete" : "restore" : "skip";
     if (unavailable) return { path: displayToolPath(this.workspace!.root, path), absolutePath: path, action: "skip", binary: false,
       status: { incomplete: "undo data incomplete · skip", missing: "no saved copy · skip", unreadable: "can't read · skip" }[unavailable],

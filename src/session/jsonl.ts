@@ -622,10 +622,11 @@ export async function deleteJsonlSession(options: { directory: string; id: strin
   const firstLine = await readFirstLine(path);
   const header: unknown = JSON.parse(firstLine ?? "null");
   if (!isSessionHeader(header) || header.id !== options.id) throw new Error("Cannot delete an invalid session header");
-  openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
-  await deleteUndoSession({ home: options.home, sessionId: header.id });
-  // The session file disappears inside the same lock that guards history publication, so no writer recreates evidence.
+  // The history lock is taken first, so a busy lock leaves the draft, undo data, session and evidence intact,
+  // and the session file disappears inside the lock that guards history publication.
   await deleteHistorySession({ home: options.home, sessionId: header.id }, async () => {
+    openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
+    await deleteUndoSession({ home: options.home, sessionId: header.id });
     await unlink(path);
     try { await unlink(`${path}.meta`); } catch (error) { if (!isNotFound(error)) throw error; }
   });

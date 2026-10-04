@@ -435,7 +435,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const historyIdentity = historyTurnIdentity(session, workspace.root, "headless");
     const history = historyIdentity ? createHistoryCollector({ store: openHistoryStore({ home }), identity: historyIdentity, secrets, session }) : undefined;
     const historyStart = await history?.start();
-    if (historyStart?.state === "unsaved") io.stderr.write(`History not saved for this turn: ${redactSecrets(historyStart.reason, secrets)}\n`);
+    if (historyStart?.state === "unsaved") io.stderr.write(`History not saved · Check ~/.schway/history access (${redactSecrets(historyStart.reason, secrets)}) · Task continues\n`);
     try {
       for await (const event of runAgentLoop({
         approval: { interactive: false, mode: () => approvalSettings.approvalMode },
@@ -490,7 +490,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       // Headless runs take no Git snapshots, so observational evidence is recorded as unavailable with its reason.
       if (historyStart?.state === "saved") {
         const finalized = await history!.finalize({ observation: { status: "unavailable", reason: settings.gitChangeTracking === "off" ? "off" : "headless" } });
-        if (finalized.state === "unsaved") io.stderr.write(`History outcome not saved: ${redactSecrets(finalized.reason, secrets)}\n`);
+        if (finalized.state === "unsaved") io.stderr.write(`History outcome not saved · Check ~/.schway/history access (${redactSecrets(finalized.reason, secrets)})\n`);
       }
     }
 

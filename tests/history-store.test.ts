@@ -1,10 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { openDraftStore } from "../src/drafts/store.ts";
+import { openUndoStore } from "../src/undo/store.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJsonlSession, deleteJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
-import { deleteHistorySession, historyDirectory, historyFilePath, openHistoryStore, HISTORY_STORE_BUSY } from "../src/history/store.ts";
+import { historyDirectory, historyFilePath, openHistoryStore, HISTORY_STORE_BUSY } from "../src/history/store.ts";
 import { MAX_HISTORY_RECORD_BYTES, parseHistoryLine, serializeHistoryFinalize, serializeHistoryRecord, type HistoryFile, type HistoryTurnFinalize, type HistoryTurnStart } from "../src/history/records.ts";
 import { historyCommandSummary, historyExcerpt, historyPath } from "../src/history/sanitize.ts";
 
@@ -82,12 +84,96 @@ test("session deletion removes evidence under the history lock and blocks recrea
   expect(await Bun.file(historyFilePath(home, session.header.id)).exists()).toBe(false);
 });
 
-test("deleting a session without any history store neither locks nor creates one", async () => {
+test("deletion always takes the history lock, even before any history exists, and waits for a writer", async () => {
   const home = await temp();
   const session = await savedSession(home);
-  await deleteHistorySession({ home, sessionId: session.header.id });
-  expect(await Bun.file(join(home, ".schway", "history.lock")).exists()).toBe(false);
-  expect(await Bun.file(historyDirectory(home)).exists()).toBe(false);
+  // A first writer holds the lock before the history directory exists.
+  const lock = new Database(join(home, ".schway", "history.lock"), { create: true });
+  lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+  const sessionPath = join(sessionsDirectory(home), `${session.header.id}.jsonl`);
+  let settled = false;
+  const deletion = deleteJsonlSession({ directory: sessionsDirectory(home), home, id: session.header.id }).finally(() => { settled = true; });
+  await Bun.sleep(100);
+  // Nothing irreversible happens while the writer owns the lock.
+  expect(settled).toBe(false);
+  expect(await Bun.file(sessionPath).exists()).toBe(true);
+  // The writer publishes its first evidence while it still holds the lock, then releases it.
+  await mkdir(historyDirectory(home), { recursive: true });
+  await writeFile(historyFilePath(home, session.header.id), `${JSON.stringify({ type: "history", version: 1, sessionId: session.header.id, createdAt: "2026-01-15T09:30:00.000Z" })}\n`);
+  lock.close();
+  await deletion;
+  expect(await Bun.file(sessionPath).exists()).toBe(false);
+  expect(await Bun.file(historyFilePath(home, session.header.id)).exists()).toBe(false);
+  await expect(openHistoryStore({ home }).start(session.header.id, start())).rejects.toMatchObject({ code: "HISTORY_SESSION_MISSING" });
+  expect(await Bun.file(historyFilePath(home, session.header.id)).exists()).toBe(false);
+});
+
+test("a busy history lock stops deletion before the draft, undo data or session change", async () => {
+  const home = await temp();
+  const session = await savedSession(home);
+  const draft = openDraftStore({ home, workspaceRoot: session.header.workspaceRoot, sessionId: session.header.id });
+  expect(draft.save("keep this draft", 1)).toBe(true);
+  await openUndoStore({ home }).recordShell({ sessionId: session.header.id, turnId: "t", turnNumber: 1 }, { detection: "unavailable" });
+  const lock = new Database(join(home, ".schway", "history.lock"), { create: true });
+  lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+  try {
+    await expect(deleteJsonlSession({ directory: sessionsDirectory(home), home, id: session.header.id })).rejects.toMatchObject({ code: HISTORY_STORE_BUSY });
+  } finally { lock.close(); }
+  expect(openDraftStore({ home, workspaceRoot: session.header.workspaceRoot, sessionId: session.header.id }).checkpoint?.text).toBe("keep this draft");
+  expect((await openUndoStore({ home }).list(session.header.id)).map(manifest => manifest.turnId)).toEqual(["t"]);
+  expect(await Bun.file(join(sessionsDirectory(home), `${session.header.id}.jsonl`)).exists()).toBe(true);
+});
+
+/** Run a store operation in a child process with `node:fs/promises` partly replaced. */
+async function withFaultyFs(home: string, sessionId: string, patch: string) {
+  const script = `
+    import { mock } from "bun:test";
+    const fs = await import("node:fs/promises");
+    ${patch}
+    const { openHistoryStore } = await import(${JSON.stringify(join(import.meta.dir, "../src/history/store.ts"))});
+    const store = openHistoryStore({ home: ${JSON.stringify(home)} });
+    try { await store.start(${JSON.stringify(sessionId)}, ${JSON.stringify(start())}); console.log("saved"); }
+    catch (error) { console.log(error.code ?? error.message); }
+  `;
+  const child = Bun.spawn([process.execPath, "--eval", script], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
+  const [code, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  expect(code, errors).toBe(0);
+  return output.trim();
+}
+
+test("a failed sidecar creation never leaves a torn header that blocks later history", async () => {
+  const home = await temp();
+  const session = await savedSession(home);
+  // Publication fails after the temporary header was written, as a crash or full disk would.
+  expect(await withFaultyFs(home, session.header.id, `mock.module("node:fs/promises", () => ({ ...fs, link: async () => { throw Object.assign(new Error("full"), { code: "ENOSPC" }); } }));`)).toBe("ENOSPC");
+  expect(await Bun.file(historyFilePath(home, session.header.id)).exists()).toBe(false);
+  expect((await readdir(historyDirectory(home))).filter(name => name.endsWith(".tmp"))).toEqual([]);
+  // The next attempt creates a valid sidecar.
+  await openHistoryStore({ home }).start(session.header.id, start());
+  expect((await openHistoryStore({ home }).read(session.header.id)).starts).toHaveLength(1);
+});
+
+test("short writes are completed and a stalled write is reported instead of a torn append", async () => {
+  const home = await temp();
+  const session = await savedSession(home);
+  const shortWrites = `const realOpen = fs.open;
+    mock.module("node:fs/promises", () => ({ ...fs, open: async (...args) => {
+      const handle = await realOpen(...args);
+      const write = handle.write.bind(handle);
+      handle.write = (buffer, offset, length) => write(buffer, offset, Math.min(length, 7));
+      return handle;
+    } }));`;
+  expect(await withFaultyFs(home, session.header.id, shortWrites)).toBe("saved");
+  const read = await openHistoryStore({ home }).read(session.header.id);
+  expect(read).toMatchObject({ status: "ok", rejected: 0, tornTail: false });
+  expect(read.starts).toHaveLength(1);
+  const stalled = `const realOpen = fs.open;
+    mock.module("node:fs/promises", () => ({ ...fs, open: async (...args) => {
+      const handle = await realOpen(...args);
+      handle.write = async () => ({ bytesWritten: 0 });
+      return handle;
+    } }));`;
+  expect(await withFaultyFs(home, session.header.id, stalled)).toBe("EIO");
 });
 
 test("the bounded reader rejects malformed, oversized and mismatched lines and ignores a torn tail without writing", async () => {
@@ -181,19 +267,26 @@ test("item counts apply before byte trimming and keep totals", () => {
   expect(record.commands).toMatchObject({ total: 70, truncated: true });
 });
 
-test("excerpts keep at most 160 graphemes and code points, cutting only at grapheme boundaries", () => {
-  const thai = "ก้".repeat(100);
-  const excerpt = historyExcerpt(thai, []);
-  expect(excerpt.truncated).toBe(true);
-  // Each Thai cluster has two code points, so the stricter code-point limit keeps 80 whole clusters.
-  expect(excerpt.text).toBe("ก้".repeat(80));
+test("excerpts keep at most 160 graphemes, cutting only at grapheme boundaries", () => {
+  const thai = historyExcerpt("ก้".repeat(200), []);
+  expect(thai.truncated).toBe(true);
+  expect(thai.text).toBe("ก้".repeat(160));
   const emoji = historyExcerpt("👩‍💻".repeat(200), []);
-  expect([...new Intl.Segmenter().segment(emoji.text!)].length).toBeLessThanOrEqual(160);
+  expect([...new Intl.Segmenter().segment(emoji.text!)].length).toBe(160);
   expect(emoji.text!.endsWith("👩‍💻")).toBe(true);
-  const zalgo = historyExcerpt(`a${"́".repeat(500)} rest`, []);
-  expect(zalgo).toMatchObject({ truncated: true });
-  expect(zalgo.text ?? "").toBe("");
   expect(historyExcerpt("x".repeat(160), [])).toEqual({ text: "x".repeat(160), truncated: false, hidden: false });
+});
+
+test("heavy combining marks shorten an excerpt but never empty it", () => {
+  const zalgo = historyExcerpt(`a${"\u0301".repeat(500)} rest`, []);
+  expect(zalgo).toEqual({ text: "a rest", truncated: true, hidden: false });
+  const stacked = historyExcerpt(`${"e\u0301\u0302".repeat(10)}${"z\u0300".repeat(200)}`, []);
+  expect(stacked.text!.startsWith("e\u0301\u0302")).toBe(true);
+  expect([...new Intl.Segmenter().segment(stacked.text!)].length).toBe(160);
+  // A record built from the worst case stays well within the line limit.
+  const line = serializeHistoryRecord(start({ task: historyExcerpt(`${"q".concat("\u0301".repeat(31))}`.repeat(400), []).text }));
+  expect(Buffer.byteLength(line)).toBeLessThan(MAX_HISTORY_RECORD_BYTES);
+  expect(historyCommandSummary(`b${"\u0301".repeat(400)}`, []).text).toBe("b");
 });
 
 test("sanitizing strips terminal controls and redacts secrets before bounding", () => {
