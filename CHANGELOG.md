@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/history` browses recorded turn outcomes on the selected branch, newest first:
+  outcome, time, duration, file and command counts, and per-turn evidence with
+  observed command exits, observed files, undo state and an on-request current
+  diff labelled as current content. Evidence lives in a private append-only
+  sidecar beside each saved session, written by interactive and headless turns
+  and removed with the session (#257).
+
 ## [1.0.0-rc.1] - 2026-10-02
 
 ### Added

@@ -433,7 +433,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const approvalSettings = settings;
     // History is ancillary: its start is persisted first, and no history failure changes execution or the exit code.
     const historyIdentity = historyTurnIdentity(session, workspace.root, "headless");
-    const history = historyIdentity ? createHistoryCollector({ store: openHistoryStore({ home }), identity: historyIdentity, secrets }) : undefined;
+    const history = historyIdentity ? createHistoryCollector({ store: openHistoryStore({ home }), identity: historyIdentity, secrets, session }) : undefined;
     const historyStart = await history?.start();
     if (historyStart?.state === "unsaved") io.stderr.write(`History not saved for this turn: ${redactSecrets(historyStart.reason, secrets)}\n`);
     try {

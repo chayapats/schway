@@ -300,6 +300,77 @@ This record has no entry ID or parent, advances no branch, and never becomes mod
 
 `setExtraRoots` writes before publishing metadata; repeated accepted lists are a no-op. Resume callers use current `session.metadata.extraRoots`, not initial `header.extraRoots`, and validate availability through `restoreWorkspace`. Missing roots remain saved while runtime context excludes them. See [workspaces](workspaces.md).
 
+## Turn history sidecar
+
+Each accepted user turn records plain-data evidence beside its saved session in
+`~/.schway/history/<session-id>.jsonl`. The directory is created with mode
+`0700` and each file with `0600`. The sidecar is optional: it never enters model
+context, the session JSONL and undo formats are unchanged, and a session without
+one opens normally with its turns shown as `Details unavailable`. Interactive and
+headless runs use the same renderer-free collector (`src/history/`).
+
+The file is append-only. Its first line is a versioned header naming the session
+root; later lines are attempt starts and revisioned outcomes:
+
+```json
+{"type":"history","version":1,"sessionId":"<session-id>","createdAt":"2026-01-15T09:30:00.000Z"}
+{"type":"turn_start","version":1,"turnId":"<user-record-id>","attemptId":"<uuid>","ordinal":1,"branchId":"main","parentId":"<parent-entry-id>","workspaceRoot":"/abs/project","mode":"tui","startedAt":"…","task":"Fix the clamp upper bound"}
+{"type":"turn_finalize","version":1,"turnId":"<user-record-id>","attemptId":"<uuid>","revision":1,"outcome":"completed","finishedAt":"…","activeMs":2400,"toolResults":2,"failedTools":0,"commands":{"total":1,"exitZero":1,"nonzero":0,"unknown":0,"truncated":false,"items":[{"id":"<digest>","command":"bun test","exitCode":0,"ended":"exit","status":"success"}]},"files":{"total":1,"truncated":false,"items":[{"path":"clamp.ts","source":"tool","added":1,"removed":1}]},"git":{"status":"captured"}}
+```
+
+- **Identity.** A turn is the accepted user record (`turnId`), which is unique
+  across every branch. The start also stores that record's parent entry, the
+  branch it ran on and the attempt's own workspace root, so a reader attaches
+  evidence only to the exact record at its saved graph position on the selected
+  ancestry. Evidence for other branches is ignored, never reattached.
+- **Lifecycle.** The start is persisted before the attempt runs. Its outcome is
+  appended once it settles: `completed`, `failed`, `stopped` or `limit`. A start
+  without an outcome, for example after a crash or forced quit, reads as
+  incomplete with unknown time; nothing is repaired or backfilled.
+- **Idempotency.** Repeating identical evidence writes nothing; changed evidence
+  for the same attempt gets the next `revision`, and the highest revision wins.
+  Duplicate lines, repeated tool results for the same call and replayed starts
+  never add turns or observations. Completed tools are never replayed to rebuild
+  metadata.
+- **Continuation.** Continuing the same accepted turn adds a new attempt. The
+  timeline shows one row with the latest attempt's outcome, deduplicated files
+  and commands, and the sum of known active durations; unknown durations stay
+  explicit.
+- **Evidence.** Files come from successful `edit` and `write` results and, when
+  change tracking already captured before/after snapshots, from paths Git found
+  changed (`source: "shell"`). Command exits come only from structured `bash`
+  results, never from prose. Tracking `off`, non-Git workspaces, failed captures
+  and headless runs (which take no snapshots) record `git` as unavailable with a
+  reason; no Git process runs only to populate history. Undo outcomes are read
+  from the session's `turn_undo` records.
+- **Bounds.** Each record keeps at most 50 command summaries of 200 characters
+  and 200 file rows; totals still count every observation and each shortened
+  list sets `truncated`. Task excerpts keep at most 160 graphemes, cut only at
+  grapheme boundaries. Every serialized line, including its LF, fits 128 KiB of
+  UTF-8: item counts apply first, then whole trailing entries are omitted until
+  the escaped JSON fits. A single path over 4096 bytes is omitted and counted.
+  Identity fields are validated, never truncated. Readers use a bounded line
+  reader and skip malformed, oversized or unknown lines; a header from a newer
+  format makes the file unsupported rather than guessed at.
+- **Privacy.** Terminal controls are stripped and known secrets redacted before
+  bounding. Records keep no provider payloads, reasoning, credentials, full tool
+  output or file contents. Slash commands and credential-like tasks store no
+  excerpt.
+- **Locking and deletion.** Appends and deletion share a cross-process lock at
+  `~/.schway/history.lock`. A sidecar is created only while its saved session
+  exists, and `/delete-session` removes the session file and its evidence inside
+  that lock, so evidence is never recreated afterwards.
+- **Failures.** A history write failure never blocks execution or changes the
+  session-write rules. The conversation and tool results are saved as usual; the
+  TUI shows `History not saved · /history shows gaps · F2 details` and headless
+  runs print `History not saved for this turn: <reason>` on stderr.
+
+History follows the saved-session lifecycle. There is no separate retention timer
+or automatic pruning; per-record bounds and 50-turn pages do not cap a session's
+total history. Undo pruning removes pre-images only, so history then reports undo
+as unavailable while its observations stay as recorded. Format changes are
+forward-only and append-only.
+
 ## Compaction
 
 Long sessions compact context instead of failing when pressure builds.

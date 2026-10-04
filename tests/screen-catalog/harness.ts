@@ -2,6 +2,8 @@ import { ConfigEditor } from "../../src/config/editing.ts";
 import { Database } from "bun:sqlite";
 import { openDraftStore } from "../../src/drafts/store.ts";
 import { openUndoStore } from "../../src/undo/store.ts";
+import { openHistoryStore } from "../../src/history/store.ts";
+import { historyExcerpt } from "../../src/history/sanitize.ts";
 import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
 import { createTestRenderer } from "@opentui/core/testing";
@@ -44,7 +46,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const reviewScope = screen.id === "review-multi-turn" || screen.id === "review-staged-unstaged";
   const undoLimit = ["undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable"].includes(screen.id);
   const resumedReview = screen.id.startsWith("resumed-review");
-  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview;
+  const historyScreen = screen.id.startsWith("history-");
+  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -53,7 +56,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       await mkdir(join(root, ".git"), { recursive: true });
       await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/feature/a-very-long-branch-name-for-testing\n");
     }
-    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id) || reviewScope || undoLimit || resumedReview) {
+    if (["completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen) {
       await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
       const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.com", GIT_AUTHOR_DATE: "2026-01-15T09:00:00Z", GIT_COMMITTER_DATE: "2026-01-15T09:00:00Z" };
       if (screen.id !== "undo-preview-no-git" && screen.id !== "undo-detection-unavailable" && screen.id !== "resumed-review-no-git") for (const args of [["init", "-q", "-b", "main"], ["add", "clamp.ts"], ["-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"]]) {
@@ -78,7 +81,26 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     if (screen.id === "resumed-review-unavailable") await rename(root, `${root}-moved`);
   }
   const durableSession = draft ? await createJsonlSession({ directory: sessionsDirectory(home), workspace }) : undefined;
-  const session = durableSession ?? resumed ?? createSession();
+  // History screens run real turns in a saved session so the controller records evidence beside it.
+  const historySession = historyScreen ? await createJsonlSession({ directory: sessionsDirectory(home), workspace }) : undefined;
+  if (screen.id === "history-missing-evidence") historySession!.append(
+    { type: "user", id: "legacy-user-1", content: [{ type: "text", text: "Sketch the clamp helper" }] }, { type: "assistant", id: "legacy-answer-1", content: [{ type: "text", text: "Sketched it." }] },
+    { type: "user", id: "legacy-user-2", content: [{ type: "text", text: "Name the bounds lo and hi" }] }, { type: "assistant", id: "legacy-answer-2", content: [{ type: "text", text: "Renamed them." }] });
+  if (screen.id === "history-truncation") {
+    // Synthetic evidence exercises record bounds without running hundreds of tools.
+    const task = `Audit every generated fixture ${"and compare its snapshot ".repeat(8)}ไทย 🧪`;
+    historySession!.append({ type: "user", id: "history-user", content: [{ type: "text", text: task }] }, { type: "assistant", id: "history-answer", content: [{ type: "text", text: "Audited the fixtures." }] });
+    const excerpt = historyExcerpt(task, []);
+    const store = openHistoryStore({ home }), id = historySession!.header.id;
+    await store.start(id, { type: "turn_start", version: 1, turnId: "history-user", attemptId: "history-attempt", ordinal: 1, branchId: "main", parentId: historySession!.rootId,
+      workspaceRoot: root, mode: "headless", startedAt: "2026-01-15T09:30:00.000Z", ...(excerpt.text ? { task: excerpt.text } : {}), ...(excerpt.truncated ? { taskTruncated: true as const } : {}) });
+    const commands = Array.from({ length: 50 }, (_, index) => ({ id: index.toString(16).padStart(16, "0"), command: `bun test fixtures/case-${index + 1}.test.ts`, exitCode: index % 17 === 3 ? 1 : 0, ended: "exit" as const, status: "success" as const }));
+    await store.finalize(id, { type: "turn_finalize", version: 1, turnId: "history-user", attemptId: "history-attempt", revision: 1, outcome: "completed", finishedAt: "2026-01-15T09:30:00.000Z", activeMs: 754_000,
+      toolResults: 291, failedTools: 0, commands: { total: 61, exitZero: 57, nonzero: 4, unknown: 0, truncated: true, items: commands },
+      files: { total: 230, truncated: true, items: Array.from({ length: 200 }, (_, index) => ({ path: `fixtures/__snapshots__/case-${index + 1}.snap`, source: "tool" as const, added: 3, removed: 1 })) },
+      git: { status: "unavailable", reason: "headless" } });
+  }
+  const session = durableSession ?? resumed ?? historySession ?? createSession();
   const draftStore = durableSession ? openDraftStore({ home, workspaceRoot: root, sessionId: durableSession.header.id }) : undefined;
   if (draftStore) draftStore.save(screen.id === "draft-restored" ? "ร่างภาษาไทย\nยังไม่ส่ง 🧪" : "Previously saved", 1);
   if (screen.id === "recent-work-resume") {
@@ -129,6 +151,18 @@ export async function buildScreen(screen: Screen, variant: Variant) {
         { text: "Fixed clamp so it respects the upper bound." }, generate, { text: "Generated the output file." }]
       : [generate, { text: "Generated the output file." }];
   }
+  if (historyScreen && screen.id !== "history-truncation") {
+    tools = createToolRegistry([readTool, editTool, writeTool, bashTool]);
+    responses = [
+      { toolCalls: [{ id: "history-edit", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "return Math.max(lo, n);", newText: "return Math.min(hi, Math.max(lo, n));" }] } }] },
+      { toolCalls: [{ id: "history-check", name: "bash", arguments: { command: "printf 'ok\\n'" } }] },
+      { text: "Fixed clamp so it respects the upper bound." },
+      { toolCalls: [{ id: "history-tests", name: "bash", arguments: { command: "printf 'clamp: 1 failing\\n'; exit 1" } }] },
+      { text: "One clamp test still fails." },
+      { toolCalls: [{ id: "history-notes", name: "write", arguments: { path: "notes.md", content: "Clamp notes ไทย 🧪\n" } }] },
+      { toolCalls: [{ id: "history-wait", name: "bash", arguments: { command: "printf 'Ready to stop\\n'; sleep 30", timeout: 5_000 } }] },
+    ];
+  }
   if (screen.id === "approval-command" || screen.id === "approval-edit") {
     tools = createToolRegistry([editTool, bashTool]);
     await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
@@ -150,7 +184,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
-    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? resumed?.header.id ?? "catalog-session",
+    session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? resumed?.header.id ?? historySession?.header.id ?? "catalog-session",
     model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     onRuntimeEvent: event => { if (event.type === "tool.finished") activityTime += 1200; },
@@ -217,7 +251,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     undoLock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
   }
   const deletionContext = screen.id === "delete-session-busy" ? { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionDirectory!, settings: () => new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") }).settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } } : undefined;
-  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets: options.secrets ?? [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets: options.secrets ?? [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "history" ? controller.historyCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();

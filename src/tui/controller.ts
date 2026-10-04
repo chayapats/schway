@@ -4,13 +4,14 @@ import { describeEffectiveThinking } from "../config/config.ts";
 import type { TuiSnapshot } from "./controller-types.ts";
 import { startupFailureCategory, startupRecoveryMessage } from "./controller-support.ts";
 import { TurnLayer } from "./controller-turn.ts";
+import { HistoryLayer } from "./controller-history.ts";
 
 export type * from "./controller-types.ts";
 export * from "./branch-tree.ts";
 export * from "./transcript-format.ts";
 
 /** Own interactive transcript state around the shared agent loop without loading the renderer. */
-export class TuiController extends TurnLayer {
+export class TuiController extends HistoryLayer {
   /** Replace the active conversation and expire its unconsumed notice diagnostics. */
   override replaceSession(...args: Parameters<TurnLayer["replaceSession"]>): void {
     super.replaceSession(...args);
@@ -43,6 +44,7 @@ export class TuiController extends TurnLayer {
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
       undoPreview: this.undoPreview ? structuredClone(this.undoPreview) : undefined,
       changeReview: this.changeReview ? structuredClone(this.changeReview) : undefined,
+      ...this.historySnapshotField(),
       readiness: this.startupAbort ? "loading" : this.isNotConnected() ? "not-connected" : this.model ? "ready" : this.startupRecoveryCategory === "auth" ? "connect" : this.startupRecoveryCategory === "model" ? "choose-model" : "repair",
       ...(!this.model && this.startupDiagnostic ? { readinessDetail:
         /Missing OpenAI API key/.test(this.startupDiagnostic) ? "Missing OpenAI API key."
@@ -149,6 +151,7 @@ export class TuiController extends TurnLayer {
     this.successfulToolPaths.clear();
     this.closeUndoPreview();
     this.closeChangeReview();
+    this.closeHistory();
     this.closeModelPicker();
     if (!this.credentialMutation) { this.credentialEntry?.cancel(); this.credentialEntry = undefined; this.credentialTarget = undefined; this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined; this.loginReturn = undefined; }
     this.abortActiveTurn();

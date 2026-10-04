@@ -52,7 +52,9 @@ export function historyTurnIdentity(session: Pick<Session, "items" | "entries" |
 }
 
 /** Create a collector for one attempt; `clock` measures active time and `now` stamps recorded times. */
-export function createHistoryCollector(options: { store: HistoryStore; identity: HistoryTurnIdentity; secrets?: readonly string[]; clock?: () => number; now?: () => Date }): HistoryCollector {
+export function createHistoryCollector(options: { store: HistoryStore; identity: HistoryTurnIdentity; secrets?: readonly string[]; clock?: () => number; now?: () => Date;
+  /** Saved conversation used only to name a command whose result carried no structured details, such as a stopped call. */
+  session?: Pick<Session, "items"> }): HistoryCollector {
   const { store, identity } = options;
   const secrets = options.secrets ?? [];
   const clock = options.clock ?? (() => performance.now());
@@ -130,7 +132,7 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
         counts[exitCode === null ? "unknown" : exitCode === 0 ? "exitZero" : "nonzero"]++;
         commandTotal++;
         if (commands.length < MAX_HISTORY_COMMANDS) {
-          const summary = historyCommandSummary(typeof details?.command === "string" ? details.command : "bash", secrets);
+          const summary = historyCommandSummary(typeof details?.command === "string" ? details.command : requestedCommand(options.session, event.toolCallId) ?? "bash", secrets);
           commands.push({ id: digest, command: summary.text, ...(summary.truncated ? { commandTruncated: true as const } : {}), exitCode, ended,
             status: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error" });
         }
@@ -179,6 +181,19 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
 /** Map an observed snapshot failure message onto a stored reason without running Git. */
 export function historyGitFailure(message: string): HistoryGitEvidence {
   return message.startsWith("Not a Git workspace") ? { status: "unavailable", reason: "non-git", detail: message } : { status: "unavailable", reason: "failed", detail: message };
+}
+
+/** The command a saved bash call requested, read from its accepted tool-call arguments. */
+function requestedCommand(session: Pick<Session, "items"> | undefined, callId: string): string | undefined {
+  for (let index = (session?.items.length ?? 0) - 1; index >= 0; index--) {
+    const item = session!.items[index]!;
+    if (item.type !== "assistant") continue;
+    const call = item.content.find(block => block.type === "tool_call" && block.id === callId);
+    if (call?.type !== "tool_call") continue;
+    const args = call.arguments as { command?: unknown } | null;
+    return args && typeof args === "object" && typeof args.command === "string" ? args.command : undefined;
+  }
+  return undefined;
 }
 
 function editHunks(value: unknown): DiffHunk[] | undefined {

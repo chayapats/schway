@@ -1,0 +1,366 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import type { RuntimeEvent } from "../agent/events.ts";
+import { redactSecrets } from "../auth/secrets.ts";
+import { createHistoryCollector, historyGitFailure, historyTurnIdentity, type HistoryCollector, type HistoryObservation } from "../history/collector.ts";
+import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome } from "../history/records.ts";
+import { openHistoryStore, type HistoryRead } from "../history/store.ts";
+import { buildHistoryTimeline, historyUndoTarget, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
+import type { Session } from "../session/session.ts";
+import { formatCount, formatDuration } from "../text/format.ts";
+import { parseGitDiff, type GitDiffRow } from "../text/diff.ts";
+import { openUndoStore } from "../undo/store.ts";
+import { getGitDiffPreview, inspectGitStatus } from "../workspace/git.ts";
+import type { TurnOutcome } from "./controller-types.ts";
+import { CURRENT_DIFF_FAILED, LOADING_CURRENT_DIFF, WORKSPACE_REVIEW_STATES, pathStateNote } from "./review-scope.ts";
+import { TurnLayer } from "./controller-turn.ts";
+
+/** What `/undo` would do now, read from durable undo manifests without changing them. */
+export interface HistoryUndoState {
+  /** False when undo data could not be read, so no eligibility is claimed. */
+  known: boolean;
+  /** Accepted turn `/undo` previews now, if any. */
+  targetTurnId?: string;
+  targetOrdinal?: number;
+  /** Turns that still have saved file pre-images. */
+  preImages: readonly string[];
+}
+
+/** Read-only timeline panel state: newest turns first, revealed in pages, with saved evidence or current content on request. */
+export interface HistorySnapshot {
+  view: "list" | "detail" | "current";
+  loading: boolean;
+  /** Short read problem shown above the list; diagnostics live in `details`. */
+  notice?: string;
+  details: string;
+  showingDetails: boolean;
+  /** Revealed turns only, newest first. */
+  turns: HistoryTurn[];
+  total: number;
+  selected: number;
+  /** Selected observed file in the detail view. */
+  file: number;
+  undo: HistoryUndoState;
+  /** Turns of this run whose evidence could not be saved, with the reason kept for details. */
+  unsaved: Record<string, string>;
+  /** Current Git content for one observed path, read only on request; never historical content. */
+  current?: { path: string; turn: number; rows: GitDiffRow[]; loading: boolean };
+}
+
+/** Pair each recorded outcome with a glyph and word, distinguishing incomplete and unavailable evidence. */
+export function historyOutcomeLabel(turn: Pick<HistoryTurn, "evidence" | "outcome">, unsaved = false): string {
+  if (turn.evidence === "missing") return unsaved ? "! Not saved" : "○ Details unavailable";
+  return { completed: "✓ Done", failed: "✗ Failed", stopped: "− Stopped", limit: "◌ Limit reached", incomplete: "! Incomplete" }[turn.outcome ?? "incomplete"];
+}
+
+/** Semantic tone for an outcome label; the glyph and word carry meaning without color. */
+export function historyOutcomeTone(turn: Pick<HistoryTurn, "evidence" | "outcome">): "success" | "error" | "warning" | "muted" {
+  if (turn.evidence === "missing") return "muted";
+  return turn.outcome === "completed" ? "success" : turn.outcome === "failed" ? "error" : turn.outcome === "incomplete" ? "warning" : "muted";
+}
+
+/** Known active time, with unknown attempt durations stated rather than guessed. */
+export function historyDurationLabel(turn: Pick<HistoryTurn, "evidence" | "activeMs" | "unknownDurations" | "attempts">): string {
+  if (turn.evidence === "missing") return "";
+  const known = turn.attempts.length > turn.unknownDurations ? formatDuration(turn.activeMs) : "";
+  if (!turn.unknownDurations) return known;
+  return known ? `${known} + unknown` : "Time unknown";
+}
+
+/** Recorded start time in UTC minutes, matching the session picker's activity format. */
+export function historyTimeLabel(turn: Pick<HistoryTurn, "startedAt">): string {
+  return turn.startedAt ? `${turn.startedAt.slice(0, 16).replace("T", " ")} UTC` : "";
+}
+
+/** Concise file and command totals; totals cover every observation even when lists were shortened. */
+export function historyCountsLabel(turn: Pick<HistoryTurn, "evidence" | "files" | "commands">): string {
+  if (turn.evidence === "missing") return "";
+  return `${formatCount(turn.files.total, "file")} · ${formatCount(turn.commands.total, "command")}`;
+}
+
+/** Task excerpt for display, marking shortened and hidden tasks. */
+export function historyTaskLabel(turn: Pick<HistoryTurn, "task" | "taskTruncated" | "taskHidden">): string {
+  if (turn.taskHidden) return "Command or sensitive task hidden";
+  return turn.task ? `${turn.task}${turn.taskTruncated ? "…" : ""}` : "No task text";
+}
+
+/** One command summary with its observed ending; an exit code describes the command only. */
+export function historyCommandLine(command: HistoryCommand): { glyph: string; text: string; tone: "success" | "warning" | "muted" | "error" } {
+  const text = `${command.command}${command.commandTruncated ? "…" : ""}`;
+  if (command.status === "cancelled") return { glyph: "−", text: `${text} · Stopped`, tone: "muted" };
+  if (command.ended === "timed-out") return { glyph: "!", text: `${text} · Timed out`, tone: "error" };
+  if (command.status === "error" && command.exitCode === null) return { glyph: "!", text: `${text} · Tool error`, tone: "error" };
+  if (command.exitCode !== null) return command.exitCode === 0 ? { glyph: "✓", text: `${text} · Exit 0`, tone: "success" } : { glyph: "!", text: `${text} · Exit ${command.exitCode}`, tone: "warning" };
+  return { glyph: "−", text: `${text} · ${command.ended === "stopped" ? "Stopped" : "No exit observed"}`, tone: "muted" };
+}
+
+/** Durable undo outcome or current `/undo` eligibility for one turn, never offering rollback from the timeline. */
+export function historyUndoLine(turn: Pick<HistoryTurn, "turnId" | "undo" | "files" | "evidence">, undo: HistoryUndoState): string {
+  const recorded = turn.undo.at(-1);
+  if (recorded) {
+    const reverted = recorded.reverted.length, skipped = recorded.skipped.length;
+    return `Undone · ${formatCount(reverted, "file")} reverted${skipped ? ` · ${skipped} skipped` : ""}`;
+  }
+  if (turn.evidence === "missing") return "Undo status unknown · /undo preview";
+  if (!turn.files.items.some(file => file.source === "tool")) return "No file edits to undo";
+  if (!undo.known) return "Undo status unknown · /undo preview";
+  if (undo.targetTurnId === turn.turnId) return "Undo available · /undo previews this turn";
+  if (!undo.preImages.includes(turn.turnId)) return "Undo unavailable · pre-images not kept";
+  return undo.targetOrdinal ? `Not the undo target · /undo previews turn ${undo.targetOrdinal}` : "Nothing to undo now";
+}
+
+/** Build F2 evidence notes for the list or one turn; caveats stay here instead of the primary view. */
+export function historyDetailsText(state: Pick<HistorySnapshot, "unsaved"> & { read?: Pick<HistoryTimeline, "status" | "rejected" | "tornTail" | "elsewhere"> }, turn?: HistoryTurn): string {
+  const lines: string[] = [];
+  if (turn) {
+    if (turn.evidence === "missing") {
+      const reason = state.unsaved[turn.turnId];
+      lines.push(reason ? `History was not saved for this turn: ${reason}. The conversation and tool results are saved normally.`
+        : "No saved history exists for this turn. It ran before history was recorded, or its evidence was not saved. Nothing is rebuilt from conversation text.");
+    } else {
+      turn.attempts.forEach((attempt, index) => {
+        const git = attempt.git === undefined ? "Git evidence unknown (no outcome recorded)"
+          : attempt.git.status === "captured" ? "Git snapshots captured before and after the attempt"
+          : `Git snapshots unavailable: ${{ off: "change tracking is off", "no-workspace": "no workspace was active", "non-git": "not a Git workspace", failed: "the snapshot failed", "not-captured": "no snapshot was captured", headless: "headless runs take no snapshots" }[attempt.git.reason]}${attempt.git.detail ? ` (${attempt.git.detail})` : ""}`;
+        lines.push(`Attempt ${index + 1}: ${attempt.mode === "tui" ? "interactive" : "headless"} · ${attempt.workspaceRoot} · started ${historyTimeLabel(attempt)} · ${attempt.outcome ? historyOutcomeLabel({ evidence: "recorded", outcome: attempt.outcome }) : "no outcome recorded"} · ${attempt.activeMs === null ? "time unknown" : formatDuration(attempt.activeMs)}`);
+        lines.push(`  ${git}`);
+      });
+      lines.push(`${formatCount(turn.toolResults, "tool result")}; ${formatCount(turn.failedTools, "failed tool")}.`);
+      lines.push(`Commands: ${turn.commands.exitZero} exited 0, ${turn.commands.nonzero} nonzero, ${turn.commands.unknown} without an observed exit.`);
+      if (turn.commands.truncated) lines.push(`The command list shows ${turn.commands.items.length} of ${turn.commands.total} summaries; each keeps at most 200 characters.`);
+      if (turn.files.truncated) lines.push(`The file list shows ${turn.files.items.length} of ${turn.files.total} observed paths${turn.oversized ? `; ${formatCount(turn.oversized, "oversized path")} could not be stored` : ""}.`);
+    }
+    lines.push("");
+  }
+  const read = state.read;
+  if (read?.status === "unsupported") lines.push("This session's history was written by a newer Schway build, so its details are not shown.");
+  if (read?.status === "unreadable") lines.push("The history file could not be read or validated, so details are unavailable. It was not changed.");
+  if (read && (read.rejected || read.tornTail)) lines.push(`Skipped ${formatCount(read.rejected + (read.tornTail ? 1 : 0), "damaged or oversized record")}. History is never repaired on read.`);
+  lines.push(
+    "History is recorded while turns run and kept beside the saved session. It is opened offline and read-only.",
+    "Outcomes and exit codes are what the runtime observed. A completed turn or exit 0 does not prove that tests passed.",
+    "File rows come from successful file-tool results and, when change tracking captured snapshots, Git before/after comparisons. They do not identify exclusive authorship; concurrent external edits can appear.",
+    "Line counts add every file-tool edit in the turn, so repeated edits can exceed the net change.",
+    `Records keep the first ${MAX_HISTORY_COMMANDS} commands and ${MAX_HISTORY_FILES} files; totals still count every observation.`,
+    "Current diff reads the working tree now on request. It is never the exact patch of an earlier turn.",
+  );
+  return lines.join("\n");
+}
+
+/** Interactive history panel and per-turn evidence collection layered on the shared turn runner. */
+export abstract class HistoryLayer extends TurnLayer {
+  private historyAttempt?: { collector: HistoryCollector; signal: AbortSignal };
+  private readonly historyUnsaved = new Map<string, string>();
+  private historyState?: { generation: number; identity: string; snapshot: HistorySnapshot; timeline?: HistoryTimeline; revealed: number };
+  private historyGeneration = 0;
+
+  /** History follows the saved-session lifecycle: only a persisted session under this home gets a sidecar. */
+  private historyEnabled(session: Session = this.session): boolean {
+    return !!this.home && "persisted" in session && (session as { persisted?: unknown }).persisted === true;
+  }
+
+  /** Persist the attempt start before the baseline capture and execution of each accepted turn. */
+  protected override async captureTurnBaseline(signal: AbortSignal): Promise<void> {
+    this.historyAttempt = undefined;
+    const identity = this.historyEnabled() && !this.disposed ? historyTurnIdentity(this.session, this.workspace?.root, "tui") : undefined;
+    if (identity && this.activeAbort?.signal === signal) {
+      const collector = createHistoryCollector({ store: openHistoryStore({ home: this.home! }), identity, secrets: this.secrets, clock: this.activityClock, session: this.session });
+      this.historyAttempt = { collector, signal };
+      await collector.start();
+    }
+    return super.captureTurnBaseline(signal);
+  }
+
+  /** Feed the owning attempt's runtime events to its collector after native observers. */
+  protected override observeRuntimeEvent(event: RuntimeEvent): void {
+    super.observeRuntimeEvent(event);
+    const attempt = this.historyAttempt;
+    if (attempt && attempt.signal === this.activeAbort?.signal) attempt.collector.observe(event);
+  }
+
+  /** Finalize the attempt with the settled outcome and only the Git evidence this turn already captured. */
+  protected override async finishOutcome(reason?: TurnOutcome["reason"]): Promise<void> {
+    await super.finishOutcome(reason);
+    const attempt = this.historyAttempt;
+    if (!attempt || attempt.signal !== this.activeAbort?.signal || this.disposed || !this.outcome) return;
+    this.historyAttempt = undefined;
+    const outcome: HistoryOutcome = this.outcome.reason === "cancelled" ? "stopped" : this.outcome.reason;
+    const state = await attempt.collector.finalize({ outcome, observation: this.historyObservation() });
+    if (state.state !== "unsaved" || this.disposed) return;
+    const { sessionId, turnId } = attempt.collector.identity;
+    this.historyUnsaved.set(`${sessionId}/${turnId}`, state.reason);
+    this.notice("History not saved · /history shows gaps · F2 details", `History evidence for this turn was not saved: ${state.reason}. The conversation and tool results were saved normally.`);
+  }
+
+  /** Describe observational Git evidence from existing captures without starting any Git process. */
+  private historyObservation(): HistoryObservation {
+    if (this.gitChangeTracking() === "off") return { status: "unavailable", reason: "off" };
+    if (!this.workspace) return { status: "unavailable", reason: "no-workspace" };
+    if (this.gitSnapshotError) return historyGitFailure(this.gitSnapshotError);
+    if (this.gitComparison && this.gitBaseline) {
+      const root = this.gitBaseline.root;
+      return { status: "captured", paths: this.gitShellPaths.map(path => resolve(root, path)) };
+    }
+    return { status: "unavailable", reason: "not-captured" };
+  }
+
+  /** Open the read-only timeline for the selected ancestry; reading is offline and never writes. */
+  async historyCommand(args: string): Promise<boolean> {
+    if (this.disposed || this.running) return false;
+    if (args.trim()) { this.fail("Usage: /history"); return false; }
+    this.closeChangeReview();
+    this.closeUndoPreview();
+    const generation = ++this.historyGeneration;
+    const identity = this.historyIdentity();
+    const session = this.session;
+    const snapshot: HistorySnapshot = { view: "list", loading: true, details: "", showingDetails: false, turns: [], total: 0, selected: 0, file: 0, undo: { known: false, preImages: [] }, unsaved: {} };
+    this.historyState = { generation, identity, snapshot, revealed: 0 };
+    const empty: HistoryRead = { status: "missing", starts: [], finalizes: [], rejected: 0, tornTail: false };
+    const read = this.historyEnabled(session) ? await openHistoryStore({ home: this.home! }).read(session.rootId).catch((): HistoryRead => ({ ...empty, status: "unreadable" })) : empty;
+    const manifests = this.home ? await openUndoStore({ home: this.home }).list(session.rootId).catch(() => undefined) : undefined;
+    const state = this.historyState;
+    if (this.disposed || state?.generation !== generation || this.historyIdentity() !== identity) return false;
+    const timeline = buildHistoryTimeline(read, session, this.secrets);
+    const target = manifests ? historyUndoTarget(session, manifests) : undefined;
+    state.timeline = timeline;
+    state.revealed = Math.min(HISTORY_PAGE_SIZE, timeline.turns.length);
+    snapshot.loading = false;
+    snapshot.total = timeline.turns.length;
+    snapshot.undo = { known: !!manifests, ...(target ? { targetTurnId: target, targetOrdinal: timeline.turns.find(turn => turn.turnId === target)?.ordinal } : {}), preImages: manifests?.map(manifest => manifest.turnId) ?? [] };
+    snapshot.unsaved = Object.fromEntries([...this.historyUnsaved].filter(([key]) => key.startsWith(`${session.rootId}/`)).map(([key, reason]) => [key.slice(session.rootId.length + 1), reason]));
+    snapshot.notice = timeline.status === "unsupported" ? "Newer history format · F2 details"
+      : timeline.status === "unreadable" ? "History unreadable · F2 details"
+      : timeline.rejected || timeline.tornTail ? "Some records skipped · F2 details" : undefined;
+    this.refreshHistoryDetails();
+    return true;
+  }
+
+  /** Return a redacted copy of the open history panel. */
+  protected historySnapshot(): HistorySnapshot | undefined {
+    const state = this.historyState;
+    if (!state) return undefined;
+    const snapshot = structuredClone({ ...state.snapshot, turns: state.timeline?.turns.slice(0, state.revealed) ?? [] });
+    if (!this.secrets.length) return snapshot;
+    const redact = (text: string) => redactSecrets(text, this.secrets);
+    snapshot.details = redact(snapshot.details);
+    for (const turn of snapshot.turns) {
+      if (turn.task) turn.task = redact(turn.task);
+      for (const file of turn.files.items) file.path = redact(file.path);
+      for (const command of turn.commands.items) command.command = redact(command.command);
+    }
+    if (snapshot.current) { snapshot.current.path = redact(snapshot.current.path); snapshot.current.rows = snapshot.current.rows.map(row => ({ ...row, text: redact(row.text) })); }
+    return snapshot;
+  }
+
+  /** Snapshot field for the open history panel, omitted while closed. */
+  protected historySnapshotField(): { history?: HistorySnapshot } {
+    const history = this.historySnapshot();
+    return history ? { history } : {};
+  }
+
+  /** Move the turn selection, revealing the next page past the last revealed turn; in detail, move the observed-file selection. */
+  moveHistory(delta: number): void {
+    const state = this.historyState, snapshot = state?.snapshot;
+    if (!state || !snapshot || snapshot.loading || !state.timeline) return;
+    if (snapshot.view === "detail") {
+      const count = state.timeline.turns[snapshot.selected]?.files.items.length ?? 0;
+      if (count) snapshot.file = Math.max(0, Math.min(count - 1, snapshot.file + delta));
+      return;
+    }
+    if (snapshot.view !== "list" || !state.timeline.turns.length) return;
+    let next = snapshot.selected + delta;
+    if (next >= state.revealed && state.revealed < state.timeline.turns.length) state.revealed = Math.min(state.timeline.turns.length, state.revealed + HISTORY_PAGE_SIZE);
+    next = Math.max(0, Math.min(state.revealed - 1, next));
+    snapshot.selected = next;
+  }
+
+  /** Open saved evidence for the selected turn without reading Git or file content. */
+  openHistoryDetail(): boolean {
+    const snapshot = this.historyState?.snapshot;
+    if (!snapshot || snapshot.loading || snapshot.view !== "list" || !snapshot.total) return false;
+    snapshot.view = "detail";
+    snapshot.file = 0;
+    snapshot.showingDetails = false;
+    this.refreshHistoryDetails();
+    return true;
+  }
+
+  /** Toggle evidence notes in place for the list or the open turn. */
+  toggleHistoryDetails(): boolean {
+    const snapshot = this.historyState?.snapshot;
+    if (!snapshot || snapshot.loading || snapshot.view === "current") return false;
+    snapshot.showingDetails = !snapshot.showingDetails;
+    return true;
+  }
+
+  /** Read the current Git diff of the selected observed path on request, labelled as current content. */
+  async inspectHistoryCurrent(): Promise<boolean> {
+    const state = this.historyState, snapshot = state?.snapshot;
+    const turn = state?.timeline?.turns[snapshot?.selected ?? -1];
+    const file = turn?.files.items[snapshot?.file ?? -1];
+    if (!state || !snapshot || snapshot.view !== "detail" || !turn || !file || this.disposed) return false;
+    const generation = ++this.historyGeneration;
+    state.generation = generation;
+    const current: NonNullable<HistorySnapshot["current"]> = { path: file.path, turn: turn.ordinal, rows: [{ sign: " ", text: LOADING_CURRENT_DIFF }], loading: true };
+    snapshot.view = "current";
+    snapshot.showingDetails = false;
+    snapshot.current = current;
+    const settle = (rows: readonly (string | GitDiffRow)[]) => {
+      current.rows = rows.map(row => typeof row === "string" ? { sign: " " as const, text: row } : row);
+      current.loading = false;
+      return true;
+    };
+    const stale = () => this.disposed || this.historyState !== state || state.generation !== generation || snapshot.current !== current;
+    // Off mode and missing workspaces read nothing, exactly like current-changes review.
+    if (this.gitChangeTracking() === "off") return settle(WORKSPACE_REVIEW_STATES.off);
+    if (!this.workspace) return settle(WORKSPACE_REVIEW_STATES.noWorkspace);
+    const root = turn.attempts.at(-1)?.workspaceRoot ?? this.workspace.root;
+    const absolute = isAbsolute(file.path) ? file.path : resolve(root, file.path);
+    const status = await inspectGitStatus(this.workspace.root);
+    if (stale()) return false;
+    if ("error" in status) return settle([CURRENT_DIFF_FAILED, status.error]);
+    if (!status.isGit) return settle(WORKSPACE_REVIEW_STATES.nonGit);
+    const inside = relative(status.root, absolute);
+    if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return settle([pathStateNote("outside")]);
+    const preview = await getGitDiffPreview(status.root, inside);
+    if (stale()) return false;
+    if ("error" in preview) return settle([CURRENT_DIFF_FAILED, preview.error]);
+    if (preview.pathState) return settle([pathStateNote(preview.pathState)]);
+    return settle(parseGitDiff(preview, { includeComparisons: true }));
+  }
+
+  /** Step back: current content to its turn, details to evidence, a turn to the same list row, then close. */
+  historyBack(): void {
+    const snapshot = this.historyState?.snapshot;
+    if (!snapshot) return;
+    if (snapshot.showingDetails) { snapshot.showingDetails = false; return; }
+    if (snapshot.view === "current") { this.historyGeneration++; snapshot.view = "detail"; snapshot.current = undefined; return; }
+    if (snapshot.view === "detail") { snapshot.view = "list"; this.refreshHistoryDetails(); return; }
+    this.closeHistory();
+  }
+
+  /** Close the timeline without touching conversation, files, undo data or the sidecar. */
+  closeHistory(): void {
+    this.historyGeneration++;
+    this.historyState = undefined;
+  }
+
+  /** Close history when the conversation it describes is replaced. */
+  override replaceSession(...args: Parameters<TurnLayer["replaceSession"]>): void {
+    this.closeHistory();
+    super.replaceSession(...args);
+  }
+
+  /** Rebuild F2 notes for the current list or turn. */
+  private refreshHistoryDetails(): void {
+    const state = this.historyState;
+    if (!state) return;
+    const snapshot = state.snapshot;
+    const turn = snapshot.view === "list" ? undefined : state.timeline?.turns[snapshot.selected];
+    snapshot.details = historyDetailsText({ unsaved: snapshot.unsaved, ...(state.timeline ? { read: state.timeline } : {}) }, turn);
+  }
+
+  /** Conversation identity an in-flight history read must still match. */
+  private historyIdentity(): string {
+    return JSON.stringify([this.sessionId, this.session.rootId, this.session.activeBranchId, this.session.items.length]);
+  }
+}

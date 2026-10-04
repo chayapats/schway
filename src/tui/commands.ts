@@ -20,6 +20,7 @@ export type SlashCommandName =
   | "branch"
   | "changes"
   | "undo"
+  | "history"
   | "context"
   | "compact"
   | "skills"
@@ -63,6 +64,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     case "branch":
     case "changes":
     case "undo":
+    case "history":
     case "context":
     case "compact":
     case "skills":
@@ -96,6 +98,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/branch list | tree | fork <entry-id> [name] | switch <branch-id> - browse the session tree or continue a saved conversation path",
     "/changes [review|status|diff [-- <path>]] - review changes and command evidence (Alt+R)",
     "/undo - undo the last turn's file edits (preview first)",
+    "/history - browse recorded turn outcomes, commands and observed files (read-only)",
     "/skills - list available skills",
     "/add-dir <directory> - attach project context (relative to the primary root; idle only)",
     "/<skill-name> [arguments] - invoke an available skill for this turn",

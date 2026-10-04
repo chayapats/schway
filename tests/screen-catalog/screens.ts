@@ -110,6 +110,22 @@ const helpPalette = async (ui: ScreenHarness, query: string, moves = 0, guide = 
   if (guide) ui.mockInput.pressEnter();
 };
 const helpReady = (ui: ScreenHarness, query: string) => ui.controller.commandHelpOpen && ui.editor.plainText === query;
+/** Run the three recorded history turns: a fix, a failing check and a stopped command. */
+const historyTurns = async (ui: ScreenHarness, turns = 3) => {
+  await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
+  if (turns < 2) return;
+  await enter(ui, "Run the clamp tests"); await ui.waitFor(s => completed(s) && s.transcript.some(row => row.text.includes("One clamp test still fails.")));
+  await enter(ui, "Save clamp notes ไทย 🧪, then wait");
+  await ui.waitFor(s => s.transcript.some(row => row.toolCallId === "history-wait" && row.text.includes("Ready to stop")));
+  ui.mockInput.pressEscape(); await ui.waitFor(stopped);
+};
+/** Open /history from the composer, move down `downs` rows and optionally open that turn. */
+const openHistory = async (ui: ScreenHarness, downs = 0, open = false) => {
+  await enter(ui, "/history"); await ui.waitFor(s => s.history?.loading === false);
+  for (let index = 0; index < downs; index++) { ui.mockInput.pressArrow("down"); await ui.settle(); }
+  if (open) { ui.mockInput.pressEnter(); await ui.settle(); }
+};
+const historyReady = (view: "list" | "detail", selected = 0) => (s: TuiSnapshot) => s.history?.loading === false && s.history.view === view && s.history.selected === selected;
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
   { id: "first-run", title: "First run, not connected", description: "A fresh installation waits for a connection.", drive: async () => {}, ready: s => s.modelId === "" && s.readiness !== "loading" },
@@ -254,6 +270,20 @@ export const SCREENS: readonly Screen[] = [
   { id: "undo-detection-unavailable", title: "Undo without change detection", description: "Without change detection, undo names the limit and its details action.", noColor: true, drive: async ui => {
     await enter(ui, "Generate the output"); await ui.waitFor(completed); await enter(ui, "/undo");
   }, ready: s => s.transcript.at(-1)?.text === "Change detection unavailable · F2 details" },
+  { id: "history-list", title: "Turn history", description: "History lists recorded turns newest first with outcome, counts, duration and task.", noColor: true, drive: async ui => { await historyTurns(ui); await openHistory(ui); },
+    ready: s => historyReady("list")(s) && s.history!.total === 3 },
+  { id: "history-detail", title: "Turn history detail", description: "A recorded turn shows its observed files, command exits and which turn undo would preview.", noColor: true, drive: async ui => { await historyTurns(ui); await openHistory(ui, 2, true); },
+    ready: historyReady("detail", 2) },
+  { id: "history-stopped-turn", title: "Stopped turn in history", description: "A stopped turn keeps its completed file write and shows the stopped command.", noColor: true, drive: async ui => { await historyTurns(ui); await openHistory(ui, 0, true); },
+    ready: s => historyReady("detail")(s) && s.history!.turns[0]!.outcome === "stopped" },
+  { id: "history-undo-note", title: "Undo note in history", description: "History shows the durable undo outcome for a turn whose file edits were undone.", noColor: true, drive: async ui => {
+    await historyTurns(ui, 1); await enter(ui, "/undo"); await ui.waitFor(s => !!s.undoPreview); ui.mockInput.pressEnter();
+    await ui.waitFor(s => !s.undoPreview && s.transcript.some(row => row.text.startsWith("✓ Undid turn 1"))); await openHistory(ui, 0, true);
+  }, ready: s => historyReady("detail")(s) && s.history!.turns[0]!.undo.length === 1 },
+  { id: "history-missing-evidence", title: "History without saved details", description: "Turns saved before history was recorded say details are unavailable instead of inventing evidence.", noColor: true, drive: async ui => { await historyTurns(ui, 1); await openHistory(ui, 1); },
+    ready: s => historyReady("list", 1)(s) && s.history!.turns.filter(turn => turn.evidence === "missing").length === 2 },
+  { id: "history-truncation", title: "Truncated turn history", description: "A turn with more observations than a record keeps shows how many files and commands are listed.", noColor: true, drive: async ui => { await openHistory(ui, 0, true); },
+    ready: s => historyReady("detail")(s) && s.history!.turns[0]!.files.truncated },
   { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion names its reason, retry command and details action.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session: Undo store busy ·")) },
   { id: "recent-work-resume", title: "Recent work resume", description: "A saved conversation is offered for resumption.", drive: async ui => { await ui.controller.offerRecentSession(ui.sessionDirectory!); }, ready: s => !!s.recentSession },
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },
@@ -276,6 +306,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
+  if (screen.id.startsWith("history-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
