@@ -16,6 +16,7 @@ import { createToolRegistry } from "../src/tools/registry.ts";
 import { editTool } from "../src/tools/edit.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { restoreWorkspace, type Workspace } from "../src/workspace/workspace.ts";
+import { openDraftStore } from "../src/drafts/store.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 
 const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
@@ -95,9 +96,9 @@ function spyGit(holdStatus = false) {
   return { commands, release: () => gate.resolve(), restore };
 }
 
-async function view(c: TuiController, root: string, width = 100, height = 28) {
+async function view(c: TuiController, root: string, width = 100, height = 28, drafts?: { home: string }) {
   const terminal = await createTestRenderer({ width, height, kittyKeyboard: true, exitOnCtrlC: false });
-  const ui = createConversationView(terminal.renderer, { controller: c, workspaceRoot: root, home: "/home/test", env: {}, secrets: [], motion: "off", quit: () => {},
+  const ui = createConversationView(terminal.renderer, { controller: c, workspaceRoot: root, home: drafts?.home ?? "/home/test", draftPersistence: !!drafts, env: {}, secrets: [], motion: "off", quit: () => {},
     submit: (value, accepted) => dispatchEditorInput(value, c, command => command.name === "changes" ? c.changesCommand(command.args) : Promise.resolve(false), accepted) });
   cleanups.push(() => { ui.destroy(); terminal.renderer.destroy(); });
   const settle = async () => { ui.refresh(); await terminal.flush(); };
@@ -414,15 +415,18 @@ test("a pending reload never presents the earlier list as live and its result is
   expect(c.snapshot().changeReview).toBeUndefined();
 });
 
-test("Alt+R and Esc keep the Thai draft, cursor, selection and transcript position", async () => {
+test("Alt+R and Esc keep the restored Thai draft, cursor, selection and transcript position", async () => {
   const dir = await temp();
   const home = join(dir, "home"), root = join(dir, "project");
   await repo(root);
   const id = await savedEditSession(home, root, [{ toolCalls: [{ id: "edit", name: "edit", arguments: { path: "tracked.txt", edits: [{ oldText: "line one", newText: "line ONE" }] } }] }, { text: "Done." }]);
   const { c, loaded } = await resume(home, id);
   for (let i = 0; i < 30; i++) c.notice(`Earlier note ${i}`);
-  const ui = await view(c, root, 80, 20);
-  ui.editor.setText("ร่างไทย 🧪 ยังไม่ส่ง"); ui.editor.cursorOffset = 6; ui.editor.setSelection(2, 6);
+  // The unsent draft saved by the earlier process returns on resume before review opens.
+  openDraftStore({ home, workspaceRoot: root, sessionId: id }).save("ร่างไทย 🧪 ยังไม่ส่ง", 1);
+  const ui = await view(c, root, 80, 20, { home });
+  await ui.waitFor(() => ui.editor.plainText === "ร่างไทย 🧪 ยังไม่ส่ง");
+  ui.editor.cursorOffset = 6; ui.editor.setSelection(2, 6);
   ui.transcript.scrollTo(3); await ui.settle();
   const draft = { text: ui.editor.plainText, cursor: ui.editor.cursorOffset, selection: ui.editor.getSelectedText(), scroll: ui.transcript.scrollTop };
   ui.mockInput.pressKey("r", { meta: true });
@@ -433,6 +437,7 @@ test("Alt+R and Esc keep the Thai draft, cursor, selection and transcript positi
   ui.mockInput.pressEscape(); await ui.settle();
   expect(c.snapshot().changeReview).toBeUndefined();
   expect({ text: ui.editor.plainText, cursor: ui.editor.cursorOffset, selection: ui.editor.getSelectedText(), scroll: ui.transcript.scrollTop }).toEqual(draft);
+  expect(openDraftStore({ home, workspaceRoot: root, sessionId: id }).checkpoint?.text).toBe("ร่างไทย 🧪 ยังไม่ส่ง");
   expect(loaded.items.filter(item => item.type === "user")).toHaveLength(1);
 });
 
