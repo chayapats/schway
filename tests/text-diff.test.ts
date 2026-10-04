@@ -1,5 +1,50 @@
 import { expect, test } from "bun:test";
-import { buildEditDiff, buildEditDiffHunks, countLines, parseGitDiff } from "../src/text/diff.ts";
+import { buildEditDiff, buildEditDiffHunks, countLines, parseGitDiff, type GitDiffSection } from "../src/text/diff.ts";
+
+test("comparison labels use structured scope and leave legacy parsing opt-in", () => {
+  const sections: GitDiffSection[] = [
+    { comparison: "index-to-worktree", diff: "Staged:\n@@ -1 +1 @@\n-index text\n+worktree text", truncated: false, binaryFiles: [] },
+    { comparison: "head-to-index", diff: "Unstaged:\n@@ -1 +1 @@\n-HEAD text\n+index text", truncated: false, binaryFiles: [] },
+  ];
+  const preview = { diff: "@@ -1 +1 @@\n-legacy old\n+legacy new", truncated: false, binaryFiles: [], sections };
+  expect(parseGitDiff(preview)).toEqual([
+    { sign: "-", line: 1, text: "legacy old" }, { sign: "+", line: 1, text: "legacy new" },
+  ]);
+  expect(parseGitDiff(preview, { includeComparisons: true, includeSections: true })).toEqual([
+    { sign: " ", text: "Unstaged · index → worktree", comparison: "index-to-worktree" },
+    { sign: "-", line: 1, text: "index text" }, { sign: "+", line: 1, text: "worktree text" },
+    { sign: " ", text: "Staged · HEAD → index", comparison: "head-to-index" },
+    { sign: "-", line: 1, text: "HEAD text" }, { sign: "+", line: 1, text: "index text" },
+  ]);
+  // A legacy preview has no trusted provenance from which to invent a comparison label.
+  expect(parseGitDiff({ ...preview, sections: undefined }, { includeComparisons: true })).toEqual(parseGitDiff(preview));
+});
+
+test("structured comparisons retain literal Unicode source and per-section unavailable content", () => {
+  const sections: GitDiffSection[] = [
+    { comparison: "untracked", diff: "Staged:\nnot source", untrackedContent: "Staged:\n@@ -1 +1 @@\nสวัสดี 😀\n", truncated: false, binaryFiles: [] },
+    { comparison: "index-to-worktree", diff: "", truncated: false, binaryFiles: ["blob.bin"] },
+    { comparison: "head-to-index", diff: "", truncated: true, binaryFiles: [] },
+  ];
+  expect(parseGitDiff({ diff: "ignored", truncated: true, binaryFiles: [], sections }, { includeComparisons: true })).toEqual([
+    { sign: " ", text: "Untracked · current file", comparison: "untracked" },
+    { sign: "+", line: 1, text: "Staged:" },
+    { sign: "+", line: 2, text: "@@ -1 +1 @@" },
+    { sign: "+", line: 3, text: "สวัสดี 😀" },
+    { sign: " ", text: "Unstaged · index → worktree", comparison: "index-to-worktree" },
+    { sign: " ", text: "Binary file · content not shown" },
+    { sign: " ", text: "Staged · HEAD → index", comparison: "head-to-index" },
+    { sign: " ", text: "Preview truncated · use git diff for full content" },
+  ]);
+});
+
+test("comparison parsing preserves raw source for the existing caller redaction boundary", () => {
+  const source = "\u001b[31msecret-fixture\u001b[0m ไทย";
+  const section: GitDiffSection = { comparison: "untracked", diff: "", untrackedContent: source, truncated: false, binaryFiles: [] };
+  const rows = parseGitDiff({ ...section, sections: [section] }, { includeComparisons: true });
+  expect(rows[1]).toEqual({ sign: "+", line: 1, text: source });
+  expect(rows[0]).toEqual({ sign: " ", text: "Untracked · current file", comparison: "untracked" });
+});
 
 test("Git review drops metadata and stats and numbers each hunk using old removals and new context", () => {
   expect(parseGitDiff({ diff: "Unstaged:\n a.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\ndiff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -2,3 +4,4 @@ title\n context\n-old\n+new\n+extra\n tail\n@@ -10 +13 @@\n-late\n+later\n", truncated: false, binaryFiles: [] })).toEqual([

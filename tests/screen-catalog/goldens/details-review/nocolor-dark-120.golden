@@ -10,16 +10,17 @@ cursor 1 1 hidden
 
   Review · turn 1
 
+  Files from turn 1    │ Turn 1 details
   › clamp.ts     +1 −1 │ ✓ Done                                                                                      █
-                       │ 3 tool results; 0 failed tools.                                                             █
-                       │ Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).                                   █
-                       │ Command results (latest 50; exit codes, not a test-suite guarantee):                        █
-                       │ printf 'ok\n' → exit 0                                                                      █
-                       │                                                                                             █
-                       │ Current working-tree content is unattributed; external edits may be included.               █
-                       │ Snapshots show changes observed during the turn, not exclusive Schway authorship. Current   █
-                       │ diffs may include later edits.                                                              █
-                       │ Review is read-only. Files remain changed after failure/cancellation; conversation branching▀
+                       │ 3 tool results; 0 failed tools.
+                       │ Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).
+                       │ Command results (latest 50; exit codes, not a test-suite guarantee):
+                       │ printf 'ok\n' → exit 0
+                       │
+                       │ Current working-tree content is unattributed; external edits may be included.
+                       │ Snapshots show changes observed during the turn, not exclusive Schway authorship. Current
+                       │ diffs may include later edits.
+                       │ Review is read-only. Files remain changed after failure/cancellation; conversation branching
                        │ does not restore files.
                        │
                        │ Snapshot comparison for ***/home/demo
@@ -28,7 +29,6 @@ cursor 1 1 hidden
                        │ Baseline: *** at 2026-01-15T09:30:00.000Z
                        │ Current: *** at 2026-01-15T09:30:00.000Z
                        │ New turn changes (1):
-                       │ - clamp.ts
 
   ✓ Done · 1 file +1 −1 · 1 command ok · 3.6s · Alt+R review
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -50,115 +50,115 @@ cursor 1 1 hidden
 02 17-120 #ffffff #0e1117 -
 03 0-120 #ffffff #0e1117 -
 04 0-2 #ffffff #0e1117 -
-04 2-22 #e6eaf0 #0e1117 -
+04 2-19 #e6eaf0 #0e1117 b
+04 19-22 #ffffff #0e1117 -
 04 22-25 #2c3444 #0e1117 -
-04 25-31 #e6eaf0 #0e1117 -
-04 31-117 #ffffff #0e1117 -
-04 117-118 #9a9ea3 #252527 -
-04 118-120 #ffffff #0e1117 -
-05 0-22 #ffffff #0e1117 -
+04 25-39 #e6eaf0 #0e1117 b
+04 39-120 #ffffff #0e1117 -
+05 0-2 #ffffff #0e1117 -
+05 2-22 #e6eaf0 #0e1117 -
 05 22-25 #2c3444 #0e1117 -
-05 25-56 #e6eaf0 #0e1117 -
-05 56-117 #ffffff #0e1117 -
+05 25-31 #e6eaf0 #0e1117 -
+05 31-117 #ffffff #0e1117 -
 05 117-118 #9a9ea3 #252527 -
 05 118-120 #ffffff #0e1117 -
 06 0-22 #ffffff #0e1117 -
 06 22-25 #2c3444 #0e1117 -
-06 25-82 #e6eaf0 #0e1117 -
-06 82-117 #ffffff #0e1117 -
-06 117-118 #9a9ea3 #252527 -
+06 25-56 #e6eaf0 #0e1117 -
+06 56-117 #ffffff #0e1117 -
+06 117-118 #ffffff #252527 -
 06 118-120 #ffffff #0e1117 -
 07 0-22 #ffffff #0e1117 -
 07 22-25 #2c3444 #0e1117 -
-07 25-93 #e6eaf0 #0e1117 -
-07 93-117 #ffffff #0e1117 -
-07 117-118 #9a9ea3 #252527 -
+07 25-82 #e6eaf0 #0e1117 -
+07 82-117 #ffffff #0e1117 -
+07 117-118 #ffffff #252527 -
 07 118-120 #ffffff #0e1117 -
 08 0-22 #ffffff #0e1117 -
 08 22-25 #2c3444 #0e1117 -
-08 25-47 #e6eaf0 #0e1117 -
-08 47-117 #ffffff #0e1117 -
-08 117-118 #9a9ea3 #252527 -
+08 25-93 #e6eaf0 #0e1117 -
+08 93-117 #ffffff #0e1117 -
+08 117-118 #ffffff #252527 -
 08 118-120 #ffffff #0e1117 -
 09 0-22 #ffffff #0e1117 -
 09 22-25 #2c3444 #0e1117 -
-09 25-117 #ffffff #0e1117 -
-09 117-118 #9a9ea3 #252527 -
+09 25-47 #e6eaf0 #0e1117 -
+09 47-117 #ffffff #0e1117 -
+09 117-118 #ffffff #252527 -
 09 118-120 #ffffff #0e1117 -
 10 0-22 #ffffff #0e1117 -
 10 22-25 #2c3444 #0e1117 -
-10 25-102 #e6eaf0 #0e1117 -
-10 102-117 #ffffff #0e1117 -
-10 117-118 #9a9ea3 #252527 -
+10 25-117 #ffffff #0e1117 -
+10 117-118 #ffffff #252527 -
 10 118-120 #ffffff #0e1117 -
 11 0-22 #ffffff #0e1117 -
 11 22-25 #2c3444 #0e1117 -
-11 25-115 #e6eaf0 #0e1117 -
-11 115-117 #ffffff #0e1117 -
-11 117-118 #9a9ea3 #252527 -
+11 25-102 #e6eaf0 #0e1117 -
+11 102-117 #ffffff #0e1117 -
+11 117-118 #ffffff #252527 -
 11 118-120 #ffffff #0e1117 -
 12 0-22 #ffffff #0e1117 -
 12 22-25 #2c3444 #0e1117 -
-12 25-55 #e6eaf0 #0e1117 -
-12 55-117 #ffffff #0e1117 -
-12 117-118 #9a9ea3 #252527 -
+12 25-115 #e6eaf0 #0e1117 -
+12 115-117 #ffffff #0e1117 -
+12 117-118 #ffffff #252527 -
 12 118-120 #ffffff #0e1117 -
 13 0-22 #ffffff #0e1117 -
 13 22-25 #2c3444 #0e1117 -
-13 25-117 #e6eaf0 #0e1117 -
-13 117-118 #9a9ea3 #252527 -
+13 25-55 #e6eaf0 #0e1117 -
+13 55-117 #ffffff #0e1117 -
+13 117-118 #ffffff #252527 -
 13 118-120 #ffffff #0e1117 -
 14 0-22 #ffffff #0e1117 -
 14 22-25 #2c3444 #0e1117 -
-14 25-48 #e6eaf0 #0e1117 -
-14 48-117 #ffffff #0e1117 -
+14 25-117 #e6eaf0 #0e1117 -
 14 117-118 #ffffff #252527 -
 14 118-120 #ffffff #0e1117 -
 15 0-22 #ffffff #0e1117 -
 15 22-25 #2c3444 #0e1117 -
-15 25-117 #ffffff #0e1117 -
+15 25-48 #e6eaf0 #0e1117 -
+15 48-117 #ffffff #0e1117 -
 15 117-118 #ffffff #252527 -
 15 118-120 #ffffff #0e1117 -
 16 0-22 #ffffff #0e1117 -
 16 22-25 #2c3444 #0e1117 -
-16 25-62 #e6eaf0 #0e1117 -
-16 62-117 #ffffff #0e1117 -
+16 25-117 #ffffff #0e1117 -
 16 117-118 #ffffff #252527 -
 16 118-120 #ffffff #0e1117 -
 17 0-22 #ffffff #0e1117 -
 17 22-25 #2c3444 #0e1117 -
-17 25-37 #e6eaf0 #0e1117 -
-17 37-117 #ffffff #0e1117 -
+17 25-62 #e6eaf0 #0e1117 -
+17 62-117 #ffffff #0e1117 -
 17 117-118 #ffffff #252527 -
 17 118-120 #ffffff #0e1117 -
 18 0-22 #ffffff #0e1117 -
 18 22-25 #2c3444 #0e1117 -
-18 25-115 #e6eaf0 #0e1117 -
-18 115-117 #ffffff #0e1117 -
+18 25-37 #e6eaf0 #0e1117 -
+18 37-117 #ffffff #0e1117 -
 18 117-118 #ffffff #252527 -
 18 118-120 #ffffff #0e1117 -
 19 0-22 #ffffff #0e1117 -
 19 22-25 #2c3444 #0e1117 -
-19 25-66 #e6eaf0 #0e1117 -
-19 66-117 #ffffff #0e1117 -
+19 25-115 #e6eaf0 #0e1117 -
+19 115-117 #ffffff #0e1117 -
 19 117-118 #ffffff #252527 -
 19 118-120 #ffffff #0e1117 -
 20 0-22 #ffffff #0e1117 -
 20 22-25 #2c3444 #0e1117 -
-20 25-65 #e6eaf0 #0e1117 -
-20 65-117 #ffffff #0e1117 -
+20 25-66 #e6eaf0 #0e1117 -
+20 66-117 #ffffff #0e1117 -
 20 117-118 #ffffff #252527 -
 20 118-120 #ffffff #0e1117 -
 21 0-22 #ffffff #0e1117 -
 21 22-25 #2c3444 #0e1117 -
-21 25-46 #e6eaf0 #0e1117 -
-21 46-117 #ffffff #0e1117 -
+21 25-65 #e6eaf0 #0e1117 -
+21 65-117 #ffffff #0e1117 -
 21 117-118 #ffffff #252527 -
 21 118-120 #ffffff #0e1117 -
 22 0-22 #ffffff #0e1117 -
 22 22-25 #2c3444 #0e1117 -
-22 25-35 #e6eaf0 #0e1117 -
-22 35-117 #ffffff #0e1117 -
+22 25-46 #e6eaf0 #0e1117 -
+22 46-117 #ffffff #0e1117 -
 22 117-118 #ffffff #252527 -
 22 118-120 #ffffff #0e1117 -
 23 0-120 #ffffff #0e1117 -

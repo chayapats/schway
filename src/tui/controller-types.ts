@@ -18,6 +18,7 @@ import type { ConfigEditor } from "../config/editing.ts";
 import type { ModelPickerSnapshot } from "./model-picker.ts";
 import type { BranchTreeSnapshot } from "./branch-tree.ts";
 import type { DiffRow, GitDiffRow } from "../text/diff.ts";
+import type { ReviewScope } from "./review-scope.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -96,6 +97,10 @@ export interface ChangeReview {
   details: string;
   showingDetails: boolean;
   loading: boolean;
+  /** Evidence that supplied `files` and their counts; absent when there is no turn to review. */
+  scope?: ReviewScope;
+  /** Listed path whose current Git content `rows` show, set together with `selected`. */
+  currentPath?: string;
 }
 
 /** One file-tool diff or non-undoable shell row with its action badge. */

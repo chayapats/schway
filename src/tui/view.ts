@@ -20,6 +20,7 @@ import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMa
 import type { CommandChoice } from "./command-catalog.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
+import { currentDiffLabel, fitPathStart, reviewDetailsLabel, reviewFilesLabel, turnFileBadge } from "./review-scope.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -207,17 +208,27 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const reviewPanel = new BoxRenderable(renderer, { id: "change-review-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column" });
   const reviewHeading = new TextRenderable(renderer, { id: "change-review-heading", content: "", fg: theme.text, flexShrink: 0, marginBottom: 1 });
   const reviewColumns = new BoxRenderable(renderer, { id: "change-review-columns", flexGrow: 1, minHeight: 0, flexDirection: "row" });
+  // Scope labels sit outside the scroll boxes so turn evidence and current content stay named while scrolling.
+  const reviewFilesColumn = new BoxRenderable(renderer, { id: "change-review-files-column", flexShrink: 0, flexDirection: "column" });
+  const reviewFilesTitle = new TextRenderable(renderer, { id: "change-review-files-label", content: "", fg: theme.text, flexShrink: 0, wrapMode: "none", visible: false });
+  const reviewDiffColumn = new BoxRenderable(renderer, { id: "change-review-diff-column", flexGrow: 1, minHeight: 0, minWidth: 0, flexDirection: "column" });
+  const reviewDiffTitle = new TextRenderable(renderer, { id: "change-review-diff-label", content: "", fg: theme.text, flexShrink: 0, wrapMode: "none", visible: false });
   const reviewFiles = new ScrollBoxRenderable(renderer, { id: "change-review-files", width: 20, flexShrink: 0, scrollX: false });
   const reviewList = new TextRenderable(renderer, { id: "change-review-list", content: "", fg: theme.text, wrapMode: "none" });
   const reviewDivider = new TextRenderable(renderer, { id: "change-review-divider", width: 3, flexShrink: 0, content: "", fg: theme.border });
-  const reviewDiff = new ScrollBoxRenderable(renderer, { id: "change-review-diff", flexGrow: 1, minHeight: 1, minWidth: 0, scrollX: false });
+  // Reserve the scrollbar column so its thumb never covers the last character of a diff or Details line.
+  const reviewDiff = new ScrollBoxRenderable(renderer, { id: "change-review-diff", flexGrow: 1, minHeight: 1, minWidth: 0, scrollX: false, contentOptions: { paddingRight: 1 } });
   const reviewText = new TextRenderable(renderer, { id: "change-review-text", content: "", fg: theme.text, wrapMode: "word" });
   reviewFiles.add(reviewList);
   reviewFiles.verticalScrollBar.visible = false;
   reviewDiff.add(reviewText);
-  reviewColumns.add(reviewFiles);
+  reviewFilesColumn.add(reviewFilesTitle);
+  reviewFilesColumn.add(reviewFiles);
+  reviewDiffColumn.add(reviewDiffTitle);
+  reviewDiffColumn.add(reviewDiff);
+  reviewColumns.add(reviewFilesColumn);
   reviewColumns.add(reviewDivider);
-  reviewColumns.add(reviewDiff);
+  reviewColumns.add(reviewDiffColumn);
   reviewPanel.add(reviewHeading);
   reviewPanel.add(reviewColumns);
   body.add(reviewPanel);
@@ -855,19 +866,38 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const review = undo ? { heading: `Undo turn ${undo.turnNumber} · ${undo.result ? "Esc close" : "Enter undo · Esc cancel"}`, selected: undo.selected,
           rows: [...(undo.shellUnavailable ? [{ sign: " " as const, text: "Shell changes can't be detected here" }] : []), { sign: " " as const, text: `─ ${selected?.path ?? ""} ─` }, ...(selected?.rows ?? [])], showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
         const stacked = !!undo || renderer.width < 80;
-        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: file.source === "shell" ? "shell" : file.added !== undefined || file.removed !== undefined ? `+${file.added ?? 0} −${file.removed ?? 0}` : "" }));
-        const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), 20);
+        const scope = undo ? undefined : snapshot.changeReview!.scope;
+        const fileRows = undo ? undo.files.map(file => ({ path: safe(file.path), badge: safe(file.status) })) : review.files.map(file => ({ path: safe(file.path), badge: turnFileBadge(file) }));
+        const filesTitle = scope ? reviewFilesLabel(scope) : "";
+        const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), Math.max(20, Bun.stringWidth(filesTitle)));
         const fileWidth = stacked ? width : Math.min(Math.floor(width * 0.4), longestFile);
         reviewHeading.content = safe(review.heading);
         reviewColumns.flexDirection = stacked ? "column" : "row";
+        // Turn evidence keeps its own title and empty state; current content is titled by the path it was loaded for.
+        reviewFilesTitle.visible = reviewDiffTitle.visible = !!scope;
+        if (scope) {
+          const currentPath = snapshot.changeReview!.currentPath;
+          reviewFilesTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(filesTitle, fileWidth)))]);
+          const titleWidth = stacked ? width : Math.max(1, width - fileWidth - 3);
+          // Truncate the path from the left so the file name stays visible beside the fixed label.
+          const diffTitle = review.showingDetails ? reviewDetailsLabel(scope) : currentPath === undefined ? currentDiffLabel()
+            : currentDiffLabel(fitPathStart(safe(currentPath), titleWidth - Bun.stringWidth(currentDiffLabel(""))));
+          reviewDiffTitle.content = new StyledText([bold(fg(theme.accent)(fitLine(diffTitle, titleWidth)))]);
+          if (!fileRows.length) fileRows.push({ path: "None observed", badge: "" });
+        }
+        reviewFilesColumn.width = fileWidth;
+        reviewFilesColumn.marginBottom = stacked && scope ? 1 : 0;
         reviewFiles.visible = fileRows.length > 0;
         reviewFiles.width = fileWidth;
-        reviewFiles.height = stacked ? Math.min(fileRows.length, Math.max(1, Math.floor((renderer.height - 8) / 3))) : "100%";
-        reviewFiles.marginBottom = stacked && fileRows.length ? 1 : 0;
+        reviewFiles.height = stacked ? Math.min(fileRows.length, Math.max(1, Math.floor((renderer.height - 8) / 3))) : scope ? "auto" : "100%";
+        reviewFiles.flexGrow = !stacked && scope ? 1 : 0;
+        reviewFiles.marginBottom = stacked && fileRows.length && !scope ? 1 : 0;
         reviewList.content = fileRows.map((row, index) => {
-          if (!row.badge) return `${index === review.selected ? "›" : " "} ${fitLine(row.path, fileWidth - 2)}`;
+          if (!review.files.length && scope) return `  ${fitLine(row.path, fileWidth - 2)}`;
+          const fitRow = (text: string, columns: number) => scope ? fitPathStart(text, columns) : fitLine(text, columns);
+          if (!row.badge) return `${index === review.selected ? "›" : " "} ${fitRow(row.path, fileWidth - 2)}`;
           const pathWidth = Math.max(1, fileWidth - 4 - Bun.stringWidth(row.badge));
-          const path = fitLine(row.path, pathWidth);
+          const path = fitRow(row.path, pathWidth);
           return `${index === review.selected ? "›" : " "} ${path}${" ".repeat(Math.max(0, pathWidth - Bun.stringWidth(path)))}  ${row.badge}`;
         }).join("\n");
         reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));
@@ -878,6 +908,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (content !== reviewContent) {
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
             const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${undo ? "│" : ""}${row.sign}${undo ? "" : " "}`}${safe(row.text)}${index < review.rows.length - 1 ? "\n" : ""}`;
+            if (row.comparison) return bold(fg(theme.accent)(text));
             return fg(row.sign === "+" ? theme.success : row.sign === "-" ? theme.error : theme.text)(text);
           }));
           reviewContent = content;
@@ -1155,7 +1186,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = "↑↓ select · PgUp/PgDn scroll · Esc close";
       } else if (panelMode === "review") {
         const navigation = snapshot.changeReview?.showingDetails ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
-        const actions = `${snapshot.outcome ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
+        const reload = snapshot.changeReview?.scope && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
+        const actions = `${reload}${snapshot.outcome ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
         // Keep each key with its action when the review hint needs a second row.
         const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
         hints.content = new StyledText([...keyHintChunks(navigation, hintColors(theme.background)), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
@@ -1352,6 +1384,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         handled(); return;
       }
       if (name === "escape") { controller.closeChangeReview(); handled(); return; }
+      // Reload rereads Git on request only; the turn list and its counts stay as recorded.
+      if (key.ctrl && name === "r" && !key.meta && !key.option && !snapshot.changeReview.showingDetails && snapshot.changeReview.scope) {
+        void controller.refreshChangeReview().then(refresh, fail); reviewDiff.scrollTo(0); handled(); return;
+      }
       if (!snapshot.changeReview.showingDetails && (name === "up" || name === "down")) { void controller.selectReviewFile(name === "up" ? -1 : 1).then(refresh, fail); reviewDiff.scrollTo(0); }
       if (name === "pageup" || name === "pagedown") {
         const distance = Math.max(1, reviewDiff.viewport.height - 2);

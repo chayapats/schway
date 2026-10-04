@@ -66,6 +66,13 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     expect(text).toContain("Auto"); expect(text).toContain(variant.rows === 8 ? "Enter send" : "Enter");
     expect(text).toContain("🧪");
   }
+  if (screen.id.startsWith("review-")) {
+    // Both scopes stay named in the primary view at every width, without opening Details.
+    const text = parseScreen(actual).text.join("\n");
+    expect(text).toContain(screen.id === "review-multi-turn" ? "Files from turn 2" : "Files from turn 1");
+    expect(text).toContain("Current diff");
+    expect(text).toContain("Esc back");
+  }
   if (screen.id.startsWith("details-")) {
     const text = parseScreen(actual).text.join("\n");
     expect(text).not.toContain("Ctrl+I");
@@ -74,7 +81,14 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     } else {
       expect(text).toContain("Esc back");
       if (screen.id === "details-model") { expect(text).toContain("gpt-6-astra"); expect(text).toContain("1,050,000 context"); }
-      if (screen.id === "details-review") expect(text).toContain("Commands:");
+      if (screen.id === "details-review") {
+        expect(text).toContain("Commands:");
+        // Rejoin the word-wrapped Details column; a scrollbar over the last column would drop letters.
+        const lines = parseScreen(actual).text.map(line => (line.includes("│") ? line.slice(line.indexOf("│") + 1) : line).replace(/[▀▄█▐▌]+\s*$/, "").trim());
+        expect(lines.some(line => line.endsWith("does no"))).toBe(false);
+        // The stacked 50-column layout scrolls this sentence below the fold; side-by-side widths show it whole.
+        if (variant.cols >= 80) expect(lines.join(" ")).toContain("does not restore files");
+      }
       if (screen.id === "details-notice" || screen.id === "details-recovery") {
         expect(text).toContain("งานถัดไป 🧪");
         if (variant.rows > 8) expect(text).toContain(screen.id === "details-notice" ? "The choice could not be saved." : "No command exit evidence.");
@@ -154,13 +168,13 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);
 });
 test("catalog repeated renders are byte-identical", async () => {
-  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "inspection-code", "stopped-streaming", "stopped-tool", "draft-restored", "draft-not-saved", "details-model", "details-review", "details-notice", "details-recovery", "details-unavailable"]) {
+  for (const id of ["first-run", "streaming-answer", "completed-turn", "review-panel", "review-multi-turn", "inspection-code", "stopped-streaming", "stopped-tool", "draft-restored", "draft-not-saved", "details-model", "details-review", "details-notice", "details-recovery", "details-unavailable"]) {
     const screen = SCREENS.find(s => s.id === id)!, variant = variantsFor(screen).find(v => v.id === "dark-80")!;
     setSystemTime(new Date(fixedTime)); const first = await renderScreen(screen, variant);
     setSystemTime(new Date(fixedTime)); expect(await renderScreen(screen, variant)).toBe(first);

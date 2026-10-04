@@ -1,4 +1,5 @@
 import { noticeConfigDeprecations } from "../src/tui/app.ts";
+import { reviewScopeDetails } from "../src/tui/review-scope.ts";
 import { beforeAll, afterAll, afterEach, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { BoxRenderable, RGBA, TextareaRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
@@ -2763,7 +2764,7 @@ test("completed outcome and responsive numbered review preserve draft and hide f
     await waitForUiState(ui, () => ui.controller.snapshot().changeReview?.selected === 1 && !ui.controller.snapshot().changeReview!.loading, "second shell file");
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("› shell.txt");
-    expect(ui.captureCharFrame()).toContain("changed by shell · not undoable");
+    expect(ui.captureCharFrame()).toContain("Found by Git snapshot · not undoable");
     expect(ui.captureCharFrame()).toContain("1 + generated");
     expect(ui.captureCharFrame()).not.toContain("call_fixture_");
   });
@@ -2792,7 +2793,9 @@ test("failed outcome details append once and review details escape returns to th
   await waitForUiState(ui, () => !!ui.controller.snapshot().changeReview && !ui.controller.snapshot().changeReview!.loading, "failed review");
   ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
   expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(true);
-  expect(ui.controller.snapshot().changeReview!.details).toBe(details);
+  // Review Details are the failed-turn Details plus review-only scope notes; the conversation copy stays unchanged.
+  expect(ui.controller.snapshot().changeReview!.details).toBe(`${details}\n\n${reviewScopeDetails({ kind: "turn", turn: 1 })}`);
+  expect(details).not.toContain("Review scope:");
   expect(ui.captureCharFrame()).not.toContain("call_fixture_failure");
   ui.mockInput.pressKey("i", { ctrl: true }); await settle(ui);
   expect(ui.controller.snapshot().changeReview!.showingDetails).toBe(false);

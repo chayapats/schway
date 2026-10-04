@@ -1,6 +1,7 @@
 import { formatCount } from "../text/format.ts";
+import type { GitDiffSection } from "../text/diff.ts";
 import { stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /** Change-tracking mode for observational Git inspection without managing commits or branches. */
 export type GitChangeTrackingMode = "off" | "on-demand" | "snapshot";
@@ -105,7 +106,14 @@ export interface GitDiffPreview {
   binaryFiles: string[];
   /** Bounded untracked text without headings or footer prose, absent for tracked and binary previews. */
   untrackedContent?: string;
+  /** Command-owned current comparisons; optional for callers supplying legacy previews. */
+  sections?: GitDiffSection[];
+  /** Why a literal path has no current comparison section; absent when a section exists or no path was given. */
+  pathState?: GitPathState;
 }
+
+/** Read-only reason a requested path has no current Git comparison: clean, absent, ignored, outside the repository or unreadable. */
+export type GitPathState = "clean" | "missing" | "ignored" | "outside" | "unavailable";
 
 
 /**
@@ -213,11 +221,11 @@ function parsePorcelainV2(output: string): ParsedStatus {
       continue;
     }
     if (record.startsWith("2 ")) {
-      // Porcelain v2 is always requested with -z, so the rename destination arrives as the next NUL record.
+      // With porcelain v2 -z the next NUL record is the literal original path, even if it looks like metadata.
       const headLine = record;
       let origPath: string | undefined;
       const next = records[i + 1];
-      if (next !== undefined && next.length > 0 && !next.startsWith("# ") && !next.startsWith("? ") && !next.startsWith("! ") && !next.startsWith("1 ") && !next.startsWith("2 ") && !next.startsWith("u ")) {
+      if (next !== undefined && next.length > 0) {
         origPath = next;
         i++;
       }
@@ -506,15 +514,30 @@ export function formatGitComparison(before: GitSnapshot, after: GitSnapshot, com
 
 /** Read a bounded diff for a literal path or the whole tree without altering Git or working files. */
 export async function getGitDiffPreview(root: string, path?: string, maxChars: number = MAX_GIT_DIFF_CHARS): Promise<GitDiffPreview | { error: string }> {
+  maxChars = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : MAX_GIT_DIFF_CHARS;
   const resolved = await resolveGitRoot(root);
   if (!resolved.ok) return { error: `Not a Git workspace (${resolved.reason}).` };
   const toplevel = resolved.toplevel;
+  if (path !== undefined) {
+    const inside = relative(toplevel, resolve(toplevel, path));
+    // Git rejects outside pathspecs with prose; report the scope instead of reading anything.
+    if (inside === ".." || inside.startsWith("../") || isAbsolute(inside)) {
+      return { path, diff: `${path} is outside the Git repository at ${toplevel}.`, truncated: false, binaryFiles: [], sections: [], pathState: "outside" };
+    }
+  }
   // Both names must participate in the pathspec or Git presents a rename as an added file.
-  const status = path ? await runGit(toplevel, ["status", "--porcelain=v2", "-z", "--untracked-files=no"]) : undefined;
-  const original = status?.exitCode === 0 ? parsePorcelainV2(status.stdout).files.find(file => file.path === path)?.origPath : undefined;
-  const paths = path ? original ? [original, path] : [path] : [];
+  const status = await runGit(toplevel, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"]);
+  if (status.exitCode !== 0) return { error: `Git diff failed: ${(status.stderr.trim() || "could not read repository state").slice(0, 500)}` };
+  const parsed = parsePorcelainV2(status.stdout);
+  const unborn = parsed.head === "(initial)";
+  const base = unborn ? await runGit(toplevel, ["hash-object", "-t", "tree", "--stdin"]) : { exitCode: 0, stdout: parsed.head };
+  const stagedBase = base.stdout.trim();
+  if (base.exitCode !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(stagedBase)) return { error: "Git diff failed: could not read the staged comparison base." };
+  const rename = path ? parsed.files.find(file => file.origPath && (file.path === path || file.origPath === path)) : undefined;
+  const paths = path ? rename ? [rename.origPath!, rename.path] : [path] : [];
   const unstagedArgs = ["--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
-  const stagedArgs = ["--literal-pathspecs", "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", "--", ...paths];
+  // Pin the observed HEAD or empty tree in the command itself; later commits cannot change its scope.
+  const stagedArgs = ["--literal-pathspecs", "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", stagedBase, "--", ...paths];
   const [unstaged, staged] = await Promise.all([runGit(toplevel, unstagedArgs), runGit(toplevel, stagedArgs)]);
   if (unstaged.exitCode !== 0) {
     return { error: `Git diff failed: ${(unstaged.stderr.trim() || unstaged.stdout.trim() || "unknown error").slice(0, 500)}` };
@@ -522,45 +545,89 @@ export async function getGitDiffPreview(root: string, path?: string, maxChars: n
   if (staged.exitCode !== 0) {
     return { error: `Git diff failed: ${(staged.stderr.trim() || staged.stdout.trim() || "unknown error").slice(0, 500)}` };
   }
-  const sections: string[] = [];
-  if (unstaged.stdout.trim().length > 0) sections.push(`Unstaged:\n${unstaged.stdout.trimEnd()}`);
-  if (staged.stdout.trim().length > 0) sections.push(`Staged:\n${staged.stdout.trimEnd()}`);
-  const combined = sections.join("\n\n");
+  const sections: GitDiffSection[] = [];
+  const chunks: string[] = [];
+  let offset = 0;
+  for (const [comparison, heading, output] of [
+    ["index-to-worktree", "Unstaged:", unstaged.stdout],
+    [unborn ? "empty-to-index" : "head-to-index", "Staged:", staged.stdout],
+  ] as const) {
+    if (!output.trim()) continue;
+    const patch = output.trimEnd();
+    offset += (chunks.length ? 2 : 0) + heading.length + 1;
+    const diff = boundedDiffText(patch, Math.max(0, maxChars - offset));
+    // Keep scope and the truncation marker even when an earlier section uses the whole budget.
+    sections.push({ comparison, diff, truncated: diff.length < patch.length, binaryFiles: diffBinaryLines(patch) });
+    chunks.push(`${heading}\n${patch}`);
+    offset += patch.length;
+  }
+  const combined = chunks.join("\n\n");
   if (combined.length === 0 && path !== undefined) {
     const untracked = await readUntrackedPreview(toplevel, path, maxChars);
     if (untracked) return untracked;
   }
   const source = combined.length > 0 ? combined : "";
-  const binaryFiles: string[] = [];
-  for (const line of source.split("\n")) {
-    if (line.includes("Binary files ") && line.includes(" differ")) binaryFiles.push(line.trim().slice(0, 200));
-  }
+  const binaryFiles = sections.flatMap(section => section.binaryFiles).slice(0, 10);
   if (source.length > maxChars) {
-    return { ...(path !== undefined ? { path } : {}), diff: `${source.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff -- ${path ?? "--stat"} in ${toplevel} for the full diff.`, truncated: true, binaryFiles: binaryFiles.slice(0, 10) };
+    return { ...(path !== undefined ? { path } : {}), diff: `${boundedDiffText(source, maxChars)}\n… truncated at ${maxChars} chars. Use git diff -- ${path ?? "--stat"} in ${toplevel} for the full diff.`, truncated: true, binaryFiles, sections };
   }
   const diff = source.trim().length === 0 ? "No textual diff. Staged, untracked, or binary-only changes may still be listed by /changes status." : source;
-  return { ...(path !== undefined ? { path } : {}), diff, truncated: false, binaryFiles: binaryFiles.slice(0, 10) };
+  const pathState = path !== undefined && sections.length === 0 ? await gitPathState(toplevel, path) : undefined;
+  return { ...(path !== undefined ? { path } : {}), diff, truncated: false, binaryFiles, sections, ...(pathState ? { pathState } : {}) };
+}
+
+/** Classify a literal path with no unstaged, staged or untracked section using read-only Git queries. */
+async function gitPathState(root: string, path: string): Promise<GitPathState> {
+  const tracked = await runGit(root, ["--literal-pathspecs", "ls-files", "-z", "--cached", "--", path]);
+  if (tracked.exitCode !== 0) return "unavailable";
+  // A tracked path without staged or unstaged output matches HEAD; a deleted one would have a section.
+  if (tracked.stdout.split("\0").includes(path)) return "clean";
+  const present = await stat(join(root, path)).then(() => true, () => false);
+  if (!present) return "missing";
+  const ignored = await runGit(root, ["--literal-pathspecs", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", path]);
+  return ignored.exitCode === 0 && ignored.stdout.split("\0").includes(path) ? "ignored" : "unavailable";
+}
+
+/** Bound UTF-16 text without leaving half of a valid surrogate pair at the cutoff. */
+function boundedDiffText(text: string, maxChars: number): string {
+  let end = Math.min(text.length, maxChars);
+  if (end > 0 && end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!) && /[\uDC00-\uDFFF]/.test(text[end]!)) end--;
+  return text.slice(0, end);
+}
+
+/** Retain bounded binary notices emitted by Git rather than similarly worded patch content. */
+function diffBinaryLines(patch: string): string[] {
+  return patch.split("\n").filter(line => /^Binary files .+ differ$/.test(line)).slice(0, 10).map(line => boundedDiffText(line, 200));
 }
 
 /** Return a bounded preview for an untracked path without mutating Git state. */
 async function readUntrackedPreview(root: string, path: string, maxChars: number): Promise<GitDiffPreview | undefined> {
-  const listed = await runGit(root, ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "--", path]);
+  const listed = await runGit(root, ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", path]);
   if (listed.exitCode !== 0) return undefined;
-  const matches = listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  const matches = listed.stdout.split("\0").filter(Boolean);
   if (matches.length === 0) return undefined;
   const candidate = join(root, path);
   const file = Bun.file(candidate);
   if (!(await file.exists())) return undefined;
   const isBinary = await hasNullByte(root, path);
   if (isBinary) {
-    return { path, diff: `Untracked binary file ${path}. Content summarized, not shown. Use git status --short in ${root} for details.`, truncated: false, binaryFiles: [path.slice(0, 200)] };
+    const binaryFiles = [boundedDiffText(path, 200)];
+    return { path, diff: `Untracked binary file ${path}. Content summarized, not shown. Use git status --short in ${root} for details.`, truncated: false, binaryFiles,
+      sections: [{ comparison: "untracked", diff: "", truncated: false, binaryFiles }] };
   }
-  const text = await file.slice(0, maxChars + 1).text().catch(() => undefined);
+  // Three UTF-8 bytes per UTF-16 unit plus lookahead cover every valid prefix; streaming decode
+  // drops an incomplete final byte sequence so bounding cannot manufacture replacement text.
+  const byteLimit = (maxChars + 2) * 3;
+  const bytes = await file.slice(0, byteLimit).arrayBuffer().catch(() => undefined);
+  const text = bytes === undefined ? undefined : new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes, { stream: bytes.byteLength === byteLimit });
   if (text === undefined) return undefined;
-  if (text.length > maxChars) {
-    return { path, diff: `Untracked:\n${text.slice(0, maxChars)}\n… truncated at ${maxChars} chars. Use git diff --no-index /dev/null -- ${path} in ${root} for the full content.`, truncated: true, binaryFiles: [], untrackedContent: text.slice(0, maxChars) };
+  const untrackedContent = boundedDiffText(text, maxChars);
+  const truncated = untrackedContent.length < text.length;
+  const sections: GitDiffSection[] = [{ comparison: "untracked", diff: "", truncated, binaryFiles: [], untrackedContent }];
+  if (truncated) {
+    return { path, diff: `Untracked:\n${untrackedContent}\n… truncated at ${maxChars} chars. Use git diff --no-index /dev/null -- ${path} in ${root} for the full content.`, truncated: true, binaryFiles: [], untrackedContent, sections };
   }
-  return { path, diff: `Untracked:\n${text}`, truncated: false, binaryFiles: [], untrackedContent: text };
+  return { path, diff: `Untracked:\n${text}`, truncated: false, binaryFiles: [], untrackedContent, sections };
 }
 
 /** Render a diff preview with explicit truncation and follow-up guidance. */
