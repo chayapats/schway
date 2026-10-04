@@ -191,6 +191,8 @@ export interface TuiSnapshot {
   branchTreeError?: string;
   /** Available actions for the most recent failure, omitted after its session or branch changes. */
   recovery?: TuiRecovery;
+  /** Present when this session cannot save another turn, so Enter cannot send until another session opens. */
+  sessionWriteBlocked?: true;
 }
 
 /** Dependencies for one interactive conversation; mirrors headless loop inputs. */

@@ -604,6 +604,19 @@ not restore the prompt as a new draft. Prompt recall records accepted ordinary
 prompts only. Long commands release the editor when their preparation succeeds
 and execution starts; their later completion leaves any newer draft intact.
 
+While a turn runs, the composer accepts an unsent draft for your next task.
+Schway has no task queue: the placeholder reads `Draft your next task…` and the
+hint row reads `Wait, then Enter sends · Esc stop` (`Working · Esc stop` when
+the row is too narrow). Enter during work keeps the draft, selection and cursor
+and shows `Still working · Wait, then Enter sends` while the status row keeps
+Esc stop available. It never adds a user message or arranges an automatic send.
+Slash and extension commands keep their own busy messages and stay unrun. When
+the turn completes, stops or fails, the draft remains in the editor until you
+press Enter again. After a completed or stopped turn the hint returns to Enter
+send; after a failure it leads with that failure's recovery keys, such as
+Ctrl+R continue or Alt+L connect. When the session cannot save another turn,
+the hint leads with `/new start fresh · /sessions browse` instead of Enter send.
+
 When a provider step fails, the error row gives the available recovery keys for
 that operation. Alt+L opens sign-in after an authentication failure, Alt+M opens
 model selection after an unavailable-model failure, F2 shows optional

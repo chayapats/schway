@@ -1,0 +1,46 @@
+schway-screen 1
+screen running-empty
+title Running empty composer
+description An empty composer during work invites an unsent draft and says Enter sends only after the turn.
+variant light-24
+size 24x8
+cursor 6 6 visible
+== text
+   ▸ Check src/config/
+     config.ts
+   ▸ Then▍
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Draft next task…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc stops
+== styles
+00 0-3 #ffffff #f7f7f4 -
+00 3-5 #0a5894 #f7f7f4 -
+00 5-11 #1d232c #f7f7f4 -
+00 11-22 #6a3fb0 #d3cfd9 -
+00 22-24 #ffffff #f7f7f4 -
+01 0-5 #ffffff #f7f7f4 -
+01 5-14 #6a3fb0 #d3cfd9 -
+01 14-24 #ffffff #f7f7f4 -
+02 0-3 #ffffff #f7f7f4 -
+02 3-5 #0a5894 #f7f7f4 -
+02 5-9 #1d232c #f7f7f4 -
+02 9-10 #0a5894 #f7f7f4 -
+02 10-24 #ffffff #f7f7f4 -
+03 0-24 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-23 #ecedea #f7f7f4 -
+04 23-24 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-5 #0a5894 #ecedea -
+05 5-21 #545e6c #ecedea -
+05 21-23 #ffffff #ecedea -
+05 23-24 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-23 #ecedea #f7f7f4 -
+06 23-24 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-17 #545e6c #ecedea -
+07 17-24 #ffffff #f7f7f4 -

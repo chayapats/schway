@@ -27,6 +27,10 @@ const stopWork = async (ui: ScreenHarness, tool: boolean) => {
   await ui.waitFor(stopped);
   if (tool && await readFile(join(ui.root, "saved.txt"), "utf8") !== "Completed work ไทย 🧪\n") throw new Error("Stopped tool lost completed file content");
 };
+const streamingTurn = async (ui: ScreenHarness) => {
+  await enter(ui, "Explain the config loader");
+  await ui.waitFor(s => s.activity?.phase === "streaming" && s.transcript.some(e => e.text.includes("- Then")));
+};
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
 const search = async (ui: ScreenHarness, query: string) => {
   ui.controller.notice("Read the project README before making changes.");
@@ -129,6 +133,11 @@ export const SCREENS: readonly Screen[] = [
     await ui.mockInput.pasteBracketedText(thai);
     ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle(); await ui.mockInput.typeText("config");
   }, ready: (s, ui) => s.status === "running" && ui.editor.plainText === "config" && ui.editor.placeholder === "Find in this conversation…" },
+  { id: "running-empty", title: "Running empty composer", description: "An empty composer during work invites an unsent draft and says Enter sends only after the turn.", elapsed: 4000, noColorWidths: true,
+    drive: ui => streamingTurn(ui), ready: (s, ui) => s.activity?.phase === "streaming" && ui.editor.plainText === "" && typeof ui.editor.placeholder === "string" && ui.editor.placeholder.startsWith("Draft") },
+  { id: "running-draft", title: "Running draft kept", description: "Enter during work keeps the multiline Thai draft unsent and names waiting and stopping.", elapsed: 4000, noColorWidths: true, drive: async ui => {
+    await streamingTurn(ui); await ui.mockInput.pasteBracketedText(thai); ui.mockInput.pressEnter();
+  }, ready: (s, ui) => s.status === "running" && ui.editor.plainText === thai && s.transcript.at(-1)?.text.startsWith("Still working") === true },
   { id: "parallel-tools", title: "Parallel tools", description: "Three independent tool calls are running together.", elapsed: 7000, drive: ui => enter(ui, "Inspect the project"), ready: s => s.activity?.activeTools === 3 },
   { id: "completed-turn", title: "Completed turn", description: "A completed fix records a file edit and successful command.", noColor: true, drive: ui => enter(ui, "Fix the clamp upper bound"), ready: completed },
   { id: "shell-long-failure", title: "Long command, nonzero exit", description: "A long Unicode command retains its exit warning before its target is clipped.", noColorWidths: true, elapsed: 1200, drive: ui => longFailure(ui), ready: s => s.transcript.some(entry => entry.shellOutcome?.kind === "exit" && entry.shellOutcome.code === 1) },
@@ -238,11 +247,13 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
-  if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
+  if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search", "running-empty", "running-draft"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   if (["details-notice", "details-recovery", "details-unavailable"].includes(screen.id)) variants.push(make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   const shortWidths = screen.id.startsWith("draft-") || screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
-    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command"].includes(screen.id) ? [40, 50] : [];
+    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command", "running-empty", "running-draft"].includes(screen.id) ? [40, 50] : [];
+  // Running drafts also need a narrow width that still shows the key-hint row.
+  if (["running-empty", "running-draft"].includes(screen.id)) variants.push(make("dark", 30, 20), make("light", 30, 20), make("dark", 30, 20, true));
   for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));
   return variants;
 }

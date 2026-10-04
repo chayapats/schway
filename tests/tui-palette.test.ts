@@ -110,6 +110,8 @@ test("availability reflects the composer the palette returns to, with approval o
   expect(running.details).toEqual({ available: false, reason: "Wait for this turn · Esc stop" });
   expect(running.cancel).toEqual({ available: true });
   expect(running.newline).toEqual({ available: true });
+  // Enter cannot send during work, so the running reason never promises it.
+  expect(keyboardGuideAvailability({ ...idle, running: true, inspectable: false })["inspect-copy"]).toEqual({ available: false, reason: "Nothing to inspect yet · Esc stop" });
   expect(keyboardGuideAvailability({ ...idle, inspectable: false })["inspect-copy"]).toEqual({ available: false, reason: "Nothing to inspect · Enter send a task" });
   expect(keyboardGuideAvailability({ ...idle, details: false }).details).toEqual({ available: false, reason: "No details to show · Esc back" });
   const approval = keyboardGuideAvailability({ ...idle, running: true, toolApproval: true });

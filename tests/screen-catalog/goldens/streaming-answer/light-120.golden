@@ -32,10 +32,10 @@ cursor 7 27 visible
 
   ⠋ Receiving response · Esc stop
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Type ahead · Enter sends after this turn settles
+  ▌ › Draft your next task…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ⠋ Receiving 4.0s   scripted/scripted-model                                                   Esc stops  ctx ~7
-  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -99,8 +99,8 @@ cursor 7 27 visible
 25 118-120 #ffffff #f7f7f4 -
 26 0-2 #ffffff #f7f7f4 -
 26 2-6 #0a5894 #ecedea -
-26 6-54 #545e6c #ecedea -
-26 54-118 #ffffff #ecedea -
+26 6-27 #545e6c #ecedea -
+26 27-118 #ffffff #ecedea -
 26 118-120 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
 27 2-118 #ecedea #f7f7f4 -
@@ -116,16 +116,17 @@ cursor 7 27 visible
 28 105-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
-29 2-11 #1d232c #caced3 b
-29 11-26 #545e6c #f7f7f4 -
-29 26-31 #1d232c #caced3 b
-29 31-39 #545e6c #f7f7f4 -
-29 39-45 #1d232c #caced3 b
-29 45-53 #545e6c #f7f7f4 -
-29 53-58 #1d232c #caced3 b
-29 58-69 #545e6c #f7f7f4 -
-29 69-75 #1d232c #caced3 b
-29 75-84 #545e6c #f7f7f4 -
-29 84-85 #1d232c #caced3 b
-29 85-94 #545e6c #f7f7f4 -
-29 94-120 #ffffff #f7f7f4 -
+29 2-27 #545e6c #f7f7f4 -
+29 27-30 #1d232c #caced3 b
+29 30-38 #545e6c #f7f7f4 -
+29 38-47 #1d232c #caced3 b
+29 47-62 #545e6c #f7f7f4 -
+29 62-68 #1d232c #caced3 b
+29 68-76 #545e6c #f7f7f4 -
+29 76-81 #1d232c #caced3 b
+29 81-92 #545e6c #f7f7f4 -
+29 92-98 #1d232c #caced3 b
+29 98-107 #545e6c #f7f7f4 -
+29 107-108 #1d232c #caced3 b
+29 108-117 #545e6c #f7f7f4 -
+29 117-120 #ffffff #f7f7f4 -

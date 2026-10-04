@@ -11,7 +11,7 @@ cursor 6 6 visible
    ▸ Then▍
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Ask Schway…
+ ▌ › Draft your next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Auto · Esc stops
 == styles
@@ -36,8 +36,8 @@ cursor 6 6 visible
 04 39-40 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
 05 1-5 #0a5894 #ecedea -
-05 5-16 #545e6c #ecedea -
-05 16-39 #ffffff #ecedea -
+05 5-26 #545e6c #ecedea -
+05 26-39 #ffffff #ecedea -
 05 39-40 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-39 #ecedea #f7f7f4 -

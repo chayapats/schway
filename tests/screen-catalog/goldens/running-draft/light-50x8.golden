@@ -1,0 +1,42 @@
+schway-screen 1
+screen running-draft
+title Running draft kept
+description Enter during work keeps the multiline Thai draft unsent and names waiting and stopping.
+variant light-50x8
+size 50x8
+cursor 19 6 visible
+== text
+
+ Still working · Wait, then Enter sends
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › แล้วสรุปเป็นภาษาไทย
+     สั้น ๆ สามบรรทัด
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc stops
+== styles
+00 0-50 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-39 #545e6c #f7f7f4 -
+01 39-50 #ffffff #f7f7f4 -
+02 0-50 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-49 #ecedea #f7f7f4 -
+03 49-50 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-5 #0a5894 #ecedea -
+04 5-21 #1d232c #ecedea -
+04 21-49 #ffffff #ecedea -
+04 49-50 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-5 #ffffff #ecedea -
+05 5-18 #1d232c #ecedea -
+05 18-49 #ffffff #ecedea -
+05 49-50 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-49 #ecedea #f7f7f4 -
+06 49-50 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-17 #545e6c #ecedea -
+07 17-50 #ffffff #f7f7f4 -

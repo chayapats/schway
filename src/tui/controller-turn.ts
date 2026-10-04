@@ -10,6 +10,7 @@ import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, asShellOutcome, boundDisplay, fo
 import { buildEditDiff, countLines, type DiffRow } from "../text/diff.ts";
 import { recoveryMessage, startupFailureCategory, startupRecoveryMessage, redactRecoveryDetails } from "./controller-support.ts";
 import { CompactionLayer } from "./controller-compaction.ts";
+import { RECOVERY_ACTION_LABELS } from "./running-hints.ts";
 
 
 /** Turn runner, runtime-event reducer, cancellation and recovery offers. */
@@ -664,7 +665,7 @@ export abstract class TurnLayer extends CompactionLayer {
       ...(details ? ["details" as const] : []),
       "keep-editing",
     ];
-    const controls = actions.map(action => ({ connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry credential access", "choose-model": "Alt+M choose model", continue: "Ctrl+R continue", details: "F2 details", "keep-editing": "Esc keep editing" })[action]);
+    const controls = actions.map(action => RECOVERY_ACTION_LABELS[action]);
     const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: markError ? "error" : "system", text: `${message}\n${controls.join(" · ")}` };
     if (!accepted && this.recovery && !this.recovery.accepted) {
       this.transcript = this.transcript.filter(item => item.id !== this.recovery!.entryId);
