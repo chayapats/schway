@@ -12,6 +12,7 @@ cursor 7 27 visible
   ▌ Compare the options
 
 
+    table                                                                                              Alt+I inspect
    Option    Speed     Use
    Read      Fast      Inspect
    Edit      Fast      Change
@@ -22,7 +23,6 @@ cursor 7 27 visible
    const hi = 10;
    const n = 12;
    Math.min(hi, Math.max(lo, n));
-
 
 
 
@@ -59,86 +59,92 @@ cursor 7 27 visible
 03 117-120 #ffffff #f7f7f4 -
 04 0-120 #ffffff #f7f7f4 -
 05 0-120 #ffffff #f7f7f4 -
-06 0-3 #ffffff #f7f7f4 -
-06 3-9 #1d232c #f7f7f4 b
-06 9-13 #ffffff #f7f7f4 -
-06 13-18 #1d232c #f7f7f4 b
-06 18-23 #ffffff #f7f7f4 -
-06 23-26 #1d232c #f7f7f4 b
-06 26-120 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-3 #ffffff #e1e3df -
+06 3-10 #0a5894 #c7d2d6 b
+06 10-103 #ffffff #e1e3df -
+06 103-116 #545e6c #e1e3df -
+06 116-117 #ffffff #e1e3df -
+06 117-120 #ffffff #f7f7f4 -
 07 0-3 #ffffff #f7f7f4 -
-07 3-7 #1d232c #f7f7f4 -
-07 7-13 #ffffff #f7f7f4 -
-07 13-17 #1d232c #f7f7f4 -
-07 17-23 #ffffff #f7f7f4 -
-07 23-30 #1d232c #f7f7f4 -
-07 30-120 #ffffff #f7f7f4 -
+07 3-9 #1d232c #f7f7f4 b
+07 9-13 #ffffff #f7f7f4 -
+07 13-18 #1d232c #f7f7f4 b
+07 18-23 #ffffff #f7f7f4 -
+07 23-26 #1d232c #f7f7f4 b
+07 26-120 #ffffff #f7f7f4 -
 08 0-3 #ffffff #f7f7f4 -
 08 3-7 #1d232c #f7f7f4 -
 08 7-13 #ffffff #f7f7f4 -
 08 13-17 #1d232c #f7f7f4 -
 08 17-23 #ffffff #f7f7f4 -
-08 23-29 #1d232c #f7f7f4 -
-08 29-120 #ffffff #f7f7f4 -
+08 23-30 #1d232c #f7f7f4 -
+08 30-120 #ffffff #f7f7f4 -
 09 0-3 #ffffff #f7f7f4 -
 09 3-7 #1d232c #f7f7f4 -
 09 7-13 #ffffff #f7f7f4 -
-09 13-19 #1d232c #f7f7f4 -
-09 19-23 #ffffff #f7f7f4 -
+09 13-17 #1d232c #f7f7f4 -
+09 17-23 #ffffff #f7f7f4 -
 09 23-29 #1d232c #f7f7f4 -
 09 29-120 #ffffff #f7f7f4 -
-10 0-120 #ffffff #f7f7f4 -
-11 0-2 #ffffff #f7f7f4 -
-11 2-3 #ffffff #e1e3df -
-11 3-7 #0a5894 #c7d2d6 b
-11 7-103 #ffffff #e1e3df -
-11 103-116 #545e6c #e1e3df -
-11 116-117 #ffffff #e1e3df -
-11 117-120 #ffffff #f7f7f4 -
+10 0-3 #ffffff #f7f7f4 -
+10 3-7 #1d232c #f7f7f4 -
+10 7-13 #ffffff #f7f7f4 -
+10 13-19 #1d232c #f7f7f4 -
+10 19-23 #ffffff #f7f7f4 -
+10 23-29 #1d232c #f7f7f4 -
+10 29-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
-12 2-3 #ffffff #ecedea -
-12 3-9 #6a3fb0 #ecedea -
-12 9-11 #1d232c #ecedea -
-12 11-14 #6a3fb0 #ecedea -
-12 14-15 #7a5000 #ecedea -
-12 15-16 #6a3fb0 #ecedea -
-12 16-117 #ffffff #ecedea -
+12 2-3 #ffffff #e1e3df -
+12 3-7 #0a5894 #c7d2d6 b
+12 7-103 #ffffff #e1e3df -
+12 103-116 #545e6c #e1e3df -
+12 116-117 #ffffff #e1e3df -
 12 117-120 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
 13 2-3 #ffffff #ecedea -
 13 3-9 #6a3fb0 #ecedea -
 13 9-11 #1d232c #ecedea -
 13 11-14 #6a3fb0 #ecedea -
-13 14-16 #7a5000 #ecedea -
-13 16-17 #6a3fb0 #ecedea -
-13 17-117 #ffffff #ecedea -
+13 14-15 #7a5000 #ecedea -
+13 15-16 #6a3fb0 #ecedea -
+13 16-117 #ffffff #ecedea -
 13 117-120 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
 14 2-3 #ffffff #ecedea -
 14 3-9 #6a3fb0 #ecedea -
-14 9-10 #1d232c #ecedea -
-14 10-13 #6a3fb0 #ecedea -
-14 13-15 #7a5000 #ecedea -
-14 15-16 #6a3fb0 #ecedea -
-14 16-117 #ffffff #ecedea -
+14 9-11 #1d232c #ecedea -
+14 11-14 #6a3fb0 #ecedea -
+14 14-16 #7a5000 #ecedea -
+14 16-17 #6a3fb0 #ecedea -
+14 17-117 #ffffff #ecedea -
 14 117-120 #ffffff #f7f7f4 -
 15 0-2 #ffffff #f7f7f4 -
 15 2-3 #ffffff #ecedea -
-15 3-7 #065e74 #ecedea -
-15 7-8 #6a3fb0 #ecedea -
-15 8-11 #0a5894 #ecedea -
-15 11-14 #1d232c #ecedea -
-15 14-16 #6a3fb0 #ecedea -
-15 16-20 #065e74 #ecedea -
-15 20-21 #6a3fb0 #ecedea -
-15 21-24 #0a5894 #ecedea -
-15 24-27 #1d232c #ecedea -
-15 27-29 #6a3fb0 #ecedea -
-15 29-30 #1d232c #ecedea -
-15 30-33 #6a3fb0 #ecedea -
-15 33-117 #ffffff #ecedea -
+15 3-9 #6a3fb0 #ecedea -
+15 9-10 #1d232c #ecedea -
+15 10-13 #6a3fb0 #ecedea -
+15 13-15 #7a5000 #ecedea -
+15 15-16 #6a3fb0 #ecedea -
+15 16-117 #ffffff #ecedea -
 15 117-120 #ffffff #f7f7f4 -
-16 0-120 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-3 #ffffff #ecedea -
+16 3-7 #065e74 #ecedea -
+16 7-8 #6a3fb0 #ecedea -
+16 8-11 #0a5894 #ecedea -
+16 11-14 #1d232c #ecedea -
+16 14-16 #6a3fb0 #ecedea -
+16 16-20 #065e74 #ecedea -
+16 20-21 #6a3fb0 #ecedea -
+16 21-24 #0a5894 #ecedea -
+16 24-27 #1d232c #ecedea -
+16 27-29 #6a3fb0 #ecedea -
+16 29-30 #1d232c #ecedea -
+16 30-33 #6a3fb0 #ecedea -
+16 33-117 #ffffff #ecedea -
+16 117-120 #ffffff #f7f7f4 -
 17 0-120 #ffffff #f7f7f4 -
 18 0-120 #ffffff #f7f7f4 -
 19 0-120 #ffffff #f7f7f4 -

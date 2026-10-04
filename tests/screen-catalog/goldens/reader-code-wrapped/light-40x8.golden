@@ -1,0 +1,49 @@
+schway-screen 1
+screen reader-code-wrapped
+title Read code, wrapped
+description W wraps long code lines in the reader while line numbers keep each source line.
+variant light-40x8
+size 40x8
+cursor 1 1 hidden
+== text
+ Read code · ts          Lines 1–1 of 5
+ 1 export function summarize(rows: read
+   only Row[], options: { locale: strin
+   g; currency: string; includeArchived
+   : boolean; precision: number; groupB
+   y: "region" | "owner"; timezone: str
+   ing }): Summary {
+ Auto · Esc back
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-15 #1d232c #f7f7f4 b
+00 15-39 #545e6c #f7f7f4 -
+00 39-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-3 #545e6c #f7f7f4 -
+01 3-39 #6a3fb0 #f7f7f4 -
+01 39-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-3 #545e6c #f7f7f4 -
+02 3-39 #6a3fb0 #f7f7f4 -
+02 39-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-3 #545e6c #f7f7f4 -
+03 3-39 #6a3fb0 #f7f7f4 -
+03 39-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-3 #545e6c #f7f7f4 -
+04 3-39 #6a3fb0 #f7f7f4 -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-3 #545e6c #f7f7f4 -
+05 3-39 #6a3fb0 #f7f7f4 -
+05 39-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-3 #545e6c #f7f7f4 -
+06 3-20 #6a3fb0 #f7f7f4 -
+06 20-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-16 #545e6c #ecedea -
+07 16-40 #ffffff #f7f7f4 -

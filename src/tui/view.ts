@@ -24,7 +24,7 @@ import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
 import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
-import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerLayout, revealMatch, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
+import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerEnd, readerLayout, revealMatch, scrollReader, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
 import type { ReaderPosition } from "./reader.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
@@ -323,7 +323,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   root.onMouseScroll = event => {
     if (reader?.layout && (event.scroll?.direction === "up" || event.scroll?.direction === "down")) {
       const state = reader, layout = reader.layout;
-      state.position = readerBodyPosition(state.document, layout, state.document.view.move(readerBodyPosition(state.document, layout, state.position), layout.viewport, { rows: event.scroll.direction === "up" ? -3 : 3 }));
+      state.position = scrollReader(state.document, layout, state.position, event.scroll.direction === "up" ? -3 : 3);
       event.stopPropagation(); refresh(); return;
     }
     for (let target = event.target; target && target !== root; target = target.parent) {
@@ -1339,7 +1339,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · C copy · Esc editor" : available.length ? `↑/↓ select · Tab complete · Esc dismiss${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc" : "↑↓ move · R read · C copy · Esc editor" : available.length ? `↑/↓ select · Tab complete · Esc dismiss${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1505,9 +1505,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if (!layout) return;
     const document = state.document, viewport = layout.viewport;
-    const move = (rows: number) => {
-      state.position = readerBodyPosition(document, layout, document.view.move(readerBodyPosition(document, layout, state.position), viewport, { rows }));
-    };
+    const move = (rows: number) => { state.position = scrollReader(document, layout, state.position, rows); };
     if (state.search) {
       const search = state.search;
       if (name === "return" || name === "kpenter" || key.ctrl && name === "f") { state.search = undefined; return; }
@@ -1532,10 +1530,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (name === "up" || name === "down") move(name === "up" ? -1 : 1);
     else if (name === "pageup" || name === "pagedown") move((name === "pageup" ? -1 : 1) * Math.max(1, viewport.rows - 1));
     else if (name === "home") state.position = readerBodyPosition(document, layout, { offset: 0, horizontal: 0 });
-    else if (name === "end") {
-      const end = document.view.positionAt(document.view.source.length);
-      state.position = readerBodyPosition(document, layout, document.view.move({ offset: end.offset, horizontal: state.position.horizontal }, viewport, { rows: -(viewport.rows - 1) }));
-    } else if ((name === "left" || name === "right") && !viewport.wrap) {
+    else if (name === "end") state.position = readerEnd(document, layout, state.position.horizontal);
+    else if ((name === "left" || name === "right") && !viewport.wrap) {
       state.position = { offset: state.position.offset, horizontal: panReader(document, layout, state.position.horizontal, name === "left" ? -1 : 1) };
     } else if (plain && name === "w" && document.kind === "code") state.wrap = !state.wrap;
     else if (plain && name === "c") copyReader();

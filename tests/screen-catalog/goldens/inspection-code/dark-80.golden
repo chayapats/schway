@@ -21,7 +21,7 @@ cursor 1 1 hidden
   Earlier explanation.
   Earlier explanation.
 
-    › ts                                                   C copy · Esc back
+    › ts                                          R read · C copy · Esc back
    console.log('เป้าหมาย 🧪');
    // บรรทัดสอง
 
@@ -35,7 +35,7 @@ cursor 1 1 hidden
   ▌ › งานถัดไป 🧪
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/scripted-model                               ctx ~0
-  ↑↓ move · C copy · Esc editor
+  ↑↓ move · R read · C copy · Esc editor
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -84,8 +84,8 @@ cursor 1 1 hidden
 15 0-2 #ffffff #0e1117 -
 15 2-3 #ffffff #33475e -
 15 3-9 #7cc4ff #33475e b
-15 9-59 #ffffff #33475e -
-15 59-76 #e6eaf0 #33475e -
+15 9-50 #ffffff #33475e -
+15 50-76 #e6eaf0 #33475e -
 15 76-77 #ffffff #33475e -
 15 77-80 #ffffff #0e1117 -
 16 0-2 #ffffff #0e1117 -
@@ -154,6 +154,8 @@ cursor 1 1 hidden
 29 4-12 #8b95a7 #0e1117 -
 29 12-13 #e6eaf0 #293140 b
 29 13-21 #8b95a7 #0e1117 -
-29 21-24 #e6eaf0 #293140 b
-29 24-31 #8b95a7 #0e1117 -
-29 31-80 #ffffff #0e1117 -
+29 21-22 #e6eaf0 #293140 b
+29 22-30 #8b95a7 #0e1117 -
+29 30-33 #e6eaf0 #293140 b
+29 33-40 #8b95a7 #0e1117 -
+29 40-80 #ffffff #0e1117 -

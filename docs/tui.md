@@ -496,7 +496,8 @@ detected here` marks newer turns with the same limit.
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc restores the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
-| Inspect results and code | Alt+I enters inspection without copying; Up/Down or Tab selects a result or code block; C copies the highlighted item; Enter copies selected code or toggles an expandable tool result; Esc returns to the draft |
+| Inspect results, code and tables | Alt+I enters inspection without copying; Up/Down or Tab selects a result, code block or table; C copies the highlighted item; Enter copies selected code or table source, or toggles an expandable tool result; R reads selected code or a table; Esc returns to the draft |
+| Read code or a table | R in inspection; Up/Down and PgUp/PgDn scroll, Home/End jump, Left/Right pan unwrapped code or step table columns, W wraps code, C copies the source, Ctrl+F finds in the block, Esc returns to the same inspection target |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
@@ -506,8 +507,8 @@ detected here` marks newer turns with the same limit.
 
 Code headers show **Alt+I inspect** until selected. Inspection returns to a
 still-valid previous target; otherwise it starts with the first block or result
-in view, or the nearest one when none is visible. The selected code header shows
-**›** and **C copy · Esc back**, including without color. Opening inspection
+in view, or the nearest one when none is visible. The selected code or table header shows
+**›** and **R read · C copy · Esc back**, including without color. Opening inspection
 never copies. If a selection needs to scroll or repaint, `Showing selection · C
 copy again` asks for another explicit C; it does not queue a copy.
 
@@ -540,6 +541,7 @@ reading position.
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
 | Help, command completion, search, inspection | Panel-specific navigation, Enter chosen action, Esc restores composer |
+| Reader | Up/Down, PgUp/PgDn, Home/End scroll; Left/Right pan; W wrap code; C copy source; Ctrl+F find; Esc back to inspection |
 
 Open preferences from the task composer. If another panel is open, Escape returns
 to the task before Alt+P; preferences likewise keep ownership of input until closed
@@ -719,7 +721,7 @@ without truncating them. Code blocks also wrap long lines. Resizing changes only
 their display layout; copying keeps the original unwrapped code text, without fences.
 Notices arriving during an answer do not finalize its still-streaming Markdown.
 
-Inspection highlights one tool result or fenced code block and keeps the draft
+Inspection highlights one tool result, fenced code block or table and keeps the draft
 and cursor in place. C copies the selected result or code body through OSC 52,
 without borders, heading text, or Markdown fences. Code copy uses the rendered
 Markdown code body, including code inside lists and quotes and an unfinished
@@ -731,6 +733,51 @@ a bounded preview; the complete result remains in the session file. If OSC 52
 is unavailable, Schway reports the failure and leaves the selection and draft
 intact. New streamed rows and tool completion keep the selected item and the
 reader's scroll position.
+
+### Read long code and wide tables
+
+Top-level tables get a header strip like code blocks, with **Alt+I inspect**.
+Adding tables to inspection keeps every existing tool and code target in the
+same relative order; tables join in rendered order. A selected table copies its
+original sanitized Markdown, including pipes, empty cells and links, with C or
+Enter. Nested tables inside lists and quotes are not inspection targets.
+
+Press **R** on selected code or a table to open the reader. It uses the
+transcript and composer area and shows `Read code` or `Read table`, the visible
+lines and, when panned, the column. The compact transcript stays the default,
+and the draft, cursor and transcript position return unchanged on Esc.
+
+- Code starts unwrapped. Left/Right pan by half a screen; `‹` and `›` mark
+  clipped edges. **W** wraps long lines; wrapping, resizing and panning keep the
+  same source line at the top. Line numbers are presentation only.
+- Tables show aligned columns with ` │ ` between cells. The header and its
+  separator stay pinned when there is room, Left/Right step one column, and the
+  title reports `Columns 2–5 of 8`. The label `Aligned columns · C copies
+  Markdown source` marks that the copy keeps the original Markdown. Extra cells
+  beyond the header stay visible; no column is hidden.
+- **C** copies the canonical source: exact sanitized code with its line
+  endings, or the table's Markdown. Line numbers, clip markers, hints, wrap
+  breaks and search highlights never enter the copy. A copy is reported only
+  when the terminal accepted the request; on failure the reader stays open at
+  the same position.
+- **Ctrl+F** searches the captured block with the conversation search's
+  Unicode folding. Up/Down move between matches, Enter keeps the result in view
+  and Esc restores the previous position. Reader search never adds rows to the
+  conversation search or changes history.
+- Opening a block that is still streaming captures a snapshot labelled
+  `Snapshot · Esc back`. The conversation keeps streaming behind it; closing
+  and pressing R again refreshes the snapshot.
+- Sources longer than 8,000,000 characters are capped at a whole character.
+  The reader shows `Showing first 8,000,000 characters`, and a copy of that
+  part reports `Copied partial source`.
+
+If a tool approval arrives while reading, it waits; the reader shows
+`◌ Approval waiting · Esc review request`, and navigation, copy and resize
+never answer it. Esc closes the reader and opens the existing approval prompt
+without approving or denying. After the request is handled, the reader never
+reopens on its own: press **Alt+I** then **R** on the same target to return to
+the saved snapshot, position and search. Session and branch changes discard the
+reader.
 
 ## Discover commands and skills
 
@@ -923,7 +970,7 @@ Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **De
 
 Esc denies the current call without stopping the turn. **Deny with reason…** opens an entry with `Why? The agent will see this…`; Enter submits the trimmed reason, including an empty denial. The model receives `Denied by the user.` or `Denied by the user: <reason>`. Reason text stays out of prompt history, composer drafts and draft checkpoints. Every exit restores the draft and cursor saved before the panel opened. **Ctrl+C** cancels the whole turn, including queued calls; **Shift+Tab** is ignored while the approval prompt is open.
 
-Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc close to review request` hint show how to reach the request; closing that view opens the approval prompt immediately.
+Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc close to review request` hint show how to reach the request; closing that view opens the approval prompt immediately. The code and table reader shows `Esc review request` instead and keeps its position for an explicit Alt+I then R return.
 
 ### Details keyboard compatibility
 

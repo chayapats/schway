@@ -129,6 +129,22 @@ export function panReader(document: ReaderDocument, layout: ReaderLayout, horizo
   return Math.max(0, Math.min(limit, next));
 }
 
+/** Scroll by rows; moving down never leaves blank rows below the last line when earlier rows could fill them. */
+export function scrollReader(document: ReaderDocument, layout: ReaderLayout, position: ReaderPosition, rows: number): ReaderPosition {
+  const moved = readerBodyPosition(document, layout, document.view.move(readerBodyPosition(document, layout, position), layout.viewport, { rows }));
+  if (rows <= 0) return moved;
+  const window = document.view.view(moved, layout.viewport);
+  if (window.hasAfter || window.rows.length >= layout.viewport.rows) return moved;
+  const last = readerEnd(document, layout, moved.horizontal);
+  return last.offset >= position.offset ? last : position;
+}
+
+/** Top anchor of the last full page. */
+export function readerEnd(document: ReaderDocument, layout: ReaderLayout, horizontal: number): ReaderPosition {
+  const end = document.view.positionAt(document.view.source.length);
+  return readerBodyPosition(document, layout, document.view.move({ offset: end.offset, horizontal }, layout.viewport, { rows: -(layout.viewport.rows - 1) }));
+}
+
 /** Keep the body below a pinned table header without changing the canonical anchor otherwise. */
 export function readerBodyPosition(document: ReaderDocument, layout: ReaderLayout, position: ReaderPosition): ReaderPosition {
   return layout.pinned && position.offset < document.bodyStart ? { offset: document.bodyStart, horizontal: position.horizontal } : position;
@@ -190,7 +206,7 @@ function positionLabel(document: ReaderDocument, layout: ReaderLayout, rows: rea
     const starts = document.columnStarts;
     let left = 0, right = 0;
     starts.forEach((start, index) => { if (start <= horizontal) left = index; if (start < horizontal + layout.viewport.columns) right = index; });
-    return compact ? `${vertical} · C${left + 1}–${right + 1}/${starts.length}` : `${vertical} · Columns ${left + 1}–${right + 1} of ${starts.length}`;
+    return compact ? `${vertical} · Col ${left + 1}–${right + 1}/${starts.length}` : `${vertical} · Columns ${left + 1}–${right + 1} of ${starts.length}`;
   }
   return horizontal > 0 ? `${vertical} · Col ${horizontal + 1}` : vertical;
 }
@@ -206,7 +222,10 @@ export function paintReader(input: {
   const lines: TextChunk[][] = [];
   const result = input.search?.query ? document.view.search(input.search.query) : { matches: [], limited: false };
   const selected = input.search?.query ? input.search.selected : -1;
-  if (layout.status.includes("approval")) lines.push([bold(fg(theme.warning)(fitLine("◌ Approval waiting · Esc review request", columns)))]);
+  if (layout.status.includes("approval")) {
+    const approval = width("◌ Approval waiting · Esc review request") <= columns ? "◌ Approval waiting · Esc review request" : "◌ Approval · Esc review request";
+    lines.push([bold(fg(theme.warning)(fitLine(approval, columns)))]);
+  }
   if (layout.title) {
     const left = `Read ${document.kind}${document.kind === "code" && document.title !== "code" ? ` · ${document.title}` : ""}`;
     let right = positionLabel(document, layout, window.rows, position.horizontal, false);
@@ -223,7 +242,7 @@ export function paintReader(input: {
   const gutter = (row: ReaderRow | undefined) => layout.gutter ? [fg(theme.muted)(row && !row.continuation ? String(row.line).padStart(layout.gutter - 1) + " " : " ".repeat(layout.gutter))] : [];
   const paintRow = (row: ReaderRow, color: string, header = false) => {
     const viewStart = layout.viewport.wrap ? document.view.positionAt(row.start).horizontal : position.horizontal;
-    const content = rowChunks(document, row, viewStart, layout.viewport.columns, color, theme, header ? [] : result.matches, selected);
+    const content = rowChunks(document, row, viewStart, layout.viewport.columns, color, theme, result.matches, selected);
     const pad = " ".repeat(Math.max(0, layout.viewport.columns - width(row.text)));
     lines.push([...gutter(row),
       ...(layout.markers ? [fg(theme.muted)(row.clippedLeft ? "‹" : " ")] : []),

@@ -1,0 +1,51 @@
+schway-screen 1
+screen reader-table
+title Read table, pinned headers
+description A wide table keeps its header and column position visible while scrolled down and right.
+variant light-40x8
+size 40x8
+cursor 1 1 hidden
+== text
+ Read table          3–5/36 · Col 2–5/8
+ Aligned columns · C copies Markdown s…
+ ‹Owner │ Q1 revenue │ Q2 revenue │ Ch›
+ ‹──────┼────────────┼────────────┼───›
+ ‹Dana  │ 1,274      │ 1,382      │ +3›
+ ‹      │ 1,311      │ 1,423      │ +4›
+ ‹Dana  │ 1,348      │ 1,464      │ +5›
+ Auto · Esc back
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-11 #1d232c #f7f7f4 b
+00 11-39 #545e6c #f7f7f4 -
+00 39-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-39 #545e6c #f7f7f4 -
+01 39-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #545e6c #f7f7f4 -
+02 2-38 #1d232c #f7f7f4 b
+02 38-39 #545e6c #f7f7f4 -
+02 39-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-39 #545e6c #f7f7f4 -
+03 39-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-2 #545e6c #f7f7f4 -
+04 2-38 #1d232c #f7f7f4 -
+04 38-39 #545e6c #f7f7f4 -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-2 #545e6c #f7f7f4 -
+05 2-38 #1d232c #f7f7f4 -
+05 38-39 #545e6c #f7f7f4 -
+05 39-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-2 #545e6c #f7f7f4 -
+06 2-38 #1d232c #f7f7f4 -
+06 38-39 #545e6c #f7f7f4 -
+06 39-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-16 #545e6c #ecedea -
+07 16-40 #ffffff #f7f7f4 -

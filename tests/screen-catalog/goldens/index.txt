@@ -75,3 +75,8 @@ table-and-code
 inspection-unfocused
 inspection-code
 inspection-tool
+reader-code
+reader-code-wrapped
+reader-table
+reader-no-matches
+reader-approval

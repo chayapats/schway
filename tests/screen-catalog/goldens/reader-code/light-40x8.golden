@@ -1,0 +1,49 @@
+schway-screen 1
+screen reader-code
+title Read code, horizontal clipping
+description The reader pans unwrapped code and marks clipped edges without changing the draft.
+variant light-40x8
+size 40x8
+cursor 1 1 hidden
+== text
+ Read code · ts          1–5/5 · Col 18
+ 1 ‹ummarize(rows: readonly Row[], opt›
+ 2 ‹สรุปยอดขาย 🧪 ' + options.locale; /›
+ 3 ‹rows.filter(row => options.include›
+ 4 ‹ total: totals.reduce((sum, value)›
+ 5 ‹
+
+ Auto · Esc back
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-15 #1d232c #f7f7f4 b
+00 15-39 #545e6c #f7f7f4 -
+00 39-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-4 #545e6c #f7f7f4 -
+01 4-38 #6a3fb0 #f7f7f4 -
+01 38-39 #545e6c #f7f7f4 -
+01 39-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-4 #545e6c #f7f7f4 -
+02 4-38 #6a3fb0 #f7f7f4 -
+02 38-39 #545e6c #f7f7f4 -
+02 39-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-4 #545e6c #f7f7f4 -
+03 4-38 #6a3fb0 #f7f7f4 -
+03 38-39 #545e6c #f7f7f4 -
+03 39-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-4 #545e6c #f7f7f4 -
+04 4-38 #6a3fb0 #f7f7f4 -
+04 38-39 #545e6c #f7f7f4 -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-4 #545e6c #f7f7f4 -
+05 4-40 #ffffff #f7f7f4 -
+06 0-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-5 #1d232c #ecedea b
+07 5-16 #545e6c #ecedea -
+07 16-40 #ffffff #f7f7f4 -

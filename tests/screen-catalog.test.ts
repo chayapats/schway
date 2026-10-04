@@ -128,6 +128,17 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
       expect(text).toContain("C copy");
     }
   }
+  if (screen.id.startsWith("reader-")) {
+    const text = parseScreen(actual).text.join("\n");
+    expect(text).toContain(screen.id === "reader-table" ? "Read table" : "Read code");
+    expect(text).not.toContain("Copied");
+    // The composer is hidden, not cleared; reading never shows or edits the draft.
+    expect(text).not.toContain("งานถัดไป");
+    if (screen.id === "reader-code") { expect(text).toContain("‹"); expect(text).toContain("›"); }
+    if (screen.id === "reader-table" && variant.rows > 8) { expect(text).toMatch(/‹Owner +│/); expect(text).toMatch(/Columns 2–\d of 8|Col 2–\d\/8/); expect(text).not.toContain("ภาค 1 "); }
+    if (screen.id === "reader-no-matches") expect(text).toContain("No matches");
+    if (screen.id === "reader-approval") { expect(text).toMatch(/◌ Approval( waiting)? · Esc review request/); expect(text).not.toContain("Allow bash?"); }
+  }
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") {
     const frame = parseScreen(actual), text = frame.text.join("\n");
     const stopping = screen.id.startsWith("stopped-");
@@ -181,7 +192,7 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "delete-session-busy", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool", "reader-code", "reader-code-wrapped", "reader-table", "reader-no-matches", "reader-approval"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);

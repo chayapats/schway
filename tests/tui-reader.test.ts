@@ -432,7 +432,7 @@ for (const width of [120, 80, 50]) test(`reader reaches every code and table cel
     ui.mockInput.pressArrow("right"); await ui.settle();
   }
   expect([...seen].sort()).toEqual(["Empty", "Fifth column", "Last column", "Link", "Name", "Notes", "Seventh column", "Sixth column", "[docs](https://example.test/2", "far 29"].sort());
-  expect(ui.readerText()).toMatch(/Columns \d+–8 of 8|C\d+–8\/8/);
+  expect(ui.readerText()).toMatch(/Columns \d+–8 of 8|Col \d+–8\/8/);
   ui.mockInput.pressKey("c"); await ui.settle();
   expect(ui.copied).toEqual([longCode, wideTable]);
   ui.mockInput.pressEscape(); await ui.settle();
@@ -707,3 +707,16 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   // A later ordinary reopen is a fresh snapshot at the top.
   expect(ui.readerText()).not.toContain("Find:");
 }));
+
+test("reader search highlights matches with attributes visible without color and never in copy", () => {
+  const source = "alpha needle\n\tneedle ไทย 🧪 needle";
+  const document = createReaderDocument({ id: "code-m-0", messageId: "m", kind: "code" }, source, { title: "txt", streaming: false });
+  const layout = readerLayout(document, false, 40, 8, { approval: false, search: true });
+  const search = { query: "needle", selected: 1, origin: { offset: 0, horizontal: 0 } };
+  const chunks = paintReader({ document, layout, position: { offset: 0, horizontal: 0 }, columns: 40, rows: 8, theme: { ...TUI_THEMES.dark }, search }).chunks;
+  const marked = chunks.filter(chunk => (chunk.attributes ?? 0) !== 0 && chunk.text === "needle");
+  expect(marked).toHaveLength(3);
+  expect(new Set(marked.map(chunk => chunk.attributes)).size).toBe(2);
+  expect(chunks.map(chunk => chunk.text).join("")).toContain("Find: needle · 2/3");
+  expect(document.copy.copy().text).toBe(source);
+});

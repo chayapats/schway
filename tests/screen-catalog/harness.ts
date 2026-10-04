@@ -136,6 +136,10 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       ? { id: "approval-command", name: "bash", arguments: { command: "bun test --filter clamp" } }
       : { id: "approval-edit", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "  return Math.max(lo, n);", newText: "  return Math.min(hi, Math.max(lo, n));" }] } }] }];
   }
+  if (screen.id === "reader-approval") {
+    tools = createToolRegistry([bashTool]);
+    responses = [{ toolCalls: [{ id: "reader-command", name: "bash", arguments: { command: "bun test --filter clamp" } }] }];
+  }
   if (screen.id === "parallel-tools") {
     const names = ["read", "grep", "bash"];
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
