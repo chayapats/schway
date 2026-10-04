@@ -41,7 +41,7 @@ test("the curated built-in order covers descriptions and the slash-command union
   const coversSlashCommands: Exclude<SlashCommandName, typeof BUILT_IN_COMMAND_ORDER[number]> extends never ? true : false = true;
   expect(coversSlashCommands).toBe(true);
   expect(BUILT_IN_COMMAND_ORDER).toEqual([
-    "model", "new", "clear", "sessions", "changes", "undo", "compact", "resume", "branch", "thinking", "context", "skills",
+    "model", "new", "clear", "sessions", "changes", "undo", "history", "compact", "resume", "branch", "thinking", "context", "skills",
     "add-dir", "config", "theme", "session", "login", "logout", "help", "quit", "delete-session",
   ]);
   expect(Object.keys(COMMAND_DESCRIPTIONS).sort()).toEqual([...BUILT_IN_COMMAND_ORDER].sort());

@@ -61,6 +61,7 @@ export function createHistoryPanel(renderer: CliRenderer) {
   root.add(notice);
   root.add(scroll);
   let paintedKey = "";
+  let paintedFocus = "";
   let content = "";
 
   /** Keep a line index inside the viewport without moving when it is already visible. */
@@ -171,11 +172,15 @@ export function createHistoryPanel(renderer: CliRenderer) {
     }
     // A new view starts at its top; the list and detail keep their selection visible.
     if (key !== paintedKey) { scroll.scrollTo(0); paintedKey = key; }
-    if (focus >= 0 && !history.showingDetails) {
+    // Scroll only when the selection or viewport changes, so PageUp/PageDown stay where the user put them.
+    // A turn opened at its first file starts at its task instead.
+    const focusKey = JSON.stringify([key, history.selected, history.file, scroll.viewport.height, focusMore]);
+    if (focus >= 0 && !history.showingDetails && focusKey !== paintedFocus && !(history.view === "detail" && history.file === 0)) {
       if (focusMore) reveal(lines.length - 1);
       else if (width < 60 && history.view === "list") reveal(focus + 1);
       reveal(focus);
     }
+    paintedFocus = focusKey;
   }
 
   /** Scroll the panel by about one page. */

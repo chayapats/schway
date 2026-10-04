@@ -1,0 +1,125 @@
+schway-screen 1
+screen history-undo-note
+title Undo note in history
+description History shows the durable undo outcome for a turn whose file edits were undone.
+variant dark-50
+size 50x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ~/demo on main
+
+ Turn 1 · ✓ Done
+
+ Fix the clamp upper bound
+ 2026-01-15 09:30 UTC · 2.4s
+
+ Files · 1
+ › clamp.ts                     +1 −1
+
+ Commands · 1
+   ✓ printf 'ok\n' · Exit 0
+
+ Undo
+   Undone · 1 file reverted
+
+
+
+
+
+
+
+
+ ✓ Done · 1 file +1 −1 · Alt+R review
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ ›
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-…    ctx ~89
+ ↑↓ files · Enter current diff
+ F2 details · Esc back
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-22 #8b95a7 #161b24 -
+00 22-26 #c0acff #161b24 -
+00 26-50 #ffffff #161b24 -
+01 0-50 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-10 #e6eaf0 #0e1117 b
+02 10-16 #8fd19e #0e1117 b
+02 16-50 #ffffff #0e1117 -
+03 0-50 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-26 #e6eaf0 #0e1117 -
+04 26-50 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-28 #8b95a7 #0e1117 -
+05 28-50 #ffffff #0e1117 -
+06 0-50 #ffffff #0e1117 -
+07 0-1 #ffffff #0e1117 -
+07 1-10 #7cc4ff #0e1117 b
+07 10-50 #ffffff #0e1117 -
+08 0-1 #ffffff #0e1117 -
+08 1-37 #7cc4ff #0e1117 -
+08 37-50 #ffffff #0e1117 -
+09 0-50 #ffffff #0e1117 -
+10 0-1 #ffffff #0e1117 -
+10 1-13 #7cc4ff #0e1117 b
+10 13-50 #ffffff #0e1117 -
+11 0-1 #ffffff #0e1117 -
+11 1-27 #8fd19e #0e1117 -
+11 27-50 #ffffff #0e1117 -
+12 0-50 #ffffff #0e1117 -
+13 0-1 #ffffff #0e1117 -
+13 1-5 #7cc4ff #0e1117 b
+13 5-50 #ffffff #0e1117 -
+14 0-1 #ffffff #0e1117 -
+14 1-27 #e6eaf0 #0e1117 -
+14 27-50 #ffffff #0e1117 -
+15 0-50 #ffffff #0e1117 -
+16 0-50 #ffffff #0e1117 -
+17 0-50 #ffffff #0e1117 -
+18 0-50 #ffffff #0e1117 -
+19 0-50 #ffffff #0e1117 -
+20 0-50 #ffffff #0e1117 -
+21 0-50 #ffffff #0e1117 -
+22 0-50 #ffffff #0e1117 -
+23 0-1 #ffffff #0e1117 -
+23 1-2 #8fd19e #0e1117 b
+23 2-3 #8b95a7 #0e1117 -
+23 3-7 #8fd19e #0e1117 b
+23 7-25 #8b95a7 #0e1117 -
+23 25-30 #e6eaf0 #293140 b
+23 30-37 #8b95a7 #0e1117 -
+23 37-50 #ffffff #0e1117 -
+24 0-1 #ffffff #0e1117 -
+24 1-49 #161b24 #0e1117 -
+24 49-50 #ffffff #0e1117 -
+25 0-1 #ffffff #0e1117 -
+25 1-5 #7cc4ff #161b24 -
+25 5-49 #ffffff #161b24 -
+25 49-50 #ffffff #0e1117 -
+26 0-1 #ffffff #0e1117 -
+26 1-49 #161b24 #0e1117 -
+26 49-50 #ffffff #0e1117 -
+27 0-1 #8b95a7 #161b24 -
+27 1-7 #e6eaf0 #161b24 b
+27 7-8 #8b95a7 #161b24 -
+27 8-17 #8fd19e #31433f b
+27 17-18 #8b95a7 #161b24 -
+27 18-39 #e6eaf0 #1e2430 -
+27 39-49 #8b95a7 #161b24 -
+27 49-50 #ffffff #0e1117 -
+28 0-1 #ffffff #0e1117 -
+28 1-3 #e6eaf0 #293140 b
+28 3-12 #8b95a7 #0e1117 -
+28 12-17 #e6eaf0 #293140 b
+28 17-30 #8b95a7 #0e1117 -
+28 30-50 #ffffff #0e1117 -
+29 0-1 #ffffff #0e1117 -
+29 1-3 #e6eaf0 #293140 b
+29 3-14 #8b95a7 #0e1117 -
+29 14-17 #e6eaf0 #293140 b
+29 17-22 #8b95a7 #0e1117 -
+29 22-50 #ffffff #0e1117 -

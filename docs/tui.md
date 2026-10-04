@@ -812,7 +812,7 @@ reader.
 ## Discover commands and skills
 
 Type `/` to browse commands in a fixed order: `/model`, `/new`, `/clear`, `/sessions`,
-`/changes`, `/undo`, `/compact`, then the remaining built-ins. User-invokable project and
+`/changes`, `/undo`, `/history`, `/compact`, then the remaining built-ins. User-invokable project and
 global skills, including user-only skills, follow under **Skills**, then active
 extension commands under **Extensions**. Empty groups have no header. Extension
 rows show their package name, or the module filename for `--extension` modules.

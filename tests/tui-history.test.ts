@@ -13,7 +13,8 @@ import { createSession } from "../src/session/session.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { writeTool } from "../src/tools/write.ts";
-import { dispatchEditorInput, parseSkillInvocation, parseSlashCommand } from "../src/tui/commands.ts";
+import { dispatchEditorInput, helpText, parseSkillInvocation, parseSlashCommand } from "../src/tui/commands.ts";
+import { commandCatalog } from "../src/tui/command-catalog.ts";
 import { handleSlashCommand } from "../src/tui/app.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createConversationView } from "../src/tui/view.ts";
@@ -317,6 +318,9 @@ test("a history skill or extension follows normal collision behavior and never s
   expect(RESERVED_SKILL_NAMES).toContain("history");
   expect(parseSlashCommand("/history")).toMatchObject({ name: "history", args: "" });
   expect(parseSkillInvocation("/history")).toBeNull();
+  // Help and completion list the built-in from the shared catalogue.
+  expect(commandCatalog([]).find(entry => entry.name === "history")).toMatchObject({ insertion: "/history ", description: "Browse turn history", source: "built-in", available: true });
+  expect(helpText()).toContain("/history - browse recorded turn outcomes");
   const dir = await temp();
   const home = join(dir, "home"), root = join(dir, "work");
   await mkdir(join(root, ".agents/skills/history"), { recursive: true });
@@ -330,6 +334,8 @@ test("a history skill or extension follows normal collision behavior and never s
   expect(opened).toBe(0);
   expect(c.snapshot().history).toBeUndefined();
   expect(c.snapshot().transcript.at(-1)?.text).toContain("Command conflicts with skill");
+  // The colliding skill is shown as an unavailable choice; the built-in is never silently redirected to it.
+  expect(c.commandChoices("/history").filter(entry => entry.name === "history").every(entry => !entry.available)).toBe(true);
   expect(counted.calls()).toBe(0);
   // Extensions cannot register the built-in name at all.
   await writeFile(join(root, "history-extension.ts"), "export default ctx => ctx.registerCommand({ name: 'history', description: 'Shadow', execute() {} });");

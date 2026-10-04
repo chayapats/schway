@@ -115,7 +115,8 @@ const historyTurns = async (ui: ScreenHarness, turns = 3) => {
   await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed);
   if (turns < 2) return;
   await enter(ui, "Run the clamp tests"); await ui.waitFor(s => completed(s) && s.transcript.some(row => row.text.includes("One clamp test still fails.")));
-  await enter(ui, "Save clamp notes ไทย 🧪, then wait");
+  // Paste keeps the emoji whole; typed input would split its surrogate pair.
+  await ui.mockInput.pasteBracketedText("Save clamp notes ไทย 🧪, then wait"); await ui.settle(); ui.mockInput.pressEnter();
   await ui.waitFor(s => s.transcript.some(row => row.toolCallId === "history-wait" && row.text.includes("Ready to stop")));
   ui.mockInput.pressEscape(); await ui.waitFor(stopped);
 };
