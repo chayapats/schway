@@ -88,7 +88,7 @@ const KEYBOARD_GUIDES = {
   },
   review: {
     label: "Review changes", shortcut: "Alt+R", description: "Inspect changed files and command results",
-    guidance: "When the turn is idle, return to the conversation and close any panel. Press Alt+R to open change review.",
+    guidance: "When the turn is idle, return to the conversation and close any panel, then press Alt+R. It opens the latest turn, or current changes when no live turn is held, such as after resume. Undo panels also accept Alt+R.",
     aliases: ["review", "changes", "diff", "alt+r"],
   },
   cancel: {

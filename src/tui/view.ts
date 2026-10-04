@@ -470,9 +470,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
 
   function keyboardRow(entry: KeyboardGuideChoice, selected: boolean, nameColumns: number, columns: number) {
     const parts = keyboardRowParts(entry, selected, nameColumns, columns);
+    // Detail keeps its quieter or warning role but is re-measured on the selection fill it sits on.
+    const detail = entry.available ? theme.muted : theme.warning;
     const row = new TextRenderable(renderer, { content: new StyledText([
       fg(selected ? theme.text : theme.muted)(parts.lead), fg(selected ? theme.text : entry.available ? theme.text : theme.muted)(parts.label),
-      fg(entry.available ? theme.muted : theme.warning)(parts.detail),
+      fg(selected ? textOn(detail, tint(theme, theme.accent)) : detail)(parts.detail),
     ]), flexShrink: 0, height: 1, wrapMode: "none" });
     if (selected) row.bg = tint(theme, theme.accent);
     picker.add(row);
