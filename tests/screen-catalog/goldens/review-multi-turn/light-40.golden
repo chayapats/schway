@@ -19,7 +19,7 @@ cursor 1 1 hidden
  , lo: number, hi: number) {
    2 -   return Math.max(lo, n);
 
- ✓ Done · 1 file +1 −1 · Alt+R review
+ ✓ Done · 1 file +1 −1 · 1.2s
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -73,10 +73,8 @@ cursor 1 1 hidden
 13 1-2 #19612f #f7f7f4 b
 13 2-3 #545e6c #f7f7f4 -
 13 3-7 #19612f #f7f7f4 b
-13 7-25 #545e6c #f7f7f4 -
-13 25-30 #1d232c #caced3 b
-13 30-37 #545e6c #f7f7f4 -
-13 37-40 #ffffff #f7f7f4 -
+13 7-29 #545e6c #f7f7f4 -
+13 29-40 #ffffff #f7f7f4 -
 14 0-1 #ffffff #f7f7f4 -
 14 1-39 #ecedea #f7f7f4 -
 14 39-40 #ffffff #f7f7f4 -

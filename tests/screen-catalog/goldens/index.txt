@@ -66,6 +66,12 @@ undo-shell-only
 undo-shell-only-review
 undo-older-target
 undo-detection-unavailable
+history-list
+history-detail
+history-stopped-turn
+history-undo-note
+history-missing-evidence
+history-truncation
 delete-session-busy
 recent-work-resume
 compaction

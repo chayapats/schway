@@ -193,6 +193,9 @@ command results, elapsed time, and **Alt+R review**. Failed turns also offer
 ✗ Failed · 2 files +8 −3 · 1 command failed · Alt+R review · F2 details
 ```
 
+While a panel or the reader is open, those keys belong to it, so the line keeps
+the outcome and counts but drops **Alt+R review** and **F2 details**.
+
 Counts include successful file-tool changes and paths detected as changed by shell
 commands, extension tools, or other processes. Created writes and edits contribute
 known additions and removals; overwritten writes have no line counts. Commands can
@@ -289,6 +292,44 @@ a missing `git` binary), and `No workspace active · Esc back`. With
 `git.changeTracking` set to `off`, review says so and reads no Git state. Details
 then describe only what was read. Opening review never calls the model, adds a
 turn, writes the session, stages content or changes files or refs.
+
+### Turn history
+
+`/history` opens a read-only timeline of accepted turns on the selected
+conversation branch, newest first. Each row shows the turn number, its recorded
+outcome (`✓ Done`, `✗ Failed`, `− Stopped`, `◌ Limit reached`, `! Incomplete`),
+the recorded start time in UTC and active duration when known, file and command
+counts, and a short task excerpt. Below 100 columns the time drops its year and
+`UTC` and counts use `cmd`/`cmds`; below 60 columns each turn takes two lines.
+A turn whose latest attempt saved no outcome shows `Counts unknown` and
+`Time unknown`; a turn with an unfinished attempt shows lower bounds such as
+`2+ files` and `1.2s + unknown`. Unknown counts are never shown as zero. Turns without saved evidence, such as those from
+before history was recorded, say `○ Details unavailable`; a turn whose evidence
+could not be saved in this run says `! Not saved`. Fifty turns are shown at a
+time; moving below the last row reveals the next page.
+
+Up/Down selects a turn and Enter opens its saved evidence: observed files with
+file-tool line counts or `detected` for snapshot paths, command summaries with the
+exit each one showed, and the turn's undo state. Undo is never offered from the
+timeline: a turn shows its durable undo outcome, `Undo available · /undo previews
+this turn` when `/undo` would target it, which turn `/undo` previews instead, or
+`Undo unavailable · pre-images not kept` after pruning. It uses the same target
+selection and per-file check as `/undo`, so a target whose files all changed since
+says `Every file changed since · nothing to undo`, exactly as `/undo` would. When `/undo` would
+instead open its read-only `Nothing to undo in turn N` panel, because saved undo data is incomplete,
+a saved copy is missing, a file can't be read or changes without saved undo stay, the turn says
+`Nothing to undo · /undo shows why`. A completed turn or an
+`Exit 0` row is not proof that tests passed.
+
+In a turn, Up/Down selects an observed file and Enter shows its
+`Current diff`, labelled `Current content · not turn N's patch`. It is read from
+Git on request, honors `git.changeTracking`, and can include earlier, later or
+external edits. **F2** toggles evidence notes: each attempt's mode, workspace,
+outcome and Git capture state, exit tallies, truncation and authorship caveats.
+Esc steps back from the current diff to the turn, from the turn to the same list
+row, then closes history and restores the draft. Opening history never calls the
+model, reads Git, writes files or changes the session. See
+[turn history sidecar](sessions.md#turn-history-sidecar) for storage and limits.
 
 ## Color roles
 
@@ -496,6 +537,7 @@ detected here` marks newer turns with the same limit.
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc restores the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc restores the draft |
+| Browse turn history | `/history`; Up/Down selects a turn or observed file, Enter opens a turn or its current diff, F2 toggles evidence notes, PageUp/PageDown scrolls, Esc steps back then restores the draft |
 | Inspect results, code and tables | Alt+I enters inspection without copying; Up/Down or Tab selects a result, code block or table; C copies the highlighted item; Enter copies selected code or table source, or toggles an expandable tool result; R reads selected code or a table; Esc returns to the draft |
 | Read code or a table | R in inspection; Up/Down and PgUp/PgDn scroll, Home/End jump, Left/Right pan unwrapped code or step table columns, W wraps code, C copies the source, Ctrl+F finds in the block, Esc returns to the same inspection target |
 | Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc to restore the old position |
@@ -782,7 +824,7 @@ reader.
 ## Discover commands and skills
 
 Type `/` to browse commands in a fixed order: `/model`, `/new`, `/clear`, `/sessions`,
-`/changes`, `/undo`, `/compact`, then the remaining built-ins. User-invokable project and
+`/changes`, `/undo`, `/history`, `/compact`, then the remaining built-ins. User-invokable project and
 global skills, including user-only skills, follow under **Skills**, then active
 extension commands under **Extensions**. Empty groups have no header. Extension
 rows show their package name, or the module filename for `--extension` modules.

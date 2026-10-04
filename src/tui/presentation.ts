@@ -7,10 +7,11 @@ export function outcomeLabel(outcome: TurnOutcome): string {
   return { completed: "✓ Done", failed: "✗ Failed", cancelled: "− Stopped", limit: "◌ Limit" }[outcome.reason];
 }
 
-/** Fit a turn summary by dropping elapsed, commands, then files before clipping outcome and actions. */
-export function formatOutcomeLine(outcome: TurnOutcome, columns: number): string {
+/** Fit a turn summary by dropping elapsed, commands, then files before clipping; actions appear only when `actionable`. */
+export function formatOutcomeLine(outcome: TurnOutcome, columns: number, actionable = true): string {
   let elapsed = formatDuration(outcome.elapsedMs);
-  const actions = `Alt+R review${outcome.reason === "failed" ? " · F2 details" : ""}`;
+  // Panels own Alt+R and F2, so the strip names its actions only where they work.
+  const actions = actionable ? `Alt+R review${outcome.reason === "failed" ? " · F2 details" : ""}` : "";
   const counts = outcome.commandCounts;
   let commands = [[counts.exitZero, "ok"], [counts.nonzero, "failed"], [counts.unknown, "stopped"]]
     .filter(([count]) => Number(count) > 0).map(([count, word]) => `${formatCount(Number(count), "command")} ${word}`).join(" · ");

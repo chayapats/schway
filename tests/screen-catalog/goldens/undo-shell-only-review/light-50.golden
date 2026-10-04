@@ -29,7 +29,7 @@ cursor 1 1 hidden
 
 
 
- ✓ Done · 1 file · 1 command ok · Alt+R review
+ ✓ Done · 1 file · 1 command ok · 1.2s
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -82,10 +82,8 @@ cursor 1 1 hidden
 23 1-2 #19612f #f7f7f4 b
 23 2-3 #545e6c #f7f7f4 -
 23 3-7 #19612f #f7f7f4 b
-23 7-34 #545e6c #f7f7f4 -
-23 34-39 #1d232c #caced3 b
-23 39-46 #545e6c #f7f7f4 -
-23 46-50 #ffffff #f7f7f4 -
+23 7-38 #545e6c #f7f7f4 -
+23 38-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-49 #ecedea #f7f7f4 -
 24 49-50 #ffffff #f7f7f4 -

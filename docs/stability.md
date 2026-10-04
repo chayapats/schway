@@ -13,6 +13,10 @@ The same forward compatibility promise covers the undo pre-image store format:
 every release reads pre-images written by any earlier release. Retention settings
 may remove expired pre-images; compatibility does not disable retention.
 
+The optional turn history sidecar (`~/.schway/history`) evolves the same way:
+forward-only and append-only. Releases read every earlier sidecar version and
+never rewrite saved history lines; a session without a sidecar stays readable.
+
 Published-version fixtures enforce ordinary discovery and resume, selected-branch
 history, compaction summaries, undo notes and append-only persistence. Synthetic
 legacy tests continue to cover the unpublished formats.

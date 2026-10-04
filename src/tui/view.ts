@@ -26,6 +26,7 @@ import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, re
 import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerEnd, readerLayout, revealMatch, scrollReader, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
 import type { ReaderPosition } from "./reader.ts";
+import { createHistoryPanel } from "./history-view.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -113,6 +114,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let discoveryOpen = false;
   let helpOriginalScroll = 0;
   let reviewOriginalScroll = 0;
+  let historyOriginalScroll = 0;
   let reviewDetailsScroll: { path?: string; scroll: number } | undefined;
   let reviewRestoreScroll: number | undefined;
   let treeOriginalScroll = 0;
@@ -249,6 +251,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   reviewPanel.add(reviewHeading);
   reviewPanel.add(reviewColumns);
   body.add(reviewPanel);
+  const historyPanel = createHistoryPanel(renderer);
+  body.add(historyPanel.root);
   const toolApprovalPanel = new BoxRenderable(renderer, { id: "tool-approval-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column", backgroundColor: theme.surface2, paddingX: 1 });
   const toolApprovalHeading = new TextRenderable(renderer, { id: "tool-approval-heading", content: "", fg: theme.text, flexShrink: 0, wrapMode: "word", marginBottom: 1 });
   const toolApprovalScroll = new ScrollBoxRenderable(renderer, { id: "tool-approval-scroll", flexGrow: 1, minHeight: 1, scrollX: false });
@@ -330,7 +334,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (target instanceof ScrollBoxRenderable || target === editor) return;
     }
     event.stopPropagation();
-    (controller.snapshot().undoPreview || controller.snapshot().changeReview ? reviewPanel : controller.snapshot().preferences ? preferencePanel : controller.snapshot().branchTree ? tree : transcript).processMouseEvent(event);
+    (controller.snapshot().history ? historyPanel.scroll : controller.snapshot().undoPreview || controller.snapshot().changeReview ? reviewPanel : controller.snapshot().preferences ? preferencePanel : controller.snapshot().branchTree ? tree : transcript).processMouseEvent(event);
   };
 
   const showInteractionNotice = (text: string) => {
@@ -398,7 +402,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     // The focus marker lives in the header; seeing only a long block's tail is insufficient.
     return !!node?.visible && !!node.height && transcript.visible && !panelMode && node.y >= transcript.viewport.y && node.y < transcript.viewport.y + transcript.viewport.height;
   };
-  const externalPanelFor = (snapshot: TuiSnapshot) => snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
+  const externalPanelFor = (snapshot: TuiSnapshot) => snapshot.endpointUrlEntry ? "endpoint" : snapshot.credentialEntry ? "credential" : snapshot.loginCallbackEntry ? "callback" : snapshot.loginChooser ? "login" : snapshot.loginApproval ? "approval" : snapshot.sessionPicker ? "sessions" : snapshot.modelPicker ? "model" : snapshot.preferences ? "preferences" : snapshot.branchTree ? "tree" : snapshot.history ? "history" : snapshot.undoPreview ? "undo" : snapshot.changeReview ? "review" : "";
   /** Return the selected item's text only when its current highlight was painted; otherwise ask for the action again. */
   const verifiedInspection = (snapshot: TuiSnapshot, again: string): string | undefined => {
     if (!inspection) return;
@@ -868,6 +872,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (panelMode === "tree" && !nextPanel && !sessionChanged) searchRestoreScroll = treeOriginalScroll;
         if (nextPanel === "review" || nextPanel === "undo") { reviewOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; reviewDetailsScroll = undefined; reviewRestoreScroll = undefined; }
         if ((panelMode === "review" || panelMode === "undo") && !nextPanel && !sessionChanged) searchRestoreScroll = reviewOriginalScroll;
+        if (nextPanel === "history") { historyOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
+        if (panelMode === "history" && !nextPanel && !sessionChanged) searchRestoreScroll = historyOriginalScroll;
         if (nextPanel === "help") { helpInserted = false; lastQuery = undefined; helpOriginalScroll = transcript.scrollTop; transcript.stickyScroll = false; }
         if (nextPanel !== "help") helpGuide = undefined;
         if (panelMode === "help" && !nextPanel && !sessionChanged) searchRestoreScroll = helpOriginalScroll;
@@ -888,10 +894,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       draftStatus.visible = !!draftMessage;
       draftStatus.height = draftMessage.includes("\n") ? 2 : 1;
       draftStatus.content = draftMessage;
-      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !reader;
+      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.history && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !reader;
       composerTop.visible = composer.visible = composerBottom.visible = !reader;
       credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
-      if (snapshot.undoPreview || snapshot.changeReview || panelMode === "tool-approval" && !snapshot.toolApproval?.enteringReason) { editor.blur(); }
+      if (snapshot.undoPreview || snapshot.changeReview || snapshot.history || panelMode === "tool-approval" && !snapshot.toolApproval?.enteringReason) { editor.blur(); }
       else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
         editor.blur();
         credential.content = snapshot.endpointUrlEntry
@@ -947,7 +953,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (lastTail && lastTail !== tailKey && !atBottom()) unseen = true;
       lastTail = tailKey;
       if (atBottom()) unseen = false;
-      transcript.visible = panelMode !== "tool-approval" && !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview && !reader;
+      transcript.visible = panelMode !== "tool-approval" && !snapshot.branchTree && !snapshot.preferences && !snapshot.changeReview && !snapshot.undoPreview && !snapshot.history && !reader;
       readerPanel.visible = !!reader;
       if (reader) {
         const panelRows = readerRows();
@@ -1034,6 +1040,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           reviewContent = content;
         }
       }
+      historyPanel.paint(snapshot.history, width, theme, safe);
       preferencePanel.visible = !!snapshot.preferences;
       tree.visible = !!snapshot.branchTree;
       empty.visible = entries.length === 0;
@@ -1126,7 +1133,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : `No matches${searchResult.limited ? " in searched portion" : " in this branch"} · Edit query · Esc back`;
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
-      const outcomeText = completed ? formatOutcomeLine(completed, width) : "";
+      // Alt+R review and F2 details act only from the conversation; panels and the reader own those keys.
+      const outcomeText = completed ? formatOutcomeLine(completed, width, !panelMode && !reader) : "";
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
@@ -1309,8 +1317,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.height = panelMode === "review" || panelMode === "tool-approval" ? "auto" : 1;
-      hints.wrapMode = panelMode === "review" || panelMode === "tool-approval" ? "word" : "none";
+      hints.height = panelMode === "review" || panelMode === "tool-approval" || panelMode === "history" ? "auto" : 1;
+      hints.wrapMode = panelMode === "review" || panelMode === "tool-approval" || panelMode === "history" ? "word" : "none";
       if (reader) {
         const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
           ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
@@ -1322,6 +1330,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = new StyledText(keyHintChunks("Enter choose · Esc deny · Ctrl+C cancel turn", hintColors(theme.background)));
       } else if (panelMode === "undo") {
         hints.content = undoHint(snapshot.undoPreview, width);
+      } else if (panelMode === "history" && snapshot.history) {
+        const history = snapshot.history;
+        const files = history.turns[history.selected]?.files.items.length ?? 0;
+        const [navigation, actions] = history.loading ? ["", "Esc back"]
+          : history.showingDetails ? ["PgUp/PgDn scroll", "F2 back · Esc back"]
+          : history.view === "current" ? ["PgUp/PgDn scroll", "Esc back"]
+          : history.view === "detail" ? [files ? "↑↓ files · Enter current diff" : "PgUp/PgDn scroll", "F2 details · Esc back"]
+          : history.total ? ["↑↓ select · Enter open", "F2 details · Esc back"] : ["", "Esc back"];
+        // Keep each key with its action when the hint needs a second row, as in review.
+        const separator = navigation && Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : navigation ? " · " : "";
+        hints.content = new StyledText([...(navigation ? keyHintChunks(navigation, hintColors(theme.background)) : []), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
       } else if (panelMode === "review") {
         const navigation = snapshot.changeReview?.showingDetails || !snapshot.changeReview?.files.length ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
         const reload = (snapshot.changeReview?.scope || snapshot.changeReview?.fromUndo) && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
@@ -1376,7 +1395,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       return;
     }
     const snapshot = controller.snapshot();
-    if (snapshot.undoPreview || snapshot.changeReview) return;
+    if (snapshot.undoPreview || snapshot.changeReview || snapshot.history) return;
     if (snapshot.readiness === "loading" || snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry) return;
     if (snapshot.loginChooser) {
       void controller.selectLoginChoice().then(refresh, fail);
@@ -1582,6 +1601,18 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       void options.submit(`/resume ${snapshot.recentSession.id}`, () => {}).then(refresh, fail); handled(); return;
     }
     if ((key.meta || key.option) && name === "s" && !panelMode && !controller.running) { void options.submit("/sessions", () => {}).then(refresh, fail); handled(); return; }
+    if (snapshot.history) {
+      const history = snapshot.history;
+      if (detailsKey) controller.toggleHistoryDetails();
+      else if (name === "escape") controller.historyBack();
+      else if (name === "pageup" || name === "pagedown") historyPanel.page(name === "pageup" ? -1 : 1);
+      else if (!history.showingDetails && (name === "up" || name === "down")) controller.moveHistory(name === "up" ? -1 : 1);
+      else if (!history.showingDetails && (name === "return" || name === "kpenter" || name === "enter")) {
+        if (history.view === "list") controller.openHistoryDetail();
+        else if (history.view === "detail") void controller.inspectHistoryCurrent().then(refresh, fail);
+      }
+      handled(); return;
+    }
     if (snapshot.undoPreview) {
       if (name === "escape") controller.closeUndoPreview();
       else if (name === "return" || name === "enter") void controller.applyUndo().then(refresh, fail);

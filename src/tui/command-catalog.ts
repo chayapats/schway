@@ -17,7 +17,7 @@ export interface CommandChoice {
 
 /** Curated discovery order containing every built-in once, with saved-data deletion last. */
 export const BUILT_IN_COMMAND_ORDER = [
-  "model", "new", "clear", "sessions", "changes", "undo", "compact", "resume", "branch", "thinking", "context", "skills",
+  "model", "new", "clear", "sessions", "changes", "undo", "history", "compact", "resume", "branch", "thinking", "context", "skills",
   "add-dir", "config", "theme", "session", "login", "logout", "help", "quit", "delete-session",
 ] as const satisfies readonly SlashCommandName[];
 
@@ -27,7 +27,7 @@ export const COMMAND_DESCRIPTIONS: Record<SlashCommandName, string> = {
   "delete-session": "Delete a saved session",
   session: "Session and workspace details", new: "Start a new conversation", sessions: "Open saved work",
   clear: "Start a new conversation",
-  resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Review changes", undo: "Undo the last turn's file edits",
+  resume: "Resume a saved session", branch: "Browse or fork conversation branches", changes: "Review changes", undo: "Undo the last turn's file edits", history: "Browse turn history",
   context: "Inspect context and summary", compact: "Summarize to free context", skills: "List skills", "add-dir": "Attach a workspace",
   config: "Preferences (Alt+P)", login: "Sign in", logout: "Remove stored credential", help: "Search commands and actions (Alt+H)", quit: "Exit Schway",
 };

@@ -2,6 +2,7 @@ import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSy
 import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { openDraftStore } from "../drafts/store.ts";
 import { deleteUndoSession } from "../undo/store.ts";
+import { deleteHistorySession } from "../history/store.ts";
 import { basename, join } from "node:path";
 import type {
   AssistantContent,
@@ -615,14 +616,18 @@ function safeTaskText(text: string): string {
   return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-/** Delete a selected saved session after clearing its draft and synchronized undo data. */
+/** Delete a selected saved session after clearing its draft and undo data, removing history evidence under the history lock. */
 export async function deleteJsonlSession(options: { directory: string; id: string; home: string }): Promise<void> {
   const path = sessionFilePath(options.directory, options.id);
   const firstLine = await readFirstLine(path);
   const header: unknown = JSON.parse(firstLine ?? "null");
   if (!isSessionHeader(header) || header.id !== options.id) throw new Error("Cannot delete an invalid session header");
-  openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
-  await deleteUndoSession({ home: options.home, sessionId: header.id });
-  await unlink(path);
-  try { await unlink(`${path}.meta`); } catch (error) { if (!isNotFound(error)) throw error; }
+  // The history lock is taken first, so a busy lock leaves the draft, undo data, session and evidence intact,
+  // and the session file disappears inside the lock that guards history publication.
+  await deleteHistorySession({ home: options.home, sessionId: header.id }, async () => {
+    openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
+    await deleteUndoSession({ home: options.home, sessionId: header.id });
+    await unlink(path);
+    try { await unlink(`${path}.meta`); } catch (error) { if (!isNotFound(error)) throw error; }
+  });
 }

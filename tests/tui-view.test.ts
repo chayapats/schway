@@ -2733,6 +2733,9 @@ test("completed outcome and responsive numbered review preserve draft and hide f
     expect(frame).toContain("› a.txt");
     expect(frame).toContain("1 - before");
     expect(frame).toContain("1 + after");
+    // Review owns Alt+R and F2, so the outcome strip names no action that is dead here.
+    expect(frame).toContain("✓ Done · 1 file +1 −1 · 1 command ok");
+    expect(frame).not.toContain("Alt+R review");
     const diffText = ui.renderer.root.findDescendantById("change-review-text") as TextRenderable;
     expect(diffText.chunks.find(chunk => chunk.text.includes("- before"))?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.error));
     expect(diffText.chunks.find(chunk => chunk.text.includes("+ after"))?.fg).toEqual(RGBA.fromHex(TUI_THEMES.dark.success));

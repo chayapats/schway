@@ -19,6 +19,7 @@ import type { ModelPickerSnapshot } from "./model-picker.ts";
 import type { BranchTreeSnapshot } from "./branch-tree.ts";
 import type { DiffRow, GitDiffRow } from "../text/diff.ts";
 import type { ReviewScope, WorkspaceReviewFile } from "./review-scope.ts";
+import type { HistorySnapshot } from "./controller-history.ts";
 
 /** Visible turn state for the status bar. Error persists until the next submit. */
 export type TuiStatus = "idle" | "running" | "error";
@@ -140,6 +141,8 @@ export interface TuiSnapshot {
   outcome?: TurnOutcome;
   changeReview?: ChangeReview;
   undoPreview?: UndoPreview;
+  /** Read-only turn timeline opened by /history; absent while closed. */
+  history?: HistorySnapshot;
   /** Distinguish an unconfigured connection from startup checks, usable models and setup failures. */
   readiness: "loading" | "ready" | "not-connected" | "connect" | "choose-model" | "repair";
   /** A bounded known startup explanation; raw provider diagnostics remain behind recovery details. */
