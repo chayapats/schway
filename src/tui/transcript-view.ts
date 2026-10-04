@@ -1,10 +1,10 @@
-import { BoxRenderable, MarkdownRenderable, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, RGBA, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { highlightCode } from "./highlight.ts";
 import { HINT_KEY, keyHintChunks } from "./hints.ts";
 import { easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
-import { mixColor, tint, type TuiTheme } from "./theme.ts";
+import { mixColor, TEXT_ROLES, textOn, themeOn, tint, type TuiTheme } from "./theme.ts";
 import { browserUrl, linkify } from "./links.ts";
 import { boundDisplay, formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { DEFAULT_INLINE_DIFF_LINES } from "../config/config.ts";
@@ -32,19 +32,20 @@ type MarkdownToken = {
   task?: boolean; checked?: boolean;
 };
 
-function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { strong?: boolean; emphasis?: boolean; link?: boolean; code?: boolean; url?: string } = {}): TextChunk[] {
+function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { strong?: boolean; emphasis?: boolean; link?: boolean; code?: boolean; url?: string } = {}, base = theme): TextChunk[] {
   return tokens.flatMap(token => {
     const next = { ...styles, strong: styles.strong || token.type === "strong", emphasis: styles.emphasis || token.type === "em", link: styles.link || token.type === "link", code: styles.code || token.type === "codespan", url: token.type === "link" ? browserUrl(token.href ?? "") : styles.url };
     if (token.tokens) {
-      const children = inline(token.tokens, theme, next);
+      const children = inline(token.tokens, theme, next, base);
       if (token.type === "link" && token.href) children.push(next.url ? link(next.url)(fg(theme.muted)(` (${token.href})`)) : fg(theme.muted)(` (${token.href})`));
       return children;
     }
     const text = token.type === "br" ? "\n" : token.text ?? token.raw ?? "";
     // The streaming caret is presentation only; it is appended by the row and colored here.
-    if (!next.code && text.endsWith(STREAM_CARET)) return [...inline([{ ...token, text: text.slice(0, -1) }], theme, styles), fg(theme.accent)(STREAM_CARET)];
-    let chunk = fg(next.code ? theme.code : next.link ? theme.accent : theme.text)(text);
-    if (next.code) chunk = bg(tint(theme, theme.code))(chunk);
+    if (!next.code && text.endsWith(STREAM_CARET)) return [...inline([{ ...token, text: text.slice(0, -1) }], theme, styles, base), fg(theme.accent)(STREAM_CARET)];
+    // Inline code paints its own tint, so it keeps the base palette measured against that tint.
+    let chunk = fg(next.code ? base.code : next.link ? theme.accent : theme.text)(text);
+    if (next.code) chunk = bg(tint(base, base.code))(chunk);
     if (next.strong) chunk = bold(chunk);
     if (next.emphasis) chunk = italic(chunk);
     if (next.link) chunk = underline(chunk);
@@ -53,7 +54,25 @@ function inline(tokens: readonly MarkdownToken[], theme: TuiTheme, styles: { str
   });
 }
 
-function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTheme, registerCode: (box: BoxRenderable, text: string, title: string) => void): BoxRenderable | TextRenderable | undefined {
+/** Remap native table cell colors from one palette's text roles to another's; returns the same content when nothing changes. */
+function recolorCells(content: TextTableRenderable["content"], from: readonly TuiTheme[], to: TuiTheme): TextTableRenderable["content"] {
+  const map = new Map<string, string>();
+  for (const palette of from) for (const role of TEXT_ROLES) map.set(palette[role], to[role]);
+  const hex = (color: RGBA) => `#${color.toInts().slice(0, 3).map(n => n.toString(16).padStart(2, "0")).join("")}`;
+  let changed = false;
+  const next = content.map(row => row.map(cell => cell?.map(chunk => {
+    const target = chunk.fg && map.get(hex(chunk.fg));
+    if (!target || target === hex(chunk.fg!)) return chunk;
+    changed = true;
+    return { ...chunk, fg: RGBA.fromHex(target) };
+  })));
+  return changed ? next : content;
+}
+
+/** Live text palette for one row; painters recolor rendered Markdown in place so search targets survive fill changes. */
+interface RowInk { paint(node: Renderable, apply: (ink: TuiTheme) => void): void }
+
+function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTheme, registerCode: (box: BoxRenderable, text: string, title: string) => void, ink: RowInk = { paint: (_, apply) => apply(theme) }): BoxRenderable | TextRenderable | undefined {
   // Tables and rules use OpenTUI's native structured widgets. Text uses the
   // already-tokenized Markdown AST so first paint never waits for a WASM download.
   if (token.type === "table" || token.type === "hr") return undefined;
@@ -78,23 +97,29 @@ function markdownBlock(renderer: CliRenderer, token: MarkdownToken, theme: TuiTh
       for (const [index, item] of (token.items ?? []).entries()) {
         const itemBox = new BoxRenderable(renderer, { flexDirection: "row" });
         const marker = item.task ? item.checked ? "[x] " : "[ ] " : token.ordered ? `${(token.start || 1) + index}. ` : "▸ ";
-        itemBox.add(new TextRenderable(renderer, { content: marker, fg: item.task ? item.checked ? theme.success : theme.muted : token.ordered ? theme.muted : theme.accent, flexShrink: 0 }));
+        const markerText = new TextRenderable(renderer, { content: marker, flexShrink: 0 });
+        ink.paint(markerText, palette => { markerText.fg = item.task ? item.checked ? palette.success : palette.muted : token.ordered ? palette.muted : palette.accent; });
+        itemBox.add(markerText);
         const contents = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1 });
         for (const child of item.tokens ?? [{ type: "text", text: item.text }]) {
-          const rendered = markdownBlock(renderer, child, theme, registerCode);
+          const rendered = markdownBlock(renderer, child, theme, registerCode, ink);
           if (rendered) contents.add(rendered);
         }
         itemBox.add(contents);
         block.add(itemBox);
       }
     } else for (const child of token.tokens ?? []) {
-      const rendered = markdownBlock(renderer, child, theme, registerCode);
+      const rendered = markdownBlock(renderer, child, theme, registerCode, ink);
       if (rendered) block.add(rendered);
     }
     return block;
   }
-  const chunks = inline(token.tokens ?? [{ type: "text", text: token.text ?? token.raw ?? "" }], theme, { strong: token.type === "heading" });
-  return new TextRenderable(renderer, { content: linkify(chunks), fg: theme.text, wrapMode: "word" });
+  const text = new TextRenderable(renderer, { content: "", wrapMode: "word" });
+  ink.paint(text, palette => {
+    text.content = linkify(inline(token.tokens ?? [{ type: "text", text: token.text ?? token.raw ?? "" }], palette, { strong: token.type === "heading" }, theme));
+    text.fg = palette.text;
+  });
+  return text;
 }
 
 /** Language pill for a code block header; focus adds the inspection marker. */
@@ -141,7 +166,33 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
   const root = new BoxRenderable(renderer, { id: `message-${initial.id}`, flexDirection: "column", flexShrink: 0, marginTop: initial.kind === "assistant" ? 1 : 0, marginBottom: initial.kind === "tool" ? 0 : 1, backgroundColor: baseBackground });
   const codeData = new WeakMap<BoxRenderable, { text: string; title: string }>();
   const registerCode = (box: BoxRenderable, text: string, title: string) => { codeData.set(box, { text, title }); };
-  const renderMarkdownNode = (token: MarkdownToken) => markdownBlock(renderer, token, theme, registerCode);
+  // Text roles follow the composed row background (search, focus, flash); explicitly tinted chunks keep the base palette.
+  let ink = theme;
+  let repaint: (() => void) | undefined;
+  let painters: { node: Renderable; apply: (ink: TuiTheme) => void }[] = [];
+  let pruneAt = 64;
+  const rowInk: RowInk = {
+    paint(node, apply) {
+      // Prune destroyed nodes at a doubling threshold so long answers stay linear.
+      if (painters.length >= pruneAt) { painters = painters.filter(painter => !painter.node.isDestroyed); pruneAt = Math.max(64, painters.length * 2); }
+      painters.push({ node, apply });
+      apply(ink);
+    },
+  };
+  // Native tables keep OpenTUI's own node and in-place updates; their cells are remapped from the base palette to the row ink.
+  const renderMarkdownNode = (token: MarkdownToken, context: { defaultRender(): Renderable | null }) => {
+    if (token.type !== "table") return markdownBlock(renderer, token, theme, registerCode, rowInk);
+    const table = context.defaultRender();
+    if (table instanceof TextTableRenderable) {
+      let applied = theme;
+      rowInk.paint(table, palette => {
+        const next = recolorCells(table.content, [theme, applied], palette);
+        if (next !== table.content) table.content = next;
+        applied = palette;
+      });
+    }
+    return table ?? undefined;
+  };
   const codeBlocks = () => {
     const blocks: { id: string; text: string }[] = [];
     const visit = (node: BaseRenderable) => {
@@ -166,9 +217,13 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       renderNode: renderMarkdownNode,
     })
     : new TextRenderable(renderer, { content: "", fg: theme.text, wrapMode: "word" });
+  const paintHeading = () => {
+    if (initial.kind === "user") label.content = new StyledText([bold(fg(ink.accent)("You"))]);
+    if (initial.kind === "error") label.content = new StyledText([bold(fg(ink.error)("! Error"))]);
+  };
   if (initial.kind === "user") {
     Object.assign(root, { border: ["left"], borderColor: theme.accent, customBorderChars: BAR, paddingLeft: 1, paddingRight: 1 });
-    label.content = new StyledText([bold(fg(theme.accent)("You"))]);
+    paintHeading();
     root.add(label);
   } else if (initial.kind === "assistant") {
     label.visible = false;
@@ -184,7 +239,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
     root.add(label);
   } else if (initial.kind === "error") {
     Object.assign(root, { border: ["left"], borderColor: theme.error, customBorderChars: BAR, paddingLeft: 1, paddingRight: 1 });
-    label.content = new StyledText([bold(fg(theme.error)("! Error"))]);
+    paintHeading();
     root.add(label);
   }
   // Text renderables do not pad their own content; tool output is indented under the target by a box.
@@ -207,11 +262,20 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
     return on && streamText ? `${streamText.trimEnd()}${STREAM_CARET}` : streamText ?? "";
   };
   const background = () => searchSelected ? theme.border : focusedRow ? tint(theme, theme.accent) : baseBackground;
+  /** Set the row fill and repaint text whose readable role colors changed on it. */
+  const paintBackground = (color: string | undefined) => {
+    root.backgroundColor = color;
+    const next = themeOn(theme, color ?? theme.background);
+    if (next === ink || JSON.stringify(next) === JSON.stringify(ink)) return;
+    ink = next;
+    paintHeading();
+    repaint?.();
+  };
   /** Apply the row background, blending a decaying success flash over the tray color; returns whether it still flashes. */
   const applyBackground = () => {
-    if (flashStart === undefined || searchSelected || focusedRow) { flashStart = searchSelected || focusedRow ? undefined : flashStart; root.backgroundColor = background(); return false; }
+    if (flashStart === undefined || searchSelected || focusedRow) { flashStart = searchSelected || focusedRow ? undefined : flashStart; paintBackground(background()); return false; }
     const k = progress(motion.now(), flashStart, 600);
-    root.backgroundColor = mixColor(mixColor(theme.surface2, theme.success, 0.35), theme.surface2, easeOut(k));
+    paintBackground(mixColor(mixColor(theme.surface2, theme.success, 0.35), theme.surface2, easeOut(k)));
     if (k < 1) return true;
     flashStart = undefined;
     return false;
@@ -273,6 +337,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.shellOutcome, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines]);
       if (next === fingerprint) return;
       fingerprint = next;
+      repaint = undefined;
       if (entry.kind === "tool") {
         const tool = toolPresentation(entry, expanded);
         const inline = hasInlineDiff(entry, inlineDiffLines);
@@ -303,14 +368,14 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         paintLabel = () => {
           const glyph = status === "running" ? spinnerFrame(motion.now(), motion.mode) : tool.marker;
           label.content = new StyledText([
-            fg(theme.accent)(` ${focus}`),
-            bold(fg(theme[tool.tone])(glyph)),
-            fg(theme.text)(" "),
+            fg(ink.accent)(` ${focus}`),
+            bold(fg(ink[tool.tone])(glyph)),
+            fg(ink.text)(" "),
             bold(bg(pillBg)(fg(color)(kind))),
-            fg(theme.text)(target),
-            fg(theme.muted)(gap),
-            ...(right ? status === "running" ? shimmer(right, motion.now(), theme.muted, theme.text, motion.mode) : [fg(state ? theme[tool.tone] : theme.muted)(right)] : []),
-            fg(theme.muted)(`${right && disclosure ? " " : ""}${disclosure}`),
+            fg(ink.text)(target),
+            fg(ink.muted)(gap),
+            ...(right ? status === "running" ? shimmer(right, motion.now(), ink.muted, ink.text, motion.mode) : [fg(state ? ink[tool.tone] : ink.muted)(right)] : []),
+            fg(ink.muted)(`${right && disclosure ? " " : ""}${disclosure}`),
           ]);
         };
         paintLabel();
@@ -320,55 +385,69 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         const isDiff = entry.toolName === "edit" || entry.toolName === "write";
         const bodyWidth = Math.max(1, width - 4);
         if (body instanceof TextRenderable) body.wrapMode = isDiff ? "char" : "word";
-        body.content = linkify(detail.split("\n").flatMap((line, index) => {
-          const numbered = isDiff ? line.match(/^(\s*\d+ │)([+-])(.*)$/) : null;
-          const sign = numbered?.[2] === "+" ? theme.success : numbered?.[2] === "-" ? theme.error : undefined;
-          const prefix = index ? "\n" : "";
-          if (!sign) return [fg(theme.muted)(`${prefix}${line}`)];
-          const used = Bun.stringWidth(line);
-          const padded = line + " ".repeat(Math.max(0, Math.ceil(Math.max(1, used) / bodyWidth) * bodyWidth - used));
-          return [fg(theme.muted)(prefix), bg(tint(theme, sign))(fg(theme.muted)(numbered![1]!)), bg(tint(theme, sign))(fg(sign)(padded.slice(numbered![1]!.length)))];
-        }));
+        const paintBody = () => {
+          body.content = linkify(detail.split("\n").flatMap((line, index) => {
+            const numbered = isDiff ? line.match(/^(\s*\d+ │)([+-])(.*)$/) : null;
+            const sign = numbered?.[2] === "+" ? theme.success : numbered?.[2] === "-" ? theme.error : undefined;
+            const prefix = index ? "\n" : "";
+            if (!sign) return [fg(ink.muted)(`${prefix}${line}`)];
+            const used = Bun.stringWidth(line);
+            const padded = line + " ".repeat(Math.max(0, Math.ceil(Math.max(1, used) / bodyWidth) * bodyWidth - used));
+            // Line numbers stay quieter than the change but are measured on the diff tint they sit on.
+            return [fg(ink.muted)(prefix), bg(tint(theme, sign))(fg(textOn(theme.muted, tint(theme, sign)))(numbered![1]!)), bg(tint(theme, sign))(fg(sign)(padded.slice(numbered![1]!.length)))];
+          }));
+        };
+        paintBody();
+        repaint = () => { paintLabel?.(); paintBody(); };
       } else {
-        if (entry.kind === "assistant") {
-          label.visible = !!entry.incomplete;
-          label.content = entry.incomplete ? new StyledText([fg(theme.warning)("Incomplete response · not saved")]) : "";
-        }
-        const color = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
         streamText = entry.kind === "assistant" && streaming && motion.mode !== "off" && (displayText(entry.text).match(/```/g)?.length ?? 0) % 2 === 0 ? displayText(entry.text) : undefined;
         caretOn = undefined;
-        // Recovery lines such as "Ctrl+R continue · Esc keep editing" get key chips inside error blocks.
-        const errorLines = (line: string, index: number): TextChunk[] => {
-          const prefix = index ? [fg(color)("\n")] : [];
-          return entry.kind === "error" && HINT_KEY.test(line) && line.includes(" ")
-            ? [...prefix, ...keyHintChunks(line, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: theme.error })]
-            : [...prefix, fg(color)(line)];
-        };
-        if (body instanceof MarkdownRenderable) {
-          const content = streamText !== undefined ? caretContent() : displayText(entry.text);
-          if (!body.streaming && body.content !== content) {
-            // Finalized Markdown caches its parsed prefix; changed saved content needs a fresh parse.
-            body.content = "";
-            body.streaming = streaming;
+        // A fill change repaints with the new ink; rendered Markdown recolors in place without reparsing.
+        const paintText = (refill: boolean) => {
+          if (entry.kind === "assistant") {
+            label.visible = !!entry.incomplete;
+            label.content = entry.incomplete ? new StyledText([fg(ink.warning)("Incomplete response · not saved")]) : "";
           }
-          body.content = content;
-          body.streaming = streaming;
-        } else {
-          body.content = linkify(displayText(entry.text).split("\n").flatMap(errorLines));
-          body.fg = entry.kind === "error" ? theme.error : entry.kind === "system" ? theme.muted : theme.text;
-        }
-        if (entry.kind === "assistant") {
-          codeBlocks().forEach(({ id }, index) => {
-            const code = root.findDescendantById(id) as BoxRenderable;
-            const header = code.getChildren()[0] as BoxRenderable;
-            const [label, , hint] = header.getChildren() as TextRenderable[];
-            const focused = focusedCode === index;
-            label!.content = codeTitle(codeData.get(code)!.title, focused, theme);
-            header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
-            hint!.content = focused ? "C copy · Esc back" : "Alt+I inspect";
-            hint!.fg = focused ? theme.text : theme.muted;
-          });
-        }
+          const color = entry.kind === "error" ? ink.error : entry.kind === "system" ? ink.muted : ink.text;
+          // Recovery lines such as "Ctrl+R continue · Esc keep editing" get key chips inside error blocks.
+          const errorLines = (line: string, index: number): TextChunk[] => {
+            const prefix = index ? [fg(color)("\n")] : [];
+            return entry.kind === "error" && HINT_KEY.test(line) && line.includes(" ")
+              ? [...prefix, ...keyHintChunks(line, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: ink.error })]
+              : [...prefix, fg(color)(line)];
+          };
+          if (body instanceof MarkdownRenderable && refill) {
+            painters = painters.filter(painter => !painter.node.isDestroyed);
+            pruneAt = Math.max(64, painters.length * 2);
+            for (const painter of painters) painter.apply(ink);
+          } else if (body instanceof MarkdownRenderable) {
+            const content = streamText !== undefined ? caretContent() : displayText(entry.text);
+            if (!body.streaming && body.content !== content) {
+              // Finalized Markdown caches its parsed prefix; changed saved content needs a fresh parse.
+              body.content = "";
+              body.streaming = streaming;
+            }
+            body.content = content;
+            body.streaming = streaming;
+          } else {
+            body.content = linkify(displayText(entry.text).split("\n").flatMap(errorLines));
+            body.fg = color;
+          }
+          if (entry.kind === "assistant") {
+            codeBlocks().forEach(({ id }, index) => {
+              const code = root.findDescendantById(id) as BoxRenderable;
+              const header = code.getChildren()[0] as BoxRenderable;
+              const [label, , hint] = header.getChildren() as TextRenderable[];
+              const focused = focusedCode === index;
+              label!.content = codeTitle(codeData.get(code)!.title, focused, theme);
+              header.backgroundColor = focused ? tint(theme, theme.accent) : theme.surface2;
+              hint!.content = focused ? "C copy · Esc back" : "Alt+I inspect";
+              hint!.fg = focused ? theme.text : theme.muted;
+            });
+          }
+        };
+        paintText(false);
+        repaint = () => paintText(true);
       }
     },
   };

@@ -282,12 +282,26 @@ The Voltage palette pairs calm canvases with color blocks for each zone.
 | Bolt | `#ffd84a` | `#b27b00` | The ⚡ mark and splash sparks |
 
 Tints mix a semantic color into Surface 2 (22% dark, 12% light) for pills, diff
-rows and selected picker rows; only body text or that same semantic color is drawn
-on a tint. Every text role meets a 4.5:1 contrast ratio on the canvas, both
-surfaces and every tint it is used on.
+rows and selected picker rows. Text keeps its role on every fill, but its color is
+measured against the composed background it sits on: selection and focus tints,
+diff rows, the search highlight (including Markdown tables in a highlighted
+answer), status pills mid-fade and the completion flash.
+A role below 4.5:1 there moves to the nearest shade that reaches it, so muted
+metadata stays quieter than body text. Roles already readable keep their palette
+color. Every text role therefore meets 4.5:1 on the canvas, both surfaces and every
+fill it is drawn on. `tests/tui-contrast.test.ts` measures each role on each fill
+and every text style run in the committed screen catalog.
+
+Decorative marks carry no information and are exempt; that test lists them:
+raised-surface half-block edges, rules and dividers (including Markdown `---`
+rules), the empty cells of the context meter, whose percentage beside it carries
+the value, the user and error left bars, and the top-bar ⚡. Selection keeps
+its `›` marker and diffs keep `+`/`-`, so meaning never depends on color, bold or dim.
 Symbols and labels retain meaning without color. Nonempty `NO_COLOR` maps semantic
-accents to the text color. This is a monochrome TUI, not a plain-text output mode;
-use `-p` for headless text.
+accents to the text color and chooses readable gray shades on selection fills.
+This is a monochrome TUI, not a plain-text output mode; use `-p` for headless text.
+Ratios cover colors Schway resolves itself. Terminal-default, indexed or remapped
+palette colors cannot be measured, so inspect them in the terminal.
 
 Code blocks use a small built-in lexer (keywords, strings, numbers, comments,
 types, calls) instead of downloaded parsers; copying still returns the exact code.

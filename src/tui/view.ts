@@ -9,7 +9,7 @@ import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscript
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
-import { mixColor, resolveTheme, tint, type ThemeMode } from "./theme.ts";
+import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
 import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { SPLASH_DURATION_MS, SPLASH_ACCENT_DURATION_MS, SPLASH_MIN_SIZE, SplashRenderable } from "./splash.ts";
 import type { SplashPolicy } from "./splash-policy.ts";
@@ -471,9 +471,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const remaining = Math.max(0, columns - Bun.stringWidth(prefix + label));
     const suffix = fitLine(entry.destructive ? " · deletes" : entry.provenance ? ` · ${safe(entry.provenance)}` : "", remaining);
     const description = fitLine(safe(entry.description), Math.max(0, remaining - Bun.stringWidth(suffix)));
+    // Metadata keeps its quieter role but is re-measured on the selection fill it sits on.
+    const metadata = entry.destructive ? mixColor(theme.warning, theme.muted, 0.5) : theme.muted;
+    const suffixColor = selected ? textOn(metadata, tint(theme, theme.accent)) : metadata;
     const row = new TextRenderable(renderer, { content: new StyledText([
       fg(color)(prefix + label + description),
-      fg(entry.destructive ? mixColor(theme.warning, theme.muted, 0.5) : theme.muted)(suffix),
+      fg(suffixColor)(suffix),
     ]), flexShrink: 0, height: 1, wrapMode: "none" });
     if (selected) row.bg = tint(theme, theme.accent);
     picker.add(row);
@@ -518,7 +521,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (tone === "active") return { bg: theme.accent, fg: theme.onFill };
     if (tone === "stopping") return { bg: theme.warning, fg: theme.onFill };
     if (tone === "attention") return { bg: theme.error, fg: theme.onFill };
-    if (tone === "neutral") return { bg: tint(theme, theme.muted, theme.surface), fg: theme.muted };
+    if (tone === "neutral") return { bg: tint(theme, theme.muted, theme.surface), fg: textOn(theme.muted, tint(theme, theme.muted, theme.surface)) };
     return { bg: tint(theme, theme.success, theme.surface), fg: theme.success };
   }
 
@@ -554,7 +557,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const glyph = pill.spinning ? spinnerFrame(at, motion) : pill.tone === "stopping" ? "◌" : pill.tone === "attention" ? "!" : pill.tone === "neutral" ? "○" : "●";
     const label = ` ${glyph} ${pill.label} `;
     const sweep = ((at / 30) % (label.length + 16)) - 8;
-    const pillChunks = [...label].map((char, index) => bold(bg(pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill)(fg(colors.fg)(char))));
+    // Fades and sweeps change the fill per cell, so each label cell is measured on its own composed fill.
+    const pillChunks = [...label].map((char, index) => {
+      const cell = pill.tone === "active" && motion === "full" ? mixColor(fill, theme.core, 0.28 * Math.exp(-((index - sweep) ** 2) / 6)) : fill;
+      return bold(bg(cell)(fg(textOn(colors.fg, cell))(char)));
+    });
     const approvalPillChunks = [...modeChip, ...pillChunks];
     if (footerParts.notConnected) {
       const action = keyHintChunks(footerParts.nextAction, hintColors(theme.surface));
@@ -1071,7 +1078,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             const selected = row.id === panel.selectedId;
             const prefix = `    ${selected ? "› " : "  "}`;
             const chunks = [fg(selected ? theme.accent : theme.text)(`${prefix}${fitLine(row.label, room - prefix.length)}`)];
-            if (detailsFit && row.detail) chunks.push(fg(theme.muted)(`${" ".repeat(labelWidth - row.label.length + 2)}${row.detail}`));
+            if (detailsFit && row.detail) chunks.push(fg(selected ? textOn(theme.muted, tint(theme, theme.accent)) : theme.muted)(`${" ".repeat(labelWidth - row.label.length + 2)}${row.detail}`));
             const item = textRow(picker, "");
             item.content = new StyledText(chunks);
             if (selected) item.bg = tint(theme, theme.accent);
