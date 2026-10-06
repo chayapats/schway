@@ -103,11 +103,8 @@ const SHORT_WORK_STATUS: Readonly<Record<string, string>> = {
   "Context unchanged": "Already compact", "Compaction failed": "Compact failed", "Compaction cancelled": "Not compacted",
 };
 
-/**
- * Fit a work status row with a trailing `Esc …` action, never cutting a status or the action mid-word: the full row,
- * the short status with the action, then the status alone (full, then short) because narrow status bars repeat
- * `Esc stop`, then the action alone.
- */
+/** Fit a work status row and its `Esc …` action into `columns` without cutting either mid-word, dropping the action before the status. */
+// Order: full row, short status with action, status alone (full, then short; narrow status bars repeat `Esc stop`), action alone.
 export function fitStatusAction(text: string, columns: number): string {
   const line = displayText(text).replace(/\s+/g, " ");
   const separator = line.lastIndexOf(" · ");
