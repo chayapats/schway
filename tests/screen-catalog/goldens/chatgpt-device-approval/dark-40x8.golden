@@ -1,0 +1,50 @@
+schway-screen 1
+screen chatgpt-device-approval
+title ChatGPT device approval
+description ChatGPT device sign-in lists the address step before the ephemeral code.
+variant dark-40x8
+size 40x8
+cursor 1 1 hidden
+== text
+ ChatGPT device sign-in started
+  Sign in to ChatGPT
+  1 Open auth.openai.com/codex/device
+  2 Enter ABCD-1234
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Typing resumes after sign-in
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ Auto · Esc cancel
+== styles
+00 0-1 #ffffff #0e1117 -
+00 1-31 #8b95a7 #0e1117 -
+00 31-40 #ffffff #0e1117 -
+01 0-1 #ffffff #0e1117 -
+01 1-2 #ffffff #1e2430 -
+01 2-20 #7cc4ff #1e2430 -
+01 20-39 #ffffff #1e2430 -
+01 39-40 #ffffff #0e1117 -
+02 0-1 #ffffff #0e1117 -
+02 1-2 #ffffff #1e2430 -
+02 2-37 #e6eaf0 #1e2430 -
+02 37-39 #ffffff #1e2430 -
+02 39-40 #ffffff #0e1117 -
+03 0-1 #ffffff #0e1117 -
+03 1-2 #ffffff #1e2430 -
+03 2-19 #e6eaf0 #1e2430 -
+03 19-39 #ffffff #1e2430 -
+03 39-40 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-39 #161b24 #0e1117 -
+04 39-40 #ffffff #0e1117 -
+05 0-1 #ffffff #0e1117 -
+05 1-5 #7cc4ff #161b24 -
+05 5-33 #e6eaf0 #161b24 -
+05 33-39 #ffffff #161b24 -
+05 39-40 #ffffff #0e1117 -
+06 0-1 #ffffff #0e1117 -
+06 1-39 #161b24 #0e1117 -
+06 39-40 #ffffff #0e1117 -
+07 0-1 #8b95a7 #161b24 -
+07 1-5 #e6eaf0 #161b24 b
+07 5-18 #8b95a7 #161b24 -
+07 18-40 #ffffff #0e1117 -

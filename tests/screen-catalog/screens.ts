@@ -176,8 +176,17 @@ export const SCREENS: readonly Screen[] = [
   { id: "endpoint-url-empty", title: "Endpoint URL", description: "A custom endpoint starts with an ephemeral, unmasked URL field.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); }, ready: s => !!s.endpointUrlEntry && !s.endpointUrlEntry.value },
   { id: "endpoint-url-error", title: "Endpoint URL validation", description: "A malformed URL stays in the field with a corrective action.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await ui.settle(); await ui.mockInput.typeText("localhost:8787"); ui.mockInput.pressEnter(); }, ready: s => !!s.endpointUrlEntry?.error },
   { id: "subscription-sign-in", title: "Subscription sign-in", description: "Browser sign-in is waiting for authorization.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter(); }, ready: (s, ui) => s.status === "running" && ui.loginCalled() },
+  { id: "chatgpt-device-approval", title: "ChatGPT device approval", description: "ChatGPT device sign-in lists the address step before the ephemeral code.", drive: async ui => {
+    ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressTab(); await ui.settle(); ui.mockInput.pressEnter();
+  }, ready: s => s.status === "running" && s.loginApprovalData?.kind === "device" },
   { id: "grok-browser-approval", title: "Grok browser approval", description: "Grok subscription sign-in waits for browser approval.", drive: ui => grokLogin(ui), ready: s => s.status === "running" && s.loginApprovalData?.kind === "browser" },
   { id: "grok-device-approval", title: "Grok device approval", description: "The ephemeral Grok device code remains in the approval panel.", drive: ui => grokLogin(ui, true), ready: s => s.status === "running" && s.loginApprovalData?.kind === "device" },
+  { id: "sign-in-browser-not-opened", title: "Browser not opened", description: "When the browser launcher fails, the link stays above and other methods appear while sign-in still waits.", drive: async ui => {
+    ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter();
+  }, ready: s => s.status === "running" && s.loginChooser?.level === "chatgpt" && s.transcript.some(entry => entry.text.startsWith("Browser didn't open")) },
+  { id: "sign-in-timeout", title: "Sign-in timed out", description: "A browser callback timeout shows a short status and reopens ChatGPT's other sign-in methods.", drive: async ui => {
+    ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter();
+  }, ready: s => s.status === "error" && s.loginChooser?.level === "chatgpt" },
   { id: "grok-plan-error", title: "Grok plan restriction", description: "A plan restriction retains the saved login and offers another connection.", drive: ui => grokLogin(ui), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.includes("Your Grok plan doesn't include API access")) },
   { id: "model-picker", title: "Model picker", description: "A short connected list shows readable model names and access routes.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
   { id: "details-model", title: "Model details", description: "F2 reveals the selected model's exact ID and capacity without changing the connection.", noColorWidths: true, drive: async ui => {
@@ -368,6 +377,8 @@ export const SCREENS: readonly Screen[] = [
   { id: "reader-no-matches", title: "Read code, no matches", description: "Reader search reports no matches and offers to restore the reading position.", noColorWidths: true, drive: ui => reader(ui, "search"), ready: (_s, ui) => reading(ui, "No matches") },
   { id: "reader-approval", title: "Read code, approval waiting", description: "A deferred tool approval stays pending while the reader names the action that reviews it.", noColorWidths: true, drive: ui => reader(ui, "approval"), ready: (s, ui) => !!s.toolApproval && !s.toolApproval.loading && reading(ui, "Esc back to request") },
 ];
+/** Screens that show the subscription sign-in wait panel. */
+export const SIGN_IN_WAIT_SCREENS = ["subscription-sign-in", "chatgpt-device-approval", "grok-browser-approval", "grok-device-approval"];
 /** Enumerate six standard variants and the screen's explicit color or narrow extras. */
 export function variantsFor(screen: Screen): Variant[] {
   const make = (theme: "dark" | "light", cols: number, rows = screen.rows ?? 30, noColor = screen.id === "no-color"): Variant => ({ id: `${noColor ? "nocolor-" : ""}${theme}-${cols}${rows === 8 && cols !== 24 ? "x8" : ""}`, theme, cols, rows, noColor });
@@ -375,6 +386,10 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "first-run" || screen.noColorWidths) variants.push(...[120, 80, 50].map(cols => make("dark", cols, screen.rows ?? 30, true)));
   if (screen.noColor) variants.push(make("dark", 80, screen.rows ?? 30, true));
   if (screen.id === "narrow-layout") variants.push(make("dark", 40, 20), make("light", 40, 20));
+  // Sign-in wait, timeout and browser-launch screens check Esc and the device steps at 40 columns and without color;
+  // wait screens add a short terminal where the compact status bar names Esc instead of the hidden hint row.
+  if (SIGN_IN_WAIT_SCREENS.includes(screen.id) || ["sign-in-browser-not-opened", "sign-in-timeout"].includes(screen.id)) variants.push(make("dark", 40), make("light", 40), make("dark", 40, 30, true), make("dark", 80, 30, true));
+  if (SIGN_IN_WAIT_SCREENS.includes(screen.id)) variants.push(make("dark", 40, 8));
   if (screen.id.startsWith("history-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));

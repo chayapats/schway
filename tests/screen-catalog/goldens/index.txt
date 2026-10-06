@@ -19,8 +19,11 @@ callback-entry
 endpoint-url-empty
 endpoint-url-error
 subscription-sign-in
+chatgpt-device-approval
 grok-browser-approval
 grok-device-approval
+sign-in-browser-not-opened
+sign-in-timeout
 grok-plan-error
 model-picker
 details-model

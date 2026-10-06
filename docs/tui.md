@@ -12,7 +12,8 @@ workspace paths. A conversation branch is distinct from a Git branch.
 
 The status pill follows the active operation's runtime events: `Preparing`,
 `Waiting` for the provider, `Receiving` a response, `N tools`, `Retry · Attempt a/b in Ns`,
-`Compacting`, `Stop requested` and `Stopping`; otherwise it reads `Ready`,
+`Compacting`, `Stop requested` and `Stopping`; `Signing in` while a ChatGPT or Grok
+sign-in waits; otherwise it reads `Ready`,
 `Checking` (connection check), `Not connected` (the neutral no-model state) or
 `Attention` (a failure needs you). It is the only saturated block on screen: filled accent while working, warning while stopping,
 error when attention is needed, a quiet green tint when ready, and a muted tint
@@ -565,7 +566,7 @@ detected here` marks newer turns with the same limit.
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
 | Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery, Esc goes back |
-| Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back |
+| Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back; Esc cancel sign-in while a sign-in still waits behind it |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc back to the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc cancel before Enter, Esc back from a result |
@@ -600,6 +601,19 @@ owns ordinary text; opening a panel preserves its draft and cursor; the active
 panel owns its navigation keys; Enter acts on the highlighted choice only; Esc
 returns one level toward the composer without submitting the draft. Login
 approval waits for the external result, so Enter does not claim to approve it.
+The sign-in wait panel starts with `Sign in to ChatGPT` or `Sign in to Grok`,
+then either `Approve in your browser` or two numbered steps, `1 Open <address>`
+before `2 Enter <code>`, then `◌ Waiting for approval`. The device code stays in
+that panel only, never in the conversation, F2 details or the saved session. Esc
+is named once, as `Esc cancel sign-in` in the hint row, or `Esc cancel` in the
+compact status bar when the hint row is hidden; while secure storage saves, the
+hint reads `Wait for secure storage` because a submitted save cannot be
+cancelled, and after Esc it reads `Wait for sign-in to stop` until the sign-in
+ends. Once a Grok approval is saved, the panel closes while models load. A
+timeout reads `Sign-in timed out · Alt+L retry · F2 details`, with the
+provider's recovery steps in F2 details; both keys work from the chooser that
+reopens after a ChatGPT timeout. When the browser cannot open, the
+link stays in the conversation above `Browser didn't open · Open the link above`.
 Credential and callback entry mask their text. Resizing reflows the active
 panel without changing its selection or operation. At 24×8 and 32×12,
 preferences put the selected field and value choice above longer guidance,

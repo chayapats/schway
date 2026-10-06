@@ -233,7 +233,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     execute: async (input: unknown, context: Parameters<typeof definition.execute>[1]) => { try { return await definition.execute(input, context); } finally { activityTime += 1200; } } })));
   const timed = (model: ReturnType<typeof createScriptedModel>): ReturnType<typeof createScriptedModel> => ({ provider: model.provider, id: model.id,
     async *stream(request) { for await (const event of model.stream(request)) { if (event.type === "message_complete") activityTime += 300; yield event; } } });
-  const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
+  const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", ...SIGN_IN_FIXTURE_SCREENS].includes(screen.id);
   const picker = screen.id === "model-picker" || screen.id === "details-model";
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
@@ -251,7 +251,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       }
       onApproval(device ? { kind: "device", verificationUri: "https://x.ai/device", userCode: "ABCD-EFGH" } : { kind: "browser" });
       await stopped(signal); return { ok: false, message: "Cancelled." };
-    }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal }) => { loginCalled = true; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
+    }, env: picker ? { OPENAI_API_KEY: "fixture-key" } : {}, reload: async () => ({ model: createScriptedModel() }), listRouteModels: async () => ["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"].map(id => ({ id })), codexLogin: async ({ signal, onProgress }) => { loginCalled = true; const fixture = signInFixture(screen.id, onProgress); if (fixture) return fixture; await stopped(signal); return { ok: false, message: "Cancelled." }; } },
   };
   if (screen.id === "details-recovery" || screen.id === "resumed-review-off") options.changeTracking = "off";
   // Exercise real diagnostic redaction before layout so temporary-root bytes never enter goldens.
@@ -404,4 +404,18 @@ async function historyTimingFixture(id: string, session: Awaited<ReturnType<type
   await store.finalize(sessionId, { type: "turn_finalize", version: 1, turnId: "timing-user", attemptId: "timing-attempt", revision: 1, outcome: "completed", finishedAt,
     activeMs, toolResults: commands.length, failedTools: 0, commands: { total: commands.length, exitZero: commands.length, nonzero: 0, unknown: 0, truncated: false, items: commands },
     files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, telemetry });
+}
+
+/** Fresh-install screens whose scripted ChatGPT runner shows a device code, a callback timeout or a browser launcher failure (#297). */
+const SIGN_IN_FIXTURE_SCREENS = ["chatgpt-device-approval", "sign-in-timeout", "sign-in-browser-not-opened"];
+
+/** Drive one scripted ChatGPT sign-in fixture without network or browser; a returned result ends the sign-in, otherwise it keeps waiting. */
+function signInFixture(id: string, onProgress: (message: string) => void): { ok: false; message: string } | undefined {
+  if (id === "chatgpt-device-approval") onProgress("Enter this code at https://auth.openai.com/codex/device: ABCD-1234");
+  if (id === "sign-in-timeout") return { ok: false, message: "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines." };
+  if (id === "sign-in-browser-not-opened") {
+    onProgress("Open this URL to sign in with ChatGPT: https://auth.openai.com/oauth/authorize?client_id=app_fixture&state=fixture");
+    onProgress("The browser could not be opened automatically; use the printed URL instead.");
+  }
+  return undefined;
 }

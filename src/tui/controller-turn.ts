@@ -23,7 +23,7 @@ export abstract class TurnLayer extends CompactionLayer {
   cancel(): void {
     this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
-    if (this.loginSaving) { this.loginAbort?.abort(); this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
+    if (this.loginSaving) { this.loginAbort?.abort(); this.notice("Saving credential · Wait for secure storage"); return; }
     if (this.loginCallbackValue !== undefined) {
       this.loginCallbackValue = undefined; this.recoveryRepair = false;
       this.restoreLoginOrigin();
@@ -44,6 +44,8 @@ export abstract class TurnLayer extends CompactionLayer {
       this.loginChooserState = this.loginChooserState.level === "main" ? undefined : { level: "main", selectedId: this.loginChooserState.level };
       this.recoveryRepair = false; return;
     }
+    // A sign-in already cancelled is winding down; a second Esc has nothing more to cancel.
+    if (this.loginAbort?.signal.aborted && this.loginApproval !== undefined) return;
     if (this.credentialMutation) { this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
     if (this.endpointUrlEntry) {
       this.endpointUrlEntry = undefined; this.endpointInputUrl = undefined;

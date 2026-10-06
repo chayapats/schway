@@ -82,6 +82,7 @@ export class TuiController extends HistoryLayer {
       ...(this.endpointUrlEntry ? { endpointUrlEntry: { ...this.endpointUrlEntry } } : {}),
       ...(this.loginCallbackValue !== undefined ? { loginCallbackEntry: { masked: "•".repeat(Math.min(this.loginCallbackValue.length, 64)) } } : {}),
       ...(this.loginApproval !== undefined ? { loginApproval: this.loginApproval } : {}),
+      ...(this.loginApproval !== undefined && this.loginProvider ? { loginWait: { provider: this.loginProvider, ...(this.loginSaving ? { saving: true as const } : {}), ...(this.loginAbort?.signal.aborted ? { cancelling: true as const } : {}) } } : {}),
       ...(branchTree.tree !== undefined ? { branchTree: branchTree.tree } : {}),
       ...(branchTree.error !== undefined ? { branchTreeError: branchTree.error } : {}),
       ...(recovery ? { recovery } : {}),
