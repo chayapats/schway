@@ -575,7 +575,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   /** A complete known command (`/name ` with no argument list to offer) has nothing left to browse. */
   function completeCommand(text: string): boolean {
     const name = /^\/(\S+)\s+$/.exec(text)?.[1];
-    return !!name && !controller.commandChoices(text).length && controller.commandChoices(`/${name}`).some(entry => entry.name === name);
+    return !!name && !controller.commandChoices(text).length && controller.commandChoices(`/${name}`).some(entry => entry.name === name.toLowerCase());
   }
 
   /** Searchable help rows; keyboard availability describes the composer this palette returns to. */

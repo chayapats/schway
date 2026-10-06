@@ -154,6 +154,14 @@ test("a typed command that collides keeps its collision notice instead of insert
   expect(ui.editor.plainText).toBe("/session");
   expect(ui.transcriptText()).toContain("Command conflicts with skill");
   expect(ui.builtins).toEqual([]);
+  // Dispatch lowercases names, so a case variant collides the same way instead of inserting another command.
+  ui.editor.setText(""); await ui.settle();
+  await ui.type("/Session");
+  await ui.enter();
+  expect(ui.editor.plainText).toBe("/Session");
+  expect(ui.builtins).toEqual([]);
+  ui.editor.setText(""); await ui.settle();
+  await ui.type("/session");
   // An explicit arrow choice still wins over the typed name.
   ui.mockInput.pressArrow("down"); await ui.settle();
   const chosen = ui.selected()!.match(/\/(\S+)/)![1]!;

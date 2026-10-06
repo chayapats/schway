@@ -159,7 +159,8 @@ export type SlashEnter = { kind: "insert"; insertion: string } | { kind: "send" 
  */
 export function slashEnter(highlight: PaletteChoice | undefined, draft: string, context: { choices: readonly PaletteChoice[]; chosen: boolean } = { choices: [], chosen: false }): SlashEnter {
   if (highlight?.kind !== "command" || !highlight.available || highlight.insertion.trim() === draft.trim()) return { kind: "send" };
-  const typed = draft.trim().slice(1);
+  // Dispatch lowercases command names, so a case variant of a listed name collides too.
+  const typed = draft.trim().slice(1).toLowerCase();
   if (!context.chosen && context.choices.some(choice => choice.kind === "command" && choice.name === typed)) return { kind: "send" };
   return { kind: "insert", insertion: highlight.insertion };
 }
