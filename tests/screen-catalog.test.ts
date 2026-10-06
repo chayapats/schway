@@ -218,8 +218,8 @@ test("catalog goldens contain no host paths, identities or changing timestamps",
   }
 });
 test("catalog goldens never show the fixture API key or browser callback", async () => {
-  // Any typed or pasted prefix is distinctive enough to prove the masked surfaces leaked nothing.
-  const needles = [CATALOG_API_KEY, CATALOG_CALLBACK, CATALOG_API_KEY.slice(0, 8), "catalog-fixture", "localhost:1455"];
+  // Distinctive prefixes and suffixes of the typed text prove no other line leaked it.
+  const needles = [CATALOG_API_KEY, CATALOG_CALLBACK, CATALOG_API_KEY.slice(0, 8), CATALOG_API_KEY.slice(4, 14), "catalog-fixture", "localhost:1455", "1455/auth", "/auth/callback?code"];
   for (const file of await files(directory)) {
     const text = await readFile(join(directory, file), "utf8");
     for (const needle of needles) expect(text.includes(needle), `${file} contains ${needle}`).toBe(false);
