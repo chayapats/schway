@@ -6,6 +6,7 @@ import { ASK_HEADLESS_DENIAL, READ_ONLY_DENIAL, READ_ONLY_HEADLESS_DENIAL, type 
 import type { RuntimeEvent } from "../src/agent/events.ts";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { runCli } from "../src/cli/main.ts";
+import { WEB_LOOKUP_GUIDANCE } from "../src/context/prompt.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import type { ToolResult } from "../src/conversation/types.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
@@ -87,6 +88,13 @@ test("web_fetch runs without an approval request in auto, interactive ask and re
     else expect(results[1]).toMatchObject({ isError: true, content: mode.bash });
   }
   expect(asked).toEqual(["bash"]);
+  // #317 telemetry: web_fetch results carry timing like any other tool.
+  const { events, results } = await round({ root, tools, calls: [{ id: "timed", name: "web_fetch", arguments: { url: `${fixture.base}/timed` } }] });
+  const finished = events.find(event => event.type === "tool.finished" && event.toolCallId === "timed");
+  expect(finished).toMatchObject({ status: "success" });
+  expect(typeof (finished as { durationMs?: unknown }).durationMs).toBe("number");
+  expect(typeof (finished as { startedAt?: unknown }).startedAt).toBe("string");
+  expect(results[0]).toMatchObject({ isError: false });
 });
 
 test("a beforeTool denial sends no request and afterTool sees the fetch outcome", async () => {
@@ -157,6 +165,8 @@ test("headless runs offer web_fetch, run it in ask and read-only, deny bash, and
       });
       expect(exit, stderr.text).toBe(0);
       expect(requests[0]!.tools?.map(tool => tool.name)).toContain("web_fetch");
+      // Registering web_fetch turns on #319's web-lookup steering line in the base prompt.
+      expect(requests[0]!.systemPrompt.split("\n")).toContain(WEB_LOOKUP_GUIDANCE);
       expect(stdout.text).not.toContain(secret);
       const events = stdout.text.trim().split("\n").map(line => JSON.parse(line));
       const fetched = events.find(event => event.type === "tool.finished" && event.toolCallId === "fetch");
@@ -791,8 +801,9 @@ test("the interactive app registers web_fetch and runs it in ask mode without a 
       const { fakeCredentialStore } = await import(pathToFileURL(join(root, "tests/helpers/credential-store.ts")).href);
       const { createScriptedModel } = await import(pathToFileURL(join(root, "tests/helpers/scripted-model.ts")).href);
       let offered = [];
+      let steered = false;
       const model = createScriptedModel({ provider: "openai", id: "fixture", responses: [
-        request => { offered = (request.tools ?? []).map(tool => tool.name); return { toolCalls: [{ id: "fetch", name: "web_fetch", arguments: { url: process.env.FETCH_URL } }] }; },
+        request => { offered = (request.tools ?? []).map(tool => tool.name); steered = request.systemPrompt.split("\n").includes(process.env.STEERING_LINE); return { toolCalls: [{ id: "fetch", name: "web_fetch", arguments: { url: process.env.FETCH_URL } }] }; },
         { text: "Rain after 3 pm." },
       ] });
       let errors = "";
@@ -810,6 +821,7 @@ test("the interactive app registers web_fetch and runs it in ask mode without a 
         await wait(() => terminal.captureCharFrame().includes("Rain after 3 pm."));
         const frame = terminal.captureCharFrame();
         if (!offered.includes("web_fetch") || !offered.includes("bash")) throw Error("Registry lacks web_fetch: " + offered.join(","));
+        if (!steered) throw Error("Base prompt lacks the web-lookup steering line");
         if (!frame.includes("WEB_FETCH") || !frame.includes("access_token=…") || frame.includes("abc123")) throw Error("Row missing or unmasked: " + frame);
         if (frame.includes("Allow web_fetch")) throw Error("web_fetch asked for approval: " + frame);
         console.log("TUI_WEB_FETCH_OK");
@@ -817,7 +829,7 @@ test("the interactive app registers web_fetch and runs it in ask mode without a 
     `;
     const child = Bun.spawn([process.execPath, "-e", script], {
       cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-      env: buildIsolatedCliEnv(home, { FETCH_URL: `${fixture.base}/forecast?access_token=abc123` }),
+      env: buildIsolatedCliEnv(home, { FETCH_URL: `${fixture.base}/forecast?access_token=abc123`, STEERING_LINE: WEB_LOOKUP_GUIDANCE }),
     });
     const timeout = setTimeout(() => child.kill(), 12_000);
     try {
