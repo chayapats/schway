@@ -84,7 +84,7 @@ test("Esc lint rejects seeded wrong verbs and accepts wrapped table phrases", ()
     "Approval modes · Esc back to change", "Approval waiting · Esc review request"])
     expect(escPhraseProblems([row]).map(problem => problem.row), row).toEqual([0]);
   // A trailing scrollbar or edge glyph is ignored, never taken as the end of a phrase or as its missing verb.
-  for (const rows of [["C copy · Esc   █", "Ask Schway…"], ["Esc resto…  █"], ["Esc cance█"], ["Esc stops  ▀"], ["Esc   │"]])
+  for (const rows of [["C copy · Esc   █", "Ask Schway…"], ["Esc resto…  █"], ["Esc cance█"], ["Esc stops  ▀"], ["Esc   │"], ["Esc stop it█"], ["Esc back now█"]])
     expect(escPhraseProblems(rows).map(problem => problem.row), rows.join("\n")).toEqual([0]);
   expect(escPhraseProblems(["Undo turn 1 · Esc close", "Esc stops"]).map(problem => problem.problem))
     .toEqual(['banned synonym "close"', 'third-person verb "stops"']);

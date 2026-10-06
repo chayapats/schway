@@ -903,7 +903,7 @@ test("masked credential entry intercepts paste and restores a multiline draft wi
   expect(ui.session.items).toHaveLength(0);
 });
 
-test("browser callback entry names Enter exchange · Esc cancel in the panel, hint row and compact status bar, and Esc changes nothing", async () => {
+test("browser callback entry names Enter sign in · Esc cancel in the panel, hint row and compact status bar, and Esc changes nothing", async () => {
   for (const [width, height] of [[80, 24], [60, 12]] as const) {
     const ui = await setup(width, height);
     await ui.mockInput.pasteBracketedText("keep this draft");
@@ -915,15 +915,19 @@ test("browser callback entry names Enter exchange · Esc cancel in the panel, hi
     expect(ui.controller.snapshot().loginCallbackEntry).toBeDefined();
     const frame = ui.captureCharFrame();
     const rows = frame.trimEnd().split("\n").map(line => line.trim());
-    expect(frame.replace(/\s+/g, " ")).toContain("Enter exchange · Esc cancel");
+    expect(frame.replace(/\s+/g, " ")).toContain("Enter sign in · Esc cancel");
     expect(frame).not.toContain("Esc back");
     expect(frame).not.toContain("Esc cancels");
     expect(frame).not.toContain("Enter confirm");
     // The hint row repeats the panel's keys; below 14 rows the compact status bar names the same Esc verb.
-    expect(rows.at(-1)).toBe(height < 14 ? "Auto · Esc cancel" : "Enter exchange · Esc cancel");
+    expect(rows.at(-1)).toBe(height < 14 ? "Auto · Esc cancel" : "Enter sign in · Esc cancel");
     ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.controller.snapshot().loginCallbackEntry).toBeUndefined();
     expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Callback entry cancelled; no credential was changed.");
+    // Esc goes back to the chooser; leaving it returns the draft untouched.
+    expect(ui.controller.snapshot().loginChooser).toMatchObject({ selectedId: "chatgpt-callback" });
+    while (ui.controller.snapshot().loginChooser) { ui.mockInput.pressEscape(); await settle(ui); }
+    expect(ui.editor.plainText).toBe("keep this draft");
   }
 });
 
