@@ -223,6 +223,10 @@ Headless `ask` denies mutations immediately with
 alone need not make the task exit nonzero. Use `--approval auto` only when those
 tool actions are intended.
 
+Neither mode is offline. Read-only tools, including `web_fetch`, still run, and a
+fetch sends its URL to a remote host, so the model can put workspace content into
+a URL without approval. See [Fetch web pages](tools.md#fetch-web-pages).
+
 `--max-turns` bounds agent rounds (default 32); `--max-concurrent-tools` caps
 parallel-safe tools (default 10). Unknown exact model IDs remain accepted by
 `--model` even when absent from a catalog, using conservative budgets of 32768

@@ -7,7 +7,7 @@ import { retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import { credentialStoreError } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { TuiRecovery, TuiTranscriptEntry, TuiControllerOptions } from "./controller-types.ts";
-import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, asShellOutcome, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, summarizeToolResult } from "./transcript-format.ts";
+import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, asShellOutcome, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, summarizeToolResult, webFetchCallUrl } from "./transcript-format.ts";
 import { buildEditDiff, countLines, type DiffRow } from "../text/diff.ts";
 import { recoveryMessage, startupFailureCategory, startupRecoveryMessage, redactRecoveryDetails } from "./controller-support.ts";
 import { CompactionLayer } from "./controller-compaction.ts";
@@ -468,6 +468,7 @@ export abstract class TurnLayer extends CompactionLayer {
           event.details,
           event.status,
           text => redactSecrets(text, this.secrets),
+          event.name === "web_fetch" ? webFetchCallUrl(this.session.items, event.toolCallId) : undefined,
         );
         if (event.name === "write" && resultSummary && typeof event.details === "object" && event.details !== null) {
           const details = event.details as { created: boolean; lineCount: number };

@@ -8,6 +8,9 @@
   `schway-local-date`. Schway now reserves that name for its own local-date
   section, so an extension that registers it fails to load or stops its turn
   with an error naming the extension. Rename the section to keep it (#319).
+- The tool name `web_fetch` is now reserved by a built-in tool. An extension that
+  registers its own `web_fetch` fails to load with `Tool already registered:
+  web_fetch`; rename the extension tool (#318).
 
 ### Added
 
@@ -15,6 +18,12 @@
   the last Schway context section, captured once per turn. Time of day is never
   sent. When the built-in `web_fetch` tool is registered, the base prompt also
   steers web lookups to it instead of curl against search-engine pages (#319).
+- Built-in `web_fetch` tool: one `GET` of an `http` or `https` URL that returns
+  readable text, with HTML converted to plain text and no JavaScript. It reads
+  only and runs in parallel, with a 5 s response deadline, a 15 s total deadline,
+  a 2 MiB body cap, a 32 KiB UTF-8 output cap with a private spill file, at most
+  5 redirects and a distinct error for each failure. It runs without a prompt in
+  every approval mode and sends its URL to the remote host (#318).
 - `/history` browses recorded turn outcomes on the selected branch, newest first:
   outcome, time, duration, file and command counts, and per-turn evidence with
   observed command exits, observed files, undo state and an on-request current

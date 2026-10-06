@@ -1,0 +1,170 @@
+schway-screen 1
+screen web-fetch-rows
+title Web fetch results
+description Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.
+variant light-50
+size 50x30
+cursor 6 27 visible
+== text
+ ⚡ schway  /project
+
+  ✓  WEB_FETCH  https://weather.example.te… ▸
+  ✓  WEB_FETCH  https://reader.example.tes… ▸
+  !  WEB_FETCH  https://api.example.… error ▾
+    HTTP 401 Unauthorized · application/json ·
+    58 bytes · https://api.example.test/
+    forecast?city=…&access_token=…
+
+    The server returned HTTP 401 Unauthorized.
+
+    {"error":"invalid token","docs":"https://
+    api.example.test/forecast?
+    city=Bangkok&access_token=***"}
+    Tool failed. Inspect this result before
+    continuing.
+
+  ⠋  WEB_FETCH  https://maps.exam… running… ▸
+
+
+
+
+
+
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Ask Schway…
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted…    ctx ~246
+ Shift+Tab change mode · Enter send · Ctrl+F find
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-50 #ffffff #ecedea -
+01 0-50 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #0a5894 #e1e3df -
+02 2-3 #19612f #e1e3df b
+02 3-4 #1d232c #e1e3df -
+02 4-15 #065e74 #c7d3d2 b
+02 15-43 #1d232c #e1e3df -
+02 43-46 #545e6c #e1e3df -
+02 46-48 #ffffff #e1e3df -
+02 48-50 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-2 #0a5894 #e1e3df -
+03 2-3 #19612f #e1e3df b
+03 3-4 #1d232c #e1e3df -
+03 4-15 #065e74 #c7d3d2 b
+03 15-43 #1d232c #e1e3df -
+03 43-46 #545e6c #e1e3df -
+03 46-48 #ffffff #e1e3df -
+03 48-50 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-2 #0a5894 #e1e3df -
+04 2-3 #a61f16 #e1e3df b
+04 3-4 #1d232c #e1e3df -
+04 4-15 #065e74 #c7d3d2 b
+04 15-37 #1d232c #e1e3df -
+04 37-38 #545e6c #e1e3df -
+04 38-43 #a61f16 #e1e3df -
+04 43-46 #545e6c #e1e3df -
+04 46-48 #ffffff #e1e3df -
+04 48-50 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-4 #ffffff #e1e3df -
+05 4-47 #545e6c #e1e3df -
+05 47-48 #ffffff #e1e3df -
+05 48-50 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-4 #ffffff #e1e3df -
+06 4-40 #545e6c #e1e3df -
+06 40-48 #ffffff #e1e3df -
+06 48-50 #ffffff #f7f7f4 -
+07 0-1 #ffffff #f7f7f4 -
+07 1-4 #ffffff #e1e3df -
+07 4-34 #545e6c #e1e3df -
+07 34-48 #ffffff #e1e3df -
+07 48-50 #ffffff #f7f7f4 -
+08 0-1 #ffffff #f7f7f4 -
+08 1-48 #ffffff #e1e3df -
+08 48-50 #ffffff #f7f7f4 -
+09 0-1 #ffffff #f7f7f4 -
+09 1-4 #ffffff #e1e3df -
+09 4-46 #545e6c #e1e3df -
+09 46-48 #ffffff #e1e3df -
+09 48-50 #ffffff #f7f7f4 -
+10 0-1 #ffffff #f7f7f4 -
+10 1-48 #ffffff #e1e3df -
+10 48-50 #ffffff #f7f7f4 -
+11 0-1 #ffffff #f7f7f4 -
+11 1-4 #ffffff #e1e3df -
+11 4-45 #545e6c #e1e3df -
+11 45-48 #ffffff #e1e3df -
+11 48-50 #ffffff #f7f7f4 -
+12 0-1 #ffffff #f7f7f4 -
+12 1-4 #ffffff #e1e3df -
+12 4-30 #545e6c #e1e3df -
+12 30-48 #ffffff #e1e3df -
+12 48-50 #ffffff #f7f7f4 -
+13 0-1 #ffffff #f7f7f4 -
+13 1-4 #ffffff #e1e3df -
+13 4-35 #545e6c #e1e3df -
+13 35-48 #ffffff #e1e3df -
+13 48-50 #ffffff #f7f7f4 -
+14 0-1 #ffffff #f7f7f4 -
+14 1-4 #ffffff #e1e3df -
+14 4-44 #545e6c #e1e3df -
+14 44-48 #ffffff #e1e3df -
+14 48-50 #ffffff #f7f7f4 -
+15 0-1 #ffffff #f7f7f4 -
+15 1-4 #ffffff #e1e3df -
+15 4-15 #545e6c #e1e3df -
+15 15-48 #ffffff #e1e3df -
+15 48-50 #ffffff #f7f7f4 -
+16 0-50 #ffffff #f7f7f4 -
+17 0-1 #ffffff #f7f7f4 -
+17 1-2 #0a5894 #e1e3df -
+17 2-3 #0a5894 #e1e3df b
+17 3-4 #1d232c #e1e3df -
+17 4-15 #065e74 #c7d3d2 b
+17 15-34 #1d232c #e1e3df -
+17 34-46 #545e6c #e1e3df -
+17 46-48 #ffffff #e1e3df -
+17 48-50 #ffffff #f7f7f4 -
+18 0-50 #ffffff #f7f7f4 -
+19 0-50 #ffffff #f7f7f4 -
+20 0-50 #ffffff #f7f7f4 -
+21 0-50 #ffffff #f7f7f4 -
+22 0-50 #ffffff #f7f7f4 -
+23 0-50 #ffffff #f7f7f4 -
+24 0-50 #ffffff #f7f7f4 -
+25 0-1 #ffffff #f7f7f4 -
+25 1-49 #ecedea #f7f7f4 -
+25 49-50 #ffffff #f7f7f4 -
+26 0-1 #ffffff #f7f7f4 -
+26 1-5 #0a5894 #ecedea -
+26 5-16 #545e6c #ecedea -
+26 16-49 #ffffff #ecedea -
+26 49-50 #ffffff #f7f7f4 -
+27 0-1 #ffffff #f7f7f4 -
+27 1-49 #ecedea #f7f7f4 -
+27 49-50 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-38 #1d232c #e1e3df -
+28 38-49 #545e6c #ecedea -
+28 49-50 #ffffff #f7f7f4 -
+29 0-1 #ffffff #f7f7f4 -
+29 1-10 #1d232c #caced3 b
+29 10-25 #545e6c #f7f7f4 -
+29 25-30 #1d232c #caced3 b
+29 30-38 #545e6c #f7f7f4 -
+29 38-44 #1d232c #caced3 b
+29 44-49 #545e6c #f7f7f4 -
+29 49-50 #ffffff #f7f7f4 -

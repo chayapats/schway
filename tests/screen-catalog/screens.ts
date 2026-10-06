@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TuiSnapshot } from "../../src/tui/controller.ts";
 import { CATALOG_API_KEY, CATALOG_CALLBACK, type ScreenHarness } from "./harness.ts";
+import { displayUrl } from "../../src/tools/web-fetch-display.ts";
 
 /** One catalog state reached through input and guarded by observable controller state. */
 export interface Screen { id: string; title: string; description: string; noColor?: boolean; noColorWidths?: boolean; rows?: number; elapsed?: number; drive(ui: ScreenHarness): Promise<void>; ready(snapshot: TuiSnapshot, ui: ScreenHarness): boolean }
@@ -53,6 +54,19 @@ const shellRow = (ui: ScreenHarness, id: string, command: string, status: "succe
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "bash", status, content, details, startedAt: "2026-01-15T09:30:00.000Z", durationMs: 1200 });
   ui.session.append({ type: "tool_result", id: `result-${id}`, toolCallId: id, content, isError: status !== "success" });
 };
+/** Append one web_fetch row; running rows start without finishing. */
+const fetchRow = (ui: ScreenHarness, id: string, url: string, finish?: { status: "success" | "error"; content: string; details: unknown }) => {
+  ui.session.append({ type: "assistant", id: `request-${id}`, content: [{ type: "tool_call", id, name: "web_fetch", arguments: { url } }] });
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: id, name: "web_fetch" });
+  if (!finish) return;
+  ui.advance();
+  // Like the tool, details carry the display-safe first line that the TUI shows instead of the raw echo.
+  const statusLine = finish.content.split("\n")[0]!.replace(url, displayUrl(url));
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "web_fetch", ...finish, details: { ...(finish.details as object), statusLine } });
+  ui.session.append({ type: "tool_result", id: `result-${id}`, toolCallId: id, content: finish.content, isError: finish.status !== "success" });
+};
+const fetchDetails = (url: string, status: number, rawBytes: number, durationMs: number, extra: Record<string, unknown> = {}) =>
+  ({ url, finalUrl: url, status, contentType: "text/html", rawBytes, textBytes: Math.round(rawBytes / 4), truncated: false, durationMs, ...extra });
 const longFailure = async (ui: ScreenHarness, expanded = false) => {
   shellRow(ui, "long-failure", longFailingCommand, "success", "Exit code: 1\nตรวจผลลัพธ์ภาษาไทย 🧪\nThe command returned a nonzero exit.", { exitCode: 1 });
   if (expanded) { await ui.settle(); ui.mockInput.pressKey("o", { ctrl: true }); }
@@ -245,6 +259,16 @@ export const SCREENS: readonly Screen[] = [
     shellRow(ui, "malformed", "inspect invalid exit details", "success", "Exit code: 0", { exitCode: "0" });
     shellRow(ui, "error", "run unavailable command", "error", "Command could not start.");
   }, ready: s => s.transcript.filter(entry => entry.kind === "tool").length === 8 },
+  { id: "web-fetch-rows", title: "Web fetch results", description: "Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.", noColorWidths: true, elapsed: 1200, drive: async ui => {
+    const weather = "https://weather.example.test/th/bangkok/today";
+    fetchRow(ui, "fetch-ok", weather, { status: "success", content: `HTTP 200 OK · text/html · 48,213 bytes · ${weather}\n\n# Today in Bangkok\n\nRain is likely after 3 pm.`, details: fetchDetails(weather, 200, 48_213, 420) });
+    const article = "https://reader.example.test/article/42";
+    fetchRow(ui, "fetch-long", article, { status: "success", content: `HTTP 200 OK · text/html · 87,940 bytes · ${article}\n\nสภาพอากาศวันนี้ 🌧️\n\n[Showing the first 32,512 of 85,904 bytes of text. Full text: /tmp/schway-web-fetch-1.txt. Use read with offset 214 to continue.]`,
+      details: fetchDetails(article, 200, 87_940, 1_350, { truncated: true, outputPath: "/tmp/schway-web-fetch-1.txt" }) });
+    const denied = "https://api.example.test/forecast?city=Bangkok&access_token=sk-live-4f9a2b7c1d";
+    fetchRow(ui, "fetch-401", denied, { status: "error", content: `HTTP 401 Unauthorized · application/json · 58 bytes · ${denied}\n\nThe server returned HTTP 401 Unauthorized.\n\n{"error":"invalid token","docs":"${denied}"}`, details: { ...fetchDetails(denied, 401, 58, 180, { errorKind: "http-status" }), contentType: "application/json" } });
+    fetchRow(ui, "fetch-running", "https://maps.example.test/route?from=Siam&to=Asok&api_key=AIzaSyFixture123");
+  }, ready: (s, ui) => s.transcript.filter(entry => entry.kind === "tool").length === 4 && !/sk-live|AIzaSy/.test(ui.captureCharFrame()) },
   { id: "large-edit", title: "Large edit", description: "An edit above the inline limit keeps its summary and disclosure marker.", noColor: true, drive: ui => enter(ui, "Update the clamp implementation"), ready: completed },
   { id: "stopped-streaming", title: "Stopped streaming", description: "A requested stop retains incomplete output and an unsent Thai draft with a neutral continuation notice.", noColorWidths: true, drive: ui => stopWork(ui, false), ready: stopped },
   { id: "stopped-tool", title: "Stopped command", description: "A stopped shell keeps the completed file write and offers explicit continuation without sending the next draft.", noColorWidths: true, drive: ui => stopWork(ui, true), ready: stopped },
@@ -408,6 +432,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
+  if (screen.id.startsWith("web-fetch-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   // Palettes and the sign-in chooser need a width where hint rows drop segments, showing what survives the cut.
   if (screen.id.startsWith("command-palette") || screen.id.startsWith("help-palette") || screen.id === "sign-in-chooser") variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   // Session picker and branch tree panels need 40-column variants so the narrow Esc invariant covers them.

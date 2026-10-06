@@ -41,6 +41,7 @@ import { loadExtensions } from "../extensions/loader.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
+import { webFetchTool } from "../tools/web-fetch.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import {
   cliOverridesFromArgs,
@@ -814,7 +815,7 @@ export async function invokeSkillTurn(
 }
 
 /** Built-in tools every interactive session registers before extensions load; the web-lookup line follows this list only. */
-const INTERACTIVE_BUILTIN_TOOLS = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool];
+const INTERACTIVE_BUILTIN_TOOLS = [readTool, writeTool, editTool, bashTool, webFetchTool, grepTool, findTool, lsTool];
 
 /** Build context-manager options so catalog budgets follow model switches unless overridden. */
 function contextManagerOptions(home: string, explicitContextWindow?: number, configDeprecations?: readonly ConfigDeprecation[], diagnosticContext?: ConfigDiagnosticContext): Parameters<typeof createContextManager>[1] {

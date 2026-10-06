@@ -1,0 +1,30 @@
+Bangkok weather & transit
+
+Home | News
+
+# Today in Bangkok
+
+Rain is likely after 3 pm. Take the BTS Skytrain — it's faster than a taxi & costs < 60 THB.
+
+## Routes
+
+- Siam → Asok: 12 min
+- Asok → Mo Chit
+  - via Phaya Thai
+
+1. Buy a Rabbit card
+2. Tap in
+
+Line | First train
+Sukhumvit | 05:15
+Silom | 05:30
+
+const fare = 60;
+  if (fare < 100) {
+    console.log("cheap");
+  }
+
+สวัสดี 🧪 café
+Second line
+
+© 2026 Example

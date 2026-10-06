@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { formatLocalDate } from "../src/context/date-section.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -244,7 +244,7 @@ test("a turn that crosses local midnight keeps its start date, and the next turn
   });
 });
 
-test("headless runs send the local date without loading the TUI, never persist it, and ignore an extension web_fetch", async () => {
+test("headless runs send the local date without loading the TUI, never persist it, and steer to the built-in web_fetch", async () => {
   await withTempDir(async root => {
     const source = join(import.meta.dir, "../src");
     const home = join(root, "home"), work = join(root, "work");
@@ -258,21 +258,26 @@ test("headless runs send the local date without loading the TUI, never persist i
       let seen;
       const model = createScriptedModel({ responses: [request => { seen = { systemPrompt: request.systemPrompt, context: request.context, tools: (request.tools ?? []).map(tool => tool.name) }; return { text: "ok" }; }] });
       let out = "", err = "";
-      const code = await runCli(["-p", "weather tomorrow?", "--extension", ${JSON.stringify(extension)}], {
-        stdout: { write: chunk => { out += chunk; } }, stderr: { write: chunk => { err += chunk; } },
-        env: { HOME: ${JSON.stringify(home)}, OPENAI_API_KEY: "sk-test" }, cwd: ${JSON.stringify(work)}, model, credentialStore: fakeCredentialStore(),
-      });
+      const io = { stdout: { write: chunk => { out += chunk; } }, stderr: { write: chunk => { err += chunk; } },
+        env: { HOME: ${JSON.stringify(home)}, OPENAI_API_KEY: "sk-test" }, cwd: ${JSON.stringify(work)}, model, credentialStore: fakeCredentialStore() };
+      const code = await runCli(["-p", "weather tomorrow?"], io);
+      // web_fetch is built in (#318), so an extension cannot register its own and fails to load.
+      let extensionErr = "";
+      const extensionCode = await runCli(["-p", "weather tomorrow?", "--extension", ${JSON.stringify(extension)}], { ...io, stderr: { write: chunk => { extensionErr += chunk; } } });
       const tui = Object.keys(require.cache).filter(path => /[\\\\/]src[\\\\/]tui[\\\\/]|@opentui/.test(path));
-      console.log(JSON.stringify({ code, err, seen, tui }));
+      console.log(JSON.stringify({ code, err, seen, tui, extensionCode, extensionErr }));
     `;
     const child = Bun.spawn([process.execPath, "--eval", script], { cwd: work, env: { PATH: process.env.PATH, HOME: home, TZ: "Asia/Tokyo" }, stdout: "pipe", stderr: "pipe" });
     const [output, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     expect(code, error).toBe(0);
-    const result = JSON.parse(output) as { code: number; err: string; tui: string[]; seen: { systemPrompt: string; context: Array<{ name: string; content: string }>; tools: string[] } };
+    const result = JSON.parse(output) as { code: number; err: string; tui: string[]; extensionCode: number; extensionErr: string; seen: { systemPrompt: string; context: Array<{ name: string; content: string }>; tools: string[] } };
     expect(result.code, result.err).toBe(0);
     expect(result.tui).toEqual([]);
     expect(result.seen.tools).toContain("web_fetch");
-    expect(result.seen.systemPrompt).toBe(STABLE_SYSTEM_PROMPT);
+    expect(result.seen.systemPrompt).toBe(`${STABLE_SYSTEM_PROMPT}\n${WEB_LOOKUP_GUIDANCE}`);
+    expect(result.extensionCode).toBe(1);
+    expect(result.extensionErr).toContain("Tool already registered: web_fetch");
+    expect(result.extensionErr).toContain(basename(extension));
     const date = result.seen.context.at(-1)!;
     expect(date.name).toBe("schway-local-date");
     expect(date.content).toMatch(/^Current date: \d{4}-\d{2}-\d{2} \(\w+day\)\nTime zone: Asia\/Tokyo \(UTC\+09:00\)$/);

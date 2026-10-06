@@ -15,6 +15,8 @@ import type {
   ToolExecutionMode,
 } from "../src/tools/types.ts";
 import { writeTool } from "../src/tools/write.ts";
+import { bashTool } from "../src/tools/bash.ts";
+import { webFetchTool } from "../src/tools/web-fetch.ts";
 import { withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 
@@ -597,4 +599,109 @@ test("scheduler retains prototype approval accessors and method receivers", asyn
   const { session } = await runTurn({ tools: [probeTool("edit", "parallel", controller)], calls: [call("mutation", "edit", "mutation")], approval: new Policy() });
   expect(resultContents(session)).toEqual(["Read-only mode: file changes and commands are off. The user can switch modes with Shift+Tab."]);
   expect(controller.executeCount.size).toBe(0);
+});
+
+/** Loopback fixture whose handlers wait until `size` requests are in flight, or a short guard expires. */
+function barrierServer(size: number, guardMs: number) {
+  const arrivals: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let release = Promise.withResolvers<"released">();
+  const server = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      arrivals.push(path);
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      if (inFlight === size) release.resolve("released");
+      const outcome = await Promise.race([release.promise, Bun.sleep(guardMs).then(() => "guard" as const)]);
+      inFlight--;
+      if (inFlight === 0) release = Promise.withResolvers<"released">();
+      return new Response(`${path} ${outcome}`, { headers: { "Content-Type": "text/plain" } });
+    },
+  });
+  return { server, arrivals, base: `http://127.0.0.1:${server.port}`, maxInFlight: () => maxInFlight };
+}
+
+test("three web_fetch calls in one round overlap; a concurrency cap of one runs them in turn", async () => {
+  const fixture = barrierServer(3, 1_000);
+  try {
+    const calls = ["a", "b", "c"].map(key => ({ id: `fetch-${key}`, name: "web_fetch", arguments: { url: `${fixture.base}/${key}` } }));
+    const { session } = await runTurn({ tools: [webFetchTool], calls });
+    expect(resultContents(session).map(content => content.split("\n\n")[1])).toEqual(["/a released", "/b released", "/c released"]);
+    expect(fixture.maxInFlight()).toBe(3);
+  } finally {
+    fixture.server.stop(true);
+  }
+
+  const serial = barrierServer(3, 100);
+  try {
+    const calls = ["a", "b", "c"].map(key => ({ id: `fetch-${key}`, name: "web_fetch", arguments: { url: `${serial.base}/${key}` } }));
+    const { session } = await runTurn({ tools: [webFetchTool], calls, maxConcurrentTools: 1 });
+    expect(serial.arrivals).toEqual(["/a", "/b", "/c"]);
+    expect(serial.maxInFlight()).toBe(1);
+    expect(resultContents(session).map(content => content.split("\n\n")[1])).toEqual(["/a guard", "/b guard", "/c guard"]);
+  } finally {
+    serial.server.stop(true);
+  }
+});
+
+test("bash keeps its exclusive barrier between web_fetch calls in the same round", async () => {
+  const log: string[] = [];
+  const arrived = new Map(["/a", "/b", "/c"].map(path => [path, new Gate()]));
+  const respond = new Map(["/a", "/b", "/c"].map(path => [path, new Gate()]));
+  const server = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      log.push(`fetch${path}:start`);
+      arrived.get(path)!.open();
+      await respond.get(path)!.promise;
+      log.push(`fetch${path}:end`);
+      return new Response(path, { headers: { "Content-Type": "text/plain" } });
+    },
+  });
+  const bashStarted = new Gate();
+  const bashRelease = new Gate();
+  const bash: ToolDefinition = {
+    ...bashTool,
+    async execute() {
+      log.push("bash:start");
+      bashStarted.open();
+      await bashRelease.promise;
+      log.push("bash:end");
+      return { content: "Exit code: 0" };
+    },
+  };
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const running = runTurn({
+      tools: [webFetchTool, bash],
+      calls: [
+        { id: "fetch-a", name: "web_fetch", arguments: { url: `${base}/a` } },
+        { id: "fetch-b", name: "web_fetch", arguments: { url: `${base}/b` } },
+        { id: "shell", name: "bash", arguments: { command: "true" } },
+        { id: "fetch-c", name: "web_fetch", arguments: { url: `${base}/c` } },
+      ],
+    });
+    await Promise.all([arrived.get("/a")!.promise, arrived.get("/b")!.promise]);
+    await Bun.sleep(20);
+    expect(log).toEqual(["fetch/a:start", "fetch/b:start"]);
+    respond.get("/a")!.open();
+    respond.get("/b")!.open();
+    await bashStarted.promise;
+    await Bun.sleep(20);
+    expect(log.slice(2).sort()).toEqual(["bash:start", "fetch/a:end", "fetch/b:end"]);
+    expect(log.at(-1)).toBe("bash:start");
+    bashRelease.open();
+    await arrived.get("/c")!.promise;
+    expect(log.slice(-2)).toEqual(["bash:end", "fetch/c:start"]);
+    respond.get("/c")!.open();
+    const { session } = await running;
+    expect(resultContents(session).map(content => content.split("\n\n").at(-1))).toEqual(["/a", "/b", "Exit code: 0", "/c"]);
+  } finally {
+    for (const gate of [...respond.values(), bashRelease]) gate.open();
+    server.stop(true);
+  }
 });
