@@ -13,7 +13,7 @@ cursor 6 6 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Draft next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- Auto · Esc stops
+ Auto · Esc stop
 == styles
 00 0-3 #ffffff #f7f7f4 -
 00 3-5 #0a5894 #f7f7f4 -
@@ -42,5 +42,5 @@ cursor 6 6 visible
 06 23-24 #ffffff #f7f7f4 -
 07 0-1 #545e6c #ecedea -
 07 1-5 #1d232c #ecedea b
-07 5-17 #545e6c #ecedea -
-07 17-24 #ffffff #f7f7f4 -
+07 5-16 #545e6c #ecedea -
+07 16-24 #ffffff #f7f7f4 -

@@ -77,7 +77,7 @@ try {
       await wait(() => frame().includes("Sign in"), "repair chooser");
       while (!/^\s*› OpenAI\s*$/m.test(frame())) { terminal.mockInput.pressArrow("down"); await terminal.flush(); }
       terminal.mockInput.pressEnter();
-      await wait(() => frame().includes("Enter saves"), "credential entry");
+      await wait(() => frame().includes("Enter save · Esc cancel"), "credential entry");
       await terminal.mockInput.pasteBracketedText("fixture-private-key");
       terminal.mockInput.pressEnter();
       await wait(() => frame().includes("Ready") && !frame().includes("Attention"), "auth repaired");

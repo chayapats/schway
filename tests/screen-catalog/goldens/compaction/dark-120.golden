@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Draft your next task…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Compacting 3.0s   scripted/scripted-model                                                 Esc stops  ctx ~48
+ ◆ Auto  ⠋ Compacting 3.0s   scripted/scripted-model                                                  Esc stop  ctx ~48
   Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #161b24 -
@@ -113,9 +113,9 @@ cursor 7 27 visible
 28 8-27 #0e1117 #7cc4ff b
 28 27-28 #8b95a7 #161b24 -
 28 28-53 #e6eaf0 #1e2430 -
-28 53-101 #8b95a7 #161b24 -
-28 101-104 #e6eaf0 #2a3241 b
-28 104-119 #8b95a7 #161b24 -
+28 53-102 #8b95a7 #161b24 -
+28 102-105 #e6eaf0 #2a3241 b
+28 105-119 #8b95a7 #161b24 -
 28 119-120 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-27 #8b95a7 #0e1117 -

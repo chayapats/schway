@@ -20,7 +20,7 @@ cursor 7 27 visible
   ↑↓ select · Tab scope · Esc back
   Remember a model for this workspace
 
-  Approval modes · Esc back to change
+  Approval modes · Shift+Tab change in composer
   Auto: Run tools without asking.
   Ask: Ask before tools that need approval.
   Read-only: Allow read-only tools.
@@ -79,8 +79,8 @@ cursor 7 27 visible
 12 37-80 #ffffff #0e1117 -
 13 0-80 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
-14 2-37 #e6eaf0 #0e1117 -
-14 37-80 #ffffff #0e1117 -
+14 2-47 #e6eaf0 #0e1117 -
+14 47-80 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
 15 2-33 #e6eaf0 #0e1117 -
 15 33-80 #ffffff #0e1117 -

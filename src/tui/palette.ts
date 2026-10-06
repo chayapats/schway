@@ -4,8 +4,8 @@ import { fitLine } from "./presentation.ts";
 /** Composer prompt shown while the help palette owns the search field. */
 export const PALETTE_PLACEHOLDER = "Search commands and actions…";
 
-/** Empty-result row; it names both ways forward without changing the draft. */
-export const PALETTE_NO_MATCHES = "No matches · Clear search or Esc back";
+/** Empty-result row; Esc restores the draft the palette opened from, as the palette hint row says. */
+export const PALETTE_NO_MATCHES = "No matches · Esc restore";
 
 /** Notice shown above results while a turn runs; commands can be inserted but not sent yet. */
 export const PALETTE_RUNNING = "Turn running · Send commands after it settles";
@@ -25,7 +25,7 @@ export interface PaletteReturnContext {
 }
 
 /** Note shown above results while a tool approval waits; commands cannot be inserted until it settles. */
-export const PALETTE_APPROVAL = "Approval waiting · Esc review request";
+export const PALETTE_APPROVAL = "Approval waiting · Esc back to request";
 
 const APPROVAL_WAITING = PALETTE_APPROVAL;
 const TURN_RUNNING = "Wait for this turn · Esc stop";
@@ -128,13 +128,19 @@ export function guidanceHeight(row: KeyboardGuideChoice, columns: number): numbe
   return guidanceLines(row).reduce((sum, line) => sum + Math.max(1, Math.ceil(Bun.stringWidth(line.text) / Math.max(1, columns))), 0);
 }
 
+/** Esc phrase for the help palette: back from read-only guidance to results, restore from results to the draft. */
+export function paletteEscape(guide: boolean): string {
+  return guide ? "Esc back" : "Esc restore";
+}
+
 /** Palette hint for the current layer; it says `Enter insert` for commands and never promises execution. */
 export function paletteHint(state: { guide: boolean; inserted: boolean; selected?: PaletteChoice }, columns: number): string {
-  if (state.guide) return "Esc back";
-  const segments = state.inserted ? ["Enter insert", "Tab complete", "Esc restore"]
-    : state.selected?.kind === "keyboard" ? ["↑↓ select", "Enter show keys", "Esc restore"]
-    : state.selected ? ["↑↓ select", "Tab preview", "Enter insert", "Esc restore"]
-    : ["Esc restore"];
+  const escape = paletteEscape(state.guide);
+  if (state.guide) return escape;
+  const segments = state.inserted ? ["Enter insert", "Tab complete", escape]
+    : state.selected?.kind === "keyboard" ? ["↑↓ select", "Enter show keys", escape]
+    : state.selected ? ["↑↓ select", "Tab preview", "Enter insert", escape]
+    : [escape];
   // Keep Enter and the Esc way out; arrows drop first at narrow widths, then the Tab shortcut.
   for (const optional of ["↑↓ select", "Tab preview", "Tab complete"]) {
     const index = segments.indexOf(optional);

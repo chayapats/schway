@@ -89,6 +89,9 @@ for (const [theme, env] of Object.entries({ dark: { SCHWAY_THEME: "dark" }, ligh
     await ui.settle();
     const focused = ui.captureCharFrame();
     expect(focused.split("\n").find(line => line.includes("› txt"))).toContain("C copy · Esc back");
+    // The hint row and the inline header name the same Esc verb.
+    expect(focused).toContain("↑↓ move · R read · C copy · Esc back");
+    expect(focused).not.toContain("Esc editor");
     expect(focused.split("\n").find(line => line.includes("json"))).toContain("Alt+I inspect");
     ui.mockInput.pressKey("c");
     expect(ui.copied).toEqual(["ภาษาไทย 🧪\nบรรทัดสอง"]);

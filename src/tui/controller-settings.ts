@@ -86,7 +86,7 @@ export abstract class SettingsLayer extends UndoLayer {
     if (!presentationPreference(row.key) && !this.stageSettings) return false;
     if (this.preferenceTransaction && panel.preview) {
       const transaction = this.preferenceTransaction;
-      const message = panel.preview.replace("Enter confirms; Esc cancels.", "Applied.");
+      const message = `${panel.preview} Applied.`;
       const applied = await this.changeSettings(async () => transaction, () => message, undefined, !presentationPreference(row.key), presentationPreference(row.key));
       if (this.preferences === panel) {
         if (applied) { panel.preview = undefined; this.preferenceTransaction = undefined; panel.rows = preferenceRows(this.configEditor, panel.scope, this.secrets, this.appearanceEnvironment, panel.page); }
@@ -124,7 +124,7 @@ export abstract class SettingsLayer extends UndoLayer {
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin
           ? advanced ? ` Saved but not effective: shadowed by ${origin}.` : ` Saved but not effective: overridden by ${friendlyPreferenceOrigin(origin)}.` : "";
         const evidence = advanced ? ` [${origin}]` : "";
-        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing} Enter confirms; Esc cancels.`, this.secrets);
+        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing}`, this.secrets);
         panel.error = undefined;
         return true;
       } catch (error) {

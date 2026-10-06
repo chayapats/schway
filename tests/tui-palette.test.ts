@@ -116,7 +116,7 @@ test("availability reflects the composer the palette returns to, with approval o
   expect(keyboardGuideAvailability({ ...idle, details: false }).details).toEqual({ available: false, reason: "No details to show · Esc back" });
   const approval = keyboardGuideAvailability({ ...idle, running: true, toolApproval: true });
   for (const id of ["newline", "inspect-copy", "copy-selection", "approval-mode", "shortcuts", "details", "review"] as const) {
-    expect(approval[id]).toEqual({ available: false, reason: "Approval waiting · Esc review request" });
+    expect(approval[id]).toEqual({ available: false, reason: "Approval waiting · Esc back to request" });
   }
   expect(approval.cancel).toEqual({ available: true });
 });
@@ -206,7 +206,7 @@ test("exact keys find their guidance first and Thai or unmatched searches offer 
   await ui.mockInput.pasteBracketedText(thaiDraft); ui.editor.cursorOffset = 5; await ui.settle();
   for (const [query, label] of [["ctrl+j", "Insert a newline"], ["Shift+Enter", "Insert a newline"], ["shift+tab", "Change approval mode"],
     ["alt+h", "Find keyboard shortcuts"], ["F2", "Inspect details"], ["ctrl+i", "Inspect details"], ["alt+r", "Review changes"],
-    ["ctrl+c", "Copy selected text"], ["esc", "Cancel running work"]] as const) {
+    ["ctrl+c", "Copy selected text"], ["esc", "Stop running work"]] as const) {
     await openPalette(ui, query);
     expect(ui.rows().find(row => !row.startsWith("    ") && !row.startsWith(PALETTE_RUNNING))).toContain(label);
     expect(ui.selected()).toContain(label);
@@ -223,6 +223,31 @@ test("exact keys find their guidance first and Thai or unmatched searches offer 
   ui.mockInput.pressEscape(); await ui.settle();
   expect(ui.editor.plainText).toBe(thaiDraft); expect(ui.editor.cursorOffset).toBe(5);
   expect(ui.submitted).toEqual([]);
+});
+
+test("a short palette names its own Esc verb in the compact status bar: restore in results, back in guidance", async () => {
+  const ui = await setup({ width: 60, height: 12 });
+  await ui.mockInput.pasteBracketedText(thaiDraft); ui.editor.cursorOffset = 5; await ui.settle();
+  const footer = () => ui.captureCharFrame().trimEnd().split("\n").at(-1)!.trim();
+  await openPalette(ui);
+  await ui.mockInput.pasteBracketedText("ภาษาไทยไม่มี"); await ui.settle();
+  expect(ui.rows()).toEqual([PALETTE_NO_MATCHES]);
+  expect(ui.hints.visible).toBe(false);
+  expect(footer()).toBe("Auto · Esc restore");
+  await clearQuery(ui);
+  await ui.mockInput.typeText("newline"); await ui.settle();
+  expect(footer()).toBe("Auto · Esc restore");
+  ui.mockInput.pressEnter(); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Insert a newline");
+  expect(footer()).toBe("Auto · Esc back");
+  // The verbs describe the handlers: back returns to the same results, restore returns the draft.
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.controller.commandHelpOpen).toBe(true); expect(ui.editor.plainText).toBe("newline");
+  expect(footer()).toBe("Auto · Esc restore");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.controller.commandHelpOpen).toBe(false);
+  expect(ui.editor.plainText).toBe(thaiDraft); expect(ui.editor.cursorOffset).toBe(5);
+  expect(footer()).toBe("Auto · Enter send");
 });
 
 test("commands preview with arguments and Enter inserts without executing; deletion reaches its path only after ordinary Enter", async () => {
@@ -368,7 +393,7 @@ for (const noColor of [false, true]) test(`50-column palette keeps markers, type
   expect(ui.rows().at(-1)).toBe("! Nothing running · Enter send a task");
   ui.mockInput.pressEnter(); await ui.settle();
   const frame = ui.captureCharFrame();
-  expect(frame).toContain("Cancel running work · Esc or Ctrl+C");
+  expect(frame).toContain("Stop running work · Esc or Ctrl+C");
   expect(frame).toContain("! Nothing running · Enter send a task");
 });
 
@@ -387,7 +412,7 @@ for (const preview of [false, true]) test(`an approval arriving behind help neve
   expect(ui.controller.commandHelpOpen).toBe(true);
   if (!preview) expect(ui.rows()[0]).toBe(PALETTE_APPROVAL);
   else expect(ui.editor.plainText).toBe("/theme ");
-  expect(ui.hints.plainText).toBe("Esc close to review request");
+  expect(ui.hints.plainText).toBe("Esc back to request");
   // Enter on the command, and repeated Enter, neither insert nor decide the approval.
   ui.mockInput.pressEnter(); await ui.settle(); ui.mockInput.pressEnter(); await ui.settle();
   expect(ui.controller.commandHelpOpen).toBe(true);
@@ -407,3 +432,12 @@ for (const preview of [false, true]) test(`an approval arriving behind help neve
   expect(ui.editor.plainText).toBe(thaiDraft); expect(ui.editor.cursorOffset).toBe(5);
   expect(ui.submitted).toEqual([]); expect(ui.builtins).toEqual([]);
 }));
+
+test("slash completion without matches names Esc keep editing and Esc keeps the typed draft", async () => {
+  const ui = await setup();
+  for (const text of ["/", "/zzqx"]) { ui.editor.setText(text); await ui.settle(); await ui.settle(); }
+  expect(ui.rows()).toEqual(["No matches · Esc keep editing"]);
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.editor.plainText).toBe("/zzqx");
+  expect(ui.picker.visible).toBe(false);
+});

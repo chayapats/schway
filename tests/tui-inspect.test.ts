@@ -85,7 +85,7 @@ test("help distinguishes entering inspection, copying code and toggling tool res
   expect(help).toContain("Up/Down or Tab selects a block or result");
   expect(help).toContain("C copies the highlighted item");
   expect(help).toContain("Enter copies selected code or toggles an expandable tool result");
-  expect(help).toContain("Esc returns to the draft");
+  expect(help).toContain("Esc goes back to the draft");
 });
 
 test("model args accept known, unknown, and provider-qualified ids", () => {

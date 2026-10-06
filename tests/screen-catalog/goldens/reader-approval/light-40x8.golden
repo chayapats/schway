@@ -6,7 +6,7 @@ variant light-40x8
 size 40x8
 cursor 1 1 hidden
 == text
- ◌ Approval · Esc review request
+ ◌ Approval · Esc back to request
  Read code · ts          Lines 1–5 of 5
  1  export function summarize(rows: re›
  2    const label = 'สรุปยอดขาย 🧪 ' + ›
@@ -16,8 +16,8 @@ cursor 1 1 hidden
  Ask · Ctrl+C cancel
 == styles
 00 0-1 #ffffff #f7f7f4 -
-00 1-32 #7a5000 #f7f7f4 b
-00 32-40 #ffffff #f7f7f4 -
+00 1-33 #7a5000 #f7f7f4 b
+00 33-40 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
 01 1-15 #1d232c #f7f7f4 b
 01 15-39 #545e6c #f7f7f4 -

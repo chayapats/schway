@@ -34,7 +34,7 @@ cursor 20 27 visible
       แล้วสรุปเป็นภาษาไทย
       สั้น ๆ สามบรรทัด
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Receiving 4.0s   scripted/scripted-model                                                   Esc stops  ctx ~7
+ ◆ Auto  ⠋ Receiving 4.0s   scripted/scripted-model                                                    Esc stop  ctx ~7
   Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -121,9 +121,9 @@ cursor 20 27 visible
 28 8-26 #ffffff #0a5894 b
 28 26-27 #545e6c #ecedea -
 28 27-52 #1d232c #e1e3df -
-28 52-102 #545e6c #ecedea -
-28 102-105 #1d232c #c9cdd2 b
-28 105-119 #545e6c #ecedea -
+28 52-103 #545e6c #ecedea -
+28 103-106 #1d232c #c9cdd2 b
+28 106-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-27 #545e6c #f7f7f4 -

@@ -249,7 +249,7 @@ export function paintReader(input: {
   const result = input.search?.query ? document.view.search(input.search.query) : { matches: [], limited: false };
   const selected = input.search?.query ? input.search.selected : -1;
   if (layout.status.includes("approval")) {
-    const approval = width("◌ Approval waiting · Esc review request") <= columns ? "◌ Approval waiting · Esc review request" : "◌ Approval · Esc review request";
+    const approval = width("◌ Approval waiting · Esc back to request") <= columns ? "◌ Approval waiting · Esc back to request" : "◌ Approval · Esc back to request";
     lines.push([bold(fg(theme.warning)(fitLine(approval, columns)))]);
   }
   if (layout.title) {
@@ -285,11 +285,13 @@ export function paintReader(input: {
     const query = fitLine(input.search?.query ?? "", Math.max(1, Math.floor(columns / 2)));
     // While an approval waits, Esc hands input to it instead of restoring, as the header and hint row say.
     const approval = layout.status.includes("approval");
-    const escape = approval ? "Esc review request" : "Esc restore";
-    const text = !input.search?.query ? `Find in this block · Type a query · ${approval ? escape : "Esc back"}`
-      : result.matches.length ? `Find: ${query} · ${selected + 1}/${result.matches.length}${result.limited ? "+" : ""} · ↑↓ next · Enter keep · ${escape}`
-      : `Find: ${query} · No matches · ${escape}`;
-    lines.push([fg(theme.accent)(fitLine(text, columns))]);
+    const escape = approval ? "Esc back to request" : "Esc restore";
+    const count = `${selected + 1}/${result.matches.length}${result.limited ? "+" : ""}`;
+    // Narrow rows drop keys the hint row repeats, then the query, so the Esc phrase is never clipped.
+    const choices = !input.search?.query ? [`Find in this block · Type a query · ${escape}`, `Type a query · ${escape}`]
+      : result.matches.length ? [`Find: ${query} · ${count} · ↑↓ next · Enter keep · ${escape}`, `Find: ${query} · ${count} · Enter keep · ${escape}`, `Find: ${query} · ${count} · ${escape}`, `${count} · ${escape}`]
+      : [`Find: ${query} · No matches · ${escape}`, `No matches · ${escape}`, `None · ${escape}`];
+    lines.push([fg(theme.accent)(fitLine(choices.find(choice => width(choice) <= columns) ?? escape, columns))]);
   }
   return new StyledText(lines.flatMap((chunks, index) => index ? [fg(theme.muted)("\n"), ...chunks] : chunks));
 }

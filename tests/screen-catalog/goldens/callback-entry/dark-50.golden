@@ -32,10 +32,10 @@ cursor 1 1 hidden
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Browser callback ·
      •••••••••••••••••••••••••••••••••••••••• ·
-     Enter exchanges · Esc cancels
+     Enter sign in · Esc cancel
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/scripted-m…    ctx ~0
- Enter confirm · Esc back
+ Enter sign in · Esc cancel
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -87,8 +87,8 @@ cursor 1 1 hidden
 25 49-50 #ffffff #0e1117 -
 26 0-1 #ffffff #0e1117 -
 26 1-5 #ffffff #161b24 -
-26 5-34 #e6eaf0 #161b24 -
-26 34-49 #ffffff #161b24 -
+26 5-31 #e6eaf0 #161b24 -
+26 31-49 #ffffff #161b24 -
 26 49-50 #ffffff #0e1117 -
 27 0-1 #ffffff #0e1117 -
 27 1-49 #161b24 #0e1117 -
@@ -105,5 +105,5 @@ cursor 1 1 hidden
 29 1-6 #e6eaf0 #293140 b
 29 6-17 #8b95a7 #0e1117 -
 29 17-20 #e6eaf0 #293140 b
-29 20-25 #8b95a7 #0e1117 -
-29 25-50 #ffffff #0e1117 -
+29 20-27 #8b95a7 #0e1117 -
+29 27-50 #ffffff #0e1117 -

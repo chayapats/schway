@@ -23,7 +23,7 @@ cursor 6 27 visible
  Saved here: Inherited
  Effective now: Provider default (medium)
 
- Approval modes · Esc back to change
+ Approval modes · Shift+Tab change in composer
  Auto: Run tools without asking.
  Ask: Ask before tools that need approval.
  Read-only: Allow read-only tools.
@@ -88,8 +88,8 @@ cursor 6 27 visible
 15 41-50 #ffffff #0e1117 -
 16 0-50 #ffffff #0e1117 -
 17 0-1 #ffffff #0e1117 -
-17 1-36 #e6eaf0 #0e1117 -
-17 36-50 #ffffff #0e1117 -
+17 1-46 #e6eaf0 #0e1117 -
+17 46-50 #ffffff #0e1117 -
 18 0-1 #ffffff #0e1117 -
 18 1-32 #e6eaf0 #0e1117 -
 18 32-50 #ffffff #0e1117 -

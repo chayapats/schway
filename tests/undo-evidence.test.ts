@@ -394,7 +394,7 @@ test("a shell-only change lists its path read-only with a reachable review and l
       const before = await ui.state();
       await ui.undo();
       const frame = ui.captureCharFrame();
-      expect(frame).toContain("No saved undo for these changes · Alt+R review · Esc close");
+      expect(frame).toContain("No saved undo for these changes · Alt+R review · Esc back");
       expect(frame).toContain("generated.txt"); expect(frame).toContain("turn 1 · no saved undo");
       expect(frame).toContain("Seen during turn 1 · no saved undo");
       expect(frame).not.toContain("Enter undo"); expect(frame).not.toContain("Nothing to undo"); expect(frame).not.toContain("changed by shell");
@@ -482,7 +482,7 @@ test("when every file conflicts the remaining paths and per-file reasons stay vi
       await ui.undo();
       expect(ui.controller.snapshot().undoPreview).toMatchObject({ readOnlyStatus: "Nothing to undo in turn 1",
         files: [{ path: "a.ts", status: "changed since · skip" }, { path: "gen.txt", status: "no saved undo" }] });
-      expect(ui.captureCharFrame()).toContain("Nothing to undo in turn 1 · Alt+R review · Esc close");
+      expect(ui.captureCharFrame()).toContain("Nothing to undo in turn 1 · Alt+R review · Esc back");
       ui.mockInput.pressEnter(); await ui.settle(); ui.mockInput.pressEscape(); await ui.settle();
       expect(ui.records()).toEqual([]); expect(await readFile(join(ui.work, "a.ts"), "utf8")).toBe("external");
       // A conflict found only at apply time keeps the result panel and its remaining context.
@@ -795,7 +795,7 @@ test("when nothing is reverted, an unavailable copy keeps the panel and never cl
       expect(await c.undoCommand("")).toBe(true);
       await writeFile(join(f.work, "a.txt"), "raced");
       await c.applyUndo();
-      expect(c.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo in turn 1 · Esc close");
+      expect(c.snapshot().transcript.at(-1)?.text).toBe("Nothing to undo in turn 1 · Esc back");
       expect(c.snapshot().undoPreview).toMatchObject({ result: true, files: [{ path: "a.txt", status: "changed since · skip" }, { path: "b.txt", status: "undo data incomplete · skip" }] });
       expect(f.session.items.some(item => item.type === "turn_undo")).toBe(false);
       expect(await readFile(join(f.work, "a.txt"), "utf8")).toBe("raced");
