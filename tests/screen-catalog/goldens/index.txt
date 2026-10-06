@@ -29,6 +29,8 @@ thinking-controls
 command-palette
 command-palette-groups
 command-palette-query
+command-palette-exact
+command-palette-inserted
 help-palette-actions
 help-palette-disabled
 help-palette-guidance

@@ -1,0 +1,116 @@
+schway-screen 1
+screen command-palette-exact
+title Command palette exact match
+description A draft that already matches the highlighted command says Enter sends it.
+variant light-80
+size 80x30
+cursor 15 27 visible
+== text
+ ⚡ schway  ~/demo
+
+
+  scripted/scripted-model · scripted API key
+
+  Type a task · Enter sends
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   ›   /session        Session and workspace details
+       /sessions       Open saved work
+       /delete-session Delete a saved session · deletes
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › /session
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                               ctx ~0
+  ↑↓ select · Enter send · Esc keep editing
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-18 #545e6c #ecedea -
+00 18-80 #ffffff #ecedea -
+01 0-80 #ffffff #f7f7f4 -
+02 0-80 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-25 #1d232c #f7f7f4 b
+03 25-44 #545e6c #f7f7f4 -
+03 44-80 #ffffff #f7f7f4 -
+04 0-80 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-16 #545e6c #f7f7f4 -
+05 16-21 #1d232c #caced3 b
+05 21-27 #545e6c #f7f7f4 -
+05 27-80 #ffffff #f7f7f4 -
+06 0-80 #ffffff #f7f7f4 -
+07 0-80 #ffffff #f7f7f4 -
+08 0-80 #ffffff #f7f7f4 -
+09 0-80 #ffffff #f7f7f4 -
+10 0-80 #ffffff #f7f7f4 -
+11 0-80 #ffffff #f7f7f4 -
+12 0-80 #ffffff #f7f7f4 -
+13 0-80 #ffffff #f7f7f4 -
+14 0-80 #ffffff #f7f7f4 -
+15 0-80 #ffffff #f7f7f4 -
+16 0-80 #ffffff #f7f7f4 -
+17 0-80 #ffffff #f7f7f4 -
+18 0-80 #ffffff #f7f7f4 -
+19 0-80 #ffffff #f7f7f4 -
+20 0-80 #ffffff #f7f7f4 -
+21 0-80 #ffffff #f7f7f4 -
+22 0-2 #ffffff #f7f7f4 -
+22 2-3 #ffffff #e1e3df -
+22 3-52 #1d232c #c7d2d6 -
+22 52-78 #ffffff #e1e3df -
+22 78-80 #ffffff #f7f7f4 -
+23 0-2 #ffffff #f7f7f4 -
+23 2-3 #ffffff #e1e3df -
+23 3-38 #545e6c #e1e3df -
+23 38-78 #ffffff #e1e3df -
+23 78-80 #ffffff #f7f7f4 -
+24 0-2 #ffffff #f7f7f4 -
+24 2-3 #ffffff #e1e3df -
+24 3-45 #7a5000 #e1e3df -
+24 45-55 #675736 #e1e3df -
+24 55-78 #ffffff #e1e3df -
+24 78-80 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-78 #ecedea #f7f7f4 -
+25 78-80 #ffffff #f7f7f4 -
+26 0-2 #ffffff #f7f7f4 -
+26 2-6 #0a5894 #ecedea -
+26 6-14 #1d232c #ecedea -
+26 14-78 #ffffff #ecedea -
+26 78-80 #ffffff #f7f7f4 -
+27 0-2 #ffffff #f7f7f4 -
+27 2-78 #ecedea #f7f7f4 -
+27 78-80 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-79 #545e6c #ecedea -
+28 79-80 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-4 #1d232c #caced3 b
+29 4-14 #545e6c #f7f7f4 -
+29 14-19 #1d232c #caced3 b
+29 19-27 #545e6c #f7f7f4 -
+29 27-30 #1d232c #caced3 b
+29 30-43 #545e6c #f7f7f4 -
+29 43-80 #ffffff #f7f7f4 -
