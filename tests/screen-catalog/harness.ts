@@ -7,12 +7,12 @@ import { historyExcerpt } from "../../src/history/sanitize.ts";
 import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
 import { createTestRenderer } from "@opentui/core/testing";
-import type { TextareaRenderable } from "@opentui/core";
+import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core";
 import { mkdtemp, mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TuiController, type TuiSnapshot, type TuiControllerOptions } from "../../src/tui/controller.ts";
-import { createConversationView } from "../../src/tui/view.ts";
+import { createConversationView, PANEL_MODES, type PanelMode } from "../../src/tui/view.ts";
 import { dispatchEditorInput } from "../../src/tui/commands.ts";
 import { createContextManager } from "../../src/context/manager.ts";
 import { createSession } from "../../src/session/session.ts";
@@ -34,6 +34,43 @@ import { serializeScreen } from "./format.ts";
 export const CATALOG_VIEW_NOW_MS = 1_000_000;
 /** Real input, controller and renderer owned by one disposable catalog variant. */
 export type ScreenHarness = Awaited<ReturnType<typeof buildScreen>>;
+/** Fixture API key typed into masked entry; no golden may contain any part of it. */
+export const CATALOG_API_KEY = "sk-catalog-fixture-4f7a9c2e1b";
+/** Fixture browser callback pasted into masked entry; no golden may contain any part of it. */
+export const CATALOG_CALLBACK = "http://localhost:1455/auth/callback?code=catalog-fixture-code&state=catalog-fixture-state";
+/** Fixed time stamped on fixture session records so pickers show only the catalog clock. */
+export const CATALOG_TIME = "2026-01-15T09:30:00.000Z";
+/** Named panel sub-states the catalog must capture in addition to every `PANEL_MODES` entry. */
+export const CATALOG_SUB_STATES: readonly { name: string; matches(mode: PanelMode | "", snapshot: TuiSnapshot, ui: ScreenHarness): boolean }[] = [
+  { name: "tool approval with reason entry", matches: (mode, s) => mode === "tool-approval" && !!s.toolApproval?.enteringReason },
+  { name: "tool approval with an overflowing diff", matches: (mode, s, ui) => {
+    const scroll = ui.renderer.root.findDescendantById("tool-approval-scroll") as ScrollBoxRenderable | undefined;
+    return mode === "tool-approval" && !!s.toolApproval?.diff && !!scroll && scroll.scrollHeight > scroll.viewport.height;
+  } },
+  { name: "branch tree with a branch selected", matches: (mode, s) => mode === "tree" && !!s.branchTree?.selectedBranchId },
+  { name: "branch tree after Tab switches to a new fork", matches: (mode, s) => mode === "tree" && !!s.branchTree && !s.branchTree.selectedBranchId },
+];
+/** Panel mode and named sub-states each screen showed at capture, across every rendered variant. */
+export const catalogCaptures = new Map<string, { modes: Set<PanelMode | "">; subStates: Set<string> }>();
+/** Name every panel mode and required sub-state that no listed screen showed at capture. */
+export function panelCoverageGaps(screenIds: readonly string[], captures: ReadonlyMap<string, { modes: ReadonlySet<PanelMode | "">; subStates: ReadonlySet<string> }>): string[] {
+  const seen = screenIds.flatMap(id => captures.get(id) ? [captures.get(id)!] : []);
+  return [
+    ...PANEL_MODES.filter(mode => !seen.some(capture => capture.modes.has(mode))).map(mode => `panel mode "${mode}"`),
+    ...CATALOG_SUB_STATES.filter(state => !seen.some(capture => capture.subStates.has(state.name))).map(state => `sub-state "${state.name}"`),
+  ];
+}
+/** Write one version-4 session file whose IDs and commit times are fixed, for pickers and resume. */
+async function writeFixtureSession(directory: string, id: string, root: string, operations: readonly Record<string, unknown>[]) {
+  await mkdir(directory, { recursive: true });
+  const header = { type: "session", version: 4, id, createdAt: CATALOG_TIME, workspaceRoot: root, launchCwd: root, extraRoots: [] };
+  await writeFile(join(directory, `${id}.jsonl`), [header, ...operations].map(record => JSON.stringify(record)).join("\n") + "\n");
+}
+/** A complete user turn appended to `branchId` after `parentId`, committed at the catalog time. */
+const fixtureTurn = (branchId: string, parentId: string, id: string, task: string, answer: string) => ({ type: "branch_append", version: 1, branchId, committedAt: CATALOG_TIME, entries: [
+  { parentId, item: { type: "user", id: `${id}-user`, content: [{ type: "text", text: task }] } },
+  { parentId: `${id}-user`, item: { type: "assistant", id: `${id}-answer`, content: [{ type: "text", text: answer }] } },
+] });
 const stopped = (signal?: AbortSignal) => signal?.aborted ? Promise.resolve() : new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
 
 /** Build an isolated final-size renderer and scripted dependencies for one screen. */
@@ -47,7 +84,10 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const undoLimit = ["undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable"].includes(screen.id);
   const resumedReview = screen.id.startsWith("resumed-review");
   const historyScreen = screen.id.startsWith("history-");
-  const disk = screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "approval-edit", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
+  // Screens that run file-touching commands (/sessions, /resume, /login and the rest) always use a temporary home.
+  const commandFiles = ["api-key-entry", "callback-entry", "session-picker", "branch-tree-continue", "branch-tree-fork", "command-routing"].includes(screen.id);
+  const askEdit = screen.id === "approval-edit" || screen.id === "approval-deny-reason" || screen.id === "approval-diff-overflow";
+  const disk = commandFiles || askEdit || screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -163,12 +203,14 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       { toolCalls: [{ id: "history-wait", name: "bash", arguments: { command: "printf 'Ready to stop\\n'; sleep 30", timeout: 5_000 } }] },
     ];
   }
-  if (screen.id === "approval-command" || screen.id === "approval-edit") {
+  if (screen.id === "approval-command" || askEdit) {
     tools = createToolRegistry([editTool, bashTool]);
     await writeFile(join(root, "clamp.ts"), "export function clamp(n: number, lo: number, hi: number) {\n  return Math.max(lo, n);\n}\n");
+    // The overflow edit's diff is taller than the approval panel at 30 rows.
+    const newText = screen.id === "approval-diff-overflow" ? Array.from({ length: 28 }, (_, i) => `  const bound${i + 1} = Math.min(hi, Math.max(lo, n + ${i}));`).join("\n") + "\n  return bound1;" : "  return Math.min(hi, Math.max(lo, n));";
     responses = [{ toolCalls: [screen.id === "approval-command"
       ? { id: "approval-command", name: "bash", arguments: { command: "bun test --filter clamp" } }
-      : { id: "approval-edit", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "  return Math.max(lo, n);", newText: "  return Math.min(hi, Math.max(lo, n));" }] } }] }];
+      : { id: screen.id, name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "  return Math.max(lo, n);", newText }] } }] }];
   }
   if (screen.id === "reader-approval") {
     tools = createToolRegistry([bashTool]);
@@ -201,7 +243,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "details-recovery" || screen.id === "resumed-review-off") options.changeTracking = "off";
   // Exercise real diagnostic redaction before layout so temporary-root bytes never enter goldens.
   if (screen.id === "details-review" || resumedReview) options.secrets = [temp!];
-  if (screen.id === "approval-command" || screen.id === "approval-edit") options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });
+  if (screen.id === "approval-command" || askEdit) options.configEditor = new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(home, "config.json"), project: join(root, "config.json") });
+  if (screen.id === "command-routing") options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (screen.id === "approval-modes-help") options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   if (picker || unconnectedPicker) {
     options.configEditor = new ConfigEditor(picker ? { cli: { provider: "openai", model: "gpt-6-astra", openaiAuth: "codex", baseUrl: "http://localhost:8787/v1", auth: "none" } } : {},
@@ -250,8 +293,29 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     undoLock = new Database(join(home, ".schway", "undo.lock"));
     undoLock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
   }
-  const deletionContext = screen.id === "delete-session-busy" ? { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionDirectory!, settings: () => new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") }).settings, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } } : undefined;
-  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets: options.secrets ?? [], workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {}, submit: (value, accepted) => dispatchEditorInput(value, controller, (command, accepted) => command.name === "login" ? controller.login(command.args, accepted) : command.name === "undo" ? controller.undoCommand(command.args) : command.name === "history" ? controller.historyCommand(command.args) : command.name === "delete-session" && deletionContext ? handleSlashCommand(command.name, command.args, deletionContext) : Promise.resolve(false), accepted) });
+  if (screen.id === "session-picker") {
+    // Fixed IDs, titles and commit times keep picker rows free of UUIDs and wall-clock timestamps.
+    for (const [id, task, answer] of [["clamp-fix", "Fix the clamp upper bound", "Fixed clamp so it respects the upper bound."], ["config-loader", "Explain the config loader", "It merges defaults, user and project settings."], ["readme-summary", "Summarize the README", "Schway is a terminal coding agent."]] as const)
+      await writeFixtureSession(sessionsDirectory(home), id, root, [fixtureTurn("main", id, `${id}-1`, task, answer)]);
+  }
+  if (screen.id.startsWith("branch-tree-")) {
+    // Two named forks from the first complete turn, with the unnamed main branch active again.
+    await writeFixtureSession(sessionsDirectory(home), "branch-demo", root, [
+      fixtureTurn("main", "branch-demo", "first", "Fix the clamp upper bound", "Fixed clamp so it respects the upper bound."),
+      fixtureTurn("main", "first-answer", "second", "Add a return type", "Added the return type."),
+      { type: "branch_fork", version: 1, branchId: "inclusive", headId: "first-answer", name: "Inclusive bounds" },
+      fixtureTurn("inclusive", "first-answer", "inclusive", "Make both bounds inclusive", "Both bounds are inclusive."),
+      { type: "branch_fork", version: 1, branchId: "exclusive", headId: "first-answer", name: "Exclusive upper bound" },
+      fixtureTurn("exclusive", "first-answer", "exclusive", "Make the upper bound exclusive", "The upper bound is exclusive."),
+      { type: "branch_select", version: 1, branchId: "main", settlements: [] },
+    ]);
+  }
+  // One production command context per screen, as the interactive app builds it after startup (skills use the live context manager), minus model creation and runtime keys.
+  const secrets = options.secrets ?? [];
+  const catalogConfig = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
+  const commandContext = { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root, manager: controller.activeContextManager() }, sessionsDir: sessionsDirectory(home), settings: () => catalogConfig.settings, env: {}, secrets, finishQuit() {}, stderr: { write() {} } };
+  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets, workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {},
+    submit: (value, accepted) => dispatchEditorInput(value, controller, (command, onAccepted) => handleSlashCommand(command.name, command.args, commandContext, command.raw, onAccepted), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();
@@ -261,7 +325,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     }
   };
   await settle();
-  return { ...terminal, controller, view, session, sessionDirectory, secrets: options.secrets ?? [], draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
+  return { ...terminal, controller, view, session, sessionDirectory, secrets, draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
     dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
   };
@@ -271,7 +335,12 @@ export async function renderScreen(screen: Screen, variant: Variant): Promise<st
   const ui = await buildScreen(screen, variant);
   try {
     await screen.drive(ui); await ui.waitFor(snapshot => screen.ready(snapshot, ui)); ui.advance(); await ui.settle();
-    if (!screen.ready(ui.controller.snapshot(), ui)) throw new Error(`Screen ${screen.id} left its ready state before capture\n${ui.captureCharFrame()}`);
+    const snapshot = ui.controller.snapshot();
+    if (!screen.ready(snapshot, ui)) throw new Error(`Screen ${screen.id} left its ready state before capture\n${ui.captureCharFrame()}`);
+    const mode = ui.view.panelMode(), capture = catalogCaptures.get(screen.id) ?? { modes: new Set(), subStates: new Set() };
+    capture.modes.add(mode);
+    for (const state of CATALOG_SUB_STATES) if (state.matches(mode, snapshot, ui)) capture.subStates.add(state.name);
+    catalogCaptures.set(screen.id, capture);
     const cursor = ui.renderer.getCursorState();
     return serializeScreen(ui.captureSpans(), { screen: screen.id, title: screen.title, description: screen.description, variant: variant.id, cursor });
   } finally { await ui.dispose(); }

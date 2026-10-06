@@ -7,11 +7,23 @@ Run `bun test tests/screen-catalog.test.ts` to compare every screen against comm
 ## Add or update a screen
 
 1. Edit the ordered `SCREENS` list in `tests/screen-catalog/screens.ts`. Supply a sentence-case title, one-sentence description, input-driven `drive` function and controller-state `ready` predicate. Update the explicit screen-order assertion in the runner when adding an ID.
-2. Add scripted dependencies in `harness.ts` when needed. Each variant gets a fresh renderer at its final dimensions. Prefer mock keyboard input; use public controller methods for states without a keyboard route.
+2. Add scripted dependencies in `harness.ts` when needed. Each variant gets a fresh renderer at its final dimensions. Prefer mock keyboard input and typed slash commands, such as Alt+S, `/sessions`, `/resume <id>`, `/branch tree` and `/login`. Call a public controller method only for a state with no keyboard route, and say so in a comment.
 3. Run `bun run screens:update`. This writes the goldens and ordered index, and prunes obsolete files/directories. Normal test runs never update them.
 4. Review and commit the implementation and goldens together.
 
-Every screen has dark/light variants at 120, 80 and 50 columns, normally 30 rows. `noColor: true` adds `nocolor-dark-80`; `noColorWidths: true` covers all three widths without color. The no-color screen uses no-color variants throughout. Narrow layout also has 40-column, 20-row variants. Stopped streaming, stopped tool and failed turn scenes include 40-column, 20-row variants in both themes and without color, so normal stops remain distinct from provider failures. Command and help palette screens add 40-column variants in both themes and without color, where narrow hint rows must keep their Esc exit.
+## Command routing and isolated files
+
+The harness submits typed input through the production `dispatchEditorInput` and `handleSlashCommand`, so every built-in command and every skill invocation (from the command's raw text) runs its real handler. Each screen builds one command context from its own home and workspace root: the live context manager as skill scope, `sessionsDirectory(home)`, settings from a `ConfigEditor` scoped to that home and workspace, an empty environment, the harness's redaction secrets, a no-op quit and a discarding stderr. It never creates models or passes runtime API keys. The runner's fetch guard rejects network access, credentials live in a fake store, and no route opens a browser.
+
+Screens without a temporary home use the placeholder paths `/home/test` and `/project`. A screen or test that runs a command which reads or writes session, skill, config or credential files (`/sessions`, `/resume`, `/new`, `/delete-session`, `/skills`, `/config`, `/login` and `/logout`) must be in the harness's temporary-home set (`disk` in `buildScreen`). Fixture sessions use fixed, non-UUID session, entry and branch IDs, and every `committedAt` is the catalog time, so goldens contain no random IDs or wall-clock timestamps.
+
+## Panel coverage
+
+`src/tui/view.ts` exports `PANEL_MODES`, the closed list of panels the view can show in place of the conversation body, and its `PanelMode` type. A panel string outside the list fails `bun run typecheck`. At capture the runner records each screen's `panelMode()` and the named sub-states in `CATALOG_SUB_STATES` (`harness.ts`): approval with reason entry, approval with an overflowing diff, and the branch tree on an existing branch and after Tab switches to a new fork. The coverage test fails and names each mode or sub-state that no screen shows. A focused run renders the screens it skipped once, so the gate always checks the whole catalog. A new panel needs its `PANEL_MODES` entry and a screen that reaches it.
+
+## Variants
+
+Every screen has dark/light variants at 120, 80 and 50 columns, normally 30 rows. `noColor: true` adds `nocolor-dark-80`; `noColorWidths: true` covers all three widths without color. The no-color screen uses no-color variants throughout. Narrow layout also has 40-column, 20-row variants. Stopped streaming, stopped tool and failed turn scenes include 40-column, 20-row variants in both themes and without color, so normal stops remain distinct from provider failures. Command and help palette screens add 40-column variants in both themes and without color, where narrow hint rows must keep their Esc exit. The session picker and branch-tree screens add 40-column, 20-row variants in both themes and without color, so the 40/50-column Esc invariant in `tests/journeys-241.test.ts` covers them. `approval-command` and `approval-diff-overflow` add 40- and 50-column, 8-row variants in both themes and without color. Masked credential and callback screens type only part of a fixture value; a runner test scans every golden for the fixture values and for distinctive prefixes and suffixes of the typed text, and requires each masked row to be exactly one bullet per typed character.
 
 ## Golden format
 

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TuiSnapshot } from "../../src/tui/controller.ts";
-import type { ScreenHarness } from "./harness.ts";
+import { CATALOG_API_KEY, CATALOG_CALLBACK, type ScreenHarness } from "./harness.ts";
 
 /** One catalog state reached through input and guarded by observable controller state. */
 export interface Screen { id: string; title: string; description: string; noColor?: boolean; noColorWidths?: boolean; rows?: number; elapsed?: number; drive(ui: ScreenHarness): Promise<void>; ready(snapshot: TuiSnapshot, ui: ScreenHarness): boolean }
@@ -126,6 +126,18 @@ const openHistory = async (ui: ScreenHarness, downs = 0, open = false) => {
   for (let index = 0; index < downs; index++) { ui.mockInput.pressArrow("down"); await ui.settle(); }
   if (open) { ui.mockInput.pressEnter(); await ui.settle(); }
 };
+/** Open the sign-in chooser with /login and move to one row, optionally into its more-options level. */
+const loginChoice = async (ui: ScreenHarness, id: string, more = false) => {
+  await enter(ui, "/login"); await ui.waitFor(s => !!s.loginChooser);
+  if (more) { ui.mockInput.pressTab(); await ui.waitFor(s => s.loginChooser?.level !== "main"); }
+  while (ui.controller.snapshot().loginChooser?.selectedId !== id) { ui.mockInput.pressArrow("down"); await ui.settle(); }
+  ui.mockInput.pressEnter();
+};
+/** Load the fixture branch session with /resume, then open its branch tree with /branch tree. */
+const openBranchTree = async (ui: ScreenHarness) => {
+  await enter(ui, "/resume branch-demo"); await ui.waitFor(s => s.sessionId === "branch-demo" && s.status === "idle");
+  await enter(ui, "/branch tree"); await ui.waitFor(s => !!s.branchTree);
+};
 const historyReady = (view: "list" | "detail", selected = 0) => (s: TuiSnapshot) => s.history?.loading === false && s.history.view === view && s.history.selected === selected;
 /** Ordered design catalog; additions deliberately update the index and its assertion. */
 export const SCREENS: readonly Screen[] = [
@@ -140,9 +152,20 @@ export const SCREENS: readonly Screen[] = [
   { id: "read-only-search-no-matches", title: "Read-only search, no matches", description: "An unmatched query retains the mode and Escape action at safety widths.", noColor: true, drive: ui => search(ui, "absent"), ready: (s, ui) => s.approvalMode === "read-only" && ui.editor.plainText === "absent" },
   { id: "approval-command", title: "Approve a command", description: "A mutating command waits for an interactive approval choice.", noColor: true, drive: ui => enter(ui, "Test the clamp fix"), ready: s => s.toolApproval?.content === "bun test --filter clamp" },
   { id: "approval-edit", title: "Approve an edit", description: "The exact clamp replacement is previewed before approval.", noColor: true, drive: ui => enter(ui, "Fix the clamp upper bound"), ready: s => !!s.toolApproval?.diff },
+  { id: "approval-deny-reason", title: "Deny with a reason", description: "Choosing Deny with reason reopens the editor for a reason the agent will see.", noColor: true, drive: async ui => {
+    await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(s => !!s.toolApproval?.diff); await ui.settle();
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); await ui.waitFor(s => s.toolApproval?.selected === 2); ui.mockInput.pressEnter();
+  }, ready: (s, ui) => !!s.toolApproval?.enteringReason && ui.editor.plainText === "" },
+  { id: "approval-diff-overflow", title: "Approve a long edit", description: "An edit diff taller than the approval panel scrolls above the fixed approval choices.", drive: ui => enter(ui, "Bound every clamp step"), ready: s => (s.toolApproval?.diff?.added ?? 0) > 20 },
   { id: "sign-in-chooser", title: "Sign-in chooser", description: "The connection chooser groups subscriptions, API keys and a custom endpoint.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); }, ready: s => !!s.loginChooser },
   { id: "chatgpt-more-options", title: "ChatGPT more options", description: "Device approval and a pasted callback are alternate ChatGPT methods.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressTab(); }, ready: s => s.loginChooser?.level === "chatgpt" },
   { id: "grok-more-options", title: "Grok more options", description: "Device code is the alternate Grok method.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "grok") ui.mockInput.pressArrow("down"); ui.mockInput.pressTab(); }, ready: s => s.loginChooser?.level === "grok" },
+  { id: "api-key-entry", title: "API key entry", description: "An API key typed after /login shows only masked characters.", drive: async ui => {
+    await loginChoice(ui, "openai"); await ui.waitFor(s => !!s.credentialEntry); await ui.mockInput.typeText(CATALOG_API_KEY.slice(0, 14));
+  }, ready: s => s.credentialEntry?.masked.length === 14 },
+  { id: "callback-entry", title: "Browser callback entry", description: "A pasted ChatGPT browser callback shows only masked characters.", drive: async ui => {
+    await loginChoice(ui, "chatgpt-callback", true); await ui.waitFor(s => !!s.loginCallbackEntry); await ui.mockInput.pasteBracketedText(CATALOG_CALLBACK.slice(0, 40));
+  }, ready: s => s.loginCallbackEntry?.masked.length === 40 },
   { id: "endpoint-url-empty", title: "Endpoint URL", description: "A custom endpoint starts with an ephemeral, unmasked URL field.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); }, ready: s => !!s.endpointUrlEntry && !s.endpointUrlEntry.value },
   { id: "endpoint-url-error", title: "Endpoint URL validation", description: "A malformed URL stays in the field with a corrective action.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await ui.settle(); await ui.mockInput.typeText("localhost:8787"); ui.mockInput.pressEnter(); }, ready: s => !!s.endpointUrlEntry?.error },
   { id: "subscription-sign-in", title: "Subscription sign-in", description: "Browser sign-in is waiting for authorization.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter(); }, ready: (s, ui) => s.status === "running" && ui.loginCalled() },
@@ -154,7 +177,7 @@ export const SCREENS: readonly Screen[] = [
     ui.mockInput.pressKey("m", { meta: true }); await ui.waitFor(s => !!s.modelPicker && !s.modelPicker.loading); openDetails(ui);
   }, ready: s => s.modelPicker?.details === true },
   { id: "model-picker-unconnected", title: "Model picker, connect a provider", description: "An empty model list offers one action to connect a provider.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
-  { id: "thinking-controls", title: "Thinking controls", description: "Basic preferences show ordinary settings and supported thinking choices.", noColorWidths: true, drive: async ui => { ui.controller.openPreferences(); ui.controller.movePreference(1); }, ready: s => !!s.preferences },
+  { id: "thinking-controls", title: "Thinking controls", description: "Basic preferences show ordinary settings and supported thinking choices.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("p", { meta: true }); await ui.settle(); ui.mockInput.pressArrow("down"); }, ready: s => !!s.preferences?.selectedIndex },
   { id: "command-palette", title: "Command palette", description: "Typing a slash opens the curated built-in order.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.controller.commandChoices("/").length > 0 && !!ui.renderer.root.findDescendantById("picker")?.visible },
   { id: "command-palette-groups", title: "Command palette groups", description: "Skills and extension owners precede the final destructive command.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/"); await ui.settle(); ui.mockInput.pressArrow("up"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/" && ui.captureCharFrame().includes("Extensions") },
   { id: "command-palette-query", title: "Command palette search", description: "A typed query ranks matching names without group headers.", noColorWidths: true, drive: async ui => { await ui.controller.refreshCommands(); await ui.mockInput.typeText("/ses"); }, ready: (s, ui) => s.status === "idle" && ui.editor.plainText === "/ses" && !!ui.renderer.root.findDescendantById("picker")?.visible },
@@ -286,6 +309,12 @@ export const SCREENS: readonly Screen[] = [
   { id: "history-truncation", title: "Truncated turn history", description: "A turn with more observations than a record keeps shows how many files and commands are listed.", noColor: true, drive: async ui => { await openHistory(ui, 0, true); },
     ready: s => historyReady("detail")(s) && s.history!.turns[0]!.files.truncated },
   { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion names its reason, retry command and details action.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session: Undo store busy ·")) },
+  { id: "session-picker", title: "Session picker", description: "Alt+S lists saved sessions for this workspace with their activity and resume keys.", drive: async ui => { ui.mockInput.pressKey("s", { meta: true }); },
+    ready: s => !!s.sessionPicker && !s.sessionPicker.loading && s.sessionPicker.entries.length === 3 },
+  { id: "branch-tree-continue", title: "Branch tree, continue a branch", description: "The branch tree opens on the active branch, ready to continue it or Tab to a new fork.", drive: openBranchTree,
+    ready: s => !!s.branchTree?.selectedBranchId && s.branchTree.branches.length === 3 },
+  { id: "branch-tree-fork", title: "Branch tree, new fork", description: "Tab in the branch tree switches from continuing a branch to naming a new fork.", drive: async ui => { await openBranchTree(ui); ui.mockInput.pressTab(); },
+    ready: s => !!s.branchTree && !s.branchTree.selectedBranchId },
   { id: "recent-work-resume", title: "Recent work resume", description: "A saved conversation is offered for resumption.", drive: async ui => { await ui.controller.offerRecentSession(ui.sessionDirectory!); }, ready: s => !!s.recentSession },
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },
@@ -313,12 +342,14 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   // Palettes and the sign-in chooser need a width where hint rows drop segments, showing what survives the cut.
   if (screen.id.startsWith("command-palette") || screen.id.startsWith("help-palette") || screen.id === "sign-in-chooser") variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
+  // Session picker and branch tree panels need 40-column variants so the narrow Esc invariant covers them.
+  if (screen.id === "session-picker" || screen.id.startsWith("branch-tree-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("reader-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true), make("dark", 40, 8), make("light", 40, 8));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search", "running-empty", "running-draft"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   if (["details-notice", "details-recovery", "details-unavailable"].includes(screen.id)) variants.push(make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   const shortWidths = screen.id.startsWith("draft-") || screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
-    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command", "running-empty", "running-draft"].includes(screen.id) ? [40, 50] : [];
+    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command", "approval-diff-overflow", "running-empty", "running-draft"].includes(screen.id) ? [40, 50] : [];
   // Running drafts also need a narrow width that still shows the key-hint row.
   if (["running-empty", "running-draft"].includes(screen.id)) variants.push(make("dark", 30, 20), make("light", 30, 20), make("dark", 30, 20, true));
   for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));
