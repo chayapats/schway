@@ -3,6 +3,7 @@ import type { CliAuthMode, CliOpenAIAuth, CliProvider } from "../cli/args.ts";
 import type { CredentialStore } from "../auth/store.ts";
 import type { CodexTokens } from "./providers/codex-subscription.ts";
 import type { ModelCapability } from "./catalog.ts";
+import { bindModelReasoning, resolveReasoningRecord } from "./thinking.ts";
 
 const grokModels = new WeakSet<Model>();
 /** Mark an activated model as subscription-backed without changing its xAI conversation namespace. */
@@ -50,6 +51,17 @@ export async function loadProviderModel(
   input: ProviderLoaderInput,
   fetchFn?: FetchLike,
 ): Promise<Model> {
+  return bindLoaderReasoning(await loadSelectedModel(input, fetchFn), input);
+}
+
+/** Bind the reasoning record implied by these construction inputs to the adapter built from them, for per-turn history. */
+export function bindLoaderReasoning(model: Model, input: Pick<ProviderLoaderInput, "provider" | "model" | "thinking" | "openaiAuth" | "xaiAuth" | "baseUrl" | "extraBody" | "modelCapability">): Model {
+  if (!input.model?.trim()) return model;
+  return bindModelReasoning(model, resolveReasoningRecord({ provider: input.provider, model: input.model.trim(), thinking: input.thinking, openaiAuth: input.openaiAuth,
+    xaiAuth: input.xaiAuth, baseUrl: input.baseUrl, extraBody: input.extraBody, capability: input.modelCapability }));
+}
+
+async function loadSelectedModel(input: ProviderLoaderInput, fetchFn?: FetchLike): Promise<Model> {
   if (input.provider === "openai-compatible") {
     const { createOpenAICompatibleModel } = await import("./providers/openai-compatible.ts");
     return createOpenAICompatibleModel({

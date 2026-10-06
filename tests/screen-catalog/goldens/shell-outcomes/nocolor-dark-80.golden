@@ -40,7 +40,7 @@ cursor 7 33 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                             ctx ~108
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default          ctx ~108
   Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #161b24 -
@@ -188,7 +188,9 @@ cursor 7 33 visible
 34 8-17 #e6eaf0 #444951 b
 34 17-18 #8b95a7 #161b24 -
 34 18-43 #e6eaf0 #1e2430 -
-34 43-79 #8b95a7 #161b24 -
+34 43-44 #8b95a7 #161b24 -
+34 44-62 #e6eaf0 #444951 -
+34 62-79 #8b95a7 #161b24 -
 34 79-80 #ffffff #0e1117 -
 35 0-2 #ffffff #0e1117 -
 35 2-11 #e6eaf0 #293140 b

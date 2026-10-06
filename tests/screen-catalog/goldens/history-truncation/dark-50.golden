@@ -15,6 +15,7 @@ cursor 1 1 hidden
  its snapshot and compare its snapshot and
  compare its snapshot and c…
  2026-01-15 09:30 UTC · 12m 34s
+ Reasoning: not recorded
 
  Files · 200 of 230 shown
  › fixtures/__snapshots__/case-1.snap    +3 −1
@@ -27,7 +28,6 @@ cursor 1 1 hidden
    fixtures/__snapshots__/case-8.snap    +3 −1
    fixtures/__snapshots__/case-9.snap    +3 −1
    fixtures/__snapshots__/case-10.snap   +3 −1
-   fixtures/__snapshots__/case-11.snap   +3 −1
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -75,21 +75,21 @@ cursor 1 1 hidden
 08 31-48 #ffffff #0e1117 -
 08 48-49 #ffffff #252527 -
 08 49-50 #ffffff #0e1117 -
-09 0-48 #ffffff #0e1117 -
+09 0-1 #ffffff #0e1117 -
+09 1-24 #8b95a7 #0e1117 -
+09 24-48 #ffffff #0e1117 -
 09 48-49 #ffffff #252527 -
 09 49-50 #ffffff #0e1117 -
-10 0-1 #ffffff #0e1117 -
-10 1-25 #7cc4ff #0e1117 b
-10 25-48 #ffffff #0e1117 -
+10 0-48 #ffffff #0e1117 -
 10 48-49 #ffffff #252527 -
 10 49-50 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-46 #7cc4ff #0e1117 -
-11 46-48 #ffffff #0e1117 -
+11 1-25 #7cc4ff #0e1117 b
+11 25-48 #ffffff #0e1117 -
 11 48-49 #ffffff #252527 -
 11 49-50 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-46 #e6eaf0 #0e1117 -
+12 1-46 #7cc4ff #0e1117 -
 12 46-48 #ffffff #0e1117 -
 12 48-49 #ffffff #252527 -
 12 49-50 #ffffff #0e1117 -

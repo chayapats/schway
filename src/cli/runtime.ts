@@ -3,7 +3,7 @@ import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/depr
 import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
 import { createHistoryCollector, historyTurnIdentity } from "../history/collector.ts";
 import { openHistoryStore } from "../history/store.ts";
-import { isOpenRouterEndpoint } from "../model/thinking.ts";
+import { isOpenRouterEndpoint, modelReasoning } from "../model/thinking.ts";
 import { formatRetryWait, retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import { resolve } from "node:path";
 import { createDiagnosticSink } from "../diagnostics/sink.ts";
@@ -44,7 +44,7 @@ import { loadExtensions } from "../extensions/loader.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
-import { loadProviderModel } from "../model/loader.ts";
+import { bindLoaderReasoning, loadProviderModel } from "../model/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../config/removed-provider.ts";
 import {
@@ -441,7 +441,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const approvalSettings = settings;
     // History is ancillary: its start is persisted first, and no history failure changes execution or the exit code.
     const historyIdentity = historyTurnIdentity(session, workspace.root, "headless");
-    const history = historyIdentity ? createHistoryCollector({ store: openHistoryStore({ home }), identity: historyIdentity, secrets, session }) : undefined;
+    // The record comes from the settings bound to this adapter, fixed for the whole run.
+    const history = historyIdentity ? createHistoryCollector({ store: openHistoryStore({ home }), identity: historyIdentity, secrets, session, reasoning: modelReasoning(model) }) : undefined;
     const historyStart = await history?.start();
     if (historyStart?.state === "unsaved") io.stderr.write(`History not saved · Check ~/.schway/history access (${redactSecrets(historyStart.reason, secrets)}) · Task continues\n`);
     try {
@@ -635,7 +636,7 @@ async function loadCliModel(
       };
       try {
         const model = io.createModel
-          ? await io.createModel(input)
+          ? bindLoaderReasoning(await io.createModel(input), input)
           : await loadProviderModel({ ...input, codexStore: credentialStore }, io.fetch);
         return selection.notice !== undefined ? { model, notice: selection.notice } : { model };
       } catch (error) {
@@ -649,7 +650,7 @@ async function loadCliModel(
     if (selection.transport === "grok") {
       const input = { provider: "xai" as const, xaiAuth: "grok" as const, model: settings.model, maxTokens: settings.maxOutput, thinking: settings.thinking,
         ...(settings.supportedThinking !== undefined ? { modelCapability: settings.reasoningCapability ?? { id: settings.model, supportedThinking: settings.supportedThinking, supportsDisabling: settings.supportsDisabling } } : {}) };
-      try { return { model: io.createModel ? await io.createModel(input) : await loadProviderModel({ ...input, grokStore: credentialStore }, io.fetch) }; }
+      try { return { model: io.createModel ? bindLoaderReasoning(await io.createModel(input), input) : await loadProviderModel({ ...input, grokStore: credentialStore }, io.fetch) }; }
       catch (error) { return { error: redactSecrets(errorMessage(error), secrets) }; }
     }
   }
@@ -685,7 +686,7 @@ async function loadCliModel(
     } : {}),
   };
   try {
-    return { model: io.createModel ? await io.createModel(input) : await loadProviderModel(input, io.fetch) };
+    return { model: io.createModel ? bindLoaderReasoning(await io.createModel(input), input) : await loadProviderModel(input, io.fetch) };
   } catch (error) {
     return { error: redactSecrets(errorMessage(error), secrets) };
   }

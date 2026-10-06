@@ -34,7 +34,7 @@ cursor 15 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › /session
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                               ctx ~0
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default            ctx ~0
   ↑↓ select · Enter send · Esc keep editing
 == styles
 00 0-1 #ffffff #161b24 -
@@ -104,7 +104,9 @@ cursor 15 27 visible
 28 8-17 #8fd19e #31433f b
 28 17-18 #8b95a7 #161b24 -
 28 18-43 #e6eaf0 #1e2430 -
-28 43-79 #8b95a7 #161b24 -
+28 43-44 #8b95a7 #161b24 -
+28 44-62 #c0acff #3b3b54 -
+28 62-79 #8b95a7 #161b24 -
 28 79-80 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-4 #e6eaf0 #293140 b

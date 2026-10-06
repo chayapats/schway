@@ -63,7 +63,7 @@ import {
   formatSkillsListing,
   prepareSkillInvocation,
 } from "../skills/skills.ts";
-import { loadProviderModel, bindGrokModel } from "../model/loader.ts";
+import { loadProviderModel, bindGrokModel, bindLoaderReasoning } from "../model/loader.ts";
 
 /** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
 export interface TuiWriter {
@@ -1011,7 +1011,7 @@ export async function loadInteractiveModel(
         openaiAuth: "codex" as const,
       };
       try {
-        const model = options.createModel ? await options.createModel(input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
+        const model = options.createModel ? bindLoaderReasoning(await options.createModel(input), input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
         return { model, ...(selection.notice ? { notice: selection.notice } : {}), ...(capability ? { capability } : {}) };
       } catch (error) {
         return { error: redactSecrets(messageOf(error), options.secrets) };
@@ -1033,7 +1033,7 @@ export async function loadInteractiveModel(
         const thinkingError = validateThinking(provider, modelId ?? "", options.thinking, undefined, capability ?? null, undefined, "grok");
         if (thinkingError) return { error: thinkingError };
         const input = { provider, xaiAuth: "grok" as const, model: modelId, maxTokens: options.maxTokens, thinking: options.thinking, modelCapability: capability };
-        const model = options.createModel ? bindGrokModel(await options.createModel(input)) : await loadProviderModel({ ...input, grokStore: store }, options.fetch);
+        const model = options.createModel ? bindLoaderReasoning(bindGrokModel(await options.createModel(input)), input) : await loadProviderModel({ ...input, grokStore: store }, options.fetch);
         return { model, ...(capability ? { capability } : {}) };
       } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
     }
@@ -1091,7 +1091,7 @@ export async function loadInteractiveModel(
     } : {}),
   };
   try {
-    return { model: options.createModel ? await options.createModel(input) : await loadProviderModel(input, options.fetch), ...(routeCapability ? { capability: routeCapability } : {}) };
+    return { model: options.createModel ? bindLoaderReasoning(await options.createModel(input), input) : await loadProviderModel(input, options.fetch), ...(routeCapability ? { capability: routeCapability } : {}) };
   } catch (error) {
     return { error: redactSecrets(messageOf(error), options.secrets) };
   }

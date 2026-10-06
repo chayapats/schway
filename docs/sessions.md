@@ -423,9 +423,30 @@ root; later lines are attempt starts and revisioned outcomes:
   strictly when present. Duplicate finalizations that differ only in times do not
   add a revision. Records written before these fields existed stay readable and
   show their timings as unknown; nothing is rebuilt from `committedAt`.
+- **Reasoning effort.** Beside `telemetry`, a `turn_finalize` may carry an
+  optional `reasoning` object; the record `version` stays 1, and older readers
+  ignore it:
+
+  ```json
+  "reasoning":{"provider":"xai","model":"grok-4.7","route":"grok","level":null,"source":"provider-default"}
+  ```
+
+  It comes from the settings bound to the adapter that served the attempt, taken
+  when the attempt starts, in both TUI and headless runs. Settings changes wait
+  for the turn, so one record covers every model call of the attempt; a continued
+  attempt records its own. `level` is the level Schway sent, or `null` when it sent
+  no reasoning control. `source` is `explicit`, `model-default` (a Schway
+  per-model default; none ships today), `provider-default` (nothing sent, so the
+  provider's default applied, including an explicit `off` on a model without a
+  disable control) or `custom` (`extraBody` reasoning keys on a compatible
+  endpoint). `route` is `api-key`, `grok` or `codex`, and is absent for compatible
+  endpoints. Readers validate the field strictly when present, including that
+  `source` agrees with whether a level was sent. Records written before it
+  existed show the effort as not recorded; it is never inferred from current
+  settings.
 - **Privacy.** Terminal controls are stripped and known secrets redacted before
-  bounding. Records keep no provider payloads, reasoning, credentials, full tool
-  output or file contents. Slash commands and credential-like tasks store no
+  bounding. Records keep no provider payloads, reasoning text or encrypted
+  reasoning, credentials, full tool output or file contents. Slash commands and credential-like tasks store no
   excerpt.
 - **Locking and deletion.** Appends and deletion share a cross-process lock at
   `~/.schway/history.lock`. A sidecar is created only while its saved session

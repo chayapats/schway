@@ -3,7 +3,9 @@ import { Database } from "bun:sqlite";
 import { openDraftStore } from "../../src/drafts/store.ts";
 import { openUndoStore } from "../../src/undo/store.ts";
 import { openHistoryStore } from "../../src/history/store.ts";
-import type { HistoryCommand, HistoryTelemetry } from "../../src/history/records.ts";
+import type { HistoryCommand, HistoryReasoning, HistoryTelemetry } from "../../src/history/records.ts";
+import { bindModelReasoning } from "../../src/model/thinking.ts";
+import { bindGrokModel } from "../../src/model/loader.ts";
 import { historyExcerpt } from "../../src/history/sanitize.ts";
 import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
@@ -88,7 +90,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   // Screens that run file-touching commands (/sessions, /resume, /login and the rest) always use a temporary home.
   const commandFiles = ["api-key-entry", "callback-entry", "branch-tree-continue", "branch-tree-fork", "command-routing"].includes(screen.id) || screen.id.startsWith("session-picker");
   const askEdit = screen.id === "approval-edit" || screen.id === "approval-deny-reason" || screen.id === "approval-diff-overflow";
-  const disk = commandFiles || askEdit || screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
+  const disk = commandFiles || askEdit || screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout", "reasoning-chip-explicit"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
   if (disk) {
     temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
@@ -142,6 +144,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       git: { status: "unavailable", reason: "headless" } });
   }
   if (screen.id.startsWith("history-timing")) await historyTimingFixture(screen.id, historySession!, home);
+  if (screen.id.startsWith("history-reasoning")) await historyReasoningFixture(screen.id, historySession!, home);
   const session = durableSession ?? resumed ?? historySession ?? createSession();
   const draftStore = durableSession ? openDraftStore({ home, workspaceRoot: root, sessionId: durableSession.header.id }) : undefined;
   if (draftStore) draftStore.save(screen.id === "draft-restored" ? "ร่างภาษาไทย\nยังไม่ส่ง 🧪" : "Previously saved", 1);
@@ -287,6 +290,22 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
     options.stageSettings = async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) });
   }
+  // History screens' live turns record the effort bound to their adapter: the scripted provider sends no reasoning control.
+  if (historyScreen && options.model) options.model = bindModelReasoning(options.model, { provider: "scripted", model: "scripted-model", level: null, source: "provider-default" });
+  // Footer reasoning chip states: an explicit level typed with /thinking, the provider default with and without an advertised level, and an unavailable request.
+  if (screen.id.startsWith("reasoning-chip-")) {
+    const modelId = screen.id === "reasoning-chip-advertised" ? "gpt-6-luna" : "gpt-5.4";
+    if (screen.id === "reasoning-chip-provider-default") {
+      Object.assign(options, { provider: "xai", modelId: "grok-4.7", xaiAuth: "grok", model: bindGrokModel(createScriptedModel({ provider: "xai", id: "grok-4.7" })) });
+    } else {
+      Object.assign(options, { provider: "openai", modelId, openaiAuth: "api-key", model: createScriptedModel({ provider: "openai", id: modelId }),
+        ...(screen.id === "reasoning-chip-unavailable" ? { thinking: "xhigh" } : {}) });
+      if (screen.id === "reasoning-chip-explicit") {
+        options.configEditor = new ConfigEditor({ cli: { provider: "openai", model: modelId, openaiAuth: "api-key" } }, { user: join(home, "config.json"), project: join(root, "config.json") });
+        options.stageSettings = async next => ({ model: createScriptedModel({ provider: "openai", id: next.model }), contextManager: createContextManager(workspace) });
+      }
+    }
+  }
   if (screen.id === "thinking-controls") {
     const baseUrl = "https://openrouter.ai/api/v1", model = "meta/muse-spark-1.3-contributor";
     const capabilities = openRouterModelCapabilities(parseModelList({ data: [{ id: model, reasoning: {
@@ -372,6 +391,29 @@ export async function renderScreen(screen: Screen, variant: Variant): Promise<st
 }
 
 /**
+ * Reasoning evidence for the `history-reasoning*` screens: a turn stopped under the provider default and continued after
+ * `/thinking low`, and a turn whose record predates reasoning, which says it was not recorded.
+ */
+async function historyReasoningFixture(id: string, session: Awaited<ReturnType<typeof createJsonlSession>>, home: string): Promise<void> {
+  const task = "Will it rain in Bangkok tomorrow afternoon?";
+  session.append({ type: "user", id: "reasoning-user", content: [{ type: "text", text: task }] }, { type: "assistant", id: "reasoning-answer", content: [{ type: "text", text: "Light rain after 3 pm." }] });
+  const store = openHistoryStore({ home }), sessionId = session.header.id;
+  const attempts: Array<{ outcome: "completed" | "stopped"; activeMs: number; reasoning?: HistoryReasoning }> = id === "history-reasoning-legacy" ? [{ outcome: "completed", activeMs: 56_800 }]
+    : [{ outcome: "stopped", activeMs: 31_200, reasoning: { provider: "xai", model: "grok-4.7", route: "grok", level: null, source: "provider-default" } },
+      { outcome: "completed", activeMs: 23_800, reasoning: { provider: "xai", model: "grok-4.7", route: "grok", level: "low", source: "explicit" } }];
+  let finishedAt = Date.parse("2026-01-15T09:29:00.000Z");
+  for (const [index, attempt] of attempts.entries()) {
+    const attemptId = `reasoning-attempt-${index + 1}`;
+    await store.start(sessionId, { type: "turn_start", version: 1, turnId: "reasoning-user", attemptId, ordinal: 1, branchId: "main", parentId: session.rootId,
+      workspaceRoot: "/home/test/demo", mode: "tui", startedAt: new Date(finishedAt - attempt.activeMs).toISOString(), task });
+    await store.finalize(sessionId, { type: "turn_finalize", version: 1, turnId: "reasoning-user", attemptId, revision: 1, outcome: attempt.outcome, finishedAt: new Date(finishedAt).toISOString(),
+      activeMs: attempt.activeMs, toolResults: 0, failedTools: 0, commands: { total: 0, exitZero: 0, nonzero: 0, unknown: 0, truncated: false, items: [] },
+      files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, ...(attempt.reasoning ? { reasoning: attempt.reasoning } : {}) });
+    finishedAt += 60_000;
+  }
+}
+
+/**
  * Synthetic, internally possible timing evidence for the `history-timing*` screens: each tool round is one model call,
  * the final answer one more, and a retried attempt one more; the turn spans exactly its active time.
  */
@@ -403,7 +445,9 @@ async function historyTimingFixture(id: string, session: Awaited<ReturnType<type
     workspaceRoot: "/home/test/demo", mode: "tui", startedAt, task });
   await store.finalize(sessionId, { type: "turn_finalize", version: 1, turnId: "timing-user", attemptId: "timing-attempt", revision: 1, outcome: "completed", finishedAt,
     activeMs, toolResults: commands.length, failedTools: 0, commands: { total: commands.length, exitZero: commands.length, nonzero: 0, unknown: 0, truncated: false, items: commands },
-    files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, telemetry });
+    files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, telemetry,
+    // The weather turn ran with no thinking set, so the provider's default applied.
+    reasoning: { provider: "xai", model: "grok-4.7", route: "grok", level: null, source: "provider-default" } });
 }
 
 /** Fresh-install screens whose scripted ChatGPT runner shows a device code, a callback timeout or a browser launcher failure (#297). */

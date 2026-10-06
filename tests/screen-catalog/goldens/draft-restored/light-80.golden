@@ -33,7 +33,7 @@ cursor 16 26 visible
   ▌ › ร่างภาษาไทย
       ยังไม่ส่ง 🧪
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                               ctx ~0
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default            ctx ~0
   Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect
   Draft restored · Alt+D discard
 == styles
@@ -94,7 +94,9 @@ cursor 16 26 visible
 27 8-17 #19612f #d3dcd4 b
 27 17-18 #545e6c #ecedea -
 27 18-43 #1d232c #e1e3df -
-27 43-79 #545e6c #ecedea -
+27 43-44 #545e6c #ecedea -
+27 44-62 #6a3fb0 #dcd8e3 -
+27 62-79 #545e6c #ecedea -
 27 79-80 #ffffff #f7f7f4 -
 28 0-2 #ffffff #f7f7f4 -
 28 2-11 #1d232c #caced3 b

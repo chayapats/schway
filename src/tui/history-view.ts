@@ -1,7 +1,7 @@
 import { BoxRenderable, ScrollBoxRenderable, StyledText, TextRenderable, bold, fg, type CliRenderer, type TextChunk } from "@opentui/core";
 import { formatCount } from "../text/format.ts";
 import type { HistoryTurn } from "../history/timeline.ts";
-import { historyCommandLine, historyCountsLabel, historyDurationLabel, historyOutcomeLabel, historyOutcomeTone, historyTaskLabel, historyTimeLabel, historyTimingLine, historyUndoLine,
+import { historyCommandLine, historyCountsLabel, historyDurationLabel, historyOutcomeLabel, historyOutcomeTone, historyReasoningLine, historyTaskLabel, historyTimeLabel, historyTimingLine, historyUndoLine,
   type HistorySnapshot } from "./controller-history.ts";
 import { displayText } from "./presentation.ts";
 import { currentDiffLabel, fitPathStart } from "./review-scope.ts";
@@ -112,6 +112,9 @@ export function createHistoryPanel(renderer: CliRenderer) {
         // Timing appears only for turns that recorded it; the cache share is dropped first when the line is narrow.
         const timing = historyTimingLine(turn, inner);
         if (timing) lines.push({ text: clip(timing, inner), color: theme.muted });
+        // The effort recorded with each attempt; older records say it was not recorded.
+        const reasoning = historyReasoningLine(turn);
+        if (reasoning) lines.push({ text: clip(safe(reasoning), inner), color: theme.muted });
         lines.push({ text: "", color: theme.text });
         const files = turn.files;
         // Unfinalized attempts recorded no counts: show them as unknown or lower bounds, never as zero.

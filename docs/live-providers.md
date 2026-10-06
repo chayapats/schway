@@ -47,6 +47,64 @@ Select `--provider grok` and optionally `--model grok=<id>`. `--provider all` in
 
 Without `--enable-live`, the lane reports `skipped/live_disabled` and exits 2 without opening the secure store. An absent login reports `pending/missing_subscription`; malformed, expired without refresh, or revoked logins report `pending/subscription_requires_login`. Unavailable secure storage reports `pending/credential_store_unavailable`. Sign in interactively with `/login grok` or `/login grok --device` before enabling a live run.
 
+## Reasoning effort evaluation
+
+This operator procedure decides whether Schway may send its own reasoning default
+for `grok-4.x` (see [Schway model defaults](configuration.md#schway-model-defaults)).
+It is a **paid/remote opt-in**: never a default `bun test` case, CI job or eval, and
+it runs only when an operator chooses to. It reads `reasoningTokens` and
+`outputTokens` from the `ModelUsage` contract.
+
+```sh
+# Plan only: prints a skipped report, opens no credential store and sends nothing.
+bun --no-env-file src/live/reasoning-eval.ts --route grok
+# Grok subscription (sign in first with /login grok):
+bun --no-env-file src/live/reasoning-eval.ts --enable-live --route grok --model grok-4.7
+# xAI API key, only if a default would also cover that route (save the key first with /login xai):
+bun --no-env-file src/live/reasoning-eval.ts --enable-live --route xai-api-key --model grok-4.7
+```
+
+- **Opt-in and credentials.** Nothing is read or sent without `--enable-live`.
+  The runner uses only stored credentials: the saved `grok-subscription:xai`
+  login or the stored `api-key:xai` key. It ignores `XAI_API_KEY` and other
+  environment keys, never starts a sign-in and never switches routes. A missing
+  login reports `pending/missing_subscription`; a missing key reports
+  `skipped/missing_credentials`.
+- **Arms.** The same fixed short question (`REASONING_EVAL_PROBE`) goes to the
+  model with thinking unset (no `reasoning` field), at `low` and at `medium`
+  (`--levels` changes the explicit levels). Each arm runs at least three times
+  (`--runs`, 3–10), interleaved per run so drift affects every arm alike. An
+  explicit level first reads the route's model list, as production does, and a
+  level the list does not offer is refused before inference
+  (`unsupported_thinking`).
+- **Bounds.** Every call sends `max_output_tokens` (`--max-output-tokens`,
+  default 16384, 1024–65536). The cap counts reasoning tokens, so keep it high
+  enough that reasoning is not cut off. A response that ends `incomplete` at the
+  cap is reported but is not evidence. Each call has its own deadline
+  (`--timeout-ms`, default 120000) and a 2 MiB response-body budget; model-list
+  reads keep the 1 MiB discovery budget. Redirects are refused. No retries run.
+- **Report.** JSON on stdout with UTC `testedAt`, checked-out `revision`,
+  `route`, `model`, `maxOutputTokens` and `runs`. For each call it gives the
+  arm, run, status or error class (`ok`, `incomplete`, `http_error`,
+  `network_error`, `timeout`, `output_limit`, `error`, `unsupported_thinking`,
+  `thinking_capability_unavailable`), the last HTTP status, `reasoningTokens`,
+  `outputTokens`, time to the first text or thinking delta and total time. Each
+  arm adds medians over its `ok` calls. It never includes a token, header,
+  endpoint, the question, the answer, reasoning text or a raw response.
+- **Verdict.** Each level's `meetsDefaultBar` is true only when no call for it got
+  a 4xx or was refused, both it and the unset arm have at least three `ok`
+  calls, and its median reasoning tokens and median total time are both lower
+  than unset. Exit code 0 means every call produced evidence, 2 means skipped or
+  incomplete, 1 a failure or usage error.
+
+Preserve the JSON with its date, revision, model and route. A PR that adopts a
+default records that JSON and the decision, here and in
+[configuration](configuration.md#schway-model-defaults), for every route the
+default covers. `bun test tests/reasoning-eval.test.ts` checks the runner with
+protocol fixtures only; that is not live evidence.
+
+**Recorded runs: none.** No operator has run this evaluation, so no default ships.
+
 ## Reasoning controls and deterministic verification
 
 Normal Schway CLI/TUI requests share the reasoning policy described in

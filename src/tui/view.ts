@@ -1026,7 +1026,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
       footerParts = {
         approvalMode: snapshot.approvalMode,
-        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", thinking: snapshot.modelId && snapshot.thinking ? safe(snapshot.thinking) : undefined,
+        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", thinking: snapshot.modelId && snapshot.thinkingChip ? safe(snapshot.thinkingChip) : undefined,
         route: snapshot.modelId ? safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`) : "",
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
         running: !!snapshot.activity || snapshot.status === "running",

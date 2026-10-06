@@ -156,18 +156,114 @@ export function assertThinking(context: ThinkingContext, thinking: ThinkingLevel
 
 /** Describe requested controls and advertised defaults from the same policy used to send requests. */
 export function describeEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined, modelId?: string,
-  context: { authRoute?: ThinkingContext["authRoute"]; baseUrl?: string; capability?: ModelCapability | null; extraBody?: Record<string, unknown> } = {}): string {
-  const policy = resolveThinkingPolicy({ provider, model: modelId ?? "", ...context });
+  context: EffectiveThinkingContext = {}): string {
+  return resolveEffectiveThinking(provider, thinking, modelId, context).label;
+}
+
+/** Route, endpoint and evidence inputs shared by effective-reasoning descriptions and per-turn records. */
+export type EffectiveThinkingContext = { authRoute?: ThinkingContext["authRoute"]; baseUrl?: string; capability?: ModelCapability | null; extraBody?: Record<string, unknown> };
+
+/**
+ * Who chose the reasoning effort in effect: an explicit level, a Schway per-model default, the provider's own default
+ * (Schway sends no control), or `extraBody` reasoning keys on a compatible endpoint.
+ */
+export type ThinkingSource = "explicit" | "model-default" | "provider-default" | "custom";
+
+/** One Schway-sent default for a provider, auth route and model, applied only when every settings layer leaves thinking unset. */
+export interface ModelThinkingDefault {
+  provider: string;
+  /** Auth route the default covers; capabilities are never transferred across routes. */
+  authRoute?: ThinkingContext["authRoute"];
+  /** Exact model ID, or a pattern such as `/^grok-4(\.|$)/` for a model family. */
+  model: string | RegExp;
+  level: ThinkingLevel;
+}
+
+/**
+ * Schway-sent per-model defaults. Empty: #321 ships no default without a recorded live evaluation showing that the
+ * route accepts the level and that it cuts median reasoning tokens and model time (see docs/live-providers.md).
+ * A new entry also needs the adoption wiring listed under "Reasoning levels" in docs/configuration.md.
+ */
+export const MODEL_THINKING_DEFAULTS: readonly ModelThinkingDefault[] = [];
+
+/** The Schway default level for this exact route and model, only when verified capability evidence lists it; otherwise undefined. */
+export function resolveModelThinkingDefault(context: ThinkingContext, defaults: readonly ModelThinkingDefault[] = MODEL_THINKING_DEFAULTS): ThinkingLevel | undefined {
+  const entry = defaults.find(candidate => candidate.provider === context.provider && candidate.authRoute === context.authRoute
+    && (typeof candidate.model === "string" ? candidate.model === context.model : candidate.model.test(context.model)));
+  // A default is sent only with a verified capability for this exact model and route that lists the level.
+  if (!entry || !context.capability) return undefined;
+  const policy = resolveThinkingPolicy(context);
+  return !policy.error && policy.known && policy.supported.includes(entry.level) ? entry.level : undefined;
+}
+
+/** Structured effective reasoning: what Schway sends, who chose it, and the full and footer-chip wording. */
+export interface EffectiveThinking {
+  /** `unavailable` means the requested level is not offered, so a request would be refused before it is sent. */
+  state: ThinkingSource | "unavailable";
+  /** Level Schway sends; undefined when it sends no reasoning control. */
+  sent?: ThinkingLevel;
+  /** Provider-advertised default when Schway sends nothing; never sent by Schway. */
+  advertised?: ThinkingLevel;
+  /** Full description for `/thinking`, `/config` and preferences. */
+  label: string;
+  /** Terse footer chip text. */
+  chip: string;
+}
+
+/** Resolve requested controls, a Schway model default and advertised provider defaults from the same policy used to send requests. */
+export function resolveEffectiveThinking(provider: string, thinking: ThinkingLevel | undefined, modelId?: string,
+  context: EffectiveThinkingContext = {}, defaults: readonly ModelThinkingDefault[] = MODEL_THINKING_DEFAULTS): EffectiveThinking {
+  const full: ThinkingContext = { provider, model: modelId ?? "", ...context };
+  const policy = resolveThinkingPolicy(full);
   if (thinking === undefined) {
-    if (findCompatibleReasoningBodyKey(context.extraBody)) return "Custom reasoning controls";
-    return policy.defaultThinking ? `Provider default (${policy.defaultThinking})` : "Provider default";
+    if (findCompatibleReasoningBodyKey(context.extraBody)) return { state: "custom", label: "Custom reasoning controls", chip: "Custom reasoning" };
+    const modelDefault = resolveModelThinkingDefault(full, defaults);
+    if (modelDefault) return { state: "model-default", sent: modelDefault, label: `Schway default (${modelDefault})`, chip: `Schway default (${modelDefault})` };
+    const label = policy.defaultThinking ? `Provider default (${policy.defaultThinking})` : "Provider default";
+    return { state: "provider-default", ...(policy.defaultThinking ? { advertised: policy.defaultThinking } : {}), label, chip: label };
   }
-  if (!policy.supported.includes(thinking)) return context.capability === null && provider === "openai" ? "Choose thinking · /model open choices" : `${thinking} unavailable · /model choose thinking`;
-  if (thinking === "off") {
-    if (policy.supportsDisabling) return "Off";
-    return "Provider default";
+  if (!policy.supported.includes(thinking)) {
+    return { state: "unavailable", chip: `${thinking} unavailable`,
+      label: context.capability === null && provider === "openai" ? "Choose thinking · /model open choices" : `${thinking} unavailable · /model choose thinking` };
   }
-  return `${thinking}`;
+  // Off without a documented disable control sends nothing, so the provider's default applies.
+  if (thinking === "off" && !policy.supportsDisabling) return { state: "provider-default", label: "Provider default", chip: "Provider default" };
+  return { state: "explicit", sent: thinking, label: thinking === "off" ? "Off" : thinking, chip: thinking };
+}
+
+/** Plain-data reasoning evidence for one attempt: the route-bound model and the level Schway sent, with no wire payload. */
+export interface ReasoningRecord {
+  /** Settings provider family, such as `openai`, `xai` or `openai-compatible`. */
+  provider: string;
+  model: string;
+  /** Auth route of the adapter; absent for compatible endpoints. */
+  route?: "api-key" | "grok" | "codex";
+  /** Level sent; null when Schway sent no reasoning control. */
+  level: ThinkingLevel | null;
+  source: ThinkingSource;
+}
+
+/** Resolve the record for an adapter built from these inputs; undefined when its requested level would be refused before sending. */
+export function resolveReasoningRecord(input: Parameters<typeof resolveThinkingSelection>[0] & { thinking?: ThinkingLevel },
+  defaults: readonly ModelThinkingDefault[] = MODEL_THINKING_DEFAULTS): ReasoningRecord | undefined {
+  const { context } = resolveThinkingSelection(input);
+  const effective = resolveEffectiveThinking(input.provider, input.thinking, input.model, context, defaults);
+  if (effective.state === "unavailable") return undefined;
+  return { provider: input.provider, model: input.model, ...(context.authRoute ? { route: context.authRoute } : {}), level: effective.sent ?? null, source: effective.state };
+}
+
+const boundReasoning = new WeakMap<object, ReasoningRecord>();
+
+/** Attach the reasoning record an adapter was built with, returning the same adapter; undefined leaves it unbound. */
+export function bindModelReasoning<T extends object>(model: T, record: ReasoningRecord | undefined): T {
+  if (record) boundReasoning.set(model, { ...record });
+  return model;
+}
+
+/** Copy of the reasoning record bound to an adapter, or undefined for an adapter built without one (such as a scripted model). */
+export function modelReasoning(model: object | undefined): ReasoningRecord | undefined {
+  const record = model ? boundReasoning.get(model) : undefined;
+  return record ? { ...record } : undefined;
 }
 
 

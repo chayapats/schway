@@ -13,6 +13,7 @@ cursor 1 1 hidden
   Save clamp notes ไทย 🧪, then wait
   2026-01-15 09:30 UTC · 3.0s
   Model 0.6s · Tools 2.4s · Cache not reported
+  Reasoning: provider default
 
   Files · 1
   › notes.md                     +1 −0
@@ -29,12 +30,11 @@ cursor 1 1 hidden
 
 
 
-
   − Stopped · 1 file +1 −0 · 1 command stopped · 3.0s
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                             ctx ~158
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default          ctx ~158
   ↑↓ files · Enter current diff · F2 details · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -59,28 +59,30 @@ cursor 1 1 hidden
 06 0-2 #ffffff #f7f7f4 -
 06 2-46 #545e6c #f7f7f4 -
 06 46-80 #ffffff #f7f7f4 -
-07 0-80 #ffffff #f7f7f4 -
-08 0-2 #ffffff #f7f7f4 -
-08 2-11 #0a5894 #f7f7f4 b
-08 11-80 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-29 #545e6c #f7f7f4 -
+07 29-80 #ffffff #f7f7f4 -
+08 0-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
-09 2-38 #0a5894 #f7f7f4 -
-09 38-80 #ffffff #f7f7f4 -
-10 0-80 #ffffff #f7f7f4 -
-11 0-2 #ffffff #f7f7f4 -
-11 2-14 #0a5894 #f7f7f4 b
-11 14-80 #ffffff #f7f7f4 -
+09 2-11 #0a5894 #f7f7f4 b
+09 11-80 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-38 #0a5894 #f7f7f4 -
+10 38-80 #ffffff #f7f7f4 -
+11 0-80 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
-12 2-57 #545e6c #f7f7f4 -
-12 57-80 #ffffff #f7f7f4 -
-13 0-80 #ffffff #f7f7f4 -
-14 0-2 #ffffff #f7f7f4 -
-14 2-6 #0a5894 #f7f7f4 b
-14 6-80 #ffffff #f7f7f4 -
+12 2-14 #0a5894 #f7f7f4 b
+12 14-80 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-57 #545e6c #f7f7f4 -
+13 57-80 #ffffff #f7f7f4 -
+14 0-80 #ffffff #f7f7f4 -
 15 0-2 #ffffff #f7f7f4 -
-15 2-45 #1d232c #f7f7f4 -
-15 45-80 #ffffff #f7f7f4 -
-16 0-80 #ffffff #f7f7f4 -
+15 2-6 #0a5894 #f7f7f4 b
+15 6-80 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-45 #1d232c #f7f7f4 -
+16 45-80 #ffffff #f7f7f4 -
 17 0-80 #ffffff #f7f7f4 -
 18 0-80 #ffffff #f7f7f4 -
 19 0-80 #ffffff #f7f7f4 -
@@ -110,7 +112,9 @@ cursor 1 1 hidden
 28 8-17 #19612f #d3dcd4 b
 28 17-18 #545e6c #ecedea -
 28 18-43 #1d232c #e1e3df -
-28 43-79 #545e6c #ecedea -
+28 43-44 #545e6c #ecedea -
+28 44-62 #6a3fb0 #dcd8e3 -
+28 62-79 #545e6c #ecedea -
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-4 #1d232c #caced3 b

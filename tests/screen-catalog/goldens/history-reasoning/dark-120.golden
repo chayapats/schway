@@ -1,0 +1,119 @@
+schway-screen 1
+screen history-reasoning
+title Reasoning effort in history
+description A turn stopped under the provider default and continued at low shows each attempt's recorded effort.
+variant dark-120
+size 120x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ~/demo on main
+
+  Turn 1 · ✓ Done
+
+  Will it rain in Bangkok tomorrow afternoon?
+  2026-01-15 09:28 UTC · 55s · 2 attempts
+  Reasoning: provider default, then low
+
+  Files · 0
+    No file changes observed
+
+  Commands · 0
+    No commands ran
+
+  Undo
+    No file edits to undo
+
+
+
+
+
+
+
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ ›
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                   ctx ~17
+  PgUp/PgDn scroll · F2 details · Esc back
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #ffd84a #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-22 #8b95a7 #161b24 -
+00 22-26 #c0acff #161b24 -
+00 26-120 #ffffff #161b24 -
+01 0-120 #ffffff #0e1117 -
+02 0-2 #ffffff #0e1117 -
+02 2-11 #e6eaf0 #0e1117 b
+02 11-17 #8fd19e #0e1117 b
+02 17-120 #ffffff #0e1117 -
+03 0-120 #ffffff #0e1117 -
+04 0-2 #ffffff #0e1117 -
+04 2-45 #e6eaf0 #0e1117 -
+04 45-120 #ffffff #0e1117 -
+05 0-2 #ffffff #0e1117 -
+05 2-41 #8b95a7 #0e1117 -
+05 41-120 #ffffff #0e1117 -
+06 0-2 #ffffff #0e1117 -
+06 2-39 #8b95a7 #0e1117 -
+06 39-120 #ffffff #0e1117 -
+07 0-120 #ffffff #0e1117 -
+08 0-2 #ffffff #0e1117 -
+08 2-11 #7cc4ff #0e1117 b
+08 11-120 #ffffff #0e1117 -
+09 0-2 #ffffff #0e1117 -
+09 2-28 #8b95a7 #0e1117 -
+09 28-120 #ffffff #0e1117 -
+10 0-120 #ffffff #0e1117 -
+11 0-2 #ffffff #0e1117 -
+11 2-14 #7cc4ff #0e1117 b
+11 14-120 #ffffff #0e1117 -
+12 0-2 #ffffff #0e1117 -
+12 2-19 #8b95a7 #0e1117 -
+12 19-120 #ffffff #0e1117 -
+13 0-120 #ffffff #0e1117 -
+14 0-2 #ffffff #0e1117 -
+14 2-6 #7cc4ff #0e1117 b
+14 6-120 #ffffff #0e1117 -
+15 0-2 #ffffff #0e1117 -
+15 2-25 #e6eaf0 #0e1117 -
+15 25-120 #ffffff #0e1117 -
+16 0-120 #ffffff #0e1117 -
+17 0-120 #ffffff #0e1117 -
+18 0-120 #ffffff #0e1117 -
+19 0-120 #ffffff #0e1117 -
+20 0-120 #ffffff #0e1117 -
+21 0-120 #ffffff #0e1117 -
+22 0-120 #ffffff #0e1117 -
+23 0-120 #ffffff #0e1117 -
+24 0-120 #ffffff #0e1117 -
+25 0-2 #ffffff #0e1117 -
+25 2-118 #161b24 #0e1117 -
+25 118-120 #ffffff #0e1117 -
+26 0-2 #ffffff #0e1117 -
+26 2-6 #7cc4ff #161b24 -
+26 6-118 #ffffff #161b24 -
+26 118-120 #ffffff #0e1117 -
+27 0-2 #ffffff #0e1117 -
+27 2-118 #161b24 #0e1117 -
+27 118-120 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-17 #8fd19e #31433f b
+28 17-18 #8b95a7 #161b24 -
+28 18-43 #e6eaf0 #1e2430 -
+28 43-44 #8b95a7 #161b24 -
+28 44-62 #c0acff #3b3b54 -
+28 62-119 #8b95a7 #161b24 -
+28 119-120 #ffffff #0e1117 -
+29 0-2 #ffffff #0e1117 -
+29 2-11 #e6eaf0 #293140 b
+29 11-21 #8b95a7 #0e1117 -
+29 21-23 #e6eaf0 #293140 b
+29 23-34 #8b95a7 #0e1117 -
+29 34-37 #e6eaf0 #293140 b
+29 37-42 #8b95a7 #0e1117 -
+29 42-120 #ffffff #0e1117 -

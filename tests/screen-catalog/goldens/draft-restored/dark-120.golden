@@ -33,7 +33,7 @@ cursor 16 26 visible
   ▌ › ร่างภาษาไทย
       ยังไม่ส่ง 🧪
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                                                                       ctx ~0
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                    ctx ~0
   Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
   Draft restored · Alt+D discard
 == styles
@@ -94,7 +94,9 @@ cursor 16 26 visible
 27 8-17 #8fd19e #31433f b
 27 17-18 #8b95a7 #161b24 -
 27 18-43 #e6eaf0 #1e2430 -
-27 43-119 #8b95a7 #161b24 -
+27 43-44 #8b95a7 #161b24 -
+27 44-62 #c0acff #3b3b54 -
+27 62-119 #8b95a7 #161b24 -
 27 119-120 #ffffff #0e1117 -
 28 0-2 #ffffff #0e1117 -
 28 2-11 #e6eaf0 #293140 b

@@ -1,7 +1,7 @@
 import type { TurnUndoRecord } from "../conversation/types.ts";
 import type { Session } from "../session/session.ts";
 import { MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCollection, type HistoryCommand, type HistoryFile, type HistoryGitEvidence, type HistoryMode,
-  type HistoryOutcome, type HistoryTelemetry, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
+  type HistoryOutcome, type HistoryReasoning, type HistoryTelemetry, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
 import { historyExcerpt } from "./sanitize.ts";
 import type { HistoryRead } from "./store.ts";
 
@@ -17,6 +17,8 @@ export interface HistoryAttempt {
   git?: HistoryGitEvidence;
   /** Model and tool timing with token totals; absent when the attempt recorded none. */
   telemetry?: HistoryTelemetry;
+  /** Reasoning effort of the adapter that served the attempt; absent when the attempt recorded none. */
+  reasoning?: HistoryReasoning;
 }
 
 /** Folded evidence for one accepted user turn on the selected ancestry; absent evidence stays explicit. */
@@ -98,7 +100,7 @@ export function buildHistoryTimeline(read: HistoryRead, session: Pick<Session, "
     for (const start of attempts) {
       const final = finals.get(start.attemptId);
       turn.attempts.push({ attemptId: start.attemptId, mode: start.mode, workspaceRoot: start.workspaceRoot, startedAt: start.startedAt, activeMs: final?.activeMs ?? null,
-        ...(final ? { outcome: final.outcome, finishedAt: final.finishedAt, git: final.git } : {}), ...(final?.telemetry ? { telemetry: final.telemetry } : {}) });
+        ...(final ? { outcome: final.outcome, finishedAt: final.finishedAt, git: final.git } : {}), ...(final?.telemetry ? { telemetry: final.telemetry } : {}), ...(final?.reasoning ? { reasoning: final.reasoning } : {}) });
       if (!final || final.activeMs === null) turn.unknownDurations++;
       if (!final) { turn.incompleteAttempts++; continue; }
       turn.activeMs += final.activeMs ?? 0;

@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ! Attention   scripted/scripted-model                                                                   ctx ~6
+ ◆ Auto  ! Attention   scripted/scripted-model   Provider default                                                ctx ~6
   Ctrl+R continue · F2 details · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #161b24 -
@@ -123,7 +123,9 @@ cursor 7 27 visible
 28 8-21 #0e1117 #e6eaf0 b
 28 21-22 #8b95a7 #161b24 -
 28 22-47 #e6eaf0 #1e2430 -
-28 47-119 #8b95a7 #161b24 -
+28 47-48 #8b95a7 #161b24 -
+28 48-66 #e6eaf0 #444951 -
+28 66-119 #8b95a7 #161b24 -
 28 119-120 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-8 #e6eaf0 #293140 b

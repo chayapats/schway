@@ -2,10 +2,11 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { createHistoryCollector, historyGitFailure, historyTurnIdentity, type HistoryCollector, type HistoryObservation } from "../history/collector.ts";
-import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome, type HistoryTelemetry } from "../history/records.ts";
+import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome, type HistoryReasoning, type HistoryTelemetry } from "../history/records.ts";
 import { openHistoryStore, type HistoryRead } from "../history/store.ts";
 import { buildHistoryTimeline, type HistoryAttempt, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
 import { combineHistoryTelemetry } from "../history/telemetry.ts";
+import { modelReasoning } from "../model/thinking.ts";
 import { collectUndoEvidence, describeUndoLimits, observeUndoFile, undoTargetVerdict, type UndoTargetVerdict } from "../undo/evidence.ts";
 import type { Session } from "../session/session.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
@@ -146,6 +147,34 @@ export function historyTimingLine(turn: Pick<HistoryTurn, "evidence" | "attempts
   return Bun.stringWidth(full) <= columns || !times.length ? full : times.join(" · ");
 }
 
+/** Short effort wording for one recorded attempt, naming who chose it when Schway sent nothing or sent its own default. */
+export function historyReasoningLabel(reasoning: HistoryReasoning): string {
+  if (reasoning.source === "custom") return "custom controls";
+  if (reasoning.source === "provider-default") return "provider default";
+  return reasoning.source === "model-default" ? `Schway default (${reasoning.level})` : `${reasoning.level}`;
+}
+
+/** Primary `Reasoning: …` line for finalized attempts; older records say not recorded, and nothing is inferred from current settings. */
+export function historyReasoningLine(turn: Pick<HistoryTurn, "evidence" | "attempts">): string {
+  if (turn.evidence === "missing") return "";
+  const finalized = turn.attempts.filter(attempt => attempt.outcome);
+  if (!finalized.length) return "";
+  const labels = finalized.map(attempt => attempt.reasoning ? historyReasoningLabel(attempt.reasoning) : "not recorded")
+    .filter((label, index, all) => index === 0 || all[index - 1] !== label);
+  return `Reasoning: ${labels.join(", then ")}`;
+}
+
+/** F2 evidence line for one attempt's recorded reasoning: level sent, who chose it, and the route-bound model. */
+export function historyReasoningDetails(attempt: Pick<HistoryAttempt, "reasoning" | "outcome">): string {
+  const reasoning = attempt.reasoning;
+  if (!reasoning) return attempt.outcome ? "  Reasoning effort was not recorded for this attempt." : "  Reasoning effort is unknown (no outcome recorded).";
+  const route = reasoning.route ? ` via ${{ "api-key": "API key", grok: "Grok subscription", codex: "ChatGPT subscription" }[reasoning.route]}` : "";
+  const sent = reasoning.source === "custom" ? "no level sent; configured extraBody reasoning controls applied"
+    : reasoning.source === "provider-default" ? "no level sent; the provider's default applied"
+    : `${reasoning.level} sent (${reasoning.source === "model-default" ? "Schway model default" : "explicit level"})`;
+  return `  Reasoning: ${sent} · ${reasoning.provider}/${reasoning.model}${route}`;
+}
+
 /** F2 evidence lines for one attempt's timing and tokens; legacy attempts say nothing was recorded. */
 export function historyTelemetryDetails(attempt: Pick<HistoryAttempt, "telemetry" | "outcome">): string[] {
   const telemetry = attempt.telemetry;
@@ -207,6 +236,7 @@ export function historyDetailsText(state: Pick<HistorySnapshot, "unsaved"> & { r
         lines.push(`Attempt ${index + 1}: ${attempt.mode === "tui" ? "interactive" : "headless"} · ${attempt.workspaceRoot} · started ${historyTimeLabel(attempt)} · ${attempt.outcome ? historyOutcomeLabel({ evidence: "recorded", outcome: attempt.outcome }) : "no outcome recorded"} · ${attempt.activeMs === null ? "time unknown" : formatDuration(attempt.activeMs)}`);
         lines.push(`  ${git}`);
         lines.push(...historyTelemetryDetails(attempt));
+        lines.push(historyReasoningDetails(attempt));
       });
       if (turn.incompleteAttempts) lines.push(`${formatCount(turn.incompleteAttempts, "attempt")} saved a start but no outcome, after a crash, forced quit or failed write. Its files, commands and time are unknown, so counts below are lower bounds.`);
       lines.push(`${formatCount(turn.toolResults, "tool result")}; ${formatCount(turn.failedTools, "failed tool")}.`);
@@ -255,7 +285,9 @@ export abstract class HistoryLayer extends TurnLayer {
     this.historyAttempt = undefined;
     const identity = this.historyEnabled() && !this.disposed ? historyTurnIdentity(this.session, this.workspace?.root, "tui") : undefined;
     if (identity && this.activeAbort?.signal === signal) {
-      const collector = createHistoryCollector({ store: openHistoryStore({ home: this.home! }), identity, secrets: this.secrets, clock: this.activityClock, session: this.session });
+      // Settings changes wait for the turn, so the adapter bound now serves every model call of this attempt.
+      const collector = createHistoryCollector({ store: openHistoryStore({ home: this.home! }), identity, secrets: this.secrets, clock: this.activityClock, session: this.session,
+        reasoning: modelReasoning(this.model) });
       this.historyAttempt = { collector, signal };
       await collector.start();
     }

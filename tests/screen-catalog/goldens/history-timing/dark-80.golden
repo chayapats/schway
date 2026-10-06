@@ -14,6 +14,7 @@ cursor 1 1 hidden
   takes
   2026-01-15 09:26 UTC · 3m 20s
   Model 1m 58s · Tools 1m 21s · 81% cached
+  Reasoning: provider default
 
   Files · 0
     No file changes observed
@@ -30,11 +31,10 @@ cursor 1 1 hidden
 
 
 
-
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                              ctx ~27
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default           ctx ~27
   PgUp/PgDn scroll · F2 details · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -62,34 +62,36 @@ cursor 1 1 hidden
 07 0-2 #ffffff #0e1117 -
 07 2-42 #8b95a7 #0e1117 -
 07 42-80 #ffffff #0e1117 -
-08 0-80 #ffffff #0e1117 -
-09 0-2 #ffffff #0e1117 -
-09 2-11 #7cc4ff #0e1117 b
-09 11-80 #ffffff #0e1117 -
+08 0-2 #ffffff #0e1117 -
+08 2-29 #8b95a7 #0e1117 -
+08 29-80 #ffffff #0e1117 -
+09 0-80 #ffffff #0e1117 -
 10 0-2 #ffffff #0e1117 -
-10 2-28 #8b95a7 #0e1117 -
-10 28-80 #ffffff #0e1117 -
-11 0-80 #ffffff #0e1117 -
-12 0-2 #ffffff #0e1117 -
-12 2-14 #7cc4ff #0e1117 b
-12 14-80 #ffffff #0e1117 -
+10 2-11 #7cc4ff #0e1117 b
+10 11-80 #ffffff #0e1117 -
+11 0-2 #ffffff #0e1117 -
+11 2-28 #8b95a7 #0e1117 -
+11 28-80 #ffffff #0e1117 -
+12 0-80 #ffffff #0e1117 -
 13 0-2 #ffffff #0e1117 -
-13 2-44 #8fd19e #0e1117 -
-13 44-80 #ffffff #0e1117 -
+13 2-14 #7cc4ff #0e1117 b
+13 14-80 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
-14 2-64 #8fd19e #0e1117 -
-14 64-80 #ffffff #0e1117 -
+14 2-44 #8fd19e #0e1117 -
+14 44-80 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
-15 2-26 #8fd19e #0e1117 -
-15 26-80 #ffffff #0e1117 -
-16 0-80 #ffffff #0e1117 -
-17 0-2 #ffffff #0e1117 -
-17 2-6 #7cc4ff #0e1117 b
-17 6-80 #ffffff #0e1117 -
+15 2-64 #8fd19e #0e1117 -
+15 64-80 #ffffff #0e1117 -
+16 0-2 #ffffff #0e1117 -
+16 2-26 #8fd19e #0e1117 -
+16 26-80 #ffffff #0e1117 -
+17 0-80 #ffffff #0e1117 -
 18 0-2 #ffffff #0e1117 -
-18 2-25 #e6eaf0 #0e1117 -
-18 25-80 #ffffff #0e1117 -
-19 0-80 #ffffff #0e1117 -
+18 2-6 #7cc4ff #0e1117 b
+18 6-80 #ffffff #0e1117 -
+19 0-2 #ffffff #0e1117 -
+19 2-25 #e6eaf0 #0e1117 -
+19 25-80 #ffffff #0e1117 -
 20 0-80 #ffffff #0e1117 -
 21 0-80 #ffffff #0e1117 -
 22 0-80 #ffffff #0e1117 -
@@ -111,7 +113,9 @@ cursor 1 1 hidden
 28 8-17 #8fd19e #31433f b
 28 17-18 #8b95a7 #161b24 -
 28 18-43 #e6eaf0 #1e2430 -
-28 43-79 #8b95a7 #161b24 -
+28 43-44 #8b95a7 #161b24 -
+28 44-62 #c0acff #3b3b54 -
+28 62-79 #8b95a7 #161b24 -
 28 79-80 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-11 #e6eaf0 #293140 b

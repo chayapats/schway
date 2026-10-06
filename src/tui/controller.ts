@@ -1,6 +1,6 @@
 import { redactSecrets } from "../auth/secrets.ts";
 import type { Model } from "../model/model.ts";
-import { describeEffectiveThinking } from "../config/config.ts";
+import { resolveEffectiveThinking } from "../model/thinking.ts";
 import type { TuiSnapshot } from "./controller-types.ts";
 import { startupFailureCategory, startupRecoveryMessage } from "./controller-support.ts";
 import { TurnLayer } from "./controller-turn.ts";
@@ -21,7 +21,8 @@ export class TuiController extends HistoryLayer {
   /** Return redacted current state and the active assistant preview independently of transcript order. */
   snapshot(): TuiSnapshot {
     const thinking = this.configEditor ? this.configEditor.settings.thinking : this.thinking;
-    const effective = describeEffectiveThinking(this.provider, thinking as never, this.modelId, this.thinkingContext());
+    // One shared policy gives /thinking its description and the footer its chip.
+    const effective = resolveEffectiveThinking(this.provider, thinking as never, this.modelId, this.thinkingContext());
     const branchTree = this.branchTreeForSnapshot();
     const activeRoute = this.model
       ? this.model.provider === "codex-subscription" ? "ChatGPT subscription" : this.model.provider === "openai" ? "OpenAI API key" : "OpenAI route"
@@ -71,7 +72,7 @@ export class TuiController extends HistoryLayer {
       ...(this.openaiAuth !== undefined ? { openaiAuth: this.openaiAuth } : {}),
       ...(this.provider === "xai" ? { activeRoute: `${this.grokSelected() ? "Grok subscription" : "xAI API key"}${this.model ? "" : " (unavailable)"}` } : {}),
       ...(this.provider === "openai" ? { activeRoute: `${activeRoute}${this.model ? "" : " (unavailable)"}` } : {}),
-      ...(thinking !== undefined ? { thinking } : {}), effectiveThinking: effective,
+      ...(thinking !== undefined ? { thinking } : {}), effectiveThinking: effective.label, ...(this.modelId ? { thinkingChip: effective.chip } : {}),
       preferences: this.preferences ? structuredClone(this.preferences) : undefined,
       recentSession: this.session.items.length === 0 ? this.recentSession : undefined,
       restored: this.restored,

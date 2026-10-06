@@ -13,6 +13,7 @@ cursor 1 1 hidden
   Check tomorrow's Bangkok weather and how long the drive to the airport takes
   2026-01-15 09:29 UTC · 58s
   Model 57s · Tools 0.4s · 40%+ cached
+  Reasoning: provider default
 
   Files · 0
     No file changes observed
@@ -30,11 +31,10 @@ cursor 1 1 hidden
 
 
 
-
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                                                                      ctx ~27
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                   ctx ~27
   PgUp/PgDn scroll · F2 details · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -59,28 +59,30 @@ cursor 1 1 hidden
 06 0-2 #ffffff #f7f7f4 -
 06 2-38 #545e6c #f7f7f4 -
 06 38-120 #ffffff #f7f7f4 -
-07 0-120 #ffffff #f7f7f4 -
-08 0-2 #ffffff #f7f7f4 -
-08 2-11 #0a5894 #f7f7f4 b
-08 11-120 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-29 #545e6c #f7f7f4 -
+07 29-120 #ffffff #f7f7f4 -
+08 0-120 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
-09 2-28 #545e6c #f7f7f4 -
-09 28-120 #ffffff #f7f7f4 -
-10 0-120 #ffffff #f7f7f4 -
-11 0-2 #ffffff #f7f7f4 -
-11 2-14 #0a5894 #f7f7f4 b
-11 14-120 #ffffff #f7f7f4 -
+09 2-11 #0a5894 #f7f7f4 b
+09 11-120 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-28 #545e6c #f7f7f4 -
+10 28-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
-12 2-26 #19612f #f7f7f4 -
-12 26-120 #ffffff #f7f7f4 -
-13 0-120 #ffffff #f7f7f4 -
-14 0-2 #ffffff #f7f7f4 -
-14 2-6 #0a5894 #f7f7f4 b
-14 6-120 #ffffff #f7f7f4 -
+12 2-14 #0a5894 #f7f7f4 b
+12 14-120 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-26 #19612f #f7f7f4 -
+13 26-120 #ffffff #f7f7f4 -
+14 0-120 #ffffff #f7f7f4 -
 15 0-2 #ffffff #f7f7f4 -
-15 2-25 #1d232c #f7f7f4 -
-15 25-120 #ffffff #f7f7f4 -
-16 0-120 #ffffff #f7f7f4 -
+15 2-6 #0a5894 #f7f7f4 b
+15 6-120 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-25 #1d232c #f7f7f4 -
+16 25-120 #ffffff #f7f7f4 -
 17 0-120 #ffffff #f7f7f4 -
 18 0-120 #ffffff #f7f7f4 -
 19 0-120 #ffffff #f7f7f4 -
@@ -105,7 +107,9 @@ cursor 1 1 hidden
 28 8-17 #19612f #d3dcd4 b
 28 17-18 #545e6c #ecedea -
 28 18-43 #1d232c #e1e3df -
-28 43-119 #545e6c #ecedea -
+28 43-44 #545e6c #ecedea -
+28 44-62 #6a3fb0 #dcd8e3 -
+28 62-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-11 #1d232c #caced3 b

@@ -1,0 +1,3 @@
+{"type":"session","version":4,"id":"13f24fb3-364a-4c6c-8109-c68b5bbb5623","createdAt":"2026-10-06T10:57:42.760Z","workspaceRoot":"/work/demo","launchCwd":"/work/demo","extraRoots":[]}
+{"type":"branch_append","version":1,"branchId":"main","entries":[{"parentId":"13f24fb3-364a-4c6c-8109-c68b5bbb5623","item":{"type":"user","id":"legacy-user-1","content":[{"type":"text","text":"Summarize the README"}]}}],"committedAt":"2026-10-06T10:57:42.761Z"}
+{"type":"branch_append","version":1,"branchId":"main","entries":[{"parentId":"legacy-user-1","item":{"type":"assistant","id":"legacy-assistant-1","content":[{"type":"text","text":"Done."}],"providerMetadata":{"xai":{"response_id":"resp_legacy","status":"completed"}}}}],"committedAt":"2026-10-06T10:57:42.769Z"}
