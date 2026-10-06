@@ -1,5 +1,6 @@
 import { StyledText, bg, bold, fg, underline, type TextChunk } from "@opentui/core";
 import { fitLine } from "./presentation.ts";
+import { FIND_ARROWS, FIND_KEEP, FIND_RESTORE } from "./find-hints.ts";
 import { ReaderSnapshot, READER_SOURCE_LIMIT, type ReaderPosition, type ReaderRow, type ReaderSearchMatch, type ReaderTarget, type ReaderViewport } from "./reader.ts";
 import { tint, type TuiTheme } from "./theme.ts";
 
@@ -285,11 +286,11 @@ export function paintReader(input: {
     const query = fitLine(input.search?.query ?? "", Math.max(1, Math.floor(columns / 2)));
     // While an approval waits, Esc hands input to it instead of restoring, as the header and hint row say.
     const approval = layout.status.includes("approval");
-    const escape = approval ? "Esc back to request" : "Esc restore";
+    const escape = approval ? "Esc back to request" : FIND_RESTORE;
     const count = `${selected + 1}/${result.matches.length}${result.limited ? "+" : ""}`;
     // Narrow rows drop keys the hint row repeats, then the query, so the Esc phrase is never clipped.
     const choices = !input.search?.query ? [`Find in this block · Type a query · ${escape}`, `Type a query · ${escape}`]
-      : result.matches.length ? [`Find: ${query} · ${count} · ↑↓ next · Enter keep · ${escape}`, `Find: ${query} · ${count} · Enter keep · ${escape}`, `Find: ${query} · ${count} · ${escape}`, `${count} · ${escape}`]
+      : result.matches.length ? [`Find: ${query} · ${count} · ${FIND_ARROWS} · ${FIND_KEEP} · ${escape}`, `Find: ${query} · ${count} · ${FIND_KEEP} · ${escape}`, `Find: ${query} · ${count} · ${escape}`, `${count} · ${escape}`]
       : [`Find: ${query} · No matches · ${escape}`, `No matches · ${escape}`, `None · ${escape}`];
     lines.push([fg(theme.accent)(fitLine(choices.find(choice => width(choice) <= columns) ?? escape, columns))]);
   }

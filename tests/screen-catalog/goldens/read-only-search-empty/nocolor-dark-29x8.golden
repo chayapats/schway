@@ -11,7 +11,7 @@ cursor 6 6 visible
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Find
+ ▌ › Find in this branch…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Read-only · Esc restore
 == styles
@@ -28,8 +28,8 @@ cursor 6 6 visible
 04 28-29 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
 05 1-5 #e6eaf0 #161b24 -
-05 5-9 #8b95a7 #161b24 -
-05 9-28 #ffffff #161b24 -
+05 5-25 #8b95a7 #161b24 -
+05 25-28 #ffffff #161b24 -
 05 28-29 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
 06 1-28 #161b24 #0e1117 -

@@ -28,6 +28,7 @@ import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, re
 import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoEscape, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerEnd, readerLayout, revealMatch, scrollReader, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
 import type { ReaderPosition } from "./reader.ts";
+import { CONVERSATION_FIND_PLACEHOLDER, conversationFindHint, conversationFindStatus, fitFindStatus, readerFindKeys } from "./find-hints.ts";
 import { createHistoryPanel } from "./history-view.ts";
 import { approvalAction, approvalChoices, approvalHint, approvalPanelLayout, charWrappedRows, type ApprovalPanelLayout } from "./approval-layout.ts";
 
@@ -737,7 +738,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ...(Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
     };
     if (columns < 30 || !hints.visible) { compactFooter(footerParts.nextAction); return; }
-    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitLine(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
+    if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitFindStatus(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
     const fill = mixColor(pillFrom, colors.bg, fade);
@@ -1002,7 +1003,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             : "Approval pending · Esc cancels";
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -1240,9 +1241,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       const selectedSearchId = searchOpen ? searchResult.matches[searchSelected]?.id : undefined;
       for (const [id, row] of rows) row.setSearchMatch(id === selectedSearchId);
-      const searchStatus = !editor.plainText ? "Find in this branch · Type a query" : searchResult.matches.length
-        ? `Find ${searchSelected + 1}/${searchResult.matches.length}${searchResult.limited ? "+ (limited)" : ""} · active branch, displayed text`
-        : `No matches${searchResult.limited ? " in searched portion" : " in this branch"} · Edit query · Esc back`;
+      // Esc restores in every find state; a waiting approval takes Esc instead, as the hint row says.
+      const searchStatus = conversationFindStatus({ query: editor.plainText, selected: searchSelected, count: searchResult.matches.length, limited: searchResult.limited, escape: snapshot.toolApproval ? "Esc back to request" : undefined });
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
       // Alt+R review and F2 details act only from the conversation; panels and the reader own those keys, and open details ignore F2.
@@ -1251,7 +1251,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
         : snapshot.toolApproval ? { text: `${width >= 40 ? "Approval required" : "Approval"} · Ctrl+C cancel turn`, tone: "warning", glyph: "◌", chips: true }
-        : searchOpen ? { text: searchStatus, tone: "accent", glyph: "⌕" }
+        : searchOpen ? { text: fitFindStatus(searchStatus, renderer.width - 2 * bodyPadding - 2), tone: "accent", glyph: "⌕" }
         : Date.now() < interactionNoticeUntil ? { text: interactionNotice, tone: "muted" }
         : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
         : snapshot.branchTreeError ? { text: safe(snapshot.branchTreeError), tone: "error", glyph: "!" }
@@ -1431,7 +1431,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       hints.height = panelMode === "review" || panelMode === "history" ? "auto" : 1;
       hints.wrapMode = panelMode === "review" || panelMode === "history" ? "word" : "none";
       if (reader) {
-        const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
+        const navigation = reader.search ? readerFindKeys(!!reader.search.query && reader.search.selected >= 0) : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
           ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
         // Esc leads so narrow hint rows keep the way out when trailing actions are dropped.
         hints.content = fittedHints([snapshot.toolApproval ? "Esc back to request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width, theme.background, true);
@@ -1472,7 +1472,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

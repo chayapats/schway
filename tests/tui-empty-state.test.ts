@@ -177,7 +177,7 @@ test("typing hides examples without changing text or cursor; clearing the draft 
 test("search, panels and command browsing own the surface; Esc restores examples and the empty composer", async () => {
   const ui = await setup(80, 30);
   const owners: [string, () => void, (s: TuiSnapshot) => boolean][] = [
-    ["search", () => ui.mockInput.pressKey("f", { ctrl: true }), () => ui.editor.placeholder === "Find in this conversation…"],
+    ["search", () => ui.mockInput.pressKey("f", { ctrl: true }), () => ui.editor.placeholder === "Find in this branch…"],
     ["model", () => ui.mockInput.pressKey("m", { meta: true }), s => !!s.modelPicker],
     ["preferences", () => ui.mockInput.pressKey("p", { meta: true }), s => !!s.preferences],
     ["sign-in", () => ui.mockInput.pressKey("l", { meta: true }), s => !!s.loginChooser],

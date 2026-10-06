@@ -32,10 +32,10 @@ cursor 6 27 visible
 
  ⌕ Find in this branch · Type a query
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Find in this conversation…
+ ▌ › Find in this branch…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Read-only  ● Ready   scripted/scrip…    ctx ~0
- Enter accept · Esc restore · Ctrl+End latest
+ Esc restore · Ctrl+End latest
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -78,8 +78,8 @@ cursor 6 27 visible
 25 49-50 #ffffff #0e1117 -
 26 0-1 #ffffff #0e1117 -
 26 1-5 #7cc4ff #161b24 -
-26 5-31 #8b95a7 #161b24 -
-26 31-49 #ffffff #161b24 -
+26 5-25 #8b95a7 #161b24 -
+26 25-49 #ffffff #161b24 -
 26 49-50 #ffffff #0e1117 -
 27 0-1 #ffffff #0e1117 -
 27 1-49 #161b24 #0e1117 -
@@ -93,10 +93,8 @@ cursor 6 27 visible
 28 40-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
-29 1-6 #e6eaf0 #293140 b
-29 6-16 #8b95a7 #0e1117 -
-29 16-19 #e6eaf0 #293140 b
-29 19-30 #8b95a7 #0e1117 -
-29 30-38 #e6eaf0 #293140 b
-29 38-45 #8b95a7 #0e1117 -
-29 45-50 #ffffff #0e1117 -
+29 1-4 #e6eaf0 #293140 b
+29 4-15 #8b95a7 #0e1117 -
+29 15-23 #e6eaf0 #293140 b
+29 23-30 #8b95a7 #0e1117 -
+29 30-50 #ffffff #0e1117 -
