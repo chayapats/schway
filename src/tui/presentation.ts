@@ -99,7 +99,7 @@ export function fitLine(text: string, columns: number): string {
 /** Short forms of work statuses that still say what happened, including compaction outcomes, on narrow rows. */
 const SHORT_WORK_STATUS: Readonly<Record<string, string>> = {
   "Preparing request": "Preparing", "Waiting for response": "Waiting", "Receiving response": "Receiving",
-  "Retrying request": "Retrying", "Provider unavailable": "Provider down", "Compacting context": "Compacting", "Context compacted": "Compaction done",
+  "Retrying request": "Retrying", "Provider unavailable": "Provider error", "Compacting context": "Compacting", "Context compacted": "Compaction done",
   "Context unchanged": "Already compact", "Compaction failed": "Compact failed", "Compaction cancelled": "Not compacted",
 };
 

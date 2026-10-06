@@ -952,7 +952,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : snapshot.credentialEntry
           ? safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter save · Esc cancel`)
           : snapshot.loginCallbackEntry
-            ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchanges · Esc cancels`)
+            ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter exchange · Esc cancel`)
             : "Approval pending · Esc cancels";
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
@@ -985,7 +985,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
         nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview)
-          : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : panelMode === "credential" ? "Esc cancel" : panelMode || inspection || detailsReturn || reader ? "Esc back"
+          : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : panelMode === "credential" || panelMode === "callback" ? "Esc cancel" : panelMode || inspection || detailsReturn || reader ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stop"
           : snapshot.readiness === "loading" ? "Esc cancel"
           : snapshot.recovery?.actions.includes("details") ? "F2 details"
@@ -1414,7 +1414,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? `↑/↓ select · Tab complete · Esc keep editing${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter exchange · Esc cancel" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? `↑/↓ select · Tab complete · Esc keep editing${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

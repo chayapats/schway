@@ -903,6 +903,30 @@ test("masked credential entry intercepts paste and restores a multiline draft wi
   expect(ui.session.items).toHaveLength(0);
 });
 
+test("browser callback entry names Enter exchange · Esc cancel in the panel, hint row and compact status bar, and Esc changes nothing", async () => {
+  for (const [width, height] of [[80, 24], [60, 12]] as const) {
+    const ui = await setup(width, height);
+    await ui.mockInput.pasteBracketedText("keep this draft");
+    expect(await ui.controller.login("")).toBe(true);
+    await settle(ui);
+    ui.mockInput.pressTab(); await settle(ui);
+    while (ui.controller.snapshot().loginChooser!.selectedId !== "chatgpt-callback") ui.mockInput.pressArrow("down");
+    ui.mockInput.pressEnter(); await settle(ui);
+    expect(ui.controller.snapshot().loginCallbackEntry).toBeDefined();
+    const frame = ui.captureCharFrame();
+    const rows = frame.trimEnd().split("\n").map(line => line.trim());
+    expect(frame.replace(/\s+/g, " ")).toContain("Enter exchange · Esc cancel");
+    expect(frame).not.toContain("Esc back");
+    expect(frame).not.toContain("Esc cancels");
+    expect(frame).not.toContain("Enter confirm");
+    // The hint row repeats the panel's keys; below 14 rows the compact status bar names the same Esc verb.
+    expect(rows.at(-1)).toBe(height < 14 ? "Auto · Esc cancel" : "Enter exchange · Esc cancel");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().loginCallbackEntry).toBeUndefined();
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Callback entry cancelled; no credential was changed.");
+  }
+});
+
 test("login chooser and masked callback use real keyboard and paste input while preserving a draft", async () => {
   const ui = await setup(48, 18);
   await ui.mockInput.pasteBracketedText("continue this task\nsecond line");

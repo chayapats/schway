@@ -332,7 +332,7 @@ test("narrow work rows keep compaction outcomes and phases readable at the 30- a
     [activity({ phase: "retry" }), "Retrying · Esc stop", "Retrying · Esc stop"],
     // A retry keeps its cause and drops the attempt number first.
     [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "rate-limit" } }), "Rate limited · Esc stop", "Rate limited"],
-    [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "provider" } }), "Provider down · Esc stop", "Provider unavailable"],
+    [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "provider" } }), "Provider error · Esc stop", "Provider unavailable"],
     [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000 } }), "Retrying · Esc stop", "Retrying · Esc stop"],
     [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "offline" } }), "Connection lost · Esc stop", "Connection lost"],
   ] as const;
