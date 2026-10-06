@@ -279,7 +279,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   configDiagnosticSecrets(diagnosticContext, [settings]);
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
-  // Built-ins are fixed before extensions load, so an extension tool named web_fetch cannot enable web-lookup guidance.
+  // Web-lookup guidance follows the built-in list only, which is fixed before extensions load.
   const builtinTools = createToolRegistry([readTool, writeTool, editTool, bashTool, webFetchTool, grepTool, findTool, lsTool]);
   const webLookupGuidance = hasBuiltinWebFetch(builtinTools.definitions());
   try {
