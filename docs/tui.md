@@ -883,11 +883,10 @@ highlighted choice clears its selection: press an arrow before completing again.
 Up/Down selects and wraps, and Tab inserts the highlighted choice. Enter inserts
 the highlighted choice when it differs from the draft, and sends when the draft
 already matches it, so `/ses` then Enter gives `/sessions `, the list closes and
-the next Enter runs it. The list stays closed while you type arguments to a known
-command. Choosing a row with an arrow wins over the typed text; a typed name that
-collides sends, so its conflict is reported. **Esc keep editing** hides the list;
-Esc, then Enter, sends the typed text unchanged. Arrows skip
-group headers and unavailable rows; Tab and Enter never insert them. Completion never
+the next Enter runs it. Choosing a row with an arrow wins over the typed text; a
+typed name that collides sends, so its conflict is reported. **Esc keep editing**
+hides the list; Esc, then Enter, sends the typed text unchanged. Arrows skip group
+headers and unavailable rows; Tab and Enter never insert them. Completion never
 executes an action. `/thinking ` suggests only validated current model levels
 (and `reset`); subscription levels require advertised account metadata. OpenRouter
 uses endpoint-scoped model metadata for the same choices in `/thinking` and

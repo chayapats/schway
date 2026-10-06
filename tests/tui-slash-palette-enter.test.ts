@@ -130,9 +130,6 @@ test("a complete command closes the list whether Enter or Tab inserted it; argum
   expect(ui.editor.plainText).toBe("/sessions ");
   expect(ui.picker.visible).toBe(false);
   expect(ui.captureCharFrame()).not.toContain("No matches");
-  // Typing arguments to a known command keeps the list closed.
-  ui.editor.setText(""); await ui.type("/resume saved-id");
-  expect(ui.picker.visible).toBe(false);
   // A command with an argument list still offers it after insertion.
   ui.editor.setText(""); await ui.type("/the");
   await ui.enter();

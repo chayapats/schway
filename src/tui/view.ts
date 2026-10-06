@@ -572,9 +572,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     return slashEnter(highlight?.id === completionId ? highlight : undefined, editor.plainText, { choices, chosen: completionChosen });
   }
 
-  /** A known command followed by arguments, with no argument list to offer, has nothing left to browse. */
-  function commandArguments(text: string): boolean {
-    const name = /^\/(\S+)\s/.exec(text)?.[1];
+  /** A complete known command (`/name ` with no argument list to offer) has nothing left to browse. */
+  function completeCommand(text: string): boolean {
+    const name = /^\/(\S+)\s+$/.exec(text)?.[1];
     return !!name && !controller.commandChoices(text).length && controller.commandChoices(`/${name}`).some(entry => entry.name === name);
   }
 
@@ -1240,7 +1240,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : outcomeText ? { text: outcomeText.slice(outcomeGlyph!.length + 1), tone: outcomeTone, glyph: outcomeGlyph, outcome: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
-      const browsing = panelMode === "help" || (!panelMode && !reader && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery && !commandArguments(editor.plainText));
+      const browsing = panelMode === "help" || (!panelMode && !reader && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery && !completeCommand(editor.plainText));
       if (browsing && !discoveryOpen) refreshDiscovery();
       discoveryOpen = browsing;
       // Guidance belongs to the query it was opened from; any query edit returns to results.
