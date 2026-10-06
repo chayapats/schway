@@ -117,6 +117,12 @@ failure details; its hint appears only when those details exist. The ready scree
 does not add a recurring welcome or restored-choice message to the transcript; `/config` retains setting provenance and `/model forget`
 clears remembered interactive choices.
 
+While a panel, palette, find, inspection, F2 details or an approval owns the keys,
+the empty-conversation card keeps its status lines, such as **Not connected** or
+the model and route, but hides its action line, such as **Connect a provider · Alt+L**
+or **Type a task · Enter sends**. The open surface's own heading and hint row name
+the keys that work there. Closing it brings the action line back unchanged.
+
 A ready, empty conversation with an empty composer also lists up to three fixed
 examples under **Try a task**. They are plain text: type or paste one, or write
 your own task in any language. Examples disappear as soon as you type, once the

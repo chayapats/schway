@@ -6,8 +6,8 @@ variant light-40x8
 size 40x8
 cursor 6 6 visible
 == text
+ /project
  Not connected
- Connect a provider · Alt+L
   Sign in
       › ChatGPT
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -16,12 +16,11 @@ cursor 6 6 visible
  Auto · Esc back
 == styles
 00 0-1 #ffffff #f7f7f4 -
-00 1-14 #1d232c #f7f7f4 b
-00 14-40 #ffffff #f7f7f4 -
+00 1-9 #545e6c #f7f7f4 -
+00 9-40 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
-01 1-22 #545e6c #f7f7f4 -
-01 22-27 #1d232c #caced3 b
-01 27-40 #ffffff #f7f7f4 -
+01 1-14 #1d232c #f7f7f4 b
+01 14-40 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
 02 1-2 #ffffff #e1e3df -
 02 2-9 #0a5894 #e1e3df -

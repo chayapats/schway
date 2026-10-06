@@ -103,6 +103,12 @@
   gone. Timeouts read `Sign-in timed out · Alt+L retry · F2 details` with the
   recovery steps in F2 details, and a browser that cannot open shows
   `Browser didn't open · Open the link above` (#297).
+- The empty-conversation card hides its action line, such as
+  `Connect a provider · Alt+L` or `Type a task · Enter sends`, while a panel,
+  the slash or help palette, find, inspection, F2 details or an approval owns
+  the keys. Its status line stays, and the action line returns when that
+  surface closes. The outcome strip decides `Alt+R review` and `F2 details`
+  separately, so it names each key only while it acts (#301).
 
 ## [1.0.0-rc.1] - 2026-10-02
 

@@ -11,7 +11,7 @@ cursor 9 27 visible
 
  scripted/scripted-model · scripted API key
 
- Type a task · Enter sends
+
 
 
 
@@ -50,11 +50,7 @@ cursor 9 27 visible
 03 24-43 #545e6c #f7f7f4 -
 03 43-50 #ffffff #f7f7f4 -
 04 0-50 #ffffff #f7f7f4 -
-05 0-1 #ffffff #f7f7f4 -
-05 1-15 #545e6c #f7f7f4 -
-05 15-20 #1d232c #caced3 b
-05 20-26 #545e6c #f7f7f4 -
-05 26-50 #ffffff #f7f7f4 -
+05 0-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -
 07 0-50 #ffffff #f7f7f4 -
 08 0-50 #ffffff #f7f7f4 -

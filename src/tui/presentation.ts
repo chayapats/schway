@@ -3,24 +3,24 @@ import { formatCount, formatDuration } from "../text/format.ts";
 import { formatRetryWait, retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import type { TurnOutcome } from "./controller-types.ts";
 import { displayUrl } from "../tools/web-fetch-display.ts";
+import type { OutcomeStripActions } from "./background-hints.ts";
 
 /** Return the visible completion word and glyph without implying verification. */
 export function outcomeLabel(outcome: TurnOutcome): string {
   return { completed: "✓ Done", failed: "✗ Failed", cancelled: "− Stopped", limit: "◌ Limit" }[outcome.reason];
 }
 
-/** Fit a turn summary by dropping elapsed, commands, then files before clipping; actions appear only when `actionable`, and F2 only while details are closed. */
-export function formatOutcomeLine(outcome: TurnOutcome, columns: number, actionable = true, detailsOpen = false): string {
+/** Fit a turn summary by dropping elapsed, commands, then files before clipping; each action key appears only while `actions` says it acts, and F2 only for a failed turn. */
+export function formatOutcomeLine(outcome: TurnOutcome, columns: number, actions: OutcomeStripActions = { review: true, details: true }): string {
   let elapsed = formatDuration(outcome.elapsedMs);
-  // Panels own Alt+R and F2, so the strip names its actions only where they work; open details ignore F2.
-  const actions = actionable ? `Alt+R review${outcome.reason === "failed" && !detailsOpen ? " · F2 details" : ""}` : "";
+  const keys = [actions.review ? "Alt+R review" : "", outcome.reason === "failed" && actions.details ? "F2 details" : ""].filter(Boolean).join(" · ");
   const counts = outcome.commandCounts;
   let commands = [[counts.exitZero, "ok"], [counts.nonzero, "failed"], [counts.unknown, "stopped"]]
     .filter(([count]) => Number(count) > 0).map(([count, word]) => `${formatCount(Number(count), "command")} ${word}`).join(" · ");
   const counted = outcome.files.filter(file => file.added !== undefined || file.removed !== undefined);
   let files = outcome.files.length ? formatCount(outcome.files.length, "file") : "";
   if (counted.length) files += ` +${counted.reduce((sum, file) => sum + (file.added ?? 0), 0)} −${counted.reduce((sum, file) => sum + (file.removed ?? 0), 0)}`;
-  const line = () => [outcomeLabel(outcome), files, commands, elapsed, actions].filter(Boolean).join(" · ");
+  const line = () => [outcomeLabel(outcome), files, commands, elapsed, keys].filter(Boolean).join(" · ");
   if (Bun.stringWidth(line()) > columns) elapsed = "";
   if (Bun.stringWidth(line()) > columns) commands = "";
   if (Bun.stringWidth(line()) > columns) files = "";
