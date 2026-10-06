@@ -633,8 +633,9 @@ for (const panel of ["model", "preferences", "help", "search"] as const) test(`$
   const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
   for (const width of [120, 80, 50]) {
     ui.resize(width, 28); await ui.settle();
-    // Ctrl+C stays in the activity row; the footer names the open view's own Esc.
-    expect(footer.plainText).toContain(panel === "search" ? "Esc restore" : "Esc back");
+    // Ctrl+C stays in the activity row; the footer names Esc with the hint row's words, never a second verb.
+    expect(footer.plainText).toContain(hints.plainText);
+    expect(footer.plainText.match(/Esc [a-z]+(?: [a-z]+)*/g)).toEqual(["Esc back to request"]);
     expect(footer.plainText).not.toContain("Ctrl+C");
     expect(ui.captureCharFrame()).toContain("Approval required · Ctrl+C cancel turn");
     expect(footer.plainText).not.toContain("Esc stop");
@@ -926,6 +927,7 @@ test("short approval panels give up margins, then unselected choices, then previ
     return { margins: [layout.headingMargin, layout.choicesMargin], choices: layout.choices.map(choice => choice.text), preview: layout.previewRows, fits: layout.fits };
   };
   const all = ["  Allow once", "› Allow edit for this session", "  Deny with reason…"];
+  // Margins take only rows left once the preview is whole and every choice shows; a lone choice leaves one spare row as its margin.
   expect(plan(10)).toEqual({ margins: [true, true], choices: all, preview: 4, fits: true });
   expect(plan(9)).toEqual({ margins: [true, true], choices: all, preview: 3, fits: true });
   expect(plan(8)).toEqual({ margins: [false, true], choices: all, preview: 3, fits: true });
@@ -933,10 +935,32 @@ test("short approval panels give up margins, then unselected choices, then previ
   expect(plan(6)).toEqual({ margins: [false, true], choices: ["› Allow edit for this session  (2 of 3)"], preview: 3, fits: true });
   expect(plan(4)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 2, fits: true });
   expect(plan(3)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 1, fits: true });
-  // A long preview takes the spare rows only after every choice and margin fits.
-  expect(plan(20, 40)).toEqual({ margins: [true, true], choices: all, preview: 14, fits: true });
+  // A preview cut short never shares rows with a blank margin: margins go first, then unselected choices, then preview rows.
+  expect(plan(20, 40)).toEqual({ margins: [false, false], choices: all, preview: 16, fits: true });
+  expect(plan(9, 40)).toEqual({ margins: [false, false], choices: all, preview: 5, fits: true });
+  expect(plan(8, 40)).toEqual({ margins: [false, false], choices: all, preview: 4, fits: true });
+  expect(plan(7, 40)).toEqual({ margins: [false, false], choices: all, preview: 3, fits: true });
+  expect(plan(6, 40)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 4, fits: true });
+  expect(plan(4, 40)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 2, fits: true });
+  expect(plan(3, 40)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 1, fits: true });
+  // A long preview gets margins back only once it is shown whole.
+  expect(plan(12, 6)).toEqual({ margins: [true, true], choices: all, preview: 6, fits: true });
+  expect(plan(11, 6)).toEqual({ margins: [false, true], choices: all, preview: 6, fits: true });
+  expect(plan(10, 6)).toEqual({ margins: [false, false], choices: all, preview: 6, fits: true });
   // Below the heading, one preview row and the selected choice, Enter has nothing safe to act on.
   expect(plan(2).fits).toBe(false);
+  // An unselected choice's two-cell indent counts toward wrapping: 39 cells take two rows at 38 columns, as the renderer draws them.
+  expect(wrappedRows("  Allow list_processes for this session", 38)).toBe(2);
+  expect(wrappedRows("› Allow list_processes for this session", 38)).toBe(2);
+  expect(wrappedRows("  Allow bash for this session", 38)).toBe(1);
+  expect(wrappedRows("  abcdefghijklmnopqrstuvwxyzabcdefghijkl", 38)).toBe(2);
+  const wrapping = (rows: number) => {
+    const layout = approvalPanelLayout({ heading: "Allow list_processes? · ask mode", choices: approvalChoices("list_processes"), selected: 0, previewRows: 1, rows, columns: 38 });
+    return [layout.choiceRows, layout.choices.length, layout.choicesMargin, layout.headingMargin];
+  };
+  // Heading, one preview row and four choice rows fill six rows exactly, leaving no margin to reserve.
+  expect(wrapping(6)).toEqual([4, 3, false, false]);
+  expect(wrapping(7)).toEqual([4, 3, true, false]);
   // A heading that would crowd out the request is fitted to one row.
   const tight = approvalPanelLayout({ heading: "Allow a_very_long_extension_tool_name? · ask mode", choices: approvalChoices("x"), selected: 0, previewRows: 1, rows: 3, columns: 24 });
   expect([tight.headingRows, tight.fits, wrappedRows(tight.heading, 24)]).toEqual([1, true, 1]);

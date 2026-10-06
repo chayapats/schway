@@ -148,7 +148,11 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     if (screen.id === "reader-code") { expect(text).toContain("‹"); expect(text).toContain("›"); }
     if (screen.id === "reader-table" && variant.rows > 8) { expect(text).toMatch(/‹Owner +│/); expect(text).toMatch(/Columns 2–\d of 8|Col 2–\d\/8/); expect(text).not.toContain("ภาค 1 "); }
     if (screen.id === "reader-no-matches") expect(text).toContain("No matches");
-    if (screen.id === "reader-approval") { expect(text).toMatch(/◌ Approval( waiting)? · Esc back to request/); expect(text).not.toContain("Allow bash?"); }
+    if (screen.id === "reader-approval") {
+      expect(text).toMatch(/◌ Approval( waiting)? · Esc back to request/); expect(text).not.toContain("Allow bash?");
+      // One Esc, one verb: every Esc phrase on the screen, footer included, matches the reader's own.
+      expect([...text.matchAll(/Esc [a-z]+(?: [a-z]+)*/g)].map(match => match[0]).filter(phrase => phrase !== "Esc back to request")).toEqual([]);
+    }
   }
   if (screen.id.startsWith("approval-") && screen.id !== "approval-modes-help") {
     // Enter never acts on a hidden choice: every approval frame marks the selected choice and names Esc deny, and Ctrl+C appears only in the activity row.

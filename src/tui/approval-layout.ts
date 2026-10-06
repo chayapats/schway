@@ -24,14 +24,16 @@ export function approvalHint(selected: number, enteringReason: boolean, overflow
   return `${enteringReason ? "" : "↑↓ choose · "}${approvalAction(selected, enteringReason)}${overflow ? " · PgUp/PgDn scroll" : ""}`;
 }
 
-/** Count terminal rows for greedy word wrapping at `columns`, splitting words wider than a row. */
+/** Count terminal rows for greedy word wrapping at `columns`, splitting words wider than a row; a leading indent takes cells. */
 export function wrappedRows(text: string, columns: number): number {
   const width = Math.max(1, columns);
   return text.split("\n").reduce((total, line) => {
-    let rows = 1, column = 0, gap = 0;
+    let rows = 1, column = 0, gap = 0, start = true;
     for (const token of line.split(/( +)/)) {
       if (!token) continue;
-      if (token.startsWith(" ")) { gap = token.length; continue; }
+      // The renderer keeps a line's leading indent, so it occupies cells before the first word.
+      if (token.startsWith(" ")) { if (start) column = Math.min(width, token.length); else gap = token.length; start = false; continue; }
+      start = false;
       const cells = Bun.stringWidth(token);
       if (column > 0 && column + gap + cells <= width) { column += gap + cells; gap = 0; continue; }
       if (column > 0) { rows++; column = 0; }
@@ -92,10 +94,10 @@ export function approvalPanelLayout(input: { heading: string; choices: readonly 
   used += kept;
   const showAll = used - aloneRows + allRows <= rows;
   if (showAll) used += allRows - aloneRows;
-  const choicesMargin = used + 1 <= rows;
-  if (choicesMargin) used++;
-  const headingMargin = used + 1 <= rows;
-  if (headingMargin) used++;
+  // Margins are given up first: they take only rows left once the whole preview is shown, never rows a cut preview or a hidden choice could use.
+  const spare = rows - used - (natural - 1 - kept);
+  const choicesMargin = spare >= 1, headingMargin = spare >= 2;
+  used += (choicesMargin ? 1 : 0) + (headingMargin ? 1 : 0);
   const previewRows = Math.max(1, rows - (used - 1 - kept));
   return { heading, headingRows, headingMargin, choicesMargin, choices: showAll ? all : alone, choiceRows: showAll ? allRows : aloneRows, previewRows, overflow: natural > previewRows, fits };
 }

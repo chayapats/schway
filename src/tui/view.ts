@@ -324,7 +324,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
-  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; approvalAction?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
+  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -691,9 +691,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     // When space hides hints, keep the mode and urgent key before status decoration.
     const compactFooter = (action: string) => {
       const room = columns - Bun.stringWidth(modeLabel) - 4;
-      // The approval heading names the mode, so Enter's meaning and Esc deny outrank the mode label; Esc deny stays last.
-      if (footerParts.approvalAction && Bun.stringWidth(action) > room && Bun.stringWidth(action) <= columns - 2) { footer.content = new StyledText([fg(theme.muted)(` ${action}`)]); return; }
-      const next = Bun.stringWidth(action) <= room ? action : footerParts.approvalAction ? action.split(" · ").at(-1)! : action.split(" ")[0]!;
+      // While a request waits, its whole action outranks the mode label: it is Enter's meaning in the approval panel (whose heading names ask mode)
+      // or the only way back to the request from another view. When even the action alone is too wide, the panel keeps its last segment, Esc deny.
+      if (footerParts.toolApproval && Bun.stringWidth(action) > room && Bun.stringWidth(action) <= columns - 2) { footer.content = new StyledText([fg(theme.muted)(` ${action}`)]); return; }
+      const next = Bun.stringWidth(action) <= room ? action : footerParts.toolApproval ? action.split(" · ").at(-1)! : action.split(" ")[0]!;
       footer.content = new StyledText([fg(theme.muted)(" "), bold(fg(modeColor)(modeLabel)),
         ...(Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
     };
@@ -990,10 +991,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
-        approvalAction: panelMode === "tool-approval" && !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
         // Ctrl+C lives only in the approval activity row; the hint row carries Enter's meaning when it is visible.
         nextAction: panelMode === "tool-approval" && snapshot.toolApproval ? hints.visible && renderer.width >= 30 ? "Esc deny" : approvalAction(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason)
+          // A request waiting behind another view: name Esc exactly as that view's hint row and reader status do.
+          : snapshot.toolApproval ? "Esc back to request"
           : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview)
           : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : panelMode === "credential" || panelMode === "callback" ? "Esc cancel" : panelMode || inspection || detailsReturn || reader ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stop"

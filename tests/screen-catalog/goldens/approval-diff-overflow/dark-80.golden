@@ -9,7 +9,6 @@ cursor 1 1 hidden
  ⚡ schway  ~/demo
 
    Allow edit? · ask mode
-
    clamp.ts  +29 −1                                                         █
     2 │-  return Math.max(lo, n);                                           █
     2 │+  const bound1 = Math.min(hi, Math.max(lo, n + 0));                 █
@@ -19,7 +18,7 @@ cursor 1 1 hidden
     6 │+  const bound5 = Math.min(hi, Math.max(lo, n + 4));                 █
     7 │+  const bound6 = Math.min(hi, Math.max(lo, n + 5));                 █
     8 │+  const bound7 = Math.min(hi, Math.max(lo, n + 6));                 █
-    9 │+  const bound8 = Math.min(hi, Math.max(lo, n + 7));
+    9 │+  const bound8 = Math.min(hi, Math.max(lo, n + 7));                 █
    10 │+  const bound9 = Math.min(hi, Math.max(lo, n + 8));
    11 │+  const bound10 = Math.min(hi, Math.max(lo, n + 9));
    12 │+  const bound11 = Math.min(hi, Math.max(lo, n + 10));
@@ -28,7 +27,8 @@ cursor 1 1 hidden
    15 │+  const bound14 = Math.min(hi, Math.max(lo, n + 13));
    16 │+  const bound15 = Math.min(hi, Math.max(lo, n + 14));
    17 │+  const bound16 = Math.min(hi, Math.max(lo, n + 15));
-
+   18 │+  const bound17 = Math.min(hi, Math.max(lo, n + 16));
+   19 │+  const bound18 = Math.min(hi, Math.max(lo, n + 17));
    › Allow once
      Allow edit for this session
      Deny with reason…
@@ -50,19 +50,23 @@ cursor 1 1 hidden
 02 25-78 #ffffff #1e2430 -
 02 78-80 #ffffff #0e1117 -
 03 0-2 #ffffff #0e1117 -
-03 2-78 #ffffff #1e2430 -
+03 2-3 #ffffff #1e2430 -
+03 3-19 #e6eaf0 #1e2430 -
+03 19-76 #ffffff #1e2430 -
+03 76-77 #9a9ea3 #252527 -
+03 77-78 #ffffff #1e2430 -
 03 78-80 #ffffff #0e1117 -
 04 0-2 #ffffff #0e1117 -
 04 2-3 #ffffff #1e2430 -
-04 3-19 #e6eaf0 #1e2430 -
-04 19-76 #ffffff #1e2430 -
+04 3-33 #f79d9d #1e2430 -
+04 33-76 #ffffff #1e2430 -
 04 76-77 #9a9ea3 #252527 -
 04 77-78 #ffffff #1e2430 -
 04 78-80 #ffffff #0e1117 -
 05 0-2 #ffffff #0e1117 -
 05 2-3 #ffffff #1e2430 -
-05 3-33 #f79d9d #1e2430 -
-05 33-76 #ffffff #1e2430 -
+05 3-59 #8fd19e #1e2430 -
+05 59-76 #ffffff #1e2430 -
 05 76-77 #9a9ea3 #252527 -
 05 77-78 #ffffff #1e2430 -
 05 78-80 #ffffff #0e1117 -
@@ -124,15 +128,15 @@ cursor 1 1 hidden
 13 78-80 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
 14 2-3 #ffffff #1e2430 -
-14 3-59 #8fd19e #1e2430 -
-14 59-76 #ffffff #1e2430 -
+14 3-60 #8fd19e #1e2430 -
+14 60-76 #ffffff #1e2430 -
 14 76-77 #ffffff #252527 -
 14 77-78 #ffffff #1e2430 -
 14 78-80 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
 15 2-3 #ffffff #1e2430 -
-15 3-60 #8fd19e #1e2430 -
-15 60-76 #ffffff #1e2430 -
+15 3-61 #8fd19e #1e2430 -
+15 61-76 #ffffff #1e2430 -
 15 76-77 #ffffff #252527 -
 15 77-78 #ffffff #1e2430 -
 15 78-80 #ffffff #0e1117 -
@@ -179,7 +183,11 @@ cursor 1 1 hidden
 21 77-78 #ffffff #1e2430 -
 21 78-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
-22 2-78 #ffffff #1e2430 -
+22 2-3 #ffffff #1e2430 -
+22 3-61 #8fd19e #1e2430 -
+22 61-76 #ffffff #1e2430 -
+22 76-77 #ffffff #252527 -
+22 77-78 #ffffff #1e2430 -
 22 78-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -

@@ -13,7 +13,7 @@ cursor 1 1 hidden
  3    const totals = rows.filter(row =›
  4    return { label, total: totals.re›
  5  }
- Ask · Esc back
+ Ask · Esc review request
 == styles
 00 0-1 #ffffff #0e1117 -
 00 1-33 #f0c674 #0e1117 b
@@ -48,5 +48,5 @@ cursor 1 1 hidden
 06 5-40 #ffffff #0e1117 -
 07 0-1 #8b95a7 #161b24 -
 07 1-4 #f0c674 #161b24 b
-07 4-15 #8b95a7 #161b24 -
-07 15-40 #ffffff #0e1117 -
+07 4-25 #8b95a7 #161b24 -
+07 25-40 #ffffff #0e1117 -
