@@ -1,0 +1,104 @@
+schway-screen 1
+screen session-picker-no-matches
+title Session picker, no matches
+description A search that matches no saved session names both ways forward and the way back.
+variant light-120
+size 120x30
+cursor 10 27 visible
+== text
+ ⚡ schway  ~/demo
+
+
+  scripted/scripted-model · scripted API key
+
+  Type a task · Enter sends
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   Recent sessions · Current workspace
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › zzz
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                                                                       ctx ~0
+  No matching sessions · Edit search or Ctrl+W scope · Esc back
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-18 #545e6c #ecedea -
+00 18-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-25 #1d232c #f7f7f4 b
+03 25-44 #545e6c #f7f7f4 -
+03 44-120 #ffffff #f7f7f4 -
+04 0-120 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-16 #545e6c #f7f7f4 -
+05 16-21 #1d232c #caced3 b
+05 21-27 #545e6c #f7f7f4 -
+05 27-120 #ffffff #f7f7f4 -
+06 0-120 #ffffff #f7f7f4 -
+07 0-120 #ffffff #f7f7f4 -
+08 0-120 #ffffff #f7f7f4 -
+09 0-120 #ffffff #f7f7f4 -
+10 0-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
+12 0-120 #ffffff #f7f7f4 -
+13 0-120 #ffffff #f7f7f4 -
+14 0-120 #ffffff #f7f7f4 -
+15 0-120 #ffffff #f7f7f4 -
+16 0-120 #ffffff #f7f7f4 -
+17 0-120 #ffffff #f7f7f4 -
+18 0-120 #ffffff #f7f7f4 -
+19 0-120 #ffffff #f7f7f4 -
+20 0-120 #ffffff #f7f7f4 -
+21 0-120 #ffffff #f7f7f4 -
+22 0-120 #ffffff #f7f7f4 -
+23 0-120 #ffffff #f7f7f4 -
+24 0-2 #ffffff #f7f7f4 -
+24 2-3 #ffffff #e1e3df -
+24 3-38 #0a5894 #e1e3df -
+24 38-118 #ffffff #e1e3df -
+24 118-120 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-118 #ecedea #f7f7f4 -
+25 118-120 #ffffff #f7f7f4 -
+26 0-2 #ffffff #f7f7f4 -
+26 2-6 #0a5894 #ecedea -
+26 6-9 #1d232c #ecedea -
+26 9-118 #ffffff #ecedea -
+26 118-120 #ffffff #f7f7f4 -
+27 0-2 #ffffff #f7f7f4 -
+27 2-118 #ecedea #f7f7f4 -
+27 118-120 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-119 #545e6c #ecedea -
+28 119-120 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-55 #545e6c #f7f7f4 -
+29 55-58 #1d232c #caced3 b
+29 58-63 #545e6c #f7f7f4 -
+29 63-120 #ffffff #f7f7f4 -

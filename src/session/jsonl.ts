@@ -148,19 +148,29 @@ async function readFirstLine(path: string): Promise<string | undefined> {
   }
 }
 
+/** Why `loadJsonlSession` refused a session before reading its records, or after validating them; the message is unchanged. */
+export type SessionLoadFailure = "not-found" | "invalid-id" | "repair-failed";
+
+/** A `loadJsonlSession` failure with a known `reason`; other load errors are file-read errors or invalid contents. */
+export class SessionLoadError extends Error {
+  constructor(readonly reason: SessionLoadFailure, message: string, options?: { cause?: unknown }) { super(message, options); this.name = "SessionLoadError"; }
+}
+
 /** Restore selected ancestry, rejecting semantic corruption and repairing torn tails and selected interrupted calls without tool replay. */
 export async function loadJsonlSession(options: {
   directory: string;
   id: string;
   branchId?: string;
 }): Promise<JsonlSession> {
-  const path = sessionFilePath(options.directory, options.id);
+  let path: string;
+  try { path = sessionFilePath(options.directory, options.id); }
+  catch (error) { throw new SessionLoadError("invalid-id", error instanceof Error ? error.message : String(error)); }
   let text: string;
   try {
     text = await readFile(path, "utf8");
   } catch (error) {
     if (isNotFound(error)) {
-      throw new Error(`Session not found: ${options.id}`);
+      throw new SessionLoadError("not-found", `Session not found: ${options.id}`);
     }
     throw error;
   }
@@ -170,7 +180,10 @@ export async function loadJsonlSession(options: {
   const staged: BranchOperation[] = [];
   const candidate = createSession([], loaded.extraRoots, { state: loaded.state, writeOperation: operation => staged.push(operation) });
   candidate.selectBranch(options.branchId ?? candidate.activeBranchId);
-  if (loaded.text !== text) await replaceFile(path, loaded.text);
+  if (loaded.text !== text) {
+    try { await replaceFile(path, loaded.text); }
+    catch (error) { throw new SessionLoadError("repair-failed", error instanceof Error ? error.message : String(error), { cause: error }); }
+  }
   const session = openPersisted(path, loaded.header, loaded.state, loaded.extraRoots, loaded.version);
   // Recompute fresh settlement IDs only after validation and any safe trailing repair succeed.
   if (staged.length) session.selectBranch(options.branchId ?? session.activeBranchId);

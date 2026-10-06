@@ -67,8 +67,8 @@ async function writeFixtureSession(directory: string, id: string, root: string, 
   const header = { type: "session", version: 4, id, createdAt: CATALOG_TIME, workspaceRoot: root, launchCwd: root, extraRoots: [] };
   await writeFile(join(directory, `${id}.jsonl`), [header, ...operations].map(record => JSON.stringify(record)).join("\n") + "\n");
 }
-/** A complete user turn appended to `branchId` after `parentId`, committed at the catalog time. */
-const fixtureTurn = (branchId: string, parentId: string, id: string, task: string, answer: string) => ({ type: "branch_append", version: 1, branchId, committedAt: CATALOG_TIME, entries: [
+/** A complete user turn appended to `branchId` after `parentId`, committed at the catalog time or `committedAt`. */
+const fixtureTurn = (branchId: string, parentId: string, id: string, task: string, answer: string, committedAt = CATALOG_TIME) => ({ type: "branch_append", version: 1, branchId, committedAt, entries: [
   { parentId, item: { type: "user", id: `${id}-user`, content: [{ type: "text", text: task }] } },
   { parentId: `${id}-user`, item: { type: "assistant", id: `${id}-answer`, content: [{ type: "text", text: answer }] } },
 ] });
@@ -86,7 +86,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const resumedReview = screen.id.startsWith("resumed-review");
   const historyScreen = screen.id.startsWith("history-");
   // Screens that run file-touching commands (/sessions, /resume, /login and the rest) always use a temporary home.
-  const commandFiles = ["api-key-entry", "callback-entry", "session-picker", "branch-tree-continue", "branch-tree-fork", "command-routing"].includes(screen.id);
+  const commandFiles = ["api-key-entry", "callback-entry", "branch-tree-continue", "branch-tree-fork", "command-routing"].includes(screen.id) || screen.id.startsWith("session-picker");
   const askEdit = screen.id === "approval-edit" || screen.id === "approval-deny-reason" || screen.id === "approval-diff-overflow";
   const disk = commandFiles || askEdit || screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
   if (disk) {
@@ -306,10 +306,22 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     undoLock = new Database(join(home, ".schway", "undo.lock"));
     undoLock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
   }
-  if (screen.id === "session-picker") {
-    // Fixed IDs, titles and commit times keep picker rows free of UUIDs and wall-clock timestamps.
-    for (const [id, task, answer] of [["clamp-fix", "Fix the clamp upper bound", "Fixed clamp so it respects the upper bound."], ["config-loader", "Explain the config loader", "It merges defaults, user and project settings."], ["readme-summary", "Summarize the README", "Schway is a terminal coding agent."]] as const)
-      await writeFixtureSession(sessionsDirectory(home), id, root, [fixtureTurn("main", id, `${id}-1`, task, answer)]);
+  if (screen.id.startsWith("session-picker") && screen.id !== "session-picker-empty") {
+    // Fixed IDs, titles and commit times (minutes to weeks before the catalog clock) keep picker rows free of UUIDs and
+    // wall-clock timestamps. The live session is `catalog-session`, a folder that no longer exists makes one row
+    // unavailable, and a legacy file without commit times shows unknown activity.
+    const before = (ms: number) => new Date(Date.parse(CATALOG_TIME) - ms).toISOString();
+    for (const [id, task, answer, age, workspaceRoot] of [
+      ["catalog-session", "Explain the config loader", "It merges defaults, user and project settings.", 2 * 60_000, root],
+      ["clamp-fix", "Fix the clamp upper bound", "Fixed clamp so it respects the upper bound.", 3 * 3_600_000, root],
+      ["release-notes", "Summarize the release notes", "Listed the three user-visible changes.", 24 * 3_600_000, join(home, "archive", "notes")],
+      ["readme-summary", "Summarize the README", "Schway is a terminal coding agent.", 3 * 86_400_000, root],
+      ["bounds-rename", "Rename the bounds to lo and hi", "Renamed both bounds.", 12 * 86_400_000, root],
+    ] as const) await writeFixtureSession(sessionsDirectory(home), id, workspaceRoot, [fixtureTurn("main", id, `${id}-1`, task, answer, before(age))]);
+    await writeFile(join(sessionsDirectory(home), "legacy-notes.jsonl"), [
+      { type: "session", version: 1, id: "legacy-notes", createdAt: "2025-12-01T00:00:00.000Z", workspaceRoot: root, launchCwd: root, extraRoots: [] },
+      { type: "user", id: "legacy-user", parentId: "legacy-notes", content: [{ type: "text", text: "Sketch the clamp helper" }] },
+    ].map(record => JSON.stringify(record)).join("\n") + "\n");
   }
   if (screen.id.startsWith("branch-tree-")) {
     // Two named forks from the first complete turn, with the unnamed main branch active again.
@@ -327,7 +339,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const secrets = options.secrets ?? [];
   const catalogConfig = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   const commandContext = { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root, manager: controller.activeContextManager() }, sessionsDir: sessionsDirectory(home), settings: () => catalogConfig.settings, env: {}, secrets, finishQuit() {}, stderr: { write() {} } };
-  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets, workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, quit: () => {}, openUrl: async () => {},
+  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets, workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, wallClock: () => Date.parse(CATALOG_TIME), quit: () => {}, openUrl: async () => {},
     submit: (value, accepted) => dispatchEditorInput(value, controller, (command, onAccepted) => handleSlashCommand(command.name, command.args, commandContext, command.raw, onAccepted), accepted) });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
