@@ -1219,7 +1219,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : snapshot.branchTreeError ? { text: safe(snapshot.branchTreeError), tone: "error", glyph: "!" }
         : snapshot.activity ? { text: activityDetail(snapshot.activity), tone: "accent", spin: true }
         : snapshot.status === "running" ? { text: "Working · Esc stop", tone: "accent", spin: true }
-        : snapshot.compactionNotice ? { text: snapshot.compactionNotice, tone: "muted" }
         : outcomeText ? { text: outcomeText.slice(outcomeGlyph!.length + 1), tone: outcomeTone, glyph: outcomeGlyph, outcome: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 

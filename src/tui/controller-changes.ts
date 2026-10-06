@@ -305,7 +305,6 @@ export abstract class ChangesLayer extends BranchesLayer {
   /** Settle duration, retained diagnostics, and observed file evidence for the latest accepted turn. */
   protected async finishOutcome(reason?: TurnOutcome["reason"]): Promise<void> {
     const owner = this.activeAbort;
-    this.compactionNotice = undefined;
     if (!this.outcome || this.disposed) return;
     if (reason) this.outcome.reason = reason;
     this.outcomeDiagnostics = this.outcome.reason === "failed" && this.recovery?.accepted ? this.recovery.details : undefined;

@@ -52,6 +52,11 @@
   inspection and `Esc back to request` while an approval waits. Narrow activity
   and reader find rows keep the whole Esc phrase. A catalog lint checks every
   screen against the table (#315).
+- Compaction shows its progress and `Esc stop` only in the activity row, hints
+  and status bar, and the transcript records each result once. No stale
+  `Esc stop` row remains after compaction ends, `/compact` results no longer
+  repeat in the activity row, and stopping a turn during compaction shows only
+  the turn's `Stopped` result with `Ctrl+R continue` (#308).
 
 ## [1.0.0-rc.1] - 2026-10-02
 

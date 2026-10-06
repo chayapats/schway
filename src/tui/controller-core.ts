@@ -105,7 +105,6 @@ export abstract class ControllerCore {
   protected status: TuiStatus = "idle";
   protected readonly activityClock: () => number;
   protected readonly agentClock?: AgentClock;
-  protected compactionNotice?: { identity: string; text: string };
   protected contextEstimate?: { session: Session; branch: string; last?: SessionRecord; tokens: number; summaryId?: string; firstKeptId?: string };
   protected reportedUsage?: { identity: string; usage: ModelUsage };
   protected activity?: { compactionOutcome?: CompactionOutcome; compactionReason?: "pressure" | "overflow" | "manual"; id: number; phase: TuiActivityPhase; startedAt: number; elapsedMs: number; activeTools: Map<string, string>; retry?: { failedAttempt: number; maxAttempts: number; until: number; cause?: ModelRetryCause }; cancellation: "none" | "requested" | "settling" };
@@ -271,7 +270,6 @@ export abstract class ControllerCore {
     return !this.startupAbort && !this.model && !this.modelId.trim() && !this.startupDiagnostic;
   }
   protected beginActivity(phase: TuiActivityPhase): number {
-    this.compactionNotice = undefined;
     const id = ++this.operationSequence;
     this.activity = { id, phase, startedAt: this.activityClock(), elapsedMs: 0, activeTools: new Map(), cancellation: "none" };
     return id;

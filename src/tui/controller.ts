@@ -39,7 +39,6 @@ export class TuiController extends HistoryLayer {
       } : undefined,
       streamingAssistantId: this.transcript.find(entry => entry.id === this.currentAssistantId && entry.text.length > 0 && !entry.incomplete)?.id,
       context,
-      compactionNotice: this.compactionNotice?.identity === this.contextIdentity() ? this.compactionNotice.text : undefined,
       noticeDetailsAvailable: this.currentNoticeDetails() !== undefined,
       outcome: !this.activeAbort && this.outcomeIdentity === `${this.sessionId}/${this.session.activeBranchId}` && this.outcome ? structuredClone(this.outcome) : undefined,
       undoPreview: this.undoPreview ? structuredClone(this.undoPreview) : undefined,

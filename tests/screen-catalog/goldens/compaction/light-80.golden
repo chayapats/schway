@@ -20,7 +20,7 @@ cursor 7 27 visible
 
   Read the records, validate them, and restore the conversation.
 
-  Compacting older turns · Esc stop
+
 
 
 
@@ -80,9 +80,7 @@ cursor 7 27 visible
 12 2-64 #1d232c #f7f7f4 -
 12 64-80 #ffffff #f7f7f4 -
 13 0-80 #ffffff #f7f7f4 -
-14 0-2 #ffffff #f7f7f4 -
-14 2-35 #545e6c #f7f7f4 -
-14 35-80 #ffffff #f7f7f4 -
+14 0-80 #ffffff #f7f7f4 -
 15 0-80 #ffffff #f7f7f4 -
 16 0-80 #ffffff #f7f7f4 -
 17 0-80 #ffffff #f7f7f4 -

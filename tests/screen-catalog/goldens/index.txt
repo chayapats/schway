@@ -88,6 +88,10 @@ branch-tree-continue
 branch-tree-fork
 recent-work-resume
 compaction
+compaction-completed
+compaction-cancelled
+compaction-failed
+compaction-noop
 no-color
 narrow-layout
 table-and-code

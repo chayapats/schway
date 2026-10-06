@@ -31,6 +31,10 @@ const streamingTurn = async (ui: ScreenHarness) => {
   await enter(ui, "Explain the config loader");
   await ui.waitFor(s => s.activity?.phase === "streaming" && s.transcript.some(e => e.text.includes("- Then")));
 };
+/** The single transcript row each settled manual compaction leaves, keyed by outcome. */
+export const COMPACTION_RESULTS = { completed: "Context compacted · /context inspect summary", cancelled: "Compaction cancelled · /compact retry",
+  failed: "Compaction failed · F2 repair details", noop: "Context unchanged · /compact retry after more turns" } as const;
+const compactionSettled = (result: string) => (s: TuiSnapshot) => s.status === "idle" && !s.activity && s.transcript.at(-1)?.text === result;
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
 const search = async (ui: ScreenHarness, query: string) => {
   ui.controller.notice("Read the project README before making changes.");
@@ -330,6 +334,12 @@ export const SCREENS: readonly Screen[] = [
     ready: s => !!s.branchTree && !s.branchTree.selectedBranchId },
   { id: "recent-work-resume", title: "Recent work resume", description: "A saved conversation is offered for resumption.", drive: async ui => { await ui.controller.offerRecentSession(ui.sessionDirectory!); }, ready: s => !!s.recentSession },
   { id: "compaction", title: "Compaction", description: "Earlier conversation turns are being summarized.", elapsed: 3000, drive: async ui => { void ui.controller.compact(); }, ready: s => s.activity?.phase === "compacting" },
+  { id: "compaction-completed", title: "Compaction completed", description: "A finished /compact leaves one result row and no stop action.", drive: ui => enter(ui, "/compact"), ready: compactionSettled(COMPACTION_RESULTS.completed) },
+  { id: "compaction-cancelled", title: "Compaction cancelled", description: "Esc during /compact leaves one cancelled result with its retry command.", noColor: true, drive: async ui => {
+    await enter(ui, "/compact"); await ui.waitFor(s => s.activity?.phase === "compacting"); ui.mockInput.pressEscape();
+  }, ready: compactionSettled(COMPACTION_RESULTS.cancelled) },
+  { id: "compaction-failed", title: "Compaction failed", description: "A failed summary keeps history and offers its repair details once.", drive: ui => enter(ui, "/compact"), ready: compactionSettled(COMPACTION_RESULTS.failed) },
+  { id: "compaction-noop", title: "Compaction unchanged", description: "With no older turns to summarize, /compact reports one unchanged result.", drive: ui => enter(ui, "/compact"), ready: compactionSettled(COMPACTION_RESULTS.noop) },
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "narrow-layout", title: "Narrow layout", description: "A table and code block fit the narrow conversation layout.", drive: ui => enter(ui, "Compare the options"), ready: completed },
   { id: "table-and-code", title: "Table and code wrapping", description: "Wide table cells and long code lines wrap without losing their text.", rows: 40, noColorWidths: true, drive: ui => enter(ui, "Show wrapping"), ready: completed },
