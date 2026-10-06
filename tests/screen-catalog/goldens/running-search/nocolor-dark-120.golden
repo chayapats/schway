@@ -34,7 +34,7 @@ cursor 13 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › config
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Receiving 4.0s   scripted/scripted-model                                                 Esc restore  ctx ~7
+ ◆ Auto  ⠋ Receiving 4.0s   scripted/scripted-model   Provider default                              Esc restore  ctx ~7
   ↑↓ previous/next · Enter keep · Esc restore · Ctrl+End latest
 == styles
 00 0-1 #ffffff #161b24 -
@@ -108,7 +108,9 @@ cursor 13 27 visible
 28 8-26 #0e1117 #e6eaf0 b
 28 26-27 #8b95a7 #161b24 -
 28 27-52 #e6eaf0 #1e2430 -
-28 52-100 #8b95a7 #161b24 -
+28 52-53 #8b95a7 #161b24 -
+28 53-71 #e6eaf0 #444951 -
+28 71-100 #8b95a7 #161b24 -
 28 100-103 #e6eaf0 #2a3241 b
 28 103-119 #8b95a7 #161b24 -
 28 119-120 #ffffff #0e1117 -
