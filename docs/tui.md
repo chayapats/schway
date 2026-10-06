@@ -957,8 +957,16 @@ is not a billing total. Inspection never sends a model request, compacts history
 changes branches or writes a session record.
 
 Automatic context pressure, provider overflow and manual `/compact` show their
-reason in the activity area. Completion, no-op, cancellation and failure are
-reported separately. A successful summary keeps every original conversation
+progress only on live surfaces: the activity row reads `Compacting context · Esc stop`,
+the status pill reads `Compacting` and the hint row offers `Esc stop`. The
+transcript gets no progress row. When compaction ends, the transcript records its
+result once, with one next action: `Context compacted · /context inspect summary`,
+`Context unchanged · /compact retry after more turns`, `Compaction cancelled ·
+/compact retry` or `Compaction failed · F2 repair details`. No row still offers
+`Esc stop`, and after `/compact` the activity row returns to its idle content.
+Inside a turn, the activity row shows the interim result while the turn continues.
+Stopping a turn during compaction records only the turn's `Stopped` result with
+`Ctrl+R continue`. A successful summary keeps every original conversation
 record; the transcript marks where recent model context begins, while older rows
 remain searchable and inspectable. `/branch tree` browses ancestry; only the
 selected branch's summary is active. Resume reconstructs that same boundary.

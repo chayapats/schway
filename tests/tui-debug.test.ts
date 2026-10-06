@@ -144,7 +144,8 @@ test("interactive /compact reports completed, noop, cancellation and rejected tr
   });
   expect(await failure.compact()).toBe(false);
   expect(failure.snapshot().status).toBe("idle");
-  expect(failure.snapshot().compactionNotice).toBe("Compaction failed · F2 repair details");
+  // The transcript row is the single place the result appears; no progress row precedes it.
+  expect(failure.snapshot().transcript.filter(row => row.kind === "system").map(row => row.text)).toEqual(["Compaction failed · F2 repair details"]);
   expect(failure.inspectNoticeDetails()).toBe(true);
   expect(failure.snapshot().transcript.at(-1)?.text).toContain("/compact");
   await sink.close();

@@ -7,7 +7,10 @@ import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { join } from "node:path";
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { createTestRenderer } from "@opentui/core/testing";
+import { createConversationView } from "../src/tui/view.ts";
 import type { Model } from "../src/model/model.ts";
 import { SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
 import { activityDetail } from "../src/tui/presentation.ts";
@@ -54,10 +57,10 @@ test("persisted summary write failure requires explicit resume before compaction
     await rename(path, saved);
     await mkdir(path);
     expect(await controller.compact()).toBe(false);
-    expect(controller.snapshot().compactionNotice).toBe("Compaction failed · F2 repair details");
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Compaction failed · F2 repair details");
+    expect(controller.snapshot().transcript.map(row => row.text).join("\n")).not.toContain("EISDIR");
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain(`/resume ${session.header.id}`);
-    expect(controller.snapshot().compactionNotice).not.toContain("EISDIR");
     expect(session.items).toEqual(history(12));
     await rm(path, { recursive: true });
     await rename(saved, path);
@@ -122,12 +125,11 @@ test("overflow compaction and retry remain visible through the real controller l
       contextManager: createContextManager(workspace, { home, keepTurns: 2 }) });
     await controller.submit("continue");
     const rows = controller.snapshot().transcript.map(row => row.text);
-    expect(rows.join("\n")).toContain("Compacting context · Esc stop");
-    expect(rows.join("\n")).toContain("Context compacted");
+    expect(rows.join("\n")).not.toContain("Esc stop");
+    expect(rows.filter(text => text === "Context compacted · /context inspect summary")).toHaveLength(1);
     expect(rows.join("\n")).toContain("continued after overflow");
     expect(rows.filter(text => text === "original 0")).toHaveLength(1);
     expect(controller.snapshot().context.summaryId).toBeDefined();
-    expect(controller.snapshot().compactionNotice).toBeUndefined();
     expect(controller.snapshot().outcome?.reason).toBe("completed");
     controller.dispose();
   });
@@ -141,7 +143,7 @@ test("an interrupted summary stream cannot commit partial text as a successful s
       model: { provider: "scripted", id: "scripted", async *stream() { yield { type: "text_delta", text: "unfinished summary" }; } },
       contextManager: createContextManager(workspace, { home, keepTurns: 2 }) });
     expect(await controller.compact()).toBe(false);
-    expect(controller.snapshot().compactionNotice).toContain("failed");
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Compaction failed · F2 repair details");
     expect(session.items).toEqual(history());
     controller.dispose();
   });
@@ -206,8 +208,8 @@ test("actual pressure loop distinguishes failed summarization from no-op and con
     wait.resolve();
     await task;
     const transcript = controller.snapshot().transcript.map(row => row.text).join("\n");
-    expect(transcript).toContain("Compacting context · Esc stop");
-    expect(transcript).toContain("Compaction failed · F2 repair details");
+    expect(transcript).not.toContain("Esc stop");
+    expect(transcript.split("Compaction failed · F2 repair details")).toHaveLength(2);
     expect(transcript).not.toContain("After a storage failure");
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("After a storage failure");
@@ -226,11 +228,11 @@ test("manual cancellation reports cancelled and no-op is distinct", async () => 
     const model: Model = { provider: "scripted", id: "scripted", async *stream(request) { started(); await new Promise<void>(resolve => request.signal!.addEventListener("abort", () => resolve(), { once: true })); yield { type: "text_delta", text: "late partial summary" }; } };
     const controller = new TuiController({ session, workspace, sessionId: "cancel", provider: "scripted", modelId: "scripted", model, contextManager: createContextManager(workspace, { home, keepTurns: 2 }) });
     const pending = controller.compact(); await wait; controller.cancel(); await pending;
-    expect(controller.snapshot().compactionNotice).toContain("cancelled");
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Compaction cancelled · /compact retry");
     expect(session.items).toEqual(history());
     controller.replaceSession(createSession(), "empty", { contextManager: createContextManager(workspace, { home }) });
     expect(await controller.compact()).toBe(false);
-    expect(controller.snapshot().compactionNotice).toBe("Context unchanged · /compact retry after more turns");
+    expect(controller.snapshot().transcript.map(row => row.text)).toEqual(["Context unchanged · /compact retry after more turns"]);
     controller.dispose();
   });
 });
@@ -247,4 +249,142 @@ test("manual summary persistence failure settles controller and preserves durabl
     expect(controller.snapshot().transcript.at(-1)?.text).toContain("failed");
     controller.dispose();
   });
+});
+
+/** A controller painted by the real view, so assertions see the same frame a user sees. */
+async function renderedCompaction(options: { session: ReturnType<typeof createSession>; model: Model; contextWindow?: number }) {
+  const home = await realpath(await mkdtemp(join(tmpdir(), "compaction-end-")));
+  const workspace = { root: home, launchCwd: home, extraRoots: [] };
+  const controller = new TuiController({ session: options.session, workspace, sessionId: "end-state", provider: "scripted", modelId: "scripted", model: options.model,
+    contextManager: createContextManager(workspace, { home, keepTurns: 2, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) }) });
+  const terminal = await createTestRenderer({ width: 120, height: 60 });
+  const view = createConversationView(terminal.renderer, { controller, home, workspaceRoot: home, env: { NO_COLOR: "1" }, secrets: [], motion: "off", quit() {}, submit: async () => false });
+  const settle = async () => { await Bun.sleep(2); view.refresh(); await terminal.flush(); };
+  const waitFor = async (ready: () => boolean) => {
+    const start = performance.now();
+    while (!ready()) { if (performance.now() - start > 5000) throw new Error(`Timed out\n${terminal.captureCharFrame()}`); await settle(); }
+  };
+  await settle();
+  return {
+    controller, settle, waitFor, pressEscape: () => terminal.mockInput.pressEscape(),
+    /** Settle the view, then return the idle frame after asserting no row still offers the compaction stop. */
+    settledFrame: async () => {
+      await settle(); await settle();
+      const snapshot = controller.snapshot();
+      expect(snapshot.status).not.toBe("running");
+      expect(snapshot.activity).toBeUndefined();
+      expect(snapshot.transcript.filter(row => row.text.includes("Esc stop"))).toEqual([]);
+      const frame = terminal.captureCharFrame();
+      expect(frame).not.toContain("Esc stop");
+      return frame;
+    },
+    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); await rm(home, { recursive: true, force: true }); },
+  };
+}
+const occurrences = (frame: string, text: string) => frame.split(text).length - 1;
+/** A summary request that stays open until Esc aborts it, after announcing that compaction is underway. */
+function abortableSummary(next?: Model) {
+  const started = Promise.withResolvers<void>();
+  const model: Model = { provider: "scripted", id: "scripted", async *stream(request) {
+    if (request.systemPrompt !== SUMMARY_SYSTEM_PROMPT && next) { yield* next.stream(request); return; }
+    started.resolve();
+    await new Promise<void>(resolve => request.signal!.addEventListener("abort", () => resolve(), { once: true }));
+    request.signal!.throwIfAborted();
+  } };
+  return { model, started: started.promise };
+}
+
+for (const [label, model, session, result] of [
+  ["completed", () => createScriptedModel({ text: "remember older work" }), () => createSession(history()), "Context compacted · /context inspect summary"],
+  ["failed", () => createScriptedModel({ error: "summary unavailable" }), () => createSession(history()), "Compaction failed · F2 repair details"],
+  ["no-op", () => createScriptedModel({ text: "unused" }), () => createSession(history(1)), "Context unchanged · /compact retry after more turns"],
+] as const) test(`manual compaction ${label} leaves one result row and no stale stop action`, async () => {
+  const ui = await renderedCompaction({ session: session(), model: model() });
+  try {
+    const pending = ui.controller.compact();
+    await ui.settle();
+    await pending;
+    const frame = await ui.settledFrame();
+    expect(occurrences(frame, result)).toBe(1);
+    expect(ui.controller.snapshot().transcript.filter(row => row.text === result)).toHaveLength(1);
+    expect(frame).not.toContain("Compacting");
+  } finally { await ui.dispose(); }
+});
+
+test("manual compaction stopped with Esc reports one cancelled result in the transcript and frees the activity row", async () => {
+  const summary = abortableSummary();
+  const ui = await renderedCompaction({ session: createSession(history()), model: summary.model });
+  try {
+    const pending = ui.controller.compact();
+    await summary.started;
+    await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "compacting");
+    // While running, only live surfaces name the stop action; the transcript has no progress row.
+    expect(ui.controller.snapshot().transcript.some(row => row.text.includes("Compacting") || row.text.includes("Esc stop"))).toBe(false);
+    ui.pressEscape();
+    await pending;
+    const frame = await ui.settledFrame();
+    expect(occurrences(frame, "Compaction cancelled · /compact retry")).toBe(1);
+    expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Compaction cancelled · /compact retry");
+  } finally { await ui.dispose(); }
+});
+
+test("pressure compaction inside a turn leaves its result once and no stale stop action after the turn completes", async () => {
+  const ui = await renderedCompaction({ session: createSession(history()), contextWindow: 1,
+    model: createScriptedModel({ responses: [{ text: "remember older work" }, { text: "task continued" }] }) });
+  try {
+    await ui.controller.submit("continue");
+    const frame = await ui.settledFrame();
+    expect(occurrences(frame, "Context compacted · /context inspect summary")).toBe(1);
+    expect(frame).toContain("task continued");
+    expect(ui.controller.snapshot().outcome?.reason).toBe("completed");
+  } finally { await ui.dispose(); }
+});
+
+test("stopping a turn during pressure compaction shows one stopped result whose next action is Ctrl+R continue", async () => {
+  const summary = abortableSummary(createScriptedModel({ text: "unused" }));
+  const ui = await renderedCompaction({ session: createSession(history()), contextWindow: 1, model: summary.model });
+  try {
+    const pending = ui.controller.submit("continue");
+    await summary.started;
+    await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "compacting");
+    expect(ui.controller.snapshot().transcript.some(row => row.text.includes("Esc stop"))).toBe(false);
+    ui.pressEscape();
+    await pending;
+    const frame = await ui.settledFrame();
+    const rows = ui.controller.snapshot().transcript.map(row => row.text);
+    expect(rows.filter(text => text.startsWith("Stopped"))).toEqual(["Stopped · Completed results kept\nCtrl+R continue · Esc keep editing"]);
+    expect(occurrences(frame, "Ctrl+R continue")).toBe(1);
+    expect(frame).not.toContain("/compact retry");
+    expect(rows.some(text => text.startsWith("Compaction cancelled"))).toBe(false);
+    expect(ui.controller.snapshot().outcome?.reason).toBe("cancelled");
+  } finally { await ui.dispose(); }
+});
+
+test("overflow compaction leaves its result once and no stale stop action after the retried turn completes", async () => {
+  const ui = await renderedCompaction({ session: createSession(history()),
+    model: createScriptedModel({ responses: [{ error: "prompt is too long: 213418 tokens > 200000 maximum", status: 400 }, { text: "older goals" }, { text: "continued after overflow" }] }) });
+  try {
+    await ui.controller.submit("continue");
+    const frame = await ui.settledFrame();
+    expect(occurrences(frame, "Context compacted · /context inspect summary")).toBe(1);
+    expect(frame).toContain("continued after overflow");
+  } finally { await ui.dispose(); }
+});
+
+test("stopping a turn during overflow compaction also shows only the stopped result", async () => {
+  const overflow = createScriptedModel({ error: "prompt is too long: 213418 tokens > 200000 maximum", status: 400 });
+  const summary = abortableSummary(overflow);
+  const ui = await renderedCompaction({ session: createSession(history()), model: summary.model });
+  try {
+    const pending = ui.controller.submit("continue");
+    await summary.started;
+    await ui.waitFor(() => ui.controller.snapshot().activity?.phase === "compacting");
+    ui.pressEscape();
+    await pending;
+    const frame = await ui.settledFrame();
+    const rows = ui.controller.snapshot().transcript.map(row => row.text);
+    expect(rows.filter(text => text.startsWith("Stopped"))).toEqual(["Stopped · Completed results kept\nCtrl+R continue · Esc keep editing"]);
+    expect(frame).not.toContain("/compact retry");
+    expect(rows.some(text => text.startsWith("Compaction"))).toBe(false);
+  } finally { await ui.dispose(); }
 });

@@ -504,20 +504,16 @@ export abstract class TurnLayer extends CompactionLayer {
         return;
       }
       case "compaction.started": {
+        // Progress and its Esc stop live only on the activity row, hints and status bar; the transcript gets the result.
         if (event.reason === "overflow") {
           this.markProvisionalIncomplete();
           this.clearRetryNotice();
         }
-        this.transcript.push(
-          this.systemEntry(
-            event.reason === "overflow"
-              ? "Compacting context · Esc stop"
-              : event.reason === "manual" ? "Compacting older turns · Esc stop" : "Compacting context · Esc stop",
-          ),
-        );
         return;
       }
       case "compaction.finished": {
+        // A stopped turn's own result names the one next action, so in-turn cancellation adds no competing row.
+        if (event.status === "cancelled" && event.reason !== "manual") return;
         const text = event.status === "completed"
           ? "Context compacted · /context inspect summary"
           : event.status === "cancelled"
@@ -525,7 +521,6 @@ export abstract class TurnLayer extends CompactionLayer {
             : event.status === "failed"
               ? "Compaction failed · F2 repair details"
               : "Context unchanged · /compact retry after more turns";
-        this.compactionNotice = { identity: this.contextIdentity(), text: redactSecrets(text, this.secrets) };
         this.notice(text, event.status === "failed"
           ? `History unchanged. For a model failure, check connection then /compact or /model. After a storage failure, repair storage and /resume ${this.sessionId} to reload before retrying /compact.${event.message ? `\n${event.message}` : ""}`
           : undefined);

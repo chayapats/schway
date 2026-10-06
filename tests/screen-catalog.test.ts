@@ -3,7 +3,7 @@ import { RGBA, type CapturedFrame } from "@opentui/core";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
-import { SCREENS, variantsFor } from "./screen-catalog/screens.ts";
+import { COMPACTION_RESULTS, SCREENS, variantsFor } from "./screen-catalog/screens.ts";
 import { CATALOG_API_KEY, CATALOG_CALLBACK, catalogCaptures, panelCoverageGaps, renderScreen } from "./screen-catalog/harness.ts";
 import { parseScreen, serializeScreen } from "./screen-catalog/format.ts";
 import { TUI_THEMES } from "../src/tui/theme.ts";
@@ -208,6 +208,27 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
       }
     }
   }
+  if (screen.id.startsWith("compaction")) {
+    const frame = parseScreen(actual), text = frame.text.join("\n");
+    // The activity row sits directly above the composer's top edge; every row above it is transcript.
+    const activityRow = frame.text.findIndex(line => /^\s*▄+$/.test(line)) - 1;
+    expect(activityRow).toBeGreaterThan(0);
+    expect(text).not.toContain("Compacting older turns");
+    if (screen.id === "compaction") {
+      // Running compaction names Esc stop only on live surfaces, never in a transcript row.
+      expect(frame.text[activityRow]).toContain("Compacting");
+      expect(frame.text.slice(0, activityRow).join("\n")).not.toMatch(/Compacting|Esc stop/);
+    } else {
+      // Once compaction settles and status is idle, nothing offers to stop it and its result shows once.
+      expect(text).toContain("Ready");
+      expect(text).not.toContain("Esc stop");
+      expect(text).not.toContain("Compacting");
+      const [status, action] = COMPACTION_RESULTS[screen.id.slice("compaction-".length) as keyof typeof COMPACTION_RESULTS].split(" · ") as [string, string];
+      expect(text.split(status)).toHaveLength(2);
+      expect(frame.text.map(line => line.trim()).join(" ")).toContain(action);
+      expect(frame.text.slice(activityRow).join("\n")).not.toContain(status);
+    }
+  }
   const relative = `tests/screen-catalog/goldens/${screen.id}/${variant.id}.golden`, path = join(directory, screen.id, `${variant.id}.golden`);
   if (update) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, actual); return; }
   if (!await Bun.file(path).exists()) throw new Error(`Missing golden ${relative}. Run: bun run screens:update`);
@@ -216,7 +237,7 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
 }, 15_000);
 
 test("catalog screen order and golden inventory are explicit", async () => {
-  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "approval-deny-reason", "approval-diff-overflow", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "api-key-entry", "callback-entry", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "retry-rate-limit", "retry-network", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "history-list", "history-detail", "history-stopped-turn", "history-undo-note", "history-missing-evidence", "history-truncation", "history-timing", "history-timing-cache-unreported", "history-timing-partial", "history-timing-details", "delete-session-busy", "session-picker", "branch-tree-continue", "branch-tree-fork", "recent-work-resume", "compaction", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool", "reader-code", "reader-code-wrapped", "reader-table", "reader-no-matches", "reader-approval"]);
+  expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "approval-deny-reason", "approval-diff-overflow", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "api-key-entry", "callback-entry", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", "grok-browser-approval", "grok-device-approval", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "retry-rate-limit", "retry-network", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "history-list", "history-detail", "history-stopped-turn", "history-undo-note", "history-missing-evidence", "history-truncation", "history-timing", "history-timing-cache-unreported", "history-timing-partial", "history-timing-details", "delete-session-busy", "session-picker", "branch-tree-continue", "branch-tree-fork", "recent-work-resume", "compaction", "compaction-completed", "compaction-cancelled", "compaction-failed", "compaction-noop", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool", "reader-code", "reader-code-wrapped", "reader-table", "reader-no-matches", "reader-approval"]);
   const unexpected = (await files(directory)).filter(file => file !== "index.txt" && !expected.has(file));
   if (!await Bun.file(join(directory, "index.txt")).exists() || await readFile(join(directory, "index.txt"), "utf8") !== index) unexpected.push("index.txt");
   if (unexpected.length) throw new Error(`Unexpected catalog files: ${unexpected.join(", ")}. Run: bun run screens:update`);

@@ -324,7 +324,8 @@ test("manual compaction succeeds then conversation and resume continue", async (
     expect(session.items.length).toBe(before + 1);
     const snapshot = controller.snapshot();
     expect(snapshot.status).toBe("idle");
-    expect(snapshot.transcript.some((entry) => entry.text.includes("Compacting"))).toBe(true);
+    // Progress lives on live surfaces only; the settled transcript keeps just the result.
+    expect(snapshot.transcript.some((entry) => entry.text.includes("Compacting"))).toBe(false);
     expect(snapshot.transcript.some((entry) => entry.text.includes("Context compacted"))).toBe(true);
     controller.setModel(createScriptedModel({ text: "after-compaction" }), "scripted", "scripted");
     await controller.submit("continue");

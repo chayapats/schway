@@ -150,7 +150,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     const prior = await createJsonlSession({ directory: sessionDirectory, workspace });
     prior.append({ type: "user", id: "previous-user", content: [{ type: "text", text: "Refactor the session loader" }] }, { type: "assistant", id: "previous-assistant", content: [{ type: "text", text: "Separated loading and validation." }] });
   }
-  if (screen.id === "compaction") for (let i = 0; i < 2; i++) session.append({ type: "user", id: `user-${i}`, content: [{ type: "text", text: `Explain session loading step ${i + 1}.` }] }, { type: "assistant", id: `assistant-${i}`, content: [{ type: "text", text: "Read the records, validate them, and restore the conversation." }] });
+  // Compaction screens summarize one older turn; the no-op screen has only the turn it keeps.
+  if (screen.id.startsWith("compaction")) for (let i = 0; i < (screen.id === "compaction-noop" ? 1 : 2); i++) session.append({ type: "user", id: `user-${i}`, content: [{ type: "text", text: `Explain session loading step ${i + 1}.` }] }, { type: "assistant", id: `assistant-${i}`, content: [{ type: "text", text: "Read the records, validate them, and restore the conversation." }] });
   let responses: ScriptedTurn[] = [{ text: "Ready." }];
   if (["streaming-answer", "running-search", "running-empty", "running-draft"].includes(screen.id)) responses = [{ chunks: ["## Plan\n\n", "Reading the **config** loader first.\n\n", "- Check `src/config/config.ts`\n- Then"], waitForAbort: true }];
   if (screen.id === "stopped-streaming") responses = [{ chunks: ["## Partial answer\n\n", "อ่านไฟล์แล้ว 🧪\n\n", "The next step is"], waitForAbort: true }];
@@ -158,7 +159,9 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "retry-countdown") responses = [{ error: "busy", status: 503, headers: { "Retry-After": "3" } }];
   if (screen.id === "retry-rate-limit") responses = [{ error: "Too many requests", status: 429, headers: { "Retry-After": "20" } }];
   if (screen.id === "retry-network") responses = [{ error: "socket hang up", code: "ECONNRESET" }];
-  if (screen.id === "compaction") responses = [{ waitForAbort: true }];
+  if (screen.id === "compaction" || screen.id === "compaction-cancelled") responses = [{ waitForAbort: true }];
+  if (screen.id === "compaction-completed") responses = [{ text: "Session loading reads, validates and restores records." }];
+  if (screen.id === "compaction-failed") responses = [{ error: "summary unavailable" }];
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
   if (screen.id === "table-and-code") responses = [{ text: MARKDOWN_ANSWER }];
   let tools = createToolRegistry();
@@ -236,7 +239,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
     session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? resumed?.header.id ?? historySession?.header.id ?? "catalog-session",
-    model: fresh || unconnectedPicker ? undefined : timed(createScriptedModel({ id: "scripted-model", responses })), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
+    model: fresh || unconnectedPicker ? undefined : timed(createScriptedModel({ id: "scripted-model", responses })), contextManager: createContextManager(workspace, { home, ...(screen.id.startsWith("compaction") ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
     // A settled call that never executed still takes its 1.2s; executed calls already advanced the clock.
     onRuntimeEvent: event => { if (event.type === "tool.finished" && event.durationMs === undefined) activityTime += 1200; },
