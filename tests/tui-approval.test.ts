@@ -11,6 +11,7 @@ import { writeTool } from "../src/tools/write.ts";
 import { pathToFileURL } from "node:url";
 import type { ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 import { statusPill } from "../src/tui/presentation.ts";
+import { approvalChoices, approvalPanelLayout, wrappedRows } from "../src/tui/approval-layout.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import type { TuiSnapshot } from "../src/tui/controller-types.ts";
 import type { ConversationViewOptions } from "../src/tui/view.ts";
@@ -591,14 +592,19 @@ test("Shift+Tab cannot change an open request or its ask chip, including after r
   expect(ui.captureCharFrame()).toContain("◆ Ask");
   expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
   expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).not.toContain("Esc stop");
-  expect(ui.captureCharFrame()).toContain("Ctrl+C cancel");
-  expect(ui.captureCharFrame()).toContain("Enter choose · Esc deny · Ctrl+C cancel turn");
+  expect(ui.captureCharFrame().match(/Ctrl\+C/g)).toEqual(["Ctrl+C"]);
+  expect(ui.captureCharFrame()).toContain("Approval required · Ctrl+C cancel turn");
+  expect(ui.captureCharFrame()).toContain("↑↓ choose · Enter allow once · Esc deny");
   for (const [width, height] of shortLayouts) {
     ui.resize(width, height); await ui.settle();
     const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
     expect(ui.renderer.root.findDescendantById("hints")!.visible).toBe(false);
-    expect(footer.plainText).toContain("Ask · Ctrl+C cancel");
-    expect(ui.captureCharFrame()).toContain("Ask · Ctrl+C cancel");
+    // The heading names ask mode, so a footer too narrow for both keeps Enter's meaning, then Esc deny alone.
+    const action = width < 29 ? "Ask · Esc deny" : width < 40 ? "Enter allow once · Esc deny" : "Ask · Enter allow once · Esc deny";
+    expect(footer.plainText.trim()).toBe(action);
+    expect(ui.captureCharFrame()).toContain(action);
+    expect(footer.plainText).not.toContain("Ctrl+C");
+    if (height >= 10) expect(ui.captureCharFrame()).toContain("Ctrl+C cancel turn");
     expect(footer.plainText).not.toContain("Esc stop");
     expect(ui.controller.snapshot().toolApproval).toEqual(request);
     expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width);
@@ -616,8 +622,9 @@ for (const panel of ["model", "preferences", "help", "search"] as const) test(`$
   await ui.settle();
   const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
   expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
-  expect(statusPill(ui.controller.snapshot())).toMatchObject({ label: "APPROVAL", tone: "stopping" });
-  expect(ui.captureCharFrame()).toContain("APPROVAL");
+  expect(statusPill(ui.controller.snapshot())).toMatchObject({ label: "Approval", tone: "stopping" });
+  expect(ui.captureCharFrame()).toMatch(/◆ [A-Za-z-]+ +◌ Approval /);
+  expect(ui.captureCharFrame()).not.toContain("APPROVAL");
   expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).not.toContain("Esc stop");
   expect(ui.captureCharFrame()).not.toContain("Esc stop");
   const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
@@ -626,7 +633,11 @@ for (const panel of ["model", "preferences", "help", "search"] as const) test(`$
   const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
   for (const width of [120, 80, 50]) {
     ui.resize(width, 28); await ui.settle();
-    expect(footer.plainText).toContain("Ctrl+C cancel");
+    // Ctrl+C stays in the activity row; the footer names Esc with the hint row's words, never a second verb.
+    expect(footer.plainText).toContain(hints.plainText);
+    expect(footer.plainText.match(/Esc [a-z]+(?: [a-z]+)*/g)).toEqual(["Esc back to request"]);
+    expect(footer.plainText).not.toContain("Ctrl+C");
+    expect(ui.captureCharFrame()).toContain("Approval required · Ctrl+C cancel turn");
     expect(footer.plainText).not.toContain("Esc stop");
     expect(ui.controller.snapshot().toolApproval).toEqual(request);
   }
@@ -752,3 +763,205 @@ test("unknown tool arguments mask escaped secrets using controller secrets", asy
   expect(preview).not.toContain("private");
   ui.mockInput.pressEscape(); await turn;
 }));
+
+/** Open one ask-mode approval for a one-line command, a one-line edit or an edit whose diff outgrows the panel. */
+async function openApproval(root: string, kind: "command" | "edit" | "long-edit", rest: ScriptedTurnFactory[] = [{ text: "done" }]) {
+  await Bun.write(join(root, "clamp.ts"), "function clamp(n, lo, hi) {\n  return Math.max(lo, n);\n}\n");
+  const newText = kind === "long-edit" ? Array.from({ length: 28 }, (_, i) => `  const bound${i + 1} = Math.min(hi, Math.max(lo, n + ${i}));`).join("\n") : "  return Math.min(hi, Math.max(lo, n));";
+  const call = kind === "command" ? { id: "request", name: "bash", arguments: { command: "printf ok > allowed.txt" } }
+    : { id: "request", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "  return Math.max(lo, n);", newText }] } };
+  const ui = await askSetup(root, [{ toolCalls: [call] }, ...rest]);
+  const turn = ui.controller.submit("approve this");
+  await ui.waitFor(s => s.toolApproval?.request.toolCallId === "request" && !s.toolApproval.loading);
+  return { ui, turn };
+}
+
+/** The approval panel's rows stay inside the panel, above the activity row, footer and hint row, which keep their own text. */
+function expectApprovalLayout(ui: Awaited<ReturnType<typeof setup>>, size: string, preview: string, selected: string) {
+  const find = (id: string) => ui.renderer.root.findDescendantById(id)!;
+  const panel = find("tool-approval-panel"), heading = find("tool-approval-heading"), scroll = find("tool-approval-scroll") as ScrollBoxRenderable;
+  const choices = find("tool-approval-choices") as TextRenderable, activity = find("activity") as TextRenderable;
+  const footer = find("footer") as TextRenderable, hints = find("hints") as TextRenderable;
+  const bottom = (item: { y: number; height: number }) => item.y + item.height;
+  const lines = ui.captureCharFrame().split("\n");
+  const context = `${size}\n${lines.join("\n")}`;
+  expect(heading.height, context).toBeGreaterThanOrEqual(1);
+  expect(scroll.height, context).toBeGreaterThanOrEqual(1);
+  expect(bottom(heading), context).toBeLessThanOrEqual(scroll.y);
+  expect(bottom(scroll), context).toBeLessThanOrEqual(choices.y);
+  expect(bottom(choices), context).toBeLessThanOrEqual(bottom(panel));
+  expect(bottom(panel), context).toBeLessThanOrEqual(activity.visible ? activity.y : footer.y);
+  if (activity.visible) expect(bottom(activity), context).toBeLessThanOrEqual(footer.y);
+  if (hints.visible) expect(hints.y, context).toBeGreaterThanOrEqual(bottom(footer));
+  // Each row shows its own text: nothing from the panel paints over the activity row, footer or hints.
+  expect(lines[heading.y], context).toContain("Allow ");
+  expect(lines[scroll.y], context).toContain(preview);
+  const choiceText = lines.slice(choices.y, bottom(choices)).map(line => line.trim()).join(" ");
+  expect(choiceText, context).toContain(`› ${selected}`);
+  // The activity row keeps the whole Ctrl+C action, shortening its status first at narrow widths.
+  if (activity.visible) expect(lines[activity.y]!.trim(), context).toMatch(/^◌ Approval( required)? · Ctrl\+C cancel turn$/);
+  expect(lines[footer.y]!.trimEnd(), context).toBe(footer.plainText.trimEnd());
+  if (hints.visible) expect(lines[hints.y]!.trim(), context).toBe(hints.plainText.trim());
+}
+
+for (const [width, height] of [[40, 8], [50, 8]] as const) {
+  for (const [moves, label, verb] of [[0, "Allow once", "Enter allow once"], [1, "Allow bash for this session", "Enter allow for session"], [2, "Deny with reason…", "Enter add reason"]] as const) {
+    test(`${width}x${height} approval shows ${label} with what Enter does, and Enter does it`, async () => withTempDir(async root => {
+      let denial = "";
+      const ui = await askSetup(root, [
+        { toolCalls: [{ id: "first", name: "bash", arguments: { command: "printf one > first.txt" } }] },
+        request => { denial = request.items.filter(item => item.type === "tool_result").at(-1)?.content ?? ""; return { toolCalls: [{ id: "second", name: "bash", arguments: { command: "printf two > second.txt" } }] }; },
+        { text: "done" },
+      ]);
+      ui.resize(width, height); await ui.settle();
+      const turn = ui.controller.submit("run the commands");
+      await ui.waitFor(s => s.toolApproval?.request.toolCallId === "first" && !s.toolApproval.loading);
+      for (let step = 0; step < moves; step++) ui.mockInput.pressArrow("down");
+      await ui.settle();
+      const frame = ui.captureCharFrame();
+      expect(frame).toContain(`› ${label}`);
+      expect(frame).toContain("printf one > first.txt");
+      expect(frame).toContain(`${verb} · Esc deny`);
+      expectApprovalLayout(ui, `${width}x${height}`, "printf one > first.txt", label);
+      ui.mockInput.pressEnter(); await ui.settle();
+      if (moves === 0) {
+        // Allow once runs this command only; the next one asks again.
+        await ui.waitFor(s => s.toolApproval?.request.toolCallId === "second");
+        expect(await Bun.file(join(root, "first.txt")).text()).toBe("one");
+        expect(await Bun.file(join(root, "second.txt")).exists()).toBe(false);
+        ui.mockInput.pressEscape();
+      } else if (moves === 1) {
+        // Allow for session runs this command and the next bash call without asking.
+        await turn;
+        expect(await Bun.file(join(root, "first.txt")).text()).toBe("one");
+        expect(await Bun.file(join(root, "second.txt")).text()).toBe("two");
+      } else {
+        // Add reason opens the reason entry and runs nothing.
+        expect(ui.controller.snapshot().toolApproval?.enteringReason).toBe(true);
+        expect(ui.captureCharFrame()).toContain("Enter deny with reason · Esc deny");
+        expect(ui.captureCharFrame()).toContain("› Deny with reason…");
+        expect(await Bun.file(join(root, "first.txt")).exists()).toBe(false);
+        await ui.mockInput.typeText("not now"); ui.mockInput.pressEnter();
+        await ui.waitFor(s => s.toolApproval?.request.toolCallId === "second");
+        expect(denial).toBe("Denied by the user: not now");
+        ui.mockInput.pressEscape();
+      }
+      await turn;
+      expect(ui.controller.snapshot().toolApproval).toBeUndefined();
+    }));
+  }
+}
+
+test("approval rows never overlap the activity row, footer or hint row at any supported size", async () => withTempDir(async root => {
+  const sizes = [...[40, 50].flatMap(width => Array.from({ length: 23 }, (_, index) => [width, 8 + index] as const)),
+    ...[80, 120].flatMap(width => [8, 10, 12, 13, 14, 20, 30].map(height => [width, height] as const))];
+  for (const [kind, preview] of [["command", "printf ok > allowed.txt"], ["edit", "clamp.ts  +1 −1"], ["long-edit", "clamp.ts  +28 −1"]] as const) {
+    const { ui, turn } = await openApproval(join(root, kind), kind);
+    for (const [moves, label] of [[0, "Allow once"], [1, `Allow ${kind === "command" ? "bash" : "edit"} for this session`]] as const) {
+      if (moves) { ui.mockInput.pressArrow("down"); await ui.settle(); }
+      for (const [width, height] of sizes) {
+        ui.resize(width, height); await ui.settle();
+        expectApprovalLayout(ui, `${kind} ${width}x${height}`, preview, label);
+        expect(ui.captureCharFrame()).toContain("Esc deny");
+        expect(ui.captureCharFrame()).toContain(`Enter allow ${moves ? "for session" : "once"}`);
+      }
+    }
+    ui.mockInput.pressEscape(); await turn;
+  }
+}), 60_000);
+
+test("reason entry keeps the request, selected choice and live keys in view at short sizes", async () => withTempDir(async root => {
+  const { ui, turn } = await openApproval(root, "edit");
+  ui.mockInput.pressArrow("up"); ui.mockInput.pressEnter(); await ui.settle();
+  expect(ui.controller.snapshot().toolApproval?.enteringReason).toBe(true);
+  for (const [width, height] of [[40, 8], [50, 8], [50, 10], [50, 12], [80, 13], [80, 14], [120, 30]] as const) {
+    ui.resize(width, height); await ui.settle();
+    expectApprovalLayout(ui, `${width}x${height}`, "clamp.ts  +1 −1", "Deny with reason…");
+    expect(ui.captureCharFrame()).toContain("Enter deny with reason · Esc deny");
+  }
+  ui.mockInput.pressEscape(); await turn;
+}), 30_000);
+
+test("approval screens show Ctrl+C once, in the activity row, and the full hint names the choice keys", async () => withTempDir(async root => {
+  for (const kind of ["command", "edit", "long-edit"] as const) {
+    const { ui, turn } = await openApproval(join(root, kind), kind);
+    const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
+    const activity = ui.renderer.root.findDescendantById("activity") as TextRenderable;
+    for (const width of [120, 80, 50]) {
+      ui.resize(width, 30); await ui.settle();
+      const lines = ui.captureCharFrame().split("\n");
+      expect(lines.filter(line => line.includes("Ctrl+C"))).toEqual([lines[activity.y]!]);
+      expect(lines[activity.y]).toContain("Approval required · Ctrl+C cancel turn");
+      expect(hints.plainText).toStartWith("↑↓ choose · Enter allow once · Esc deny");
+      // Paging is named only while the preview overflows, and only where the row has room.
+      if (kind !== "long-edit") expect(hints.plainText).not.toContain("PgUp/PgDn");
+      else if (width >= 80) expect(hints.plainText).toBe("↑↓ choose · Enter allow once · Esc deny · PgUp/PgDn scroll");
+    }
+    ui.mockInput.pressArrow("down"); await ui.settle();
+    expect(hints.plainText).toStartWith("↑↓ choose · Enter allow for session · Esc deny");
+    ui.mockInput.pressArrow("down"); await ui.settle();
+    expect(hints.plainText).toStartWith("↑↓ choose · Enter add reason · Esc deny");
+    ui.mockInput.pressEscape(); await turn;
+  }
+}), 30_000);
+
+for (const exit of ["enter", "escape"] as const) test(`reason entry hint names its keys, and ${exit === "enter" ? "Enter sends the typed reason" : "Esc denies without it"}`, async () => withTempDir(async root => {
+  let result = "";
+  const { ui, turn } = await openApproval(root, "edit", [request => { result = request.items.filter(item => item.type === "tool_result").at(-1)?.content ?? ""; return { text: "done" }; }]);
+  ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await ui.settle();
+  const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
+  expect(hints.plainText).toBe("Enter deny with reason · Esc deny");
+  expect(ui.captureCharFrame()).toContain("› Deny with reason…");
+  await ui.mockInput.typeText("keep the old bound"); await ui.settle();
+  expect(hints.plainText).toBe("Enter deny with reason · Esc deny");
+  if (exit === "enter") ui.mockInput.pressEnter(); else ui.mockInput.pressEscape();
+  await turn;
+  expect(result).toBe(exit === "enter" ? "Denied by the user: keep the old bound" : "Denied by the user.");
+  expect(ui.editor.plainText).not.toContain("keep the old bound");
+  expect(await Bun.file(join(root, "clamp.ts")).text()).toContain("return Math.max(lo, n);");
+}));
+
+test("short approval panels give up margins, then unselected choices, then preview rows down to one", () => {
+  const plan = (rows: number, previewRows = 3, selected = 1) => {
+    const layout = approvalPanelLayout({ heading: "Allow edit? · ask mode", choices: approvalChoices("edit"), selected, previewRows, rows, columns: 46 });
+    return { margins: [layout.headingMargin, layout.choicesMargin], choices: layout.choices.map(choice => choice.text), preview: layout.previewRows, fits: layout.fits };
+  };
+  const all = ["  Allow once", "› Allow edit for this session", "  Deny with reason…"];
+  // Margins take only rows left once the preview is whole and every choice shows; a lone choice leaves one spare row as its margin.
+  expect(plan(10)).toEqual({ margins: [true, true], choices: all, preview: 4, fits: true });
+  expect(plan(9)).toEqual({ margins: [true, true], choices: all, preview: 3, fits: true });
+  expect(plan(8)).toEqual({ margins: [false, true], choices: all, preview: 3, fits: true });
+  expect(plan(7)).toEqual({ margins: [false, false], choices: all, preview: 3, fits: true });
+  expect(plan(6)).toEqual({ margins: [false, true], choices: ["› Allow edit for this session  (2 of 3)"], preview: 3, fits: true });
+  expect(plan(4)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 2, fits: true });
+  expect(plan(3)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 1, fits: true });
+  // A preview cut short never shares rows with a blank margin: margins go first, then unselected choices, then preview rows.
+  expect(plan(20, 40)).toEqual({ margins: [false, false], choices: all, preview: 16, fits: true });
+  expect(plan(9, 40)).toEqual({ margins: [false, false], choices: all, preview: 5, fits: true });
+  expect(plan(8, 40)).toEqual({ margins: [false, false], choices: all, preview: 4, fits: true });
+  expect(plan(7, 40)).toEqual({ margins: [false, false], choices: all, preview: 3, fits: true });
+  expect(plan(6, 40)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 4, fits: true });
+  expect(plan(4, 40)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 2, fits: true });
+  expect(plan(3, 40)).toEqual({ margins: [false, false], choices: ["› Allow edit for this session  (2 of 3)"], preview: 1, fits: true });
+  // A long preview gets margins back only once it is shown whole.
+  expect(plan(12, 6)).toEqual({ margins: [true, true], choices: all, preview: 6, fits: true });
+  expect(plan(11, 6)).toEqual({ margins: [false, true], choices: all, preview: 6, fits: true });
+  expect(plan(10, 6)).toEqual({ margins: [false, false], choices: all, preview: 6, fits: true });
+  // Below the heading, one preview row and the selected choice, Enter has nothing safe to act on.
+  expect(plan(2).fits).toBe(false);
+  // An unselected choice's two-cell indent counts toward wrapping: 39 cells take two rows at 38 columns, as the renderer draws them.
+  expect(wrappedRows("  Allow list_processes for this session", 38)).toBe(2);
+  expect(wrappedRows("› Allow list_processes for this session", 38)).toBe(2);
+  expect(wrappedRows("  Allow bash for this session", 38)).toBe(1);
+  expect(wrappedRows("  abcdefghijklmnopqrstuvwxyzabcdefghijkl", 38)).toBe(2);
+  const wrapping = (rows: number) => {
+    const layout = approvalPanelLayout({ heading: "Allow list_processes? · ask mode", choices: approvalChoices("list_processes"), selected: 0, previewRows: 1, rows, columns: 38 });
+    return [layout.choiceRows, layout.choices.length, layout.choicesMargin, layout.headingMargin];
+  };
+  // Heading, one preview row and four choice rows fill six rows exactly, leaving no margin to reserve.
+  expect(wrapping(6)).toEqual([4, 3, false, false]);
+  expect(wrapping(7)).toEqual([4, 3, true, false]);
+  // A heading that would crowd out the request is fitted to one row.
+  const tight = approvalPanelLayout({ heading: "Allow a_very_long_extension_tool_name? · ask mode", choices: approvalChoices("x"), selected: 0, previewRows: 1, rows: 3, columns: 24 });
+  expect([tight.headingRows, tight.fits, wrappedRows(tight.heading, 24)]).toEqual([1, true, 1]);
+});

@@ -7,13 +7,13 @@ size 50x8
 cursor 1 1 hidden
 == text
   Allow edit? · ask mode
-
   clamp.ts  +29 −1                             ▀
-
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ ›
- ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- Ask · Ctrl+C cancel
+   2 │-  return Math.max(lo, n);
+   2 │+  const bound1 = Math.min(hi, Math.max(l
+  › Allow once
+    Allow edit for this session
+    Deny with reason…
+ Ask · Enter allow once · Esc deny
 == styles
 00 0-1 #ffffff #f7f7f4 -
 00 1-2 #ffffff #e1e3df -
@@ -21,30 +21,41 @@ cursor 1 1 hidden
 00 24-49 #ffffff #e1e3df -
 00 49-50 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
-01 1-49 #ffffff #e1e3df -
+01 1-2 #ffffff #e1e3df -
+01 2-18 #1d232c #e1e3df -
+01 18-47 #ffffff #e1e3df -
+01 47-48 #9a9ea3 #252527 -
+01 48-49 #ffffff #e1e3df -
 01 49-50 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
 02 1-2 #ffffff #e1e3df -
-02 2-18 #1d232c #e1e3df -
-02 18-47 #ffffff #e1e3df -
-02 47-48 #9a9ea3 #252527 -
+02 2-32 #a61f16 #e1e3df -
+02 32-47 #ffffff #e1e3df -
+02 47-48 #ffffff #252527 -
 02 48-49 #ffffff #e1e3df -
 02 49-50 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-49 #ffffff #e1e3df -
+03 1-2 #ffffff #e1e3df -
+03 2-47 #19612f #e1e3df -
+03 47-48 #ffffff #252527 -
+03 48-49 #ffffff #e1e3df -
 03 49-50 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
-04 1-49 #ecedea #f7f7f4 -
+04 1-2 #ffffff #e1e3df -
+04 2-14 #0a5894 #e1e3df -
+04 14-49 #ffffff #e1e3df -
 04 49-50 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
-05 1-2 #7a5000 #ecedea -
-05 2-5 #0a5894 #ecedea -
-05 5-49 #ffffff #ecedea -
+05 1-2 #ffffff #e1e3df -
+05 2-31 #1d232c #e1e3df -
+05 31-49 #ffffff #e1e3df -
 05 49-50 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
-06 1-49 #ecedea #f7f7f4 -
+06 1-2 #ffffff #e1e3df -
+06 2-21 #1d232c #e1e3df -
+06 21-49 #ffffff #e1e3df -
 06 49-50 #ffffff #f7f7f4 -
 07 0-1 #545e6c #ecedea -
 07 1-4 #7a5000 #ecedea b
-07 4-20 #545e6c #ecedea -
-07 20-50 #ffffff #f7f7f4 -
+07 4-34 #545e6c #ecedea -
+07 34-50 #ffffff #f7f7f4 -

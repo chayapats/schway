@@ -683,7 +683,10 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   expect(ui.reading()).toBe(true);
   expect(ui.readerText()).toContain("◌ Approval waiting · Esc back to request");
   expect(ui.hints()).toStartWith("Esc back to request");
-  expect(ui.captureCharFrame()).toContain("APPROVAL");
+  // The status bar names the same Esc as the reader and its hint row, never a second verb.
+  const footerText = () => (ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText;
+  expect(footerText().match(/Esc [a-z]+(?: [a-z]+)*/g)).toEqual(["Esc back to request"]);
+  expect(ui.captureCharFrame()).toMatch(/◆ [A-Za-z-]+ +◌ Approval /);
   expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
   // Navigation, copy and resize never answer the request.
   ui.mockInput.pressKey("\u001b[6~"); ui.mockInput.pressArrow("up"); ui.mockInput.pressArrow("down");

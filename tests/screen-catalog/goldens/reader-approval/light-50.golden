@@ -34,7 +34,7 @@ cursor 1 1 hidden
 
 
  ◌ Approval required · Ctrl+C cancel turn
- ◆ Ask  ◌ APPROVAL   s…    Ctrl+C cancel  ctx ~16
+ ◆ Ask  ◌ Approval   Esc back to request  ctx ~16
  Esc back to request · ↑↓ scroll · ←→ pan
 == styles
 00 0-1 #ffffff #ecedea -
@@ -103,11 +103,9 @@ cursor 1 1 hidden
 28 1-6 #7a5000 #ecedea b
 28 6-7 #545e6c #ecedea -
 28 7-19 #ffffff #7a5000 b
-28 19-20 #545e6c #ecedea -
-28 20-24 #1d232c #e1e3df -
-28 24-27 #545e6c #ecedea -
-28 27-33 #1d232c #c9cdd2 b
-28 33-49 #545e6c #ecedea -
+28 19-21 #545e6c #ecedea -
+28 21-24 #1d232c #c9cdd2 b
+28 24-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-4 #1d232c #caced3 b

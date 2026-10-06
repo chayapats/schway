@@ -27,6 +27,7 @@ import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoEscap
 import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerEnd, readerLayout, revealMatch, scrollReader, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
 import type { ReaderPosition } from "./reader.ts";
 import { createHistoryPanel } from "./history-view.ts";
+import { approvalAction, approvalChoices, approvalHint, approvalPanelLayout, charWrappedRows, type ApprovalPanelLayout } from "./approval-layout.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -265,7 +266,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   body.add(reviewPanel);
   const historyPanel = createHistoryPanel(renderer);
   body.add(historyPanel.root);
-  const toolApprovalPanel = new BoxRenderable(renderer, { id: "tool-approval-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column", backgroundColor: theme.surface2, paddingX: 1 });
+  const toolApprovalPanel = new BoxRenderable(renderer, { id: "tool-approval-panel", flexBasis: 0, flexGrow: 1, minHeight: 1, visible: false, flexDirection: "column", backgroundColor: theme.surface2, paddingX: 1, overflow: "hidden" });
   const toolApprovalHeading = new TextRenderable(renderer, { id: "tool-approval-heading", content: "", fg: theme.text, flexShrink: 0, wrapMode: "word", marginBottom: 1 });
   const toolApprovalScroll = new ScrollBoxRenderable(renderer, { id: "tool-approval-scroll", flexGrow: 1, minHeight: 1, scrollX: false });
   const toolApprovalText = new TextRenderable(renderer, { id: "tool-approval-text", content: "", fg: theme.text, wrapMode: "char" });
@@ -277,6 +278,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   body.add(toolApprovalPanel);
   let toolApprovalIdentity = "";
   let toolApprovalContent = "";
+  // The approval rows planned this refresh, and a measured correction keyed by the estimate it replaced.
+  let toolApprovalLayout: ApprovalPanelLayout | undefined;
+  let toolApprovalRows: { estimate: number; rows: number } | undefined;
   const activity = new TextRenderable(renderer, { id: "activity", height: 1, flexShrink: 0, fg: theme.muted, marginTop: 1 });
   body.add(activity);
   const picker = new BoxRenderable(renderer, { id: "picker", flexDirection: "column", flexShrink: 0, backgroundColor: theme.surface2, paddingX: 1, overflow: "hidden", visible: false });
@@ -687,7 +691,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     // When space hides hints, keep the mode and urgent key before status decoration.
     const compactFooter = (action: string) => {
       const room = columns - Bun.stringWidth(modeLabel) - 4;
-      const next = Bun.stringWidth(action) <= room ? action : action.split(" ")[0]!;
+      // While a request waits, its whole action outranks the mode label: it is Enter's meaning in the approval panel (whose heading names ask mode)
+      // or the only way back to the request from another view. When even the action alone is too wide, the panel keeps its last segment, Esc deny.
+      if (footerParts.toolApproval && Bun.stringWidth(action) > room && Bun.stringWidth(action) <= columns - 2) { footer.content = new StyledText([fg(theme.muted)(` ${action}`)]); return; }
+      const next = Bun.stringWidth(action) <= room ? action : footerParts.toolApproval ? action.split(" · ").at(-1)! : action.split(" ")[0]!;
       footer.content = new StyledText([fg(theme.muted)(" "), bold(fg(modeColor)(modeLabel)),
         ...(Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
     };
@@ -939,7 +946,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       draftStatus.height = draftMessage.includes("\n") ? 2 : 1;
       draftStatus.content = draftMessage;
       editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.history && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !reader;
-      composerTop.visible = composer.visible = composerBottom.visible = !reader;
+      // An open approval without reason entry takes the composer's rows for its choices.
+      composerTop.visible = composer.visible = composerBottom.visible = !reader && (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason);
       credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
       if (snapshot.undoPreview || snapshot.changeReview || snapshot.history || panelMode === "tool-approval" && !snapshot.toolApproval?.enteringReason) { editor.blur(); }
       else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
@@ -984,7 +992,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         running: !!snapshot.activity || snapshot.status === "running",
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
-        nextAction: snapshot.toolApproval ? "Ctrl+C cancel" : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview)
+        // Ctrl+C lives only in the approval activity row; the hint row carries Enter's meaning when it is visible.
+        nextAction: panelMode === "tool-approval" && snapshot.toolApproval ? hints.visible && renderer.width >= 30 ? "Esc deny" : approvalAction(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason)
+          // A request waiting behind another view: name Esc exactly as that view's hint row and reader status do.
+          : snapshot.toolApproval ? "Esc back to request"
+          : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview)
           : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : panelMode === "credential" || panelMode === "callback" ? "Esc cancel" : panelMode || inspection || detailsReturn || reader ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stop"
           : snapshot.readiness === "loading" ? "Esc cancel"
@@ -1014,11 +1026,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         readerText.height = panelRows;
       }
       toolApprovalPanel.visible = panelMode === "tool-approval";
+      toolApprovalLayout = undefined;
       if (toolApprovalPanel.visible && snapshot.toolApproval) {
         const approval = snapshot.toolApproval;
         const identity = approval.request.toolCallId;
         if (identity !== toolApprovalIdentity) { toolApprovalIdentity = identity; toolApprovalScroll.scrollTo(0); }
-        toolApprovalHeading.content = safe(`Allow ${approval.request.toolName}? · ask mode`);
         const counts = approval.diff ? `  +${approval.diff.added} −${approval.diff.removed}` : "";
         const target = approval.path ? `${shortenWorkspacePath(safe(approval.path), options.home, Math.max(1, width - 2 - Bun.stringWidth(counts)))}${counts}` : "";
         const content = JSON.stringify([identity, target, approval.content, approval.diff, mode]);
@@ -1029,8 +1041,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           ]);
           toolApprovalContent = content;
         }
-        toolApprovalChoices.content = new StyledText(["Allow once", `Allow ${approval.request.toolName} for this session`, "Deny with reason…"].map((choice, index) =>
-          fg(index === approval.selected ? theme.accent : theme.text)(`${index === approval.selected ? "›" : " "} ${safe(choice)}${index < 2 ? "\n" : ""}`)));
+        // Size the panel from the rows the chrome leaves; a measured panel height corrects the estimate (reason entry grows the editor).
+        const margin = (value: number | string) => typeof value === "number" ? value : 0;
+        const estimate = renderer.height - (topBar.visible ? 1 : 0) - margin(body.marginTop) - (activity.visible ? 1 + margin(activity.marginTop) : 0)
+          - (composer.visible ? 2 + Math.max(1, editor.height) : 0) - 1 - (hints.visible ? 1 : 0) - (draftStatus.visible ? margin(draftStatus.height) : 0);
+        const rows = toolApprovalRows?.estimate === estimate ? toolApprovalRows.rows : estimate;
+        toolApprovalRows = { estimate, rows };
+        const preview = [target || approval.content, ...(approval.diff ? formatDiffRows(approval.diff.rows).split("\n") : [])].join("\n");
+        const plan = toolApprovalLayout = approvalPanelLayout({ heading: safe(`Allow ${approval.request.toolName}? · ask mode`), choices: approvalChoices(safe(approval.request.toolName)),
+          selected: approval.selected, previewRows: charWrappedRows(safe(preview), width - 2), rows, columns: width - 2 });
+        toolApprovalHeading.content = plan.heading;
+        toolApprovalHeading.marginBottom = plan.headingMargin ? 1 : 0;
+        toolApprovalChoices.marginTop = plan.choicesMargin ? 1 : 0;
+        toolApprovalChoices.content = new StyledText(plan.choices.map((choice, index) => fg(choice.selected ? theme.accent : theme.text)(`${index ? "\n" : ""}${choice.text}`)));
       }
       reviewPanel.visible = !!snapshot.changeReview || !!snapshot.undoPreview;
       if (snapshot.changeReview || snapshot.undoPreview) {
@@ -1189,7 +1212,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
-        : snapshot.toolApproval ? { text: "Approval required · Ctrl+C cancel turn", tone: "warning", glyph: "◌", chips: true }
+        : snapshot.toolApproval ? { text: `${width >= 40 ? "Approval required" : "Approval"} · Ctrl+C cancel turn`, tone: "warning", glyph: "◌", chips: true }
         : searchOpen ? { text: searchStatus, tone: "accent", glyph: "⌕" }
         : Date.now() < interactionNoticeUntil ? { text: interactionNotice, tone: "muted" }
         : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
@@ -1372,8 +1395,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           tree.scrollChildIntoView(branches.selectedBranchId ? `branch-choice-${branches.selectedBranchId}` : `branch-${branches.selectedId}`);
         }
       }
-      hints.height = panelMode === "review" || panelMode === "tool-approval" || panelMode === "history" ? "auto" : 1;
-      hints.wrapMode = panelMode === "review" || panelMode === "tool-approval" || panelMode === "history" ? "word" : "none";
+      hints.height = panelMode === "review" || panelMode === "history" ? "auto" : 1;
+      hints.wrapMode = panelMode === "review" || panelMode === "history" ? "word" : "none";
       if (reader) {
         const navigation = reader.search ? ["↑↓ next", "Enter keep"] : ["↑↓ scroll", ...(reader.layout?.viewport.wrap ? [] : [reader.document.kind === "table" && reader.document.aligned ? "←→ columns" : "←→ pan"]),
           ...(reader.document.kind === "code" ? [reader.wrap ? "W unwrap" : "W wrap"] : []), "C copy", "Ctrl+F find"];
@@ -1381,8 +1404,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         hints.content = fittedHints([snapshot.toolApproval ? "Esc back to request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width, theme.background, true);
       } else if (snapshot.toolApproval && panelMode !== "tool-approval") {
         hints.content = "Esc back to request";
-      } else if (panelMode === "tool-approval") {
-        hints.content = new StyledText(keyHintChunks("Enter choose · Esc deny · Ctrl+C cancel turn", hintColors(theme.background)));
+      } else if (panelMode === "tool-approval" && snapshot.toolApproval) {
+        hints.content = fittedHints(approvalHint(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason, !!toolApprovalLayout?.overflow), width);
       } else if (panelMode === "undo") {
         hints.content = undoHint(snapshot.undoPreview, width);
       } else if (panelMode === "history" && snapshot.history) {
@@ -1430,7 +1453,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   function submit() {
     if (panelMode === "tool-approval") {
       if (controller.snapshot().toolApproval?.enteringReason) controller.denyToolApproval(editor.plainText);
-      else controller.chooseToolApproval();
+      // Enter never acts on a choice the panel could not paint.
+      else if (toolApprovalLayout?.fits) controller.chooseToolApproval();
       refresh(); return;
     }
     if (panelMode === "help") {
@@ -1961,6 +1985,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       if (!layered()) grewWhileLayered = false;
     } else if (!layered()) { restoreFollow = transcript.stickyScroll && atBottom() || resumeFollowTop !== undefined; grewWhileLayered = false; }
+    if (toolApprovalPanel.visible && toolApprovalRows && toolApprovalPanel.height > 0 && toolApprovalPanel.height !== toolApprovalRows.rows) {
+      toolApprovalRows = { estimate: toolApprovalRows.estimate, rows: toolApprovalPanel.height };
+      refresh();
+    }
     if (reader && readerPanel.visible) {
       reader.painted = true;
       if (readerPanel.height > 0 && readerPanel.height !== readerText.height && readerMeasured?.rows !== readerPanel.height) {

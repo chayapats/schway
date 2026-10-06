@@ -1,0 +1,61 @@
+schway-screen 1
+screen approval-edit
+title Approve an edit
+description The exact clamp replacement is previewed before approval.
+variant light-40x8
+size 40x8
+cursor 1 1 hidden
+== text
+  Allow edit? · ask mode
+  clamp.ts  +1 −1                    █
+  2 │-  return Math.max(lo, n);      █
+  2 │+  return Math.min(hi, Math.max(
+  › Allow once
+    Allow edit for this session
+    Deny with reason…
+ Ask · Enter allow once · Esc deny
+== styles
+00 0-1 #ffffff #f7f7f4 -
+00 1-2 #ffffff #e1e3df -
+00 2-24 #1d232c #e1e3df -
+00 24-39 #ffffff #e1e3df -
+00 39-40 #ffffff #f7f7f4 -
+01 0-1 #ffffff #f7f7f4 -
+01 1-2 #ffffff #e1e3df -
+01 2-17 #1d232c #e1e3df -
+01 17-37 #ffffff #e1e3df -
+01 37-38 #9a9ea3 #252527 -
+01 38-39 #ffffff #e1e3df -
+01 39-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-2 #ffffff #e1e3df -
+02 2-31 #a61f16 #e1e3df -
+02 31-37 #ffffff #e1e3df -
+02 37-38 #9a9ea3 #252527 -
+02 38-39 #ffffff #e1e3df -
+02 39-40 #ffffff #f7f7f4 -
+03 0-1 #ffffff #f7f7f4 -
+03 1-2 #ffffff #e1e3df -
+03 2-37 #19612f #e1e3df -
+03 37-38 #ffffff #252527 -
+03 38-39 #ffffff #e1e3df -
+03 39-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-2 #ffffff #e1e3df -
+04 2-14 #0a5894 #e1e3df -
+04 14-39 #ffffff #e1e3df -
+04 39-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-2 #ffffff #e1e3df -
+05 2-31 #1d232c #e1e3df -
+05 31-39 #ffffff #e1e3df -
+05 39-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-2 #ffffff #e1e3df -
+06 2-21 #1d232c #e1e3df -
+06 21-39 #ffffff #e1e3df -
+06 39-40 #ffffff #f7f7f4 -
+07 0-1 #545e6c #ecedea -
+07 1-4 #7a5000 #ecedea b
+07 4-34 #545e6c #ecedea -
+07 34-40 #ffffff #f7f7f4 -
