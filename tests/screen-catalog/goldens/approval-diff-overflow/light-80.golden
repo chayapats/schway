@@ -10,32 +10,32 @@ cursor 1 1 hidden
 
    Allow edit? · ask mode
 
-   clamp.ts  +29 −1                                                         ▀
-    2 │-  return Math.max(lo, n);
-    2 │+  const bound1 = Math.min(hi, Math.max(lo, n + 0));
-    3 │+  const bound2 = Math.min(hi, Math.max(lo, n + 1));
-    4 │+  const bound3 = Math.min(hi, Math.max(lo, n + 2));
-    5 │+  const bound4 = Math.min(hi, Math.max(lo, n + 3));
-    6 │+  const bound5 = Math.min(hi, Math.max(lo, n + 4));
-    7 │+  const bound6 = Math.min(hi, Math.max(lo, n + 5));
-    8 │+  const bound7 = Math.min(hi, Math.max(lo, n + 6));
+   clamp.ts  +29 −1                                                         █
+    2 │-  return Math.max(lo, n);                                           █
+    2 │+  const bound1 = Math.min(hi, Math.max(lo, n + 0));                 █
+    3 │+  const bound2 = Math.min(hi, Math.max(lo, n + 1));                 █
+    4 │+  const bound3 = Math.min(hi, Math.max(lo, n + 2));                 █
+    5 │+  const bound4 = Math.min(hi, Math.max(lo, n + 3));                 █
+    6 │+  const bound5 = Math.min(hi, Math.max(lo, n + 4));                 █
+    7 │+  const bound6 = Math.min(hi, Math.max(lo, n + 5));                 █
+    8 │+  const bound7 = Math.min(hi, Math.max(lo, n + 6));                 █
     9 │+  const bound8 = Math.min(hi, Math.max(lo, n + 7));
    10 │+  const bound9 = Math.min(hi, Math.max(lo, n + 8));
    11 │+  const bound10 = Math.min(hi, Math.max(lo, n + 9));
    12 │+  const bound11 = Math.min(hi, Math.max(lo, n + 10));
    13 │+  const bound12 = Math.min(hi, Math.max(lo, n + 11));
    14 │+  const bound13 = Math.min(hi, Math.max(lo, n + 12));
+   15 │+  const bound14 = Math.min(hi, Math.max(lo, n + 13));
+   16 │+  const bound15 = Math.min(hi, Math.max(lo, n + 14));
+   17 │+  const bound16 = Math.min(hi, Math.max(lo, n + 15));
 
    › Allow once
      Allow edit for this session
      Deny with reason…
 
   ◌ Approval required · Ctrl+C cancel turn
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ ›
-  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Ask  ◌ APPROVAL   scripted/scripted-model            Ctrl+C cancel  ctx ~412
-  Enter choose · Esc deny · Ctrl+C cancel turn
+ ◆ Ask  ◌ Approval   scripted/scripted-model                 Esc deny  ctx ~412
+  ↑↓ choose · Enter allow once · Esc deny · PgUp/PgDn scroll
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -63,56 +63,56 @@ cursor 1 1 hidden
 05 2-3 #ffffff #e1e3df -
 05 3-33 #a61f16 #e1e3df -
 05 33-76 #ffffff #e1e3df -
-05 76-77 #ffffff #252527 -
+05 76-77 #9a9ea3 #252527 -
 05 77-78 #ffffff #e1e3df -
 05 78-80 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
 06 2-3 #ffffff #e1e3df -
 06 3-59 #19612f #e1e3df -
 06 59-76 #ffffff #e1e3df -
-06 76-77 #ffffff #252527 -
+06 76-77 #9a9ea3 #252527 -
 06 77-78 #ffffff #e1e3df -
 06 78-80 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-3 #ffffff #e1e3df -
 07 3-59 #19612f #e1e3df -
 07 59-76 #ffffff #e1e3df -
-07 76-77 #ffffff #252527 -
+07 76-77 #9a9ea3 #252527 -
 07 77-78 #ffffff #e1e3df -
 07 78-80 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
 08 2-3 #ffffff #e1e3df -
 08 3-59 #19612f #e1e3df -
 08 59-76 #ffffff #e1e3df -
-08 76-77 #ffffff #252527 -
+08 76-77 #9a9ea3 #252527 -
 08 77-78 #ffffff #e1e3df -
 08 78-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
 09 2-3 #ffffff #e1e3df -
 09 3-59 #19612f #e1e3df -
 09 59-76 #ffffff #e1e3df -
-09 76-77 #ffffff #252527 -
+09 76-77 #9a9ea3 #252527 -
 09 77-78 #ffffff #e1e3df -
 09 78-80 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
 10 2-3 #ffffff #e1e3df -
 10 3-59 #19612f #e1e3df -
 10 59-76 #ffffff #e1e3df -
-10 76-77 #ffffff #252527 -
+10 76-77 #9a9ea3 #252527 -
 10 77-78 #ffffff #e1e3df -
 10 78-80 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
 11 2-3 #ffffff #e1e3df -
 11 3-59 #19612f #e1e3df -
 11 59-76 #ffffff #e1e3df -
-11 76-77 #ffffff #252527 -
+11 76-77 #9a9ea3 #252527 -
 11 77-78 #ffffff #e1e3df -
 11 78-80 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
 12 2-3 #ffffff #e1e3df -
 12 3-59 #19612f #e1e3df -
 12 59-76 #ffffff #e1e3df -
-12 76-77 #ffffff #252527 -
+12 76-77 #9a9ea3 #252527 -
 12 77-78 #ffffff #e1e3df -
 12 78-80 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
@@ -158,56 +158,68 @@ cursor 1 1 hidden
 18 77-78 #ffffff #e1e3df -
 18 78-80 #ffffff #f7f7f4 -
 19 0-2 #ffffff #f7f7f4 -
-19 2-78 #ffffff #e1e3df -
+19 2-3 #ffffff #e1e3df -
+19 3-61 #19612f #e1e3df -
+19 61-76 #ffffff #e1e3df -
+19 76-77 #ffffff #252527 -
+19 77-78 #ffffff #e1e3df -
 19 78-80 #ffffff #f7f7f4 -
 20 0-2 #ffffff #f7f7f4 -
 20 2-3 #ffffff #e1e3df -
-20 3-15 #0a5894 #e1e3df -
-20 15-78 #ffffff #e1e3df -
+20 3-61 #19612f #e1e3df -
+20 61-76 #ffffff #e1e3df -
+20 76-77 #ffffff #252527 -
+20 77-78 #ffffff #e1e3df -
 20 78-80 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
 21 2-3 #ffffff #e1e3df -
-21 3-32 #1d232c #e1e3df -
-21 32-78 #ffffff #e1e3df -
+21 3-61 #19612f #e1e3df -
+21 61-76 #ffffff #e1e3df -
+21 76-77 #ffffff #252527 -
+21 77-78 #ffffff #e1e3df -
 21 78-80 #ffffff #f7f7f4 -
 22 0-2 #ffffff #f7f7f4 -
-22 2-3 #ffffff #e1e3df -
-22 3-22 #1d232c #e1e3df -
-22 22-78 #ffffff #e1e3df -
+22 2-78 #ffffff #e1e3df -
 22 78-80 #ffffff #f7f7f4 -
-23 0-80 #ffffff #f7f7f4 -
+23 0-2 #ffffff #f7f7f4 -
+23 2-3 #ffffff #e1e3df -
+23 3-15 #0a5894 #e1e3df -
+23 15-78 #ffffff #e1e3df -
+23 78-80 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
-24 2-3 #7a5000 #f7f7f4 b
-24 3-24 #545e6c #f7f7f4 -
-24 24-30 #1d232c #caced3 b
-24 30-42 #545e6c #f7f7f4 -
-24 42-80 #ffffff #f7f7f4 -
+24 2-3 #ffffff #e1e3df -
+24 3-32 #1d232c #e1e3df -
+24 32-78 #ffffff #e1e3df -
+24 78-80 #ffffff #f7f7f4 -
 25 0-2 #ffffff #f7f7f4 -
-25 2-78 #ecedea #f7f7f4 -
+25 2-3 #ffffff #e1e3df -
+25 3-22 #1d232c #e1e3df -
+25 22-78 #ffffff #e1e3df -
 25 78-80 #ffffff #f7f7f4 -
-26 0-2 #ffffff #f7f7f4 -
-26 2-3 #7a5000 #ecedea -
-26 3-6 #0a5894 #ecedea -
-26 6-78 #ffffff #ecedea -
-26 78-80 #ffffff #f7f7f4 -
+26 0-80 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
-27 2-78 #ecedea #f7f7f4 -
-27 78-80 #ffffff #f7f7f4 -
+27 2-3 #7a5000 #f7f7f4 b
+27 3-24 #545e6c #f7f7f4 -
+27 24-30 #1d232c #caced3 b
+27 30-42 #545e6c #f7f7f4 -
+27 42-80 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
 28 1-6 #7a5000 #ecedea b
 28 6-7 #545e6c #ecedea -
 28 7-19 #ffffff #7a5000 b
 28 19-20 #545e6c #ecedea -
 28 20-45 #1d232c #e1e3df -
-28 45-56 #545e6c #ecedea -
-28 56-62 #1d232c #c9cdd2 b
-28 62-79 #545e6c #ecedea -
+28 45-61 #545e6c #ecedea -
+28 61-64 #1d232c #c9cdd2 b
+28 64-79 #545e6c #ecedea -
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
-29 2-7 #1d232c #caced3 b
-29 7-17 #545e6c #f7f7f4 -
-29 17-20 #1d232c #caced3 b
-29 20-28 #545e6c #f7f7f4 -
-29 28-34 #1d232c #caced3 b
-29 34-46 #545e6c #f7f7f4 -
-29 46-80 #ffffff #f7f7f4 -
+29 2-4 #1d232c #caced3 b
+29 4-14 #545e6c #f7f7f4 -
+29 14-19 #1d232c #caced3 b
+29 19-33 #545e6c #f7f7f4 -
+29 33-36 #1d232c #caced3 b
+29 36-44 #545e6c #f7f7f4 -
+29 44-53 #1d232c #caced3 b
+29 53-60 #545e6c #f7f7f4 -
+29 60-80 #ffffff #f7f7f4 -

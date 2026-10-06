@@ -31,7 +31,7 @@ export type StatusTone = "ready" | "neutral" | "active" | "stopping" | "attentio
 
 /** Describe the current state in sentence case; spinning labels receive an animated glyph. */
 export function statusPill(state: { readiness: string; status: string; activity?: TuiActivity; toolApproval?: unknown }, tiny = false): { label: string; tone: StatusTone; spinning: boolean } {
-  if (state.toolApproval) return { label: "APPROVAL", tone: "stopping", spinning: false };
+  if (state.toolApproval) return { label: "Approval", tone: "stopping", spinning: false };
   const activity = state.activity;
   if (state.readiness === "loading") return { label: "Checking", tone: "active", spinning: true };
   if (!activity) {

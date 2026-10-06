@@ -150,6 +150,15 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
     if (screen.id === "reader-no-matches") expect(text).toContain("No matches");
     if (screen.id === "reader-approval") { expect(text).toMatch(/◌ Approval( waiting)? · Esc back to request/); expect(text).not.toContain("Allow bash?"); }
   }
+  if (screen.id.startsWith("approval-") && screen.id !== "approval-modes-help") {
+    // Enter never acts on a hidden choice: every approval frame marks the selected choice and names Esc deny, and Ctrl+C appears only in the activity row.
+    const text = parseScreen(actual).text;
+    expect(text.join("\n")).toMatch(/› (Allow once|Allow \w+ for this session|Deny with reason…)/);
+    expect(text.join("\n")).toContain("Esc deny");
+    expect(text.join("\n")).toMatch(/Enter (allow once|allow for session|add reason|deny with reason)/);
+    expect(text.filter(line => line.includes("Ctrl+C")).every(line => /^\s*◌ Approval( required)? · Ctrl\+C cancel turn$/.test(line))).toBe(true);
+    expect(text.join("\n")).not.toContain("APPROVAL");
+  }
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn") {
     const frame = parseScreen(actual), text = frame.text.join("\n");
     const stopping = screen.id.startsWith("stopped-");

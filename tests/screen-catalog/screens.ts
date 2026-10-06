@@ -353,7 +353,8 @@ export function variantsFor(screen: Screen): Variant[] {
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   if (["details-notice", "details-recovery", "details-unavailable"].includes(screen.id)) variants.push(make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));
   const shortWidths = screen.id.startsWith("draft-") || screen.id.startsWith("read-only-search-") || ["disconnected-search", "sign-in-chooser", "running-search"].includes(screen.id) ? [29, 30, 40, 50]
-    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command", "approval-diff-overflow", "running-empty", "running-draft"].includes(screen.id) ? [40, 50] : [];
+    : ["first-run", "auto-mode", "ask-mode", "read-only-mode", "streaming-answer", "approval-command", "approval-edit", "approval-diff-overflow", "running-empty", "running-draft"].includes(screen.id) ? [40, 50]
+    : screen.id === "approval-deny-reason" ? [40] : [];
   // Running drafts also need a narrow width that still shows the key-hint row.
   if (["running-empty", "running-draft"].includes(screen.id)) variants.push(make("dark", 30, 20), make("light", 30, 20), make("dark", 30, 20, true));
   for (const cols of shortWidths) variants.push(make("dark", cols, 8), make("light", cols, 8), make("dark", cols, 8, true));

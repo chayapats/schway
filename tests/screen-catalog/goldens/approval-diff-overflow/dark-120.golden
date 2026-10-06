@@ -10,32 +10,32 @@ cursor 1 1 hidden
 
    Allow edit? · ask mode
 
-   clamp.ts  +29 −1                                                                                                 ▀
-    2 │-  return Math.max(lo, n);
-    2 │+  const bound1 = Math.min(hi, Math.max(lo, n + 0));
-    3 │+  const bound2 = Math.min(hi, Math.max(lo, n + 1));
-    4 │+  const bound3 = Math.min(hi, Math.max(lo, n + 2));
-    5 │+  const bound4 = Math.min(hi, Math.max(lo, n + 3));
-    6 │+  const bound5 = Math.min(hi, Math.max(lo, n + 4));
-    7 │+  const bound6 = Math.min(hi, Math.max(lo, n + 5));
-    8 │+  const bound7 = Math.min(hi, Math.max(lo, n + 6));
+   clamp.ts  +29 −1                                                                                                 █
+    2 │-  return Math.max(lo, n);                                                                                   █
+    2 │+  const bound1 = Math.min(hi, Math.max(lo, n + 0));                                                         █
+    3 │+  const bound2 = Math.min(hi, Math.max(lo, n + 1));                                                         █
+    4 │+  const bound3 = Math.min(hi, Math.max(lo, n + 2));                                                         █
+    5 │+  const bound4 = Math.min(hi, Math.max(lo, n + 3));                                                         █
+    6 │+  const bound5 = Math.min(hi, Math.max(lo, n + 4));                                                         █
+    7 │+  const bound6 = Math.min(hi, Math.max(lo, n + 5));                                                         █
+    8 │+  const bound7 = Math.min(hi, Math.max(lo, n + 6));                                                         █
     9 │+  const bound8 = Math.min(hi, Math.max(lo, n + 7));
    10 │+  const bound9 = Math.min(hi, Math.max(lo, n + 8));
    11 │+  const bound10 = Math.min(hi, Math.max(lo, n + 9));
    12 │+  const bound11 = Math.min(hi, Math.max(lo, n + 10));
    13 │+  const bound12 = Math.min(hi, Math.max(lo, n + 11));
    14 │+  const bound13 = Math.min(hi, Math.max(lo, n + 12));
+   15 │+  const bound14 = Math.min(hi, Math.max(lo, n + 13));
+   16 │+  const bound15 = Math.min(hi, Math.max(lo, n + 14));
+   17 │+  const bound16 = Math.min(hi, Math.max(lo, n + 15));
 
    › Allow once
      Allow edit for this session
      Deny with reason…
 
   ◌ Approval required · Ctrl+C cancel turn
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ ›
-  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Ask  ◌ APPROVAL   scripted/scripted-model                                                    Ctrl+C cancel  ctx ~412
-  Enter choose · Esc deny · Ctrl+C cancel turn
+ ◆ Ask  ◌ Approval   scripted/scripted-model                                                         Esc deny  ctx ~412
+  ↑↓ choose · Enter allow once · Esc deny · PgUp/PgDn scroll
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -63,56 +63,56 @@ cursor 1 1 hidden
 05 2-3 #ffffff #1e2430 -
 05 3-33 #f79d9d #1e2430 -
 05 33-116 #ffffff #1e2430 -
-05 116-117 #ffffff #252527 -
+05 116-117 #9a9ea3 #252527 -
 05 117-118 #ffffff #1e2430 -
 05 118-120 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
 06 2-3 #ffffff #1e2430 -
 06 3-59 #8fd19e #1e2430 -
 06 59-116 #ffffff #1e2430 -
-06 116-117 #ffffff #252527 -
+06 116-117 #9a9ea3 #252527 -
 06 117-118 #ffffff #1e2430 -
 06 118-120 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
 07 2-3 #ffffff #1e2430 -
 07 3-59 #8fd19e #1e2430 -
 07 59-116 #ffffff #1e2430 -
-07 116-117 #ffffff #252527 -
+07 116-117 #9a9ea3 #252527 -
 07 117-118 #ffffff #1e2430 -
 07 118-120 #ffffff #0e1117 -
 08 0-2 #ffffff #0e1117 -
 08 2-3 #ffffff #1e2430 -
 08 3-59 #8fd19e #1e2430 -
 08 59-116 #ffffff #1e2430 -
-08 116-117 #ffffff #252527 -
+08 116-117 #9a9ea3 #252527 -
 08 117-118 #ffffff #1e2430 -
 08 118-120 #ffffff #0e1117 -
 09 0-2 #ffffff #0e1117 -
 09 2-3 #ffffff #1e2430 -
 09 3-59 #8fd19e #1e2430 -
 09 59-116 #ffffff #1e2430 -
-09 116-117 #ffffff #252527 -
+09 116-117 #9a9ea3 #252527 -
 09 117-118 #ffffff #1e2430 -
 09 118-120 #ffffff #0e1117 -
 10 0-2 #ffffff #0e1117 -
 10 2-3 #ffffff #1e2430 -
 10 3-59 #8fd19e #1e2430 -
 10 59-116 #ffffff #1e2430 -
-10 116-117 #ffffff #252527 -
+10 116-117 #9a9ea3 #252527 -
 10 117-118 #ffffff #1e2430 -
 10 118-120 #ffffff #0e1117 -
 11 0-2 #ffffff #0e1117 -
 11 2-3 #ffffff #1e2430 -
 11 3-59 #8fd19e #1e2430 -
 11 59-116 #ffffff #1e2430 -
-11 116-117 #ffffff #252527 -
+11 116-117 #9a9ea3 #252527 -
 11 117-118 #ffffff #1e2430 -
 11 118-120 #ffffff #0e1117 -
 12 0-2 #ffffff #0e1117 -
 12 2-3 #ffffff #1e2430 -
 12 3-59 #8fd19e #1e2430 -
 12 59-116 #ffffff #1e2430 -
-12 116-117 #ffffff #252527 -
+12 116-117 #9a9ea3 #252527 -
 12 117-118 #ffffff #1e2430 -
 12 118-120 #ffffff #0e1117 -
 13 0-2 #ffffff #0e1117 -
@@ -158,56 +158,68 @@ cursor 1 1 hidden
 18 117-118 #ffffff #1e2430 -
 18 118-120 #ffffff #0e1117 -
 19 0-2 #ffffff #0e1117 -
-19 2-118 #ffffff #1e2430 -
+19 2-3 #ffffff #1e2430 -
+19 3-61 #8fd19e #1e2430 -
+19 61-116 #ffffff #1e2430 -
+19 116-117 #ffffff #252527 -
+19 117-118 #ffffff #1e2430 -
 19 118-120 #ffffff #0e1117 -
 20 0-2 #ffffff #0e1117 -
 20 2-3 #ffffff #1e2430 -
-20 3-15 #7cc4ff #1e2430 -
-20 15-118 #ffffff #1e2430 -
+20 3-61 #8fd19e #1e2430 -
+20 61-116 #ffffff #1e2430 -
+20 116-117 #ffffff #252527 -
+20 117-118 #ffffff #1e2430 -
 20 118-120 #ffffff #0e1117 -
 21 0-2 #ffffff #0e1117 -
 21 2-3 #ffffff #1e2430 -
-21 3-32 #e6eaf0 #1e2430 -
-21 32-118 #ffffff #1e2430 -
+21 3-61 #8fd19e #1e2430 -
+21 61-116 #ffffff #1e2430 -
+21 116-117 #ffffff #252527 -
+21 117-118 #ffffff #1e2430 -
 21 118-120 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
-22 2-3 #ffffff #1e2430 -
-22 3-22 #e6eaf0 #1e2430 -
-22 22-118 #ffffff #1e2430 -
+22 2-118 #ffffff #1e2430 -
 22 118-120 #ffffff #0e1117 -
-23 0-120 #ffffff #0e1117 -
+23 0-2 #ffffff #0e1117 -
+23 2-3 #ffffff #1e2430 -
+23 3-15 #7cc4ff #1e2430 -
+23 15-118 #ffffff #1e2430 -
+23 118-120 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
-24 2-3 #f0c674 #0e1117 b
-24 3-24 #8b95a7 #0e1117 -
-24 24-30 #e6eaf0 #293140 b
-24 30-42 #8b95a7 #0e1117 -
-24 42-120 #ffffff #0e1117 -
+24 2-3 #ffffff #1e2430 -
+24 3-32 #e6eaf0 #1e2430 -
+24 32-118 #ffffff #1e2430 -
+24 118-120 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
-25 2-118 #161b24 #0e1117 -
+25 2-3 #ffffff #1e2430 -
+25 3-22 #e6eaf0 #1e2430 -
+25 22-118 #ffffff #1e2430 -
 25 118-120 #ffffff #0e1117 -
-26 0-2 #ffffff #0e1117 -
-26 2-3 #f0c674 #161b24 -
-26 3-6 #7cc4ff #161b24 -
-26 6-118 #ffffff #161b24 -
-26 118-120 #ffffff #0e1117 -
+26 0-120 #ffffff #0e1117 -
 27 0-2 #ffffff #0e1117 -
-27 2-118 #161b24 #0e1117 -
-27 118-120 #ffffff #0e1117 -
+27 2-3 #f0c674 #0e1117 b
+27 3-24 #8b95a7 #0e1117 -
+27 24-30 #e6eaf0 #293140 b
+27 30-42 #8b95a7 #0e1117 -
+27 42-120 #ffffff #0e1117 -
 28 0-1 #8b95a7 #161b24 -
 28 1-6 #f0c674 #161b24 b
 28 6-7 #8b95a7 #161b24 -
 28 7-19 #0e1117 #f0c674 b
 28 19-20 #8b95a7 #161b24 -
 28 20-45 #e6eaf0 #1e2430 -
-28 45-96 #8b95a7 #161b24 -
-28 96-102 #e6eaf0 #2a3241 b
-28 102-119 #8b95a7 #161b24 -
+28 45-101 #8b95a7 #161b24 -
+28 101-104 #e6eaf0 #2a3241 b
+28 104-119 #8b95a7 #161b24 -
 28 119-120 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
-29 2-7 #e6eaf0 #293140 b
-29 7-17 #8b95a7 #0e1117 -
-29 17-20 #e6eaf0 #293140 b
-29 20-28 #8b95a7 #0e1117 -
-29 28-34 #e6eaf0 #293140 b
-29 34-46 #8b95a7 #0e1117 -
-29 46-120 #ffffff #0e1117 -
+29 2-4 #e6eaf0 #293140 b
+29 4-14 #8b95a7 #0e1117 -
+29 14-19 #e6eaf0 #293140 b
+29 19-33 #8b95a7 #0e1117 -
+29 33-36 #e6eaf0 #293140 b
+29 36-44 #8b95a7 #0e1117 -
+29 44-53 #e6eaf0 #293140 b
+29 53-60 #8b95a7 #0e1117 -
+29 60-120 #ffffff #0e1117 -

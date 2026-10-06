@@ -600,7 +600,7 @@ reading position.
 | --- | --- |
 | Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc cancel a preview, otherwise Esc back |
 | Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery |
-| Tool approval | Up/Down choose, Enter choose or send reason, Esc deny, Ctrl+C cancel turn, PageUp/PageDown scroll |
+| Tool approval | Up/Down choose; Enter allow once, allow for session, add reason or deny with reason, as the hint names; Esc deny; PageUp/PageDown scroll; Ctrl+C cancel turn |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
 | Help, search | Panel-specific navigation, Enter chosen action, Esc restore the draft or position |
@@ -1037,11 +1037,15 @@ Shift+Tab retains its existing scope, inspection, or completion behavior while t
 
 In **Ask** mode, read-only tools run without a prompt. A mutating tool opens an `Allow <tool>? · ask mode` panel after `beforeTool` hooks and argument validation. Bash shows the full command; edit and write show the target path, line counts and a numbered diff; other tools show their final arguments as indented JSON. Known secrets are masked. PageUp/PageDown scroll the preview; resizing reflows it.
 
-Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **Deny with reason…**, then Enter. Allow once applies only to the current call. A session allowance applies to later ask-mode calls with the same tool name; it never overrides read-only mode and survives cycling back to ask. Successful session switches through `/new`, `/resume`, `/sessions` or Alt+B clear every allowance. Allowances are not saved across processes.
+Use Up/Down to choose **Allow once**, **Allow <tool> for this session**, or **Deny with reason…**, then Enter. The hint row names what Enter does for the selected choice: `↑↓ choose · Enter allow once · Esc deny`, then `Enter allow for session` or `Enter add reason` as the selection moves, plus `PgUp/PgDn scroll` only while the preview overflows. Narrow rows drop the navigation keys first and keep `Esc deny` and the Enter verb. Below 14 rows, where the hint row is hidden, the status bar shows the same `Enter <verb> · Esc deny` action. Ctrl+C appears once, in the `Approval required · Ctrl+C cancel turn` activity row from 10 rows.
 
-Esc denies the current call without stopping the turn. **Deny with reason…** opens an entry with `Why? The agent will see this…`; Enter submits the trimmed reason, including an empty denial. The model receives `Denied by the user.` or `Denied by the user: <reason>`. Reason text stays out of prompt history, composer drafts and draft checkpoints. Every exit restores the draft and cursor saved before the panel opened. **Ctrl+C** cancels the whole turn, including queued calls; **Shift+Tab** is ignored while the approval prompt is open.
+The approval panel takes the composer's rows while it waits. Its heading, at least the first preview row and the selected choice (marked `›`) always fit, from 8 rows up. On short terminals the panel gives up its blank rows first, then the choices that are not selected, then preview rows down to one; a lone choice shows its position, such as `› Allow once  (1 of 3)`. Enter never acts on a choice the panel cannot show.
 
-Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **APPROVAL** pill and `Esc back to request` hint show how to reach the request; leaving that view opens the approval prompt immediately. The code and table reader shows the same `Esc back to request` and keeps its position for an explicit Alt+I then R return.
+Allow once applies only to the current call. A session allowance applies to later ask-mode calls with the same tool name; it never overrides read-only mode and survives cycling back to ask. Successful session switches through `/new`, `/resume`, `/sessions` or Alt+B clear every allowance. Allowances are not saved across processes.
+
+Esc denies the current call without stopping the turn. **Deny with reason…** opens an entry with `Why? The agent will see this…` and the hint `Enter deny with reason · Esc deny`; Enter submits the trimmed reason, including an empty denial, and Esc denies without the typed reason. The model receives `Denied by the user.` or `Denied by the user: <reason>`. Reason text stays out of prompt history, composer drafts and draft checkpoints. Every exit restores the draft and cursor saved before the panel opened. **Ctrl+C** cancels the whole turn, including queued calls; **Shift+Tab** is ignored while the approval prompt is open.
+
+Requests appear one at a time in assistant-message order. If another panel, search or inspection is open, it remains open while approval waits. The warning-colored **Approval** pill and `Esc back to request` hint show how to reach the request; leaving that view opens the approval prompt immediately. The status bar names that view's own Esc action, and Ctrl+C stays in the activity row. The code and table reader shows the same `Esc back to request` and keeps its position for an explicit Alt+I then R return.
 
 ### Details keyboard compatibility
 
