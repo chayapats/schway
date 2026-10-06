@@ -66,6 +66,34 @@ export interface HistoryCommand {
   /** How the command ended: an exit, a stop without exit, a timeout or unknown evidence. */
   ended: "exit" | "stopped" | "timed-out" | "unknown";
   status: "success" | "error" | "cancelled";
+  /** Milliseconds from scheduler start to settlement, including any approval wait; absent when not measured. */
+  durationMs?: number;
+  /** Part of `durationMs` spent waiting for approval; absent when the call did not wait. */
+  approvalWaitMs?: number;
+}
+
+/** Sum of one token dimension over the model calls that reported it; fewer reporting calls than `modelCalls` makes it a lower bound. */
+export interface HistoryTokenTotal { total: number; reportedCalls: number }
+
+/** Model-call and tool timing plus provider-reported token totals for one attempt, in whole milliseconds. */
+export interface HistoryTelemetry {
+  /** Turn model attempts observed, including failed and cancelled ones; compaction calls are excluded. */
+  modelCalls: number;
+  /** Sum of attempt durations, including failed and cancelled attempts. */
+  modelMs: number;
+  /** Range of time to first text or thinking output over the calls that produced any; null when none did. */
+  firstDelta: { minMs: number; maxMs: number; calls: number } | null;
+  /** Transient retries and the backoff waited before them. */
+  retries: number;
+  retryWaitMs: number;
+  /** Tool calls with a measured duration. */
+  toolCalls: number;
+  /** Wall time during which at least one tool call was running, approval waits included; parallel calls count once. */
+  toolMs: number;
+  /** Summed approval waits of the tool calls; part of their durations. */
+  approvalWaitMs: number;
+  /** Provider-reported token totals; cached input is part of input and reasoning is part of output. */
+  tokens: { input: HistoryTokenTotal; cachedInput: HistoryTokenTotal; output: HistoryTokenTotal; reasoning: HistoryTokenTotal };
 }
 
 /** One observed path: a successful file-tool edit or a path found by Git snapshots. */
@@ -106,6 +134,8 @@ export interface HistoryTurnFinalize {
   git: HistoryGitEvidence;
   /** Optional entries omitted because a single path or command was too large to store. */
   oversized?: number;
+  /** Model and tool timing with token totals; absent on records written before it was recorded, whose timings are unknown. */
+  telemetry?: HistoryTelemetry;
 }
 
 /** Any validated sidecar line. */
@@ -226,7 +256,22 @@ function validRecord(value: unknown): value is HistoryRecord {
     && !!git && typeof git === "object" && (git.status === "captured" ? Object.keys(git).length === 1
       : git.status === "unavailable" && ["off", "no-workspace", "non-git", "failed", "not-captured", "headless"].includes(git.reason as string)
         && (git.detail === undefined || (typeof git.detail === "string" && boundedText(git.detail, MAX_HISTORY_DETAIL_CHARS))))
-    && (record.oversized === undefined || COUNT(record.oversized));
+    && (record.oversized === undefined || COUNT(record.oversized))
+    && (record.telemetry === undefined || validTelemetry(record.telemetry));
+}
+
+/** Strictly validate optional telemetry: whole nonnegative numbers, coverage within the call count and an ordered first-output range. */
+function validTelemetry(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const telemetry = value as Record<string, unknown>;
+  const calls = telemetry.modelCalls, tokens = telemetry.tokens as Record<string, unknown> | undefined, first = telemetry.firstDelta as Record<string, unknown> | null | undefined;
+  const total = (entry: unknown) => !!entry && typeof entry === "object" && COUNT((entry as Record<string, unknown>).total)
+    && COUNT((entry as Record<string, unknown>).reportedCalls) && ((entry as Record<string, unknown>).reportedCalls as number) <= (calls as number);
+  return COUNT(calls) && COUNT(telemetry.modelMs) && COUNT(telemetry.retries) && COUNT(telemetry.retryWaitMs) && COUNT(telemetry.toolCalls)
+    && COUNT(telemetry.toolMs) && COUNT(telemetry.approvalWaitMs)
+    && (first === null || (!!first && typeof first === "object" && COUNT(first.minMs) && COUNT(first.maxMs) && (first.minMs as number) <= (first.maxMs as number)
+      && COUNT(first.calls) && (first.calls as number) >= 1 && (first.calls as number) <= (calls as number)))
+    && !!tokens && typeof tokens === "object" && total(tokens.input) && total(tokens.cachedInput) && total(tokens.output) && total(tokens.reasoning);
 }
 
 function collection(value: Record<string, unknown> | undefined, max: number, item: (entry: unknown) => boolean): boolean {
@@ -240,7 +285,9 @@ function validCommand(value: unknown): boolean {
     && typeof entry.command === "string" && boundedText(entry.command, MAX_HISTORY_COMMAND_CHARS)
     && (entry.commandTruncated === undefined || entry.commandTruncated === true)
     && (entry.exitCode === null || COUNT(entry.exitCode))
-    && ["exit", "stopped", "timed-out", "unknown"].includes(entry.ended as string) && ["success", "error", "cancelled"].includes(entry.status as string);
+    && ["exit", "stopped", "timed-out", "unknown"].includes(entry.ended as string) && ["success", "error", "cancelled"].includes(entry.status as string)
+    && (entry.durationMs === undefined || COUNT(entry.durationMs))
+    && (entry.approvalWaitMs === undefined || (COUNT(entry.approvalWaitMs) && COUNT(entry.durationMs) && entry.approvalWaitMs <= entry.durationMs));
 }
 
 function validFile(value: unknown): boolean {

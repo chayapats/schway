@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "../conversation/types.ts";
+import type { AssistantMessage, AssistantTelemetry } from "../conversation/types.ts";
 import type { Model, ModelRequest, ModelUsage } from "../model/model.ts";
 import type { ModelRetryCause, RuntimeEvent } from "./events.ts";
 
@@ -17,6 +17,18 @@ export interface AgentClock {
   now(): number;
   /** Wait for the requested milliseconds, rejecting when the supplied signal aborts. */
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
+  /** Return monotonic milliseconds for measuring durations; `now` is used when absent. */
+  monotonicNow?(): number;
+}
+
+/** Monotonic milliseconds from `clock`, falling back to its wall clock when it has no monotonic source. */
+export function monotonicNow(clock: AgentClock): number {
+  return clock.monotonicNow ? clock.monotonicNow() : clock.now();
+}
+
+/** Whole nonnegative milliseconds between two monotonic readings. */
+export function elapsedMs(from: number, to: number): number {
+  return Math.max(0, Math.round(to - from));
 }
 
 /** Outcome of streaming one model turn, after retries and cancellation. */
@@ -52,11 +64,12 @@ const NETWORK_NAMES = new Set([
 const NETWORK_MESSAGE =
   /connection (reset|error|refused|aborted|closed)|network reset|network error|socket hang up|fetch failed|econnreset|etimedout|enotfound|temporarily unavailable/i;
 
-/** Return a wall clock with abortable timer sleeps that reject with an AbortError. */
+/** Return a wall clock, a monotonic clock and abortable timer sleeps that reject with an AbortError. */
 export function systemClock(): AgentClock {
   return {
     now: () => Date.now(),
     sleep: abortableSleep,
+    monotonicNow: () => performance.now(),
   };
 }
 
@@ -90,6 +103,7 @@ async function abortableSleep(
 /**
  * Stream turn events with bounded transport retries and return completion, cancellation, overflow, or error.
  * Partial deltas may be emitted again after a retry; only the caller persists a complete message.
+ * Every attempt reports its timing on `model.usage`, and a complete message carries harness telemetry measured with `clock`.
  */
 export async function* streamModelTurn(options: {
   model: Model;
@@ -98,6 +112,9 @@ export async function* streamModelTurn(options: {
   signal?: AbortSignal;
 }): AsyncGenerator<RuntimeEvent, ModelTurnOutcome> {
   const { model, request, clock, signal } = options;
+  const firstStart = monotonicNow(clock);
+  const startedAt = new Date(clock.now()).toISOString();
+  let retryWaitMs = 0;
 
   for (let attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt++) {
     if (signal?.aborted) {
@@ -110,20 +127,20 @@ export async function* streamModelTurn(options: {
       model: model.id,
     };
 
+    const attemptStart = monotonicNow(clock);
+    const attemptStartedAt = attempt === 1 ? startedAt : new Date(clock.now()).toISOString();
+    let firstDeltaMs: number | null = null;
+    let attemptMs: number | undefined;
     let complete: AssistantMessage | undefined;
     let usage: ModelUsage = { inputTokens: null, outputTokens: null };
     let failed = false;
     try {
       for await (const event of model.stream(request)) {
-        if (event.type === "text_delta") {
+        if (event.type === "text_delta" || event.type === "thinking_delta") {
+          firstDeltaMs ??= elapsedMs(attemptStart, monotonicNow(clock));
           yield {
             type: "model.delta",
-            content: { type: "text", text: event.text },
-          };
-        } else if (event.type === "thinking_delta") {
-          yield {
-            type: "model.delta",
-            content: { type: "thinking", text: event.text },
+            content: { type: event.type === "text_delta" ? "text" : "thinking", text: event.text },
           };
         } else if (event.type === "usage") {
           // Terminal totals supersede earlier partial reports from the same attempt.
@@ -132,7 +149,9 @@ export async function* streamModelTurn(options: {
           complete = event.message;
         }
       }
+      attemptMs = elapsedMs(attemptStart, monotonicNow(clock));
     } catch (error) {
+      attemptMs = elapsedMs(attemptStart, monotonicNow(clock));
       failed = true;
       if (signal?.aborted || isAbortError(error)) {
         return { kind: "cancelled" };
@@ -161,6 +180,7 @@ export async function* streamModelTurn(options: {
           }
           return { kind: "error", message: errorMessage(sleepError), category: "offline" };
         }
+        retryWaitMs += delayMs;
         continue;
       }
       if (transient) {
@@ -172,7 +192,10 @@ export async function* streamModelTurn(options: {
       }
       return { kind: "error", message, category: providerFailureCategory(error) };
     } finally {
-      yield { type: "model.usage", phase: "turn", usage, complete: !!complete && !failed && !signal?.aborted };
+      // A consumer that stops early still observes this attempt's elapsed time.
+      attemptMs ??= elapsedMs(attemptStart, monotonicNow(clock));
+      yield { type: "model.usage", phase: "turn", usage, complete: !!complete && !failed && !signal?.aborted,
+        startedAt: attemptStartedAt, firstDeltaMs, attemptMs };
     }
 
     if (!complete) {
@@ -181,7 +204,16 @@ export async function* streamModelTurn(options: {
         message: "Model stream ended without a complete message",
       };
     }
-    return { kind: "complete", message: complete };
+    const telemetry: AssistantTelemetry = {
+      startedAt,
+      firstDeltaMs,
+      attemptMs: attemptMs ?? 0,
+      totalMs: elapsedMs(firstStart, monotonicNow(clock)),
+      attempts: attempt,
+      retryWaitMs,
+      usage: { ...usage },
+    };
+    return { kind: "complete", message: { ...complete, telemetry } };
   }
 
   return {

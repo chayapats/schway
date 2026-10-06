@@ -263,6 +263,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         approval: options.approval,
         undo: options.undo,
         undoTurn,
+        clock,
       });
       for (const item of executed) {
         try { options.session.append(item.result); }

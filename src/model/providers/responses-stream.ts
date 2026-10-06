@@ -16,6 +16,7 @@ import type {
   ModelRequest,
   ModelStreamEvent,
   ModelTool,
+  ModelUsage,
 } from "../model.ts";
 
 /** Provider metadata namespace a Responses adapter stores and replays. */
@@ -59,10 +60,7 @@ export async function* assembleResponsesStream(input: {
   for await (const event of input.stream) {
     if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
       const usage = event.response.usage;
-      if (usage) yield { type: "usage", usage: {
-        inputTokens: reportedTokens(usage.input_tokens),
-        outputTokens: reportedTokens(usage.output_tokens),
-      } };
+      if (usage) yield { type: "usage", usage: responsesUsage(usage) };
     }
     if (event.type === "response.incomplete") {
       throw new Error(`${input.label} response incomplete`);
@@ -76,6 +74,23 @@ export async function* assembleResponsesStream(input: {
     for (const delta of builder.accept(event)) yield delta;
   }
   yield { type: "message_complete", message: builder.complete() };
+}
+
+/** Normalize a Responses `usage` object, including cached-input and reasoning subsets; unreported or invalid counters become null. */
+export function responsesUsage(usage: unknown): ModelUsage {
+  const record = isRecord(usage) ? usage : {};
+  const inputDetails = isRecord(record.input_tokens_details) ? record.input_tokens_details : {};
+  const outputDetails = isRecord(record.output_tokens_details) ? record.output_tokens_details : {};
+  return {
+    inputTokens: reportedTokens(record.input_tokens),
+    outputTokens: reportedTokens(record.output_tokens),
+    cachedInputTokens: reportedTokens(inputDetails.cached_tokens),
+    reasoningTokens: reportedTokens(outputDetails.reasoning_tokens),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Stable system prompt plus dynamic context as Responses instructions. */

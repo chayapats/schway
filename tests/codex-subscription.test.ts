@@ -856,7 +856,7 @@ test("subscription transport normalizes text, thinking, tool calls, usage, and o
   expect(seen[0]?.body["model"]).toBe("gpt-5.4");
   expect(String(seen[0]?.body["instructions"])).toContain(STABLE_SYSTEM_PROMPT);
   expect(events.filter((event) => event.type === "usage")).toEqual([
-    { type: "usage", usage: { inputTokens: 10, outputTokens: 5 } },
+    { type: "usage", usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: null, reasoningTokens: null } },
   ]);
   const deltas = events.filter((event) => event.type !== "message_complete" && event.type !== "usage");
   expect(deltas).toEqual([

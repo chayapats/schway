@@ -30,10 +30,14 @@ export interface ModelRequest {
   thinking?: ThinkingLevel;
 }
 
-/** Reported token counts for one provider attempt; null means that dimension was not reported. */
+/** Reported token counts for one provider attempt; null or absent means that dimension was not reported, while 0 means the provider reported none. */
 export interface ModelUsage {
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Part of `inputTokens` the provider reports as served from its prompt cache; a subset, never added to the total. */
+  cachedInputTokens?: number | null;
+  /** Part of `outputTokens` the provider reports as reasoning; a subset, never added to the total. */
+  reasoningTokens?: number | null;
 }
 
 /** Normalize nonnegative integer provider counters without inventing consumption. */

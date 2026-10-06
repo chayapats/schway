@@ -1,7 +1,7 @@
 import type { ApprovalPolicy } from "./approval.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import { DEFAULT_MAX_CONCURRENT_TOOLS } from "../config/defaults.ts";
-import type { ToolCallContent } from "../conversation/types.ts";
+import type { ToolCallContent, ToolTelemetry } from "../conversation/types.ts";
 import type { ExtensionToolHooks } from "../extensions/tool-hooks.ts";
 import {
   executeToolCall,
@@ -11,11 +11,12 @@ import type { ToolRegistry } from "../tools/registry.ts";
 import type { ToolExecutionMode } from "../tools/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
 import type { RuntimeEvent } from "./events.ts";
+import { elapsedMs, monotonicNow, systemClock, type AgentClock } from "./retry.ts";
 
 /** Default cap on consecutive parallel-safe tool calls. */
 export { DEFAULT_MAX_CONCURRENT_TOOLS };
 
-/** Stream parallel-safe tool work around exclusive barriers, settling cancellation and returning outcomes in source order. */
+/** Stream parallel-safe tool work around exclusive barriers, settling cancellation and returning outcomes in source order; each call that ran carries its measured telemetry. */
 export async function* scheduleToolCalls(options: {
   calls: readonly ToolCallContent[];
   registry?: ToolRegistry;
@@ -27,6 +28,8 @@ export async function* scheduleToolCalls(options: {
   approval?: ApprovalPolicy;
   undo?: UndoStore;
   undoTurn?: UndoTurn;
+  /** Time source for per-call durations and approval waits. */
+  clock?: AgentClock;
 }): AsyncGenerator<RuntimeEvent, ExecutedToolCall[]> {
   const { calls, registry, workspace, toolHooks } = options;
   const signal = toolHooks?.active ? AbortSignal.any([toolHooks.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
@@ -76,8 +79,19 @@ export async function* scheduleToolCalls(options: {
     return running.size < maxConcurrentTools;
   };
 
+  const clock = options.clock ?? systemClock();
   const start = (index: number): void => {
     const call = calls[index]!;
+    const startedMono = monotonicNow(clock);
+    const startedAt = new Date(clock.now()).toISOString();
+    let approvalWaitMs: number | undefined;
+    /** Attach measured telemetry unless the call settled before it passed validation. */
+    const measured = (executed: ExecutedToolCall): { executed: ExecutedToolCall; timing: Partial<ToolTelemetry> } => {
+      if (executed.neverRan) return { executed, timing: {} };
+      const durationMs = elapsedMs(startedMono, monotonicNow(clock));
+      const telemetry: ToolTelemetry = { startedAt, durationMs, ...(approvalWaitMs !== undefined ? { approvalWaitMs: Math.min(approvalWaitMs, durationMs) } : {}) };
+      return { executed: { ...executed, result: { ...executed.result, telemetry } }, timing: telemetry };
+    };
     running.add(index);
     emit({
       type: "tool.started",
@@ -102,6 +116,8 @@ export async function* scheduleToolCalls(options: {
       },
       undo: options.undo,
       undoTurn: options.undoTurn,
+      monotonicNow: () => monotonicNow(clock),
+      onApprovalWait(ms) { approvalWaitMs = (approvalWaitMs ?? 0) + ms; },
       onOutput(chunk) {
         if (chunk.text.length === 0) {
           return;
@@ -115,7 +131,8 @@ export async function* scheduleToolCalls(options: {
         });
       },
     })
-      .then((executed) => {
+      .then((settled) => {
+        const { executed, timing } = measured(settled);
         results[index] = executed;
         if (executed.denied) emit({ type: "tool.denied", toolCallId: call.id, name: call.name, ...executed.denied });
         emit({
@@ -127,10 +144,11 @@ export async function* scheduleToolCalls(options: {
           ...(executed.details !== undefined
             ? { details: executed.details }
             : {}),
+          ...timing,
         });
       })
       .catch((error) => {
-        const executed = unexpectedFailure(call, error);
+        const { executed, timing } = measured(unexpectedFailure(call, error));
         results[index] = executed;
         emit({
           type: "tool.finished",
@@ -138,6 +156,7 @@ export async function* scheduleToolCalls(options: {
           name: call.name,
           status: executed.status,
           content: executed.result.content,
+          ...timing,
         });
       })
       .finally(() => {
