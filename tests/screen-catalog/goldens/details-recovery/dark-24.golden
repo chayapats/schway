@@ -7,9 +7,9 @@ size 24x8
 cursor 16 6 visible
 == text
  ✗ Failed
- 0 tool results; 0
- failed tools.
- Commands: 0 exit 0 /
+ Failure details:
+ Provider request
+ failed after 3
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › งานถัดไป 🧪
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -19,14 +19,14 @@ cursor 16 6 visible
 00 1-9 #8b95a7 #0e1117 -
 00 9-24 #ffffff #0e1117 -
 01 0-1 #ffffff #0e1117 -
-01 1-19 #8b95a7 #0e1117 -
-01 19-24 #ffffff #0e1117 -
+01 1-18 #8b95a7 #0e1117 -
+01 18-24 #ffffff #0e1117 -
 02 0-1 #ffffff #0e1117 -
-02 1-14 #8b95a7 #0e1117 -
-02 14-24 #ffffff #0e1117 -
+02 1-18 #8b95a7 #0e1117 -
+02 18-24 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
-03 1-22 #8b95a7 #0e1117 -
-03 22-24 #ffffff #0e1117 -
+03 1-16 #8b95a7 #0e1117 -
+03 16-24 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
 04 1-23 #161b24 #0e1117 -
 04 23-24 #ffffff #0e1117 -

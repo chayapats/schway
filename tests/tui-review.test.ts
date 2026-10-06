@@ -115,7 +115,9 @@ test("review caller separates completed edits, observed exits, and unsupported m
     expect(prose.snapshot().outcome!.commands).toEqual([]);
     await prose.openChangeReview();
     prose.toggleReviewDetails();
-    expect(prose.snapshot().changeReview!.details).toContain("No command exit evidence");
+    // Prose claiming a passing check is not command evidence; the empty summary says so in one line.
+    expect(prose.snapshot().changeReview!.details).toContain("No tool results or commands.");
+    expect(prose.snapshot().changeReview!.details).not.toContain("exit 0");
     prose.dispose();
   });
 });
@@ -441,10 +443,12 @@ test("retained failure diagnostics stay sanitized and clear with the next turn o
       await c.submit("fail");
       expect(c.keepEditingRecovery()).toBe(true);
       expect(c.inspectRecovery()).toBe(true);
-      expect(c.snapshot().transcript.at(-1)!.text).toContain("retained fixture diagnostic");
+      // The redacted cause leads the failed-turn details, directly below the outcome label.
+      expect(c.snapshot().transcript.at(-1)!.text.split("\n").slice(0, 3)).toEqual(["✗ Failed", "Failure details: retained fixture diagnostic ***", "No tool results or commands."]);
       expect(c.snapshot().transcript.at(-1)!.text).not.toContain("secret-sentinel");
       await c.openChangeReview();
-      expect(c.snapshot().changeReview!.details).toContain("retained fixture diagnostic");
+      c.toggleReviewDetails();
+      expect(c.snapshot().changeReview!.details.split("\n").slice(0, 3)).toEqual(["✗ Failed", "Failure details: retained fixture diagnostic ***", "No tool results or commands."]);
       expect(c.snapshot().changeReview!.details).not.toContain("secret-sentinel");
       c.closeChangeReview();
       if (boundary === "session") c.replaceSession(createSession(), "replacement");

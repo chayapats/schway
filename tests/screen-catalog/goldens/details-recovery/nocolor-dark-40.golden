@@ -9,18 +9,18 @@ cursor 16 17 visible
  ⚡ schway  ~/demo
 
  ✗ Failed
- 0 tool results; 0 failed tools.
- Commands: 0 exit 0 / 0 nonzero / 0
- unknown (entire turn).
- Command results (latest 50; exit
- codes, not a test-suite guarantee):
- No command exit evidence.
+ Failure details: Provider request
+ failed after 3 transient attempts:
+ Service unavailable
+ No tool results or commands.
 
  Current working-tree content is
  unattributed; external edits may be
  included.
+ Snapshots show changes observed
+ during the turn, not exclusive Schway
 
- ✗ Failed · Alt+R review · F2 details
+ ✗ Failed · 0.0s · Alt+R review
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › งานถัดไป 🧪
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -38,44 +38,42 @@ cursor 16 17 visible
 02 1-9 #8b95a7 #0e1117 -
 02 9-40 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
-03 1-32 #8b95a7 #0e1117 -
-03 32-40 #ffffff #0e1117 -
+03 1-35 #8b95a7 #0e1117 -
+03 35-40 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
 04 1-36 #8b95a7 #0e1117 -
 04 36-40 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
-05 1-23 #8b95a7 #0e1117 -
-05 23-40 #ffffff #0e1117 -
+05 1-20 #8b95a7 #0e1117 -
+05 20-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-34 #8b95a7 #0e1117 -
-06 34-40 #ffffff #0e1117 -
-07 0-1 #ffffff #0e1117 -
-07 1-36 #8b95a7 #0e1117 -
-07 36-40 #ffffff #0e1117 -
+06 1-29 #8b95a7 #0e1117 -
+06 29-40 #ffffff #0e1117 -
+07 0-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-26 #8b95a7 #0e1117 -
-08 26-40 #ffffff #0e1117 -
-09 0-40 #ffffff #0e1117 -
+08 1-33 #8b95a7 #0e1117 -
+08 33-40 #ffffff #0e1117 -
+09 0-1 #ffffff #0e1117 -
+09 1-37 #8b95a7 #0e1117 -
+09 37-40 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-33 #8b95a7 #0e1117 -
-10 33-40 #ffffff #0e1117 -
+10 1-10 #8b95a7 #0e1117 -
+10 10-40 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-37 #8b95a7 #0e1117 -
-11 37-40 #ffffff #0e1117 -
+11 1-33 #8b95a7 #0e1117 -
+11 33-40 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-10 #8b95a7 #0e1117 -
-12 10-40 #ffffff #0e1117 -
+12 1-38 #8b95a7 #0e1117 -
+12 38-40 #ffffff #0e1117 -
 13 0-40 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
 14 1-2 #e6eaf0 #0e1117 b
 14 2-3 #8b95a7 #0e1117 -
 14 3-9 #e6eaf0 #0e1117 b
-14 9-12 #8b95a7 #0e1117 -
-14 12-17 #e6eaf0 #293140 b
-14 17-27 #8b95a7 #0e1117 -
-14 27-29 #e6eaf0 #293140 b
-14 29-37 #8b95a7 #0e1117 -
-14 37-40 #ffffff #0e1117 -
+14 9-19 #8b95a7 #0e1117 -
+14 19-24 #e6eaf0 #293140 b
+14 24-31 #8b95a7 #0e1117 -
+14 31-40 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
 15 1-39 #161b24 #0e1117 -
 15 39-40 #ffffff #0e1117 -

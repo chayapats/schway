@@ -104,7 +104,16 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
       }
       if (screen.id === "details-notice" || screen.id === "details-recovery") {
         expect(text).toContain("งานถัดไป 🧪");
-        if (variant.rows > 8) expect(text).toContain(screen.id === "details-notice" ? "The choice could not be saved." : "No command exit evidence.");
+        if (screen.id === "details-notice" && variant.rows > 8) expect(text).toContain("The choice could not be saved.");
+      }
+      if (screen.id === "details-recovery") {
+        // The cause leads failed-turn details, so the first viewport shows it whole; 24x8 shows at least its start.
+        const joined = parseScreen(actual).text.map(line => line.trim()).join(" ");
+        if (variant.rows > 8) expect(joined).toContain("Failure details: Provider request failed after 3 transient attempts: Service unavailable");
+        else { expect(text).toContain("✗ Failed"); expect(text).toContain("Provider request"); }
+        // F2 does nothing while details are open, so the outcome strip names only the live Alt+R action.
+        const strip = parseScreen(actual).text.find(line => line.trimStart().startsWith("✗ Failed · "));
+        if (variant.cols >= 40) { expect(strip).toContain("Alt+R review"); expect(strip).not.toContain("F2 details"); }
       }
     }
   }
