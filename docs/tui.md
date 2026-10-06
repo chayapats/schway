@@ -249,10 +249,10 @@ same turn details, including any recovery diagnostics; review Details also add t
 review scope notes.
 Details contain tool counts, whole-turn exit-zero/nonzero/unknown totals, and the
 retained commands without tool-call IDs. When a turn has no tool results and no
-commands, those lines become `No tool results or commands.` Failed-turn details
-lead with the outcome and the cause (`Failure details: …`), so F2 shows the cause
-in its first screen, even at narrow widths; the counts, commands and evidence notes
-follow. **Alt+I** still inspects individual tools.
+commands, those lines become `No tool results or commands.` When a failed turn
+retained diagnostics, its details put `Failure details: …` right after the
+outcome, so the cause starts on F2's first screen, even at narrow widths; the
+counts, commands and evidence notes follow. **Alt+I** still inspects individual tools.
 Selected filenames are literal paths, including glob characters and Git pathspec
 syntax. `/changes status` and `/changes diff -- <path>` remain available.
 
