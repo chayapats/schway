@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { createTestRenderer } from "@opentui/core/testing";
+import type { TextareaRenderable, TextRenderable } from "@opentui/core";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
@@ -14,6 +16,8 @@ import {
   buildBranchTreeSnapshot,
 } from "../src/tui/controller.ts";
 import { formatBranchTree, isBranchTreeCommandInput } from "../src/tui/app.ts";
+import { branchTreeEnterHint, branchTreeEscInStatusBar, branchTreeHint, branchTreeModeLine, branchTreePlaceholder, branchTreeTabHint } from "../src/tui/branch-tree-hints.ts";
+import { createConversationView } from "../src/tui/view.ts";
 import { dispatchEditorInput, parseSlashCommand } from "../src/tui/commands.ts";
 import { emptyBranchState } from "../src/session/branches.ts";
 import { withTempDir } from "./helpers.ts";
@@ -631,4 +635,112 @@ test("named fork compaction persists branch-local summary and reload displays th
       expect(forkReload.items.map(item => item.id)).toEqual(["u", "a", "u2", "a2", "summary", "after", "done"]);
     } finally { controller.dispose(); }
   });
+});
+
+/** Open a real conversation view on a two-path session, with `draft` typed and the cursor at `cursor`. */
+async function branchTreeView(draft: string, cursor: number) {
+  const session = createSession([
+    { type: "user", id: "u", content: [{ type: "text", text: "initial task" }] },
+    { type: "assistant", id: "a", content: [{ type: "text", text: "completed turn" }] },
+  ]);
+  session.forkBranch("a", "second path");
+  session.selectBranch("main");
+  const terminal = await createTestRenderer({ width: 120, height: 32, kittyKeyboard: true });
+  const ws = workspace("/project");
+  const controller = new TuiController({
+    session, workspace: ws, provider: "scripted", modelId: "test-model", sessionId: "branch-hints",
+    model: createScriptedModel({ responses: [] }), contextManager: createContextManager(ws),
+  });
+  const view = createConversationView(terminal.renderer, {
+    controller, workspaceRoot: "/project", home: "/home/test", env: {}, secrets: [],
+    quit: () => {}, openUrl: async () => {}, submit: async () => false,
+  });
+  const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
+  const text = (id: string) => (terminal.renderer.root.findDescendantById(id) as TextRenderable).plainText;
+  const settle = async () => { await Bun.sleep(5); view.refresh(); await terminal.flush(); };
+  await terminal.mockInput.pasteBracketedText(draft);
+  editor.cursorOffset = cursor;
+  await settle();
+  return {
+    ...terminal, controller, editor, settle, hints: () => text("hints"), footer: () => text("footer"),
+    close: () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); },
+  };
+}
+
+const BRANCH_TREE_SIZES = [[120, 32], [80, 24], [50, 24], [40, 20], [36, 16], [32, 16], [31, 16], [30, 16], [29, 16], [80, 11], [24, 8]] as const;
+
+test("branch-tree copy names one Tab, Enter and Esc label per mode and fits each hint segment", () => {
+  expect([branchTreeTabHint(true), branchTreeTabHint(false)]).toEqual(["Tab new fork", "Tab existing"]);
+  expect([branchTreeEnterHint(true), branchTreeEnterHint(false)]).toEqual(["Enter continue", "Enter fork"]);
+  // Arrows drop first, then Enter, then Tab; the note never drops and Esc drops only to the status bar.
+  expect(branchTreeHint(true, 200, false)).toBe("Files/Git unchanged · ↑↓ preview · Enter continue · Tab new fork · Esc back");
+  expect(branchTreeHint(false, 70, false)).toBe("Files/Git unchanged · Enter fork · Tab existing · Esc back");
+  expect(branchTreeHint(true, 48, false)).toBe("Files/Git unchanged · Tab new fork · Esc back");
+  expect(branchTreeHint(false, 30, false)).toBe("Files/Git unchanged · Esc back");
+  expect(branchTreeHint(false, 29, true)).toBe("Files/Git unchanged");
+  expect(branchTreeHint(true, 22, true)).toBe("Files/Git unchanged");
+  expect([30, 29, 28].map(branchTreeEscInStatusBar)).toEqual([false, true, true]);
+  // Placeholders and the mode line keep their Tab action whole instead of wrapping or clipping it.
+  for (const continuing of [true, false]) {
+    for (const columns of [18, 19, 23, 24, 28, 29, 34, 200]) {
+      for (const copy of [branchTreePlaceholder(continuing, columns), branchTreeModeLine(continuing, columns)]) {
+        expect(Bun.stringWidth(copy)).toBeLessThanOrEqual(columns);
+        expect(copy).toEndWith(branchTreeTabHint(continuing));
+        expect(copy).not.toContain("Tab:");
+      }
+    }
+  }
+  expect(branchTreePlaceholder(true, 18)).toBe("Tab new fork");
+  expect(branchTreePlaceholder(false, 18)).toBe("Tab existing");
+  expect(branchTreePlaceholder(false, 24)).toBe("Fork name · Tab existing");
+  expect(branchTreeModeLine(true, 34)).toBe("Continue existing · Tab new fork");
+  expect(branchTreeModeLine(true, 28)).toBe("Continue · Tab new fork");
+});
+
+test("branch tree keeps Files/Git, Esc back and its Tab action visible at every size in both modes", async () => {
+  const ui = await branchTreeView("keep me\nsecond", 3);
+  try {
+    expect(ui.controller.openBranchTree()).toBe(true);
+    await ui.settle();
+    const states = [
+      { name: "continue", continuing: true, typed: false },
+      { name: "continue typed", continuing: true, typed: true },
+      { name: "fork", continuing: false, typed: false },
+      { name: "fork typed", continuing: false, typed: true },
+    ];
+    for (const state of states) {
+      if (state.name === "fork") { ui.resize(120, 32); await ui.settle(); ui.mockInput.pressTab(); await ui.settle(); }
+      if (state.typed) { await ui.mockInput.pasteBracketedText("ทางเลือกใหม่"); await ui.settle(); }
+      expect(!!ui.controller.snapshot().branchTree?.selectedBranchId).toBe(state.continuing);
+      const tab = state.continuing ? "Tab new fork" : "Tab existing";
+      const enter = state.continuing ? "Enter continue" : "Enter fork";
+      for (const [width, height] of BRANCH_TREE_SIZES) {
+        ui.resize(width, height); await ui.settle();
+        const label = `${state.name} ${width}x${height}`;
+        const frame = ui.captureCharFrame();
+        if (state.typed) expect(ui.editor.plainText, label).toBe("ทางเลือกใหม่");
+        expect(frame, label).toContain("Files/Git unchanged");
+        expect(ui.hints(), label).toStartWith("Files/Git unchanged");
+        expect(`${ui.hints()}\n${ui.footer()}`, label).toContain("Esc back");
+        // A typed name at 24x8 hides the placeholder, the only row with room for Tab there.
+        if (!(state.typed && width === 24)) expect(frame, label).toContain(tab);
+        expect(frame, label).not.toContain(state.continuing ? "Tab existing" : "Tab new fork");
+        if (width >= 50) for (const segment of ["Files/Git unchanged", tab, "Esc back"]) expect(ui.hints(), label).toContain(segment);
+        for (const banned of ["Tab:", "Esc cancel", "Enter confirm", "↑/↓"]) expect(frame, label).not.toContain(banned);
+        for (const match of frame.matchAll(/Enter \S+/g)) expect(match[0], label).toBe(enter);
+        for (const line of frame.split("\n")) {
+          const text = line.replace(/[\s█▀▄▐▌]+$/, "");
+          expect(text, `${label}: ${line}`).not.toMatch(/(?:^|\s)(?:Esc|Enter|Tab)$/);
+          expect(text.trimStart(), `${label}: ${line}`).not.toMatch(/^·/);
+        }
+      }
+    }
+    // Esc back closes at the narrowest note handoff and restores the draft and cursor.
+    ui.resize(30, 16); await ui.settle();
+    expect(ui.footer()).toContain("Esc back");
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.controller.isBranchTreeOpen()).toBe(false);
+    expect(ui.editor.plainText).toBe("keep me\nsecond");
+    expect(ui.editor.cursorOffset).toBe(3);
+  } finally { ui.close(); }
 });

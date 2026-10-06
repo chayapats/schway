@@ -33,6 +33,7 @@ import { CONVERSATION_FIND_PLACEHOLDER, conversationFindHint, conversationFindSt
 import { createHistoryPanel } from "./history-view.ts";
 import { approvalAction, approvalChoices, approvalHint, approvalPanelLayout, charWrappedRows, type ApprovalPanelLayout } from "./approval-layout.ts";
 import { SIGN_IN_CANCELLING_HINT, SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, fitSignInWaitRows, signInChooserHint, signInWaitRows } from "./sign-in-wait.ts";
+import { branchTreeEscInStatusBar, branchTreeHint, branchTreeModeLine, branchTreePlaceholder } from "./branch-tree-hints.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -335,6 +336,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
   let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
+  // The branch tree hands Esc back to the status bar when its hint row cannot hold both Files/Git unchanged and Esc back.
+  let branchTreeEscInFooter = false;
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -680,7 +683,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
 
   /** The status bar already shows an Esc action (compact footer, hidden hint row, sign-in or running work). */
   const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") &&
-    (renderer.width < 30 || !hints.visible || footerParts.override === undefined && (footerParts.notConnected || footerParts.running));
+    (branchTreeEscInFooter || renderer.width < 30 || !hints.visible || footerParts.override === undefined && (footerParts.notConnected || footerParts.running));
 
   /**
    * Key-chip hints that fit `columns`. Arrow and paging hints drop first, then trailing actions; primary actions
@@ -768,7 +771,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const ctx = footerParts.ctxPercent === undefined
       ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
       : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
-    const esc = footerParts.running && footerParts.nextAction ? keyHintChunks(footerParts.nextAction, hintColors(theme.surface)) : [];
+    const esc = (footerParts.running || branchTreeEscInFooter) && footerParts.nextAction ? keyHintChunks(footerParts.nextAction, hintColors(theme.surface)) : [];
     const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
     // Keep mode and the active action; drop route, reasoning, model and context as space tightens.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
@@ -1011,7 +1014,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             : SIGN_IN_COMPOSER_TEXT;
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -1031,6 +1034,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (nextPill.tone !== pill.tone) { pillFrom = pillColors(pill.tone).bg; pillChangedAt = now(); }
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
+      branchTreeEscInFooter = panelMode === "tree" && !snapshot.toolApproval && branchTreeEscInStatusBar(width);
       footerParts = {
         approvalMode: snapshot.approvalMode,
         model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", thinking: snapshot.modelId && snapshot.thinkingChip ? safe(snapshot.thinkingChip) : undefined,
@@ -1396,9 +1400,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           if (renderer.height >= 16) textRow(tree, "Conversation branches", theme.accent);
           if (renderer.height >= 12) {
             textRow(tree, fitLine(`● Active: ${branches.activeBranchLabel ?? branches.activeBranchId}`, width), theme.muted);
-            textRow(tree, fitLine(branches.selectedBranchId ? "Continue existing · Tab: new fork" : "New fork · Tab: existing", width), theme.accent);
+            // One column stays free for the scrollbar so the Tab action is never wrapped or clipped.
+            textRow(tree, fitLine(branchTreeModeLine(!!branches.selectedBranchId, width - 1), width - 1), theme.accent);
           }
-          if (renderer.height >= 16) textRow(tree, "↑/↓ preview · Enter confirm · Esc cancel", theme.muted);
           const visibleRows = Math.max(1, Math.min(8, renderer.height - 14));
           if (branches.selectedBranchId) {
             const selectedIndex = branches.branches.findIndex(branch => branch.id === branches.selectedBranchId);
@@ -1476,7 +1480,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""}`) : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

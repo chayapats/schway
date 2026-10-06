@@ -648,7 +648,7 @@ reading position.
 | Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery; sessions F2 shows a failure's details |
 | Tool approval | Up/Down choose; Enter allow once, allow for session, add reason or deny with reason, as the hint names; Esc deny; PageUp/PageDown scroll; Ctrl+C cancel turn |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
-| Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
+| Branch tree, change review | Up/Down selection, Esc back; the branch tree uses Enter continue or Enter fork and Tab new fork or Tab existing; review uses PageUp/PageDown and Ctrl+R reload |
 | Help, search | Panel-specific navigation, Enter chosen action, Esc restore the draft or position |
 | Command completion | Up/Down select, Enter insert a differing choice or send a matching draft, Tab complete, Esc keep editing |
 | Inspection | Up/Down select, Enter chosen action, Esc back to the composer |
@@ -1098,7 +1098,7 @@ draft recovery.
 
 ## Alternate conversation paths
 
-`/branch tree` opens a preview browser. Arrow keys select numbered, named existing paths; `●` means active and `›` means preview. Duplicate labels still select exact branch identities. Enter continues the selected existing path. Tab chooses a separate new-fork action at a complete turn; type a name and press Enter. Tab returns to existing paths. Escape returns to the ordinary draft, cursor and reading position. See [session branching](sessions.md#browsing-branches-in-the-tui).
+`/branch tree` opens a preview browser. Arrow keys select numbered, named existing paths; `●` means active and `›` means preview. Duplicate labels still select exact branch identities. **Enter continue** continues the selected existing path. **Tab new fork** chooses a separate new-fork action at a complete turn; type a name and press **Enter fork**. **Tab existing** returns to existing paths. **Esc back** returns to the ordinary draft, cursor and reading position. The hint row always keeps `Files/Git unchanged`; see [session branching](sessions.md#browsing-branches-in-the-tui) for how it fits narrow widths.
 
 The confirmation controls explain that files and Git remain unchanged. Switching history neither undoes edits nor replays tools. While work runs, preview remains available but activation is refused. Failed activation retains the previous path. The list pages through large branch sets and truncates previews; exact IDs remain supported by explicit commands.
 
