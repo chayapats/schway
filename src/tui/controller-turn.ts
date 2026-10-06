@@ -23,7 +23,7 @@ export abstract class TurnLayer extends CompactionLayer {
   cancel(): void {
     this.signInListAbort?.abort();
     if (this.startupAbort) { this.startupAbort.abort(); return; }
-    if (this.loginSaving) { this.loginAbort?.abort(); this.notice("Waiting for the OS credential operation to finish; it cannot be cancelled after submission."); return; }
+    if (this.loginSaving) { this.loginAbort?.abort(); this.notice("Saving credential · Wait for secure storage"); return; }
     if (this.loginCallbackValue !== undefined) {
       this.loginCallbackValue = undefined; this.recoveryRepair = false;
       this.restoreLoginOrigin();

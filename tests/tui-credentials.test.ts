@@ -221,7 +221,7 @@ test("Grok cancellation and disposal abort the shared login path without saving 
     const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] }, store = fakeCredentialStore();
     const controller = new TuiController({ session: createSession(), sessionId: "cancel-grok", workspace, provider: "xai", modelId: "", contextManager: createContextManager(workspace), credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), grokLogin: async ({ signal, onApproval }) => { onApproval({ kind: "device", verificationUri: "https://x.ai/device", userCode: "ABCD-EFGH" }); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return { ok: false, message: "Cancelled" }; } } });
     const running = controller.login("grok --device");
-    expect(controller.snapshot().loginApproval).toBe("Open x.ai/device and enter ABCD-EFGH · Esc cancel");
+    expect(controller.snapshot().loginApproval).toBe("Open x.ai/device and enter ABCD-EFGH");
     expect(controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
     if (dispose) controller.dispose(); else controller.cancel();
     expect(await running).toBe(false); expect(controller.snapshot().loginApproval).toBeUndefined();

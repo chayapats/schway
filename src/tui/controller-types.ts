@@ -199,6 +199,8 @@ export interface TuiSnapshot {
   loginApproval?: string;
   /** Structured device address and code kept only in the ephemeral sign-in panel. */
   loginApprovalData?: LoginApproval;
+  /** Present while a subscription sign-in waits: the target provider, whether secure storage is saving, and whether Esc already cancelled it. */
+  loginWait?: { provider: "ChatGPT" | "Grok"; saving?: true; cancelling?: true };
   /** Interactive branch-tree browser state; undefined while the tree is closed. */
   branchTree?: BranchTreeSnapshot;
   /** Renderer-free branch-tree build failure shown instead of a tree. */

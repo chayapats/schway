@@ -30,8 +30,9 @@ export function formatOutcomeLine(outcome: TurnOutcome, columns: number, actiona
 export type StatusTone = "ready" | "neutral" | "active" | "stopping" | "attention";
 
 /** Describe the current state in sentence case; spinning labels receive an animated glyph. */
-export function statusPill(state: { readiness: string; status: string; activity?: TuiActivity; toolApproval?: unknown }, tiny = false): { label: string; tone: StatusTone; spinning: boolean } {
+export function statusPill(state: { readiness: string; status: string; activity?: TuiActivity; toolApproval?: unknown; loginWait?: unknown }, tiny = false): { label: string; tone: StatusTone; spinning: boolean } {
   if (state.toolApproval) return { label: "Approval", tone: "stopping", spinning: false };
+  if (state.loginWait && state.status === "running") return { label: "Signing in", tone: "active", spinning: true };
   const activity = state.activity;
   if (state.readiness === "loading") return { label: "Checking", tone: "active", spinning: true };
   if (!activity) {

@@ -42,12 +42,8 @@ interface EscException { screen: string; phrase: string; owner: string }
 
 // Each entry must still match a golden, so an owner that fixes its surface has to delete the entry.
 // Surfaces those owners also keep but the lint does not flag (valid verbs in the wrong place) need no entry:
-// U4 keeps the sign-in status-bar `Esc back`;
 // L5 (#312) keeps the branch tree's in-panel `Esc cancel` beside its `Esc back` hint row.
 const ESC_EXCEPTIONS: readonly EscException[] = [
-  { screen: "subscription-sign-in", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
-  { screen: "grok-browser-approval", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
-  { screen: "grok-device-approval", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
 ];
 
 interface ScreenProblem extends EscPhraseProblem { file: string; screen: string; variant: string }

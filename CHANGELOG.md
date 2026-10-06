@@ -67,6 +67,14 @@
   `Esc restore` in every find state. Conversation find names one scope, `this
   branch`, in its placeholder and statuses, and narrow status lines drop their
   trailing Esc instead of clipping it (#300).
+- The ChatGPT and Grok sign-in wait screen starts with `Sign in to ChatGPT` or
+  `Sign in to Grok`, lists device steps as `1 Open <address>` before
+  `2 Enter <code>` at every width, and names Esc once as `Esc cancel sign-in`
+  (`Esc cancel` in the compact status bar). The pill reads `Signing in`; the
+  dead `Enter confirm` hint and the stale `Esc cancel` in transcript notices are
+  gone. Timeouts read `Sign-in timed out · Alt+L retry · F2 details` with the
+  recovery steps in F2 details, and a browser that cannot open shows
+  `Browser didn't open · Open the link above` (#297).
 
 ## [1.0.0-rc.1] - 2026-10-02
 

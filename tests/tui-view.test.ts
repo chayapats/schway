@@ -1039,12 +1039,16 @@ test("device approval code remains visible on a narrow terminal without entering
   });
   const pending = ui.controller.login("codex --device");
   await settle(ui);
-  expect(ui.captureCharFrame()).toContain("ABCD-1234");
-  expect(ui.captureCharFrame().replace(/\s+/g, "")).toContain("https://auth.openai.com/codex/device");
+  const flat = () => ui.captureCharFrame().replace(/\s+/g, "");
+  // The address step comes before the code step, each with its verb, at every width.
+  expect(ui.captureCharFrame()).toContain("2 Enter ABCD-1234");
+  expect(flat().indexOf("1Openauth.openai.com/codex/device")).toBeGreaterThan(-1);
+  expect(flat().indexOf("1Openauth.openai.com/codex/device")).toBeLessThan(flat().indexOf("2EnterABCD-1234"));
   ui.resize(24, 8);
   await settle(ui);
   expect(ui.captureCharFrame()).toContain("ABCD-1234");
-  expect(ui.captureCharFrame().replace(/\s+/g, "")).toContain("https://auth.openai.com/codex/device");
+  expect(flat().indexOf("1Openauth.openai.com/codex/device")).toBeGreaterThan(-1);
+  expect(flat().indexOf("1Openauth.openai.com/codex/device")).toBeLessThan(flat().indexOf("2EnterABCD-1234"));
   expect(JSON.stringify(ui.controller.snapshot().transcript)).not.toContain("ABCD-1234");
   ui.mockInput.pressEscape();
   expect(await pending).toBe(false);
@@ -2491,7 +2495,10 @@ test("Grok chooser, browser and device panels preserve drafts and show codes at 
     while (ui.controller.snapshot().loginChooser!.selectedId !== "grok") ui.mockInput.pressArrow("down");
     if (device) { ui.mockInput.pressTab(); await settle(ui); expect(ui.controller.snapshot().loginChooser!.selectedId).toBe("grok-device"); }
     ui.mockInput.pressEnter(); await settle(ui);
-    expect(ui.captureCharFrame()).toContain(device ? "Open x.ai/device and enter ABCD-EFGH · Esc cancel" : "Approve in your browser · Esc cancel");
+    const panel = ui.captureCharFrame().split("\n").map(line => line.trim());
+    expect(panel.slice(panel.indexOf("Sign in to Grok"), panel.indexOf("◌ Waiting for approval") + 1))
+      .toEqual(["Sign in to Grok", ...(device ? ["1 Open x.ai/device", "2 Enter ABCD-EFGH"] : ["Approve in your browser"]), "◌ Waiting for approval"]);
+    expect(panel.filter(line => line.includes("Esc"))).toEqual(["Esc cancel sign-in"]);
     if (device) { ui.resize(24, 8); await settle(ui); expect(ui.captureCharFrame()).toContain("x.ai/device"); expect(ui.captureCharFrame()).toContain("ABCD-EFGH"); }
     expect(ui.controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
     ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);

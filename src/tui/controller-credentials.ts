@@ -9,6 +9,7 @@ import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
 import { isValidProfileBaseUrl } from "../config/profile-name.ts";
 import type { LoginChooserSnapshot } from "./controller-types.ts";
 import { ControllerCore } from "./controller-core.ts";
+import { BROWSER_NOT_OPENED, browserNotOpened, codexDeviceApproval, deviceAddress, signInTimeout, type SignInProvider } from "./sign-in-wait.ts";
 
 /** Ordered payment groups define each primary sign-in action and its optional alternates. */
 export const LOGIN_GROUPS = [
@@ -32,6 +33,24 @@ export const LOGIN_GROUPS = [
 
 /** Sign-in, credential entry, logout and subscription login actions. */
 export abstract class CredentialsLayer extends ControllerCore {
+  /** Provider of the active or latest subscription sign-in; the wait panel names it while `loginApproval` is set. */
+  protected loginProvider?: SignInProvider;
+
+  /** Report a failed subscription sign-in, keeping timeout recipes in F2 details instead of the primary line. */
+  private failSignIn(message: string): void {
+    const timeout = signInTimeout(message);
+    if (timeout) this.fail(timeout.text, timeout.details); else this.fail(message);
+  }
+
+  /** Show a browser-launch failure as a short status, putting an embedded authorization link on its own line first. */
+  private noticeBrowserNotOpened(message: string): boolean {
+    const failure = browserNotOpened(message);
+    if (!failure) return false;
+    if (failure.link) this.notice(redactSecrets(failure.link, this.secrets));
+    this.notice(BROWSER_NOT_OPENED);
+    return true;
+  }
+
   /** Route login input and notify when an explicit subscription sign-in starts. */
   async login(args: string, accepted: () => void = () => {}): Promise<boolean> {
     if (!args.trim()) return this.openLoginChooser();
@@ -537,19 +556,25 @@ export abstract class CredentialsLayer extends ControllerCore {
     const generation = ++this.loginGeneration;
     this.loginSaving = false;
     this.activeAbort = abort; this.loginAbort = abort; this.credentialMutation = true; this.status = "running";
-    this.loginApprovalData = { kind: "browser" };
-    this.loginApproval = target.device ? "Starting Grok approval · Esc cancel" : "Approve in your browser · Esc cancel";
+    // Device steps wait for their code; the heading comes from the provider, not from approval data.
+    this.loginApprovalData = target.device ? undefined : { kind: "browser" };
+    this.loginProvider = "Grok";
+    this.loginApproval = target.device ? "Starting device approval" : "Approve in your browser";
     try { accepted(); } catch { /* Presentation cannot cancel an accepted operation. */ }
     const task = (async () => {
       try {
         const result = await runner({ device: target.device, signal: abort.signal,
           onSaving: () => { if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return; this.loginSaving = true; },
           onSaved: () => { if ((abort.signal.aborted && !this.loginSaving) || this.loginAbort !== abort || this.disposed) return; saved = true; this.invalidateGrokAdapter(); },
-          onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Approve in your browser · Esc cancel" : `Open ${approval.verificationUri.replace(/^https:\/\//, "").replace(/\/$/, "")} and enter ${approval.userCode} · Esc cancel`; },
-          onProgress: message => { if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return; this.notice(redactSecrets(message, this.secrets)); if (message.startsWith("The browser could not")) this.loginChooserState = { level: "grok", selectedId: "grok-device" }; },
+          onApproval: approval => { if (this.disposed || abort.signal.aborted) return; this.loginApprovalData = approval; this.loginApproval = approval.kind === "browser" ? "Approve in your browser" : `Open ${deviceAddress(approval.verificationUri)} and enter ${approval.userCode}`; },
+          onProgress: message => {
+            if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return;
+            if (this.noticeBrowserNotOpened(message)) this.loginChooserState = { level: "grok", selectedId: "grok-device" };
+            else this.notice(redactSecrets(message, this.secrets));
+          },
         });
         abort.signal.throwIfAborted(); if (this.disposed) return false;
-        if (!result.ok) { this.fail(result.message); return false; }
+        if (!result.ok) { this.failSignIn(result.message); return false; }
         // Secure storage has settled; discovery is cancellable, including from the picker.
         this.loginSaving = false; this.loginAbort = undefined; this.credentialMutation = false;
         this.loginChooserState = undefined;
@@ -612,7 +637,9 @@ export abstract class CredentialsLayer extends ControllerCore {
     const reconnectModel = this.model?.provider === "codex-subscription" || (!this.model && this.provider === "openai" && this.openaiAuth === "codex") ? this.modelId : undefined;
     const activate = !this.model || reconnectModel !== undefined;
     this.closeModelPicker();
-    this.loginApproval = target.device ? "Starting device approval · Esc cancel" : "Approve in your browser · Esc cancel";
+    this.loginProvider = "ChatGPT";
+    this.loginApprovalData = undefined;
+    this.loginApproval = target.device ? "Starting device approval" : "Approve in your browser";
     const abort = new AbortController();
     const generation = ++this.loginGeneration;
     this.loginSaving = false;
@@ -621,7 +648,8 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.loginAbort = abort;
     this.credentialMutation = true;
     this.status = "running";
-    this.notice(target.device ? "Starting ChatGPT device sign-in · Esc cancel" : "Starting ChatGPT browser sign-in · Esc cancel");
+    // The transcript keeps this line after the wait ends, so it names no transient key.
+    this.notice(target.device ? "ChatGPT device sign-in started" : "ChatGPT browser sign-in started");
     try { accepted(); } catch { /* Presentation cannot cancel an accepted sign-in. */ }
     const task = (async (): Promise<boolean> => {
       try {
@@ -637,19 +665,20 @@ export abstract class CredentialsLayer extends ControllerCore {
           },
           onProgress: (message) => {
             if (abort.signal.aborted || this.loginAbort !== abort || this.disposed) return;
-            if (message.startsWith("Enter this code at ")) this.loginApproval = message;
-            else {
-              if (message.startsWith("ChatGPT subscription (Codex OAuth):")) this.notice("Sign-in saved · /model choose model · F2 details", message);
-              else if (message.startsWith("Approval received.")) this.notice("Approval received · Saving sign-in · Esc cancel");
-              else this.notice(redactSecrets(message, this.secrets));
-              if (message.startsWith("The browser could not be opened automatically")) this.loginChooserState = { level: "chatgpt", selectedId: "chatgpt-device" };
-            }
+            // The user code stays in the ephemeral panel only, never in a notice, details or the session.
+            const device = codexDeviceApproval(message);
+            if (device) { this.loginApprovalData = device; this.loginApproval = `Open ${deviceAddress(device.verificationUri)} and enter ${device.userCode}`; }
+            else if (message.startsWith("Enter this code at ")) this.loginApproval = "Starting device approval";
+            else if (message.startsWith("ChatGPT subscription (Codex OAuth):")) this.notice("Sign-in saved · /model choose model · F2 details", message);
+            else if (message.startsWith("Approval received.")) this.notice("Approval received · Saving sign-in");
+            else if (this.noticeBrowserNotOpened(message)) this.loginChooserState = { level: "chatgpt", selectedId: "chatgpt-device" };
+            else this.notice(redactSecrets(message, this.secrets));
           },
         });
         abort.signal.throwIfAborted();
         if (this.disposed || this.activeAbort !== abort) return false;
         if (!result.ok) {
-          this.fail(result.message);
+          this.failSignIn(result.message);
           if (!result.message.startsWith("Cannot save credential")) {
             this.loginChooserState = /callback|localhost|browser/i.test(result.message) ? { level: "chatgpt", selectedId: "chatgpt-device" } : { level: "main", selectedId: "chatgpt" };
           }
@@ -714,6 +743,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (this.activeAbort === abort) this.activeAbort = undefined;
       if (this.activeTurn === tracked) this.activeTurn = undefined;
       this.loginApproval = undefined;
+      this.loginApprovalData = undefined;
       this.loginReturn = undefined;
     }
     if (signedIn) this.loginChooserState = undefined;
