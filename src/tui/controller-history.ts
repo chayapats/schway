@@ -153,16 +153,23 @@ export function historyTelemetryDetails(attempt: Pick<HistoryAttempt, "telemetry
   const first = telemetry.firstDelta;
   const firstOutput = !telemetry.modelCalls ? "" : !first ? " · no text or thinking before completion"
     : ` · first output ${first.minMs === first.maxMs ? formatDuration(first.minMs) : `${formatDuration(first.minMs)}–${formatDuration(first.maxMs)}`}${first.calls < telemetry.modelCalls ? ` (${first.calls} of ${formatCount(telemetry.modelCalls, "call")})` : ""}`;
-  const retries = telemetry.retries || telemetry.retryWaitMs ? ` · ${formatCount(telemetry.retries, "retry", "retries")}, ${formatDuration(telemetry.retryWaitMs)} backoff` : " · no retries";
-  const token = (label: string, total: HistoryTelemetry["tokens"]["input"]) => (!total.reportedCalls ? `${label} not reported`
-    : `${label} ${total.total.toLocaleString("en-US")}${total.reportedCalls < telemetry.modelCalls ? ` (${total.reportedCalls} of ${formatCount(telemetry.modelCalls, "call")} reported)` : ""}`)
-    + (total.inconsistentCalls ? ` (ignored ${formatCount(total.inconsistentCalls, "call")} that exceeded the total)` : "");
+  // A backoff that a stop cut short is waited time without a retry.
+  const retries = telemetry.retries ? ` · ${formatCount(telemetry.retries, "retry", "retries")}, ${formatDuration(telemetry.retryWaitMs)} backoff`
+    : telemetry.retryWaitMs ? ` · no retries · ${formatDuration(telemetry.retryWaitMs)} backoff before stop` : " · no retries";
+  /** One token figure with a single note for partial coverage and ignored calls whose subset exceeded their own bound. */
+  const token = (label: string, total: HistoryTelemetry["tokens"]["input"], bound?: string) => {
+    const ignored = total.inconsistentCalls ? `${formatCount(total.inconsistentCalls, "call")} ignored, ${bound}` : "";
+    if (!total.reportedCalls) return ignored ? `${label} unusable (${ignored})` : `${label} not reported`;
+    const coverage = total.reportedCalls < telemetry.modelCalls ? `${total.reportedCalls} of ${formatCount(telemetry.modelCalls, "call")} ${ignored ? "counted" : "reported"}` : "";
+    const note = [coverage, ignored].filter(Boolean).join("; ");
+    return `${label} ${total.total.toLocaleString("en-US")}${note ? ` (${note})` : ""}`;
+  };
   const { input, cachedInput, output, reasoning } = telemetry.tokens;
   return [
     telemetry.modelCalls ? `  Model: ${formatCount(telemetry.modelCalls, "call")} · ${formatDuration(telemetry.modelMs)}${firstOutput}${retries}` : "  Model: no calls",
     telemetry.toolCalls ? `  Tools: ${formatCount(telemetry.toolCalls, "timed call")} · ${formatDuration(telemetry.toolMs)} wall time${telemetry.approvalWaitMs ? ` · ${formatDuration(telemetry.approvalWaitMs)} approval wait` : ""}`
       : "  Tools: no timed calls",
-    ...(telemetry.modelCalls ? [`  Tokens: ${[token("input", input), token("cached input", cachedInput), token("output", output), token("reasoning", reasoning)].join(" · ")}`] : []),
+    ...(telemetry.modelCalls ? [`  Tokens: ${[token("input", input), token("cached input", cachedInput, "cached above input"), token("output", output), token("reasoning", reasoning, "reasoning above output")].join(" · ")}`] : []),
   ];
 }
 
@@ -210,6 +217,7 @@ export function historyDetailsText(state: Pick<HistorySnapshot, "unsaved"> & { r
         "Token counts are what the provider reported, not billing. Cached input is part of input and reasoning is part of output.",
         "Model time adds every model attempt, including failed ones. Tool time is wall time with at least one tool running, so parallel tools count once; approval waits are part of it.",
         "Command times exclude approval waits. No first output means no text or thinking arrived before the call completed.",
+        "A backoff cut short by a stop counts as waited time, not a retry. A call reporting more cached than input tokens, or more reasoning than output tokens, is ignored for that count.",
       );
     }
     lines.push("");

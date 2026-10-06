@@ -125,7 +125,7 @@ test("cancelling during a retry backoff records the time waited but no retry", a
   const fold = createHistoryTelemetryFold();
   for (const event of events) fold.observe(event);
   expect(fold.summary()).toMatchObject({ modelCalls: 1, modelMs: 300, retries: 0, retryWaitMs: 25_000 });
-  expect(historyDetailsText({ unsaved: {} }, turnWith(fold.summary()))).toContain("  Model: 1 call · 0.3s · no text or thinking before completion · 0 retries, 25s backoff");
+  expect(historyDetailsText({ unsaved: {} }, turnWith(fold.summary()))).toContain("  Model: 1 call · 0.3s · no text or thinking before completion · no retries · 25s backoff before stop");
 });
 
 test("a call whose cached count exceeds its own input makes the cache share unreported, whatever other calls report", () => {
@@ -138,7 +138,13 @@ test("a call whose cached count exceeds its own input makes the cache share unre
     reasoning: { total: 4, reportedCalls: 1, inconsistentCalls: 1 } });
   expect(historyCacheLabel(summary)).toBe("Cache not reported");
   expect(historyTimingLine(turnWith(summary), 120)).toBe("Model 0.0s · Cache not reported");
-  expect(historyDetailsText({ unsaved: {} }, turnWith(summary))).toContain("cached input 0 (1 of 2 calls reported) (ignored 1 call that exceeded the total)");
+  const details = historyDetailsText({ unsaved: {} }, turnWith(summary));
+  expect(details).toContain("cached input 0 (1 of 2 calls counted; 1 call ignored, cached above input)");
+  expect(details).toContain("reasoning 4 (1 of 2 calls counted; 1 call ignored, reasoning above output)");
+  expect(details).toContain("is ignored for that count.");
+  // Every call ignored, and more than one: one note names the bound with a plural count.
+  const all = { ...summary, tokens: { ...summary.tokens, cachedInput: { total: 0, reportedCalls: 0, inconsistentCalls: 2 } } };
+  expect(historyDetailsText({ unsaved: {} }, turnWith(all))).toContain("cached input unusable (2 calls ignored, cached above input)");
   // Records keep the flag, and coverage plus inconsistent calls cannot exceed the call count.
   const record = finalize({ telemetry: summary });
   expect((parseHistoryLine(serializeHistoryFinalize(record).trim()) as HistoryTurnFinalize).telemetry).toEqual(summary);

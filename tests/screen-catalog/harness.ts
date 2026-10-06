@@ -356,29 +356,37 @@ export async function renderScreen(screen: Screen, variant: Variant): Promise<st
   } finally { await ui.dispose(); }
 }
 
-/** Synthetic timing evidence for the `history-timing*` screens, matching the 8.4-minute turn the timing line was designed for. */
+/**
+ * Synthetic, internally possible timing evidence for the `history-timing*` screens: each tool round is one model call,
+ * the final answer one more, and a retried attempt one more; the turn spans exactly its active time.
+ */
 async function historyTimingFixture(id: string, session: Awaited<ReturnType<typeof createJsonlSession>>, home: string): Promise<void> {
   const task = "Check tomorrow's Bangkok weather and how long the drive to the airport takes";
   session.append({ type: "user", id: "timing-user", content: [{ type: "text", text: task }] }, { type: "assistant", id: "timing-answer", content: [{ type: "text", text: "Light rain; about 45 minutes." }] });
   const store = openHistoryStore({ home }), sessionId = session.header.id;
   const total = (value: number, reportedCalls: number) => ({ total: value, reportedCalls });
+  // Cache not reported: one round runs two commands, then the answer, after one retried attempt (3 calls; the failed one reported nothing).
+  // Partial: one command round, then the answer (2 calls); only one call reported cached input.
+  // Default and details: three command rounds, then the answer (4 calls).
   const telemetry: HistoryTelemetry = id === "history-timing-cache-unreported"
-    ? { modelCalls: 2, modelMs: 53_300, firstDelta: { minMs: 812, maxMs: 1400, calls: 2 }, retries: 0, retryWaitMs: 0, toolCalls: 2, toolMs: 8500, approvalWaitMs: 4100,
+    ? { modelCalls: 3, modelMs: 53_300, firstDelta: { minMs: 812, maxMs: 1400, calls: 2 }, retries: 1, retryWaitMs: 1000, toolCalls: 2, toolMs: 8500, approvalWaitMs: 4100,
       tokens: { input: total(162_000, 2), cachedInput: total(0, 0), output: total(3100, 2), reasoning: total(0, 0) } }
     : id === "history-timing-partial"
-      ? { modelCalls: 2, modelMs: 56_800, firstDelta: null, retries: 0, retryWaitMs: 0, toolCalls: 0, toolMs: 0, approvalWaitMs: 0,
+      ? { modelCalls: 2, modelMs: 56_800, firstDelta: null, retries: 0, retryWaitMs: 0, toolCalls: 1, toolMs: 400, approvalWaitMs: 0,
         tokens: { input: total(160_000, 2), cachedInput: total(65_536, 1), output: total(4100, 2), reasoning: total(3800, 1) } }
-      : { modelCalls: 12, modelMs: 162_000, firstDelta: { minMs: 4700, maxMs: 31_000, calls: 12 }, retries: 1, retryWaitMs: 1000, toolCalls: 3, toolMs: 81_400, approvalWaitMs: 0,
-        tokens: { input: total(530_000, 12), cachedInput: total(429_300, 12), output: total(9000, 12), reasoning: total(7000, 12) } };
+      : { modelCalls: 4, modelMs: 118_000, firstDelta: { minMs: 4700, maxMs: 31_000, calls: 4 }, retries: 0, retryWaitMs: 0, toolCalls: 3, toolMs: 81_400, approvalWaitMs: 0,
+        tokens: { input: total(160_000, 4), cachedInput: total(129_600, 4), output: total(6000, 4), reasoning: total(4800, 4) } };
   const command = (index: number, text: string, durationMs: number, approvalWaitMs?: number): HistoryCommand => ({ id: index.toString(16).padStart(16, "0"), command: text, exitCode: 0,
     ended: "exit", status: "success", durationMs, ...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}) });
-  const commands = id === "history-timing-partial" ? []
+  const commands = id === "history-timing-partial" ? [command(1, "date", 400)]
     : id === "history-timing-cache-unreported" ? [command(1, "date", 400), command(2, "curl -s wttr.in/Bangkok", 8100, 4100)]
       : [command(1, "curl -s wttr.in/Bangkok", 31_200), command(2, "curl -s 'https://maps.example/route?to=BKK'", 49_800), command(3, "date", 400)];
+  // Model plus backoff plus tool time fits the active time, and the start and finish times span exactly that.
+  const activeMs = telemetry.modelMs + telemetry.retryWaitMs + telemetry.toolMs + 600;
+  const finishedAt = "2026-01-15T09:30:00.000Z", startedAt = new Date(Date.parse(finishedAt) - activeMs).toISOString();
   await store.start(sessionId, { type: "turn_start", version: 1, turnId: "timing-user", attemptId: "timing-attempt", ordinal: 1, branchId: "main", parentId: session.rootId,
-    workspaceRoot: "/home/test/demo", mode: "tui", startedAt: "2026-01-15T09:21:36.000Z", task });
-  await store.finalize(sessionId, { type: "turn_finalize", version: 1, turnId: "timing-user", attemptId: "timing-attempt", revision: 1, outcome: "completed", finishedAt: "2026-01-15T09:30:00.000Z",
-    // Each record agrees with itself: tool results match timed calls, and model plus tool time fits the active time.
-    activeMs: telemetry.modelMs + telemetry.retryWaitMs + telemetry.toolMs + 600, toolResults: commands.length, failedTools: 0, commands: { total: commands.length, exitZero: commands.length, nonzero: 0, unknown: 0, truncated: false, items: commands },
+    workspaceRoot: "/home/test/demo", mode: "tui", startedAt, task });
+  await store.finalize(sessionId, { type: "turn_finalize", version: 1, turnId: "timing-user", attemptId: "timing-attempt", revision: 1, outcome: "completed", finishedAt,
+    activeMs, toolResults: commands.length, failedTools: 0, commands: { total: commands.length, exitZero: commands.length, nonzero: 0, unknown: 0, truncated: false, items: commands },
     files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, telemetry });
 }

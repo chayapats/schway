@@ -33,9 +33,12 @@
   `reasoningTokens` (parsed for OpenAI, xAI, Grok and ChatGPT subscription
   responses). Saved `assistant` and `tool_result` items gain an optional
   `telemetry` object (`AssistantTelemetry`, `ToolTelemetry`) without a session
-  format change. The `model.usage` event gains `startedAt`, `firstDeltaMs` and
-  `attemptMs`, and `tool.finished` gains `startedAt`, `durationMs` and
-  `approvalWaitMs`. `/history` turn detail shows `Model … · Tools … · N% cached`
+  format change. The `model.usage` event gains `startedAt`, `firstDeltaMs`,
+  `attemptMs` and, after a retry backoff, `retryWaitMs` (the backoff actually
+  waited, also when a stop cut it short); `tool.finished` gains `startedAt`,
+  `durationMs` and `approvalWaitMs`. History finalize records gain optional
+  `telemetry` totals with per-dimension call coverage and `inconsistentCalls`
+  for counts that exceed their own call's total. `/history` turn detail shows `Model … · Tools … · N% cached`
   and each command's run time, F2 details list calls, retries, tool wall time,
   approval wait and token coverage, `/context` adds cached and reasoning counts,
   and `--debug` records the same counts and timings (#317).
