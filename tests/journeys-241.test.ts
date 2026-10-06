@@ -219,7 +219,7 @@ for (const encoding of encodings) test(`[${encoding} 40x20] palette, slash sugge
   ui.editor.setText(""); await ui.settle();
   await ui.input(ui.keys.ctrlF);
   await ui.type("value 3");
-  expect(ui.hints()).toBe("Enter accept · Esc restore");
+  expect(ui.hints()).toBe("Enter keep · Esc restore");
 });
 
 for (const width of [40, 44, 48]) test(`[legacy ${width}x30] the sign-in chooser keeps Tab more options in its hint row`, async () => {

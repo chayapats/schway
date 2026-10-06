@@ -572,7 +572,7 @@ detected here` marks newer turns with the same limit.
 | Browse turn history | `/history`; Up/Down selects a turn or observed file, Enter opens a turn or its current diff, F2 toggles evidence notes, PageUp/PageDown scrolls, Esc back one level at a time to the draft |
 | Inspect results, code and tables | Alt+I enters inspection without copying; Up/Down or Tab selects a result, code block or table; C copies the highlighted item; Enter copies selected code or table source, or toggles an expandable tool result; R reads selected code or a table; Esc back to the draft |
 | Read code or a table | R in inspection; Up/Down and PgUp/PgDn scroll, Home/End jump, Left/Right pan unwrapped code or step table columns, W wraps code, C copies the source, Ctrl+F finds in the block, Esc back to the same inspection target |
-| Find in this conversation | Ctrl+F; type a literal query, Up/Down for previous/next, Enter to keep the result in view, Esc restore the old position |
+| Find in this branch | Ctrl+F; type a literal query; ↑ previous and ↓ next match, wrapping at either end; Enter keep the selected match in view; Esc restore the old position |
 | Scroll | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+End or click the new-activity hint |
 | Recover stale terminal cells | Ctrl+L; preserves the draft and scroll position |
@@ -642,16 +642,24 @@ retains its own scrolling. The transcript has a fixed-width viewport so starting
 to overflow does not introduce a scrollbar and rewrap earlier messages.
 
 Ctrl+F searches the selected conversation branch locally and shows the current
-match and count. Search is literal and ignores case; it follows logical text
-across terminal wraps, including Unicode. It searches redacted, bounded display
-text: collapsed successful tools expose their summary, and expanding tools with
-Ctrl+O before searching includes their bounded output. Other branches and bytes
-past a truncation marker are outside the search. The status says when a very
-large search is limited. The search field replaces the composer temporarily;
-the draft and cursor return when search closes. Esc restores the original
-reading position, while Enter keeps the selected result in view. New streaming
-output updates the count without moving the current result. Ctrl+End explicitly
-closes search and follows the latest output again.
+match and count, such as `Find 2/5 in this branch · Esc restore`. Search is
+literal and ignores case; it follows logical text across terminal wraps,
+including Unicode. It searches redacted, bounded display text: collapsed
+successful tools expose their summary, and expanding tools with Ctrl+O before
+searching includes their bounded output. Other branches and bytes past a
+truncation marker are outside the search. A very large search that stops early
+adds `(limited)` to the status. The search field replaces the composer
+temporarily; the draft and cursor return when search closes.
+
+While a match is selected, the hint row reads `↑↓ previous/next · Enter keep ·
+Esc restore · Ctrl+End latest`: ↑ (or Ctrl+P) moves to the previous match and ↓
+(or Ctrl+N) to the next, wrapping at either end, and Enter keeps the selected
+result in view. With an empty query or no matches, the hint row shows only
+`Esc restore · Ctrl+End latest`, and Enter closes search where you are. Esc
+always restores the original reading position. New streaming output updates the
+count without moving the current result. Ctrl+End explicitly closes search and
+follows the latest output again. Narrow status lines drop their trailing
+`Esc restore` rather than clip it, since the hint row or status bar still names it.
 
 After an accepted prompt clears, you can type or paste a future draft during the
 current turn. Enter does not queue it while work is active; the draft stays in the
@@ -839,8 +847,11 @@ and the draft, cursor and transcript position return unchanged on Esc.
   when the terminal accepted the request; on failure the reader stays open at
   the same position.
 - **Ctrl+F** searches the captured block with the conversation search's
-  Unicode folding. Up/Down move between matches, Enter keeps the result in view
-  and Esc restores the previous position. A match near the end shows the last
+  Unicode folding. While a match is selected, the find row and hint row show
+  `↑↓ previous/next` and `Enter keep`: ↑ moves to the previous match and ↓ to the
+  next, wrapping at either end, and Enter keeps the result in view. With an
+  empty query or no matches they show only `Esc restore`, and Enter closes find
+  where you are. Esc restores the previous position in every find state. A match near the end shows the last
   full page, so the body never ends in blank rows. Reader search never adds rows to the
   conversation search or changes history.
 - Opening a block that is still streaming captures a snapshot labelled

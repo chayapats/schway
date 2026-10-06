@@ -30,12 +30,12 @@ cursor 12 27 visible
 
 
 
- ⌕ Find 1/1 · active branch, displayed text
+ ⌕ Find 1/1 in this branch · Esc restore
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › README
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Read-only  ● Ready   scripted/scrip…    ctx ~0
- Enter accept · Esc restore · Ctrl+End latest
+ Enter keep · Esc restore · Ctrl+End latest
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -72,8 +72,8 @@ cursor 12 27 visible
 24 0-1 #ffffff #0e1117 -
 24 1-2 #7cc4ff #0e1117 b
 24 2-3 #8b95a7 #0e1117 -
-24 3-43 #7cc4ff #0e1117 -
-24 43-50 #ffffff #0e1117 -
+24 3-40 #7cc4ff #0e1117 -
+24 40-50 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
 25 1-49 #161b24 #0e1117 -
 25 49-50 #ffffff #0e1117 -
@@ -95,9 +95,9 @@ cursor 12 27 visible
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
 29 1-6 #e6eaf0 #293140 b
-29 6-16 #8b95a7 #0e1117 -
-29 16-19 #e6eaf0 #293140 b
-29 19-30 #8b95a7 #0e1117 -
-29 30-38 #e6eaf0 #293140 b
-29 38-45 #8b95a7 #0e1117 -
-29 45-50 #ffffff #0e1117 -
+29 6-14 #8b95a7 #0e1117 -
+29 14-17 #e6eaf0 #293140 b
+29 17-28 #8b95a7 #0e1117 -
+29 28-36 #e6eaf0 #293140 b
+29 36-43 #8b95a7 #0e1117 -
+29 43-50 #ffffff #0e1117 -

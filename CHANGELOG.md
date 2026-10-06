@@ -62,6 +62,11 @@
   the next Enter sends it. Enter still sends a draft that already matches, and
   Esc, then Enter, sends the typed text unchanged. The hint row says
   `Enter insert` or `Enter send` and keeps it at 40 columns (#296).
+- Find hints now match their keys. Conversation and reader find show
+  `↑↓ previous/next` and `Enter keep` only while a match is selected, and use
+  `Esc restore` in every find state. Conversation find names one scope, `this
+  branch`, in its placeholder and statuses, and narrow status lines drop their
+  trailing Esc instead of clipping it (#300).
 
 ## [1.0.0-rc.1] - 2026-10-02
 

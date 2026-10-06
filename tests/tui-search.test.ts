@@ -1,18 +1,25 @@
 import { afterEach, expect, test } from "bun:test";
+import { join } from "node:path";
 import { createTestRenderer } from "@opentui/core/testing";
-import { BoxRenderable, ScrollBoxRenderable, TextareaRenderable } from "@opentui/core";
+import { BoxRenderable, ScrollBoxRenderable, TextareaRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
-import { TuiController } from "../src/tui/controller.ts";
+import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
+import { conversationFindStatus, fitFindStatus } from "../src/tui/find-hints.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession, type Session } from "../src/session/session.ts";
-import { createScriptedModel } from "./helpers/scripted-model.ts";
+import { ConfigEditor } from "../src/config/editing.ts";
+import { createToolRegistry } from "../src/tools/registry.ts";
+import { editTool } from "../src/tools/edit.ts";
+import { withTempDir } from "./helpers.ts";
+import { escPhraseProblems } from "./helpers/esc-verbs.ts";
+import { createScriptedModel, type ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-async function setup(session: Session = createSession(), width = 70, height = 20) {
-  const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
+async function setup(session: Session = createSession(), width = 70, height = 20, overrides: Partial<TuiControllerOptions> = {}) {
+  const terminal = await createTestRenderer({ width, height, kittyKeyboard: true, exitOnCtrlC: false });
   const workspace = { root: "/fixture", launchCwd: "/fixture", extraRoots: [] };
   let modelCalls = 0;
   let submits = 0;
@@ -20,7 +27,7 @@ async function setup(session: Session = createSession(), width = 70, height = 20
     session, sessionId: "search-fixture", workspace, provider: "scripted", modelId: "test-model",
     contextManager: createContextManager(workspace), secrets: ["secret-sentinel"],
     model: createScriptedModel({ responses: [() => { modelCalls++; return { text: "unexpected" }; }] }),
-    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) },
+    credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ model: createScriptedModel() }) }, ...overrides,
   });
   const view = createConversationView(terminal.renderer, {
     controller, workspaceRoot: workspace.root, home: "/home/test", env: {}, secrets: ["secret-sentinel"],
@@ -31,7 +38,14 @@ async function setup(session: Session = createSession(), width = 70, height = 20
   const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
   const transcript = terminal.renderer.root.findDescendantById("transcript") as ScrollBoxRenderable;
   const settle = async () => { view.refresh(); await terminal.flush(); };
-  return { ...terminal, controller, view, session, editor, transcript, settle, modelCalls: () => modelCalls, submits: () => submits };
+  const plain = (id: string) => (terminal.renderer.root.findDescendantById(id) as TextRenderable).plainText;
+  const rows = {
+    /** Conversation find status (activity row), hint row, status bar and the reader's find row (its last line). */
+    status: () => plain("activity"), hints: () => plain("hints"), footer: () => plain("footer"),
+    readerFind: () => plain("reader-text").split("\n").at(-1)!,
+    reading: () => !!(terminal.renderer.root.findDescendantById("reader-panel") as { visible: boolean }).visible,
+  };
+  return { ...terminal, ...rows, controller, view, session, editor, transcript, settle, modelCalls: () => modelCalls, submits: () => submits };
 }
 
 const user = (id: string, text: string) => ({ type: "user" as const, id, content: [{ type: "text" as const, text }] });
@@ -307,4 +321,213 @@ test("thousands of rows remain cancellable without model, submit, or session cha
   expect(JSON.stringify(ui.session.items)).toBe(before);
   expect(ui.modelCalls()).toBe(0);
   expect(ui.submits()).toBe(0);
+});
+
+// #300: every find hint is read from the screen and checked against what its key does.
+
+/** What each arrow does according to a rendered row (`↑↓ previous/next` or `↑ previous · ↓ next`); undefined when the row names no arrows. */
+function arrowSteps(row: string): { up: number; down: number } | undefined {
+  const step = (word: string | undefined) => word === "previous" ? -1 : word === "next" ? 1 : NaN;
+  const pair = /↑↓ ([a-z]+)\/([a-z]+)/.exec(row);
+  if (pair) return { up: step(pair[1]), down: step(pair[2]) };
+  const up = /↑ ([a-z]+)/.exec(row)?.[1], down = /↓ ([a-z]+)/.exec(row)?.[1];
+  return up || down ? { up: step(up), down: step(down) } : undefined;
+}
+const escPhrases = (row: string) => row.match(/Esc [a-z]+(?: to request)?/g) ?? [];
+const statusWords = (status: string) => status.replace(/^⌕ /, "").split(" · ")[0]!.trim().split(/\s+/).length;
+const codeAnswer = "Here is the file.\n\n```txt\nneedle one\nfiller\nneedle two\nfiller\nneedle three\nfiller\nneedle four\nend\n```";
+
+async function openReader(ui: Awaited<ReturnType<typeof setup>>) {
+  ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
+  ui.mockInput.pressKey("r"); await ui.settle();
+  expect(ui.reading()).toBe(true);
+}
+
+test("conversation find hint names ↑ previous and ↓ next, and each arrow moves the count that way, wrapping at both ends", async () => {
+  const ui = await setup(createSession([user("u1", "needle one"), assistant("a1", "needle two"), user("u2", "needle three")]), 80, 24);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("needle"); await ui.settle();
+  const steps = arrowSteps(ui.hints());
+  expect(steps).toEqual({ up: -1, down: 1 });
+  const position = () => Number(/Find (\d+)\/3 /.exec(ui.status())?.[1]);
+  expect(position()).toBe(1);
+  // Up from the first match wraps to the last, down from the last wraps to the first.
+  for (const key of ["up", "down", "down", "down", "down", "up"] as const) {
+    const before = position();
+    ui.mockInput.pressArrow(key); await ui.settle();
+    expect(arrowSteps(ui.hints())).toEqual(steps);
+    expect(position(), `${key} from ${before}`).toBe((before - 1 + steps![key] + 3) % 3 + 1);
+  }
+});
+
+test("reader find hint row and status line name ↑ previous and ↓ next, and each arrow moves the count that way, wrapping at both ends", async () => {
+  const ui = await setup(createSession([user("u", "show the file"), assistant("a", codeAnswer)]), 80, 24);
+  await openReader(ui);
+  ui.mockInput.pressKey("f", { ctrl: true });
+  await ui.mockInput.typeText("needle"); await ui.settle();
+  const steps = arrowSteps(ui.hints());
+  expect(steps).toEqual({ up: -1, down: 1 });
+  expect(arrowSteps(ui.readerFind())).toEqual(steps);
+  const position = () => Number(/ · (\d+)\/4 · /.exec(ui.readerFind())?.[1]);
+  expect(position()).toBe(1);
+  for (const key of ["up", "down", "down", "down", "down", "down", "up"] as const) {
+    const before = position();
+    ui.mockInput.pressArrow(key); await ui.settle();
+    expect(arrowSteps(ui.hints())).toEqual(steps);
+    expect(arrowSteps(ui.readerFind())).toEqual(steps);
+    expect(position(), `${key} from ${before}`).toBe((before - 1 + steps![key] + 4) % 4 + 1);
+  }
+});
+
+test("with an empty query or no matches, conversation find hides the arrows and Enter keep, and Enter closes find in place", async () => {
+  const ui = await setup(createSession(Array.from({ length: 40 }, (_, i) => i % 2 ? assistant(`a${i}`, `answer ${i}`) : user(`u${i}`, `request ${i}`))), 80, 24);
+  ui.mockInput.pressKey("pageup"); await ui.settle();
+  const top = ui.transcript.scrollTop;
+  expect(top).toBeGreaterThan(0);
+  for (const query of ["", "absent"]) {
+    ui.mockInput.pressKey("f", { ctrl: true });
+    if (query) await ui.mockInput.typeText(query);
+    await ui.settle();
+    for (const row of [ui.status(), ui.hints()]) {
+      expect(arrowSteps(row), row).toBeUndefined();
+      expect(row).not.toContain("Enter");
+    }
+    expect(ui.hints()).toContain("Esc restore");
+    ui.mockInput.pressArrow("up"); ui.mockInput.pressArrow("down"); await ui.settle();
+    expect(ui.transcript.scrollTop).toBe(top);
+    ui.mockInput.pressEnter(); await ui.settle();
+    expect(ui.editor.placeholder).not.toContain("Find");
+    expect(ui.hints()).not.toContain("Esc restore");
+    expect(ui.transcript.scrollTop).toBe(top);
+  }
+});
+
+test("with an empty query or no matches, reader find hides the arrows and Enter keep, and Enter closes find in place", async () => {
+  const ui = await setup(createSession([user("u", "show the file"), assistant("a", codeAnswer)]), 80, 12);
+  await openReader(ui);
+  ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); await ui.settle();
+  const body = () => ui.captureCharFrame().split("\n").filter(line => /^\s*\d+ /.test(line)).join("\n");
+  const before = body();
+  for (const query of ["", "absent"]) {
+    ui.mockInput.pressKey("f", { ctrl: true });
+    if (query) await ui.mockInput.typeText(query);
+    await ui.settle();
+    expect(ui.readerFind()).toContain(query ? "No matches" : "Type a query");
+    for (const row of [ui.readerFind(), ui.hints()]) {
+      expect(arrowSteps(row), row).toBeUndefined();
+      expect(row).not.toContain("Enter");
+    }
+    ui.mockInput.pressArrow("up"); await ui.settle();
+    ui.mockInput.pressEnter(); await ui.settle();
+    expect(ui.reading()).toBe(true);
+    expect(ui.readerFind()).not.toContain("Esc restore");
+    expect(ui.hints()).toStartWith("Esc back");
+    expect(body()).toBe(before);
+  }
+});
+
+test("conversation find names Esc restore in its status, hint row and status bar for empty, matching and unmatched queries", async () => {
+  const ui = await setup(createSession([user("u1", "needle one"), assistant("a1", "needle two")]), 80, 24);
+  for (const query of ["", "needle", "absent"]) {
+    ui.resize(80, 24);
+    ui.mockInput.pressKey("f", { ctrl: true });
+    if (query) await ui.mockInput.typeText(query);
+    await ui.settle();
+    expect(escPhrases(ui.status()), ui.status()).toEqual(["Esc restore"]);
+    expect(escPhrases(ui.hints()), ui.hints()).toEqual(["Esc restore"]);
+    expect(escPhrases(ui.footer()).filter(phrase => phrase !== "Esc restore")).toEqual([]);
+    // Short layouts hide the hint row; the status bar then carries the same next action.
+    ui.resize(80, 12); await ui.settle();
+    expect(escPhrases(ui.status())).toEqual(["Esc restore"]);
+    expect(escPhrases(ui.footer()), ui.footer()).toEqual(["Esc restore"]);
+    ui.mockInput.pressEscape(); await ui.settle();
+  }
+});
+
+test("reader find names Esc restore in its find row, hint row and status bar for empty, matching and unmatched queries", async () => {
+  const ui = await setup(createSession([user("u", "show the file"), assistant("a", codeAnswer)]), 80, 24);
+  await openReader(ui);
+  for (const query of ["", "needle", "absent"]) {
+    ui.resize(80, 24);
+    ui.mockInput.pressKey("f", { ctrl: true });
+    if (query) await ui.mockInput.typeText(query);
+    await ui.settle();
+    expect(escPhrases(ui.readerFind()), ui.readerFind()).toEqual(["Esc restore"]);
+    expect(escPhrases(ui.hints()), ui.hints()).toEqual(["Esc restore"]);
+    expect(escPhrases(ui.footer()).filter(phrase => phrase !== "Esc restore")).toEqual([]);
+    ui.resize(80, 12); await ui.settle();
+    expect(escPhrases(ui.readerFind())).toEqual(["Esc restore"]);
+    expect(escPhrases(ui.footer()), ui.footer()).toEqual(["Esc restore"]);
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.reading()).toBe(true);
+  }
+});
+
+test("reader find keeps Esc back to request in its find row, hint row and status bar while an approval waits", async () => withTempDir(async root => {
+  await Bun.write(join(root, "note.txt"), "before");
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  const responses: ScriptedTurnFactory[] = [
+    { text: codeAnswer },
+    { toolCalls: [{ id: "edit-call", name: "edit", arguments: { path: "note.txt", edits: [{ oldText: "before", newText: "after" }] } }] },
+    { text: "done" },
+  ];
+  const ui = await setup(createSession(), 80, 24, {
+    workspace, contextManager: createContextManager(workspace), model: createScriptedModel({ responses }), tools: createToolRegistry([editTool]),
+    configEditor: new ConfigEditor({ cli: { approval: { mode: "ask" } } }, { user: join(root, "user-config"), project: join(root, "project-config") }),
+  });
+  await ui.controller.submit("show code"); await ui.settle();
+  await openReader(ui);
+  ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+  const turn = ui.controller.submit("edit");
+  for (let tries = 0; tries < 200 && !(ui.controller.snapshot().toolApproval && !ui.controller.snapshot().toolApproval!.loading); tries++) { await Bun.sleep(5); await ui.settle(); }
+  expect(ui.controller.snapshot().toolApproval).toBeDefined();
+  for (const query of ["", "needle", "absent"]) {
+    if (query) await ui.mockInput.typeText(query);
+    await ui.settle();
+    expect(escPhrases(ui.readerFind()), ui.readerFind()).toEqual(["Esc back to request"]);
+    expect(escPhrases(ui.hints()), ui.hints()).toEqual(["Esc back to request"]);
+    expect(escPhrases(ui.footer()), ui.footer()).toEqual(["Esc back to request"]);
+    for (let index = 0; index < query.length; index++) ui.mockInput.pressBackspace();
+  }
+  ui.mockInput.pressKey("c", { ctrl: true });
+  await turn; await ui.settle();
+  expect(await Bun.file(join(root, "note.txt")).text()).toBe("before");
+}));
+
+test("conversation find uses one scope phrase, this branch, in its placeholder and every status", async () => {
+  const ui = await setup(createSession([user("u1", "needle one"), assistant("a1", "needle two")]), 80, 24);
+  ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
+  expect(ui.editor.placeholder).toBe("Find in this branch…");
+  const statuses: string[] = [ui.status()];
+  await ui.mockInput.typeText("needle"); await ui.settle();
+  statuses.push(ui.status());
+  for (let index = 0; index < 6; index++) ui.mockInput.pressBackspace();
+  await ui.mockInput.typeText("absent"); await ui.settle();
+  statuses.push(ui.status());
+  for (const limited of [false, true]) for (const [query, count] of [["", 0], ["needle", 3], ["absent", 0]] as const)
+    statuses.push(conversationFindStatus({ query, selected: count ? 1 : -1, count, limited }));
+  expect(statuses.slice(0, 3).map(status => status.split(" · ")[0])).toEqual(["⌕ Find in this branch", "⌕ Find 1/2 in this branch", "⌕ No matches in this branch"]);
+  for (const status of statuses) {
+    expect(status).toContain("in this branch");
+    expect(status).not.toMatch(/conversation|active branch|displayed text|searched portion/);
+    expect(statusWords(status), status).toBeLessThanOrEqual(6);
+  }
+  expect(conversationFindStatus({ query: "needle", selected: 1, count: 3, limited: true })).toStartWith("Find 2/3+ in this branch");
+});
+
+test("narrow find rows never end in a clipped Esc or a key without its verb", async () => {
+  const ui = await setup(createSession([user("u1", "needle one"), assistant("a1", "needle two")]), 80, 30);
+  expect(fitFindStatus("No matches in this branch · Edit query · Esc restore", 46)).toBe("No matches in this branch · Edit query");
+  expect(fitFindStatus("No matches in this branch · Edit query · Esc restore", 30)).toBe("No matches in this branch");
+  for (const query of ["", "needle", "absent"]) {
+    ui.mockInput.pressKey("f", { ctrl: true });
+    if (query) await ui.mockInput.typeText(query);
+    for (const [width, height] of [[120, 30], [80, 30], [50, 30], [40, 30], [30, 30], [50, 8], [40, 8]] as const) {
+      ui.resize(width, height); await ui.settle();
+      const rows = ui.captureCharFrame().split("\n");
+      expect(escPhraseProblems(rows), `${query} at ${width}x${height}\n${rows.join("\n")}`).toEqual([]);
+      if (height >= 10) expect(ui.status(), `${query} at ${width}`).not.toMatch(/…$|· (?:Esc|Enter|Ctrl\+End)$/);
+    }
+    ui.mockInput.pressEscape(); await ui.settle();
+  }
 });
