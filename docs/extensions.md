@@ -294,12 +294,14 @@ turns start fresh. Denials require a nonempty explanation and stop the affected
 turn without sending an ordinary model request.
 
 `registerPrompt` names must be unique across enabled extensions. Schway reserves
-`environment`, `project-instructions`, `available-skills`, `active-skill`, and
-`summary`; prompt and turn contributions cannot claim these names. Duplicate
-prompt registration reports both source paths. Before each logical request,
-Schway prepares ordinary environment, applicable project instructions, skill
-metadata/body, and any compaction summary, then appends registered prompts and
-turn context. The `context` waterfall receives all of them. It may modify content,
+`environment`, `project-instructions`, `available-skills`, `active-skill`,
+`summary`, and `schway-local-date`; prompt and turn contributions cannot claim
+these names. Duplicate prompt registration reports both source paths. Before
+each logical request, Schway prepares ordinary environment, applicable project
+instructions, skill metadata/body, and any compaction summary, then the local
+date (`schway-local-date`), which is always the last Schway section and stays
+fixed for the whole user turn. It then appends registered prompts and turn
+context. The `context` waterfall receives all of them. It may modify content,
 reorder sections, or append sections; every existing name must occur exactly once.
 This keeps structural sections identifiable throughout interception.
 

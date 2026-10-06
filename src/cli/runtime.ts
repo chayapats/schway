@@ -17,6 +17,7 @@ import { createNativeCredentialStore, type CredentialStore } from "../auth/store
 import { loadResolvedSettings, ignoredProjectApprovalNotice, projectConfigPath, type ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
 import { createContextManager } from "../context/manager.ts";
+import { hasBuiltinWebFetch } from "../context/prompt.ts";
 import {
   RESERVED_SKILL_NAMES,
   discoverSkills,
@@ -277,11 +278,14 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   configDiagnosticSecrets(diagnosticContext, [settings]);
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
+  // Built-ins are fixed before extensions load, so an extension tool named web_fetch cannot enable web-lookup guidance.
+  const builtinTools = createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]);
+  const webLookupGuidance = hasBuiltinWebFetch(builtinTools.definitions());
   try {
     const loaded = await loadExtensions({
       modules: parsed.args.extensions ?? [], workspace, secrets, home, signal: io.signal, configDeprecations: io.configDeprecations,
       onDiagnostic: (message) => io.stderr.write(`${message}\n`),
-      tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+      tools: builtinTools,
     });
     tools = loaded.tools;
     extensions = loaded.runtime;
@@ -423,6 +427,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       configDeprecations: io.configDeprecations,
       home,
       contextWindow: settings.contextWindow,
+      webLookupGuidance,
     });
     if (skillTurn) {
       contextManager.setActiveSkill({

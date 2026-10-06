@@ -110,6 +110,8 @@ Nested files are discovered when work enters that subtree. Sibling directories a
 
 Replace the base system prompt with `~/.schway/SYSTEM.md` and append with `~/.schway/APPEND_SYSTEM.md`. Project-local `SYSTEM.md` is ignored; put project instructions in `AGENTS.md`.
 
+Each turn's model requests also include your local date, weekday, time zone name and UTC offset, captured once when the turn starts, so the selected provider receives them. Time of day and location are not sent. `SYSTEM.md` does not remove this context.
+
 ## Interactive configuration
 
 Start Schway with `bun run start` (or `schway` after installation). Set the selected provider's API key in the environment or pass `--api-key` at launch. Configuration does not store API keys.

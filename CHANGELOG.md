@@ -2,8 +2,19 @@
 
 ## [Unreleased]
 
+### Breaking
+
+- Extensions can no longer name a prompt or turn context section
+  `schway-local-date`. Schway now reserves that name for its own local-date
+  section, so an extension that registers it fails to load or stops its turn
+  with an error naming the extension. Rename the section to keep it (#319).
+
 ### Added
 
+- Model requests include the local date, weekday, time zone and UTC offset as
+  the last Schway context section, captured once per turn. Time of day is never
+  sent. When the built-in `web_fetch` tool is registered, the base prompt also
+  steers web lookups to it instead of curl against search-engine pages (#319).
 - `/history` browses recorded turn outcomes on the selected branch, newest first:
   outcome, time, duration, file and command counts, and per-turn evidence with
   observed command exits, observed files, undo state and an on-request current

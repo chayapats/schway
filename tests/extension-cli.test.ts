@@ -156,7 +156,7 @@ for (const deny of [false, true]) {
         model: createScriptedModel({ responses: [request => {
           requests++;
           expect(request.systemPrompt).toContain("request transformed");
-          expect(request.context.map(s => s.name)).toEqual(["environment", "extension", "turn", "waterfall"]);
+          expect(request.context.map(s => s.name)).toEqual(["environment", "schway-local-date", "extension", "turn", "waterfall"]);
           return { text: "done" };
         }] }),
       });
