@@ -469,6 +469,7 @@ test("picker shows one paired hint row with Esc back, keeps Enter resume narrow 
         expect(rows).toHaveLength(1);
         expect(rows[0]!.trim()).toBe("Loading sessions… · Esc back");
         expect(ui.frame()).not.toContain("No results");
+        expect(ui.frame()).not.toMatch(banned);
         open(); readdir.mockRestore();
         await ui.waitFor(() => f.controller.snapshot().sessionPicker?.loading === false);
         // Selected: Enter resume and Esc back at every width, other keys by priority.
@@ -490,6 +491,7 @@ test("picker shows one paired hint row with Esc back, keeps Enter resume narrow 
         expect(rows[0]).toContain("No matching sessions"); expect(rows[0]).toContain("Esc back"); expect(rows[0]).not.toContain("Enter resume");
         expect(ui.frame()).not.toContain("Last activity");
         expect(ui.frame()).not.toContain("Nothing selected");
+        expect(ui.frame()).not.toMatch(banned);
         // Resuming: a held resume replaces Enter resume with its own status.
         for (let i = 0; i < 3; i++) ui.terminal.mockInput.pressBackspace();
         await ui.settle();
@@ -500,6 +502,7 @@ test("picker shows one paired hint row with Esc back, keeps Enter resume narrow 
         rows = hintRows(ui.frame());
         expect(rows).toHaveLength(1);
         expect(rows[0]!.trim()).toBe("Resuming session… · Esc back");
+        expect(ui.frame()).not.toMatch(banned);
         finish(); await ui.settle();
         expect(ui.frame()).not.toMatch(banned);
         f.controller.closeSessionPicker(); await ui.settle();
