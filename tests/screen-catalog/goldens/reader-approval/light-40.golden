@@ -33,8 +33,8 @@ cursor 1 1 hidden
 
 
 
- ◌ Approval required · Ctrl+C cancel t…
- ◆ Ask  ◌ APPROVAL        Ctrl+C cancel
+ ◌ Approval · Ctrl+C cancel turn
+ ◆ Ask  ◌ Approval  Esc back to request
  Esc back to request · ↑↓ scroll
 == styles
 00 0-1 #ffffff #ecedea -
@@ -95,17 +95,17 @@ cursor 1 1 hidden
 26 0-40 #ffffff #f7f7f4 -
 27 0-1 #ffffff #f7f7f4 -
 27 1-2 #7a5000 #f7f7f4 b
-27 2-23 #545e6c #f7f7f4 -
-27 23-29 #1d232c #caced3 b
-27 29-39 #545e6c #f7f7f4 -
-27 39-40 #ffffff #f7f7f4 -
+27 2-14 #545e6c #f7f7f4 -
+27 14-20 #1d232c #caced3 b
+27 20-32 #545e6c #f7f7f4 -
+27 32-40 #ffffff #f7f7f4 -
 28 0-1 #545e6c #ecedea -
 28 1-6 #7a5000 #ecedea b
 28 6-7 #545e6c #ecedea -
 28 7-19 #ffffff #7a5000 b
-28 19-26 #545e6c #ecedea -
-28 26-32 #1d232c #c9cdd2 b
-28 32-39 #545e6c #ecedea -
+28 19-20 #545e6c #ecedea -
+28 20-23 #1d232c #c9cdd2 b
+28 23-39 #545e6c #ecedea -
 28 39-40 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-4 #1d232c #caced3 b
