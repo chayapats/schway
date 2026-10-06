@@ -955,6 +955,11 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     await settle(ui);
     expect(ui.captureCharFrame()).toContain("API key · xai");
     expect(ui.captureCharFrame()).toContain("Enter save · Esc cancel");
+    // The hint row names the same Enter and Esc verbs as the entry, never the generic panel keys.
+    const credentialRows = ui.captureCharFrame().split("\n").map(line => line.trim());
+    expect(credentialRows.filter(line => line === "Enter save · Esc cancel")).toHaveLength(2);
+    expect(ui.captureCharFrame()).not.toContain("Esc back");
+    expect(ui.captureCharFrame()).not.toContain("Enter confirm");
     ui.mockInput.pressEscape();
     await settle(ui);
     expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "xai" });
@@ -963,6 +968,23 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     expect(ui.editor.cursorOffset).toBe(5);
     expect(ui.controller.snapshot().credentialEntry).toBeUndefined();
   }
+});
+
+test("short API key entry names Esc cancel in the compact status bar, and Esc still saves nothing", async () => {
+  const ui = await setup(60, 12);
+  await ui.mockInput.pasteBracketedText("keep this draft");
+  expect(await ui.controller.login("")).toBe(true);
+  await settle(ui);
+  while (ui.controller.snapshot().loginChooser!.selectedId !== "xai") ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter(); await settle(ui);
+  expect(ui.controller.snapshot().credentialEntry).toBeDefined();
+  const frame = ui.captureCharFrame();
+  expect(frame.trimEnd().split("\n").at(-1)!.trim()).toBe("Auto · Esc cancel");
+  expect(frame).not.toContain("Esc back");
+  ui.mockInput.pressEscape(); await settle(ui);
+  expect(ui.controller.snapshot().credentialEntry).toBeUndefined();
+  expect(ui.controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "xai" });
+  expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("Credential entry cancelled; nothing saved.");
 });
 
 test("/login without arguments reaches the chooser through editor dispatch", async () => {
@@ -1512,12 +1534,40 @@ test("compact preferences show project scope and confirmation before a write", a
     expect(ui.captureCharFrame()).toContain("project");
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
-    expect(ui.controller.snapshot().preferences?.preview).toEndWith(" Enter confirm · Esc cancel");
+    expect(ui.controller.snapshot().preferences?.preview).not.toContain("Esc");
     expect(ui.captureCharFrame()).toContain("Enter saves");
     await preferenceEnter(ui);
     const applied = ui.controller.snapshot().transcript.at(-1)?.text ?? "";
     expect(applied).toEndWith(" Applied.");
     expect(applied).not.toContain("Esc cancel");
+  });
+});
+
+test("a staged preference preview names Esc cancel on every row and the status bar, once per row, until Esc clears it", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
+    expect(ui.controller.snapshot().preferences?.preview).toContain("Effective after save:");
+    for (const [width, height] of [[80, 28], [60, 12]] as const) {
+      ui.resize(width, height); await settle(ui);
+      const rows = ui.captureCharFrame().split("\n").map(line => line.trim()).filter(Boolean);
+      // Esc clears only the staged preview, so no row may promise that it leaves the panel.
+      expect(rows.join("\n")).toContain("Esc cancel");
+      expect(rows.join("\n")).not.toContain("Esc back");
+      expect(rows.join("\n")).not.toContain("Enter preview");
+      expect(rows.some((line, index) => index > 0 && line === rows[index - 1])).toBe(false);
+      if (height < 14) expect(rows.at(-1)).toBe("Auto · Esc cancel");
+    }
+    ui.resize(80, 28); await settle(ui);
+    expect(ui.captureCharFrame().split("\n").filter(line => line.trim() === "Enter confirm · Esc cancel")).toHaveLength(2);
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().preferences).toBeDefined();
+    expect(ui.controller.snapshot().preferences?.preview).toBeUndefined();
+    expect(ui.captureCharFrame()).not.toContain("Esc cancel");
+    expect(ui.captureCharFrame()).toContain("↑↓ select · Tab scope · Esc back");
+    ui.mockInput.pressEscape(); await settle(ui);
+    expect(ui.controller.snapshot().preferences).toBeUndefined();
   });
 });
 
@@ -1757,7 +1807,7 @@ test("preferences at narrow width scroll preview and Escape keeps pasted task an
     ui.mockInput.pressKey("p", { meta: true }); ui.resize(36, 16); await settle(ui);
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
     ui.mockInput.pressKey("pagedown"); await settle(ui);
-    expect(ui.controller.snapshot().preferences?.preview).toEndWith("Enter confirm · Esc cancel");
+    expect(ui.controller.snapshot().preferences?.preview).not.toContain("Esc");
     expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Esc cancel");
     expect(ui.editor.y + ui.editor.height).toBeLessThanOrEqual(16);
     await ui.mockInput.pasteBracketedText("paste while viewing");

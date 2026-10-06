@@ -5,6 +5,7 @@ import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import { TuiController } from "../src/tui/controller.ts";
+import type { TuiActivity } from "../src/tui/controller-types.ts";
 import { activityDetail, fitStatusAction, statusPill } from "../src/tui/presentation.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
@@ -312,4 +313,31 @@ test("narrow work rows drop status words before clipping the Esc stop action", (
   expect(fitStatusAction("Receiving response · Esc stop", 5)).toBe("Esc …");
   // Rows without a trailing Esc action keep the ordinary clipping.
   expect(fitStatusAction("Running 3 tools in parallel", 12)).toBe("Running 3 t…");
+});
+
+test("narrow work rows keep compaction outcomes and the waiting phase whole beside Esc stop", () => {
+  const activity = (patch: Partial<TuiActivity>): TuiActivity => ({ operationId: 1, phase: "preparing", elapsedMs: 0, activeTools: 0, toolNames: [], cancellation: "none", ...patch });
+  // A 30-column terminal leaves 26 columns for the activity row text; 20 is the 24-column variant.
+  const rows = [
+    [activity({ compactionOutcome: "completed" }), "Compacted · Esc stop"],
+    [activity({ compactionOutcome: "noop" }), "Unchanged · Esc stop"],
+    [activity({ compactionOutcome: "failed" }), "Compact failed · Esc stop"],
+    [activity({ compactionOutcome: "cancelled" }), "Not compacted · Esc stop"],
+    [activity({ phase: "waiting" }), "Waiting · Esc stop"],
+    [activity({ phase: "preparing" }), "Preparing · Esc stop"],
+    [activity({ phase: "compacting" }), "Compacting · Esc stop"],
+    [activity({ phase: "retry" }), "Retrying · Esc stop"],
+  ] as const;
+  for (const [state, narrow] of rows) {
+    const detail = activityDetail(state);
+    expect(fitStatusAction(detail, 40)).toBe(detail);
+    expect(fitStatusAction(detail, 26)).toBe(narrow);
+    // Too narrow for the short form: the whole status goes, never just its outcome word.
+    expect(fitStatusAction(detail, 10)).toBe("Esc stop");
+  }
+  expect(fitStatusAction(activityDetail(activity({ compactionOutcome: "failed" })), 26)).not.toBe("Compaction · Esc stop");
+  expect(fitStatusAction(activityDetail(activity({ phase: "waiting" })), 24)).toBe("Waiting · Esc stop");
+  expect(fitStatusAction(activityDetail(activity({ phase: "waiting" })), 20)).toBe("Waiting · Esc stop");
+  // A status with no short form drops to the action alone instead of a word fragment.
+  expect(fitStatusAction("Copying several large files · Esc stop", 26)).toBe("Esc stop");
 });

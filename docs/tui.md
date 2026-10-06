@@ -248,7 +248,7 @@ current diff without changing the turn list or counts. While a read is pending t
 pane shows `Loading current diff…` instead of earlier content, and a result that
 arrives after you select another file, close review or switch session is discarded.
 **F2** swaps the diff for turn details, titled `Turn N details`; F2 again or Esc
-returns to the diff. Esc from the diff restores the same conversation position,
+returns to the diff. Esc from the diff goes back to the same conversation position,
 unsent draft, and cursor. After a failed turn, F2 in the conversation appends the
 same turn details, including any recovery diagnostics; review Details also add the
 review scope notes.
@@ -528,7 +528,8 @@ the same paths. F2 details say what review read: with change tracking off,
 outside Git or when Git fails, they say no current Git diff was read instead of
 describing Git reads. In a session that cannot save, `/undo` and `/history` point
 to `/new start fresh · /sessions browse`, like the hint row.
-Esc returns to the same undo panel; Esc again closes it and restores the draft. Reviewing, selecting and
+Esc goes back to the same undo panel; Esc again cancels the offered undo, or goes
+back from a result, and the draft returns. Reviewing, selecting and
 closing never write files, Git, the session or undo data. Undo never runs inverse
 shell commands, `git reset` or `git checkout`.
 

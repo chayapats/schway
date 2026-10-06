@@ -96,18 +96,22 @@ export function fitLine(text: string, columns: number): string {
   return `${result}…`;
 }
 
-/** Fit a work status row, keeping its trailing `Esc …` action whole by dropping status words first. */
+/** Short forms of work statuses that keep their meaning, including compaction outcomes, on narrow rows. */
+const SHORT_WORK_STATUS: Readonly<Record<string, string>> = {
+  "Preparing request": "Preparing", "Waiting for response": "Waiting", "Receiving response": "Receiving",
+  "Retrying connection": "Retrying", "Compacting context": "Compacting", "Context compacted": "Compacted",
+  "Context unchanged": "Unchanged", "Compaction failed": "Compact failed", "Compaction cancelled": "Not compacted",
+};
+
+/** Fit a work status row with a trailing `Esc …` action: full row, then the status's short form, then the action alone. */
 export function fitStatusAction(text: string, columns: number): string {
   const line = displayText(text).replace(/\s+/g, " ");
   const separator = line.lastIndexOf(" · ");
   const action = separator < 0 ? "" : line.slice(separator + 3);
   if (Bun.stringWidth(line) <= columns || !action.startsWith("Esc ")) return fitLine(line, columns);
-  const words = line.slice(0, separator).split(" ");
-  while (words.length > 1) {
-    words.pop();
-    const candidate = `${words.join(" ")} · ${action}`;
-    if (Bun.stringWidth(candidate) <= columns) return candidate;
-  }
+  const short = SHORT_WORK_STATUS[line.slice(0, separator)];
+  // Never cut a status mid-phrase: an outcome word such as "failed" either stays or the whole status goes.
+  if (short && Bun.stringWidth(`${short} · ${action}`) <= columns) return `${short} · ${action}`;
   return fitLine(action, columns);
 }
 

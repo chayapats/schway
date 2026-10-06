@@ -225,6 +225,31 @@ test("exact keys find their guidance first and Thai or unmatched searches offer 
   expect(ui.submitted).toEqual([]);
 });
 
+test("a short palette names its own Esc verb in the compact status bar: restore in results, back in guidance", async () => {
+  const ui = await setup({ width: 60, height: 12 });
+  await ui.mockInput.pasteBracketedText(thaiDraft); ui.editor.cursorOffset = 5; await ui.settle();
+  const footer = () => ui.captureCharFrame().trimEnd().split("\n").at(-1)!.trim();
+  await openPalette(ui);
+  await ui.mockInput.pasteBracketedText("ภาษาไทยไม่มี"); await ui.settle();
+  expect(ui.rows()).toEqual([PALETTE_NO_MATCHES]);
+  expect(ui.hints.visible).toBe(false);
+  expect(footer()).toBe("Auto · Esc restore");
+  await clearQuery(ui);
+  await ui.mockInput.typeText("newline"); await ui.settle();
+  expect(footer()).toBe("Auto · Esc restore");
+  ui.mockInput.pressEnter(); await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Insert a newline");
+  expect(footer()).toBe("Auto · Esc back");
+  // The verbs describe the handlers: back returns to the same results, restore returns the draft.
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.controller.commandHelpOpen).toBe(true); expect(ui.editor.plainText).toBe("newline");
+  expect(footer()).toBe("Auto · Esc restore");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(ui.controller.commandHelpOpen).toBe(false);
+  expect(ui.editor.plainText).toBe(thaiDraft); expect(ui.editor.cursorOffset).toBe(5);
+  expect(footer()).toBe("Auto · Enter send");
+});
+
 test("commands preview with arguments and Enter inserts without executing; deletion reaches its path only after ordinary Enter", async () => {
   const ui = await setup();
   await ui.mockInput.pasteBracketedText("keep ไทย"); await ui.settle();
