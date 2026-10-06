@@ -2,6 +2,7 @@ import type { TuiActivity, TuiTranscriptEntry } from "./controller.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
 import { formatRetryWait, retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import type { TurnOutcome } from "./controller-types.ts";
+import { displayUrl } from "../tools/web-fetch-display.ts";
 
 /** Return the visible completion word and glyph without implying verification. */
 export function outcomeLabel(outcome: TurnOutcome): string {
@@ -145,6 +146,7 @@ export function shortenWorkspacePath(path: string, home: string, columns: number
 export function toolTarget(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== "object") return undefined;
   const values = args as Record<string, unknown>;
+  if (name === "web_fetch") return typeof values.url === "string" ? displayUrl(values.url) : undefined;
   const candidate = name === "bash" ? values.command
     : name === "grep" || name === "find" ? values.pattern
     : ["read", "write", "edit", "ls"].includes(name) ? values.path : undefined;

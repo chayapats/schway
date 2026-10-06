@@ -13,3 +13,7 @@ Shift+Tab cycles the mode for the process. `approval.mode` in config sets the de
 ## Consequences
 
 This deliberately narrows the original section 4 non-goal of a built-in permission framework. These are three fixed toggles without per-path rules, command allowlists or a policy language, and safety cannot depend on an optional extension. Approval settings do not change the model/auth choice or credential precedence in [ADR 0001](0001-interactive-choice-memory.md).
+
+## Note: `web_fetch` (#318)
+
+The built-in `web_fetch` tool joins the tools that read only. It declares `effect: "read-only"` and `execution: "parallel"`, so it runs without a prompt in all three modes, and the decision above is unchanged. Reading only is not the same as staying offline: a fetch sends its URL to a remote host, so in `ask` and `read-only` the model can put workspace content into a URL without approval. The configuration, headless and [tools](../tools.md#fetch-web-pages) docs say so. Loopback and private addresses stay reachable. `bash` keeps `effect: "mutating"` and `execution: "exclusive"`; scheduling stays separate from effect, and no shell command is classified as read-only.

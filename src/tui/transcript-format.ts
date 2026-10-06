@@ -1,5 +1,6 @@
 import { formatUndoResult } from "../undo/record.ts";
 import { toolTarget } from "./presentation.ts";
+import { credentialValues, displayUrl, maskCredentialsInText, UNDISPLAYABLE_URL } from "../tools/web-fetch-display.ts";
 import type { SessionRecord } from "../conversation/types.ts";
 import type { TuiShellOutcome, TuiTranscriptEntry } from "./controller-types.ts";
 import { buildEditDiff, buildEditDiffHunks, type DiffRow } from "../text/diff.ts";
@@ -30,6 +31,13 @@ export function summarizeToolResult(
     ? formatDuration(durationMs) : undefined;
   if (status !== "success" || typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
   const record = details as Record<string, unknown>;
+  if (name === "web_fetch") {
+    const { status: httpStatus, rawBytes, truncated } = record;
+    if (!isCount(httpStatus) || !isCount(rawBytes) || typeof truncated !== "boolean") return undefined;
+    const elapsed = typeof record.durationMs === "number" && Number.isFinite(record.durationMs) && record.durationMs >= 0 ? record.durationMs
+      : typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined;
+    return [`HTTP ${httpStatus}`, formatByteSize(rawBytes), ...(elapsed === undefined ? [] : [formatDuration(elapsed)]), ...(truncated ? ["truncated"] : [])].join(" · ");
+  }
   if (name === "read") {
     const { lineCount, startLine, endLine, truncated } = record;
     if (!isCount(lineCount) || !isCount(startLine) || startLine < 1 || !isCount(endLine) || typeof truncated !== "boolean") return undefined;
@@ -113,6 +121,13 @@ export function hasInlineDiff(entry: TuiTranscriptEntry, limit: number): boolean
     && !!entry.diffRows?.length && entry.diffRows.length <= limit;
 }
 
+/** Format a byte count as B, KB or MB using 1024-byte units. */
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const [value, unit] = bytes < 1024 * 1024 ? [bytes / 1024, "KB"] : [bytes / (1024 * 1024), "MB"];
+  return `${value < 9.95 ? value.toFixed(1) : Math.round(value)} ${unit}`;
+}
+
 /** Accept finite nonnegative integers for result counts and original line positions. */
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -163,7 +178,9 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
     } else if (item.type === "tool_result") {
       const entry = pending.get(item.toolCallId);
       if (entry) {
-        entry.text = boundDisplay(item.content);
+        const args = argumentsByCall.get(item.toolCallId);
+        const url = typeof args === "object" && args !== null && typeof (args as { url?: unknown }).url === "string" ? (args as { url: string }).url : undefined;
+        entry.text = entry.toolName === "web_fetch" ? webFetchDisplayText(item.content, undefined, url) : boundDisplay(item.content);
         entry.toolStatus = item.isError ? "error" : "success";
         entry.resultSummary = summarizeResumedToolResult(entry.toolName ?? "", entry.toolStatus, argumentsByCall.get(item.toolCallId));
         pending.delete(item.toolCallId);
@@ -180,6 +197,97 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
     }
   }
   return transcript;
+}
+
+/**
+ * Display a web_fetch result without re-showing the tool's own URL echo: the first line becomes the structured
+ * `details.statusLine`, or, without details, a status rebuilt from known fields and the requested URL's display form.
+ * The server text gets best-effort masking plus every exact credential value from the requested and echoed URLs.
+ */
+export function webFetchDisplayText(content: string, details: unknown, requestedUrl?: string): string {
+  return webFetchMasked(content, details, requestedUrl, webFetchSecrets(content, requestedUrl));
+}
+
+/** Mask one web_fetch result with precomputed exact credential values. */
+function webFetchMasked(content: string, details: unknown, requestedUrl: string | undefined, secrets: readonly string[]): string {
+  const statusLine = typeof details === "object" && details !== null && typeof (details as { statusLine?: unknown }).statusLine === "string"
+    ? (details as { statusLine: string }).statusLine : undefined;
+  const newline = content.indexOf("\n");
+  const first = newline < 0 ? content : content.slice(0, newline);
+  const rest = newline < 0 ? "" : content.slice(newline);
+  const line = statusLine ?? rebuiltStatusLine(first, requestedUrl);
+  return boundDisplay(line === undefined ? maskCredentialsInText(content, secrets) : `${line}${maskCredentialsInText(rest, secrets)}`);
+}
+
+/** Longest first line read for the tool's own status line; the tool bounds that line well below this. */
+const MAX_FIRST_LINE = 64 * 1024;
+
+/** Exact credential values from the requested URL and from the URL the tool's own first line carries; never persisted. */
+function webFetchSecrets(content: string, requestedUrl: string | undefined): string[] {
+  const newline = content.slice(0, MAX_FIRST_LINE + 1).indexOf("\n");
+  const fields = (newline < 0 ? content.slice(0, MAX_FIRST_LINE) : content.slice(0, newline)).split(" · ");
+  const known = fields[0] === "No response" || fields[0] === "No request sent" || /^HTTP \d{3}/.test(fields[0] ?? "");
+  const echoed = known && fields.length > 1 ? (/^after \d+ redirects?$/.test(fields.at(-1)!) ? fields.at(-2)! : fields.at(-1)!) : "";
+  return [...new Set([...(requestedUrl ? credentialValues(requestedUrl) : []), ...(echoed ? credentialValues(echoed) : [])])];
+}
+
+/**
+ * One-line-ready preview of a web_fetch result that masks only a bounded prefix: the first line plus about two
+ * preview lengths, cut at ASCII whitespace when one is near. The cut moves before any exact credential value it
+ * would split, and when it is not at whitespace a sentinel `@` closes an open userinfo span so it is masked to the cut.
+ */
+export function webFetchPreviewText(content: string, requestedUrl: string | undefined, bound: number): string {
+  const secrets = webFetchSecrets(content, requestedUrl);
+  const newline = content.slice(0, MAX_FIRST_LINE + 1).indexOf("\n");
+  const head = newline >= 0 ? newline : 0;
+  let cut = head + bound * 2;
+  if (cut >= content.length) return webFetchMasked(content, undefined, requestedUrl, secrets);
+  for (let index = cut; index < Math.min(content.length, cut + bound * 2); index++) {
+    if (content.charCodeAt(index) <= 32) { cut = index; break; }
+  }
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const secret of secrets) {
+      const from = Math.max(head, cut - secret.length + 1);
+      const found = content.slice(from, cut + secret.length - 1).indexOf(secret);
+      if (found >= 0 && from + found < cut) { cut = from + found; moved = true; }
+    }
+  }
+  // At ASCII whitespace no masked span is open; elsewhere the sentinel closes an open userinfo span.
+  if (content.charCodeAt(cut) <= 32) return webFetchMasked(content.slice(0, cut), undefined, requestedUrl, secrets);
+  const shown = webFetchMasked(`${content.slice(0, cut)}@`, undefined, requestedUrl, secrets);
+  return shown.endsWith("@") ? shown.slice(0, -1) : shown;
+}
+
+/** The `url` argument of the web_fetch call with this ID, from the latest assistant message that holds it. */
+export function webFetchCallUrl(items: readonly SessionRecord[], toolCallId: string): string | undefined {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!;
+    if (item.type !== "assistant") continue;
+    const call = item.content.find(block => block.type === "tool_call" && block.id === toolCallId);
+    if (call?.type !== "tool_call") continue;
+    const url = (call.arguments as { url?: unknown } | null)?.url;
+    return typeof url === "string" ? url : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Rebuild a stored first line from recognized fields only, never re-emitting its URL: `HTTP NNN` keeps a plain reason
+ * phrase, type and size when they match, then adds the requested URL's display form. Other lines return undefined.
+ */
+function rebuiltStatusLine(first: string, requestedUrl: string | undefined): string | undefined {
+  const fields = first.split(" · ");
+  const url = requestedUrl === undefined ? UNDISPLAYABLE_URL : displayUrl(requestedUrl);
+  if (fields[0] === "No response" || fields[0] === "No request sent") return `${fields[0]} · ${url}`;
+  const code = /^HTTP (\d{3})(?![\d])/.exec(fields[0] ?? "");
+  if (!code) return undefined;
+  const kept = [/^HTTP \d{3}( [A-Za-z][A-Za-z '-]{0,40})?$/.test(fields[0]!) ? fields[0]! : `HTTP ${code[1]}`];
+  if (/^(no content type|[a-z0-9.+-]+\/[a-z0-9.+-]+)$/.test(fields[1] ?? "")) {
+    kept.push(fields[1]!);
+    if (/^([\d,]+ bytes?( read| \(read limit\))?|\d+ MiB( read| \(read limit\))?|size unknown)$/.test(fields[2] ?? "")) kept.push(fields[2]!);
+  }
+  return `${kept.join(" · ")} · ${url}`;
 }
 
 /** Bound displayed tool output so one result cannot flood the terminal. */
@@ -224,7 +332,9 @@ export function formatToolFinishedText(
   details: unknown,
   status: "success" | "error" | "cancelled",
   transformText: (text: string) => string = text => text,
+  requestedUrl?: string,
 ): string {
+  if (name === "web_fetch") return webFetchDisplayText(content, details, requestedUrl);
   if (status === "cancelled") {
     return boundDisplay(content);
   }

@@ -41,8 +41,8 @@ or renaming a member, or making a field required, is a major change.
 
 ## Core tool semantics
 
-The core tools are `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`.
-Any change to their meaning needs a major version. Semantic changes include:
+The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`
+and `ls`. Any change to their meaning needs a major version. Semantic changes include:
 
 - Renaming or removing a tool or parameter.
 - Changing a parameter’s meaning.
@@ -51,7 +51,8 @@ Any change to their meaning needs a major version. Semantic changes include:
 - Changing the declared effect: reads only or can change state.
 - Changing when a call is an error.
 - Editing a core tool’s model-facing description text.
-- Changing output bounds, such as the 50,000-character cap.
+- Changing output bounds, such as the 50,000-character cap or the `web_fetch`
+  deadlines, raw-body cap, 32 KiB output cap and redirect limit.
 
 ## Changelog
 

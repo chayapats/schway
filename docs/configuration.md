@@ -90,6 +90,8 @@ readiness without proving remote access.
 
 `approval.mode` accepts `auto` (default), `ask`, or `read-only`; unknown modes are rejected. Ask previews mutating tools for an interactive decision; headless ask refuses them immediately with `approval required; headless cannot ask`. A denial alone does not change the exit code. Read-only lets tools investigate but refuses tools that can change files or run commands. Skill activation remains available.
 
+Read-only does not mean offline. Tools that only read, including `web_fetch`, run without a prompt in every mode, and a fetch sends its URL to a remote host. In `ask` and `read-only`, the model can still put workspace content into a fetched URL without asking. See [Fetch web pages](tools.md#fetch-web-pages).
+
 ```json
 { "approval": { "mode": "read-only" } }
 ```

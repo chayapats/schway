@@ -44,6 +44,7 @@ import { loadExtensions } from "../extensions/loader.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
+import { webFetchTool } from "../tools/web-fetch.ts";
 import { loadProviderModel } from "../model/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../config/removed-provider.ts";
@@ -279,7 +280,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
   // Built-ins are fixed before extensions load, so an extension tool named web_fetch cannot enable web-lookup guidance.
-  const builtinTools = createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]);
+  const builtinTools = createToolRegistry([readTool, writeTool, editTool, bashTool, webFetchTool, grepTool, findTool, lsTool]);
   const webLookupGuidance = hasBuiltinWebFetch(builtinTools.definitions());
   try {
     const loaded = await loadExtensions({

@@ -1,6 +1,7 @@
 import type { SessionRecord } from "../conversation/types.ts";
 import type { Session } from "../session/session.ts";
 import type { SessionEntry } from "../session/branches.ts";
+import { webFetchPreviewText } from "./transcript-format.ts";
 
 /** Maximum tree nodes rendered in one snapshot; older nodes are pinned around root, heads and selection. */
 export const MAX_BRANCH_TREE_NODES = 200;
@@ -69,8 +70,8 @@ export interface BranchTreeSnapshot {
   totalNodeCount: number;
 }
 
-/** Build a bounded one-line preview for one durable record or the empty root. */
-export function branchTreePreviewForRecord(item: SessionRecord | undefined, limit: number = MAX_BRANCH_TREE_PREVIEW_CHARS): string {
+/** Build a bounded one-line preview for one durable record or the empty root; a web_fetch result shows its display-safe form. */
+export function branchTreePreviewForRecord(item: SessionRecord | undefined, limit: number = MAX_BRANCH_TREE_PREVIEW_CHARS, toolCall?: { name: string; arguments: unknown }): string {
   const bound = Math.max(1, Math.floor(limit));
   if (!item) {
     const root = "(empty conversation root)";
@@ -92,7 +93,11 @@ export function branchTreePreviewForRecord(item: SessionRecord | undefined, limi
     }
     return "(reasoning)";
   }
-  if (item.type === "tool_result") return oneLine(item.content);
+  if (item.type === "tool_result") {
+    if (toolCall?.name !== "web_fetch") return oneLine(item.content);
+    const url = (toolCall.arguments as { url?: unknown } | null)?.url;
+    return oneLine(webFetchPreviewText(item.content, typeof url === "string" ? url : undefined, bound));
+  }
   if (item.type === "turn_undo") return oneLine(`Undid turn ${item.turnNumber}`);
   return oneLine(`Compacted: ${item.summary}`);
 }
@@ -141,6 +146,9 @@ export function buildBranchTreeSnapshot(session: Session, selectedId?: string, l
     if (list) list.push(entry);
     else children.set(entry.parentId, [entry]);
   }
+  const toolCalls = new Map<string, { name: string; arguments: unknown }>();
+  for (const item of itemById.values()) if (item.type === "assistant") for (const block of item.content) if (block.type === "tool_call") toolCalls.set(block.id, block);
+  const preview = (item: SessionRecord | undefined) => branchTreePreviewForRecord(item, previewChars, item?.type === "tool_result" ? toolCalls.get(item.toolCallId) : undefined);
   const kindOf = (id: string): BranchTreeEntryKind => {
     if (id === session.rootId) return "root";
     const item = itemById.get(id);
@@ -164,7 +172,7 @@ export function buildBranchTreeSnapshot(session: Session, selectedId?: string, l
       ...(next.parentId === undefined ? {} : { parentId: next.parentId }),
       depth: next.depth,
       kind: kindOf(next.id),
-      preview: branchTreePreviewForRecord(next.id === session.rootId ? undefined : itemById.get(next.id), previewChars),
+      preview: preview(next.id === session.rootId ? undefined : itemById.get(next.id)),
       isForkPoint: forkPoints.has(next.id),
       isHead: headIds.length > 0,
       headBranchIds: [...headIds],
@@ -206,7 +214,7 @@ export function buildBranchTreeSnapshot(session: Session, selectedId?: string, l
     active: branch.id === session.activeBranchId,
     headId: branch.headId,
     entryCount: branch.entryCount,
-    preview: branchTreePreviewForRecord(branch.headId === session.rootId ? undefined : itemById.get(branch.headId) ?? undefined, previewChars),
+    preview: preview(branch.headId === session.rootId ? undefined : itemById.get(branch.headId) ?? undefined),
   }));
   return { rootId: session.rootId, activeBranchId: session.activeBranchId, branches: rows, nodes, truncated, selectedId: selected, totalNodeCount };
 }

@@ -54,6 +54,7 @@ completed-turn
 shell-long-failure
 shell-long-failure-expanded
 shell-outcomes
+web-fetch-rows
 large-edit
 stopped-streaming
 stopped-tool

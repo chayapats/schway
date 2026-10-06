@@ -1,0 +1,156 @@
+schway-screen 1
+screen web-fetch-rows
+title Web fetch results
+description Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.
+variant nocolor-dark-120
+size 120x30
+cursor 7 27 visible
+== text
+ ⚡ schway  /project
+
+   ✓  WEB_FETCH  https://weather.example.test/th/bangkok/today                           HTTP 200 · 47 KB · 0.4s ▸
+   ✓  WEB_FETCH  https://reader.example.test/article/42                      HTTP 200 · 86 KB · 1.4s · truncated ▸
+   !  WEB_FETCH  https://api.example.test/forecast?city=…&access_token=…                                   error ▾
+     HTTP 401 Unauthorized · application/json · 58 bytes · https://api.example.test/forecast?city=…&access_token=…
+
+     The server returned HTTP 401 Unauthorized.
+
+     {"error":"invalid token","docs":"https://api.example.test/forecast?city=Bangkok&access_token=***"}
+     Tool failed. Inspect this result before continuing.
+
+   ⠋  WEB_FETCH  https://maps.example.test/route?from=…&to=…&api_key=…                                  running… ▸
+
+
+
+
+
+
+
+
+
+
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › Ask Schway…
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                                                                     ctx ~246
+  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+== styles
+00 0-1 #ffffff #161b24 -
+00 1-3 #e6eaf0 #161b24 b
+00 3-4 #e6eaf0 #161b24 -
+00 4-10 #e6eaf0 #161b24 b
+00 10-20 #8b95a7 #161b24 -
+00 20-120 #ffffff #161b24 -
+01 0-120 #ffffff #0e1117 -
+02 0-2 #ffffff #0e1117 -
+02 2-3 #e6eaf0 #1e2430 -
+02 3-4 #e6eaf0 #1e2430 b
+02 4-5 #e6eaf0 #1e2430 -
+02 5-16 #e6eaf0 #4a505a b
+02 16-62 #e6eaf0 #1e2430 -
+02 62-115 #8b95a7 #1e2430 -
+02 115-117 #ffffff #1e2430 -
+02 117-120 #ffffff #0e1117 -
+03 0-2 #ffffff #0e1117 -
+03 2-3 #e6eaf0 #1e2430 -
+03 3-4 #e6eaf0 #1e2430 b
+03 4-5 #e6eaf0 #1e2430 -
+03 5-16 #e6eaf0 #4a505a b
+03 16-55 #e6eaf0 #1e2430 -
+03 55-115 #8b95a7 #1e2430 -
+03 115-117 #ffffff #1e2430 -
+03 117-120 #ffffff #0e1117 -
+04 0-2 #ffffff #0e1117 -
+04 2-3 #e6eaf0 #1e2430 -
+04 3-4 #e6eaf0 #1e2430 b
+04 4-5 #e6eaf0 #1e2430 -
+04 5-16 #e6eaf0 #4a505a b
+04 16-72 #e6eaf0 #1e2430 -
+04 72-107 #8b95a7 #1e2430 -
+04 107-112 #e6eaf0 #1e2430 -
+04 112-115 #8b95a7 #1e2430 -
+04 115-117 #ffffff #1e2430 -
+04 117-120 #ffffff #0e1117 -
+05 0-2 #ffffff #0e1117 -
+05 2-5 #ffffff #1e2430 -
+05 5-114 #8b95a7 #1e2430 -
+05 114-117 #ffffff #1e2430 -
+05 117-120 #ffffff #0e1117 -
+06 0-2 #ffffff #0e1117 -
+06 2-117 #ffffff #1e2430 -
+06 117-120 #ffffff #0e1117 -
+07 0-2 #ffffff #0e1117 -
+07 2-5 #ffffff #1e2430 -
+07 5-47 #8b95a7 #1e2430 -
+07 47-117 #ffffff #1e2430 -
+07 117-120 #ffffff #0e1117 -
+08 0-2 #ffffff #0e1117 -
+08 2-117 #ffffff #1e2430 -
+08 117-120 #ffffff #0e1117 -
+09 0-2 #ffffff #0e1117 -
+09 2-5 #ffffff #1e2430 -
+09 5-103 #8b95a7 #1e2430 -
+09 103-117 #ffffff #1e2430 -
+09 117-120 #ffffff #0e1117 -
+10 0-2 #ffffff #0e1117 -
+10 2-5 #ffffff #1e2430 -
+10 5-56 #8b95a7 #1e2430 -
+10 56-117 #ffffff #1e2430 -
+10 117-120 #ffffff #0e1117 -
+11 0-120 #ffffff #0e1117 -
+12 0-2 #ffffff #0e1117 -
+12 2-3 #e6eaf0 #1e2430 -
+12 3-4 #e6eaf0 #1e2430 b
+12 4-5 #e6eaf0 #1e2430 -
+12 5-16 #e6eaf0 #4a505a b
+12 16-70 #e6eaf0 #1e2430 -
+12 70-115 #8b95a7 #1e2430 -
+12 115-117 #ffffff #1e2430 -
+12 117-120 #ffffff #0e1117 -
+13 0-120 #ffffff #0e1117 -
+14 0-120 #ffffff #0e1117 -
+15 0-120 #ffffff #0e1117 -
+16 0-120 #ffffff #0e1117 -
+17 0-120 #ffffff #0e1117 -
+18 0-120 #ffffff #0e1117 -
+19 0-120 #ffffff #0e1117 -
+20 0-120 #ffffff #0e1117 -
+21 0-120 #ffffff #0e1117 -
+22 0-120 #ffffff #0e1117 -
+23 0-120 #ffffff #0e1117 -
+24 0-120 #ffffff #0e1117 -
+25 0-2 #ffffff #0e1117 -
+25 2-118 #161b24 #0e1117 -
+25 118-120 #ffffff #0e1117 -
+26 0-2 #ffffff #0e1117 -
+26 2-6 #e6eaf0 #161b24 -
+26 6-17 #8b95a7 #161b24 -
+26 17-118 #ffffff #161b24 -
+26 118-120 #ffffff #0e1117 -
+27 0-2 #ffffff #0e1117 -
+27 2-118 #161b24 #0e1117 -
+27 118-120 #ffffff #0e1117 -
+28 0-1 #8b95a7 #161b24 -
+28 1-7 #e6eaf0 #161b24 b
+28 7-8 #8b95a7 #161b24 -
+28 8-17 #e6eaf0 #444951 b
+28 17-18 #8b95a7 #161b24 -
+28 18-43 #e6eaf0 #1e2430 -
+28 43-119 #8b95a7 #161b24 -
+28 119-120 #ffffff #0e1117 -
+29 0-2 #ffffff #0e1117 -
+29 2-11 #e6eaf0 #293140 b
+29 11-26 #8b95a7 #0e1117 -
+29 26-31 #e6eaf0 #293140 b
+29 31-39 #8b95a7 #0e1117 -
+29 39-45 #e6eaf0 #293140 b
+29 45-53 #8b95a7 #0e1117 -
+29 53-58 #e6eaf0 #293140 b
+29 58-69 #8b95a7 #0e1117 -
+29 69-75 #e6eaf0 #293140 b
+29 75-84 #8b95a7 #0e1117 -
+29 84-85 #e6eaf0 #293140 b
+29 85-94 #8b95a7 #0e1117 -
+29 94-120 #ffffff #0e1117 -
