@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "../conversation/types.ts";
 import type { Model, ModelRequest, ModelUsage } from "../model/model.ts";
-import type { RuntimeEvent } from "./events.ts";
+import type { ModelRetryCause, RuntimeEvent } from "./events.ts";
 
 /** Total provider stream attempts allowed for one model turn, including the first. */
 const MAX_TRANSIENT_ATTEMPTS = 3;
@@ -141,7 +141,8 @@ export async function* streamModelTurn(options: {
       if (isContextOverflowError(error)) {
         return { kind: "overflow", message };
       }
-      const transient = isTransientProviderFailure(error);
+      const cause = transientFailureCause(error);
+      const transient = cause !== undefined;
       if (transient && attempt < MAX_TRANSIENT_ATTEMPTS) {
         const delayMs = retryDelayMs(error, attempt, clock.now());
         yield {
@@ -150,6 +151,7 @@ export async function* streamModelTurn(options: {
           maxAttempts: MAX_TRANSIENT_ATTEMPTS,
           delayMs,
           message,
+          cause,
         };
         try {
           await clock.sleep(delayMs, signal);
@@ -205,31 +207,34 @@ function providerFailureCategory(error: unknown): "auth" | "credential-store" | 
   return "provider";
 }
 
-/** True for rate limits, 5xx, and transient network failures; false for abort/4xx. */
-function isTransientProviderFailure(error: unknown): boolean {
+/**
+ * Retry cause for rate limits, 5xx, and transient network failures; undefined for abort/4xx.
+ * The first HTTP status in the error chain decides; a network failure counts only when no status does.
+ */
+function transientFailureCause(error: unknown): ModelRetryCause | undefined {
   if (isAbortError(error)) {
-    return false;
+    return undefined;
   }
   let sawNetwork = false;
   for (const item of errorChain(error)) {
     if (isAbortError(item)) {
-      return false;
+      return undefined;
     }
     const status = httpStatus(item);
     if (status === 429) {
-      return true;
+      return "rate-limit";
     }
     if (status !== undefined && status >= 500 && status <= 599) {
-      return true;
+      return "provider";
     }
     if (status !== undefined && status >= 400 && status <= 499) {
-      return false;
+      return undefined;
     }
     if (isNetworkFailure(item)) {
       sawNetwork = true;
     }
   }
-  return sawNetwork;
+  return sawNetwork ? "offline" : undefined;
 }
 
 /** Distinct provider context-overflow signal; never treated as a transient retry. */

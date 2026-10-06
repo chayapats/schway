@@ -4,11 +4,12 @@ import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
 import { createHistoryCollector, historyTurnIdentity } from "../history/collector.ts";
 import { openHistoryStore } from "../history/store.ts";
 import { isOpenRouterEndpoint } from "../model/thinking.ts";
-import { formatDuration } from "../text/format.ts";
+import { formatRetryWait, retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import { resolve } from "node:path";
 import { createDiagnosticSink } from "../diagnostics/sink.ts";
 import { diagnose, doctorExitCode, formatDoctor } from "../doctor/doctor.ts";
 import { runAgentLoop } from "../agent/loop.ts";
+import type { AgentClock } from "../agent/retry.ts";
 import type { HeadlessSessionReadyEvent, RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport } from "../auth/credentials.ts";
@@ -79,6 +80,8 @@ export interface CliIo {
   /** Terminal capabilities for interactive launches; omitted capabilities default to false. */
   terminal?: { stdin: boolean; stdout: boolean };
   signal?: AbortSignal;
+  /** Override the agent loop's retry clock so backoff tests run without real sleeps. */
+  clock?: AgentClock;
   model?: Model;
   /** Override OS credential storage for embedding or deterministic tests. */
   credentialStore?: CredentialStore;
@@ -447,6 +450,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         extensions,
         workspace,
         signal: io.signal,
+        ...(io.clock ? { clock: io.clock } : {}),
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
       })) {
@@ -467,7 +471,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             printedText = false;
           }
           io.stderr.write(
-            `Retry ${safeEvent.attempt}/${safeEvent.maxAttempts} · Waiting ${formatDuration(safeEvent.delayMs)} · Ctrl+C stop\n${safeEvent.message}\n`,
+            `${retryCauseLabel(safeEvent.cause)} · ${retryAttemptLabel(safeEvent.attempt, safeEvent.maxAttempts)} ${formatRetryWait(safeEvent.delayMs)} · Ctrl+C stop\n${safeEvent.message}\n`,
           );
         }
 

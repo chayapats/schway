@@ -77,6 +77,7 @@ test("retries and errors log sanitized metadata without streamed prompt or tool 
   const text = await readFile(diagnosticPath(home), "utf8");
   expect(text).not.toMatch(/secret-sentinel|private prompt|alice|pw@/);
   expect(text).toContain('"event":"model.retry"');
+  expect(text).toContain('"cause":"rate-limit"');
   expect(text).toContain('"event":"error"');
 }));
 

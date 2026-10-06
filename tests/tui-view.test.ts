@@ -1098,7 +1098,8 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   await settle(ui);
   expect(ui.controller.snapshot().activity?.operationId).toBe(operationId);
   expect(ui.editor.cursorOffset).toBe(draftCursor);
-  expect(ui.captureCharFrame()).toContain("Retry 2/3");
+  expect(ui.captureCharFrame()).toContain("Attempt 2/3");
+  expect(ui.captureCharFrame()).not.toContain("Retry 2/3");
   expect(ui.captureCharFrame()).toContain("Esc stops");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
   ui.mockInput.pressEscape();

@@ -11,7 +11,7 @@ cursor 7 27 visible
   ▌ You
   ▌ Summarize the changes
 
-  Retrying connection · Attempt 2/3 · Esc stop
+  Provider unavailable · Attempt 2/3 · Esc stop
 
 
 
@@ -30,11 +30,11 @@ cursor 7 27 visible
 
 
 
-  ⠋ Retry 2/3 · Esc stop
+  ⠋ Provider unavailable · Attempt 2/3 · Esc stop
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Draft your next task…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Retry 2/3 · 1.8s   scripted/scripted-model         Esc stops  ctx ~6
+ ◆ Auto  ⠋ Retry · Attempt 2/3 in 2s   scripted/scripted-…    Esc stops  ctx ~6
   Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find
 == styles
 00 0-1 #ffffff #161b24 -
@@ -58,8 +58,8 @@ cursor 7 27 visible
 03 77-80 #ffffff #0e1117 -
 04 0-80 #ffffff #0e1117 -
 05 0-2 #ffffff #0e1117 -
-05 2-46 #8b95a7 #0e1117 -
-05 46-80 #ffffff #0e1117 -
+05 2-47 #8b95a7 #0e1117 -
+05 47-80 #ffffff #0e1117 -
 06 0-80 #ffffff #0e1117 -
 07 0-80 #ffffff #0e1117 -
 08 0-80 #ffffff #0e1117 -
@@ -80,8 +80,8 @@ cursor 7 27 visible
 23 0-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #7cc4ff #0e1117 b
-24 3-24 #8b95a7 #0e1117 -
-24 24-80 #ffffff #0e1117 -
+24 3-49 #8b95a7 #0e1117 -
+24 49-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -
 25 78-80 #ffffff #0e1117 -
@@ -97,10 +97,10 @@ cursor 7 27 visible
 28 0-1 #8b95a7 #161b24 -
 28 1-7 #e6eaf0 #161b24 b
 28 7-8 #8b95a7 #161b24 -
-28 8-28 #0e1117 #f0c674 b
-28 28-29 #8b95a7 #161b24 -
-28 29-54 #e6eaf0 #1e2430 -
-28 54-62 #8b95a7 #161b24 -
+28 8-37 #0e1117 #f0c674 b
+28 37-38 #8b95a7 #161b24 -
+28 38-59 #e6eaf0 #1e2430 -
+28 59-62 #8b95a7 #161b24 -
 28 62-65 #e6eaf0 #2a3241 b
 28 65-79 #8b95a7 #161b24 -
 28 79-80 #ffffff #0e1117 -

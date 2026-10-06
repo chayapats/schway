@@ -115,6 +115,19 @@ test("freeform runtime text is never serialized even when it echoes unknown prom
   expect(text).toContain('"status":"failed"');
 }));
 
+test("model.retry records carry the retry cause beside the transient category but never the raw message", async () => temporary(async home => {
+  const sink = createDiagnosticSink({ home, enabled: true });
+  const raw = "upstream said: private-prompt-echo";
+  for (const cause of ["rate-limit", "provider", "offline"] as const) sink.runtime({ type: "model.retry", attempt: 1, maxAttempts: 3, delayMs: 1000, message: raw, cause });
+  await sink.close();
+  const text = await readFile(diagnosticPath(home), "utf8");
+  const records = text.trim().split("\n").map(line => JSON.parse(line) as { event: string; level: string; fields: Record<string, unknown> });
+  expect(records.filter(record => record.event === "model.retry").map(record => record.fields)).toEqual(["rate-limit", "provider", "offline"].map(cause =>
+    ({ attempt: 1, maxAttempts: 3, delayMs: 1000, category: "transient_provider_failure", cause })));
+  expect(text).not.toContain(raw);
+  expect(text).not.toContain('"message":');
+}));
+
 test("canonical session targets and symlink aliases cannot be appended or rotated", async () => temporary(async home => {
   const sessions = join(home, ".schway", "sessions");
   await mkdir(sessions, { recursive: true });

@@ -10,6 +10,12 @@
   diff labelled as current content. Evidence lives in a private append-only
   sidecar beside each saved session, written by interactive and headless turns
   and removed with the session (#257).
+- Retry status names its cause and the upcoming attempt. The TUI shows
+  `Rate limited`, `Provider unavailable` or `Connection lost` with `Attempt 2/3`,
+  and the pill counts down as `Retry · Attempt 2/3 in 2s`; headless stderr uses
+  the same form. The `model.retry` runtime event, headless `--json` output and
+  diagnostics gain an optional `cause` (`rate-limit`, `provider` or `offline`)
+  that matches the `error` event's categories (#313).
 
 ## [1.0.0-rc.1] - 2026-10-02
 

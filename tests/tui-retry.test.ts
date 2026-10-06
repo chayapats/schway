@@ -37,6 +37,7 @@ test("a partial failed attempt is absent from the accepted live and resumed answ
 
 test("exhausted partial attempts leave one labelled preview and a recovery error", async () => {
   await withTempDir(async dir => {
+    const notices: (string | undefined)[] = [];
     const workspace = { root: dir, launchCwd: dir, extraRoots: [] };
     const session = createSession();
     const controller = new TuiController({
@@ -46,12 +47,13 @@ test("exhausted partial attempts leave one labelled preview and a recovery error
       })) }),
       contextManager: createContextManager(workspace), workspace,
       provider: "scripted", modelId: "retry", sessionId: "exhausted",
-      agentClock: { now: () => 0, sleep: async () => {} },
+      agentClock: { now: () => 0, sleep: async () => { notices.push(controller.snapshot().transcript.find(entry => entry.kind === "system")?.text); } },
     });
     await controller.submit("hello");
     const transcript = controller.snapshot().transcript;
     expect(transcript.filter(entry => entry.kind === "assistant")).toMatchObject([{ text: "three", incomplete: true }]);
-    expect(transcript.filter(entry => entry.kind === "system" && entry.text.includes("Retrying"))).toHaveLength(0);
+    expect(notices.at(-1)).toBe("Provider unavailable · Attempt 3/3 · Esc stop");
+    expect(transcript.filter(entry => entry.kind === "system" && entry.text.includes("Provider unavailable · Attempt"))).toHaveLength(0);
     expect(transcript.find(entry => entry.kind === "error")?.text).toContain("Ctrl+R continue");
     expect(session.items.filter(item => item.type === "assistant")).toHaveLength(0);
     controller.dispose();

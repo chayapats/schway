@@ -237,7 +237,13 @@ files are not loaded automatically. Headless mode never opens a login prompt.
 
 SIGINT/SIGTERM requests cancellation through model streaming, tools and provider
 requests. Transient network/429/5xx failures retry up to three attempts;
-authentication errors and ordinary tool failures do not. Failed/cancelled
+authentication errors and ordinary tool failures do not. Each retry writes one
+stderr line naming its cause and the upcoming attempt, such as
+`Provider unavailable · Attempt 2/3 in 3s · Ctrl+C stop`, followed by the redacted
+provider message. In `--json` output the `model.retry` event keeps `attempt` (the
+failed attempt), `maxAttempts`, `delayMs` and `message`, and adds `cause`:
+`rate-limit` for HTTP 429, `provider` for HTTP 5xx or `offline` for a network
+failure with no HTTP status. These match the `error` event's `category` names. Failed/cancelled
 streams are not committed assistant answers. A hint confirms persisted session
 readiness, not that tools were rolled back or the turn succeeded.
 

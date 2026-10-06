@@ -3,7 +3,7 @@ import type { ApprovalMode } from "../agent/approval.ts";
 import type { SessionDiscovery } from "../session/jsonl.ts";
 import type { PreferencesSnapshot } from "./preferences.ts";
 import type { AgentClock } from "../agent/retry.ts";
-import type { RuntimeEvent } from "../agent/events.ts";
+import type { ModelRetryCause, RuntimeEvent } from "../agent/events.ts";
 import { MaskedCredentialEntry } from "../auth/management.ts";
 import type { CredentialStore } from "../auth/store.ts";
 import type { CompactionOutcome, ContextManager } from "../context/manager.ts";
@@ -34,7 +34,7 @@ export interface TuiActivity {
   elapsedMs: number;
   activeTools: number;
   toolNames: readonly string[];
-  retry?: { failedAttempt: number; maxAttempts: number; remainingMs: number };
+  retry?: { failedAttempt: number; maxAttempts: number; remainingMs: number; cause?: ModelRetryCause };
   compactionReason?: "pressure" | "overflow" | "manual";
   compactionOutcome?: CompactionOutcome;
   cancellation: "none" | "requested" | "settling";
