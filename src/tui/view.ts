@@ -1241,8 +1241,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       }
       const selectedSearchId = searchOpen ? searchResult.matches[searchSelected]?.id : undefined;
       for (const [id, row] of rows) row.setSearchMatch(id === selectedSearchId);
-      // Esc restores in every find state; a waiting approval takes Esc instead, as the hint row says.
-      const searchStatus = conversationFindStatus({ query: editor.plainText, selected: searchSelected, count: searchResult.matches.length, limited: searchResult.limited, escape: snapshot.toolApproval ? "Esc back to request" : undefined });
+      // While an approval waits, the activity row shows it instead of this status, and the hint row names Esc back to request.
+      const searchStatus = conversationFindStatus({ query: editor.plainText, selected: searchSelected, count: searchResult.matches.length, limited: searchResult.limited });
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
       // Alt+R review and F2 details act only from the conversation; panels and the reader own those keys, and open details ignore F2.

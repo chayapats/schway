@@ -16,8 +16,8 @@ export const CONVERSATION_FIND_SCOPE = "this branch";
 export const CONVERSATION_FIND_PLACEHOLDER = `Find in ${CONVERSATION_FIND_SCOPE}…`;
 
 /** Conversation find hint row; the arrows and Enter keep appear only while a match is selected, because they do nothing otherwise. */
-export function conversationFindHint(selected: boolean, escape = FIND_RESTORE): string {
-  return [...selected ? [FIND_ARROWS, FIND_KEEP] : [], escape, "Ctrl+End latest"].join(" · ");
+export function conversationFindHint(selected: boolean): string {
+  return [...selected ? [FIND_ARROWS, FIND_KEEP] : [], FIND_RESTORE, "Ctrl+End latest"].join(" · ");
 }
 
 /** Reader find hint segments after its leading Esc phrase; empty unless a match is selected. Enter precedes the arrows so narrow rows drop the arrows first. */
@@ -25,13 +25,12 @@ export function readerFindKeys(selected: boolean): string[] {
   return selected ? [FIND_KEEP, FIND_ARROWS] : [];
 }
 
-/** Conversation find status: at most six words naming the scope (and count) before the next action and its Esc phrase. */
-export function conversationFindStatus(state: { query: string; selected: number; count: number; limited: boolean; escape?: string }): string {
-  const escape = state.escape ?? FIND_RESTORE;
+/** Conversation find status: at most six words naming the scope (and count) before the next action and Esc restore. */
+export function conversationFindStatus(state: { query: string; selected: number; count: number; limited: boolean }): string {
   const limited = state.limited ? " (limited)" : "";
-  if (!state.query) return `Find in ${CONVERSATION_FIND_SCOPE} · Type a query · ${escape}`;
-  if (state.count) return `Find ${state.selected + 1}/${state.count}${state.limited ? "+" : ""} in ${CONVERSATION_FIND_SCOPE}${limited} · ${escape}`;
-  return `No matches in ${CONVERSATION_FIND_SCOPE}${limited} · Edit query · ${escape}`;
+  if (!state.query) return `Find in ${CONVERSATION_FIND_SCOPE} · Type a query · ${FIND_RESTORE}`;
+  if (state.count) return `Find ${state.selected + 1}/${state.count}${state.limited ? "+" : ""} in ${CONVERSATION_FIND_SCOPE}${limited} · ${FIND_RESTORE}`;
+  return `No matches in ${CONVERSATION_FIND_SCOPE}${limited} · Edit query · ${FIND_RESTORE}`;
 }
 
 /**
