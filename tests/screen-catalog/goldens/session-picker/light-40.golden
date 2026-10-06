@@ -1,31 +1,31 @@
 schway-screen 1
 screen session-picker
 title Session picker
-description Alt+S lists saved sessions for this workspace with their activity and resume keys.
+description Alt+S then Ctrl+W lists saved sessions from every workspace with relative activity, the current session and an unavailable folder.
 variant light-40
 size 40x20
-cursor 6 16 visible
+cursor 6 17 visible
 == text
  ⚡ schway  ~/demo
 
 
  scripted/scripted-model · scripted
+ API key
 
 
-  Recent sessions · Current workspace…
-  › Fix the clamp upper bound · 2026-…
-   Explain the config loader · 2026-0…
-   Summarize the README · 2026-01-15T…
-  2026-01-15 09:30
-  ~/demo · clamp-fix
+  Recent sessions · All workspaces + …
+  › ● current · Explain t… · 2 min ago
+    Fix the clamp upper bou… · 3 h ago
+    Summarize the release… · yesterday
+    Summarize the README · 3 days ago
+  Last activity: 2026-01-15 09:28 UTC
+  ~/demo · catalog-session
   Ready
-  ↑↓ Enter Esc ^W ^L
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Sear
-     ch tasks, workspace or session ID…
+ ▌ › Search sessions…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/…    ctx ~0
- Enter confirm · Esc back
+ ↑↓ select · Enter resume · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -39,21 +39,19 @@ cursor 6 16 visible
 03 1-24 #1d232c #f7f7f4 b
 03 24-36 #545e6c #f7f7f4 -
 03 36-40 #ffffff #f7f7f4 -
-04 0-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-8 #545e6c #f7f7f4 -
+04 8-40 #ffffff #f7f7f4 -
 05 0-40 #ffffff #f7f7f4 -
-06 0-1 #ffffff #f7f7f4 -
-06 1-2 #ffffff #e1e3df -
-06 2-38 #0a5894 #e1e3df -
-06 38-39 #ffffff #e1e3df -
-06 39-40 #ffffff #f7f7f4 -
+06 0-40 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
 07 1-2 #ffffff #e1e3df -
-07 2-38 #1d232c #c7d2d6 -
+07 2-38 #0a5894 #e1e3df -
 07 38-39 #ffffff #e1e3df -
 07 39-40 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -
 08 1-2 #ffffff #e1e3df -
-08 2-38 #1d232c #e1e3df -
+08 2-38 #1d232c #c7d2d6 -
 08 38-39 #ffffff #e1e3df -
 08 39-40 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
@@ -63,35 +61,36 @@ cursor 6 16 visible
 09 39-40 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-2 #ffffff #e1e3df -
-10 2-18 #545e6c #e1e3df -
-10 18-39 #ffffff #e1e3df -
+10 2-38 #1d232c #e1e3df -
+10 38-39 #ffffff #e1e3df -
 10 39-40 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
 11 1-2 #ffffff #e1e3df -
-11 2-20 #545e6c #e1e3df -
-11 20-39 #ffffff #e1e3df -
+11 2-37 #1d232c #e1e3df -
+11 37-39 #ffffff #e1e3df -
 11 39-40 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
 12 1-2 #ffffff #e1e3df -
-12 2-7 #545e6c #e1e3df -
-12 7-39 #ffffff #e1e3df -
+12 2-37 #545e6c #e1e3df -
+12 37-39 #ffffff #e1e3df -
 12 39-40 #ffffff #f7f7f4 -
 13 0-1 #ffffff #f7f7f4 -
 13 1-2 #ffffff #e1e3df -
-13 2-20 #545e6c #e1e3df -
-13 20-39 #ffffff #e1e3df -
+13 2-26 #545e6c #e1e3df -
+13 26-39 #ffffff #e1e3df -
 13 39-40 #ffffff #f7f7f4 -
 14 0-1 #ffffff #f7f7f4 -
-14 1-39 #ecedea #f7f7f4 -
+14 1-2 #ffffff #e1e3df -
+14 2-7 #545e6c #e1e3df -
+14 7-39 #ffffff #e1e3df -
 14 39-40 #ffffff #f7f7f4 -
 15 0-1 #ffffff #f7f7f4 -
-15 1-5 #0a5894 #ecedea -
-15 5-9 #545e6c #ecedea -
-15 9-39 #ffffff #ecedea -
+15 1-39 #ecedea #f7f7f4 -
 15 39-40 #ffffff #f7f7f4 -
 16 0-1 #ffffff #f7f7f4 -
-16 1-5 #ffffff #ecedea -
-16 5-39 #545e6c #ecedea -
+16 1-5 #0a5894 #ecedea -
+16 5-21 #545e6c #ecedea -
+16 21-39 #ffffff #ecedea -
 16 39-40 #ffffff #f7f7f4 -
 17 0-1 #ffffff #f7f7f4 -
 17 1-39 #ecedea #f7f7f4 -
@@ -105,8 +104,10 @@ cursor 6 16 visible
 18 30-39 #545e6c #ecedea -
 18 39-40 #ffffff #f7f7f4 -
 19 0-1 #ffffff #f7f7f4 -
-19 1-6 #1d232c #caced3 b
-19 6-17 #545e6c #f7f7f4 -
-19 17-20 #1d232c #caced3 b
-19 20-25 #545e6c #f7f7f4 -
-19 25-40 #ffffff #f7f7f4 -
+19 1-3 #1d232c #caced3 b
+19 3-13 #545e6c #f7f7f4 -
+19 13-18 #1d232c #caced3 b
+19 18-28 #545e6c #f7f7f4 -
+19 28-31 #1d232c #caced3 b
+19 31-36 #545e6c #f7f7f4 -
+19 36-40 #ffffff #f7f7f4 -

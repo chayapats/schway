@@ -35,6 +35,8 @@ const streamingTurn = async (ui: ScreenHarness) => {
 export const COMPACTION_RESULTS = { completed: "Context compacted · /context inspect summary", cancelled: "Compaction cancelled · /compact retry",
   failed: "Compaction failed · F2 repair details", noop: "Context unchanged · /compact retry after more turns" } as const;
 const compactionSettled = (result: string) => (s: TuiSnapshot) => s.status === "idle" && !s.activity && s.transcript.at(-1)?.text === result;
+/** Open the session picker with Alt+S and wait until discovery finishes. */
+const openSessions = async (ui: ScreenHarness) => { ui.mockInput.pressKey("s", { meta: true }); await ui.waitFor(s => !!s.sessionPicker && !s.sessionPicker.loading); };
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
 const search = async (ui: ScreenHarness, query: string) => {
   ui.controller.notice("Read the project README before making changes.");
@@ -328,8 +330,20 @@ export const SCREENS: readonly Screen[] = [
   { id: "history-timing-details", title: "Turn timing details", description: "F2 details list model calls, first output, retries, tool wall time and token totals with their caveats.", noColor: true,
     drive: async ui => { await openHistory(ui, 0, true); openDetails(ui); await ui.settle(); }, ready: s => historyReady("detail")(s) && s.history!.showingDetails },
   { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion names its reason, retry command and details action.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session: Undo store busy ·")) },
-  { id: "session-picker", title: "Session picker", description: "Alt+S lists saved sessions for this workspace with their activity and resume keys.", drive: async ui => { ui.mockInput.pressKey("s", { meta: true }); },
-    ready: s => !!s.sessionPicker && !s.sessionPicker.loading && s.sessionPicker.entries.length === 3 },
+  { id: "session-picker", title: "Session picker", description: "Alt+S then Ctrl+W lists saved sessions from every workspace with relative activity, the current session and an unavailable folder.", noColorWidths: true,
+    drive: async ui => { await openSessions(ui); ui.mockInput.pressKey("w", { ctrl: true }); },
+    ready: s => !!s.sessionPicker?.allWorkspaces && !s.sessionPicker.loading && s.sessionPicker.total === 6 },
+  { id: "session-picker-resume-failed", title: "Session picker, resume failed", description: "Resuming a session whose folder is gone keeps the picker open and names the reason, details and the way back.", noColorWidths: true,
+    drive: async ui => {
+      await openSessions(ui); ui.mockInput.pressKey("w", { ctrl: true }); await ui.settle();
+      ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); await ui.settle(); ui.mockInput.pressEnter();
+    },
+    ready: s => s.sessionPicker?.errorKind === "resume" && !s.sessionPicker.resuming },
+  { id: "session-picker-empty", title: "Session picker, no saved sessions", description: "A workspace with no saved sessions says so and offers other workspaces or the way back.", noColorWidths: true,
+    drive: openSessions, ready: s => !!s.sessionPicker && !s.sessionPicker.loading && !s.sessionPicker.allWorkspaces && s.sessionPicker.total === 0 },
+  { id: "session-picker-no-matches", title: "Session picker, no matches", description: "A search that matches no saved session names both ways forward and the way back.", noColorWidths: true,
+    drive: async ui => { await openSessions(ui); await ui.mockInput.typeText("zzz"); },
+    ready: s => s.sessionPicker?.query === "zzz" && !s.sessionPicker.loading && s.sessionPicker.total === 0 },
   { id: "branch-tree-continue", title: "Branch tree, continue a branch", description: "The branch tree opens on the active branch, ready to continue it or Tab to a new fork.", drive: openBranchTree,
     ready: s => !!s.branchTree?.selectedBranchId && s.branchTree.branches.length === 3 },
   { id: "branch-tree-fork", title: "Branch tree, new fork", description: "Tab in the branch tree switches from continuing a branch to naming a new fork.", drive: async ui => { await openBranchTree(ui); ui.mockInput.pressTab(); },
@@ -368,7 +382,7 @@ export function variantsFor(screen: Screen): Variant[] {
   // Palettes and the sign-in chooser need a width where hint rows drop segments, showing what survives the cut.
   if (screen.id.startsWith("command-palette") || screen.id.startsWith("help-palette") || screen.id === "sign-in-chooser") variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   // Session picker and branch tree panels need 40-column variants so the narrow Esc invariant covers them.
-  if (screen.id === "session-picker" || screen.id.startsWith("branch-tree-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
+  if (screen.id.startsWith("session-picker") || screen.id.startsWith("branch-tree-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("reader-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true), make("dark", 40, 8), make("light", 40, 8));
   if (["first-run", "disconnected-search", "sign-in-chooser", "auto-mode", "ask-mode", "read-only-mode", "running-search", "running-empty", "running-draft"].includes(screen.id) || screen.id.startsWith("read-only-search-") || screen.id.startsWith("draft-")) variants.push(
     make("dark", 24, 8), make("light", 24, 8), make("dark", 24, 8, true));

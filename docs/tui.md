@@ -610,7 +610,7 @@ reading position.
 | Panel | Navigation and action |
 | --- | --- |
 | Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc cancel a preview, otherwise Esc back |
-| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery |
+| Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery; sessions F2 shows a failure's details |
 | Tool approval | Up/Down choose; Enter allow once, allow for session, add reason or deny with reason, as the hint names; Esc deny; PageUp/PageDown scroll; Ctrl+C cancel turn |
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
@@ -994,8 +994,13 @@ recovery explanation instead of retrying forever.
 
 Use `/sessions` or **Alt+S** to browse saved work. Alt+S keeps your multiline
 editor draft. Type a task, workspace or ID to search; arrows preview the selected
-row, PgUp/PgDn move eight results, and Enter explicitly resumes. Escape restores
-the draft, focus and reading position. Successful resume restores the destination
+row, PgUp/PgDn move eight results, and Enter explicitly resumes. Esc goes back:
+it closes F2 details first, then returns the draft, focus and reading position.
+The picker has one hint row, below the search box, and every key in it is paired
+with a verb, such as `Enter resume · Esc back`. When the row is narrow, it keeps
+`Enter resume` and `Esc back` and drops `↑↓ select`, `Ctrl+W scope`,
+`PgUp/PgDn page`, `Ctrl+L load more` and the position, in that order. It offers
+`Ctrl+L load more` only while more history can load. Successful resume restores the destination
 conversation’s in-memory draft and reading position, or an empty editor at the
 latest message on its first visit. Returning to the source restores its draft;
 commands and credential-entry values are not cached. Previewing does not switch the model,
@@ -1003,10 +1008,26 @@ workspace or session, repair files, execute tools, or advance activity.
 
 The default scope is the current canonical workspace. Ctrl+W switches to all
 workspaces, including unknown/corrupt files for recovery. Rows show a bounded task
-preview, committed activity time (or “activity unknown”), workspace, state and a
-current-session marker. The selected activity has its own line so long task
-previews do not hide it, including at narrow terminal sizes. No provider generates titles. Saved auth commands and
+preview, a current-session marker and how long ago the last committed activity was:
+`just now`, `N min ago`, `N h ago`, `yesterday` (the previous UTC day), `N days ago`
+within a week, then the date, or “activity unknown”. The selected row's exact
+time has its own line in the `/history` format, such as
+`Last activity: 2026-01-15 09:28 UTC`, followed by its workspace (shortened as in the
+header) with its ID, and its state. Long task previews never hide the activity, including at narrow terminal sizes. No provider generates titles. Saved auth commands and
 callback payloads are excluded from task previews.
+
+The hint row also carries the picker's state. While history loads it reads
+`Loading sessions… · Esc back`, and while a resume runs it reads
+`Resuming session… · Esc back`. An empty current workspace reads
+`No saved sessions here yet · Ctrl+W other workspaces · Esc back`, and a search with
+no results reads `No matching sessions · Edit search or Ctrl+W scope · Esc back`.
+
+If a resume from the picker fails, the picker stays open and the hint row names the
+reason, such as `Workspace unavailable · ↑↓ choose another · F2 details · Esc back`
+or `Session file unreadable · F2 details · Esc back`. F2 shows the full error inside
+the picker. The failure clears when you choose another row, change the search or
+scope, or try again. If discovery fails, the row reads
+`Cannot load sessions · F2 details · Esc back` until a later discovery succeeds.
 
 Discovery reads at most 100 files per request and 64 KiB per transcript, plus
 2 KiB metadata. “Partial results” means search and ordering cover only the loaded
@@ -1015,7 +1036,8 @@ show a partial-preview state and are fully validated only on explicit resume.
 Older history without activity metadata uses creation time for ordering and
 truthfully displays unknown activity. Empty, legacy and corrupt files are retained;
 restore an unavailable directory or repair a corrupt file outside Schway, then
-reopen the picker. A failed resume retains the current conversation and draft.
+reopen the picker. A failed resume retains the current conversation and draft. A typed
+`/resume <id>` that fails reports in the conversation instead and suggests `/sessions`.
 
 Draft preservation here is in memory; this picker does not add persistent per-session
 draft recovery.

@@ -49,7 +49,6 @@ const ESC_EXCEPTIONS: readonly EscException[] = [
   { screen: "grok-browser-approval", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
   { screen: "grok-device-approval", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
   { screen: "read-only-search-no-matches", phrase: "Esc …", owner: "U7 #300 conversation find bar" },
-  { screen: "session-picker", phrase: "Esc ^W ^L", owner: "U6 #299 session picker hint row" },
 ];
 
 interface ScreenProblem extends EscPhraseProblem { file: string; screen: string; variant: string }

@@ -86,6 +86,9 @@ history-timing-partial
 history-timing-details
 delete-session-busy
 session-picker
+session-picker-resume-failed
+session-picker-empty
+session-picker-no-matches
 branch-tree-continue
 branch-tree-fork
 recent-work-resume

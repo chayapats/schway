@@ -116,8 +116,8 @@ export abstract class CompactionLayer extends SettingsLayer {
     }
   }
 
-  /** Stage workspace capabilities and atomically switch sessions, preserving the current runtime on failure or cancellation. */
-  async switchSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }): Promise<boolean> {
+  /** Stage workspace capabilities and atomically switch sessions, preserving the current runtime on failure or cancellation; with `origin: "picker"` a staging failure throws for the picker instead of reaching the transcript. */
+  async switchSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager; origin?: "picker" }): Promise<boolean> {
     if (this.disposed) return false;
     if (this.running) {
       this.notice("Wait for this turn · Esc stop");
@@ -127,7 +127,8 @@ export abstract class CompactionLayer extends SettingsLayer {
     this.activeAbort = abort;
     this.status = "running";
     const task = this.stageSession(session, sessionId, options, abort);
-    const tracked = task.then(() => {});
+    // A picker-origin staging failure rejects `task` for the caller; idle waiters only need it settled.
+    const tracked = task.then(() => {}, () => {});
     this.activeTurn = tracked;
     try { return await task; } finally {
       if (this.activeAbort === abort) this.activeAbort = undefined;
@@ -136,7 +137,7 @@ export abstract class CompactionLayer extends SettingsLayer {
   }
 
   /** Publish staged workspace capabilities only while this switch still owns the controller. */
-  protected async stageSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager }, abort: AbortController): Promise<boolean> {
+  protected async stageSession(session: Session, sessionId: string, options: { workspace: Workspace; contextManager: ContextManager; origin?: "picker" }, abort: AbortController): Promise<boolean> {
     let staged: { tools: ToolRegistry; runtime: ExtensionRuntime } | undefined;
     try {
       const editor = await this.configEditor?.forWorkspace(options.workspace.root);
@@ -172,10 +173,12 @@ export abstract class CompactionLayer extends SettingsLayer {
       return true;
     } catch (error) {
       if (!this.disposed && this.activeAbort === abort) {
+        // A switch started from the open session picker reports there instead of pointing back to /sessions.
         if (abort.signal.aborted) {
-          this.notice("Session unchanged · /sessions choose another");
+          if (options.origin !== "picker") this.notice("Session unchanged · /sessions choose another");
           this.status = "idle";
-        } else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+        } else if (options.origin === "picker") { this.status = "idle"; throw error; }
+        else this.fail(redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
       }
       return false;
     } finally {

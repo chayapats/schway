@@ -9,6 +9,7 @@ import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscript
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
+import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
 import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
 import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
 import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
@@ -50,6 +51,8 @@ export interface ConversationViewOptions {
   onSplashPlayed?(): void;
   /** Animation clock in milliseconds; defaults to performance.now. */
   now?: () => number;
+  /** Wall clock in epoch milliseconds for relative session activity; defaults to Date.now. */
+  wallClock?: () => number;
   /** Version shown beneath the splash wordmark. */
   version?: string;
 }
@@ -64,6 +67,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const controller = options.controller;
   const motion: MotionMode = options.motion ?? "off";
   const now = options.now ?? (() => performance.now());
+  const wallClock = options.wallClock ?? (() => Date.now());
   const environmentMode = options.env.SCHWAY_THEME === "light" || options.env.SCHWAY_THEME === "dark" ? options.env.SCHWAY_THEME : undefined;
   let configuredMode = controller.appearanceMode();
   let mode: ThemeMode = configuredMode;
@@ -700,6 +704,22 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
   }
 
+  /** The session picker's one hint row as text: its status, then paired actions that fit `columns`. */
+  const sessionHintText = (sessions: NonNullable<TuiSnapshot["sessionPicker"]>, columns: number) => {
+    const fitted = fitSessionPickerHint(sessionPickerHint(sessions), columns, footerNamesEsc());
+    return [fitted.status, fitted.actions].filter(Boolean).join(" · ");
+  };
+  /** The session picker's one hint row with its status in the state's tone and key chips for its actions. */
+  function sessionHintContent(sessions: NonNullable<TuiSnapshot["sessionPicker"]>, columns: number): StyledText {
+    const hint = sessionPickerHint(sessions);
+    const fitted = fitSessionPickerHint(hint, columns, footerNamesEsc());
+    return new StyledText([
+      ...(fitted.status ? [fg(hint.tone === "error" ? theme.error : theme.muted)(fitted.status)] : []),
+      ...(fitted.status && fitted.actions ? [fg(theme.muted)(" · ")] : []),
+      ...(fitted.actions ? keyHintChunks(fitted.actions, hintColors(theme.background)) : []),
+    ]);
+  }
+
   /** Render the status pill within terminal width, adding model details only after connection. */
   function paintFooter(at: number) {
     const columns = Math.max(1, renderer.width);
@@ -982,7 +1002,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             : "Approval pending · Esc cancels";
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? snapshot.branchTree?.selectedBranchId ? "Continue · Tab: fork" : "Fork name…" : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? "Find in this conversation…" : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -1268,12 +1288,15 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         ? (!snapshot.loginApprovalData && renderer.height >= 12 ? 1 : 0) + Math.ceil(Bun.stringWidth(deviceApproval!.code)/(width - 2)) + Math.ceil(Bun.stringWidth(deviceApproval!.address)/(width - 2))
         : snapshot.loginApprovalData ? Math.max(1, Math.ceil(Bun.stringWidth(snapshot.loginApproval ?? "")/(width - 2))) : 2;
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
-      const pickerRows = snapshot.sessionPicker ? Math.max(1, Math.min(sessionVisibleRows, snapshot.sessionPicker.entries.length)) + 2 + (renderer.height >= 12 ? 1 : 0) + (renderer.height >= 14 ? 1 : 0) + (renderer.height >= 10 ? 1 : 0) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : guide ? guidanceHeight(guide, width - 2) : Math.max(1, Math.min(maxRows, commandRows.length)) + (paletteNote ? 1 : 0) + (selectedDetail ? 1 : 0);
+      // Without the footer hint row, the picker's one hint row moves into the panel; Esc stays only in the status bar.
+      const sessionLines = snapshot.sessionPicker ? sessionPanelLines(snapshot.sessionPicker, { columns: width - 2, height: renderer.height, visibleRows: sessionVisibleRows, home: options.home, now: wallClock(), currentSessionId: snapshot.sessionId,
+        ...(hints.visible ? {} : { hint: { text: sessionHintText(snapshot.sessionPicker, width - 2), tone: "muted" as const } }) }) : [];
+      const pickerRows = snapshot.sessionPicker ? Math.max(1, sessionLines.length) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : guide ? guidanceHeight(guide, width - 2) : Math.max(1, Math.min(maxRows, commandRows.length)) + (paletteNote ? 1 : 0) + (selectedDetail ? 1 : 0);
       const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + (draftStatus.visible ? draftStatus.height : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.sessionPicker, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, guide?.id, paletteNote, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.sessionPicker, sessionLines, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, guide?.id, paletteNote, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
@@ -1313,19 +1336,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
             textRow(picker, deviceApproval!.address, theme.text).wrapMode = "char";
           } else textRow(picker, snapshot.loginApproval, theme.text).wrapMode = "char";
         } else if (snapshot.sessionPicker) {
-          const sessions = snapshot.sessionPicker;
-          if (renderer.height >= 12) textRow(picker, fitLine(`${sessions.hasMore ? `Recent sessions · Ctrl+L load ${formatCount(100, "more session")}` : "Recent sessions"} · ${sessions.allWorkspaces ? "All workspaces + recovery" : "Current workspace"} · Ctrl+W scope`, width - 2), theme.accent);
-          const start = Math.max(0, sessions.selectedIndex - sessionVisibleRows + 1);
-          sessions.entries.slice(start, start + sessionVisibleRows).forEach((entry, index) => {
-            textRow(picker, fitLine(`${start + index === sessions.selectedIndex ? "›" : " "} ${entry.id === snapshot.sessionId ? "● current · " : ""}${entry.title} · ${entry.activityAt ?? "activity unknown"}`, width - 2), start + index === sessions.selectedIndex ? theme.accent : theme.text);
-          });
-          const selected = sessions.entries[sessions.selectedIndex];
-          if (!selected) textRow(picker, fitLine("No results · ^W scope", width - 2), theme.muted);
-          const activity = selected?.activityAt ? selected.activityAt.slice(0, 16).replace("T", " ") : "Activity unknown";
-          textRow(picker, fitLine(width >= 50 ? `Last activity: ${selected?.activityAt ?? "unknown"}` : activity, width - 2), theme.muted);
-          if (renderer.height >= 14) textRow(picker, fitLine(selected ? `${selected.workspaceRoot ? shortenWorkspacePath(selected.workspaceRoot, options.home, width - 2) : "Unknown workspace"} · ${selected.id}` : "Ctrl+W includes other workspaces and recovery files", width - 2), theme.muted);
-          if (renderer.height >= 10) textRow(picker, fitLine(sessions.error ?? (sessions.loading ? "Loading…" : selected?.state ?? "Nothing selected"), width - 2), sessions.error ? theme.error : theme.muted);
-          textRow(picker, fitLine(width < 60 ? "↑↓ Enter Esc ^W ^L" : `↑↓ preview · PgUp/PgDn page · Enter resume · Esc restore · ${sessions.total ? sessions.offset + sessions.selectedIndex + 1 : 0}/${sessions.total}`, width - 2), theme.muted);
+          const tones = { accent: theme.accent, text: theme.text, muted: theme.muted, error: theme.error };
+          for (const line of sessionLines) {
+            const row = textRow(picker, safe(line.text), tones[line.tone]);
+            // The in-panel hint row (footer hint row hidden) keeps key chips; failure text keeps its error color.
+            if (line === sessionLines.at(-1) && !hints.visible) row.content = sessionHintContent(snapshot.sessionPicker, width - 2);
+          }
         } else if (snapshot.modelPicker) {
           const models = snapshot.modelPicker;
           if (editor.plainText !== models.query) setDraft(models.query);
@@ -1445,6 +1461,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         // Keep each key with its action when the review hint needs a second row.
         const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
         hints.content = new StyledText([...keyHintChunks(navigation, hintColors(theme.background)), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
+      } else if (panelMode === "sessions" && snapshot.sessionPicker) {
+        hints.content = sessionHintContent(snapshot.sessionPicker, width);
       } else if (snapshot.modelPicker) {
         hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
@@ -1690,7 +1708,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if (snapshot.sessionPicker) {
-      if (name === "escape") { if (controller.running) controller.cancel(); else controller.closeSessionPicker(); handled(); return; }
+      if (name === "escape") { if (controller.running) controller.cancel(); else controller.backSessionPicker(); handled(); return; }
       if (name === "up" || name === "down" || name === "pageup" || name === "pagedown") { controller.moveSessionPicker(name === "up" ? -1 : name === "down" ? 1 : name === "pageup" ? -8 : 8); handled(); return; }
       if (key.ctrl && name === "w") { controller.toggleSessionScope(); handled(); return; }
       if (key.ctrl && name === "l") { void controller.loadMoreSessionPicker().then(refresh, fail); handled(); return; }
@@ -1743,6 +1761,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     }
     if (detailsKey) {
       if (panelMode === "model") controller.togglePickerDetails();
+      else if (panelMode === "sessions") controller.toggleSessionPickerDetails();
       else if (!panelMode && !controller.running && snapshot.readiness !== "loading" && !detailsReturn) {
         const prior = { key: sessionKey, scroll: transcript.scrollTop, inspection };
         const opened = snapshot.noticeDetailsAvailable ? controller.inspectNoticeDetails()

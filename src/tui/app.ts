@@ -52,6 +52,7 @@ import {
 import { TuiController } from "./controller.ts";
 import type { CodexLoginRunner } from "./controller.ts";
 import type { BranchTreeSnapshot } from "./controller.ts";
+import { SessionResumeError } from "./controller-sessions.ts";
 import {
   dispatchEditorInput,
   parseSkillInvocation,
@@ -654,13 +655,17 @@ export async function handleSlashCommand(
         ctx.controller.fail("Usage: /resume <session-id> [branch-id]. See /sessions for ids.");
         return false;
       }
+      // Only the session picker passes a resume signal; its failures stay inside the open picker with a reason-specific status.
+      let failure = "Session file unreadable";
       try {
         const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: sessionId, ...(branchId ? { branchId } : {}) });
+        failure = "Workspace unavailable";
         const restored = await restoreWorkspace({ root: resumed.header.workspaceRoot, launchCwd: resumed.header.launchCwd, extraRoots: [...resumed.metadata.extraRoots] });
+        failure = "Workspace setup failed";
         const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
         if (resumeSignal?.aborted) return false;
-        if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager })) return false;
+        if (!await ctx.controller.switchSession(resumed, resumed.header.id, { workspace, contextManager: manager, ...(resumeSignal ? { origin: "picker" as const } : {}) })) return false;
         ctx.controller.markRestored();
         ctx.skillScope.manager = ctx.controller.activeContextManager();
         ctx.skillScope.workspaceRoot = workspace.root;
@@ -670,6 +675,7 @@ export async function handleSlashCommand(
         );
         return true;
       } catch (error) {
+        if (resumeSignal) throw new SessionResumeError(failure, messageOf(error));
         ctx.controller.fail(`${messageOf(error)}. Start a new task here or use /sessions for recoverable history.`);
         return false;
       }

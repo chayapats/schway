@@ -174,7 +174,19 @@ export interface TuiSnapshot {
   recentSession?: SessionDiscovery;
   /** Whether the current conversation was explicitly restored. */
   restored?: boolean;
-  sessionPicker?: { query: string; allWorkspaces: boolean; entries: SessionDiscovery[]; selectedIndex: number; offset: number; total: number; loading: boolean; hasMore: boolean; error?: string };
+  sessionPicker?: { query: string; allWorkspaces: boolean; entries: SessionDiscovery[]; selectedIndex: number; offset: number; total: number; loading: boolean; hasMore: boolean;
+    /** Short status of the visible failure; a resume failure clears when the selection, query or scope changes or a new resume starts. */
+    error?: string;
+    /** Full failure text that F2 details reveals inside the picker. */
+    errorDetails?: string;
+    /** Whether the visible failure is a discovery failure (the whole list) or a resume failure (one attempt). */
+    errorKind?: "discovery" | "resume";
+    /** A picker resume is in progress; discovery uses `loading`. */
+    resuming?: boolean;
+    /** F2 details are open for the visible failure. */
+    details?: boolean;
+    /** Full text of the last discovery failure, kept until discovery succeeds so it returns once a resume failure clears. */
+    discoveryError?: string };
   modelPicker?: ModelPickerSnapshot;
   credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
   /** Available sign-in actions while the interactive chooser is open. */
