@@ -179,8 +179,8 @@ export interface TuiSnapshot {
     error?: string;
     /** Full failure text that F2 details reveals inside the picker. */
     errorDetails?: string;
-    /** Whether the visible failure is a discovery failure (the whole list) or a resume failure (one attempt). */
-    errorKind?: "discovery" | "resume";
+    /** The visible failure: discovery of the whole list, a failed load of more rows (loaded rows stay usable) or one resume attempt. */
+    errorKind?: "discovery" | "more" | "resume";
     /** A picker resume is in progress; discovery uses `loading`. */
     resuming?: boolean;
     /** F2 details are open for the visible failure. */

@@ -27,6 +27,7 @@ import {
   createJsonlSession,
   deleteJsonlSession,
   loadJsonlSession,
+  SessionLoadError,
   sessionsDirectory,
   type JsonlSession,
 } from "../session/jsonl.ts";
@@ -590,6 +591,12 @@ async function runTuiRenderer(options: {
   }
 }
 
+/** Short picker status for a `loadJsonlSession` failure: a missing file, bad ID, failed repair write, file-system read error or invalid contents. */
+export function sessionLoadStatus(error: unknown): string {
+  if (error instanceof SessionLoadError) return { "not-found": "Session not found", "invalid-id": "Invalid session ID", "repair-failed": "Session repair failed" }[error.reason];
+  return typeof (error as { code?: unknown } | undefined)?.code === "string" ? "Session file unreadable" : "Session file damaged or unsupported";
+}
+
 /** Execute one interactive slash command and report whether the editor may release it. */
 export async function handleSlashCommand(
   name: string,
@@ -656,12 +663,12 @@ export async function handleSlashCommand(
         return false;
       }
       // Only the session picker passes a resume signal; its failures stay inside the open picker with a reason-specific status.
-      let failure = "Session file unreadable";
+      let failure: (error: unknown) => string = sessionLoadStatus;
       try {
         const resumed = await loadJsonlSession({ directory: ctx.sessionsDir, id: sessionId, ...(branchId ? { branchId } : {}) });
-        failure = "Workspace unavailable";
+        failure = () => "Workspace unavailable";
         const restored = await restoreWorkspace({ root: resumed.header.workspaceRoot, launchCwd: resumed.header.launchCwd, extraRoots: [...resumed.metadata.extraRoots] });
-        failure = "Workspace setup failed";
+        failure = () => "Workspace setup failed";
         const workspace = restored.workspace;
         const manager = createContextManager(workspace, managerOptions);
         if (resumeSignal?.aborted) return false;
@@ -675,7 +682,7 @@ export async function handleSlashCommand(
         );
         return true;
       } catch (error) {
-        if (resumeSignal) throw new SessionResumeError(failure, messageOf(error));
+        if (resumeSignal) throw new SessionResumeError(failure(error), messageOf(error));
         ctx.controller.fail(`${messageOf(error)}. Start a new task here or use /sessions for recoverable history.`);
         return false;
       }

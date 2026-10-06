@@ -8,13 +8,14 @@ import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
-import { handleSlashCommand } from "../src/tui/app.ts";
+import { handleSlashCommand, sessionLoadStatus } from "../src/tui/app.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { createConversationView } from "../src/tui/view.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import { SessionResumeError } from "../src/tui/controller-sessions.ts";
 import { historyTimeLabel } from "../src/tui/controller-history.ts";
-import { fitSessionPickerHint, relativeActivityLabel, sessionPickerHint, utcMinuteLabel } from "../src/tui/session-picker-view.ts";
+import { daysAgoLabel, fitSessionPickerHint, relativeActivityLabel, sessionPanelLines, sessionPickerHint, utcMinuteLabel } from "../src/tui/session-picker-view.ts";
+import { SessionLoadError } from "../src/session/jsonl.ts";
 import { withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
@@ -317,14 +318,20 @@ test("relative activity covers every bucket boundary, day counts, missing, futur
   const cases: [string | undefined, string][] = [
     [ago(0), "just now"], [ago(MIN - 1), "just now"], [ago(MIN), "1 min ago"], [ago(HOUR - 1), "59 min ago"],
     [ago(HOUR), "1 h ago"], [ago(2 * HOUR), "2 h ago"], [ago(DAY - 1), "23 h ago"],
-    // Yesterday is the previous UTC calendar day; older activity under a week counts whole elapsed days.
-    [ago(DAY), "yesterday"], [ago(DAY + 9 * HOUR + 30 * MIN), "yesterday"], [ago(DAY + 9 * HOUR + 31 * MIN), "1 day ago"],
+    // Buckets use elapsed time only, so calendar midnight never makes older activity read newer.
+    [ago(DAY), "yesterday"], [ago(DAY + 9 * HOUR + 31 * MIN), "yesterday"], [ago(2 * DAY - 1), "yesterday"],
     [ago(2 * DAY), "2 days ago"], [ago(7 * DAY - 1), "6 days ago"], [ago(7 * DAY), "2026-01-08"], [ago(400 * DAY), "2024-12-11"],
     [undefined, "activity unknown"], ["", "activity unknown"], ["not a time", "activity unknown"],
     [new Date(NOW + 5 * MIN).toISOString(), "2026-01-15"],
   ];
   for (const [value, label] of cases) expect([value, relativeActivityLabel(value, NOW)]).toEqual([value, label]);
   expect(relativeActivityLabel(ago(3 * DAY), NOW)).not.toContain("-");
+  expect([daysAgoLabel(1), daysAgoLabel(2)]).toEqual(["1 day ago", "2 days ago"]);
+  // Labels never move backwards as activity gets older, minute by minute across two weeks and both midnights.
+  const order = ["just now", "min ago", "h ago", "yesterday", "days ago", "date"];
+  const rank = (label: string) => /^\d{4}-/.test(label) ? 5 : order.findIndex(bucket => label === bucket || label.endsWith(bucket));
+  let last = 0;
+  for (let age = 0; age < 14 * DAY; age += 7 * MIN) { const next = rank(relativeActivityLabel(ago(age), NOW)); expect(next).toBeGreaterThanOrEqual(last); last = next; }
 });
 
 test("selected activity uses the /history minute format with an explicit zone", () => {
@@ -480,7 +487,7 @@ test("picker shows one paired hint row with Esc back, keeps Enter resume narrow 
         if (width >= 80) expect(rows[0]!.trim()).toBe("↑↓ select · Enter resume · Ctrl+W scope · Esc back · 1/4");
         expect(ui.frame()).not.toMatch(banned);
         // Sessions saved after the fixed clock show their date; the empty current session has no committed activity.
-        expect(ui.frame()).toMatch(/› saved task \d · \d{4}-\d\d-\d\d\s/);
+        expect(ui.frame()).toMatch(/ saved task \d · \d{4}-\d\d-\d\d\s/);
         if (width >= 80) expect(ui.frame()).toContain("● current · No task preview · activity unknown");
         // The search placeholder fits one row without breaking a word at 40 columns.
         expect(ui.frame()).toMatch(width < 50 ? /› Search sessions… *\n/ : /› Search tasks, workspace or session ID… *\n/);
@@ -557,4 +564,83 @@ test("narrow hint fitting keeps the status and Esc back and drops actions by pri
   expect(fit(many, 48)).toBe("↑↓ select · Enter resume · Esc back");
   expect(fit(many, 30)).toBe("Enter resume · Esc back");
   expect(fitSessionPickerHint(sessionPickerHint(many), 30, true).actions).toBe("↑↓ select · Enter resume");
+});
+
+test("a late resume failure is not shown against a row or query that changed while it ran", async () => {
+  await withTempDir(async home => {
+    const f = await fixture(home);
+    for (const task of ["alpha task", "beta task"]) { const s = await createJsonlSession({ directory: f.directory, workspace: f.workspace }); s.append(user(task)); }
+    let fail!: () => void;
+    const resume = () => new Promise<boolean>((_resolve, reject) => { fail = () => reject(new SessionResumeError("Workspace unavailable", "Saved workspace unavailable: /gone.")); });
+    await f.controller.openSessionPicker(f.directory, resume);
+    const picker = () => f.controller.snapshot().sessionPicker!;
+    // Typing while the resume runs re-filters the list and selects a different row.
+    f.controller.searchSessions("alpha");
+    const first = picker().entries[0]!.id;
+    let pending = f.controller.selectPickerSession();
+    await Bun.sleep(1);
+    f.controller.searchSessions("beta");
+    expect(picker().entries[0]!.id).not.toBe(first);
+    fail(); expect(await pending).toBe(false);
+    expect(picker()).toMatchObject({ resuming: false, query: "beta" });
+    expect(picker().error).toBeUndefined();
+    // The same row and query still show the failure when it arrives.
+    pending = f.controller.selectPickerSession(); await Bun.sleep(1);
+    fail(); expect(await pending).toBe(false);
+    expect(picker().error).toBe("Workspace unavailable");
+    f.controller.dispose();
+  });
+});
+
+test("a failed load-more keeps loaded rows usable, names the failure and clears on a successful retry", async () => {
+  await withTempDir(async home => {
+    const f = await fixture(home);
+    for (let i = 0; i < 101; i++) { const s = await createJsonlSession({ directory: f.directory, workspace: f.workspace }); s.append(user(`batch ${i}`)); }
+    await f.controller.openSessionPicker(f.directory, async () => { throw new SessionResumeError("Workspace unavailable", "gone"); });
+    const picker = () => f.controller.snapshot().sessionPicker!;
+    expect(picker().hasMore).toBe(true);
+    const failure = spyOn(fileSystem, "readdir").mockImplementation((async () => { throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }); }) as never);
+    try { expect(await f.controller.loadMoreSessionPicker()).toBe(false); } finally { failure.mockRestore(); }
+    expect(picker()).toMatchObject({ error: "Cannot load more sessions", errorKind: "more", errorDetails: expect.stringContaining("EACCES") });
+    const fit = (columns: number) => { const fitted = fitSessionPickerHint(sessionPickerHint(picker()), columns); return [fitted.status, fitted.actions].filter(Boolean).join(" · "); };
+    expect(fit(120)).toBe("↑↓ select · Enter resume · PgUp/PgDn page · Ctrl+W scope · Ctrl+L load more · F2 details · Esc back · 1/100");
+    expect(fit(38)).toBe("Enter resume · F2 details · Esc back");
+    const lines = sessionPanelLines(picker(), { columns: 78, height: 24, visibleRows: 4, home, now: NOW });
+    expect(lines.filter(line => line.tone === "error").map(line => line.text)).toEqual(["Cannot load more sessions"]);
+    // Rows stay usable: moving works and a resume failure replaces, then returns, the load-more failure.
+    f.controller.moveSessionPicker(1); expect(picker().offset + picker().selectedIndex).toBe(1);
+    expect(await f.controller.selectPickerSession()).toBe(false);
+    expect(picker().error).toBe("Workspace unavailable");
+    f.controller.moveSessionPicker(1); expect(picker().error).toBe("Cannot load more sessions");
+    expect(await f.controller.loadMoreSessionPicker()).toBe(true);
+    expect(picker()).toMatchObject({ total: 102, hasMore: false });
+    expect(picker().error).toBeUndefined();
+    f.controller.dispose();
+  });
+});
+
+test("picker resume load failures map to accurate short statuses", async () => {
+  await withTempDir(async home => {
+    expect(sessionLoadStatus(new SessionLoadError("not-found", "Session not found: x"))).toBe("Session not found");
+    expect(sessionLoadStatus(new SessionLoadError("invalid-id", "Invalid session id: .."))).toBe("Invalid session ID");
+    expect(sessionLoadStatus(new SessionLoadError("repair-failed", "EROFS"))).toBe("Session repair failed");
+    expect(sessionLoadStatus(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))).toBe("Session file unreadable");
+    expect(sessionLoadStatus(new Error("Session file contains malformed interior JSON"))).toBe("Session file damaged or unsupported");
+    const f = await fixture(home);
+    const statusFor = async (id: string) => {
+      try { await handleSlashCommand("resume", id, f.ctx, undefined, undefined, new AbortController().signal); return "resumed"; }
+      catch (error) { return (error as SessionResumeError).status; }
+    };
+    // A file deleted after discovery, a torn tail whose repair write fails, and corrupt contents.
+    expect(await statusFor("deleted-after-discovery")).toBe("Session not found");
+    const torn = await createJsonlSession({ directory: f.directory, workspace: f.workspace }); torn.append(user("torn task"));
+    const path = join(f.directory, `${torn.header.id}.jsonl`);
+    await writeFile(path, (await readFile(path, "utf8")) + '{"partial":');
+    const write = spyOn(fileSystem, "writeFile").mockImplementation((async () => { throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }); }) as never);
+    try { expect(await statusFor(torn.header.id)).toBe("Session repair failed"); } finally { write.mockRestore(); }
+    await writeFile(join(f.directory, "corrupt.jsonl"), "not json\n");
+    expect(await statusFor("corrupt")).toBe("Session file damaged or unsupported");
+    for (const status of ["Session not found", "Invalid session ID", "Session repair failed", "Session file unreadable", "Session file damaged or unsupported"]) expect(status.split(" ").length).toBeLessThanOrEqual(6);
+    f.controller.dispose();
+  });
 });

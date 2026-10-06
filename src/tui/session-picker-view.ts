@@ -8,6 +8,8 @@ export type SessionPickerState = NonNullable<TuiSnapshot["sessionPicker"]>;
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 /** Short status shown for any discovery failure; the raw error stays behind F2 details. */
 export const SESSION_DISCOVERY_FAILED = "Cannot load sessions";
+/** Short status when loading another batch fails; the rows already loaded stay usable. */
+export const SESSION_LOAD_MORE_FAILED = "Cannot load more sessions";
 /** Short status for a picker resume whose cause has no more specific label. */
 export const SESSION_RESUME_FAILED = "Resume failed";
 
@@ -24,23 +26,27 @@ export function utcMinuteLabel(value: string | undefined): string | undefined {
   return ms === undefined ? undefined : `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/** Whole elapsed days as `N day(s) ago`, with the noun matching the count. */
+export function daysAgoLabel(days: number): string {
+  return `${formatCount(days, "day")} ago`;
+}
+
 /**
- * Activity relative to the wall-clock time `now` (epoch ms): `just now`, `N min ago`, `N h ago`, `yesterday` for the
- * previous UTC calendar day, `N days ago` within a week, then the UTC date. Missing or unparseable values read
- * `activity unknown`; a future time shows its date, never a negative age.
+ * Activity by elapsed time before the wall-clock `now` (epoch ms), so older activity never reads newer: `just now`
+ * under a minute, `N min ago` under an hour, `N h ago` under 24 hours, `yesterday` under 48 hours, `N days ago` under
+ * seven days, then the UTC date. Missing or unparseable values read `activity unknown`; a future time shows its UTC
+ * date, never a negative age.
  */
 export function relativeActivityLabel(value: string | undefined, now: number): string {
   const at = parseTime(value);
   if (at === undefined) return "activity unknown";
-  const date = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   const age = now - at;
-  if (age < 0) return date(at);
+  if (age < 0 || age >= 7 * DAY) return new Date(at).toISOString().slice(0, 10);
   if (age < MINUTE) return "just now";
   if (age < HOUR) return `${Math.floor(age / MINUTE)} min ago`;
   if (age < DAY) return `${Math.floor(age / HOUR)} h ago`;
-  if (date(at) === date(now - DAY)) return "yesterday";
-  if (age < 7 * DAY) return `${formatCount(Math.floor(age / DAY), "day")} ago`;
-  return date(at);
+  if (age < 2 * DAY) return "yesterday";
+  return daysAgoLabel(Math.floor(age / DAY));
 }
 
 /** One hint-row action in display order; the highest `priority` number drops first, after trying its `short` form. */
@@ -53,13 +59,15 @@ const ESC_BACK: SessionHintAction = { text: "Esc back", priority: 1 };
 /**
  * Status and actions for the one picker hint row. Failures, loading, resuming and empty states lead with a short
  * status; a selected row offers `Enter resume`, `Esc back`, `↑↓ select`, `Ctrl+W scope`, `PgUp/PgDn page`,
- * `Ctrl+L load more` (only while more can load) and its position, in that priority.
+ * `Ctrl+L load more` (only while more can load) and its position, in that priority. A load-more failure keeps those
+ * forward actions and adds `F2 details`; the panel names the failure.
  */
 export function sessionPickerHint(picker: SessionPickerState): SessionPickerHint {
   const many = picker.total > 1;
-  if (picker.error && picker.details) return { status: picker.error, tone: "error", actions: [ESC_BACK] };
   if (picker.resuming) return { status: "Resuming session…", tone: "muted", actions: [ESC_BACK] };
-  if (picker.error) return { status: picker.error, tone: "error", actions: [
+  if (picker.error && picker.details) return { status: picker.error, tone: "error", actions: [ESC_BACK] };
+  const more = picker.errorKind === "more" && picker.errorDetails ? [{ text: "F2 details", priority: 2.5 }] : [];
+  if (picker.error && picker.errorKind !== "more") return { status: picker.error, tone: "error", actions: [
     ...(picker.errorKind === "resume" && many ? [{ text: "↑↓ choose another", priority: 3 }] : []),
     ...(picker.errorDetails ? [{ text: "F2 details", priority: 2 }] : []),
     ESC_BACK,
@@ -67,10 +75,10 @@ export function sessionPickerHint(picker: SessionPickerState): SessionPickerHint
   if (picker.loading) return { status: "Loading sessions…", tone: "muted", actions: [ESC_BACK] };
   if (!picker.total) {
     if (picker.query.trim()) return { status: "No matching sessions", tone: "muted", actions: [
-      picker.allWorkspaces ? { text: "Edit search", priority: 2 } : { text: "Edit search or Ctrl+W scope", priority: 2, short: "Ctrl+W scope" }, ESC_BACK] };
+      picker.allWorkspaces ? { text: "Edit search", priority: 3 } : { text: "Edit search or Ctrl+W scope", priority: 3, short: "Ctrl+W scope" }, ...more, ESC_BACK] };
     return picker.allWorkspaces
-      ? { status: "No saved sessions yet", tone: "muted", actions: [ESC_BACK] }
-      : { status: "No saved sessions here yet", tone: "muted", actions: [{ text: "Ctrl+W other workspaces", priority: 2, short: "Ctrl+W scope" }, ESC_BACK] };
+      ? { status: "No saved sessions yet", tone: "muted", actions: [...more, ESC_BACK] }
+      : { status: "No saved sessions here yet", tone: "muted", actions: [{ text: "Ctrl+W other workspaces", priority: 3, short: "Ctrl+W scope" }, ...more, ESC_BACK] };
   }
   return { tone: "muted", actions: [
     ...(many ? [{ text: "↑↓ select", priority: 3 }] : []),
@@ -78,6 +86,7 @@ export function sessionPickerHint(picker: SessionPickerState): SessionPickerHint
     ...(picker.total > 8 ? [{ text: "PgUp/PgDn page", priority: 5 }] : []),
     { text: "Ctrl+W scope", priority: 4 },
     ...(picker.hasMore ? [{ text: "Ctrl+L load more", priority: 6 }] : []),
+    ...more,
     { ...ESC_BACK, priority: 2 },
     { text: `${picker.offset + picker.selectedIndex + 1}/${picker.total}`, priority: 7 },
   ] };
@@ -146,6 +155,8 @@ export function sessionPanelLines(picker: SessionPickerState, options: {
     lines.push({ text, tone: selected ? "accent" : "text", selected });
   });
   const selected = picker.entries[picker.selectedIndex];
+  // A load-more failure is named here because the hint row keeps the forward actions for the rows already loaded.
+  if (picker.errorKind === "more" && !details) lines.push({ text: fitLine(picker.error ?? SESSION_LOAD_MORE_FAILED, columns), tone: "error" });
   if (details) {
     const rows = options.visibleRows - (selected ? 1 : 0) + 1 + (height >= 14 ? 1 : 0) + (height >= 10 ? 1 : 0);
     for (const row of wrapRows(picker.errorDetails!, columns, Math.max(1, rows))) lines.push({ text: row, tone: "error" });

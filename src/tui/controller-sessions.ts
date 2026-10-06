@@ -3,7 +3,7 @@ import { resolveWorkspace as canonicalWorkspace } from "../workspace/workspace.t
 import { redactSecrets } from "../auth/secrets.ts";
 import { ModelsLayer } from "./controller-models.ts";
 import type { TuiSnapshot } from "./controller-types.ts";
-import { SESSION_DISCOVERY_FAILED, SESSION_RESUME_FAILED } from "./session-picker-view.ts";
+import { SESSION_DISCOVERY_FAILED, SESSION_LOAD_MORE_FAILED, SESSION_RESUME_FAILED } from "./session-picker-view.ts";
 
 /** A picker resume failure with a short, reason-specific status of six words or fewer; `message` holds the full text for F2 details. */
 export class SessionResumeError extends Error {
@@ -46,7 +46,10 @@ export abstract class SessionsLayer extends ModelsLayer {
   /** Mark an explicit restoration so the view explains its live workspace, branch and connection. */
   markRestored(): void { this.restored = true; }
 
-  /** Discover bounded history once; subsequent search and paging use only the cached metadata. A discovery failure stays until discovery succeeds. */
+  /**
+   * Discover bounded history once; subsequent search and paging use only the cached metadata. A discovery failure stays
+   * until discovery succeeds; when earlier batches loaded, it is a load-more failure that leaves those rows usable.
+   */
   async openSessionPicker(directory: string, resume: (id: string, signal: AbortSignal) => Promise<boolean>, more = false): Promise<boolean> {
     if (this.running || this.disposed || this.credentialEntry || this.loginCallbackValue !== undefined) return false;
     this.closeModelPicker();
@@ -74,14 +77,14 @@ export abstract class SessionsLayer extends ModelsLayer {
       picker.hasMore = rows.length === 100;
       picker.loading = false;
       delete picker.discoveryError;
-      if (picker.errorKind === "discovery") this.clearPickerError(picker);
+      if (picker.errorKind === "discovery" || picker.errorKind === "more") this.clearPickerError(picker);
       this.searchSessions(picker.query, true);
       return true;
     } catch (error) {
       if (this.sessionPicker === picker) {
         picker.loading = false;
         picker.discoveryError = redactSecrets(`Cannot discover sessions: ${error instanceof Error ? error.message : String(error)}`, this.secrets);
-        if (picker.errorKind !== "resume") this.showPickerError(picker, "discovery", SESSION_DISCOVERY_FAILED, picker.discoveryError);
+        if (picker.errorKind !== "resume") this.showDiscoveryError(picker);
       }
       return false;
     }
@@ -144,14 +147,18 @@ export abstract class SessionsLayer extends ModelsLayer {
   /**
    * Resume only after explicit confirmation, retaining the picker and current runtime on failure. A thrown
    * `SessionResumeError` supplies the short status; any other error reads `Resume failed`. Both keep the full text
-   * for F2 details. A resume that returns false without throwing was cancelled and shows no failure.
+   * for F2 details. A resume that returns false without throwing was cancelled and shows no failure, and a failure is
+   * dropped when the row, query or scope changed while it ran, because that change clears it.
    */
   async selectPickerSession(): Promise<boolean> {
     const picker = this.sessionPicker;
     const selected = picker?.entries[picker.selectedIndex];
     if (!picker || picker.loading || picker.resuming || !selected || !this.resumePickedSession || this.running) return false;
     if (picker.errorKind === "resume") this.clearPickerError(picker);
+    picker.details = false;
     picker.resuming = true;
+    // A failure belongs to the row, query and scope it was attempted with; typing during the resume may change them.
+    const attempt = { id: selected.id, query: picker.query, allWorkspaces: picker.allWorkspaces };
     const abort = new AbortController();
     this.sessionResumeAbort = abort;
     try {
@@ -161,6 +168,8 @@ export abstract class SessionsLayer extends ModelsLayer {
       return success;
     } catch (error) {
       if (abort.signal.aborted || this.sessionPicker !== picker) return false;
+      // Changing the row, query or scope clears a resume failure, so a late failure for an earlier one is not shown.
+      if (picker.query !== attempt.query || picker.allWorkspaces !== attempt.allWorkspaces || picker.entries[picker.selectedIndex]?.id !== attempt.id) return false;
       const status = error instanceof SessionResumeError ? error.status : SESSION_RESUME_FAILED;
       this.showPickerError(picker, "resume", status, redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
       return false;
@@ -168,13 +177,20 @@ export abstract class SessionsLayer extends ModelsLayer {
   }
 
   /** Make `status` the visible failure with `details` behind F2, closing any details already open. */
-  protected showPickerError(picker: NonNullable<TuiSnapshot["sessionPicker"]>, kind: "discovery" | "resume", status: string, details: string): void {
+  protected showPickerError(picker: NonNullable<TuiSnapshot["sessionPicker"]>, kind: "discovery" | "more" | "resume", status: string, details: string): void {
     picker.error = status; picker.errorDetails = details; picker.errorKind = kind; picker.details = false;
   }
 
   /** Drop the visible failure; a retained discovery failure becomes visible again because it still describes the list. */
   protected clearPickerError(picker: NonNullable<TuiSnapshot["sessionPicker"]>): void {
     delete picker.error; delete picker.errorDetails; delete picker.errorKind; delete picker.details;
-    if (picker.discoveryError) this.showPickerError(picker, "discovery", SESSION_DISCOVERY_FAILED, picker.discoveryError);
+    this.showDiscoveryError(picker);
+  }
+
+  /** Show a retained discovery failure: for the whole list before any batch loaded, otherwise as a load-more failure. */
+  protected showDiscoveryError(picker: NonNullable<TuiSnapshot["sessionPicker"]>): void {
+    if (!picker.discoveryError) return;
+    const more = this.sessionRows.length > 0;
+    this.showPickerError(picker, more ? "more" : "discovery", more ? SESSION_LOAD_MORE_FAILED : SESSION_DISCOVERY_FAILED, picker.discoveryError);
   }
 }

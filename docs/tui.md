@@ -996,11 +996,13 @@ Use `/sessions` or **Alt+S** to browse saved work. Alt+S keeps your multiline
 editor draft. Type a task, workspace or ID to search; arrows preview the selected
 row, PgUp/PgDn move eight results, and Enter explicitly resumes. Esc goes back:
 it closes F2 details first, then returns the draft, focus and reading position.
-The picker has one hint row, below the search box, and every key in it is paired
-with a verb, such as `Enter resume · Esc back`. When the row is narrow, it keeps
-`Enter resume` and `Esc back` and drops `↑↓ select`, `Ctrl+W scope`,
-`PgUp/PgDn page`, `Ctrl+L load more` and the position, in that order. It offers
-`Ctrl+L load more` only while more history can load. Successful resume restores the destination
+The picker has one hint row, and every key in it is paired with a verb, such as
+`Enter resume · Esc back`. It is the bottom row of the screen, below the status
+bar; on terminals too short for that row, it moves into the picker above the search
+box and the status bar shows `Esc back`. When the row is narrow, it keeps
+`Enter resume` and `Esc back` and drops the position first, then
+`Ctrl+L load more`, `PgUp/PgDn page`, `Ctrl+W scope` and finally `↑↓ select`. It
+offers `Ctrl+L load more` only while more history can load. Successful resume restores the destination
 conversation’s in-memory draft and reading position, or an empty editor at the
 latest message on its first visit. Returning to the source restores its draft;
 commands and credential-entry values are not cached. Previewing does not switch the model,
@@ -1009,8 +1011,9 @@ workspace or session, repair files, execute tools, or advance activity.
 The default scope is the current canonical workspace. Ctrl+W switches to all
 workspaces, including unknown/corrupt files for recovery. Rows show a bounded task
 preview, a current-session marker and how long ago the last committed activity was:
-`just now`, `N min ago`, `N h ago`, `yesterday` (the previous UTC day), `N days ago`
-within a week, then the date, or “activity unknown”. The selected row's exact
+`just now`, `N min ago`, `N h ago` under a day, `yesterday` under two days,
+`N days ago` under a week, then the UTC date, or “activity unknown”. The labels use
+elapsed time only, so an older row never reads newer than the one above it. The selected row's exact
 time has its own line in the `/history` format, such as
 `Last activity: 2026-01-15 09:28 UTC`, followed by its workspace (shortened as in the
 header) with its ID, and its state. Long task previews never hide the activity, including at narrow terminal sizes. No provider generates titles. Saved auth commands and
@@ -1023,11 +1026,16 @@ The hint row also carries the picker's state. While history loads it reads
 no results reads `No matching sessions · Edit search or Ctrl+W scope · Esc back`.
 
 If a resume from the picker fails, the picker stays open and the hint row names the
-reason, such as `Workspace unavailable · ↑↓ choose another · F2 details · Esc back`
-or `Session file unreadable · F2 details · Esc back`. F2 shows the full error inside
-the picker. The failure clears when you choose another row, change the search or
-scope, or try again. If discovery fails, the row reads
-`Cannot load sessions · F2 details · Esc back` until a later discovery succeeds.
+reason, such as `Workspace unavailable · ↑↓ choose another · F2 details · Esc back`,
+`Session not found`, `Session file unreadable`, `Session repair failed` or
+`Session file damaged or unsupported`. F2 shows the full error inside the picker.
+The failure clears when you choose another row, change the search or scope, or try
+again; a failure that arrives after you changed the row or search while it ran is
+not shown. If discovery fails, the row reads
+`Cannot load sessions · F2 details · Esc back` until a later discovery succeeds. If
+Ctrl+L fails to load more, the picker shows `Cannot load more sessions` above the
+hint row, the rows already loaded keep working with their usual keys plus
+`F2 details`, and a later successful Ctrl+L clears it.
 
 Discovery reads at most 100 files per request and 64 KiB per transcript, plus
 2 KiB metadata. “Partial results” means search and ordering cover only the loaded
