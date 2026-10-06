@@ -560,7 +560,7 @@ detected here` marks newer turns with the same limit.
 | Copy conversation text | Drag to select and release to copy automatically; Ctrl+C copies an existing selection |
 | Open a web link | Click its label or URL; dragging selects instead of opening |
 | Recall prompt | Up/Down at first/last visual row; up to 100 prompts in memory |
-| Complete command | Type `/`, Up/Down to select, Tab to insert |
+| Complete command | Type `/`, Up/Down to select, Tab or Enter to insert |
 | Hide suggestions | Esc keep editing |
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
@@ -615,7 +615,7 @@ reading position.
 | Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
 | Branch tree, change review | Up/Down selection, Enter branch choice, Esc back; review uses PageUp/PageDown and Ctrl+R reload |
 | Help, search | Panel-specific navigation, Enter chosen action, Esc restore the draft or position |
-| Command completion | Up/Down select, Tab complete, Esc keep editing |
+| Command completion | Up/Down select, Enter insert a differing choice or send a matching draft, Tab complete, Esc keep editing |
 | Inspection | Up/Down select, Enter chosen action, Esc back to the composer |
 | Reader | Up/Down, PgUp/PgDn, Home/End scroll; Left/Right pan; W wrap code; C copy source; Ctrl+F find; Esc back to inspection |
 
@@ -880,8 +880,12 @@ extensions before invoking either meaning of the name. Metadata refreshes when
 browsing reopens, and submission rechecks collisions. Removing or disabling a
 highlighted choice clears its selection: press an arrow before completing again.
 
-Use Up/Down to select and wrap, Tab to insert, and **Esc keep editing** to hide the list. Arrows skip
-group headers and unavailable rows; Tab never inserts them. Completion never
+Up/Down selects and wraps, and Tab inserts the highlighted choice. Enter inserts
+the highlighted choice when it differs from the draft, and sends when the draft
+already matches it, so `/ses` then Enter gives `/sessions ` and the next Enter
+runs it. Choosing a row with an arrow wins over the typed text. **Esc keep
+editing** hides the list; Esc, then Enter, sends the typed text unchanged. Arrows skip
+group headers and unavailable rows; Tab and Enter never insert them. Completion never
 executes an action. `/thinking ` suggests only validated current model levels
 (and `reset`); subscription levels require advertised account metadata. OpenRouter
 uses endpoint-scoped model metadata for the same choices in `/thinking` and
@@ -890,8 +894,11 @@ distinguish an advertised provider default from an explicit effort or `off`;
 mandatory reasoning models never offer `off`. An unavailable catalog leaves the
 provider default usable, but an explicit effort requires verified support.
 `/theme ` offers appearance choices; `/login ` and `/logout ` offer public
-connection names, never keys or callback payloads. Enter explicitly submits;
-rejected or busy commands remain in the editor for correction.
+connection names, never keys or callback payloads. Enter on an argument list
+inserts the highlighted form, such as `/theme auto`, and the next Enter sends it;
+the bare command still sends when typed exactly. Rejected or busy commands remain
+in the editor for correction. Inserting never sends, so it also works while a turn
+is running.
 
 Skill browsing reads bounded frontmatter; full body validation happens on invocation.
 

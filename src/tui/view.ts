@@ -20,6 +20,7 @@ import { browserUrl, textLinkAt } from "./links.ts";
 import { renderedOffsetForFolded, TranscriptSearchIndex, type TranscriptSearchMatch, type TranscriptSearchResult } from "./search.ts";
 import { paletteChoices, type CommandChoice, type KeyboardGuideChoice, type PaletteChoice } from "./command-catalog.ts";
 import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNNING, guidanceHeight, guidanceLines, keyboardGuideAvailability, keyboardRowParts, nextPaletteSelection, nothingToInspectReason, paletteDetail, paletteEscape, paletteHint, paletteSections, paletteSelectable } from "./palette.ts";
+import { slashEnter, slashPaletteHint, type SlashEnter } from "./palette.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
@@ -558,6 +559,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (panelMode && panelMode !== "help" || editor.plainText === dismissedQuery) return [];
     if (panelMode === "help" && !helpInserted) return helpChoices();
     return controller.commandChoices(editor.plainText).map(entry => ({ ...entry, kind: "command" as const }));
+  }
+
+  /** Enter in the inline slash palette: insert the remembered highlight when it differs from the draft, else send. */
+  function slashEnterAction(): SlashEnter {
+    if (panelMode) return { kind: "send" };
+    if (editor.plainText !== lastQuery) refresh();
+    const highlight = completions()[completionIndex];
+    return slashEnter(highlight?.id === completionId ? highlight : undefined, editor.plainText);
   }
 
   /** Searchable help rows; keyboard availability describes the composer this palette returns to. */
@@ -1436,7 +1445,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? `↑/↓ select · Tab complete · Esc keep editing${working ? "" : " · Enter send"}` : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · Esc back` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? "↑/↓ next/previous · Enter accept · Esc restore · Ctrl+End latest" : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1492,6 +1501,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (controller.confirmBranchTreeSelection(editor.plainText.trim() || undefined)) controller.closeBranchTree();
       refresh(); return;
     }
+    // A slash-palette highlight that differs from the draft is inserted, as Tab does; it never dispatches, even while busy.
+    const enter = slashEnterAction();
+    if (enter.kind === "insert") { setDraft(enter.insertion); refresh(); return; }
     const value = editor.plainText;
     if (!value.trim()) return;
     if (pendingAcceptance) return;

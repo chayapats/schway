@@ -57,6 +57,11 @@
   `Esc stop` row remains after compaction ends, `/compact` results no longer
   repeat in the activity row, and stopping a turn during compaction shows only
   the turn's `Stopped` result with `Ctrl+R continue` (#308).
+- Enter in the slash suggestion list inserts the highlighted command when it
+  differs from the draft, as Tab does, instead of reporting `Unknown command`;
+  the next Enter sends it. Enter still sends a draft that already matches, and
+  Esc, then Enter, sends the typed text unchanged. The hint row says
+  `Enter insert` or `Enter send` and keeps it at 40 columns (#296).
 
 ## [1.0.0-rc.1] - 2026-10-02
 

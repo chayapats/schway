@@ -210,8 +210,8 @@ for (const encoding of encodings) test(`[${encoding} 40x20] palette, slash sugge
   expect(ui.editor.plainText).toBe("keep me");
   ui.editor.setText(""); await ui.settle();
   await ui.type("/");
-  // Arrows drop first, so completion and the way out both stay.
-  expect(ui.hints()).toBe("Tab complete · Esc keep editing");
+  // Arrows drop first, then Tab, so what Enter does and the way out both stay.
+  expect(ui.hints()).toBe("Enter insert · Esc keep editing");
   await ui.input(ui.keys.esc);
   // Esc keep editing hides the list and leaves the typed draft as it was.
   expect(ui.editor.plainText).toBe("/");

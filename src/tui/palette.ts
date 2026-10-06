@@ -148,3 +148,26 @@ export function paletteHint(state: { guide: boolean; inserted: boolean; selected
   }
   return segments.join(" · ");
 }
+
+/** What Enter does in the inline slash palette: insert a differing selectable command, otherwise send the draft. */
+export type SlashEnter = { kind: "insert"; insertion: string } | { kind: "send" };
+
+/** Insert when the highlight is an available command whose insertion differs from the draft (trimmed); else send. */
+export function slashEnter(highlight: PaletteChoice | undefined, draft: string): SlashEnter {
+  if (highlight?.kind !== "command" || !highlight.available || highlight.insertion.trim() === draft.trim()) return { kind: "send" };
+  return { kind: "insert", insertion: highlight.insertion };
+}
+
+/**
+ * Inline slash-palette hint naming what Enter does now; a send while working omits Enter. Arrows drop first at
+ * narrow widths, then Tab; Enter and `Esc keep editing` always stay.
+ */
+export function slashPaletteHint(state: { enter: SlashEnter["kind"]; working: boolean }, columns: number): string {
+  const segments = state.enter === "insert" ? ["↑↓ select", "Enter insert", "Tab complete", "Esc keep editing"]
+    : ["↑↓ select", ...state.working ? [] : ["Enter send"], "Esc keep editing"];
+  for (const optional of ["↑↓ select", "Tab complete"]) {
+    const index = segments.indexOf(optional);
+    if (Bun.stringWidth(segments.join(" · ")) > columns && index >= 0) segments.splice(index, 1);
+  }
+  return segments.join(" · ");
+}
