@@ -1808,7 +1808,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       return;
     }
     if (snapshot.readiness === "loading" && ((key.meta || key.option) && (name === "m" || name === "l") || key.ctrl && name === "r")) { handled(); return; }
-    if ((key.meta || key.option) && name === "l" && (!panelMode || panelMode === "login" && !snapshot.loginWait) && !controller.running && !snapshot.recovery?.actions.includes("connect")) {
+    // A chooser reopened by a failed sign-in honours that failure's `Alt+L retry`; other choosers keep Alt+L inert.
+    if ((key.meta || key.option) && name === "l" && panelMode === "login" && !snapshot.loginWait && controller.retryFailedSignIn()) { handled(); return; }
+    if ((key.meta || key.option) && name === "l" && !panelMode && !controller.running && !snapshot.recovery?.actions.includes("connect")) {
       controller.openLoginChooser(); handled(); return;
     }
     if (key.ctrl && name === "f" && !panelMode && !inspection) {

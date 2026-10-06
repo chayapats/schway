@@ -419,3 +419,16 @@ test("a chooser over a saving sign-in names the save wait instead of Esc cancel 
   expect(ui.rows().filter(line => line.includes("Esc"))).toEqual([]);
   finish.resolve(); await running;
 });
+
+test("a chooser the user opened keeps F2 and Alt+L inert even when unrelated details exist", async () => {
+  const { controller } = controllerWith({});
+  const ui = await render(controller);
+  controller.notice("F2 details", "must stay hidden");
+  ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+  ui.mockInput.pressArrow("down"); await ui.settle();
+  const before = JSON.stringify(controller.snapshot());
+  ui.mockInput.pressKey("F2"); await ui.settle();
+  ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+  expect(JSON.stringify(controller.snapshot())).toBe(before);
+  expect(ui.captureCharFrame()).not.toContain("must stay hidden");
+});

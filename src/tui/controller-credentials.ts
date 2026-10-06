@@ -77,9 +77,22 @@ export abstract class CredentialsLayer extends ControllerCore {
     return true;
   }
 
-  /** Close a chooser that no sign-in waits behind, so conversation keys such as F2 act on the failure it follows. */
+  /** The chooser a failed sign-in reopened; its status names Alt+L and F2, so those keys act on it. A chooser the user opened keeps them inert. */
+  private failureChooser?: object;
+
+  /** True while the visible chooser is the one a failed sign-in reopened and no work runs. */
+  private atFailureChooser(): boolean {
+    return !!this.loginChooserState && this.loginChooserState === this.failureChooser && !this.running;
+  }
+
+  /** From a failure-reopened chooser, start sign-in again at its first level, as the failure's `Alt+L retry` names. */
+  retryFailedSignIn(): boolean {
+    return this.atFailureChooser() && this.openLoginChooser();
+  }
+
+  /** Close a failure-reopened chooser so F2 opens the details of the failure it follows; other choosers stay. */
   leaveLoginChooser(): boolean {
-    if (!this.loginChooserState || this.running) return false;
+    if (!this.atFailureChooser()) return false;
     this.loginChooserState = undefined; this.loginReturn = undefined; this.recoveryRepair = false;
     // The conversation now owns the failure; a model picker that started this sign-in does not reopen over it.
     this.pickerReturn = undefined;
@@ -692,6 +705,7 @@ export abstract class CredentialsLayer extends ControllerCore {
           this.failSignIn(result.message);
           if (!result.message.startsWith("Cannot save credential")) {
             this.loginChooserState = /callback|localhost|browser/i.test(result.message) ? { level: "chatgpt", selectedId: "chatgpt-device" } : { level: "main", selectedId: "chatgpt" };
+            this.failureChooser = this.loginChooserState;
           }
           return false;
         }
@@ -739,6 +753,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         } else {
           this.fail("ChatGPT sign-in failed · Alt+L retry");
           this.loginChooserState = { level: "main", selectedId: "chatgpt" };
+          this.failureChooser = this.loginChooserState;
         }
         return false;
       }
