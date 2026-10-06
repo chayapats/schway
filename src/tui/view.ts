@@ -31,7 +31,7 @@ import type { ReaderPosition } from "./reader.ts";
 import { CONVERSATION_FIND_PLACEHOLDER, conversationFindHint, conversationFindStatus, fitFindStatus, readerFindKeys } from "./find-hints.ts";
 import { createHistoryPanel } from "./history-view.ts";
 import { approvalAction, approvalChoices, approvalHint, approvalPanelLayout, charWrappedRows, type ApprovalPanelLayout } from "./approval-layout.ts";
-import { SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, signInWaitRows } from "./sign-in-wait.ts";
+import { SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, fitSignInWaitRows, signInWaitRows } from "./sign-in-wait.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -1284,7 +1284,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       picker.visible = !!snapshot.loginChooser || !!snapshot.loginApproval || !!snapshot.modelPicker || !!snapshot.sessionPicker || browsing;
       const maxRows = snapshot.modelPicker ? Math.max(1, Math.min(12, renderer.height - 10))
         : Math.max(1, Math.min(snapshot.loginChooser ? 8 : 6, Math.floor(renderer.height / 3) - 2));
-      const waitRows = snapshot.loginApproval !== undefined ? signInWaitRows(snapshot.loginWait ?? { provider: "ChatGPT" }, snapshot.loginApproval, snapshot.loginApprovalData) : [];
+      // Rows left after the composer, status bar, one conversation row and the chrome visible at this height.
+      const waitBudget = renderer.height - 5 - (renderer.height >= 10 ? 2 : 0) - (renderer.height >= 14 ? 1 : 0) - (renderer.height >= 20 ? 2 : 0);
+      const waitRows = snapshot.loginApproval !== undefined ? fitSignInWaitRows(signInWaitRows(snapshot.loginWait ?? { provider: "ChatGPT" }, snapshot.loginApproval, snapshot.loginApprovalData), waitBudget, width - 2) : [];
       const approvalRows = waitRows.reduce((sum, row) => sum + Math.max(1, Math.ceil(Bun.stringWidth(row.text) / (width - 2))), 0);
       const sessionVisibleRows = renderer.height < 14 ? 1 : maxRows;
       // Without the footer hint row, the picker's one hint row moves into the panel; Esc stays only in the status bar.

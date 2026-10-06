@@ -317,3 +317,11 @@ test("Grok device sign-in shows a starting status, not browser steps, until its 
   controller.cancel();
   expect(await running).toBe(false);
 });
+
+test("short terminals drop the wait status, then the heading, but keep both device steps", async () => {
+  const { fitSignInWaitRows } = await import("../src/tui/sign-in-wait.ts");
+  const rows = signInWaitRows({ provider: "ChatGPT" }, "", { kind: "device", verificationUri: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" });
+  expect(fitSignInWaitRows(rows, 10, 38).map(row => row.text)).toEqual(rows.map(row => row.text));
+  expect(fitSignInWaitRows(rows, 3, 38).map(row => row.text)).toEqual(["Sign in to ChatGPT", "1 Open auth.openai.com/codex/device", "2 Enter ABCD-1234"]);
+  expect(fitSignInWaitRows(rows, 3, 22).map(row => row.text)).toEqual(["1 Open auth.openai.com/codex/device", "2 Enter ABCD-1234"]);
+});

@@ -51,6 +51,19 @@ export function signInWaitRows(wait: { provider: SignInProvider; saving?: boolea
   return [heading, { text: `◌ ${status}`, tone: "muted" }];
 }
 
+/**
+ * Fit wait rows into `budget` terminal rows at `columns`: drop the trailing glyph status first, then the heading,
+ * never an instruction or device step, so `Open <address>` and `Enter <code>` stay visible on short terminals.
+ */
+export function fitSignInWaitRows(rows: readonly SignInWaitRow[], budget: number, columns: number): SignInWaitRow[] {
+  const height = (list: readonly SignInWaitRow[]) => list.reduce((sum, row) => sum + Math.max(1, Math.ceil(Bun.stringWidth(row.text) / Math.max(1, columns))), 0);
+  let fitted = [...rows];
+  const instructions = () => fitted.filter(row => row.tone === "text").length;
+  if (height(fitted) > budget && instructions() && fitted.at(-1)?.tone === "muted") fitted = fitted.slice(0, -1);
+  if (height(fitted) > budget && instructions() && fitted[0]?.tone === "accent") fitted = fitted.slice(1);
+  return fitted;
+}
+
 /** Map a provider sign-in timeout to short TUI copy with the full recovery text as details; other failures return nothing. */
 export function signInTimeout(message: string): { text: string; details: string } | undefined {
   if (!/^(?:ChatGPT sign-in timed out|Device sign-in timed out|Grok (?:device )?sign-in timed out)/.test(message)) return;

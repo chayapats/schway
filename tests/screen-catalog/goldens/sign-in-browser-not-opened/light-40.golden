@@ -1,0 +1,120 @@
+schway-screen 1
+screen sign-in-browser-not-opened
+title Browser not opened
+description When the browser launcher fails, the link stays above and other methods appear while sign-in still waits.
+variant light-40
+size 40x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  /project
+
+ ChatGPT browser sign-in started
+
+ Open this URL to sign in with
+ ChatGPT: https://auth.openai.com/
+ oauth/authorize?
+ client_id=app_fixture&state=fixture
+
+ Browser didn't open · Open the link
+ above
+
+
+
+
+
+
+
+
+
+
+
+  ChatGPT · more options
+      › Device approval
+        Paste browser callback
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ▌ › Typing resumes after sign-in
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ⠋ Signing in
+ ↑↓ select · Enter · Esc cancel sign-in
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-40 #ffffff #ecedea -
+01 0-40 #ffffff #f7f7f4 -
+02 0-1 #ffffff #f7f7f4 -
+02 1-32 #545e6c #f7f7f4 -
+02 32-40 #ffffff #f7f7f4 -
+03 0-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-31 #545e6c #f7f7f4 -
+04 31-40 #ffffff #f7f7f4 -
+05 0-1 #ffffff #f7f7f4 -
+05 1-34 #545e6c #f7f7f4 -
+05 34-40 #ffffff #f7f7f4 -
+06 0-1 #ffffff #f7f7f4 -
+06 1-17 #545e6c #f7f7f4 -
+06 17-40 #ffffff #f7f7f4 -
+07 0-1 #ffffff #f7f7f4 -
+07 1-36 #545e6c #f7f7f4 -
+07 36-40 #ffffff #f7f7f4 -
+08 0-40 #ffffff #f7f7f4 -
+09 0-1 #ffffff #f7f7f4 -
+09 1-37 #545e6c #f7f7f4 -
+09 37-40 #ffffff #f7f7f4 -
+10 0-1 #ffffff #f7f7f4 -
+10 1-6 #545e6c #f7f7f4 -
+10 6-40 #ffffff #f7f7f4 -
+11 0-40 #ffffff #f7f7f4 -
+12 0-40 #ffffff #f7f7f4 -
+13 0-40 #ffffff #f7f7f4 -
+14 0-40 #ffffff #f7f7f4 -
+15 0-40 #ffffff #f7f7f4 -
+16 0-40 #ffffff #f7f7f4 -
+17 0-40 #ffffff #f7f7f4 -
+18 0-40 #ffffff #f7f7f4 -
+19 0-40 #ffffff #f7f7f4 -
+20 0-40 #ffffff #f7f7f4 -
+21 0-40 #ffffff #f7f7f4 -
+22 0-1 #ffffff #f7f7f4 -
+22 1-2 #ffffff #e1e3df -
+22 2-24 #0a5894 #e1e3df -
+22 24-39 #ffffff #e1e3df -
+22 39-40 #ffffff #f7f7f4 -
+23 0-1 #ffffff #f7f7f4 -
+23 1-2 #ffffff #e1e3df -
+23 2-23 #0a5894 #c7d2d6 -
+23 23-39 #ffffff #e1e3df -
+23 39-40 #ffffff #f7f7f4 -
+24 0-1 #ffffff #f7f7f4 -
+24 1-2 #ffffff #e1e3df -
+24 2-30 #1d232c #e1e3df -
+24 30-39 #ffffff #e1e3df -
+24 39-40 #ffffff #f7f7f4 -
+25 0-1 #ffffff #f7f7f4 -
+25 1-39 #ecedea #f7f7f4 -
+25 39-40 #ffffff #f7f7f4 -
+26 0-1 #ffffff #f7f7f4 -
+26 1-5 #0a5894 #ecedea -
+26 5-33 #1d232c #ecedea -
+26 33-39 #ffffff #ecedea -
+26 39-40 #ffffff #f7f7f4 -
+27 0-1 #ffffff #f7f7f4 -
+27 1-39 #ecedea #f7f7f4 -
+27 39-40 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-22 #ffffff #0a5894 b
+28 22-23 #545e6c #ecedea -
+28 23-40 #ffffff #f7f7f4 -
+29 0-1 #ffffff #f7f7f4 -
+29 1-3 #1d232c #caced3 b
+29 3-13 #545e6c #f7f7f4 -
+29 13-18 #1d232c #caced3 b
+29 18-21 #545e6c #f7f7f4 -
+29 21-24 #1d232c #caced3 b
+29 24-39 #545e6c #f7f7f4 -
+29 39-40 #ffffff #f7f7f4 -

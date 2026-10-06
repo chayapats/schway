@@ -8,7 +8,7 @@ cursor 1 1 hidden
 == text
  ⚡ schway  /project
 
-  Starting ChatGPT browser sign-in · Esc cancel
+  ChatGPT browser sign-in started
 
 
 
@@ -28,14 +28,14 @@ cursor 1 1 hidden
 
 
 
-  ⠋ Working · Esc stop
-   Complete ChatGPT approval · Esc cancels
-   Approve in your browser · Esc cancel
+   Sign in to ChatGPT
+   Approve in your browser
+   ◌ Waiting for approval
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Approval pending · Esc cancels
+  ▌ › Typing resumes after sign-in
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Working  Esc back
-  Enter confirm · Esc back
+ ◆ Auto  ⠋ Signing in
+  Esc cancel sign-in
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -45,8 +45,8 @@ cursor 1 1 hidden
 00 20-80 #ffffff #161b24 -
 01 0-80 #ffffff #0e1117 -
 02 0-2 #ffffff #0e1117 -
-02 2-47 #8b95a7 #0e1117 -
-02 47-80 #ffffff #0e1117 -
+02 2-33 #8b95a7 #0e1117 -
+02 33-80 #ffffff #0e1117 -
 03 0-80 #ffffff #0e1117 -
 04 0-80 #ffffff #0e1117 -
 05 0-80 #ffffff #0e1117 -
@@ -67,26 +67,27 @@ cursor 1 1 hidden
 20 0-80 #ffffff #0e1117 -
 21 0-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
-22 2-3 #7cc4ff #0e1117 b
-22 3-22 #8b95a7 #0e1117 -
-22 22-80 #ffffff #0e1117 -
+22 2-3 #ffffff #1e2430 -
+22 3-21 #7cc4ff #1e2430 -
+22 21-78 #ffffff #1e2430 -
+22 78-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
-23 3-42 #7cc4ff #1e2430 -
-23 42-78 #ffffff #1e2430 -
+23 3-26 #e6eaf0 #1e2430 -
+23 26-78 #ffffff #1e2430 -
 23 78-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -
-24 3-39 #e6eaf0 #1e2430 -
-24 39-78 #ffffff #1e2430 -
+24 3-25 #8b95a7 #1e2430 -
+24 25-78 #ffffff #1e2430 -
 24 78-80 #ffffff #0e1117 -
 25 0-2 #ffffff #0e1117 -
 25 2-78 #161b24 #0e1117 -
 25 78-80 #ffffff #0e1117 -
 26 0-2 #ffffff #0e1117 -
 26 2-6 #7cc4ff #161b24 -
-26 6-36 #e6eaf0 #161b24 -
-26 36-78 #ffffff #161b24 -
+26 6-34 #e6eaf0 #161b24 -
+26 34-78 #ffffff #161b24 -
 26 78-80 #ffffff #0e1117 -
 27 0-2 #ffffff #0e1117 -
 27 2-78 #161b24 #0e1117 -
@@ -94,14 +95,10 @@ cursor 1 1 hidden
 28 0-1 #8b95a7 #161b24 -
 28 1-7 #e6eaf0 #161b24 b
 28 7-8 #8b95a7 #161b24 -
-28 8-19 #0e1117 #7cc4ff b
-28 19-20 #8b95a7 #161b24 -
-28 20-23 #e6eaf0 #2a3241 b
-28 23-28 #8b95a7 #161b24 -
-28 28-80 #ffffff #0e1117 -
+28 8-22 #0e1117 #7cc4ff b
+28 22-23 #8b95a7 #161b24 -
+28 23-80 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
-29 2-7 #e6eaf0 #293140 b
-29 7-18 #8b95a7 #0e1117 -
-29 18-21 #e6eaf0 #293140 b
-29 21-26 #8b95a7 #0e1117 -
-29 26-80 #ffffff #0e1117 -
+29 2-5 #e6eaf0 #293140 b
+29 5-20 #8b95a7 #0e1117 -
+29 20-80 #ffffff #0e1117 -
