@@ -156,7 +156,8 @@ export function sessionPanelLines(picker: SessionPickerState, options: {
   });
   const selected = picker.entries[picker.selectedIndex];
   // A load-more failure is named here because the hint row keeps the forward actions for the rows already loaded.
-  if (picker.errorKind === "more" && !details) lines.push({ text: fitLine(picker.error ?? SESSION_LOAD_MORE_FAILED, columns), tone: "error" });
+  // While a Ctrl+L retry loads, the hint row says so and the earlier failure line is hidden.
+  if (picker.errorKind === "more" && !details && !picker.loading) lines.push({ text: fitLine(picker.error ?? SESSION_LOAD_MORE_FAILED, columns), tone: "error" });
   if (details) {
     const rows = options.visibleRows - (selected ? 1 : 0) + 1 + (height >= 14 ? 1 : 0) + (height >= 10 ? 1 : 0);
     for (const row of wrapRows(picker.errorDetails!, columns, Math.max(1, rows))) lines.push({ text: row, tone: "error" });

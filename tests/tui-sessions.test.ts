@@ -607,6 +607,10 @@ test("a failed load-more keeps loaded rows usable, names the failure and clears 
     expect(fit(38)).toBe("Enter resume · F2 details · Esc back");
     const lines = sessionPanelLines(picker(), { columns: 78, height: 24, visibleRows: 4, home, now: NOW });
     expect(lines.filter(line => line.tone === "error").map(line => line.text)).toEqual(["Cannot load more sessions"]);
+    // A retry in progress shows only its loading status, not the earlier failure.
+    const retrying = { ...picker(), loading: true };
+    expect(sessionPanelLines(retrying, { columns: 78, height: 24, visibleRows: 4, home, now: NOW }).some(line => line.text.includes("Cannot load more"))).toBe(false);
+    expect(fitSessionPickerHint(sessionPickerHint(retrying), 78)).toEqual({ status: "Loading sessions…", actions: "Esc back" });
     // Rows stay usable: moving works and a resume failure replaces, then returns, the load-more failure.
     f.controller.moveSessionPicker(1); expect(picker().offset + picker().selectedIndex).toBe(1);
     expect(await f.controller.selectPickerSession()).toBe(false);
