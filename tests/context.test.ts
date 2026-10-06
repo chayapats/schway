@@ -174,5 +174,6 @@ test("default clock and zone, or an unknown zone, still produce a day-granular d
   expect(byDefault.name).toBe("schway-local-date");
   expect(byDefault.content).toMatch(/^Current date: \d{4}-\d{2}-\d{2} \((Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day\)\nTime zone: (\S+ \()?UTC[+-]\d{2}:\d{2}\)?$/);
   const unknown = (await createContextManager(workspace, { timeZone: "Not/A_Zone", clock: { now: () => Date.parse("2026-06-15T12:00:00Z") } }).prepare(session)).context.at(-1)!;
-  expect(unknown.content).toMatch(/^Current date: 2026-06-1[45] \(\w+day\)\nTime zone: UTC[+-]\d{2}:\d{2}$/);
+  // The fallback uses the host offset, so only the shape is host-independent; date-section.test.ts pins exact fallback values.
+  expect(unknown.content).toMatch(/^Current date: \d{4}-\d{2}-\d{2} \(\w+day\)\nTime zone: UTC[+-]\d{2}:\d{2}$/);
 });
