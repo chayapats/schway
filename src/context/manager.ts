@@ -18,6 +18,7 @@ import {
   SUMMARY_SECTION_NAME,
   SUMMARY_SYSTEM_PROMPT,
 } from "./compaction.ts";
+import { formatLocalDate, LOCAL_DATE_SECTION_NAME, systemTimeZone } from "./date-section.ts";
 import { assembleSystemPrompt } from "./prompt.ts";
 import {
   estimatePreparedTokens,
@@ -73,6 +74,12 @@ export interface ContextManagerOptions {
   contextWindow?: number;
   /** Recent complete turns to retain; defaults to COMPACTION_KEEP_TURNS. */
   keepTurns?: number;
+  /** Wall clock read once per managed turn for the local-date section; defaults to the system clock. */
+  clock?: { now(): number };
+  /** IANA zone for the local-date section; defaults to the process's resolved zone. */
+  timeZone?: string;
+  /** Add the web-lookup line to the base prompt; set only when the session's built-in registry has `web_fetch`. */
+  webLookupGuidance?: boolean;
 }
 
 /** Options for an explicit compaction run. */
@@ -96,7 +103,7 @@ export interface ContextManager {
     model: Model,
     options: CompactOptions,
   ): Promise<CompactionRecord | null>;
-  /** Start the managed user turn retaining explicit activation, and return cleanup fenced against later turns. */
+  /** Start the managed user turn, capturing its local date and retaining explicit activation; cleanup is fenced against later turns. */
   beginTurn(): () => void;
   /** Attach a prepared user invocation before its managed turn and invalidate pending model replacements. */
   setActiveSkill(skill: ActiveSkill): void;
@@ -116,6 +123,8 @@ export function createContextManager(
   const keepTurns = options.keepTurns ?? COMPACTION_KEEP_TURNS;
   let activeSkill: ActiveSkill | undefined;
   let activationScope = {};
+  // Captured once per managed turn so every round, retry and overflow recovery replays identical bytes.
+  let turnDate: { content: string } | undefined;
   const summaryUsage: Array<{ usage: ModelUsage; complete: boolean }> = [];
 
   /** Resolve the model-aware context window with explicit overrides first. */
@@ -126,6 +135,13 @@ export function createContextManager(
     return lookupModel(model.provider, model.id).contextWindow;
   };
 
+  /** Read the clock and format the local date at day granularity; a failing injected clock falls back to the system clock. */
+  const captureDate = (): string => {
+    let epochMs = Date.now();
+    try { if (options.clock) epochMs = options.clock.now(); } catch { /* Keep the system clock reading. */ }
+    return formatLocalDate({ epochMs, timeZone: options.timeZone ?? systemTimeZone() });
+  };
+
   /** Build volatile context sections from a durable summary. */
   const summarySections = (summary: string | undefined): ContextSection[] =>
     summary === undefined
@@ -134,7 +150,9 @@ export function createContextManager(
 
   return {
     async prepare(session, model, prepareOptions = {}) {
-      const systemPrompt = await assembleSystemPrompt(options.home);
+      const systemPrompt = await assembleSystemPrompt(options.home, { webLookupGuidance: options.webLookupGuidance });
+      // Last Schway-owned section: a date change alters only the bytes after the shared system and project prefix.
+      const dateSection: ContextSection = { name: LOCAL_DATE_SECTION_NAME, content: turnDate?.content ?? captureDate() };
       const base: ContextSection[] = [
         {
           name: "environment",
@@ -185,7 +203,7 @@ export function createContextManager(
         const window = resolveWindow(model);
         const estimated = estimatePreparedTokens({
           systemPrompt,
-          context: [...base, ...summarySections(summary)],
+          context: [...base, ...summarySections(summary), dateSection],
           items,
         });
         if (estimated >= window * COMPACTION_PRESSURE_THRESHOLD) {
@@ -206,7 +224,7 @@ export function createContextManager(
 
       return {
         systemPrompt,
-        context: [...base.slice(0, 1), ...summarySections(summary), ...base.slice(1)],
+        context: [...base.slice(0, 1), ...summarySections(summary), ...base.slice(1), dateSection],
         items,
         ...(compaction ? { compaction } : {}),
         ...(compactionOutcome ? { compactionOutcome } : {}),
@@ -222,10 +240,14 @@ export function createContextManager(
       });
     },
 
-    /** Retain prepared activation and return cleanup that cannot clear a later turn's context. */
+    /** Capture the turn's local date, retain prepared activation, and return cleanup that cannot clear a later turn's context. */
     beginTurn() {
       const scope = activationScope = {};
+      const date = turnDate = { content: captureDate() };
       return () => {
+        if (turnDate === date) {
+          turnDate = undefined;
+        }
         if (activationScope === scope) {
           activeSkill = undefined;
           activationScope = {};

@@ -97,6 +97,7 @@ test("missing optional instructions leave the default prompt and no project sect
     expect(instructionsOf(requests[0])).toBe("");
     expect(requests[0]?.context.map((section) => section.name)).toEqual([
       "environment",
+      "schway-local-date",
     ]);
   });
 });
@@ -203,6 +204,7 @@ test("AGENTS.md symlink into an out-of-scope file is not loaded", async () => {
     );
     expect(requests[0]?.context.map((section) => section.name)).toEqual([
       "environment",
+      "schway-local-date",
     ]);
   });
 });

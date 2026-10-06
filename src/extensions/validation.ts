@@ -1,9 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
+import { LOCAL_DATE_SECTION_NAME } from "../context/date-section.ts";
 import type { ContextSection } from "../context/manager.ts";
 import type { ConversationItem } from "../conversation/types.ts";
 import type { ModelTool } from "../model/model.ts";
 
-const STRUCTURAL_NAMES = new Set(["environment", "summary", "project-instructions", "available-skills", "active-skill"]);
+const STRUCTURAL_NAMES = new Set(["environment", "summary", "project-instructions", "available-skills", "active-skill", LOCAL_DATE_SECTION_NAME]);
 
 /** Validate named sections, preventing duplicate names and loss of existing structural identities. */
 export function validateSections(value: unknown, previous: readonly ContextSection[] = [], additionsOnly = false): asserts value is ContextSection[] {

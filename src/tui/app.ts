@@ -10,6 +10,7 @@ import { resolveSplash, type SplashPolicy } from "./splash-policy.ts";
 import { readSplashSeenVersion, recordSplashSeenVersion } from "./ui-state.ts";
 import { resolveMotion } from "./motion-policy.ts";
 import { createContextManager, type ContextManager } from "../context/manager.ts";
+import { hasBuiltinWebFetch } from "../context/prompt.ts";
 import { loadConfigEditor, type ConfigEditor } from "../config/editing.ts";
 import type { ResolvedSettings } from "../config/config.ts";
 import { applyEnvFiles } from "../config/env-file.ts";
@@ -194,7 +195,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
   const credentialStore = io.credentialStore ?? createNativeCredentialStore();
   const loadWorkspaceExtensions = (nextWorkspace: Workspace, signal: AbortSignal) => loadExtensions({
     modules: io.args.extensions ?? [], workspace: nextWorkspace, secrets, home, signal, configDeprecations: io.configDeprecations,
-    tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+    tools: createToolRegistry(INTERACTIVE_BUILTIN_TOOLS),
   });
   let tools: ToolRegistry;
   let extensions: ExtensionRuntime;
@@ -202,7 +203,7 @@ export async function runInteractiveTui(io: InteractiveIo): Promise<number> {
     const loaded = await loadExtensions({
       modules: io.args.extensions ?? [], workspace, secrets, home, signal: io.signal, configDeprecations: io.configDeprecations,
       onDiagnostic: (message) => io.stderr.write(`${message}\n`),
-      tools: createToolRegistry([readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool]),
+      tools: createToolRegistry(INTERACTIVE_BUILTIN_TOOLS),
     });
     tools = loaded.tools;
     extensions = loaded.runtime;
@@ -799,9 +800,13 @@ export async function invokeSkillTurn(
   }
 }
 
+/** Built-in tools every interactive session registers before extensions load; the web-lookup line follows this list only. */
+const INTERACTIVE_BUILTIN_TOOLS = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool];
+
 /** Build context-manager options so catalog budgets follow model switches unless overridden. */
 function contextManagerOptions(home: string, explicitContextWindow?: number, configDeprecations?: readonly ConfigDeprecation[], diagnosticContext?: ConfigDiagnosticContext): Parameters<typeof createContextManager>[1] {
-  return { home, configDeprecations, diagnosticContext, ...(explicitContextWindow !== undefined ? { contextWindow: explicitContextWindow } : {}) };
+  return { home, configDeprecations, diagnosticContext, ...(explicitContextWindow !== undefined ? { contextWindow: explicitContextWindow } : {}),
+    ...(hasBuiltinWebFetch(INTERACTIVE_BUILTIN_TOOLS) ? { webLookupGuidance: true } : {}) };
 }
 
 /** Report whether branch-tree input must take the slash-command path instead of becoming a fork name. */

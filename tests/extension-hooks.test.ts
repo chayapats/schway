@@ -95,7 +95,7 @@ test("two enabled extensions waterfall into actual requests without mutating dur
       const inspect = (request: ModelRequest) => {
         requests.push(request);
         expect(request.systemPrompt).toBe("custom system-first-second");
-        expect(request.context.map(s => s.name)).toEqual(["environment", "project-instructions", "available-skills", "style", "turn", "second"]);
+        expect(request.context.map(s => s.name)).toEqual(["environment", "project-instructions", "available-skills", "schway-local-date", "style", "turn", "second"]);
         expect(request.context.find(s => s.name === "style")?.content).toBe("be concise");
         expect(request.context.find(s => s.name === "turn")?.content).toBe("once-context-second");
         expect(request.items.find(i => i.type === "user")?.content).toEqual([{ type: "text", text: "original-ephemeral" }]);
@@ -149,7 +149,7 @@ test("transport retries reuse a prepared object while overflow reruns only reque
         request => {
           expect(request).not.toBe(original);
           expect(request.systemPrompt).toContain("-hook-2");
-          expect(request.context.map(s => s.name)).toEqual(["environment", "summary", "active-skill", "extension", "turn"]);
+          expect(request.context.map(s => s.name)).toEqual(["environment", "summary", "active-skill", "schway-local-date", "extension", "turn"]);
           expect(request.context.find(s => s.name === "summary")?.content).toBe("Coding summary");
           return { text: "done" };
         },
@@ -196,6 +196,9 @@ const failures: Array<[string, string, string]> = [
   ["beforeAgent", "return { deny: 'policy explanation' }", "Denied: policy explanation"],
   ["beforeModel", "return { deny: 'model explanation' }", "Denied: model explanation"],
   ["beforeAgent", "return { context: [{ name: 'environment', content: 'forged' }] }", "reserved"],
+  ["beforeAgent", "return { context: [{ name: 'schway-local-date', content: 'Current date: 1999-12-31' }] }", 'context section "schway-local-date" is reserved by Schway'],
+  ["context", "return input.context.filter(section => section.name !== 'schway-local-date')", 'context must retain named section "schway-local-date"'],
+  ["beforeModel", "return { ...input, context: input.context.filter(section => section.name !== 'schway-local-date') }", 'context must retain named section "schway-local-date"'],
   ["beforeAgent", "return { message: input.message }", "unsupported field"],
   ["context", "return []", "retain named section"],
   ["context", "return [...input.context, input.context[0]]", "duplicate context"],
@@ -300,6 +303,7 @@ test("request registration is atomic, source-labelled, and closes after initiali
     } finally { setup.runtime.dispose(); }
     for (const [index, body] of [
       `ctx.registerPrompt({ name: 'environment', content: 'bad' })`,
+      `ctx.registerPrompt({ name: 'schway-local-date', content: 'bad' })`,
       `ctx.beforeAgent(42)`,
       `ctx.context(null)`,
       `ctx.beforeModel('bad')`,
@@ -329,7 +333,7 @@ test("mutating hook inputs without returning changes leaves native requests and 
         contextManager: createContextManager(setup.workspace, { home: setup.home }),
         model: createScriptedModel({ responses: [request => {
           expect(request.systemPrompt).toContain("You are Schway");
-          expect(request.context.map(s => s.name)).toEqual(["environment"]);
+          expect(request.context.map(s => s.name)).toEqual(["environment", "schway-local-date"]);
           expect(request.items[0]).toMatchObject({ type: "user", content: [{ type: "text", text: "original" }] });
           expect(request.tools![0]!.inputSchema).not.toEqual({});
           return { text: "done" };
@@ -366,3 +370,34 @@ for (const action of ["cancel", "dispose"] as const) {
     });
   });
 }
+
+test("registerPrompt cannot claim the local-date section, and the error names the extension", async () => {
+  await withTempDir(async dir => {
+    const workspace = await resolveWorkspace(dir);
+    const path = join(dir, "claims-date.ts");
+    await Bun.write(path, `export default ctx => ctx.registerPrompt({ name: 'schway-local-date', content: 'Current date: 1999-12-31' });`);
+    const loading = loadExtensions({ modules: [path], workspace, home: join(dir, "home"), tools: createToolRegistry() });
+    await expect(loading).rejects.toThrow("claims-date.ts");
+    await expect(loading).rejects.toThrow('context section "schway-local-date" is reserved by Schway');
+  });
+});
+
+test("the context waterfall keeps the local-date section and may reorder it like other structural sections", async () => {
+  await withTempDir(async dir => {
+    const setup = await fixture(dir, [`export default ctx => {
+      ctx.registerPrompt({ name: 'style', content: 'be concise' });
+      ctx.context(({ context }) => [...context].reverse());
+    };`]);
+    try {
+      const session = createSession([user("hello")]);
+      const contextManager = createContextManager(setup.workspace, { home: setup.home, clock: { now: () => Date.parse("2026-06-15T08:00:00Z") }, timeZone: "Europe/Berlin" });
+      const events = await collect(runAgentLoop({ ...setup, session, contextManager, extensions: setup.runtime,
+        model: createScriptedModel({ responses: [request => {
+          expect(request.context.map(s => s.name)).toEqual(["style", "schway-local-date", "environment"]);
+          expect(request.context.find(s => s.name === "schway-local-date")?.content).toBe("Current date: 2026-06-15 (Monday)\nTime zone: Europe/Berlin (UTC+02:00)");
+          return { text: "done" };
+        }] }) }));
+      expect(events.at(-1)).toMatchObject({ reason: "completed" });
+    } finally { setup.runtime.dispose(); }
+  });
+});

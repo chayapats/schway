@@ -110,7 +110,7 @@ test("a saved session continues after file tools without persisting runtime delt
           root: loaded.header.workspaceRoot,
           launchCwd: loaded.header.launchCwd,
           extraRoots: loaded.header.extraRoots,
-        }),
+        }, { clock: { now: () => Date.parse("2026-06-15T08:00:00Z") }, timeZone: "Europe/Berlin" }),
       }),
     );
 
@@ -126,6 +126,10 @@ test("a saved session continues after file tools without persisting runtime delt
           `Workspace root: ${project}`,
           `Launch directory: ${project}`,
         ].join("\n"),
+      },
+      {
+        name: "schway-local-date",
+        content: "Current date: 2026-06-15 (Monday)\nTime zone: Europe/Berlin (UTC+02:00)",
       },
     ]);
   });
