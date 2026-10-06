@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Draft your next task…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Retry · Attempt 2/3 in 1s   scripted/scripted-model                                        Esc stops  ctx ~6
+ ◆ Auto  ⠋ Retry · Attempt 2/3 in 1s   scripted/scripted-model                                         Esc stop  ctx ~6
   Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
 == styles
 00 0-1 #ffffff #ecedea -
@@ -100,9 +100,9 @@ cursor 7 27 visible
 28 8-37 #ffffff #7a5000 b
 28 37-38 #545e6c #ecedea -
 28 38-63 #1d232c #e1e3df -
-28 63-102 #545e6c #ecedea -
-28 102-105 #1d232c #c9cdd2 b
-28 105-119 #545e6c #ecedea -
+28 63-103 #545e6c #ecedea -
+28 103-106 #1d232c #c9cdd2 b
+28 106-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-27 #545e6c #f7f7f4 -

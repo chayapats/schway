@@ -40,6 +40,7 @@ const boundary = /^(?:$|\s*$| · | {2}|[.,;:)]|\s*[│┃█▐▌▀▄])/;
 // A key list such as the help palette's `Esc or Ctrl+C` shortcut column names keys, not an action.
 const keyList = /^ or (?:Ctrl|Alt|Shift)\+\S+(?= {2}|\s*$)/;
 const wrapGutter = /^[\s▌]+/;
+const edgeGlyph = /\s*[│┃█▐▌▀▄]\s*$/;
 
 /** Return the glossary phrase that `rest` (the text after `Esc`) starts with, or undefined. */
 function complete(rest: string): string | undefined {
@@ -69,13 +70,15 @@ function classify(rest: string): string {
 
 /**
  * Check every `Esc` token in rendered rows against the glossary. A row that ends on `Esc` or partway through a
- * phrase is joined with the next row (leading spaces and the `▌` gutter removed) before it is judged.
+ * phrase, ignoring a trailing scrollbar or edge glyph, is joined with the next row (leading spaces and the `▌`
+ * gutter removed) before it is judged.
  */
 export function escPhraseProblems(rows: readonly string[]): EscPhraseProblem[] {
   const problems: EscPhraseProblem[] = [];
   rows.forEach((line, row) => {
     for (const match of line.matchAll(/(?<![A-Za-z])Esc(?![A-Za-z])/g)) {
-      const rest = line.slice(match.index + 3);
+      // A panel's scrollbar or edge glyph after the text is not part of the phrase, so a wrap before it still joins.
+      const rest = line.slice(match.index + 3).replace(edgeGlyph, "");
       if (keyList.test(rest) || complete(rest)) continue;
       const next = rows[row + 1];
       if (partial(rest) && next !== undefined) {

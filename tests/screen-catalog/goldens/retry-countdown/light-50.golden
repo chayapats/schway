@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Draft your next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Retry · Attempt 2/3 in 2s    Esc stops
+ ◆ Auto  ⠋ Retry · Attempt 2/3 in 2s     Esc stop
  Wait, then Enter sends · Esc stop
 == styles
 00 0-1 #ffffff #ecedea -
@@ -98,9 +98,9 @@ cursor 6 27 visible
 28 1-7 #1d232c #ecedea b
 28 7-8 #545e6c #ecedea -
 28 8-37 #ffffff #7a5000 b
-28 37-40 #545e6c #ecedea -
-28 40-43 #1d232c #c9cdd2 b
-28 43-49 #545e6c #ecedea -
+28 37-41 #545e6c #ecedea -
+28 41-44 #1d232c #c9cdd2 b
+28 44-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-26 #545e6c #f7f7f4 -

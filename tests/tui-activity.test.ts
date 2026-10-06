@@ -330,10 +330,15 @@ test("narrow work rows keep compaction outcomes and phases readable at the 30- a
     [activity({ phase: "waiting" }), "Waiting · Esc stop", "Waiting · Esc stop"],
     [activity({ phase: "preparing" }), "Preparing · Esc stop", "Preparing · Esc stop"],
     [activity({ phase: "retry" }), "Retrying · Esc stop", "Retrying · Esc stop"],
+    // A retry keeps its cause and drops the attempt number first.
+    [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "rate-limit" } }), "Rate limited · Esc stop", "Rate limited"],
+    [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "provider" } }), "Provider down · Esc stop", "Provider unavailable"],
+    [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000 } }), "Retrying · Esc stop", "Retrying · Esc stop"],
+    [activity({ phase: "retry", retry: { failedAttempt: 1, maxAttempts: 3, remainingMs: 2_000, cause: "offline" } }), "Connection lost · Esc stop", "Connection lost"],
   ] as const;
   for (const [state, thirty, twentyFour] of rows) {
     const detail = activityDetail(state);
-    expect(fitStatusAction(detail, 40)).toBe(detail);
+    expect(fitStatusAction(detail, Bun.stringWidth(detail))).toBe(detail);
     expect(fitStatusAction(detail, 26)).toBe(thirty);
     expect(fitStatusAction(detail, 20)).toBe(twentyFour);
     for (let columns = 8; columns <= 40; columns++) {
@@ -342,7 +347,7 @@ test("narrow work rows keep compaction outcomes and phases readable at the 30- a
       // Every form is whole: no clipped Esc phrase, no ellipsis and no status cut to a fragment such as "Compaction ·".
       expect(fitted).not.toContain("…");
       expect(fitted.includes("Esc") ? fitted.endsWith("Esc stop") : true).toBe(true);
-      expect(fitted).not.toMatch(/^(Compaction|Context|Waiting for) ·/);
+      expect(fitted).not.toMatch(/^(Compaction|Context|Waiting for|Attempt \d\/\d) ·/);
     }
   }
   // A status with no short form drops to the action alone instead of a word fragment.

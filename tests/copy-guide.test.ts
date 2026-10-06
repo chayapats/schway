@@ -42,14 +42,16 @@ interface EscException { screen: string; phrase: string; owner: string }
 
 // Each entry must still match a golden, so an owner that fixes its surface has to delete the entry.
 // Surfaces those owners also keep but the lint does not flag (valid verbs in the wrong place) need no entry:
-// U4 keeps the sign-in status-bar `Esc back` and the browser-callback entry (no golden); U7 keeps the find
-// bar's `Edit query · Esc back` and its `↑/↓` row; U6 (#299) and L5 (#312) own the session picker and branch
-// tree, which have no golden yet.
+// U4 keeps the sign-in status-bar `Esc back` and the callback entry's hint-row `Esc back`; U7 keeps the find
+// bar's `Edit query · Esc back` and its `↑/↓` row; L5 (#312) keeps the branch tree's in-panel `Esc cancel`
+// beside its `Esc back` hint row.
 const ESC_EXCEPTIONS: readonly EscException[] = [
   { screen: "subscription-sign-in", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
   { screen: "grok-browser-approval", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
   { screen: "grok-device-approval", phrase: "Esc cancels", owner: "U4 #297 sign-in wait screen" },
+  { screen: "callback-entry", phrase: "Esc cancels", owner: "U4 #297 browser-callback entry" },
   { screen: "read-only-search-no-matches", phrase: "Esc …", owner: "U7 #300 conversation find bar" },
+  { screen: "session-picker", phrase: "Esc ^W ^L", owner: "U6 #299 session picker hint row" },
 ];
 
 interface ScreenProblem extends EscPhraseProblem { file: string; screen: string; variant: string }
@@ -86,7 +88,8 @@ test("Esc lint rejects seeded wrong verbs and accepts wrapped table phrases", ()
   expect(escPhraseProblems(["Undo turn 1 · Esc close", "Esc stops"]).map(problem => problem.problem))
     .toEqual(['banned synonym "close"', 'third-person verb "stops"']);
   for (const rows of [["Ctrl+R continue · Esc keep", " ▌ editing"], ["Ctrl+R continue · Esc", "keep editing"], ["Clear search or Esc", "  back"],
-    ["◌ Approval · Esc back to request"], ["Esc or Ctrl+C         Stop running work"], ["Esc cancel sign-in"], ["Esc stop  ctx ~7"], ["Esc back        █"]])
+    ["◌ Approval · Esc back to request"], ["Esc or Ctrl+C         Stop running work"], ["Esc cancel sign-in"], ["Esc stop  ctx ~7"], ["Esc back        █"],
+    ["↑/↓ preview · Enter confirm · Esc    █", "cancel                               █"]])
     expect(escPhraseProblems(rows), rows.join("\n")).toEqual([]);
   // A wrapped prefix still fails when the next row does not finish a table phrase.
   expect(escPhraseProblems(["C copy · Esc", "Ask Schway…"])).toHaveLength(1);
