@@ -224,7 +224,14 @@ test("catalog goldens never show the fixture API key or browser callback", async
     const text = await readFile(join(directory, file), "utf8");
     for (const needle of needles) expect(text.includes(needle), `${file} contains ${needle}`).toBe(false);
   }
-  for (const id of ["api-key-entry", "callback-entry"]) expect(await readFile(join(directory, id, "dark-80.golden"), "utf8")).toContain("••••");
+  // Every masked row is one run of exactly one bullet per typed character, so no prefix, suffix or middle segment shows.
+  const typed: Record<string, number> = { "api-key-entry": 14, "callback-entry": 40 };
+  for (const file of await files(directory)) {
+    const length = typed[file.split("/")[0]!];
+    if (length === undefined) continue;
+    const masked = (await readFile(join(directory, file), "utf8")).split(/\s+/).filter(token => token.includes("•"));
+    expect(masked, file).toEqual(["•".repeat(length)]);
+  }
 });
 test("every panel mode and required sub-state has a catalog screen", async () => {
   // A focused run captures only some screens; render each missing one once so the gate always sees the whole catalog.
