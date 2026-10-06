@@ -81,6 +81,24 @@ test("no Schway model default ships without a recorded live evaluation, and a li
     .toEqual({ provider: "xai", model: "grok-4.7", route: "grok", level: "low", source: "model-default" });
 });
 
+test("every shipped Schway model default is actually sent by the adapter and recorded, so the chip can never claim a level that is not sent", async () => {
+  // Empty today. An entry added without the adapter wiring in docs/configuration.md fails here instead of silently mislabeling the chip.
+  for (const entry of MODEL_THINKING_DEFAULTS) {
+    expect(entry.provider, "Only the xAI adapter can carry a Schway default").toBe("xai");
+    const modelId = typeof entry.model === "string" ? entry.model : ["grok-4.7", "grok-4.5", "grok-4"].find(id => (entry.model as RegExp).test(id));
+    expect(modelId, "Default patterns must match a known grok-4.x ID").toBeDefined();
+    const store = fakeCredentialStore();
+    await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-grok", obtainedAt: Date.now() }));
+    const capability: ModelCapability = { id: modelId!, ...(entry.authRoute ? { authRoute: entry.authRoute } : {}), supportedThinking: [entry.level] };
+    const served = capture(() => encodeXaiSse(XAI_TEXT_EVENTS));
+    const model = await loadProviderModel({ provider: "xai", model: modelId, modelCapability: capability,
+      ...(entry.authRoute === "grok" ? { xaiAuth: "grok" as const, grokStore: store } : { apiKey: "k" }) }, served.fetch);
+    await collect(model.stream(sampleRequest()));
+    expect(served.requests[0]?.reasoning, "The adapter must send the default the chip shows").toEqual({ effort: entry.level === "off" ? "none" : entry.level, summary: "auto" });
+    expect(modelReasoning(model)).toMatchObject({ level: entry.level, source: "model-default" });
+  }
+});
+
 /** Serve one SSE body per request and capture inference request bodies; model-list GETs are recorded separately. */
 function capture(body: () => string) {
   const requests: Record<string, unknown>[] = [];
