@@ -19,6 +19,9 @@ cursor 1 1 hidden
    Tools: 3 timed calls · 1m 21s wall time
    Tokens: input 160,000 · cached input 129,600
  · output 6,000 · reasoning 4,800
+   Reasoning: no level sent; the provider's
+ default applied · xai/grok-4.7 via Grok
+ subscription
  3 tool results; 0 failed tools.
  Commands: 3 exited 0, 0 nonzero, 0 without an
  observed exit.
@@ -26,9 +29,6 @@ cursor 1 1 hidden
  not billing. Cached input is part of input and
  reasoning is part of output.
  Model time adds every model attempt, including
- failed ones. Tool time is wall time with at
- least one tool running, so parallel tools count
- once; approval waits are part of it.
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -94,50 +94,51 @@ cursor 1 1 hidden
 12 48-49 #ffffff #252527 -
 12 49-50 #ffffff #0e1117 -
 13 0-1 #ffffff #0e1117 -
-13 1-32 #e6eaf0 #0e1117 -
-13 32-48 #ffffff #0e1117 -
+13 1-44 #e6eaf0 #0e1117 -
+13 44-48 #ffffff #0e1117 -
 13 48-49 #ffffff #252527 -
 13 49-50 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
-14 1-47 #e6eaf0 #0e1117 -
-14 47-48 #ffffff #0e1117 -
+14 1-41 #e6eaf0 #0e1117 -
+14 41-48 #ffffff #0e1117 -
 14 48-49 #ffffff #252527 -
 14 49-50 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
-15 1-15 #e6eaf0 #0e1117 -
-15 15-48 #ffffff #0e1117 -
+15 1-13 #e6eaf0 #0e1117 -
+15 13-48 #ffffff #0e1117 -
 15 48-49 #ffffff #252527 -
 15 49-50 #ffffff #0e1117 -
 16 0-1 #ffffff #0e1117 -
-16 1-46 #e6eaf0 #0e1117 -
-16 46-48 #ffffff #0e1117 -
+16 1-32 #e6eaf0 #0e1117 -
+16 32-48 #ffffff #0e1117 -
 16 48-49 #ffffff #252527 -
 16 49-50 #ffffff #0e1117 -
 17 0-1 #ffffff #0e1117 -
-17 1-48 #e6eaf0 #0e1117 -
+17 1-47 #e6eaf0 #0e1117 -
+17 47-48 #ffffff #0e1117 -
 17 48-49 #ffffff #252527 -
 17 49-50 #ffffff #0e1117 -
 18 0-1 #ffffff #0e1117 -
-18 1-29 #e6eaf0 #0e1117 -
-18 29-48 #ffffff #0e1117 -
+18 1-15 #e6eaf0 #0e1117 -
+18 15-48 #ffffff #0e1117 -
 18 48-49 #ffffff #252527 -
 18 49-50 #ffffff #0e1117 -
 19 0-1 #ffffff #0e1117 -
-19 1-48 #e6eaf0 #0e1117 -
+19 1-46 #e6eaf0 #0e1117 -
+19 46-48 #ffffff #0e1117 -
 19 48-49 #ffffff #252527 -
 19 49-50 #ffffff #0e1117 -
 20 0-1 #ffffff #0e1117 -
-20 1-45 #e6eaf0 #0e1117 -
-20 45-48 #ffffff #0e1117 -
+20 1-48 #e6eaf0 #0e1117 -
 20 48-49 #ffffff #252527 -
 20 49-50 #ffffff #0e1117 -
 21 0-1 #ffffff #0e1117 -
-21 1-48 #e6eaf0 #0e1117 -
+21 1-29 #e6eaf0 #0e1117 -
+21 29-48 #ffffff #0e1117 -
 21 48-49 #ffffff #252527 -
 21 49-50 #ffffff #0e1117 -
 22 0-1 #ffffff #0e1117 -
-22 1-37 #e6eaf0 #0e1117 -
-22 37-48 #ffffff #0e1117 -
+22 1-48 #e6eaf0 #0e1117 -
 22 48-49 #ffffff #252527 -
 22 49-50 #ffffff #0e1117 -
 23 0-50 #ffffff #0e1117 -

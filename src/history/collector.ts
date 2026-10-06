@@ -2,8 +2,8 @@ import { isAbsolute, relative, sep } from "node:path";
 import type { RuntimeEvent } from "../agent/events.ts";
 import type { Session } from "../session/session.ts";
 import { buildEditDiff, type DiffHunk } from "../text/diff.ts";
-import { historyCallDigest, isHistoryId, isHistoryRoot, isHistorySessionId, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES,
-  type HistoryCommand, type HistoryFile, type HistoryGitEvidence, type HistoryMode, type HistoryOutcome, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
+import { historyCallDigest, isHistoryId, isHistoryReasoning, isHistoryRoot, isHistorySessionId, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES,
+  type HistoryCommand, type HistoryFile, type HistoryGitEvidence, type HistoryMode, type HistoryOutcome, type HistoryReasoning, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
 import { createHistoryTelemetryFold } from "./telemetry.ts";
 import { historyCommandSummary, historyDetail, historyExcerpt, historyPath } from "./sanitize.ts";
 import { HISTORY_SESSION_MISSING, type HistoryStore } from "./store.ts";
@@ -55,7 +55,12 @@ export function historyTurnIdentity(session: Pick<Session, "items" | "entries" |
 /** Create a collector for one attempt; `clock` measures active time and `now` stamps recorded times. */
 export function createHistoryCollector(options: { store: HistoryStore; identity: HistoryTurnIdentity; secrets?: readonly string[]; clock?: () => number; now?: () => Date;
   /** Saved conversation used only to name a command whose result carried no structured details, such as a stopped call. */
-  session?: Pick<Session, "items"> }): HistoryCollector {
+  session?: Pick<Session, "items">;
+  /**
+   * Plain-data reasoning record bound to the adapter that serves this attempt, taken when the attempt starts. The adapter is
+   * fixed for the whole attempt (settings changes wait for the turn), so one record covers every model call in it.
+   */
+  reasoning?: HistoryReasoning }): HistoryCollector {
   const { store, identity } = options;
   const secrets = options.secrets ?? [];
   const clock = options.clock ?? (() => performance.now());
@@ -76,6 +81,7 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
   const seenCalls = new Set<string>();
   const files = new Map<string, HistoryFile>();
   const telemetry = createHistoryTelemetryFold();
+  const reasoning = validReasoning(options.reasoning);
 
   /** Store a workspace-relative `/` path when inside the attempt's root, otherwise the absolute path. */
   const displayPath = (absolute: string): string => {
@@ -161,6 +167,7 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
         git,
         ...(oversized ? { oversized } : {}),
         telemetry: telemetry.summary(),
+        ...(reasoning ? { reasoning: { ...reasoning } } : {}),
       };
       // Idempotent: identical evidence (ignoring time) is not appended again; changed evidence gets the next revision.
       const payload = JSON.stringify({ ...body, activeMs: undefined, telemetry: { ...body.telemetry, modelMs: undefined, firstDelta: undefined, retryWaitMs: undefined, toolMs: undefined, approvalWaitMs: undefined },
@@ -184,6 +191,12 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
     },
   };
   return collector;
+}
+
+/** Keep only a well-formed plain reasoning record; anything else is left unrecorded rather than failing the attempt's history. */
+function validReasoning(value: HistoryReasoning | undefined): HistoryReasoning | undefined {
+  if (!isHistoryReasoning(value)) return undefined;
+  return { provider: value.provider, model: value.model, ...(value.route ? { route: value.route } : {}), level: value.level, source: value.source };
 }
 
 /** Map an observed snapshot failure message onto a stored reason without running Git. */

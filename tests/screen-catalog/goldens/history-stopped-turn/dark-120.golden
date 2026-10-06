@@ -13,6 +13,7 @@ cursor 1 1 hidden
   Save clamp notes ไทย 🧪, then wait
   2026-01-15 09:30 UTC · 3.0s
   Model 0.6s · Tools 2.4s · Cache not reported
+  Reasoning: provider default
 
   Files · 1
   › notes.md                     +1 −0
@@ -29,12 +30,11 @@ cursor 1 1 hidden
 
 
 
-
   − Stopped · 1 file +1 −0 · 1 command stopped · 3.0s
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                                                                     ctx ~158
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                  ctx ~158
   ↑↓ files · Enter current diff · F2 details · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -59,28 +59,30 @@ cursor 1 1 hidden
 06 0-2 #ffffff #0e1117 -
 06 2-46 #8b95a7 #0e1117 -
 06 46-120 #ffffff #0e1117 -
-07 0-120 #ffffff #0e1117 -
-08 0-2 #ffffff #0e1117 -
-08 2-11 #7cc4ff #0e1117 b
-08 11-120 #ffffff #0e1117 -
+07 0-2 #ffffff #0e1117 -
+07 2-29 #8b95a7 #0e1117 -
+07 29-120 #ffffff #0e1117 -
+08 0-120 #ffffff #0e1117 -
 09 0-2 #ffffff #0e1117 -
-09 2-38 #7cc4ff #0e1117 -
-09 38-120 #ffffff #0e1117 -
-10 0-120 #ffffff #0e1117 -
-11 0-2 #ffffff #0e1117 -
-11 2-14 #7cc4ff #0e1117 b
-11 14-120 #ffffff #0e1117 -
+09 2-11 #7cc4ff #0e1117 b
+09 11-120 #ffffff #0e1117 -
+10 0-2 #ffffff #0e1117 -
+10 2-38 #7cc4ff #0e1117 -
+10 38-120 #ffffff #0e1117 -
+11 0-120 #ffffff #0e1117 -
 12 0-2 #ffffff #0e1117 -
-12 2-57 #8b95a7 #0e1117 -
-12 57-120 #ffffff #0e1117 -
-13 0-120 #ffffff #0e1117 -
-14 0-2 #ffffff #0e1117 -
-14 2-6 #7cc4ff #0e1117 b
-14 6-120 #ffffff #0e1117 -
+12 2-14 #7cc4ff #0e1117 b
+12 14-120 #ffffff #0e1117 -
+13 0-2 #ffffff #0e1117 -
+13 2-57 #8b95a7 #0e1117 -
+13 57-120 #ffffff #0e1117 -
+14 0-120 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
-15 2-45 #e6eaf0 #0e1117 -
-15 45-120 #ffffff #0e1117 -
-16 0-120 #ffffff #0e1117 -
+15 2-6 #7cc4ff #0e1117 b
+15 6-120 #ffffff #0e1117 -
+16 0-2 #ffffff #0e1117 -
+16 2-45 #e6eaf0 #0e1117 -
+16 45-120 #ffffff #0e1117 -
 17 0-120 #ffffff #0e1117 -
 18 0-120 #ffffff #0e1117 -
 19 0-120 #ffffff #0e1117 -
@@ -110,7 +112,9 @@ cursor 1 1 hidden
 28 8-17 #8fd19e #31433f b
 28 17-18 #8b95a7 #161b24 -
 28 18-43 #e6eaf0 #1e2430 -
-28 43-119 #8b95a7 #161b24 -
+28 43-44 #8b95a7 #161b24 -
+28 44-62 #c0acff #3b3b54 -
+28 62-119 #8b95a7 #161b24 -
 28 119-120 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-4 #e6eaf0 #293140 b

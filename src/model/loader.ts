@@ -3,6 +3,7 @@ import type { CliAuthMode, CliOpenAIAuth, CliProvider } from "../cli/args.ts";
 import type { CredentialStore } from "../auth/store.ts";
 import type { CodexTokens } from "./providers/codex-subscription.ts";
 import type { ModelCapability } from "./catalog.ts";
+import { bindLoaderReasoning } from "./thinking.ts";
 
 const grokModels = new WeakSet<Model>();
 /** Mark an activated model as subscription-backed without changing its xAI conversation namespace. */
@@ -50,6 +51,10 @@ export async function loadProviderModel(
   input: ProviderLoaderInput,
   fetchFn?: FetchLike,
 ): Promise<Model> {
+  return bindLoaderReasoning(await loadSelectedModel(input, fetchFn), input);
+}
+
+async function loadSelectedModel(input: ProviderLoaderInput, fetchFn?: FetchLike): Promise<Model> {
   if (input.provider === "openai-compatible") {
     const { createOpenAICompatibleModel } = await import("./providers/openai-compatible.ts");
     return createOpenAICompatibleModel({

@@ -43,8 +43,27 @@
   calls, retries, tool wall time, approval wait and token coverage, `/context`
   adds cached and reasoning counts, and `--debug` records the same counts and
   timings (#317).
+- Each turn records the reasoning effort its adapter used. History finalize
+  records gain an optional `reasoning` object (provider, model, route, the level
+  sent or `null`, and its source: `explicit`, `model-default`,
+  `provider-default` or `custom`) beside `telemetry`, written by TUI and headless
+  turns; the record `version` stays 1 and older readers ignore it. `/history`
+  turn detail shows `Reasoning: …`, and records written before this say
+  `Reasoning: not recorded` (#321).
+- `bun --no-env-file src/live/reasoning-eval.ts --enable-live --route grok` runs
+  an opt-in, paid evaluation that compares reasoning tokens and model time for
+  `grok-4.x` with thinking unset, at `low` and at `medium`, using stored
+  credentials only. It is never part of `bun test` or CI (#321).
 
 ### Changed
+
+- The status bar's reasoning chip always shows the effective effort while a
+  model is selected, not only an explicit level: `Provider default` when Schway
+  sends no reasoning control, with the advertised level such as
+  `Provider default (medium)` when the model list names one, or
+  `xhigh unavailable` for a level the model does not offer. Schway still sends
+  no reasoning default of its own for `grok-4.x` or any other model: no
+  recorded live evaluation supports one (#321).
 
 - Esc hints use one verb per meaning, from the new Esc verbs table in the voice
   guide: `Esc stop` in the status bar, `Esc cancel` while an undo is offered and

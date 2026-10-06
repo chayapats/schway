@@ -13,6 +13,7 @@ cursor 1 1 hidden
   Audit every generated fixture and compare its snapshot and compare its snapshot and compare its snapshot and       ▀
   compare its snapshot and compare its snapshot and c…
   2026-01-15 09:30 UTC · 12m 34s
+  Reasoning: not recorded
 
   Files · 200 of 230 shown
   › fixtures/__snapshots__/case-1.snap    +3 −1
@@ -28,13 +29,12 @@ cursor 1 1 hidden
     fixtures/__snapshots__/case-11.snap   +3 −1
     fixtures/__snapshots__/case-12.snap   +3 −1
     fixtures/__snapshots__/case-13.snap   +3 −1
-    fixtures/__snapshots__/case-14.snap   +3 −1
 
 
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                                                                      ctx ~65
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                   ctx ~65
   ↑↓ files · Enter current diff · F2 details · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -65,21 +65,21 @@ cursor 1 1 hidden
 06 32-117 #ffffff #f7f7f4 -
 06 117-118 #ffffff #252527 -
 06 118-120 #ffffff #f7f7f4 -
-07 0-117 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-25 #545e6c #f7f7f4 -
+07 25-117 #ffffff #f7f7f4 -
 07 117-118 #ffffff #252527 -
 07 118-120 #ffffff #f7f7f4 -
-08 0-2 #ffffff #f7f7f4 -
-08 2-26 #0a5894 #f7f7f4 b
-08 26-117 #ffffff #f7f7f4 -
+08 0-117 #ffffff #f7f7f4 -
 08 117-118 #ffffff #252527 -
 08 118-120 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
-09 2-47 #0a5894 #f7f7f4 -
-09 47-117 #ffffff #f7f7f4 -
+09 2-26 #0a5894 #f7f7f4 b
+09 26-117 #ffffff #f7f7f4 -
 09 117-118 #ffffff #252527 -
 09 118-120 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
-10 2-47 #1d232c #f7f7f4 -
+10 2-47 #0a5894 #f7f7f4 -
 10 47-117 #ffffff #f7f7f4 -
 10 117-118 #ffffff #252527 -
 10 118-120 #ffffff #f7f7f4 -
@@ -161,7 +161,9 @@ cursor 1 1 hidden
 28 8-17 #19612f #d3dcd4 b
 28 17-18 #545e6c #ecedea -
 28 18-43 #1d232c #e1e3df -
-28 43-119 #545e6c #ecedea -
+28 43-44 #545e6c #ecedea -
+28 44-62 #6a3fb0 #dcd8e3 -
+28 62-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-4 #1d232c #caced3 b

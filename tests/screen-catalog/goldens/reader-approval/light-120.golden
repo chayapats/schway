@@ -34,7 +34,7 @@ cursor 1 1 hidden
 
 
   ◌ Approval required · Ctrl+C cancel turn
- ◆ Ask  ◌ Approval   scripted/scripted-model                                               Esc back to request  ctx ~16
+ ◆ Ask  ◌ Approval   scripted/scripted-model   Provider default                            Esc back to request  ctx ~16
   Esc back to request · ↑↓ scroll · ←→ pan · W wrap · C copy · Ctrl+F find
 == styles
 00 0-1 #ffffff #ecedea -
@@ -105,7 +105,9 @@ cursor 1 1 hidden
 28 7-19 #ffffff #7a5000 b
 28 19-20 #545e6c #ecedea -
 28 20-45 #1d232c #e1e3df -
-28 45-91 #545e6c #ecedea -
+28 45-46 #545e6c #ecedea -
+28 46-64 #6a3fb0 #dcd8e3 -
+28 64-91 #545e6c #ecedea -
 28 91-94 #1d232c #c9cdd2 b
 28 94-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -

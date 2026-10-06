@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Why? The agent will see this…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Ask  ◌ Approval   scripted/scripted-model                                                          Esc deny  ctx ~39
+ ◆ Ask  ◌ Approval   scripted/scripted-model   Provider default                                       Esc deny  ctx ~39
   Enter deny with reason · Esc deny
 == styles
 00 0-1 #ffffff #ecedea -
@@ -146,7 +146,9 @@ cursor 7 27 visible
 28 7-19 #ffffff #7a5000 b
 28 19-20 #545e6c #ecedea -
 28 20-45 #1d232c #e1e3df -
-28 45-102 #545e6c #ecedea -
+28 45-46 #545e6c #ecedea -
+28 46-64 #6a3fb0 #dcd8e3 -
+28 64-102 #545e6c #ecedea -
 28 102-105 #1d232c #c9cdd2 b
 28 105-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -

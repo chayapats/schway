@@ -28,6 +28,10 @@ grok-plan-error
 model-picker
 details-model
 model-picker-unconnected
+reasoning-chip-explicit
+reasoning-chip-provider-default
+reasoning-chip-advertised
+reasoning-chip-unavailable
 thinking-controls
 command-palette
 command-palette-groups
@@ -87,6 +91,9 @@ history-timing
 history-timing-cache-unreported
 history-timing-partial
 history-timing-details
+history-reasoning
+history-reasoning-details
+history-reasoning-legacy
 delete-session-busy
 session-picker
 session-picker-resume-failed

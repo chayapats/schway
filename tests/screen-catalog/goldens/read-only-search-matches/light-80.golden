@@ -34,7 +34,7 @@ cursor 13 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › README
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Read-only  ● Ready   scripted/scripted-model                          ctx ~0
+ ◆ Read-only  ● Ready   scripted/scripted-model   Provider default       ctx ~0
   ↑↓ previous/next · Enter keep · Esc restore · Ctrl+End latest
 == styles
 00 0-1 #ffffff #ecedea -
@@ -91,7 +91,9 @@ cursor 13 27 visible
 28 13-22 #19612f #d3dcd4 b
 28 22-23 #545e6c #ecedea -
 28 23-48 #1d232c #e1e3df -
-28 48-79 #545e6c #ecedea -
+28 48-49 #545e6c #ecedea -
+28 49-67 #6a3fb0 #dcd8e3 -
+28 67-79 #545e6c #ecedea -
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-4 #1d232c #caced3 b

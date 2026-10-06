@@ -14,6 +14,7 @@ cursor 1 1 hidden
   takes
   2026-01-15 09:29 UTC · 58s
   Model 57s · Tools 0.4s · 40%+ cached
+  Reasoning: provider default
 
   Files · 0
     No file changes observed
@@ -30,11 +31,10 @@ cursor 1 1 hidden
 
 
 
-
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                              ctx ~27
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default           ctx ~27
   PgUp/PgDn scroll · F2 details · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -62,28 +62,30 @@ cursor 1 1 hidden
 07 0-2 #ffffff #f7f7f4 -
 07 2-38 #545e6c #f7f7f4 -
 07 38-80 #ffffff #f7f7f4 -
-08 0-80 #ffffff #f7f7f4 -
-09 0-2 #ffffff #f7f7f4 -
-09 2-11 #0a5894 #f7f7f4 b
-09 11-80 #ffffff #f7f7f4 -
+08 0-2 #ffffff #f7f7f4 -
+08 2-29 #545e6c #f7f7f4 -
+08 29-80 #ffffff #f7f7f4 -
+09 0-80 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
-10 2-28 #545e6c #f7f7f4 -
-10 28-80 #ffffff #f7f7f4 -
-11 0-80 #ffffff #f7f7f4 -
-12 0-2 #ffffff #f7f7f4 -
-12 2-14 #0a5894 #f7f7f4 b
-12 14-80 #ffffff #f7f7f4 -
+10 2-11 #0a5894 #f7f7f4 b
+10 11-80 #ffffff #f7f7f4 -
+11 0-2 #ffffff #f7f7f4 -
+11 2-28 #545e6c #f7f7f4 -
+11 28-80 #ffffff #f7f7f4 -
+12 0-80 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
-13 2-26 #19612f #f7f7f4 -
-13 26-80 #ffffff #f7f7f4 -
-14 0-80 #ffffff #f7f7f4 -
-15 0-2 #ffffff #f7f7f4 -
-15 2-6 #0a5894 #f7f7f4 b
-15 6-80 #ffffff #f7f7f4 -
+13 2-14 #0a5894 #f7f7f4 b
+13 14-80 #ffffff #f7f7f4 -
+14 0-2 #ffffff #f7f7f4 -
+14 2-26 #19612f #f7f7f4 -
+14 26-80 #ffffff #f7f7f4 -
+15 0-80 #ffffff #f7f7f4 -
 16 0-2 #ffffff #f7f7f4 -
-16 2-25 #1d232c #f7f7f4 -
-16 25-80 #ffffff #f7f7f4 -
-17 0-80 #ffffff #f7f7f4 -
+16 2-6 #0a5894 #f7f7f4 b
+16 6-80 #ffffff #f7f7f4 -
+17 0-2 #ffffff #f7f7f4 -
+17 2-25 #1d232c #f7f7f4 -
+17 25-80 #ffffff #f7f7f4 -
 18 0-80 #ffffff #f7f7f4 -
 19 0-80 #ffffff #f7f7f4 -
 20 0-80 #ffffff #f7f7f4 -
@@ -107,7 +109,9 @@ cursor 1 1 hidden
 28 8-17 #19612f #d3dcd4 b
 28 17-18 #545e6c #ecedea -
 28 18-43 #1d232c #e1e3df -
-28 43-79 #545e6c #ecedea -
+28 43-44 #545e6c #ecedea -
+28 44-62 #6a3fb0 #dcd8e3 -
+28 62-79 #545e6c #ecedea -
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-11 #1d232c #caced3 b

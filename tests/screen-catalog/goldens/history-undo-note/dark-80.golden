@@ -13,6 +13,7 @@ cursor 1 1 hidden
   Fix the clamp upper bound
   2026-01-15 09:30 UTC · 3.3s
   Model 0.9s · Tools 2.4s · Cache not reported
+  Reasoning: provider default
 
   Files · 1
   › clamp.ts                     +1 −1
@@ -29,12 +30,11 @@ cursor 1 1 hidden
 
 
 
-
   ✓ Done · 1 file +1 −1 · 1 command ok · 3.3s
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                              ctx ~89
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default           ctx ~89
   ↑↓ files · Enter current diff · F2 details · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -59,28 +59,30 @@ cursor 1 1 hidden
 06 0-2 #ffffff #0e1117 -
 06 2-46 #8b95a7 #0e1117 -
 06 46-80 #ffffff #0e1117 -
-07 0-80 #ffffff #0e1117 -
-08 0-2 #ffffff #0e1117 -
-08 2-11 #7cc4ff #0e1117 b
-08 11-80 #ffffff #0e1117 -
+07 0-2 #ffffff #0e1117 -
+07 2-29 #8b95a7 #0e1117 -
+07 29-80 #ffffff #0e1117 -
+08 0-80 #ffffff #0e1117 -
 09 0-2 #ffffff #0e1117 -
-09 2-38 #7cc4ff #0e1117 -
-09 38-80 #ffffff #0e1117 -
-10 0-80 #ffffff #0e1117 -
-11 0-2 #ffffff #0e1117 -
-11 2-14 #7cc4ff #0e1117 b
-11 14-80 #ffffff #0e1117 -
+09 2-11 #7cc4ff #0e1117 b
+09 11-80 #ffffff #0e1117 -
+10 0-2 #ffffff #0e1117 -
+10 2-38 #7cc4ff #0e1117 -
+10 38-80 #ffffff #0e1117 -
+11 0-80 #ffffff #0e1117 -
 12 0-2 #ffffff #0e1117 -
-12 2-35 #8fd19e #0e1117 -
-12 35-80 #ffffff #0e1117 -
-13 0-80 #ffffff #0e1117 -
-14 0-2 #ffffff #0e1117 -
-14 2-6 #7cc4ff #0e1117 b
-14 6-80 #ffffff #0e1117 -
+12 2-14 #7cc4ff #0e1117 b
+12 14-80 #ffffff #0e1117 -
+13 0-2 #ffffff #0e1117 -
+13 2-35 #8fd19e #0e1117 -
+13 35-80 #ffffff #0e1117 -
+14 0-80 #ffffff #0e1117 -
 15 0-2 #ffffff #0e1117 -
-15 2-28 #e6eaf0 #0e1117 -
-15 28-80 #ffffff #0e1117 -
-16 0-80 #ffffff #0e1117 -
+15 2-6 #7cc4ff #0e1117 b
+15 6-80 #ffffff #0e1117 -
+16 0-2 #ffffff #0e1117 -
+16 2-28 #e6eaf0 #0e1117 -
+16 28-80 #ffffff #0e1117 -
 17 0-80 #ffffff #0e1117 -
 18 0-80 #ffffff #0e1117 -
 19 0-80 #ffffff #0e1117 -
@@ -110,7 +112,9 @@ cursor 1 1 hidden
 28 8-17 #8fd19e #31433f b
 28 17-18 #8b95a7 #161b24 -
 28 18-43 #e6eaf0 #1e2430 -
-28 43-79 #8b95a7 #161b24 -
+28 43-44 #8b95a7 #161b24 -
+28 44-62 #c0acff #3b3b54 -
+28 62-79 #8b95a7 #161b24 -
 28 79-80 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-4 #e6eaf0 #293140 b

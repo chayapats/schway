@@ -3,7 +3,7 @@
 Schway uses one conversation column with a persistent multiline editor. The screen
 is divided into color blocks: a top bar names the workspace and checked-out Git
 branch; the conversation sits on the canvas; the composer is a raised block; the
-status bar below it carries the state pill, model, reasoning preference, and context
+status bar below it carries the state pill, model, effective reasoning effort, and context
 meter; key hints sit on the last row. At narrow widths arrow and paging hints drop
 first, then trailing actions; the main action, disclosures such as `Tab more
 options` and the Esc way out stay. When the status bar already names an Esc
@@ -31,6 +31,14 @@ meter shows the estimated share of known capacity (`ctx ━━━━ 19%`), or t
 estimate (`ctx ~132`) when capacity is unknown; `/context` explains it. At narrow
 widths the pill, `Esc stop` and the context estimate take priority; the route,
 reasoning chip and then the model name are shortened first.
+
+The reasoning chip shows the effort in effect whenever a model is selected, from
+the same policy as `/thinking`: an explicit level such as `high`, `Provider
+default` when Schway sends no reasoning control (with the advertised level, as in
+`Provider default (medium)`, when the model list names one), `xhigh unavailable`
+for a requested level the model does not offer, or `Custom reasoning` for
+`extraBody` controls on a compatible endpoint. An advertised default is never shown
+as a level Schway sent.
 
 Streamed assistant text is a preview until the provider finishes the attempt. A
 retry keeps an abandoned preview visibly marked as incomplete, then replaces it
@@ -348,6 +356,13 @@ Each command shows its run time, excluding any approval wait, beside its exit.
 Turns recorded before timing existed show no timing line. F2 details list each
 attempt's model calls, time to first output, retries and backoff, tool wall time,
 approval wait and reported token totals with how many calls reported them.
+
+The next line names the reasoning effort recorded with the turn, such as
+`Reasoning: low`, `Reasoning: provider default`, or `Reasoning: provider default,
+then low` when a continued attempt ran at another level. Turns recorded before
+efforts were saved say `Reasoning: not recorded`; the effort is never guessed
+from current settings. F2 details name, per attempt, the level sent or that none
+was sent, who chose it, and the model and route.
 
 In a turn, Up/Down selects an observed file and Enter shows its
 `Current diff`, labelled `Current content · not turn N's patch`. It is read from

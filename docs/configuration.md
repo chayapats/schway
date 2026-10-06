@@ -244,7 +244,7 @@ Global publication is locked across workspaces. Both records are staged before t
 
 ## Reasoning levels
 
-Select reasoning with config `"thinking": "medium"`, CLI `--thinking medium`, interactive `/thinking medium`, or `/config set thinking medium` (session only by default). Interactive precedence is built-in → interactive memory → user → project → CLI → session, so a session choice overrides files and flags. `/thinking` without arguments shows requested and effective values with provider/model; `/thinking reset` clears the session override for ordinary providers; in Codex subscription mode it selects the backend default for this session, safely shadowing an incompatible saved level without changing the file. `/config` always shows `thinking` with origin and effective mapping, and the status header shows `(thinking <level>)` when set. Changing reasoning affects future requests only and never rewrites history; thinking and opaque provider metadata still round-trip across tool calls, compaction, and resume.
+Select reasoning with config `"thinking": "medium"`, CLI `--thinking medium`, interactive `/thinking medium`, or `/config set thinking medium` (session only by default). Interactive precedence is built-in → interactive memory → user → project → CLI → session, so a session choice overrides files and flags. `/thinking` without arguments shows requested and effective values with provider/model; `/thinking reset` clears the session override for ordinary providers; in Codex subscription mode it selects the backend default for this session, safely shadowing an incompatible saved level without changing the file. `/config` always shows `thinking` with origin and effective mapping. The status bar's reasoning chip always shows the effective effort while a model is selected: the explicit level, `Provider default` when nothing is sent (with the advertised level, such as `Provider default (medium)`, when the model list names one), or `<level> unavailable`. Each turn records the effort its adapter used in the [turn history sidecar](sessions.md#turn-history-sidecar), and `/history` shows it. Changing reasoning affects future requests only and never rewrites history; thinking and opaque provider metadata still round-trip across tool calls, compaction, and resume.
 
 Per-provider mapping follows current official docs without forcing identical wire semantics:
 
@@ -255,7 +255,7 @@ Per-provider mapping follows current official docs without forcing identical wir
 
 Truthful capability handling:
 
-- Unset thinking leaves provider defaults untouched for every family, including unknown IDs. For the static Platform catalog and arbitrary compatible services, explicit `off` on unknown or known non-reasoning models is a no-op; only known reasoning-capable models send the provider's documented disable control. In a Codex subscription or OpenRouter catalog, even `off` must be advertised as `none` for that account/model. Unset/default never means “off”: no control is sent, and `/thinking` displays the advertised default when available.
+- Unset thinking leaves provider defaults untouched for every family, including unknown IDs. Schway sends no per-model default of its own (see [Schway model defaults](#schway-model-defaults)). For the static Platform catalog and arbitrary compatible services, explicit `off` on unknown or known non-reasoning models is a no-op; only known reasoning-capable models send the provider's documented disable control. In a Codex subscription or OpenRouter catalog, even `off` must be advertised as `none` for that account/model. Unset/default never means “off”: no control is sent, and `/thinking` displays the advertised default when available.
 - Explicit reasoning levels absent from the selected model's known or verified catalog support fail before any request. Unknown Platform IDs explain that support cannot be established instead of pretending a mapping applied; only `off` is a safe no-op there. Codex subscription IDs use the signed-in catalog instead of this static fallback.
 - `thinking` plus any reasoning body key in effective `extraBody` (direct or selected-profile `extraBody`) is rejected as `thinking "<level>" conflicts with extraBody.<key>`; remove one to define a single source of truth.
 - Model and profile switches recompute capability and effective reasoning. Subscription model switches shadow incompatible saved thinking with a session-only provider default, without editing files. Other providers reject an incompatible request with the previous settings intact; set a compatible level or reset thinking first.
@@ -278,6 +278,24 @@ The shared contract lives in `src/model/thinking.ts`: capability provenance, sel
 
 Capability sources: [OpenAI Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [OpenAI Sol](https://developers.openai.com/api/docs/models/gpt-6-sol), and [OpenRouter reasoning metadata](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
 
+### Schway model defaults
+
+Schway ships no reasoning default of its own for any model, including `grok-4.x`. Issue #321 evaluated sending one, such as `low` or `medium`, for `grok-4.x` when every layer leaves thinking unset. The rule is to ship it only after a recorded run of the [reasoning effort evaluation](live-providers.md#reasoning-effort-evaluation) shows, on each route the default covers, that:
+
+- the route accepts the level for `grok-4.x` without a 4xx; and
+- the level cuts median reasoning tokens and median model time compared with leaving thinking unset.
+
+No operator has recorded that run, so the decision is no default. Unset thinking sends no reasoning control on the Grok subscription and xAI API-key routes, and the chip says `Provider default`.
+
+The policy table `MODEL_THINKING_DEFAULTS` in `src/model/thinking.ts` is empty. Effective descriptions, the footer chip and per-turn records already handle a Schway default (`Schway default (low)`, source `model-default`). Adopting an entry also requires:
+
+- sending it from the xAI adapter only with a verified capability for that exact model and route;
+- a bounded model-list fetch when thinking is unset that never blocks startup or a headless run and sends nothing on failure (no such fetch runs today);
+- honoring the session-only `null` marker so `/thinking reset` can select the provider's own default for one session;
+- this section and a CHANGELOG entry.
+
+An explicit level always wins. A resolved default is never written into interactive memory, `config.json` or the session, so users who never chose a level would get it, and any later change to it, without a migration.
+
 ## xAI API key
 
 An xAI API key bills the xAI console account. It is not the Grok subscription route: that sign-in, its OAuth flow, and any selector between the subscription and this key are a separate route. This route talks to the public xAI Responses API at `https://api.x.ai/v1` and does not read `OPENAI_API_KEY`.
@@ -298,7 +316,7 @@ schway --provider xai --xai-auth api-key --model "$MODEL_ID" -p "Explain this re
 
 `/login xai` asks for the key in the masked prompt and stores it at the `api-key:xai` identity. Headless runs never open that prompt. With no model named, headless exits with `No model configured · Pass --provider and --model, or set them in config` and does not invent `grok-4.7`. After an interactive sign-in with no model set, Schway selects the recommended listed model, falling back to `grok-4.7` when the list names no default.
 
-Reasoning levels come from that model's `capabilities.reasoning_effort` in `GET https://api.x.ai/v1/models`. `none` is offered as `off` and is the only level that sends `reasoning.effort: none`. A model whose efforts omit `none` offers no `off`. A model with no reasoning capability offers only `off`, which sends no `reasoning` field. An unlisted level is rejected. With thinking unset, Schway does not fetch the model list and sends no reasoning control. With thinking set, headless fetches the list once and validates the level before the turn. Capabilities are bound to the API-key or Grok subscription auth route, even when both offer the same model ID. Switching routes fetches the target route’s list before activation; a rejected effort keeps the previous settings and route active. Credential replacement and logout invalidate the affected route’s evidence. If a replacement Grok account’s catalog cannot be verified, its previous adapter stays blocked; another active provider remains usable.
+Reasoning levels come from that model's `capabilities.reasoning_effort` in `GET https://api.x.ai/v1/models`. `none` is offered as `off` and is the only level that sends `reasoning.effort: none`. A model whose efforts omit `none` offers no `off`. A model with no reasoning capability offers only `off`, which sends no `reasoning` field. An unlisted level is rejected. With thinking unset, Schway does not fetch the model list and sends no reasoning control; there is no Schway default for `grok-4.x` (see [Schway model defaults](#schway-model-defaults)). With thinking set, headless fetches the list once and validates the level before the turn. Capabilities are bound to the API-key or Grok subscription auth route, even when both offer the same model ID. Switching routes fetches the target route’s list before activation; a rejected effort keeps the previous settings and route active. Credential replacement and logout invalidate the affected route’s evidence. If a replacement Grok account’s catalog cannot be verified, its previous adapter stays blocked; another active provider remains usable.
 
 ## ChatGPT subscription (Codex OAuth)
 

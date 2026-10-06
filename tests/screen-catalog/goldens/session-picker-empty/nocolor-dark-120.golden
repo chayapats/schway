@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Search tasks, workspace or session ID…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model                                                                       ctx ~0
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                    ctx ~0
   No saved sessions here yet · Ctrl+W other workspaces · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -95,7 +95,9 @@ cursor 7 27 visible
 28 8-17 #e6eaf0 #444951 b
 28 17-18 #8b95a7 #161b24 -
 28 18-43 #e6eaf0 #1e2430 -
-28 43-119 #8b95a7 #161b24 -
+28 43-44 #8b95a7 #161b24 -
+28 44-62 #e6eaf0 #444951 -
+28 62-119 #8b95a7 #161b24 -
 28 119-120 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-31 #8b95a7 #0e1117 -

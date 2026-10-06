@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
+import type { ReasoningRecord } from "../model/thinking.ts";
 
 /** Current sidecar format version written in the header and every turn record. */
 export const HISTORY_FORMAT_VERSION = 1;
@@ -142,7 +143,15 @@ export interface HistoryTurnFinalize {
   oversized?: number;
   /** Model and tool timing with token totals; absent on records written before it was recorded, whose timings are unknown. */
   telemetry?: HistoryTelemetry;
+  /** Reasoning effort of the adapter that served the attempt; absent when it was not recorded, never inferred from current settings. */
+  reasoning?: HistoryReasoning;
 }
+
+/** Plain-data reasoning evidence for one attempt: provider, model, route, the level sent (null for none) and who chose it. */
+export type HistoryReasoning = ReasoningRecord;
+
+/** Thinking levels a record may name; kept local so session commands that read history never load model modules. */
+export const HISTORY_REASONING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 
 /** Any validated sidecar line. */
 export type HistoryRecord = HistoryHeader | HistoryTurnStart | HistoryTurnFinalize;
@@ -263,7 +272,19 @@ function validRecord(value: unknown): value is HistoryRecord {
       : git.status === "unavailable" && ["off", "no-workspace", "non-git", "failed", "not-captured", "headless"].includes(git.reason as string)
         && (git.detail === undefined || (typeof git.detail === "string" && boundedText(git.detail, MAX_HISTORY_DETAIL_CHARS))))
     && (record.oversized === undefined || COUNT(record.oversized))
-    && (record.telemetry === undefined || validTelemetry(record.telemetry));
+    && (record.telemetry === undefined || validTelemetry(record.telemetry))
+    && (record.reasoning === undefined || isHistoryReasoning(record.reasoning));
+}
+
+/** True for a reasoning record with printable identities, a known route and level, and a source that agrees with whether a level was sent. */
+export function isHistoryReasoning(value: unknown): value is HistoryReasoning {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const reasoning = value as Record<string, unknown>;
+  const sent = reasoning.level !== null;
+  return isHistoryId(reasoning.provider) && isHistoryId(reasoning.model)
+    && (reasoning.route === undefined || ["api-key", "grok", "codex"].includes(reasoning.route as string))
+    && (!sent || HISTORY_REASONING_LEVELS.includes(reasoning.level as string))
+    && (sent ? reasoning.source === "explicit" || reasoning.source === "model-default" : reasoning.source === "provider-default" || reasoning.source === "custom");
 }
 
 /** Strictly validate optional telemetry: whole nonnegative numbers, coverage within the call count and an ordered first-output range. */

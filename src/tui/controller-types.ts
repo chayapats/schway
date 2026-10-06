@@ -170,6 +170,8 @@ export interface TuiSnapshot {
   thinking?: string;
   /** Effective reasoning description shown alongside the requested value. */
   effectiveThinking?: string;
+  /** Footer chip naming the effective effort whenever a model is selected: an explicit level, the provider default, or an unavailable request. */
+  thinkingChip?: string;
   preferences?: PreferencesSnapshot;
   recentSession?: SessionDiscovery;
   /** Whether the current conversation was explicitly restored. */

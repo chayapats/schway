@@ -3,7 +3,7 @@ import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/depr
 import { pruneUndoStore } from "../undo/store.ts";
 import { isErrno } from "../tools/fs.ts";
 import { formatCount } from "../text/format.ts";
-import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
+import { bindLoaderReasoning, isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
 import { version } from "../../package.json";
 import { resolveSplash, type SplashPolicy } from "./splash-policy.ts";
@@ -1011,7 +1011,7 @@ export async function loadInteractiveModel(
         openaiAuth: "codex" as const,
       };
       try {
-        const model = options.createModel ? await options.createModel(input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
+        const model = options.createModel ? bindLoaderReasoning(await options.createModel(input), input) : await loadProviderModel({ ...input, codexStore: store }, options.fetch);
         return { model, ...(selection.notice ? { notice: selection.notice } : {}), ...(capability ? { capability } : {}) };
       } catch (error) {
         return { error: redactSecrets(messageOf(error), options.secrets) };
@@ -1033,7 +1033,7 @@ export async function loadInteractiveModel(
         const thinkingError = validateThinking(provider, modelId ?? "", options.thinking, undefined, capability ?? null, undefined, "grok");
         if (thinkingError) return { error: thinkingError };
         const input = { provider, xaiAuth: "grok" as const, model: modelId, maxTokens: options.maxTokens, thinking: options.thinking, modelCapability: capability };
-        const model = options.createModel ? bindGrokModel(await options.createModel(input)) : await loadProviderModel({ ...input, grokStore: store }, options.fetch);
+        const model = options.createModel ? bindLoaderReasoning(bindGrokModel(await options.createModel(input)), input) : await loadProviderModel({ ...input, grokStore: store }, options.fetch);
         return { model, ...(capability ? { capability } : {}) };
       } catch (error) { return { error: redactSecrets(messageOf(error), options.secrets) }; }
     }
@@ -1091,7 +1091,7 @@ export async function loadInteractiveModel(
     } : {}),
   };
   try {
-    return { model: options.createModel ? await options.createModel(input) : await loadProviderModel(input, options.fetch), ...(routeCapability ? { capability: routeCapability } : {}) };
+    return { model: options.createModel ? bindLoaderReasoning(await options.createModel(input), input) : await loadProviderModel(input, options.fetch), ...(routeCapability ? { capability: routeCapability } : {}) };
   } catch (error) {
     return { error: redactSecrets(messageOf(error), options.secrets) };
   }

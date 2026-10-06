@@ -34,7 +34,7 @@ cursor 17 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › งานถัดไป 🧪
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ! Attention   scripted/scripted-model                                                                   ctx ~6
+ ◆ Auto  ! Attention   scripted/scripted-model   Provider default                                                ctx ~6
   PgUp/PgDn scroll · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
@@ -140,7 +140,9 @@ cursor 17 27 visible
 28 8-21 #ffffff #a61f16 b
 28 21-22 #545e6c #ecedea -
 28 22-47 #1d232c #e1e3df -
-28 47-119 #545e6c #ecedea -
+28 47-48 #545e6c #ecedea -
+28 48-66 #6a3fb0 #dcd8e3 -
+28 66-119 #545e6c #ecedea -
 28 119-120 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-11 #1d232c #caced3 b
