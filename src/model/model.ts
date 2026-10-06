@@ -52,10 +52,16 @@ export type ModelStreamEvent =
   | { type: "usage"; usage: ModelUsage }
   | { type: "message_complete"; message: AssistantMessage };
 
+/** Schway-owned per-call settings kept outside the extension-editable request; an adapter may ignore any of them. */
+export interface ModelCallOptions {
+  /** Opaque conversation affinity key from `promptCacheKey`; absent on requests outside a conversation, such as compaction summaries. */
+  readonly promptCacheKey?: string;
+}
+
 /** Provider adapter contract using Schway conversation records while leaving retries and tool execution to the harness. */
 export interface Model {
   readonly provider: string;
   readonly id: string;
   /** Stream normalized deltas and a completed assistant message, forwarding request cancellation and provider failures. */
-  stream(request: ModelRequest): AsyncIterable<ModelStreamEvent>;
+  stream(request: ModelRequest, call?: ModelCallOptions): AsyncIterable<ModelStreamEvent>;
 }

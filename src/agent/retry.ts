@@ -1,5 +1,5 @@
 import type { AssistantMessage, AssistantTelemetry } from "../conversation/types.ts";
-import type { Model, ModelRequest, ModelUsage } from "../model/model.ts";
+import type { Model, ModelCallOptions, ModelRequest, ModelUsage } from "../model/model.ts";
 import type { ModelRetryCause, RuntimeEvent } from "./events.ts";
 
 /** Total provider stream attempts allowed for one model turn, including the first. */
@@ -108,10 +108,12 @@ async function abortableSleep(
 export async function* streamModelTurn(options: {
   model: Model;
   request: ModelRequest;
+  /** Schway-owned call settings, sent unchanged with every attempt including transport retries. */
+  call?: ModelCallOptions;
   clock: AgentClock;
   signal?: AbortSignal;
 }): AsyncGenerator<RuntimeEvent, ModelTurnOutcome> {
-  const { model, request, clock, signal } = options;
+  const { model, request, call, clock, signal } = options;
   const firstStart = monotonicNow(clock);
   const startedAt = new Date(clock.now()).toISOString();
   let retryWaitMs = 0;
@@ -136,7 +138,7 @@ export async function* streamModelTurn(options: {
     let usage: ModelUsage = { inputTokens: null, outputTokens: null };
     let failed = false;
     try {
-      for await (const event of model.stream(request)) {
+      for await (const event of model.stream(request, call)) {
         if (event.type === "text_delta" || event.type === "thinking_delta") {
           firstDeltaMs ??= elapsedMs(attemptStart, monotonicNow(clock));
           yield {

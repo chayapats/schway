@@ -14,6 +14,15 @@
 
 ### Added
 
+- xAI requests, on both the API-key and Grok subscription routes, send a
+  `prompt_cache_key` so a conversation's requests reach the server that holds
+  its cached prompt prefix. The key is derived from the session and selected
+  branch, so it stays the same across rounds, turns, retries and resume, and
+  changes with `/new`, `/clear` and a different branch. Compaction summaries
+  and model lists send none, and extension hooks never see it. ChatGPT
+  subscription and native OpenAI requests are unchanged. An opt-in
+  `src/live/prompt-cache-probe.ts --enable-live` run measures cache hits with
+  and without the key; see docs/live-providers.md (#320).
 - Model requests include the local date, weekday, time zone and UTC offset as
   the last Schway context section, captured once per turn. Time of day is never
   sent. When the built-in `web_fetch` tool is registered, the base prompt also

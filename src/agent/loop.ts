@@ -3,7 +3,8 @@ import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
 import type { ContextManager, ContextSection, PreparedContext } from "../context/manager.ts";
-import type { Model, ModelRequest, ModelTool } from "../model/model.ts";
+import type { Model, ModelCallOptions, ModelRequest, ModelTool } from "../model/model.ts";
+import { promptCacheKey } from "../model/prompt-cache-key.ts";
 import type { Session } from "../session/session.ts";
 import { createActivateSkillTool } from "../skills/activate.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
@@ -69,6 +70,9 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     ? AbortSignal.any([options.extensions!.signal, ...(options.signal ? [options.signal] : [])])
     : options.signal;
   let turnContext: ContextSection[] = [];
+  // The operation lease holds the branch fixed, so every round, retry and recovery shares one key.
+  // It travels beside the request, never through it, so extension hooks cannot see, drop or change it.
+  const call: ModelCallOptions = { promptCacheKey: promptCacheKey(options.session) };
   const finishTurn = options.contextManager.beginTurn();
   function* compactionUsage(): Generator<RuntimeEvent> {
     for (const entry of options.contextManager.takeUsage()) {
@@ -183,6 +187,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     const outcome = yield* streamModelTurn({
       model: options.model,
       request: await prepareRequest(prepared),
+      call,
       clock,
       signal,
     });
@@ -221,6 +226,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       let outcome = yield* streamModelTurn({
         model: options.model,
         request: await prepareRequest(prepared),
+        call,
         clock,
         signal,
       });

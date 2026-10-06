@@ -105,6 +105,70 @@ protocol fixtures only; that is not live evidence.
 
 **Recorded runs: none.** No operator has run this evaluation, so no default ships.
 
+## Prompt cache probe
+
+This operator procedure measures whether the
+[prompt cache key](configuration.md#prompt-cache-key) produces cache hits on an
+xAI route. It is a **paid/remote opt-in**: never a default `bun test` case, CI
+job or eval, and it runs only when an operator chooses to. It reads
+`inputTokens` and `cachedInputTokens` from the `ModelUsage` contract. The
+ChatGPT subscription route sends no key, so the probe does not cover it. The
+live smoke's `xai-api-key` and `grok` lanes send the key on both rounds, as
+production does, so a passing lane also shows the route accepts the field.
+
+```sh
+# Plan only: prints a skipped report, opens no credential store and sends nothing.
+bun --no-env-file src/live/prompt-cache-probe.ts --route grok
+# Grok subscription (sign in first with /login grok):
+bun --no-env-file src/live/prompt-cache-probe.ts --enable-live --route grok --model grok-4.7
+# xAI API key (save the key first with /login xai):
+bun --no-env-file src/live/prompt-cache-probe.ts --enable-live --route xai-api-key --model grok-4.7
+```
+
+- **Opt-in and credentials.** Nothing is read or sent without `--enable-live`.
+  The probe uses only stored credentials: the saved `grok-subscription:xai`
+  login or the stored `api-key:xai` key. It ignores `XAI_API_KEY` and other
+  environment keys, never starts a sign-in and never switches routes. A missing
+  login reports `pending/missing_subscription`; a missing key reports
+  `skipped/missing_credentials`.
+- **Turns.** Each arm is two turns of one probe conversation. Turn 1 sends a
+  fixed reference text of about 20k tokens and asks for one word. Turn 2 resends
+  turn 1, a fixed one-word reply and one more short question, so its prompt
+  extends turn 1 exactly. A fresh random line leads each arm's system prompt, so
+  no arm or run can reuse another one's cached prefix.
+- **Arms (A/B).** The `key` arm sends one derived key (`schway-v1-…`) on both
+  turns, exactly as a conversation would. The `no-key` arm sends none. The arm
+  is chosen inside the probe only; no setting, config key or flag turns the key
+  off for normal use. Each run does both arms, and the arm that goes first
+  alternates between runs (`--runs`, 1–5, default 1).
+- **Bounds.** Every call sends `max_output_tokens` (`--max-output-tokens`,
+  default 4096, 1024–65536); the cap counts reasoning tokens. Each call has its
+  own deadline (`--timeout-ms`, default 120000) and a 2 MiB response-body
+  budget. Thinking stays unset, so no model list is read. Redirects are refused.
+  No retries run.
+- **Report.** JSON on stdout with UTC `testedAt`, checked-out `revision`,
+  `route`, `model`, `maxOutputTokens` and `runs`. For each call it gives the
+  arm, run, turn, status or error class (`ok`, `incomplete`, `http_error`,
+  `network_error`, `timeout`, `output_limit`, `error`), the last HTTP status,
+  `inputTokens`, `cachedInputTokens`, `outputTokens`, time to the first text or
+  thinking delta and total time. It never includes a token, header, endpoint,
+  the key, the prompt, the answer or a raw response.
+- **Verdict.** A turn 2 counts as a cache hit when it reports
+  `cachedInputTokens > 0`. `summary.keyTurn2Hits` and `summary.noKeyTurn2Hits`
+  count hits per arm, and `summary.cacheHit` is true when any keyed turn 2 hit.
+  A 4xx status on every `key` call but none on `no-key` calls means the
+  route rejects the field: record it, and turn the key off for that route.
+  Exit code 0 means every call completed, 2 means skipped or incomplete, 1 a
+  failure or usage error.
+
+Preserve the JSON with its date, revision, model and route, and record it in the
+PR that relies on it. `bun test tests/prompt-cache-probe.test.ts` checks the
+probe with protocol fixtures only; that is not live evidence.
+
+**Recorded runs: none.** No operator has run this probe. The key ships on both
+xAI routes because xAI documents `prompt_cache_key` for its Responses API, not
+because of a probe result.
+
 ## Reasoning controls and deterministic verification
 
 Normal Schway CLI/TUI requests share the reasoning policy described in

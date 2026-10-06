@@ -6,6 +6,10 @@ import { createContextManager } from "../src/context/manager.ts";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { createSession } from "../src/session/session.ts";
 import { createXaiModel } from "../src/model/providers/xai.ts";
+import { loadProviderModel } from "../src/model/loader.ts";
+import { promptCacheKey } from "../src/model/prompt-cache-key.ts";
+import { GROK_TOKEN_URL, saveSubscriptionTokens } from "../src/model/providers/grok-subscription.ts";
+import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { grepTool } from "../src/tools/grep.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -22,13 +26,13 @@ import {
 
 /** Local Responses server that records the request and returns one SSE body. */
 function serveResponses(events: readonly object[], status = 200) {
-  const seen: Array<{ pathname: string; authorization: string | null; body: unknown }> = [];
+  const seen: Array<{ pathname: string; authorization: string | null; convId: string | null; body: unknown }> = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const body = request.method === "GET" ? undefined : await request.json();
-      seen.push({ pathname: new URL(request.url).pathname, authorization: request.headers.get("authorization"), body });
+      seen.push({ pathname: new URL(request.url).pathname, authorization: request.headers.get("authorization"), convId: request.headers.get("x-grok-conv-id"), body });
       return new Response(status === 200 ? encodeXaiSse(events) : "nope", {
         status,
         headers: status === 200 ? { "Content-Type": "text/event-stream" } : {},
@@ -212,4 +216,64 @@ test("abort stops the stream", async () => {
 test("a missing or blank model ID is rejected before any request", () => {
   expect(() => createXaiModel({ apiKey: "xai-test-key" })).toThrow("A model ID is required.");
   expect(() => createXaiModel({ apiKey: "xai-test-key", model: "  " })).toThrow("A model ID is required.");
+});
+
+const CACHE_KEY = promptCacheKey({ rootId: "8a4f1f36-6a43-4c55-9d1e-5b0f2f0c9e11", activeBranchId: "main" });
+
+test("the API-key route sends the conversation key as prompt_cache_key and no x-grok-conv-id header", async () => {
+  const served = serveResponses(XAI_TEXT_EVENTS);
+  try {
+    const model = createXaiModel({ apiKey: "xai-test-key", model: "grok-4.7", baseUrl: served.baseUrl });
+    await collect(model.stream(sampleRequest(), { promptCacheKey: CACHE_KEY }));
+    const body = served.seen[0]?.body as Record<string, unknown>;
+    expect(body.prompt_cache_key).toBe(CACHE_KEY);
+    expect(served.seen[0]?.convId).toBeNull();
+    // The key is the only addition: the rest of the request shape is unchanged.
+    expect(body.store).toBe(false);
+    expect(body.include).toEqual(["reasoning.encrypted_content"]);
+    expect(body).not.toHaveProperty("reasoning");
+    expect(body).not.toHaveProperty("previous_response_id");
+  } finally { served.server.stop(true); }
+});
+
+test("a request without a conversation key, or with a value that is not a derived key, sends no prompt_cache_key", async () => {
+  const served = serveResponses(XAI_TEXT_EVENTS);
+  try {
+    const model = createXaiModel({ apiKey: "xai-test-key", model: "grok-4.7", baseUrl: served.baseUrl });
+    await collect(model.stream(sampleRequest()));
+    await collect(model.stream(sampleRequest(), {}));
+    await collect(model.stream(sampleRequest(), { promptCacheKey: "8a4f1f36-6a43-4c55-9d1e-5b0f2f0c9e11" }));
+    expect(served.seen).toHaveLength(3);
+    for (const entry of served.seen) {
+      expect(entry.body).not.toHaveProperty("prompt_cache_key");
+      expect(entry.convId).toBeNull();
+    }
+  } finally { served.server.stop(true); }
+});
+
+test("the Grok subscription route sends the same key on the first request and on the one 401 refresh resend", async () => {
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "old-grok-token", refreshToken: "refresh", obtainedAt: 0 });
+  const bodies: Array<Record<string, unknown>> = [];
+  const auth: string[] = [];
+  const convIds: Array<string | null> = [];
+  let refreshes = 0;
+  const model = await loadProviderModel({ provider: "xai", model: "grok-4.7", xaiAuth: "grok", grokStore: store }, async (url, init) => {
+    if (String(url) === GROK_TOKEN_URL) { refreshes++; return Response.json({ access_token: "renewed-grok-token" }); }
+    expect(String(url)).toBe("https://api.x.ai/v1/responses");
+    const headers = new Headers(init!.headers);
+    bodies.push(JSON.parse(String(init!.body)) as Record<string, unknown>);
+    auth.push(headers.get("authorization")!);
+    convIds.push(headers.get("x-grok-conv-id"));
+    return bodies.length === 1
+      ? Response.json({}, { status: 401 })
+      : new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+  });
+  const events = await collect(model.stream(sampleRequest(), { promptCacheKey: CACHE_KEY }));
+  expect(events.at(-1)?.type).toBe("message_complete");
+  expect(refreshes).toBe(1);
+  expect(auth).toEqual(["Bearer old-grok-token", "Bearer renewed-grok-token"]);
+  expect(bodies.map(body => body.prompt_cache_key)).toEqual([CACHE_KEY, CACHE_KEY]);
+  expect(bodies[1]).toEqual(bodies[0]!);
+  expect(convIds).toEqual([null, null]);
 });

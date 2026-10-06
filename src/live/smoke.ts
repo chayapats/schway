@@ -190,10 +190,11 @@ async function runScenario(selection: SmokeSelection, provider: SmokeProvider, r
     const model = await awaitSetup((deps.createModel ?? (input => loadProviderModel(input, fetchFn)))(input), signal);
     result.model = SAFE_ID.test(model.id) ? model.id : "invalid-model-id";
     // The loop registers activate_skill whenever it has a workspace. Do not
-    // advertise that unrelated tool to the selected smoke transport.
+    // advertise that unrelated tool to the selected smoke transport. The
+    // conversation's prompt-cache key passes through, as in production.
     const smokeModel: Model = {
       provider: model.provider, id: model.id,
-      stream: request => model.stream({ ...request, tools: request.tools?.filter(tool => tool.name === "read") }),
+      stream: (request, call) => model.stream({ ...request, tools: request.tools?.filter(tool => tool.name === "read") }, call),
     };
     directory = selection.workspaceRoot ?? await mkdtemp(join(tmpdir(), "schway-live-"));
     // Never promote an ancestor Git root if TMPDIR happens to live inside a repository.
