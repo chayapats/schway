@@ -152,9 +152,15 @@ export function paletteHint(state: { guide: boolean; inserted: boolean; selected
 /** What Enter does in the inline slash palette: insert a differing selectable command, otherwise send the draft. */
 export type SlashEnter = { kind: "insert"; insertion: string } | { kind: "send" };
 
-/** Insert when the highlight is an available command whose insertion differs from the draft (trimmed); else send. */
-export function slashEnter(highlight: PaletteChoice | undefined, draft: string): SlashEnter {
+/**
+ * Insert when the highlight is an available command whose insertion differs from the trimmed draft; else send.
+ * A typed name that is itself a listed command, even an unavailable one, sends so dispatch can report a collision,
+ * unless the user `chose` the highlight with an arrow.
+ */
+export function slashEnter(highlight: PaletteChoice | undefined, draft: string, context: { choices: readonly PaletteChoice[]; chosen: boolean } = { choices: [], chosen: false }): SlashEnter {
   if (highlight?.kind !== "command" || !highlight.available || highlight.insertion.trim() === draft.trim()) return { kind: "send" };
+  const typed = draft.trim().slice(1);
+  if (!context.chosen && context.choices.some(choice => choice.kind === "command" && choice.name === typed)) return { kind: "send" };
   return { kind: "insert", insertion: highlight.insertion };
 }
 

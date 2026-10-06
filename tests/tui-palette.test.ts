@@ -330,7 +330,8 @@ test("running work keeps the palette readable, reflects disabled actions and is 
   await openPalette(ui, "/model");
   ui.mockInput.pressEnter(); await ui.settle();
   expect(ui.editor.plainText).toBe("/model ");
-  ui.mockInput.pressEscape(); await ui.settle();
+  // A complete command closes the slash list, so Enter goes straight to dispatch (and Esc would stop the turn).
+  expect(ui.picker.visible).toBe(false);
   ui.mockInput.pressEnter(); await ui.settle(); await Bun.sleep(10); await ui.settle();
   expect(ui.builtins).toEqual([]);
   expect(ui.editor.plainText).toBe("/model ");

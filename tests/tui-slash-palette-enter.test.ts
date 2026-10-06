@@ -111,8 +111,10 @@ test("/session with /session highlighted runs on the first Enter; /ses inserts /
   await ui.enter();
   expect(ui.editor.plainText).toBe("/sessions ");
   expect(ui.builtins).toEqual([]);
-  // The inserted command leaves no choice to highlight, so this Enter sends it.
-  expect(ui.selected()).toBeUndefined();
+  // The inserted command closes the list, so this Enter sends it.
+  expect(ui.picker.visible).toBe(false);
+  expect(ui.captureCharFrame()).not.toContain("No matches");
+  expect(ui.hints.plainText).toContain("Enter send");
   expect(ui.hints.plainText).not.toContain("Enter insert");
   await ui.enter();
   expect(ui.submitted).toEqual(["/sessions "]);
@@ -120,6 +122,49 @@ test("/session with /session highlighted runs on the first Enter; /ses inserts /
   expect(ui.modelSubmissions()).toBe(0);
   expect(ui.transcriptText()).not.toContain("Unknown command");
 });
+
+test("a complete command closes the list whether Enter or Tab inserted it; argument lists and unknown names keep theirs", async () => {
+  const ui = await setup();
+  await ui.type("/ses");
+  ui.mockInput.pressTab(); await ui.settle();
+  expect(ui.editor.plainText).toBe("/sessions ");
+  expect(ui.picker.visible).toBe(false);
+  expect(ui.captureCharFrame()).not.toContain("No matches");
+  // Typing arguments to a known command keeps the list closed.
+  ui.editor.setText(""); await ui.type("/resume saved-id");
+  expect(ui.picker.visible).toBe(false);
+  // A command with an argument list still offers it after insertion.
+  ui.editor.setText(""); await ui.type("/the");
+  await ui.enter();
+  expect(ui.editor.plainText).toBe("/theme ");
+  expect(ui.picker.visible).toBe(true);
+  expect(ui.selected()).toContain("/theme auto");
+  // An unknown name keeps its no-match row.
+  ui.editor.setText(""); await ui.type("/zzqx ");
+  expect(ui.picker.visible).toBe(true);
+  expect(ui.captureCharFrame()).toContain("No matches · Esc keep editing");
+});
+
+test("a typed command that collides keeps its collision notice instead of inserting another command", async () => withTempDir(async root => {
+  await mkdir(join(root, ".agents/skills/session"), { recursive: true });
+  await Bun.write(join(root, ".agents/skills/session/SKILL.md"), "---\nname: session\ndescription: Conflicting skill\n---\nTask");
+  const ui = await setup({ root });
+  await ui.controller.refreshCommands();
+  await ui.type("/session");
+  expect(ui.selected()).not.toMatch(/\/session\s/);
+  expect(ui.hints.plainText).not.toContain("Enter insert");
+  await ui.enter();
+  expect(ui.editor.plainText).toBe("/session");
+  expect(ui.transcriptText()).toContain("Command conflicts with skill");
+  expect(ui.builtins).toEqual([]);
+  // An explicit arrow choice still wins over the typed name.
+  ui.mockInput.pressArrow("down"); await ui.settle();
+  const chosen = ui.selected()!.match(/\/(\S+)/)![1]!;
+  expect(ui.hints.plainText).toContain("Enter insert");
+  await ui.enter();
+  expect(ui.editor.plainText).toBe(`/${chosen} `);
+  expect(ui.builtins).toEqual([]);
+}));
 
 test("an explicit arrow choice wins: /session + ↓ to /sessions inserts it and does not run /session", async () => {
   const ui = await setup();

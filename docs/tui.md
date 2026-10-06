@@ -882,9 +882,11 @@ highlighted choice clears its selection: press an arrow before completing again.
 
 Up/Down selects and wraps, and Tab inserts the highlighted choice. Enter inserts
 the highlighted choice when it differs from the draft, and sends when the draft
-already matches it, so `/ses` then Enter gives `/sessions ` and the next Enter
-runs it. Choosing a row with an arrow wins over the typed text. **Esc keep
-editing** hides the list; Esc, then Enter, sends the typed text unchanged. Arrows skip
+already matches it, so `/ses` then Enter gives `/sessions `, the list closes and
+the next Enter runs it. The list stays closed while you type arguments to a known
+command. Choosing a row with an arrow wins over the typed text; a typed name that
+collides sends, so its conflict is reported. **Esc keep editing** hides the list;
+Esc, then Enter, sends the typed text unchanged. Arrows skip
 group headers and unavailable rows; Tab and Enter never insert them. Completion never
 executes an action. `/thinking ` suggests only validated current model levels
 (and `reset`); subscription levels require advertised account metadata. OpenRouter
@@ -1039,8 +1041,9 @@ text available. Select the text before pressing **Ctrl+C**; without a selection,
 Ctrl+C keeps its ordinary stop or quit action. A narrow terminal puts the status
 and selection/copy action on separate lines. Failed discard keeps the text and
 shows **Draft cleanup failed · Alt+D retry**. Credential entry, callback entry and
-auth commands are never saved as drafts; saving pauses throughout credential
-surfaces.
+slash commands, including auth commands and commands inserted from suggestions,
+are never saved as drafts, so callback text never reaches disk; the last saved
+ordinary draft stays as it was. Saving pauses throughout credential surfaces.
 
 Quit attempts to save the latest editor text in an isolated writer with a 500 ms
 deadline, then restores the terminal even if storage stalls. **Draft saved.**
