@@ -24,7 +24,7 @@ cursor 19 17 visible
      แล้วสรุปเป็นภาษาไทย
      สั้น ๆ สามบรรทัด
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- Auto · Esc stop
+ ◆ Auto  ⠋ Receiving   ctx ~7
  Working · Esc stop
 == styles
 00 0-1 #ffffff #ecedea -
@@ -90,9 +90,11 @@ cursor 19 17 visible
 17 1-29 #ecedea #f7f7f4 -
 17 29-30 #ffffff #f7f7f4 -
 18 0-1 #545e6c #ecedea -
-18 1-5 #1d232c #ecedea b
-18 5-16 #545e6c #ecedea -
-18 16-30 #ffffff #f7f7f4 -
+18 1-7 #1d232c #ecedea b
+18 7-8 #545e6c #ecedea -
+18 8-21 #ffffff #0a5894 b
+18 21-29 #545e6c #ecedea -
+18 29-30 #ffffff #f7f7f4 -
 19 0-1 #ffffff #f7f7f4 -
 19 1-11 #545e6c #f7f7f4 -
 19 11-14 #1d232c #caced3 b

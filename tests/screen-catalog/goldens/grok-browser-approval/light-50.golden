@@ -34,7 +34,7 @@ cursor 1 1 hidden
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Typing resumes after sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Signing in   scripted/scrip…    ctx ~0
+ ◆ Auto  ⠋ Signing in   scripted-model     ctx ~0
  Esc cancel sign-in
 == styles
 00 0-1 #ffffff #ecedea -
@@ -98,8 +98,8 @@ cursor 1 1 hidden
 28 7-8 #545e6c #ecedea -
 28 8-22 #ffffff #0a5894 b
 28 22-23 #545e6c #ecedea -
-28 23-40 #1d232c #e1e3df -
-28 40-49 #545e6c #ecedea -
+28 23-39 #1d232c #e1e3df -
+28 39-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-4 #1d232c #caced3 b

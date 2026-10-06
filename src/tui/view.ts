@@ -7,7 +7,7 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
-import { activityDetail, displayText, fitLine, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
+import { activityDetail, displayText, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { keyHintChunks } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
 import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
@@ -335,7 +335,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let pill: { label: string; tone: StatusTone; spinning: boolean } = { label: "READY", tone: "ready", spinning: false };
   let pillFrom = theme.surface2;
   let pillChangedAt = -Infinity;
-  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
+  let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; modelId?: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
   // The branch tree hands Esc back to the status bar when its hint row cannot hold both Files/Git unchanged and Esc back.
   let branchTreeEscInFooter = false;
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
@@ -681,9 +681,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   const chunkWidth = (chunks: readonly TextChunk[]) => chunks.reduce((sum, chunk) => sum + Bun.stringWidth(chunk.text), 0);
   const hintColors = (base: string) => ({ key: theme.text, chip: mixColor(base, theme.border, 0.9), action: theme.muted });
 
-  /** The status bar already shows an Esc action (compact footer, hidden hint row, sign-in or running work). */
-  const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") &&
-    (branchTreeEscInFooter || renderer.width < 30 || !hints.visible || footerParts.override === undefined && (footerParts.notConnected || footerParts.running));
+  /**
+   * The status bar shows its Esc action: the branch tree's hint row has no room for it, the hint row is hidden, the sign-in
+   * status bar names one, a waiting approval keeps its own (audit U2), or an idle compact bar below 30 columns names one.
+   * While work runs with the hint row visible, the hint row owns Esc.
+   */
+  const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") && (branchTreeEscInFooter || !hints.visible || !!footerParts.toolApproval ||
+    footerParts.override === undefined && !!footerParts.notConnected || renderer.width < 30 && !footerParts.running);
 
   /**
    * Key-chip hints that fit `columns`. Arrow and paging hints drop first, then trailing actions; primary actions
@@ -742,7 +746,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       footer.content = new StyledText([fg(theme.muted)(" "), bold(fg(modeColor)(modeLabel)),
         ...(next && Bun.stringWidth(next) <= room ? [fg(theme.muted)(` · ${next}`)] : [])]);
     };
-    if (columns < 30 || !hints.visible) { compactFooter(footerParts.nextAction); return; }
+    // An Esc action the hint row already names stays off the status bar, so the bar can spend that width on the model.
+    const nextAction = footerParts.nextAction.startsWith("Esc") && !footerNamesEsc() ? "" : footerParts.nextAction;
+    if (columns < 30 || !hints.visible) { compactFooter(nextAction); return; }
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitFindStatus(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
@@ -771,7 +777,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const ctx = footerParts.ctxPercent === undefined
       ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
       : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
-    const esc = (footerParts.running || branchTreeEscInFooter) && footerParts.nextAction ? keyHintChunks(footerParts.nextAction, hintColors(theme.surface)) : [];
+    const esc = (footerParts.running || branchTreeEscInFooter) && nextAction ? keyHintChunks(nextAction, hintColors(theme.surface)) : [];
     const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
     // Keep mode and the active action; drop route, reasoning, model and context as space tightens.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
@@ -790,11 +796,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       if (fits()) break;
       include.ctx = withContext;
       const room = columns - chunkWidth(approvalPillChunks) - chunkWidth(build([]).right) - 6;
-      ({ left, right } = build(room > 3 ? [bg(theme.surface2)(fg(theme.text)(` ${fitLine(footerParts.model, room - 2)} `))] : []));
+      ({ left, right } = build(room > 3 ? [bg(theme.surface2)(fg(theme.text)(` ${fitModelLabel(footerParts.model, footerParts.modelId ?? footerParts.model, room - 2)} `))] : []));
     }
     if (!fits()) {
       if (chunkWidth(approvalPillChunks) + chunkWidth(esc) + 3 > columns) {
-        compactFooter(footerParts.nextAction);
+        compactFooter(nextAction);
         return;
       }
       left = approvalPillChunks; right = esc;
@@ -1037,7 +1043,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       branchTreeEscInFooter = panelMode === "tree" && !snapshot.toolApproval && branchTreeEscInStatusBar(width);
       footerParts = {
         approvalMode: snapshot.approvalMode,
-        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", thinking: snapshot.modelId && snapshot.thinkingChip ? safe(snapshot.thinkingChip) : undefined,
+        model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", modelId: snapshot.modelId ? safe(snapshot.modelId) : undefined, thinking: snapshot.modelId && snapshot.thinkingChip ? safe(snapshot.thinkingChip) : undefined,
         route: snapshot.modelId ? safe(`${snapshot.activeRoute ?? ""}${snapshot.profile ? `${snapshot.activeRoute ? " · " : ""}${snapshot.profile}` : ""}`) : "",
         ctx: `~${context.estimatedTokens}${context.summaryId ? " · summary" : ""}`, ctxPercent,
         running: !!snapshot.activity || snapshot.status === "running",

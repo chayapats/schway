@@ -237,7 +237,7 @@ test("every 40-column catalog hint row keeps the Esc exit its 50-column variant 
     const text = (await readFile(path, "utf8")).split("== text\n")[1]!.split("\n== styles")[0]!;
     return text.trimEnd().split("\n").at(-1)!.trim();
   };
-  // The exit may sit in the status bar instead when it already names an Esc action (sign-in, running work).
+  // The exit may sit in the status bar instead when it already names an Esc action (sign-in, a waiting approval, a hidden hint row).
   const exitShown = async (path: string) => {
     const rows = (await readFile(path, "utf8")).split("== text\n")[1]!.split("\n== styles")[0]!.trimEnd().split("\n");
     return escExit.test(rows.at(-1)!.trim()) || /(^|\s|· )Esc /.test(rows.at(-2) ?? "");

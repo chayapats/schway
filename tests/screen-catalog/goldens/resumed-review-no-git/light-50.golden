@@ -33,7 +33,7 @@ cursor 1 1 hidden
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-…    ctx ~18
+ ◆ Auto  ● Ready   scripted-model         ctx ~18
  PgUp/PgDn scroll
  Ctrl+R reload · F2 details · Esc back
 == styles
@@ -95,8 +95,8 @@ cursor 1 1 hidden
 27 7-8 #545e6c #ecedea -
 27 8-17 #19612f #d3dcd4 b
 27 17-18 #545e6c #ecedea -
-27 18-39 #1d232c #e1e3df -
-27 39-49 #545e6c #ecedea -
+27 18-34 #1d232c #e1e3df -
+27 34-49 #545e6c #ecedea -
 27 49-50 #ffffff #f7f7f4 -
 28 0-1 #ffffff #f7f7f4 -
 28 1-10 #1d232c #caced3 b

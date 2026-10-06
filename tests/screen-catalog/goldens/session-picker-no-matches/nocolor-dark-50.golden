@@ -34,7 +34,7 @@ cursor 9 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › zzz
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-m…    ctx ~0
+ ◆ Auto  ● Ready   scripted-model          ctx ~0
  No matching sessions · Ctrl+W scope · Esc back
 == styles
 00 0-1 #ffffff #161b24 -
@@ -89,8 +89,8 @@ cursor 9 27 visible
 28 7-8 #8b95a7 #161b24 -
 28 8-17 #e6eaf0 #444951 b
 28 17-18 #8b95a7 #161b24 -
-28 18-40 #e6eaf0 #1e2430 -
-28 40-49 #8b95a7 #161b24 -
+28 18-34 #e6eaf0 #1e2430 -
+28 34-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
 29 1-24 #8b95a7 #0e1117 -

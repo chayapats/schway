@@ -83,6 +83,13 @@
   no reasoning default of its own for `grok-4.x` or any other model: no
   recorded live evaluation supports one (#321).
 
+- While work runs, the hint row names the Esc action (`Esc stop`,
+  `Esc restore`, `Esc back`) and the status bar no longer repeats it, so the
+  status bar has room for the model name at 50 columns. The status bar names Esc only when
+  the hint row is hidden on short terminals, as in `Auto · Esc stop`. A model
+  chip too narrow for `provider/model` shows the model ID without the provider
+  before shortening it with `…` (#310).
+
 - Esc hints use one verb per meaning, from the new Esc verbs table in the voice
   guide: `Esc stop` in the status bar, `Esc cancel` while an undo is offered and
   `Esc back` after it, `Esc keep editing` for slash suggestions, `Esc back` in

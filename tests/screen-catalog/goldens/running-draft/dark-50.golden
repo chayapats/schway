@@ -34,7 +34,7 @@ cursor 19 27 visible
      แล้วสรุปเป็นภาษาไทย
      สั้น ๆ สามบรรทัด
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Receiving 4.0s        Esc stop  ctx ~7
+ ◆ Auto  ⠋ Receiving 4.0s   scripted-m…    ctx ~7
  Wait, then Enter sends · Esc stop
 == styles
 00 0-1 #ffffff #161b24 -
@@ -119,9 +119,9 @@ cursor 19 27 visible
 28 1-7 #e6eaf0 #161b24 b
 28 7-8 #8b95a7 #161b24 -
 28 8-26 #0e1117 #7cc4ff b
-28 26-33 #8b95a7 #161b24 -
-28 33-36 #e6eaf0 #2a3241 b
-28 36-49 #8b95a7 #161b24 -
+28 26-27 #8b95a7 #161b24 -
+28 27-40 #e6eaf0 #1e2430 -
+28 40-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
 29 1-26 #8b95a7 #0e1117 -

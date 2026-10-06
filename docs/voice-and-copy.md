@@ -83,7 +83,7 @@ Pair Esc with the one verb that names what it does on that screen. The definitio
 - Never write a bare `Esc` in a hint or action row.
 - Never use the synonyms `close`, `dismiss`, `exit`, `quit`, `return`, `editor` or `basic` after Esc.
 
-Prose in `/help`, `--help` and docs may conjugate the verb, as in “Esc stops the running turn”; the meaning still matches the table.
+Prose in `/help`, `--help` and docs may conjugate the verb, as in “Esc restores the draft you had before the search”; the meaning still matches the table.
 
 ## Before and after
 

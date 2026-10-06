@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ! Attention   scripted/script…    ctx ~6
+ ◆ Auto  ! Attention   scripted-model      ctx ~6
  Ctrl+R continue · F2 details
 == styles
 00 0-1 #ffffff #ecedea -
@@ -132,8 +132,8 @@ cursor 6 27 visible
 28 7-8 #545e6c #ecedea -
 28 8-21 #f7f7f4 #1d232c b
 28 21-22 #545e6c #ecedea -
-28 22-40 #1d232c #e1e3df -
-28 40-49 #545e6c #ecedea -
+28 22-38 #1d232c #e1e3df -
+28 38-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-7 #1d232c #caced3 b

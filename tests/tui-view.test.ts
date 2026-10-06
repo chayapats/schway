@@ -1158,7 +1158,9 @@ test("retry and cancellation stay visible at 44×18 while a future draft survive
   expect(ui.editor.cursorOffset).toBe(draftCursor);
   expect(ui.captureCharFrame()).toContain("Attempt 2/3");
   expect(ui.captureCharFrame()).not.toContain("Retry 2/3");
-  expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).toContain("Esc stop");
+  // The visible hint row owns the stop key; the status bar spends that width on the model.
+  expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).not.toContain("Esc");
+  expect((ui.renderer.root.findDescendantById("hints") as TextRenderable).plainText).toContain("Esc stop");
   expect(ui.editor.plainText).toBe("future draft\nsecond line");
   ui.mockInput.pressEscape();
   await ui.flush();
@@ -2347,7 +2349,8 @@ test("context inspection uses keyboard input and retains draft and controls duri
     const narrow = ui.captureCharFrame();
     expect(narrow).toContain("ctx ~");
     expect(narrow).toContain("1 tool");
-    expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).toContain("Esc stop");
+    expect((ui.renderer.root.findDescendantById("footer") as TextRenderable).plainText).not.toContain("Esc");
+    expect((ui.renderer.root.findDescendantById("hints") as TextRenderable).plainText).toContain("Esc stop");
     expect(narrow).toContain("future draft");
     expect(narrow).not.toContain("% complete");
     expect(ui.editor.plainText).toBe("future draft");
