@@ -485,7 +485,9 @@ working.
   `request.items`; adapters ignore them.
 - The `model.usage` event adds `startedAt`, `firstDeltaMs` (null when no text
   or thinking delta arrived) and `attemptMs` for every turn attempt, including
-  failed and cancelled ones. Compaction usage events carry none of them.
+  failed and cancelled ones. A failed attempt followed by a retry backoff also
+  carries `retryWaitMs`, the backoff actually waited, even when cancellation cut
+  it short. Compaction usage events carry none of them.
 - The `tool.finished` event adds `startedAt`, `durationMs` and, when the call
   waited for approval, `approvalWaitMs`. They are absent for calls that never
   ran, such as unknown tools or invalid arguments.

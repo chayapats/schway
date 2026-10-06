@@ -11,14 +11,14 @@ cursor 1 1 hidden
   Turn 3 · − Stopped
 
   Save clamp notes ไทย 🧪, then wait
-  2026-01-15 09:30 UTC · 2.4s
-  Model 0.0s · Tools 0.0s · Cache not reported
+  2026-01-15 09:30 UTC · 3.0s
+  Model 0.6s · Tools 2.4s · Cache not reported
 
   Files · 1
   › notes.md                     +1 −0
 
   Commands · 1
-    − printf 'Ready to stop\n'; sleep 30 · Stopped · 0.0s
+    − printf 'Ready to stop\n'; sleep 30 · Stopped · 1.2s
 
   Undo
     Undo available · /undo previews this turn
@@ -30,7 +30,7 @@ cursor 1 1 hidden
 
 
 
-  − Stopped · 1 file +1 −0 · 1 command stopped · 2.4s
+  − Stopped · 1 file +1 −0 · 1 command stopped · 3.0s
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ ›
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀

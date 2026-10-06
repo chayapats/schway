@@ -11,10 +11,10 @@ cursor 1 1 hidden
   Turn 1 details
 
   Attempt 1: interactive · /home/test/demo · started 2026-01-15 09:21 UTC · ✓█
-  Done · 8m 24s                                                              ▀
+  Done · 4m 5s                                                               ▀
     Git snapshots captured before and after the attempt
     Model: 12 calls · 2m 42s · first output 4.7s–31s · 1 retry, 1.0s backoff
-    Tools: 30 timed calls · 5m 42s wall time
+    Tools: 3 timed calls · 1m 21s wall time
     Tokens: input 530,000 · cached input 429,300 · output 9,000 · reasoning
   7,000
   3 tool results; 0 failed tools.
@@ -54,8 +54,8 @@ cursor 1 1 hidden
 04 77-78 #9a9ea3 #252527 -
 04 78-80 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
-05 2-15 #1d232c #f7f7f4 -
-05 15-77 #ffffff #f7f7f4 -
+05 2-14 #1d232c #f7f7f4 -
+05 14-77 #ffffff #f7f7f4 -
 05 77-78 #9a9ea3 #252527 -
 05 78-80 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
@@ -69,8 +69,8 @@ cursor 1 1 hidden
 07 77-78 #ffffff #252527 -
 07 78-80 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
-08 2-44 #1d232c #f7f7f4 -
-08 44-77 #ffffff #f7f7f4 -
+08 2-43 #1d232c #f7f7f4 -
+08 43-77 #ffffff #f7f7f4 -
 08 77-78 #ffffff #252527 -
 08 78-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -

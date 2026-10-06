@@ -244,6 +244,7 @@ export type RuntimeEvent = {
     startedAt?: string;
     firstDeltaMs?: number | null;
     attemptMs?: number;
+    retryWaitMs?: number;
 } | {
     type: "model.retry";
     attempt: number;

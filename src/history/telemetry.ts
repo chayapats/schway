@@ -17,15 +17,17 @@ const DIMENSIONS = [["input", "inputTokens"], ["cachedInput", "cachedInputTokens
 export function createHistoryTelemetryFold(): HistoryTelemetryFold {
   const telemetry = emptyHistoryTelemetry();
   const intervals: Array<[number, number]> = [];
-  let pendingRetryWaitMs = 0;
+  let retryPending = false;
   return {
     observe(event) {
-      if (event.type === "model.retry") { telemetry.retries++; pendingRetryWaitMs = event.delayMs; return; }
-      // A retry's backoff counts once the next attempt actually starts.
-      if (event.type === "model.started") { telemetry.retryWaitMs += pendingRetryWaitMs; pendingRetryWaitMs = 0; return; }
+      if (event.type === "model.retry") { retryPending = true; return; }
+      // A retry counts only once the next attempt actually starts; a backoff cut short by cancellation is not a retry.
+      if (event.type === "model.started") { if (retryPending) telemetry.retries++; retryPending = false; return; }
       if (event.type === "model.usage" && event.phase === "turn") {
         telemetry.modelCalls++;
         if (isMs(event.attemptMs)) telemetry.modelMs += event.attemptMs;
+        // The waited backoff counts even when cancellation ended it before the next attempt.
+        if (isMs(event.retryWaitMs)) telemetry.retryWaitMs += event.retryWaitMs;
         if (isMs(event.firstDeltaMs)) {
           const first = telemetry.firstDelta;
           telemetry.firstDelta = first ? { minMs: Math.min(first.minMs, event.firstDeltaMs), maxMs: Math.max(first.maxMs, event.firstDeltaMs), calls: first.calls + 1 }
@@ -61,6 +63,7 @@ export function combineHistoryTelemetry(parts: readonly HistoryTelemetry[]): His
     for (const [name] of DIMENSIONS) {
       combined.tokens[name].total += part.tokens[name].total;
       combined.tokens[name].reportedCalls += part.tokens[name].reportedCalls;
+      if (part.tokens[name].inconsistentCalls) combined.tokens[name].inconsistentCalls = (combined.tokens[name].inconsistentCalls ?? 0) + part.tokens[name].inconsistentCalls!;
     }
   }
   return combined;
@@ -73,11 +76,22 @@ function emptyHistoryTelemetry(): HistoryTelemetry {
     tokens: { input: total(), cachedInput: total(), output: total(), reasoning: total() } };
 }
 
-/** Add each reported dimension; an unreported (null or absent) dimension adds neither tokens nor coverage. */
+/** Subset dimensions and the totals they must not exceed within one call. */
+const SUBSETS = { cachedInput: "inputTokens", reasoning: "outputTokens" } as const;
+
+/**
+ * Add each reported dimension; an unreported (null or absent) dimension adds neither tokens nor coverage.
+ * A subset larger than its own call's total is counted as inconsistent instead, so no other call's slack can hide it.
+ */
 function foldUsage(telemetry: HistoryTelemetry, usage: ModelUsage): void {
   for (const [name, field] of DIMENSIONS) {
     const value = usage[field];
     if (!isMs(value)) continue;
+    const bound = name === "cachedInput" || name === "reasoning" ? usage[SUBSETS[name]] : undefined;
+    if (isMs(bound) && value > bound) {
+      telemetry.tokens[name].inconsistentCalls = (telemetry.tokens[name].inconsistentCalls ?? 0) + 1;
+      continue;
+    }
     telemetry.tokens[name].total += value;
     telemetry.tokens[name].reportedCalls++;
   }

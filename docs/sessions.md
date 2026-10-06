@@ -234,7 +234,8 @@ ISO 8601 wall-clock strings:
   it is never the completion time. `attemptMs` runs from that attempt's start to
   the end of its stream. `totalMs` runs from the first attempt's start to
   completion, including failed attempts and backoff. `attempts` is 1 plus the
-  transient retries, and `retryWaitMs` is the backoff waited. `usage` is the
+  transient retries, and `retryWaitMs` is the backoff actually waited, measured
+  with the same monotonic clock. `usage` is the
   successful attempt's final reported usage.
 - **Usage.** `cachedInputTokens` is the part of `inputTokens` the provider
   served from its prompt cache, and `reasoningTokens` is the part of
@@ -406,13 +407,17 @@ root; later lines are attempt starts and revisioned outcomes:
   `modelCalls` counts turn model attempts, including failed and cancelled ones;
   compaction calls are excluded. `modelMs` adds every attempt's duration.
   `firstDelta` is the range of time to first text or thinking output over the
-  `calls` that produced any, or `null`. `retries` and `retryWaitMs` count
-  transient retries and the backoff waited. `toolCalls` counts calls with a
+  `calls` that produced any, or `null`. `retries` counts transient retries that
+  started another attempt, and `retryWaitMs` is the backoff actually waited,
+  including a backoff that cancellation cut short. `toolCalls` counts calls with a
   measured duration; `toolMs` is wall time with at least one of them running,
   approval waits included, so parallel calls count once and `modelMs + toolMs`
   stays within `activeMs` up to clock rounding. `approvalWaitMs` adds the
   approval waits. Each token total covers only the `reportedCalls` that reported
   that dimension; fewer reporting calls than `modelCalls` make it a lower bound.
+  A call whose cached or reasoning count exceeds its own input or output total
+  is left out of that subset and counted in an optional `inconsistentCalls`;
+  any such call makes the cache share read `Cache not reported`.
   A command's `durationMs` runs from scheduler start to settlement and its
   `approvalWaitMs` is the part spent waiting. Readers validate these fields
   strictly when present. Duplicate finalizations that differ only in times do not

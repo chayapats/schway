@@ -225,16 +225,22 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     tools = createToolRegistry(names.map(name => ({ name, description: `Gated ${name} fixture`, execution: "parallel" as const, inputSchema: { type: "object", properties: {} }, execute: async (_input, context) => { await stopped(context.signal); return { content: "Stopped." }; } })));
     responses = [{ toolCalls: names.map(name => ({ id: `call_fixture_parallel_${name}`, name, arguments: name === "bash" ? { command: "bun test" } : name === "grep" ? { pattern: "clamp" } : { path: "clamp.ts" } })) }];
   }
+  // Catalog run times come from the activity clock: each executed tool takes 1.2s and each completed model response 0.3s.
+  tools = createToolRegistry(tools.definitions().map(definition => ({ ...definition,
+    execute: async (input: unknown, context: Parameters<typeof definition.execute>[1]) => { try { return await definition.execute(input, context); } finally { activityTime += 1200; } } })));
+  const timed = (model: ReturnType<typeof createScriptedModel>): ReturnType<typeof createScriptedModel> => ({ provider: model.provider, id: model.id,
+    async *stream(request) { for await (const event of model.stream(request)) { if (event.type === "message_complete") activityTime += 300; yield event; } } });
   const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in"].includes(screen.id);
   const picker = screen.id === "model-picker" || screen.id === "details-model";
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
     session, workspace, home, tools, maxConcurrentTools: 3, provider: fresh || picker ? "openai" : "scripted", modelId: fresh || unconnectedPicker ? "" : picker ? "gpt-6-astra" : "scripted-model", sessionId: durableSession?.header.id ?? resumed?.header.id ?? historySession?.header.id ?? "catalog-session",
-    model: fresh || unconnectedPicker ? undefined : createScriptedModel({ id: "scripted-model", responses }), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
+    model: fresh || unconnectedPicker ? undefined : timed(createScriptedModel({ id: "scripted-model", responses })), contextManager: createContextManager(workspace, { home, ...(screen.id === "compaction" ? { keepTurns: 1 } : {}) }),
     appearanceEnvironment: variant.theme, activityClock: () => activityTime,
-    onRuntimeEvent: event => { if (event.type === "tool.finished") activityTime += 1200; },
-    agentClock: { now: () => 10_000, sleep: async (_ms, signal) => { if (screen.id.startsWith("retry-")) await stopped(signal); } },
+    // A settled call that never executed still takes its 1.2s; executed calls already advanced the clock.
+    onRuntimeEvent: event => { if (event.type === "tool.finished" && event.durationMs === undefined) activityTime += 1200; },
+    agentClock: { now: () => activityTime, monotonicNow: () => activityTime, sleep: async (_ms, signal) => { if (screen.id.startsWith("retry-")) await stopped(signal); } },
     credentials: { store, grokLogin: async ({ device, signal, onApproval, onSaved }) => {
       if (screen.id === "grok-plan-error") {
         await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-access", obtainedAt: 1 })); onSaved?.();
@@ -350,19 +356,19 @@ export async function renderScreen(screen: Screen, variant: Variant): Promise<st
   } finally { await ui.dispose(); }
 }
 
-/** Synthetic timing evidence for the `history-timing*` screens; live catalog turns run on a frozen agent clock, so they record zero durations. */
+/** Synthetic timing evidence for the `history-timing*` screens, matching the 8.4-minute turn the timing line was designed for. */
 async function historyTimingFixture(id: string, session: Awaited<ReturnType<typeof createJsonlSession>>, home: string): Promise<void> {
   const task = "Check tomorrow's Bangkok weather and how long the drive to the airport takes";
   session.append({ type: "user", id: "timing-user", content: [{ type: "text", text: task }] }, { type: "assistant", id: "timing-answer", content: [{ type: "text", text: "Light rain; about 45 minutes." }] });
   const store = openHistoryStore({ home }), sessionId = session.header.id;
   const total = (value: number, reportedCalls: number) => ({ total: value, reportedCalls });
   const telemetry: HistoryTelemetry = id === "history-timing-cache-unreported"
-    ? { modelCalls: 2, modelMs: 53_300, firstDelta: { minMs: 812, maxMs: 1400, calls: 2 }, retries: 0, retryWaitMs: 0, toolCalls: 3, toolMs: 9300, approvalWaitMs: 4100,
+    ? { modelCalls: 2, modelMs: 53_300, firstDelta: { minMs: 812, maxMs: 1400, calls: 2 }, retries: 0, retryWaitMs: 0, toolCalls: 2, toolMs: 8500, approvalWaitMs: 4100,
       tokens: { input: total(162_000, 2), cachedInput: total(0, 0), output: total(3100, 2), reasoning: total(0, 0) } }
     : id === "history-timing-partial"
       ? { modelCalls: 2, modelMs: 56_800, firstDelta: null, retries: 0, retryWaitMs: 0, toolCalls: 0, toolMs: 0, approvalWaitMs: 0,
         tokens: { input: total(160_000, 2), cachedInput: total(65_536, 1), output: total(4100, 2), reasoning: total(3800, 1) } }
-      : { modelCalls: 12, modelMs: 162_000, firstDelta: { minMs: 4700, maxMs: 31_000, calls: 12 }, retries: 1, retryWaitMs: 1000, toolCalls: 30, toolMs: 342_000, approvalWaitMs: 0,
+      : { modelCalls: 12, modelMs: 162_000, firstDelta: { minMs: 4700, maxMs: 31_000, calls: 12 }, retries: 1, retryWaitMs: 1000, toolCalls: 3, toolMs: 81_400, approvalWaitMs: 0,
         tokens: { input: total(530_000, 12), cachedInput: total(429_300, 12), output: total(9000, 12), reasoning: total(7000, 12) } };
   const command = (index: number, text: string, durationMs: number, approvalWaitMs?: number): HistoryCommand => ({ id: index.toString(16).padStart(16, "0"), command: text, exitCode: 0,
     ended: "exit", status: "success", durationMs, ...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}) });
@@ -372,6 +378,7 @@ async function historyTimingFixture(id: string, session: Awaited<ReturnType<type
   await store.start(sessionId, { type: "turn_start", version: 1, turnId: "timing-user", attemptId: "timing-attempt", ordinal: 1, branchId: "main", parentId: session.rootId,
     workspaceRoot: "/home/test/demo", mode: "tui", startedAt: "2026-01-15T09:21:36.000Z", task });
   await store.finalize(sessionId, { type: "turn_finalize", version: 1, turnId: "timing-user", attemptId: "timing-attempt", revision: 1, outcome: "completed", finishedAt: "2026-01-15T09:30:00.000Z",
-    activeMs: 504_000, toolResults: commands.length, failedTools: 0, commands: { total: commands.length, exitZero: commands.length, nonzero: 0, unknown: 0, truncated: false, items: commands },
+    // Each record agrees with itself: tool results match timed calls, and model plus tool time fits the active time.
+    activeMs: telemetry.modelMs + telemetry.retryWaitMs + telemetry.toolMs + 600, toolResults: commands.length, failedTools: 0, commands: { total: commands.length, exitZero: commands.length, nonzero: 0, unknown: 0, truncated: false, items: commands },
     files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, telemetry });
 }

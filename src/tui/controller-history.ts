@@ -115,14 +115,15 @@ export function historyTurnTelemetry(turn: Pick<HistoryTurn, "evidence" | "attem
   return recorded.length ? { telemetry: combineHistoryTelemetry(recorded), complete: recorded.length === turn.attempts.length } : undefined;
 }
 
-/** Cached share of input when every call reported both counts and cached never exceeds input; a lower bound when only some calls reported cached counts; otherwise not reported. */
+/** Cached share of input when every call reported both counts with `0 ≤ cached ≤ input` per call; a lower bound when only some calls reported cached counts; otherwise not reported. */
 export function historyCacheLabel(telemetry: HistoryTelemetry, complete = true): string {
   const { input, cachedInput } = telemetry.tokens;
   const calls = telemetry.modelCalls;
   if (!calls) return "";
   const allInput = complete && input.reportedCalls === calls;
   const share = () => input.total ? Math.floor((cachedInput.total / input.total) * 100) : 0;
-  if (!cachedInput.reportedCalls || (allInput && cachedInput.total > input.total)) return "Cache not reported";
+  // A call whose cached count exceeded its own input makes every cache figure untrustworthy.
+  if (!cachedInput.reportedCalls || cachedInput.inconsistentCalls || (allInput && cachedInput.total > input.total)) return "Cache not reported";
   if (allInput) return `${share()}%${complete && cachedInput.reportedCalls === calls ? "" : "+"} cached`;
   // Without every input count no share can be bounded, but the reported cached tokens are a lower bound.
   return `${cachedInput.total.toLocaleString("en-US")}+ tokens cached`;
@@ -152,9 +153,10 @@ export function historyTelemetryDetails(attempt: Pick<HistoryAttempt, "telemetry
   const first = telemetry.firstDelta;
   const firstOutput = !telemetry.modelCalls ? "" : !first ? " · no text or thinking before completion"
     : ` · first output ${first.minMs === first.maxMs ? formatDuration(first.minMs) : `${formatDuration(first.minMs)}–${formatDuration(first.maxMs)}`}${first.calls < telemetry.modelCalls ? ` (${first.calls} of ${formatCount(telemetry.modelCalls, "call")})` : ""}`;
-  const retries = telemetry.retries ? ` · ${formatCount(telemetry.retries, "retry", "retries")}, ${formatDuration(telemetry.retryWaitMs)} backoff` : " · no retries";
-  const token = (label: string, total: HistoryTelemetry["tokens"]["input"]) => !total.reportedCalls ? `${label} not reported`
-    : `${label} ${total.total.toLocaleString("en-US")}${total.reportedCalls < telemetry.modelCalls ? ` (${total.reportedCalls} of ${formatCount(telemetry.modelCalls, "call")} reported)` : ""}`;
+  const retries = telemetry.retries || telemetry.retryWaitMs ? ` · ${formatCount(telemetry.retries, "retry", "retries")}, ${formatDuration(telemetry.retryWaitMs)} backoff` : " · no retries";
+  const token = (label: string, total: HistoryTelemetry["tokens"]["input"]) => (!total.reportedCalls ? `${label} not reported`
+    : `${label} ${total.total.toLocaleString("en-US")}${total.reportedCalls < telemetry.modelCalls ? ` (${total.reportedCalls} of ${formatCount(telemetry.modelCalls, "call")} reported)` : ""}`)
+    + (total.inconsistentCalls ? ` (ignored ${formatCount(total.inconsistentCalls, "call")} that exceeded the total)` : "");
   const { input, cachedInput, output, reasoning } = telemetry.tokens;
   return [
     telemetry.modelCalls ? `  Model: ${formatCount(telemetry.modelCalls, "call")} · ${formatDuration(telemetry.modelMs)}${firstOutput}${retries}` : "  Model: no calls",

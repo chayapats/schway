@@ -73,7 +73,12 @@ export interface HistoryCommand {
 }
 
 /** Sum of one token dimension over the model calls that reported it; fewer reporting calls than `modelCalls` makes it a lower bound. */
-export interface HistoryTokenTotal { total: number; reportedCalls: number }
+export interface HistoryTokenTotal {
+  total: number;
+  reportedCalls: number;
+  /** Calls whose cached or reasoning count exceeded that call's input or output total; excluded from `total` and `reportedCalls`. */
+  inconsistentCalls?: number;
+}
 
 /** Model-call and tool timing plus provider-reported token totals for one attempt, in whole milliseconds. */
 export interface HistoryTelemetry {
@@ -83,8 +88,9 @@ export interface HistoryTelemetry {
   modelMs: number;
   /** Range of time to first text or thinking output over the calls that produced any; null when none did. */
   firstDelta: { minMs: number; maxMs: number; calls: number } | null;
-  /** Transient retries and the backoff waited before them. */
+  /** Transient retries that started another attempt. */
   retries: number;
+  /** Backoff actually waited, including a backoff that cancellation cut short. */
   retryWaitMs: number;
   /** Tool calls with a measured duration. */
   toolCalls: number;
@@ -265,8 +271,12 @@ function validTelemetry(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const telemetry = value as Record<string, unknown>;
   const calls = telemetry.modelCalls, tokens = telemetry.tokens as Record<string, unknown> | undefined, first = telemetry.firstDelta as Record<string, unknown> | null | undefined;
-  const total = (entry: unknown) => !!entry && typeof entry === "object" && COUNT((entry as Record<string, unknown>).total)
-    && COUNT((entry as Record<string, unknown>).reportedCalls) && ((entry as Record<string, unknown>).reportedCalls as number) <= (calls as number);
+  const total = (entry: unknown) => {
+    const value = entry as Record<string, unknown>;
+    return !!value && typeof value === "object" && COUNT(value.total) && COUNT(value.reportedCalls)
+      && (value.inconsistentCalls === undefined || COUNT(value.inconsistentCalls))
+      && (value.reportedCalls as number) + ((value.inconsistentCalls as number | undefined) ?? 0) <= (calls as number);
+  };
   return COUNT(calls) && COUNT(telemetry.modelMs) && COUNT(telemetry.retries) && COUNT(telemetry.retryWaitMs) && COUNT(telemetry.toolCalls)
     && COUNT(telemetry.toolMs) && COUNT(telemetry.approvalWaitMs)
     && (first === null || (!!first && typeof first === "object" && COUNT(first.minMs) && COUNT(first.maxMs) && (first.minMs as number) <= (first.maxMs as number)

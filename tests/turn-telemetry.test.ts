@@ -121,7 +121,7 @@ test("one transient failure then success records two attempts and the slept back
   const retry = events.find(event => event.type === "model.retry");
   expect(retry).toMatchObject({ attempt: 1, delayMs: 1000 });
   expect(events.filter(event => event.type === "model.usage")).toEqual([
-    { type: "model.usage", phase: "turn", complete: false, startedAt: iso(0), firstDeltaMs: 200, attemptMs: 220, usage: { inputTokens: null, outputTokens: null } },
+    { type: "model.usage", phase: "turn", complete: false, startedAt: iso(0), firstDeltaMs: 200, attemptMs: 220, retryWaitMs: 1000, usage: { inputTokens: null, outputTokens: null } },
     { type: "model.usage", phase: "turn", complete: true, startedAt: iso(1220), firstDeltaMs: 100, attemptMs: 500, usage: { inputTokens: null, outputTokens: null } },
   ]);
   if (outcome.kind !== "complete") throw new Error("expected completion");

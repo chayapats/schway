@@ -2,7 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentClock } from "../src/agent/retry.ts";
+import type { RuntimeEvent } from "../src/agent/events.ts";
+import { streamModelTurn, type AgentClock } from "../src/agent/retry.ts";
+import { createHistoryTelemetryFold } from "../src/history/telemetry.ts";
 import { runCli } from "../src/cli/runtime.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createHistoryCollector, historyTurnIdentity } from "../src/history/collector.ts";
@@ -91,15 +93,61 @@ test("a duplicate finalization with different timings adds no revision", async (
   await collector.start();
   collector.observe({ type: "model.started", provider: "scripted", model: "timed" });
   collector.observe({ type: "model.retry", attempt: 1, maxAttempts: 3, delayMs: 1000, message: "unavailable", cause: "provider" });
-  collector.observe({ type: "model.usage", phase: "turn", usage: { inputTokens: null, outputTokens: null }, complete: false, firstDeltaMs: null, attemptMs: 200 });
-  now = 1200;
-  await collector.finalize({ observation: { status: "unavailable", reason: "not-captured" } });
-  // The next attempt starting completes the retry wait, a timing-only change, and the clock moved on.
+  collector.observe({ type: "model.usage", phase: "turn", usage: { inputTokens: null, outputTokens: null }, complete: false, firstDeltaMs: null, attemptMs: 200, retryWaitMs: 1000 });
   collector.observe({ type: "model.started", provider: "scripted", model: "timed" });
+  collector.observe({ type: "model.usage", phase: "turn", usage: { inputTokens: null, outputTokens: null }, complete: true, firstDeltaMs: 40, attemptMs: 300 });
+  collector.observe({ type: "tool.finished", toolCallId: "b1", name: "bash", status: "success", content: "ok", details: { command: "date", exitCode: 0 }, startedAt: "2026-01-15T09:30:01.500Z", durationMs: 400 });
+  now = 1900;
+  await collector.finalize({ observation: { status: "unavailable", reason: "not-captured" } });
+  // A late duplicate delivery with another duration is ignored, and only the active time moved on.
+  collector.observe({ type: "tool.finished", toolCallId: "b1", name: "bash", status: "success", content: "ok", details: { command: "date", exitCode: 0 }, startedAt: "2026-01-15T09:30:01.500Z", durationMs: 9000 });
   now = 5000;
   await collector.finalize({ observation: { status: "unavailable", reason: "not-captured" } });
   const read = await openHistoryStore({ home }).read(session.rootId);
-  expect(read.finalizes.map(record => [record.revision, record.telemetry?.retryWaitMs])).toEqual([[1, 0]]);
+  expect(read.finalizes.map(record => [record.revision, record.activeMs, record.telemetry?.retries, record.telemetry?.retryWaitMs, record.telemetry?.modelMs, record.telemetry?.toolMs,
+    record.commands.items[0]?.durationMs])).toEqual([[1, 1900, 1, 1000, 500, 400, 400]]);
+});
+
+test("cancelling during a retry backoff records the time waited but no retry", async () => {
+  let t = 0;
+  // The user stops the turn 25 s into a 30 s backoff.
+  const clock: AgentClock = { now: () => Date.parse("2026-01-15T09:30:00.000Z") + t, monotonicNow: () => t,
+    sleep: async () => { t += 25_000; throw Object.assign(new Error("aborted"), { name: "AbortError" }); } };
+  const limited = Object.assign(new Error("Too many requests"), { status: 429, headers: { "retry-after": "30" } });
+  const model: Model = { provider: "scripted", id: "timed", async *stream() { t += 300; throw limited; } };
+  const events: RuntimeEvent[] = [];
+  const generator = streamModelTurn({ model, request: { systemPrompt: "", context: [], items: [] }, clock });
+  let next = await generator.next();
+  while (!next.done) { events.push(next.value); next = await generator.next(); }
+  expect(next.value).toEqual({ kind: "cancelled" });
+  expect(events.find(event => event.type === "model.retry")).toMatchObject({ delayMs: 30_000 });
+  expect(events.find(event => event.type === "model.usage")).toMatchObject({ complete: false, attemptMs: 300, retryWaitMs: 25_000 });
+  const fold = createHistoryTelemetryFold();
+  for (const event of events) fold.observe(event);
+  expect(fold.summary()).toMatchObject({ modelCalls: 1, modelMs: 300, retries: 0, retryWaitMs: 25_000 });
+  expect(historyDetailsText({ unsaved: {} }, turnWith(fold.summary()))).toContain("  Model: 1 call · 0.3s · no text or thinking before completion · 0 retries, 25s backoff");
+});
+
+test("a call whose cached count exceeds its own input makes the cache share unreported, whatever other calls report", () => {
+  const fold = createHistoryTelemetryFold();
+  fold.observe({ type: "model.usage", phase: "turn", complete: true, attemptMs: 10, firstDeltaMs: 5, usage: { inputTokens: 100, outputTokens: 10, cachedInputTokens: 150, reasoningTokens: 4 } });
+  fold.observe({ type: "model.usage", phase: "turn", complete: true, attemptMs: 10, firstDeltaMs: 5, usage: { inputTokens: 1000, outputTokens: 20, cachedInputTokens: 0, reasoningTokens: 30 } });
+  const summary = fold.summary();
+  // The totals alone (1,100 input, 150 cached) would have shown 13% cached.
+  expect(summary.tokens).toEqual({ input: total(1100, 2), cachedInput: { total: 0, reportedCalls: 1, inconsistentCalls: 1 }, output: total(30, 2),
+    reasoning: { total: 4, reportedCalls: 1, inconsistentCalls: 1 } });
+  expect(historyCacheLabel(summary)).toBe("Cache not reported");
+  expect(historyTimingLine(turnWith(summary), 120)).toBe("Model 0.0s · Cache not reported");
+  expect(historyDetailsText({ unsaved: {} }, turnWith(summary))).toContain("cached input 0 (1 of 2 calls reported) (ignored 1 call that exceeded the total)");
+  // Records keep the flag, and coverage plus inconsistent calls cannot exceed the call count.
+  const record = finalize({ telemetry: summary });
+  expect((parseHistoryLine(serializeHistoryFinalize(record).trim()) as HistoryTurnFinalize).telemetry).toEqual(summary);
+  expect(parseHistoryLine(JSON.stringify({ ...record, telemetry: { ...summary, tokens: { ...summary.tokens, cachedInput: { total: 0, reportedCalls: 2, inconsistentCalls: 1 } } } }))).toBeUndefined();
+  // Valid per-call counts keep the share.
+  const valid = createHistoryTelemetryFold();
+  valid.observe({ type: "model.usage", phase: "turn", complete: true, usage: { inputTokens: 100, outputTokens: 10, cachedInputTokens: 100 } });
+  valid.observe({ type: "model.usage", phase: "turn", complete: true, usage: { inputTokens: 1000, outputTokens: 20, cachedInputTokens: 0 } });
+  expect(historyCacheLabel(valid.summary())).toBe("9% cached");
 });
 
 test("worst-case telemetry and command timings stay within 128 KiB", () => {

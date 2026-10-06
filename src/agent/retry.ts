@@ -131,6 +131,7 @@ export async function* streamModelTurn(options: {
     const attemptStartedAt = attempt === 1 ? startedAt : new Date(clock.now()).toISOString();
     let firstDeltaMs: number | null = null;
     let attemptMs: number | undefined;
+    let attemptWaitMs: number | undefined;
     let complete: AssistantMessage | undefined;
     let usage: ModelUsage = { inputTokens: null, outputTokens: null };
     let failed = false;
@@ -172,6 +173,7 @@ export async function* streamModelTurn(options: {
           message,
           cause,
         };
+        const waitStart = monotonicNow(clock);
         try {
           await clock.sleep(delayMs, signal);
         } catch (sleepError) {
@@ -179,8 +181,11 @@ export async function* streamModelTurn(options: {
             return { kind: "cancelled" };
           }
           return { kind: "error", message: errorMessage(sleepError), category: "offline" };
+        } finally {
+          // Time actually waited, even when cancellation or a failed timer ends the backoff early.
+          attemptWaitMs = elapsedMs(waitStart, monotonicNow(clock));
+          retryWaitMs += attemptWaitMs;
         }
-        retryWaitMs += delayMs;
         continue;
       }
       if (transient) {
@@ -195,7 +200,7 @@ export async function* streamModelTurn(options: {
       // A consumer that stops early still observes this attempt's elapsed time.
       attemptMs ??= elapsedMs(attemptStart, monotonicNow(clock));
       yield { type: "model.usage", phase: "turn", usage, complete: !!complete && !failed && !signal?.aborted,
-        startedAt: attemptStartedAt, firstDeltaMs, attemptMs };
+        startedAt: attemptStartedAt, firstDeltaMs, attemptMs, ...(attemptWaitMs !== undefined ? { retryWaitMs: attemptWaitMs } : {}) };
     }
 
     if (!complete) {

@@ -13,7 +13,7 @@ cursor 1 1 hidden
  Check tomorrow's Bangkok weather and █
  how long the drive to the airport
  takes
- 2026-01-15 09:21 UTC · 8m 24s
+ 2026-01-15 09:21 UTC · 57s
  Model 57s · 40%+ cached
 
  Files · 0
@@ -56,8 +56,8 @@ cursor 1 1 hidden
 06 38-39 #ffffff #252527 -
 06 39-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-30 #8b95a7 #0e1117 -
-07 30-38 #ffffff #0e1117 -
+07 1-27 #8b95a7 #0e1117 -
+07 27-38 #ffffff #0e1117 -
 07 38-39 #ffffff #252527 -
 07 39-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -

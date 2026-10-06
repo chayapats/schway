@@ -140,7 +140,8 @@ export function createDiagnosticSink(options: {
         // Key names avoid the sanitizer's "token" and "output" filters, which would otherwise drop these counts.
         case "model.usage": sink.record("model", event.type, { phase: event.phase, complete: event.complete, inputCount: event.usage.inputTokens, generatedCount: event.usage.outputTokens,
           cachedInputCount: event.usage.cachedInputTokens ?? null, reasoningCount: event.usage.reasoningTokens ?? null,
-          ...(event.firstDeltaMs !== undefined ? { firstDeltaMs: event.firstDeltaMs } : {}), ...(event.attemptMs !== undefined ? { attemptMs: event.attemptMs } : {}) }); break;
+          ...(event.firstDeltaMs !== undefined ? { firstDeltaMs: event.firstDeltaMs } : {}), ...(event.attemptMs !== undefined ? { attemptMs: event.attemptMs } : {}),
+          ...(event.retryWaitMs !== undefined ? { retryWaitMs: event.retryWaitMs } : {}) }); break;
         case "model.retry": sink.record("model", event.type, { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, category: "transient_provider_failure", ...(event.cause ? { cause: event.cause } : {}) }, "warn"); break;
         case "tool.denied": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId, mode: event.mode, reason: event.reason }, "warn"); break;
         case "tool.started": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId }); break;

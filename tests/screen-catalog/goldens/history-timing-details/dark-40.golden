@@ -12,13 +12,13 @@ cursor 1 1 hidden
 
  Attempt 1: interactive · /home/test/ █
  demo · started 2026-01-15 09:21 UTC ·
- ✓ Done · 8m 24s
+ ✓ Done · 4m 5s
    Git snapshots captured before and
  after the attempt
    Model: 12 calls · 2m 42s · first
  output 4.7s–31s · 1 retry, 1.0s
  backoff
-   Tools: 30 timed calls · 5m 42s wall
+   Tools: 3 timed calls · 1m 21s wall
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -49,8 +49,8 @@ cursor 1 1 hidden
 05 38-39 #ffffff #252527 -
 05 39-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-16 #e6eaf0 #0e1117 -
-06 16-38 #ffffff #0e1117 -
+06 1-15 #e6eaf0 #0e1117 -
+06 15-38 #ffffff #0e1117 -
 06 38-39 #ffffff #252527 -
 06 39-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -

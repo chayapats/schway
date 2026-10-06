@@ -37,6 +37,8 @@ export type RuntimeEvent =
       firstDeltaMs?: number | null;
       /** Milliseconds from this attempt's start to the end of its stream, including failed and cancelled attempts. Turn attempts only. */
       attemptMs?: number;
+      /** Milliseconds of retry backoff actually waited after this failed attempt, including a backoff cut short by cancellation; absent when no backoff followed. */
+      retryWaitMs?: number;
     }
   | {
       type: "model.retry";
