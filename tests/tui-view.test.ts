@@ -1,3 +1,4 @@
+import { escPhraseProblems } from "./helpers/esc-verbs.ts";
 import { noticeConfigDeprecations } from "../src/tui/app.ts";
 import { reviewScopeDetails } from "../src/tui/review-scope.ts";
 import { beforeAll, afterAll, afterEach, expect, test } from "bun:test";
@@ -1568,6 +1569,23 @@ test("a staged preference preview names Esc cancel on every row and the status b
     expect(ui.captureCharFrame()).toContain("↑↓ select · Tab scope · Esc back");
     ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.controller.snapshot().preferences).toBeUndefined();
+  });
+});
+
+test("a staged preview at 36 columns never clips an Esc verb against the preferences scrollbar", async () => {
+  await withTempDir(async root => {
+    const ui = await preferenceFixture(root);
+    ui.resize(36, 16);
+    ui.mockInput.pressKey("p", { meta: true }); await settle(ui);
+    ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
+    for (const page of [0, 1]) {
+      if (page) { ui.mockInput.pressKey("pagedown"); await settle(ui); }
+      // Strip the scrollbar column so a phrase that word-wraps is read across its line break.
+      const rows = ui.captureCharFrame().split("\n").map(line => line.replace(/[\s█▀▄]+$/, ""));
+      expect(rows.join("\n")).not.toMatch(/Esc cance(?!l)/);
+      expect(escPhraseProblems(rows)).toEqual([]);
+    }
+    expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Tab scope · Esc cancel");
   });
 });
 

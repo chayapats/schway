@@ -1242,7 +1242,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const panel = snapshot.preferences;
           const compact = renderer.width < 45 || renderer.height < 16;
           const lines = preferenceLines(panel, compact);
-          for (const [index, line] of lines.entries()) textRow(preferencePanel, safe(compact && index < 3 ? fitLine(line, width) : line), theme.text).wrapMode = "word";
+          // Rows wrap one cell short of the panel whether or not the scrollbar shows, so it never clips a row's last word.
+          preferencePanel.content.minWidth = preferencePanel.content.maxWidth = Math.max(1, width - 1);
+          for (const [index, line] of lines.entries()) textRow(preferencePanel, safe(compact && index < 3 ? fitLine(line, width - 1) : line), theme.text).wrapMode = "word";
           preferencePanel.scrollTo(0);
         } else if (snapshot.loginChooser) {
           const panel = snapshot.loginChooser;

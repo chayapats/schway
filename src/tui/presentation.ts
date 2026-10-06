@@ -96,23 +96,27 @@ export function fitLine(text: string, columns: number): string {
   return `${result}…`;
 }
 
-/** Short forms of work statuses that keep their meaning, including compaction outcomes, on narrow rows. */
+/** Short forms of work statuses that still say what happened, including compaction outcomes, on narrow rows. */
 const SHORT_WORK_STATUS: Readonly<Record<string, string>> = {
   "Preparing request": "Preparing", "Waiting for response": "Waiting", "Receiving response": "Receiving",
-  "Retrying connection": "Retrying", "Compacting context": "Compacting", "Context compacted": "Compacted",
-  "Context unchanged": "Unchanged", "Compaction failed": "Compact failed", "Compaction cancelled": "Not compacted",
+  "Retrying connection": "Retrying", "Compacting context": "Compacting", "Context compacted": "Compaction done",
+  "Context unchanged": "Already compact", "Compaction failed": "Compact failed", "Compaction cancelled": "Not compacted",
 };
 
-/** Fit a work status row with a trailing `Esc …` action: full row, then the status's short form, then the action alone. */
+/**
+ * Fit a work status row with a trailing `Esc …` action, never cutting a status or the action mid-word: the full row,
+ * the short status with the action, then the status alone (full, then short) because narrow status bars repeat
+ * `Esc stop`, then the action alone.
+ */
 export function fitStatusAction(text: string, columns: number): string {
   const line = displayText(text).replace(/\s+/g, " ");
   const separator = line.lastIndexOf(" · ");
   const action = separator < 0 ? "" : line.slice(separator + 3);
   if (Bun.stringWidth(line) <= columns || !action.startsWith("Esc ")) return fitLine(line, columns);
-  const short = SHORT_WORK_STATUS[line.slice(0, separator)];
-  // Never cut a status mid-phrase: an outcome word such as "failed" either stays or the whole status goes.
-  if (short && Bun.stringWidth(`${short} · ${action}`) <= columns) return `${short} · ${action}`;
-  return fitLine(action, columns);
+  const status = line.slice(0, separator);
+  const short = SHORT_WORK_STATUS[status];
+  const choices = [...short ? [`${short} · ${action}`] : [], status, ...short ? [short] : [], action];
+  return choices.find(choice => Bun.stringWidth(choice) <= columns) ?? fitLine(short ?? status, columns);
 }
 
 /** Fit a workspace path by dropping middle segments before clipping its final grapheme-safe folder name. */
