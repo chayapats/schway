@@ -191,7 +191,8 @@ async function measure(selection: ReasoningEvalSelection, base: ProviderLoaderIn
         : typeof (error as { status?: unknown })?.status === "number" ? "http_error" : call.httpStatus === undefined ? "network_error" : "error";
     } finally { call.totalMs = Math.max(0, Math.round(now() - started)); }
   } catch {
-    call.status = controller.signal.aborted ? "timeout" : call.httpStatus !== undefined && call.httpStatus >= 400 ? "http_error" : "network_error";
+    // Setup failures (such as building the adapter) carry no provider evidence.
+    call.status = controller.signal.aborted ? "timeout" : call.httpStatus !== undefined && call.httpStatus >= 400 ? "http_error" : "error";
   } finally { clearTimeout(timer); }
   return call;
 }

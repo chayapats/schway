@@ -3,7 +3,7 @@ import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/depr
 import { openUndoStore, pruneUndoStore } from "../undo/store.ts";
 import { createHistoryCollector, historyTurnIdentity } from "../history/collector.ts";
 import { openHistoryStore } from "../history/store.ts";
-import { isOpenRouterEndpoint, modelReasoning } from "../model/thinking.ts";
+import { bindLoaderReasoning, isOpenRouterEndpoint, modelReasoning } from "../model/thinking.ts";
 import { formatRetryWait, retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import { resolve } from "node:path";
 import { createDiagnosticSink } from "../diagnostics/sink.ts";
@@ -44,7 +44,7 @@ import { loadExtensions } from "../extensions/loader.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { writeTool } from "../tools/write.ts";
-import { bindLoaderReasoning, loadProviderModel } from "../model/loader.ts";
+import { loadProviderModel } from "../model/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, resolveWorkspace, type Workspace } from "../workspace/workspace.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../config/removed-provider.ts";
 import {

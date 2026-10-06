@@ -262,6 +262,14 @@ export function bindModelReasoning<T extends object>(model: T, record: Reasoning
   return model;
 }
 
+/** Bind the reasoning record implied by an adapter's construction inputs to that adapter, for per-turn history; inputs without a model ID bind nothing. */
+export function bindLoaderReasoning<T extends object>(model: T, input: { provider: string; model?: string; thinking?: ThinkingLevel; openaiAuth?: string; xaiAuth?: string;
+  baseUrl?: string; extraBody?: Record<string, unknown>; modelCapability?: ModelCapability }): T {
+  if (!input.model?.trim()) return model;
+  return bindModelReasoning(model, resolveReasoningRecord({ provider: input.provider, model: input.model.trim(), thinking: input.thinking, openaiAuth: input.openaiAuth,
+    xaiAuth: input.xaiAuth, baseUrl: input.baseUrl, extraBody: input.extraBody, capability: input.modelCapability }));
+}
+
 /** Copy of the reasoning record bound to an adapter, or undefined for an adapter built without one (such as a scripted model). */
 export function modelReasoning(model: object | undefined): ReasoningRecord | undefined {
   const record = model ? boundReasoning.get(model) : undefined;

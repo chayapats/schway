@@ -3,7 +3,7 @@ import type { ConfigDeprecation, ConfigDeprecationWarning } from "../config/depr
 import { pruneUndoStore } from "../undo/store.ts";
 import { isErrno } from "../tools/fs.ts";
 import { formatCount } from "../text/format.ts";
-import { isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
+import { bindLoaderReasoning, isOpenRouterEndpoint, validateThinking } from "../model/thinking.ts";
 import { flushDraftOnExit, type ExitDraftResult } from "../drafts/exit.ts";
 import { version } from "../../package.json";
 import { resolveSplash, type SplashPolicy } from "./splash-policy.ts";
@@ -63,7 +63,7 @@ import {
   formatSkillsListing,
   prepareSkillInvocation,
 } from "../skills/skills.ts";
-import { loadProviderModel, bindGrokModel, bindLoaderReasoning } from "../model/loader.ts";
+import { loadProviderModel, bindGrokModel } from "../model/loader.ts";
 
 /** Minimal writer used so the TUI can fall back to stderr when TTY setup fails. */
 export interface TuiWriter {
