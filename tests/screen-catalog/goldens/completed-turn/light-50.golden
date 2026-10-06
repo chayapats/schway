@@ -17,7 +17,7 @@ cursor 6 27 visible
     2 │+return Math.min(hi, Math.max(lo, n));
 
   ✓  WRITE  src/util/range.ts               ▸
-  ✓  BASH  printf 'ok\n'      Exit 0 · 1.2s ▸
+  ✓  BASH  printf 'ok\n'      Exit 0 · 0.0s ▸
 
  Fixed clamp so it respects the upper bound.
 

@@ -49,7 +49,7 @@ export abstract class CompactionLayer extends SettingsLayer {
       `Selected model context: ${this.provider}/${this.modelId}`,
       `Estimated conversation + summary: ~${context.estimatedTokens} tokens (excludes system prompt, instructions, tools and provider overhead).`,
       `Context capacity: ${context.capacity ?? "unknown (runtime fallback is not verified capacity)"}.`,
-      `Last reported provider usage (turn request): input ${usage?.inputTokens ?? "unknown"}, output ${usage?.outputTokens ?? "unknown"}. Not a billing total or task progress.`,
+      `Last reported provider usage (turn request): input ${usage?.inputTokens ?? "unknown"} (cached ${usage?.cachedInputTokens ?? "unknown"}), output ${usage?.outputTokens ?? "unknown"} (reasoning ${usage?.reasoningTokens ?? "unknown"}). Not a billing total or task progress.`,
       context.summaryId ? `Active summary ${context.summaryId}; recent conversation starts at ${context.firstKeptId}. Original history remains available above and in /branch tree.` : "No active summary on this branch. Original history is retained.",
       ...(context.summaryId ? [`Summary: ${boundDisplay(getEffectiveSummary(this.session.items) ?? "", 4000)}`] : []),
     ].join("\n");

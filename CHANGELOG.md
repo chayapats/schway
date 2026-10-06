@@ -27,6 +27,18 @@
   the same form. The `model.retry` runtime event, headless `--json` output and
   diagnostics gain an optional `cause` (`rate-limit`, `provider` or `offline`)
   that matches the `error` event's categories (#313).
+- Each model call and tool call now records its timing and reported tokens, so a
+  slow turn shows whether the model or the tools took the time and whether the
+  prompt cache was hit. `ModelUsage` gains optional `cachedInputTokens` and
+  `reasoningTokens` (parsed for OpenAI, xAI, Grok and ChatGPT subscription
+  responses). Saved `assistant` and `tool_result` items gain an optional
+  `telemetry` object (`AssistantTelemetry`, `ToolTelemetry`) without a session
+  format change. The `model.usage` event gains `startedAt`, `firstDeltaMs` and
+  `attemptMs`, and `tool.finished` gains `startedAt`, `durationMs` and
+  `approvalWaitMs`. `/history` turn detail shows `Model … · Tools … · N% cached`
+  and each command's run time, F2 details list calls, retries, tool wall time,
+  approval wait and token coverage, `/context` adds cached and reasoning counts,
+  and `--debug` records the same counts and timings (#317).
 
 ### Changed
 

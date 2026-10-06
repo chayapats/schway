@@ -84,9 +84,13 @@ test("selected-model context keeps unknowns, separates reported usage and follow
       model: createScriptedModel(), contextManager: createContextManager(workspace, { home }) });
     expect(controller.snapshot().context).toMatchObject({ capacity: null, providerUsage: null });
     expect(controller.describeContext()).toContain("excludes system prompt");
-    expect(controller.describeContext()).toContain("input unknown, output unknown");
+    expect(controller.describeContext()).toContain("input unknown (cached unknown), output unknown (reasoning unknown)");
     controller.applyEvent({ type: "model.usage", phase: "turn", usage: { inputTokens: 42, outputTokens: null }, complete: true });
-    expect(controller.describeContext()).toContain("input 42, output unknown");
+    expect(controller.describeContext()).toContain("input 42 (cached unknown), output unknown (reasoning unknown)");
+    controller.applyEvent({ type: "model.usage", phase: "turn", usage: { inputTokens: 1200, outputTokens: 40, cachedInputTokens: 1024, reasoningTokens: 0 }, complete: true });
+    expect(controller.describeContext()).toContain("input 1200 (cached 1024), output 40 (reasoning 0). Not a billing total");
+    controller.applyEvent({ type: "model.usage", phase: "turn", usage: { inputTokens: 1200, outputTokens: 40, cachedInputTokens: null, reasoningTokens: 30 }, complete: true });
+    expect(controller.describeContext()).toContain("input 1200 (cached unknown), output 40 (reasoning 30)");
     controller.setModel(createScriptedModel(), "openai", "gpt-5.4");
     expect(controller.snapshot().context.capacity).toBe(256_000);
     expect(controller.snapshot().context.providerUsage).toBeNull();

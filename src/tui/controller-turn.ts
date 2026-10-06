@@ -16,7 +16,6 @@ import { RECOVERY_ACTION_LABELS } from "./running-hints.ts";
 
 /** Turn runner, runtime-event reducer, cancellation and recovery offers. */
 export abstract class TurnLayer extends CompactionLayer {
-  private readonly toolStartedAt = new Map<string, number>();
   /**
    * Signal cancellation of the active operation without waiting; idle calls do nothing.
    * Applies to both submitted turns and manual compaction.
@@ -220,7 +219,6 @@ export abstract class TurnLayer extends CompactionLayer {
 
   /** Replace retained outcome evidence and start one accepted turn with its own cancellation signal. */
   protected async startAcceptedTurn(accepted: () => void = () => {}): Promise<boolean> {
-    this.toolStartedAt.clear();
     this.closeUndoPreview();
     this.closeChangeReview();
     this.outcomeIdentity = `${this.sessionId}/${this.session.activeBranchId}`;
@@ -259,7 +257,6 @@ export abstract class TurnLayer extends CompactionLayer {
       }
       this.settleActivity(operationId);
       this.invalidateBranchTreeCache();
-      this.toolStartedAt.clear();
     }
     return true;
   }
@@ -403,7 +400,6 @@ export abstract class TurnLayer extends CompactionLayer {
         return;
       }
       case "tool.started": {
-        this.toolStartedAt.set(event.toolCallId, this.activityClock());
         const assistant = this.session.items.findLast(item => item.type === "assistant");
         const call = assistant?.type === "assistant" ? assistant.content.find(block => block.type === "tool_call" && block.id === event.toolCallId) : undefined;
         const entry: TuiTranscriptEntry = {
@@ -457,9 +453,8 @@ export abstract class TurnLayer extends CompactionLayer {
           }
         }
         const entry = this.toolEntryByCallId.get(event.toolCallId);
-        const startedAt = this.toolStartedAt.get(event.toolCallId);
-        const durationMs = startedAt === undefined ? undefined : Math.max(0, this.activityClock() - startedAt);
-        this.toolStartedAt.delete(event.toolCallId);
+        // The scheduler's measured run time keeps the transcript, the session and history in agreement; approval waits are not run time.
+        const durationMs = event.durationMs === undefined ? undefined : Math.max(0, event.durationMs - (event.approvalWaitMs ?? 0));
         const resultSummary = summarizeToolResult(event.name, event.status, event.details, durationMs);
         const shellOutcome = event.name === "bash" ? asShellOutcome(event.details) : undefined;
         const edit = event.name === "edit" && event.status === "success" ? asEditDetails(event.details) : undefined;

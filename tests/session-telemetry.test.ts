@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { appendFile, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildSummaryInputText, pruneForSummary } from "../src/context/compaction.ts";
-import type { AssistantMessage, AssistantTelemetry, ConversationItem, ToolResult, ToolTelemetry } from "../src/conversation/types.ts";
+import type { AssistantMessage, AssistantTelemetry, ConversationItem, SessionRecord, ToolResult, ToolTelemetry } from "../src/conversation/types.ts";
 import type { ModelRequest } from "../src/model/model.ts";
 import { createCodexSubscriptionModel, CODEX_ACCOUNT_CLAIM } from "../src/model/providers/codex-subscription.ts";
 import { createOpenAICompatibleModel } from "../src/model/providers/openai-compatible.ts";
@@ -34,16 +34,16 @@ test("assistant and tool telemetry survive save, resume, fork and branch select"
     session.selectBranch("main");
 
     const resumed = await loadJsonlSession({ directory, id: session.header.id });
-    const byId = (items: readonly ConversationItem[], id: string) => items.find(item => item.id === id) as AssistantMessage & ToolResult;
-    expect(byId(resumed.items, "a1").telemetry).toEqual(ASSISTANT_TELEMETRY);
-    expect(byId(resumed.items, "r1").telemetry).toEqual(TOOL_TELEMETRY);
-    expect(byId(resumed.items, "a3").telemetry).toEqual(ASSISTANT_TELEMETRY);
+    const byId = (items: readonly SessionRecord[], id: string) => items.find(item => item.id === id) as { telemetry?: unknown } | undefined;
+    expect(byId(resumed.items, "a1")?.telemetry).toEqual(ASSISTANT_TELEMETRY);
+    expect(byId(resumed.items, "r1")?.telemetry).toEqual(TOOL_TELEMETRY);
+    expect(byId(resumed.items, "a3")?.telemetry).toEqual(ASSISTANT_TELEMETRY);
     resumed.selectBranch(fork);
-    expect(byId(resumed.items, "a1").telemetry).toEqual(ASSISTANT_TELEMETRY);
-    expect(byId(resumed.items, "a4").telemetry).toEqual(ASSISTANT_TELEMETRY);
-    expect(byId(resumed.items, "r2").telemetry).toEqual({ startedAt: TOOL_TELEMETRY.startedAt, durationMs: 120 });
+    expect(byId(resumed.items, "a1")?.telemetry).toEqual(ASSISTANT_TELEMETRY);
+    expect(byId(resumed.items, "a4")?.telemetry).toEqual(ASSISTANT_TELEMETRY);
+    expect(byId(resumed.items, "r2")?.telemetry).toEqual({ startedAt: TOOL_TELEMETRY.startedAt, durationMs: 120 });
     const forked = await loadJsonlSession({ directory, id: session.header.id, branchId: fork });
-    expect(byId(forked.items, "r2").telemetry).toEqual({ startedAt: TOOL_TELEMETRY.startedAt, durationMs: 120 });
+    expect(byId(forked.items, "r2")?.telemetry).toEqual({ startedAt: TOOL_TELEMETRY.startedAt, durationMs: 120 });
   });
 });
 

@@ -29,8 +29,20 @@ export interface AssistantMessage {
     id: string;
     // (undocumented)
     providerMetadata?: ProviderMetadata;
+    telemetry?: AssistantTelemetry;
     // (undocumented)
     type: "assistant";
+}
+
+// @public
+export interface AssistantTelemetry {
+    attemptMs: number;
+    attempts: number;
+    firstDeltaMs: number | null;
+    retryWaitMs: number;
+    startedAt: string;
+    totalMs: number;
+    usage: ModelUsage;
 }
 
 // @public
@@ -192,10 +204,12 @@ export interface ModelTool {
 
 // @public
 export interface ModelUsage {
+    cachedInputTokens?: number | null;
     // (undocumented)
     inputTokens: number | null;
     // (undocumented)
     outputTokens: number | null;
+    reasoningTokens?: number | null;
 }
 
 // @public
@@ -227,6 +241,9 @@ export type RuntimeEvent = {
     phase: "turn" | "compaction";
     usage: ModelUsage;
     complete: boolean;
+    startedAt?: string;
+    firstDeltaMs?: number | null;
+    attemptMs?: number;
 } | {
     type: "model.retry";
     attempt: number;
@@ -257,6 +274,9 @@ export type RuntimeEvent = {
     status: ToolCallStatus;
     content: string;
     details?: unknown;
+    startedAt?: string;
+    durationMs?: number;
+    approvalWaitMs?: number;
 } | {
     type: "compaction.started";
     reason: CompactionReason;
@@ -369,10 +389,18 @@ export interface ToolResult {
     id: string;
     // (undocumented)
     isError: boolean;
+    telemetry?: ToolTelemetry;
     // (undocumented)
     toolCallId: string;
     // (undocumented)
     type: "tool_result";
+}
+
+// @public
+export interface ToolTelemetry {
+    approvalWaitMs?: number;
+    durationMs: number;
+    startedAt: string;
 }
 
 // @public

@@ -13,7 +13,7 @@ cursor 7 27 visible
 
    ✓  READ  clamp.ts                                             3 lines ▸
    ✓  EDIT  clamp.ts                                              +13 −1 ▸
-   ✓  BASH  printf 'ok\n'                                  Exit 0 · 1.2s ▸
+   ✓  BASH  printf 'ok\n'                                  Exit 0 · 0.0s ▸
 
   Updated the clamp implementation.
 

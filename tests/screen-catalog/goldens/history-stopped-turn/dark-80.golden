@@ -12,16 +12,16 @@ cursor 1 1 hidden
 
   Save clamp notes ไทย 🧪, then wait
   2026-01-15 09:30 UTC · 2.4s
+  Model 0.0s · Tools 0.0s · Cache not reported
 
   Files · 1
   › notes.md                     +1 −0
 
   Commands · 1
-    − printf 'Ready to stop\n'; sleep 30 · Stopped
+    − printf 'Ready to stop\n'; sleep 30 · Stopped · 0.0s
 
   Undo
     Undo available · /undo previews this turn
-
 
 
 
@@ -56,28 +56,30 @@ cursor 1 1 hidden
 05 0-2 #ffffff #0e1117 -
 05 2-29 #8b95a7 #0e1117 -
 05 29-80 #ffffff #0e1117 -
-06 0-80 #ffffff #0e1117 -
-07 0-2 #ffffff #0e1117 -
-07 2-11 #7cc4ff #0e1117 b
-07 11-80 #ffffff #0e1117 -
+06 0-2 #ffffff #0e1117 -
+06 2-46 #8b95a7 #0e1117 -
+06 46-80 #ffffff #0e1117 -
+07 0-80 #ffffff #0e1117 -
 08 0-2 #ffffff #0e1117 -
-08 2-38 #7cc4ff #0e1117 -
-08 38-80 #ffffff #0e1117 -
-09 0-80 #ffffff #0e1117 -
-10 0-2 #ffffff #0e1117 -
-10 2-14 #7cc4ff #0e1117 b
-10 14-80 #ffffff #0e1117 -
+08 2-11 #7cc4ff #0e1117 b
+08 11-80 #ffffff #0e1117 -
+09 0-2 #ffffff #0e1117 -
+09 2-38 #7cc4ff #0e1117 -
+09 38-80 #ffffff #0e1117 -
+10 0-80 #ffffff #0e1117 -
 11 0-2 #ffffff #0e1117 -
-11 2-50 #8b95a7 #0e1117 -
-11 50-80 #ffffff #0e1117 -
-12 0-80 #ffffff #0e1117 -
-13 0-2 #ffffff #0e1117 -
-13 2-6 #7cc4ff #0e1117 b
-13 6-80 #ffffff #0e1117 -
+11 2-14 #7cc4ff #0e1117 b
+11 14-80 #ffffff #0e1117 -
+12 0-2 #ffffff #0e1117 -
+12 2-57 #8b95a7 #0e1117 -
+12 57-80 #ffffff #0e1117 -
+13 0-80 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
-14 2-45 #e6eaf0 #0e1117 -
-14 45-80 #ffffff #0e1117 -
-15 0-80 #ffffff #0e1117 -
+14 2-6 #7cc4ff #0e1117 b
+14 6-80 #ffffff #0e1117 -
+15 0-2 #ffffff #0e1117 -
+15 2-45 #e6eaf0 #0e1117 -
+15 45-80 #ffffff #0e1117 -
 16 0-80 #ffffff #0e1117 -
 17 0-80 #ffffff #0e1117 -
 18 0-80 #ffffff #0e1117 -

@@ -291,7 +291,7 @@ test.each([["tracking off", "off"], ["non-Git workspace", "non-git"], ["failed c
   expect(turn.attempts[0]!.git).toMatchObject({ status: "unavailable", reason: kind });
   expect(c.openHistoryDetail()).toBe(true);
   expect(c.snapshot().history!.details).toContain({ off: "change tracking is off", "non-git": "not a Git workspace", failed: "the snapshot failed" }[kind]);
-  const ui = await view(c, root, home, 80, 24);
+  const ui = await view(c, root, home, 80, 26);
   expect(ui.frame()).toContain("Shell changes not tracked · F2 details");
   // Current content on request still honors tracking off by reading nothing.
   await ui.press("return");

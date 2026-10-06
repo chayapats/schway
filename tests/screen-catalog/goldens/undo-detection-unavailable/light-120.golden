@@ -11,7 +11,7 @@ cursor 7 27 visible
   ▌ You
   ▌ Generate the output
 
-   ✓  BASH  mkdir -p gen; printf 'generated\n' > gen/out.json                                      Exit 0 · 1.2s ▸
+   ✓  BASH  mkdir -p gen; printf 'generated\n' > gen/out.json                                      Exit 0 · 0.0s ▸
 
   Generated the output file.
 

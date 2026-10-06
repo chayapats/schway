@@ -137,11 +137,15 @@ export function createDiagnosticSink(options: {
         case "agent.started": case "model.finished": sink.record(event.type.split(".")[0]!, event.type); break;
         case "agent.finished": sink.record("agent", event.type, { reason: event.reason }, event.reason === "error" ? "error" : "info"); break;
         case "model.started": sink.record("model", event.type, { provider: event.provider, model: event.model }); break;
-        case "model.usage": sink.record("model", event.type, { phase: event.phase, complete: event.complete, inputCount: event.usage.inputTokens, outputCount: event.usage.outputTokens }); break;
+        // Key names avoid the sanitizer's "token" and "output" filters, which would otherwise drop these counts.
+        case "model.usage": sink.record("model", event.type, { phase: event.phase, complete: event.complete, inputCount: event.usage.inputTokens, generatedCount: event.usage.outputTokens,
+          cachedInputCount: event.usage.cachedInputTokens ?? null, reasoningCount: event.usage.reasoningTokens ?? null,
+          ...(event.firstDeltaMs !== undefined ? { firstDeltaMs: event.firstDeltaMs } : {}), ...(event.attemptMs !== undefined ? { attemptMs: event.attemptMs } : {}) }); break;
         case "model.retry": sink.record("model", event.type, { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, category: "transient_provider_failure", ...(event.cause ? { cause: event.cause } : {}) }, "warn"); break;
         case "tool.denied": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId, mode: event.mode, reason: event.reason }, "warn"); break;
         case "tool.started": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId }); break;
-        case "tool.finished": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId, status: event.status }, event.status === "success" ? "info" : "warn"); break;
+        case "tool.finished": sink.record("tool", event.type, { name: event.name, toolCallId: event.toolCallId, status: event.status,
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}), ...(event.approvalWaitMs !== undefined ? { approvalWaitMs: event.approvalWaitMs } : {}) }, event.status === "success" ? "info" : "warn"); break;
         case "compaction.started": sink.record("compaction", event.type, { reason: event.reason }); break;
         case "compaction.finished": sink.record("compaction", event.type, { reason: event.reason, status: event.status, ...(event.status === "completed" ? { recordId: event.recordId, firstKeptId: event.firstKeptId } : { category: event.status === "failed" ? "compaction_failure" : "no_compaction" }) }, event.status === "failed" ? "warn" : "info"); break;
         case "error": sink.record("agent", event.type, { category: "runtime_failure" }, "error"); break;
