@@ -149,6 +149,8 @@ test("a call whose cached count exceeds its own input makes the cache share unre
   const record = finalize({ telemetry: summary });
   expect((parseHistoryLine(serializeHistoryFinalize(record).trim()) as HistoryTurnFinalize).telemetry).toEqual(summary);
   expect(parseHistoryLine(JSON.stringify({ ...record, telemetry: { ...summary, tokens: { ...summary.tokens, cachedInput: { total: 0, reportedCalls: 2, inconsistentCalls: 1 } } } }))).toBeUndefined();
+  for (const key of ["input", "output"] as const)
+    expect(parseHistoryLine(JSON.stringify({ ...record, telemetry: { ...summary, tokens: { ...summary.tokens, [key]: { ...summary.tokens[key], inconsistentCalls: 1 } } } }))).toBeUndefined();
   // Valid per-call counts keep the share.
   const valid = createHistoryTelemetryFold();
   valid.observe({ type: "model.usage", phase: "turn", complete: true, usage: { inputTokens: 100, outputTokens: 10, cachedInputTokens: 100 } });

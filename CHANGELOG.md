@@ -39,9 +39,10 @@
   `durationMs` and `approvalWaitMs`. History finalize records gain optional
   `telemetry` totals with per-dimension call coverage and `inconsistentCalls`
   for counts that exceed their own call's total. `/history` turn detail shows
-  `Model … · Tools … · N% cached` and each command's run time, F2 details list calls, retries, tool wall time,
-  approval wait and token coverage, `/context` adds cached and reasoning counts,
-  and `--debug` records the same counts and timings (#317).
+  `Model … · Tools … · N% cached` and each command's run time, F2 details list
+  calls, retries, tool wall time, approval wait and token coverage, `/context`
+  adds cached and reasoning counts, and `--debug` records the same counts and
+  timings (#317).
 
 ### Changed
 

@@ -271,17 +271,18 @@ function validTelemetry(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const telemetry = value as Record<string, unknown>;
   const calls = telemetry.modelCalls, tokens = telemetry.tokens as Record<string, unknown> | undefined, first = telemetry.firstDelta as Record<string, unknown> | null | undefined;
-  const total = (entry: unknown) => {
+  // Only subsets (cached input, reasoning) can exceed their own call's total, so only they may carry ignored calls.
+  const total = (entry: unknown, subset = false) => {
     const value = entry as Record<string, unknown>;
     return !!value && typeof value === "object" && COUNT(value.total) && COUNT(value.reportedCalls)
-      && (value.inconsistentCalls === undefined || COUNT(value.inconsistentCalls))
+      && (value.inconsistentCalls === undefined || (subset && COUNT(value.inconsistentCalls)))
       && (value.reportedCalls as number) + ((value.inconsistentCalls as number | undefined) ?? 0) <= (calls as number);
   };
   return COUNT(calls) && COUNT(telemetry.modelMs) && COUNT(telemetry.retries) && COUNT(telemetry.retryWaitMs) && COUNT(telemetry.toolCalls)
     && COUNT(telemetry.toolMs) && COUNT(telemetry.approvalWaitMs)
     && (first === null || (!!first && typeof first === "object" && COUNT(first.minMs) && COUNT(first.maxMs) && (first.minMs as number) <= (first.maxMs as number)
       && COUNT(first.calls) && (first.calls as number) >= 1 && (first.calls as number) <= (calls as number)))
-    && !!tokens && typeof tokens === "object" && total(tokens.input) && total(tokens.cachedInput) && total(tokens.output) && total(tokens.reasoning);
+    && !!tokens && typeof tokens === "object" && total(tokens.input) && total(tokens.cachedInput, true) && total(tokens.output) && total(tokens.reasoning, true);
 }
 
 function collection(value: Record<string, unknown> | undefined, max: number, item: (entry: unknown) => boolean): boolean {
