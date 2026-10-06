@@ -10,25 +10,25 @@ cursor 1 1 hidden
 
   Turn 1 details
 
-  Attempt 1: interactive · /home/test/demo · started 2026-01-15 09:21 UTC · ✓ Done · 4m 5s                           █
+  Attempt 1: interactive · /home/test/demo · started 2026-01-15 09:26 UTC · ✓ Done · 3m 20s                          █
     Git snapshots captured before and after the attempt                                                              █
-    Model: 12 calls · 2m 42s · first output 4.7s–31s · 1 retry, 1.0s backoff                                         █
-    Tools: 3 timed calls · 1m 21s wall time                                                                          █
-    Tokens: input 530,000 · cached input 429,300 · output 9,000 · reasoning 7,000                                    █
-  3 tool results; 0 failed tools.                                                                                    █
+    Model: 4 calls · 1m 58s · first output 4.7s–31s · no retries                                                     █
+    Tools: 3 timed calls · 1m 21s wall time                                                                          ▀
+    Tokens: input 160,000 · cached input 129,600 · output 6,000 · reasoning 4,800
+  3 tool results; 0 failed tools.
   Commands: 3 exited 0, 0 nonzero, 0 without an observed exit.
   Token counts are what the provider reported, not billing. Cached input is part of input and reasoning is part of
   output.
   Model time adds every model attempt, including failed ones. Tool time is wall time with at least one tool running,
   so parallel tools count once; approval waits are part of it.
   Command times exclude approval waits. No first output means no text or thinking arrived before the call completed.
+  A backoff cut short by a stop counts as waited time, not a retry. A call reporting more cached than input tokens,
+  or more reasoning than output tokens, is ignored for that count.
 
   History is recorded while turns run and kept beside the saved session. It is opened offline and read-only.
   Outcomes and exit codes are what the runtime observed. A completed turn or exit 0 does not prove that tests passed.
   File rows come from successful file-tool results and, when change tracking captured snapshots, Git before/after
   comparisons. They do not identify exclusive authorship; concurrent external edits can appear.
-  Line counts add every file-tool edit in the turn, so repeated edits can exceed the net change.
-  Records keep the first 50 commands and 200 files; totals still count every observation.
 
 
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -50,8 +50,8 @@ cursor 1 1 hidden
 02 16-120 #ffffff #0e1117 -
 03 0-120 #ffffff #0e1117 -
 04 0-2 #ffffff #0e1117 -
-04 2-90 #e6eaf0 #0e1117 -
-04 90-117 #ffffff #0e1117 -
+04 2-91 #e6eaf0 #0e1117 -
+04 91-117 #ffffff #0e1117 -
 04 117-118 #9a9ea3 #252527 -
 04 118-120 #ffffff #0e1117 -
 05 0-2 #ffffff #0e1117 -
@@ -60,8 +60,8 @@ cursor 1 1 hidden
 05 117-118 #9a9ea3 #252527 -
 05 118-120 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
-06 2-76 #e6eaf0 #0e1117 -
-06 76-117 #ffffff #0e1117 -
+06 2-64 #e6eaf0 #0e1117 -
+06 64-117 #ffffff #0e1117 -
 06 117-118 #9a9ea3 #252527 -
 06 118-120 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
@@ -72,12 +72,12 @@ cursor 1 1 hidden
 08 0-2 #ffffff #0e1117 -
 08 2-81 #e6eaf0 #0e1117 -
 08 81-117 #ffffff #0e1117 -
-08 117-118 #9a9ea3 #252527 -
+08 117-118 #ffffff #252527 -
 08 118-120 #ffffff #0e1117 -
 09 0-2 #ffffff #0e1117 -
 09 2-33 #e6eaf0 #0e1117 -
 09 33-117 #ffffff #0e1117 -
-09 117-118 #9a9ea3 #252527 -
+09 117-118 #ffffff #252527 -
 09 118-120 #ffffff #0e1117 -
 10 0-2 #ffffff #0e1117 -
 10 2-62 #e6eaf0 #0e1117 -
@@ -108,36 +108,36 @@ cursor 1 1 hidden
 15 116-117 #ffffff #0e1117 -
 15 117-118 #ffffff #252527 -
 15 118-120 #ffffff #0e1117 -
-16 0-117 #ffffff #0e1117 -
+16 0-2 #ffffff #0e1117 -
+16 2-116 #e6eaf0 #0e1117 -
+16 116-117 #ffffff #0e1117 -
 16 117-118 #ffffff #252527 -
 16 118-120 #ffffff #0e1117 -
 17 0-2 #ffffff #0e1117 -
-17 2-108 #e6eaf0 #0e1117 -
-17 108-117 #ffffff #0e1117 -
+17 2-66 #e6eaf0 #0e1117 -
+17 66-117 #ffffff #0e1117 -
 17 117-118 #ffffff #252527 -
 17 118-120 #ffffff #0e1117 -
-18 0-2 #ffffff #0e1117 -
-18 2-117 #e6eaf0 #0e1117 -
+18 0-117 #ffffff #0e1117 -
 18 117-118 #ffffff #252527 -
 18 118-120 #ffffff #0e1117 -
 19 0-2 #ffffff #0e1117 -
-19 2-114 #e6eaf0 #0e1117 -
-19 114-117 #ffffff #0e1117 -
+19 2-108 #e6eaf0 #0e1117 -
+19 108-117 #ffffff #0e1117 -
 19 117-118 #ffffff #252527 -
 19 118-120 #ffffff #0e1117 -
 20 0-2 #ffffff #0e1117 -
-20 2-95 #e6eaf0 #0e1117 -
-20 95-117 #ffffff #0e1117 -
+20 2-117 #e6eaf0 #0e1117 -
 20 117-118 #ffffff #252527 -
 20 118-120 #ffffff #0e1117 -
 21 0-2 #ffffff #0e1117 -
-21 2-96 #e6eaf0 #0e1117 -
-21 96-117 #ffffff #0e1117 -
+21 2-114 #e6eaf0 #0e1117 -
+21 114-117 #ffffff #0e1117 -
 21 117-118 #ffffff #252527 -
 21 118-120 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
-22 2-89 #e6eaf0 #0e1117 -
-22 89-117 #ffffff #0e1117 -
+22 2-95 #e6eaf0 #0e1117 -
+22 95-117 #ffffff #0e1117 -
 22 117-118 #ffffff #252527 -
 22 118-120 #ffffff #0e1117 -
 23 0-120 #ffffff #0e1117 -

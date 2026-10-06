@@ -11,14 +11,14 @@ cursor 1 1 hidden
  Turn 1 details
 
  Attempt 1: interactive · /home/test/ █
- demo · started 2026-01-15 09:21 UTC ·
- ✓ Done · 4m 5s
+ demo · started 2026-01-15 09:26 UTC ·
+ ✓ Done · 3m 20s
    Git snapshots captured before and
  after the attempt
-   Model: 12 calls · 2m 42s · first
- output 4.7s–31s · 1 retry, 1.0s
- backoff
+   Model: 4 calls · 1m 58s · first
+ output 4.7s–31s · no retries
    Tools: 3 timed calls · 1m 21s wall
+ time
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -49,8 +49,8 @@ cursor 1 1 hidden
 05 38-39 #ffffff #252527 -
 05 39-40 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
-06 1-15 #1d232c #f7f7f4 -
-06 15-38 #ffffff #f7f7f4 -
+06 1-16 #1d232c #f7f7f4 -
+06 16-38 #ffffff #f7f7f4 -
 06 38-39 #ffffff #252527 -
 06 39-40 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
@@ -64,22 +64,22 @@ cursor 1 1 hidden
 08 38-39 #ffffff #252527 -
 08 39-40 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
-09 1-36 #1d232c #f7f7f4 -
-09 36-38 #ffffff #f7f7f4 -
+09 1-35 #1d232c #f7f7f4 -
+09 35-38 #ffffff #f7f7f4 -
 09 38-39 #ffffff #252527 -
 09 39-40 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
-10 1-33 #1d232c #f7f7f4 -
-10 33-38 #ffffff #f7f7f4 -
+10 1-29 #1d232c #f7f7f4 -
+10 29-38 #ffffff #f7f7f4 -
 10 38-39 #ffffff #252527 -
 10 39-40 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
-11 1-8 #1d232c #f7f7f4 -
-11 8-38 #ffffff #f7f7f4 -
+11 1-38 #1d232c #f7f7f4 -
 11 38-39 #ffffff #252527 -
 11 39-40 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
-12 1-38 #1d232c #f7f7f4 -
+12 1-5 #1d232c #f7f7f4 -
+12 5-38 #ffffff #f7f7f4 -
 12 38-39 #ffffff #252527 -
 12 39-40 #ffffff #f7f7f4 -
 13 0-40 #ffffff #f7f7f4 -
