@@ -608,8 +608,11 @@ that panel only, never in the conversation, F2 details or the saved session. Esc
 is named once, as `Esc cancel sign-in` in the hint row, or `Esc cancel` in the
 compact status bar when the hint row is hidden; while secure storage saves, the
 hint reads `Wait for secure storage` because a submitted save cannot be
-cancelled. A timeout reads `Sign-in timed out · Alt+L retry · F2 details`, with
-the provider's recovery steps in F2 details; when the browser cannot open, the
+cancelled, and after Esc it reads `Wait for sign-in to stop` until the sign-in
+ends. Once a Grok approval is saved, the panel closes while models load. A
+timeout reads `Sign-in timed out · Alt+L retry · F2 details`, with the
+provider's recovery steps in F2 details; both keys work from the chooser that
+reopens after a ChatGPT timeout. When the browser cannot open, the
 link stays in the conversation above `Browser didn't open · Open the link above`.
 Credential and callback entry mask their text. Resizing reflows the active
 panel without changing its selection or operation. At 24×8 and 32×12,

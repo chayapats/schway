@@ -31,7 +31,7 @@ import type { ReaderPosition } from "./reader.ts";
 import { CONVERSATION_FIND_PLACEHOLDER, conversationFindHint, conversationFindStatus, fitFindStatus, readerFindKeys } from "./find-hints.ts";
 import { createHistoryPanel } from "./history-view.ts";
 import { approvalAction, approvalChoices, approvalHint, approvalPanelLayout, charWrappedRows, type ApprovalPanelLayout } from "./approval-layout.ts";
-import { SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, fitSignInWaitRows, signInWaitRows } from "./sign-in-wait.ts";
+import { SIGN_IN_CANCELLING_HINT, SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, fitSignInWaitRows, signInChooserHint, signInWaitRows } from "./sign-in-wait.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
 export interface ConversationViewOptions {
@@ -1038,7 +1038,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : snapshot.toolApproval ? "Esc back to request"
           // A sign-in wait names Esc once: in the hint row, or here only when the hint row is hidden; a submitted save names none.
           // A chooser over a sign-in that Esc already cancelled goes back like any chooser.
-          : snapshot.loginWait && !(snapshot.loginWait.cancelling && snapshot.loginChooser) ? hints.visible || snapshot.loginWait.saving ? "" : SIGN_IN_WAIT_COMPACT_ACTION
+          : snapshot.loginWait && !(snapshot.loginWait.cancelling && !snapshot.loginWait.saving && snapshot.loginChooser) ? hints.visible || snapshot.loginWait.saving || snapshot.loginWait.cancelling ? "" : SIGN_IN_WAIT_COMPACT_ACTION
           : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview)
           : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : panelMode === "credential" || panelMode === "callback" ? "Esc cancel" : panelMode || inspection || detailsReturn || reader ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stop"
@@ -1297,7 +1297,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
-      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.sessionPicker, sessionLines, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, guide?.id, paletteNote, width, renderer.height]);
+      const panelKey = JSON.stringify([snapshot.preferences, snapshot.loginChooser, snapshot.loginApproval, snapshot.loginApprovalData, snapshot.loginWait, snapshot.sessionPicker, sessionLines, snapshot.modelPicker, snapshot.branchTree, available, completionIndex, guide?.id, paletteNote, width, renderer.height]);
       if (panelKey !== panelFingerprint) {
         panelFingerprint = panelKey;
         clear(picker);
@@ -1470,7 +1470,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""} · ${snapshot.loginWait && !snapshot.loginWait.cancelling ? SIGN_IN_WAIT_HINT : "Esc back"}` : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""}`) : panelMode === "tree" ? "Files/Git unchanged · Enter confirm · Esc back" : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -1758,9 +1758,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       handled(); return;
     }
     if (detailsKey) {
+      // A chooser reopened after a failure gives way to that failure's details, as its status names F2.
+      const leftChooser = panelMode === "login" && !snapshot.loginWait && !!snapshot.noticeDetailsAvailable && controller.leaveLoginChooser();
       if (panelMode === "model") controller.togglePickerDetails();
       else if (panelMode === "sessions") controller.toggleSessionPickerDetails();
-      else if (!panelMode && !controller.running && snapshot.readiness !== "loading" && !detailsReturn) {
+      else if ((!panelMode || leftChooser) && !controller.running && snapshot.readiness !== "loading" && !detailsReturn) {
         const prior = { key: sessionKey, scroll: transcript.scrollTop, inspection };
         const opened = snapshot.noticeDetailsAvailable ? controller.inspectNoticeDetails()
           : snapshot.recovery?.actions.includes("details") || snapshot.outcome?.reason === "failed" ? controller.inspectRecovery() : false;
@@ -1806,7 +1808,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       return;
     }
     if (snapshot.readiness === "loading" && ((key.meta || key.option) && (name === "m" || name === "l") || key.ctrl && name === "r")) { handled(); return; }
-    if ((key.meta || key.option) && name === "l" && !panelMode && !controller.running && !snapshot.recovery?.actions.includes("connect")) {
+    if ((key.meta || key.option) && name === "l" && (!panelMode || panelMode === "login" && !snapshot.loginWait) && !controller.running && !snapshot.recovery?.actions.includes("connect")) {
       controller.openLoginChooser(); handled(); return;
     }
     if (key.ctrl && name === "f" && !panelMode && !inspection) {

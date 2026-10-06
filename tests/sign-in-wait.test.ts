@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextRenderable } from "@opentui/core";
 import { createContextManager } from "../src/context/manager.ts";
+import { ConfigEditor } from "../src/config/editing.ts";
 import { createSession } from "../src/session/session.ts";
 import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity } from "../src/auth/store.ts";
@@ -132,6 +133,7 @@ test("Esc while secure storage saves never claims the save was cancelled, then t
   expect(controller.snapshot().transcript.map(entry => entry.text)).toContain("Approval received · Saving sign-in");
   expect(ui.rows().filter(line => line.includes("Esc"))).toEqual([]);
   expect(ui.hints()).toBe("Wait for secure storage");
+  expect(ui.rows().map(line => line.trim())).toContain("◌ Saving sign-in");
   ui.mockInput.pressEscape(); await ui.settle();
   const notice = controller.snapshot().transcript.at(-1)!.text;
   expect(notice).toBe("Saving credential · Wait for secure storage");
@@ -324,4 +326,96 @@ test("short terminals drop the wait status, then the heading, but keep both devi
   expect(fitSignInWaitRows(rows, 10, 38).map(row => row.text)).toEqual(rows.map(row => row.text));
   expect(fitSignInWaitRows(rows, 3, 38).map(row => row.text)).toEqual(["Sign in to ChatGPT", "1 Open auth.openai.com/codex/device", "2 Enter ABCD-1234"]);
   expect(fitSignInWaitRows(rows, 3, 22).map(row => row.text)).toEqual(["1 Open auth.openai.com/codex/device", "2 Enter ABCD-1234"]);
+});
+
+test("after a ChatGPT timeout the reopened chooser lets F2 open the details and Alt+L restart sign-in, as the status names", async () => {
+  const { codex } = await providerTimeouts();
+  for (const key of ["f2", "alt+l"] as const) {
+    let calls = 0;
+    const { controller } = controllerWith({ codexLogin: async () => { calls++; return { ok: false, message: codex }; } });
+    const ui = await render(controller);
+    ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter();
+    await controller.waitForIdle(); await ui.settle();
+    expect(controller.snapshot().transcript.at(-1)!.text).toBe(SIGN_IN_TIMED_OUT);
+    expect(controller.snapshot().loginChooser?.level).toBe("chatgpt");
+    if (key === "f2") {
+      ui.mockInput.pressKey("F2"); await ui.settle();
+      expect(controller.snapshot().loginChooser).toBeUndefined();
+      const details = controller.snapshot().transcript.at(-1)!.text;
+      expect(details).toStartWith("Details");
+      expect(details).toContain("/login codex --code");
+      expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Details");
+    } else {
+      ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+      expect(controller.snapshot().loginChooser).toMatchObject({ level: "main", selectedId: "chatgpt" });
+      ui.mockInput.pressEnter(); await controller.waitForIdle(); await ui.settle();
+      expect(calls).toBe(2);
+    }
+  }
+});
+
+test("Grok model discovery after a saved sign-in closes the wait panel and names no sign-in cancel", async () => {
+  const listing = Promise.withResolvers<void>(), listed = Promise.withResolvers<void>();
+  const { controller } = controllerWith({ grokLogin: async ({ onApproval, onSaving, onSaved }) => {
+    onApproval({ kind: "browser" }); onSaving?.(); onSaved?.(); return { ok: true, status: "Saved" };
+  }, listGrokModels: async signal => { listed.resolve(); await Promise.race([listing.promise, aborted(signal)]); signal.throwIfAborted(); return []; } },
+  { provider: "xai", configEditor: new ConfigEditor({}, { user: "/home/test/config.json", project: "/project/config.json" }),
+    stageSettings: async () => { throw new Error("not reached"); } });
+  const ui = await render(controller);
+  const running = controller.login("grok"); await listed.promise; await ui.settle();
+  expect(controller.snapshot().loginWait).toBeUndefined();
+  const frame = ui.captureCharFrame();
+  for (const stale of ["Waiting for approval", "Signing in", "Esc cancel sign-in", "Sign in to Grok"]) expect(frame).not.toContain(stale);
+  ui.mockInput.pressEscape();
+  expect(await running).toBe(false);
+  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Sign-in saved; activation cancelled · /model choose model");
+});
+
+test("a second Esc while a sign-in is cancelling is quiet, and the hint offers no cancel that already happened", async () => {
+  const stop = Promise.withResolvers<void>();
+  const { controller } = controllerWith({ codexLogin: async ({ signal }) => { await aborted(signal); await stop.promise; return { ok: false, message: "Cancelled." }; } });
+  const ui = await render(controller);
+  const running = controller.login("codex"); await ui.settle();
+  expect(ui.hints()).toBe("Esc cancel sign-in");
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(controller.snapshot().loginWait?.cancelling).toBe(true);
+  expect(ui.hints()).toBe("Wait for sign-in to stop");
+  expect(ui.rows().map(line => line.trim())).toContain("◌ Cancelling sign-in");
+  expect(ui.rows().filter(line => line.includes("Esc"))).toEqual([]);
+  const before = controller.snapshot().transcript.length;
+  ui.mockInput.pressEscape(); await ui.settle();
+  expect(controller.snapshot().transcript.length).toBe(before);
+  stop.resolve();
+  expect(await running).toBe(false);
+  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Sign-in cancelled; nothing saved · Alt+L retry");
+});
+
+test("the API-key save still explains a second Esc while secure storage writes", async () => {
+  const write = Promise.withResolvers<void>(), started = Promise.withResolvers<void>();
+  const base = fakeCredentialStore();
+  const store = { ...base, async set(identity: Parameters<typeof base.set>[0], value: string) { started.resolve(); await write.promise; await base.set(identity, value); } };
+  const { controller } = controllerWith({ store });
+  expect(controller.beginLogin("openai")).toBe(true);
+  controller.enterCredentialText("sk-fixture-key");
+  const saving = controller.submitCredential(); await started.promise;
+  controller.cancel();
+  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Waiting for the OS credential operation to finish; it cannot be cancelled after submission.");
+  write.resolve(); await saving;
+});
+
+test("a chooser over a saving sign-in names the save wait instead of Esc cancel sign-in", async () => {
+  const finish = Promise.withResolvers<void>(), saving = Promise.withResolvers<void>();
+  const { controller } = controllerWith({ codexLogin: async ({ onProgress, onSaving, onSaved }) => {
+    onProgress("The browser could not be opened automatically; use the printed URL instead.");
+    onProgress("Approval received. Saving ChatGPT credential in the OS secure store…"); onSaving?.(); saving.resolve();
+    await finish.promise; onSaved?.(); return { ok: true, status: "Saved" };
+  } });
+  const ui = await render(controller);
+  const running = controller.login("codex"); await saving.promise; await ui.settle();
+  expect(controller.snapshot().loginChooser?.level).toBe("chatgpt");
+  expect(ui.hints()).toBe("Wait for secure storage");
+  expect(ui.rows().filter(line => line.includes("Esc"))).toEqual([]);
+  ui.resize(80, 10); await ui.settle();
+  expect(ui.rows().filter(line => line.includes("Esc"))).toEqual([]);
+  finish.resolve(); await running;
 });

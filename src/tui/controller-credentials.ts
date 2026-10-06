@@ -77,6 +77,15 @@ export abstract class CredentialsLayer extends ControllerCore {
     return true;
   }
 
+  /** Close a chooser that no sign-in waits behind, so conversation keys such as F2 act on the failure it follows. */
+  leaveLoginChooser(): boolean {
+    if (!this.loginChooserState || this.running) return false;
+    this.loginChooserState = undefined; this.loginReturn = undefined; this.recoveryRepair = false;
+    // The conversation now owns the failure; a model picker that started this sign-in does not reopen over it.
+    this.pickerReturn = undefined;
+    return true;
+  }
+
   /** Return ordered nonselectable headers and selectable actions for the active chooser level. */
   protected loginChooserSnapshot(): LoginChooserSnapshot | undefined {
     const state = this.loginChooserState;
@@ -578,6 +587,8 @@ export abstract class CredentialsLayer extends ControllerCore {
         // Secure storage has settled; discovery is cancellable, including from the picker.
         this.loginSaving = false; this.loginAbort = undefined; this.credentialMutation = false;
         this.loginChooserState = undefined;
+        // Approval is over: model discovery runs as ordinary work, so the wait panel and its Esc cancel sign-in close now.
+        this.loginApproval = undefined; this.loginApprovalData = undefined;
         if (!saved) this.invalidateGrokAdapter();
         saved = true; this.grokPending = true;
         if (!activate) { this.notice("Sign-in saved · /model choose model"); return true; }

@@ -9,6 +9,8 @@ export const SIGN_IN_WAIT_HINT = "Esc cancel sign-in";
 export const SIGN_IN_WAIT_COMPACT_ACTION = "Esc cancel";
 /** Hint while secure storage saves a credential; a submitted write cannot be cancelled, so no key is named. */
 export const SIGN_IN_SAVING_HINT = "Wait for secure storage";
+/** Hint after Esc cancelled a sign-in that has not yet stopped; Esc has nothing more to cancel. */
+export const SIGN_IN_CANCELLING_HINT = "Wait for sign-in to stop";
 /** Key-free composer text while the wait panel owns input. */
 export const SIGN_IN_COMPOSER_TEXT = "Typing resumes after sign-in";
 /** Primary transcript status after a browser launcher failure; the authorization link is the line above. */
@@ -40,9 +42,10 @@ export function codexDeviceApproval(message: string): Extract<LoginApproval, { k
  * steps (address before code, each with its verb), then a glyph status that keeps its meaning without color.
  * `status` is the controller's key-free body text, used before approval data arrives.
  */
-export function signInWaitRows(wait: { provider: SignInProvider; saving?: boolean }, status: string, approval?: LoginApproval): SignInWaitRow[] {
+export function signInWaitRows(wait: { provider: SignInProvider; saving?: boolean; cancelling?: boolean }, status: string, approval?: LoginApproval): SignInWaitRow[] {
   const heading: SignInWaitRow = { text: signInHeading(wait.provider), tone: "accent" };
   if (wait.saving) return [heading, { text: "◌ Saving sign-in", tone: "muted" }];
+  if (wait.cancelling) return [heading, { text: "◌ Cancelling sign-in", tone: "muted" }];
   if (approval?.kind === "device") return [heading,
     { text: `1 Open ${deviceAddress(approval.verificationUri)}`, tone: "text" },
     { text: `2 Enter ${approval.userCode}`, tone: "text" },
@@ -62,6 +65,13 @@ export function fitSignInWaitRows(rows: readonly SignInWaitRow[], budget: number
   if (height(fitted) > budget && instructions() && fitted.at(-1)?.tone === "muted") fitted = fitted.slice(0, -1);
   if (height(fitted) > budget && instructions() && fitted[0]?.tone === "accent") fitted = fitted.slice(1);
   return fitted;
+}
+
+/** Hint row for the chooser while a sign-in waits behind it, or undefined when it is the ordinary chooser. */
+export function signInChooserHint(wait: { saving?: boolean; cancelling?: boolean } | undefined, navigation: string): string {
+  // A submitted save ignores Enter and Esc; a cancelled sign-in lets Esc go back like any chooser.
+  if (wait?.saving) return SIGN_IN_SAVING_HINT;
+  return `${navigation} · ${wait && !wait.cancelling ? SIGN_IN_WAIT_HINT : "Esc back"}`;
 }
 
 /** Map a provider sign-in timeout to short TUI copy with the full recovery text as details; other failures return nothing. */
