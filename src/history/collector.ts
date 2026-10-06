@@ -138,8 +138,8 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
           const summary = historyCommandSummary(typeof details?.command === "string" ? details.command : requestedCommand(options.session, event.toolCallId) ?? "bash", secrets);
           commands.push({ id: digest, command: summary.text, ...(summary.truncated ? { commandTruncated: true as const } : {}), exitCode, ended,
             status: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error",
-            ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
-            ...(event.durationMs !== undefined && event.approvalWaitMs !== undefined ? { approvalWaitMs: Math.min(event.approvalWaitMs, event.durationMs) } : {}) });
+            ...(isMs(event.durationMs) ? { durationMs: event.durationMs } : {}),
+            ...(isMs(event.durationMs) && isMs(event.approvalWaitMs) ? { approvalWaitMs: Math.min(event.approvalWaitMs, event.durationMs) } : {}) });
         }
       }
     },
@@ -212,6 +212,11 @@ function editHunks(value: unknown): DiffHunk[] | undefined {
     hunks.push({ startLine: hunk.startLine, oldText: hunk.oldText, newText: hunk.newText });
   }
   return hunks;
+}
+
+/** Whole nonnegative milliseconds, the only durations a record accepts. */
+function isMs(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isCode(error: unknown, code: string): boolean {

@@ -279,6 +279,8 @@ test("bash timeout yields one error result and the loop continues", async () => 
       status: "error",
       content: results[0]!.content,
       details: expect.objectContaining({ timedOut: true }),
+      startedAt: expect.any(String),
+      durationMs: expect.any(Number),
     });
     expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
     const assistant = session.items.at(-1) as AssistantMessage;

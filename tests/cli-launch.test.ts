@@ -123,11 +123,13 @@ test("opt-in hint adds only one stderr line while default text and JSONL bytes s
     }
     expect(outputs[0]).toEqual({ exit: 0, stdout: "Fixture answer\n", stderr: "" });
     expect(outputs[1]).toEqual({ ...outputs[0], stderr: "Session 00000000-0000-4000-8000-000000000002 · Resume with --resume 00000000-0000-4000-8000-000000000002\n" });
-    expect(outputs[2]).toEqual({ exit: 0, stderr: "", stdout: [
+    // Attempt timing is measured live, so only its shape is fixed.
+    const timing = (text: string) => text.replace(/"startedAt":"[^"]+","firstDeltaMs":\d+,"attemptMs":\d+/g, '"startedAt":"<time>","firstDeltaMs":<ms>,"attemptMs":<ms>');
+    expect({ ...outputs[2], stdout: timing(outputs[2]!.stdout) }).toEqual({ exit: 0, stderr: "", stdout: [
       '{"type":"session.ready","sessionId":"00000000-0000-4000-8000-000000000002"}',
       '{"type":"agent.started"}', '{"type":"model.started","provider":"openai","model":"fixture"}',
       '{"type":"model.delta","content":{"type":"text","text":"Fixture answer"}}',
-      '{"type":"model.usage","phase":"turn","usage":{"inputTokens":null,"outputTokens":null},"complete":true}',
+      '{"type":"model.usage","phase":"turn","usage":{"inputTokens":null,"outputTokens":null},"complete":true,"startedAt":"<time>","firstDeltaMs":<ms>,"attemptMs":<ms>}',
       '{"type":"model.finished"}', '{"type":"agent.finished","reason":"completed"}', "",
     ].join("\n") });
   });

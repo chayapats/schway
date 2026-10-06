@@ -46,10 +46,12 @@ export function validateItems(value: unknown): asserts value is ConversationItem
   if (!Array.isArray(value)) throw new Error("items must be a native conversation list");
   const pending = new Set<string>();
   for (const item of value) {
-    object(item, ["type", "id", "content", "providerMetadata", "toolCallId", "isError"]);
+    object(item, ["type", "id", "content", "providerMetadata", "toolCallId", "isError", "telemetry"]);
     nonempty(item.id, "item id");
+    // Harness telemetry may ride along on assistant and tool items; adapters never send it.
+    metadata(item.telemetry);
     if (item.type === "tool_result") {
-      object(item, ["type", "id", "toolCallId", "content", "isError"]);
+      object(item, ["type", "id", "toolCallId", "content", "isError", "telemetry"]);
       nonempty(item.toolCallId, "toolCallId");
       if (typeof item.content !== "string" || typeof item.isError !== "boolean" || !pending.delete(item.toolCallId)) {
         throw new Error("tool results must have text, an isError boolean, and match one preceding tool call");
@@ -58,7 +60,7 @@ export function validateItems(value: unknown): asserts value is ConversationItem
     }
     if (pending.size) throw new Error("conversation must settle each tool call before the next message");
     if (item.type !== "user" && item.type !== "assistant") throw new Error("items must contain only native user, assistant, or tool_result records");
-    object(item, item.type === "user" ? ["type", "id", "content"] : ["type", "id", "content", "providerMetadata"]);
+    object(item, item.type === "user" ? ["type", "id", "content"] : ["type", "id", "content", "providerMetadata", "telemetry"]);
     metadata(item.providerMetadata);
     if (!Array.isArray(item.content)) throw new Error("message content must be native content blocks");
     for (const block of item.content) {

@@ -73,7 +73,7 @@ test("pressure summarization and the completed turn both contribute usage once",
   events.forEach(tracker.record);
   expect(events.filter(event => event.type === "model.usage")).toEqual([
     { type: "model.usage", phase: "compaction", usage: { inputTokens: 9, outputTokens: 4 }, complete: true },
-    { type: "model.usage", phase: "turn", usage: { inputTokens: 13, outputTokens: 6 }, complete: true },
+    { type: "model.usage", phase: "turn", usage: { inputTokens: 13, outputTokens: 6 }, complete: true, startedAt: expect.any(String), firstDeltaMs: null, attemptMs: expect.any(Number) },
   ]);
   expect(tracker.result().inputTokens).toBe(22);
   expect(tracker.result().outputTokens).toBe(10);

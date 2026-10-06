@@ -208,7 +208,7 @@ test("headless JSONL and controller observers receive the same native events, wi
     let stdout = "";
     let stderr = "";
     expect(await runCli(["-p", "hello", "--json", "--extension", file], {
-      cwd: work, env: { HOME: home, OPENAI_API_KEY: "private-key" }, model: createScriptedModel({ text: "original" }),
+      cwd: work, env: { HOME: home, OPENAI_API_KEY: "private-key" }, model: createScriptedModel({ text: "original" }), clock: fixedClock(),
       stdout: { write: text => { stdout += text; } }, stderr: { write: text => { stderr += text; } },
     })).toBe(0);
     const output = stdout.trim().split("\n").map(line => JSON.parse(line));
@@ -229,7 +229,7 @@ test("headless JSONL and controller observers receive the same native events, wi
     const controller = new TuiController({
       session: createSession(), sessionId: "tui", ...loaded, extensions: loaded.runtime, workspace,
       provider: "scripted", modelId: "scripted", contextManager: createContextManager(workspace),
-      model: createScriptedModel({ text: "original" }),
+      model: createScriptedModel({ text: "original" }), agentClock: fixedClock(),
     });
     await controller.submit("hello");
     expect(module.observed).toEqual(agentEvents);
@@ -255,3 +255,8 @@ test("headless early return disposes extension subscriptions before constructing
     expect(module.signal.aborted).toBe(true);
   });
 });
+
+/** Frozen agent clock so headless and TUI runs report identical attempt timing. */
+function fixedClock() {
+  return { now: () => Date.parse("2026-01-15T09:30:00.000Z"), monotonicNow: () => 0, sleep: async () => {} };
+}
