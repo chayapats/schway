@@ -140,8 +140,10 @@ test("each adapter's bound record names exactly the level its request sends, and
     expect(record).toMatchObject({ route: "codex", level: wire === undefined ? null : wire.effort === "none" ? "off" : wire.effort,
       source: thinking === undefined ? "provider-default" : "explicit" });
   }
-  // A level the model does not offer is refused before sending, so there is nothing to record.
+  // A level the model does not offer, evidence for another model, or a conflicting extraBody is refused before sending, so there is nothing to record.
   expect(resolveReasoningRecord({ provider: "openai", openaiAuth: "api-key", model: "gpt-5.4", thinking: "xhigh" })).toBeUndefined();
+  expect(resolveReasoningRecord({ provider: "xai", xaiAuth: "grok", model: "grok-4.7", capability: { ...grokCapability(), id: "grok-4.5" } })).toBeUndefined();
+  expect(resolveReasoningRecord({ provider: "openai-compatible", model: "local", baseUrl: "http://127.0.0.1:9/v1", thinking: "off", extraBody: { reasoning_effort: "low" } })).toBeUndefined();
 });
 
 const finalize = (reasoning?: unknown): HistoryTurnFinalize => ({ type: "turn_finalize", version: 1, turnId: "user-1", attemptId: "attempt-1", revision: 1, outcome: "completed",
@@ -271,6 +273,7 @@ test("launching with a remembered choice and no thinking key, then running a tur
   const c = new TuiController({ session, sessionId: session.header.id, workspace, home, configEditor: editor, provider: "xai", xaiAuth: "api-key", modelId: "grok-4.7",
     model: loaded.model, contextManager: createContextManager(workspace), activityClock: () => 0 });
   cleanups.push(() => c.dispose());
+  expect(c.snapshot().thinkingChip).toBe("Provider default");
   expect(await c.submit("weather")).toBe(true);
   expect((await finalizes(home, session.header.id))[0]?.reasoning).toEqual({ provider: "xai", model: "grok-4.7", route: "api-key", level: null, source: "provider-default" });
   expect(await readFile(memoryPath, "utf8")).toBe(remembered);

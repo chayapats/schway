@@ -243,10 +243,12 @@ export interface ReasoningRecord {
   source: ThinkingSource;
 }
 
-/** Resolve the record for an adapter built from these inputs; undefined when its requested level would be refused before sending. */
+/** Resolve the record for an adapter built from these inputs; undefined when the adapter would refuse the request before sending it. */
 export function resolveReasoningRecord(input: Parameters<typeof resolveThinkingSelection>[0] & { thinking?: ThinkingLevel },
   defaults: readonly ModelThinkingDefault[] = MODEL_THINKING_DEFAULTS): ReasoningRecord | undefined {
   const { context } = resolveThinkingSelection(input);
+  // The adapter refuses such a request before sending anything, so there is no effort to record.
+  if (validateThinking(context.provider, context.model, input.thinking, context.extraBody, context.capability, context.baseUrl, context.authRoute)) return undefined;
   const effective = resolveEffectiveThinking(input.provider, input.thinking, input.model, context, defaults);
   if (effective.state === "unavailable") return undefined;
   return { provider: input.provider, model: input.model, ...(context.authRoute ? { route: context.authRoute } : {}), level: effective.sent ?? null, source: effective.state };
