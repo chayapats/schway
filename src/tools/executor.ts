@@ -20,6 +20,8 @@ export interface ExecutedToolCall {
   details?: unknown;
   /** Approval denial emitted immediately before settlement. */
   denied?: { mode: ApprovalMode; reason: string };
+  /** The call settled before validation passed (cancelled first, unknown tool, invalid arguments or no workspace), so no telemetry is recorded. */
+  neverRan?: true;
 }
 
 /** Validate, hook and approve before undo capture and execution, settling a bounded outcome through cancellation. */
@@ -37,28 +39,32 @@ export async function executeToolCall(options: {
   onApprovalSettled?: () => void;
   undo?: UndoStore;
   undoTurn?: UndoTurn;
+  /** Monotonic milliseconds used to measure an approval wait. */
+  monotonicNow?: () => number;
+  /** Receive the milliseconds this call waited for an approval decision, including waits for earlier calls' decisions. */
+  onApprovalWait?: (ms: number) => void;
 }): Promise<ExecutedToolCall> {
   const hooks = options.toolHooks?.active ? options.toolHooks : undefined;
   const signal = hooks ? AbortSignal.any([hooks.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
   if (signal?.aborted) {
-    return cancelled(options.call);
+    return neverRan(cancelled(options.call));
   }
 
   const registered = options.registry?.get(options.call.name);
   if (!registered) {
-    return failure(options.call, `Unknown tool: ${options.call.name}`);
+    return neverRan(failure(options.call, `Unknown tool: ${options.call.name}`));
   }
 
   const validated = registered.validate(options.call.arguments);
   if (!validated.ok) {
-    return failure(
+    return neverRan(failure(
       options.call,
       `Invalid arguments for tool ${options.call.name}: ${validated.message}`,
-    );
+    ));
   }
 
   if (!options.workspace) {
-    return failure(options.call, "Workspace is not available");
+    return neverRan(failure(options.call, "Workspace is not available"));
   }
 
   let args = validated.value;
@@ -84,9 +90,15 @@ export async function executeToolCall(options: {
       }
       if (mode === "ask") {
         const ask = options.approval?.ask;
-        const decision = ask ? await waitForApproval(() => ask.call(options.approval, { toolCallId: options.call.id, toolName: options.call.name,
-          arguments: structuredClone(args), effect, index: options.index ?? 0 }, signal ?? new AbortController().signal), signal)
-          : { kind: "deny" as const, reason: ASK_HEADLESS_DENIAL };
+        const waitStart = ask ? options.monotonicNow?.() : undefined;
+        let decision;
+        try {
+          decision = ask ? await waitForApproval(() => ask.call(options.approval, { toolCallId: options.call.id, toolName: options.call.name,
+            arguments: structuredClone(args), effect, index: options.index ?? 0 }, signal ?? new AbortController().signal), signal)
+            : { kind: "deny" as const, reason: ASK_HEADLESS_DENIAL };
+        } finally {
+          if (waitStart !== undefined) options.onApprovalWait?.(Math.max(0, Math.round(options.monotonicNow!() - waitStart)));
+        }
         if (signal?.aborted) return cancelled(options.call);
         if (decision.kind === "deny") {
           const reason = decision.reason ?? "Denied by the user.";
@@ -160,6 +172,11 @@ function waitForApproval<T>(ask: () => Promise<T>, signal?: AbortSignal): Promis
 function messageOf(error: unknown): string {
   try { return error instanceof Error ? error.message : String(error); }
   catch { return "Unprintable tool failure"; }
+}
+
+/** Mark a result settled before the call passed validation. */
+function neverRan(executed: ExecutedToolCall): ExecutedToolCall {
+  return { ...executed, neverRan: true };
 }
 
 /** Build a cancelled result for an accepted call that did not run. */

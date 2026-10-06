@@ -19,7 +19,7 @@ cursor 1 1 hidden
  , lo: number, hi: number) {
    2 -   return Math.max(lo, n);
 
- ✓ Done · 1 file +1 −1 · 1.2s
+ ✓ Done · 1 file +1 −1 · 1.8s
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ ›
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀

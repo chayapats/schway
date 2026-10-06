@@ -1,3 +1,5 @@
+import type { ModelUsage } from "../model/model.ts";
+
 /** Opaque adapter-owned data preserved alongside Schway's provider-independent conversation records. */
 export type ProviderMetadata = Record<string, unknown>;
 
@@ -35,12 +37,42 @@ export interface UserMessage {
   content: UserContent[];
 }
 
+/** Harness-measured timing and reported usage of the model call that produced a message; never sent to a provider. Durations are whole milliseconds. */
+export interface AssistantTelemetry {
+  /** ISO wall-clock start of the first attempt. */
+  startedAt: string;
+  /** Time from the successful attempt's start to its first text or thinking delta; null when none arrived before completion. */
+  firstDeltaMs: number | null;
+  /** Time from the successful attempt's start to the end of its stream. */
+  attemptMs: number;
+  /** Time from the first attempt's start to completion, including failed attempts and backoff. */
+  totalMs: number;
+  /** One plus the number of transient retries. */
+  attempts: number;
+  /** Total backoff waited between attempts. */
+  retryWaitMs: number;
+  /** Final usage the successful attempt reported; null or absent counts were not reported. */
+  usage: ModelUsage;
+}
+
 /** Assembled assistant output with ordered content blocks and opaque metadata retained for adapter replay. */
 export interface AssistantMessage {
   type: "assistant";
   id: string;
   content: AssistantContent[];
   providerMetadata?: ProviderMetadata;
+  /** Harness telemetry of the model call; absent on older records and never part of model context. */
+  telemetry?: AssistantTelemetry;
+}
+
+/** Harness-measured timing of one tool call from scheduler start to settlement, in whole milliseconds; never sent to a provider. */
+export interface ToolTelemetry {
+  /** ISO wall-clock time the scheduler started the call. */
+  startedAt: string;
+  /** Wall time from scheduler start to settlement, including any approval wait. */
+  durationMs: number;
+  /** Part of `durationMs` spent waiting for approval; absent when the call did not wait. */
+  approvalWaitMs?: number;
 }
 
 /** Model-facing outcome linked to a tool-call id, with errors marked explicitly. */
@@ -50,6 +82,8 @@ export interface ToolResult {
   toolCallId: string;
   content: string;
   isError: boolean;
+  /** Harness telemetry of the call; absent on older records and on results that never ran. */
+  telemetry?: ToolTelemetry;
 }
 
 /** Provider-independent message or tool outcome that may be included in model context. */

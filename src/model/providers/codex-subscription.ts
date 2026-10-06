@@ -7,7 +7,8 @@ import type {
   ProviderMetadata,
 } from "../../conversation/types.ts";
 import type { ModelCapability } from "../catalog.ts";
-import { THINKING_LEVELS, reportedTokens } from "../model.ts";
+import { THINKING_LEVELS } from "../model.ts";
+import { responsesUsage } from "./responses-stream.ts";
 import type {
   Model,
   ModelRequest,
@@ -1083,11 +1084,7 @@ export function createCodexSubscriptionModel(options: {
       const builder = createCodexStreamBuilder();
       for await (const event of readCodexStreamEvents(response, request.signal)) {
         if (["response.completed", "response.incomplete", "response.failed"].includes(event.type) && event.response?.usage && typeof event.response.usage === "object") {
-          const usage = event.response.usage as Record<string, unknown>;
-          yield { type: "usage", usage: {
-            inputTokens: reportedTokens(usage.input_tokens),
-            outputTokens: reportedTokens(usage.output_tokens),
-          } };
+          yield { type: "usage", usage: responsesUsage(event.response.usage) };
         }
         if (event.type === "response.incomplete") {
           throw new Error("ChatGPT subscription response incomplete");

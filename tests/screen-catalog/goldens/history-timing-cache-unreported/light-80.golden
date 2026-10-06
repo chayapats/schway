@@ -1,0 +1,121 @@
+schway-screen 1
+screen history-timing-cache-unreported
+title Turn timing without cache counts
+description When the provider reported no cached counts, the timing line says the cache was not reported instead of showing a share.
+variant light-80
+size 80x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ~/demo on main
+
+  Turn 1 · ✓ Done
+
+  Check tomorrow's Bangkok weather and how long the drive to the airport
+  takes
+  2026-01-15 09:28 UTC · 1m 3s
+  Model 53s · Tools 8.5s · Cache not reported
+
+  Files · 0
+    No file changes observed
+
+  Commands · 2
+    ✓ date · Exit 0 · 0.4s
+    ✓ curl -s wttr.in/Bangkok · Exit 0 · 4.0s
+
+  Undo
+    No file edits to undo
+
+
+
+
+
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ ›
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                              ctx ~27
+  PgUp/PgDn scroll · F2 details · Esc back
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-22 #545e6c #ecedea -
+00 22-26 #6a3fb0 #ecedea -
+00 26-80 #ffffff #ecedea -
+01 0-80 #ffffff #f7f7f4 -
+02 0-2 #ffffff #f7f7f4 -
+02 2-11 #1d232c #f7f7f4 b
+02 11-17 #19612f #f7f7f4 b
+02 17-80 #ffffff #f7f7f4 -
+03 0-80 #ffffff #f7f7f4 -
+04 0-2 #ffffff #f7f7f4 -
+04 2-72 #1d232c #f7f7f4 -
+04 72-80 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-7 #1d232c #f7f7f4 -
+05 7-80 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-30 #545e6c #f7f7f4 -
+06 30-80 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-45 #545e6c #f7f7f4 -
+07 45-80 #ffffff #f7f7f4 -
+08 0-80 #ffffff #f7f7f4 -
+09 0-2 #ffffff #f7f7f4 -
+09 2-11 #0a5894 #f7f7f4 b
+09 11-80 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-28 #545e6c #f7f7f4 -
+10 28-80 #ffffff #f7f7f4 -
+11 0-80 #ffffff #f7f7f4 -
+12 0-2 #ffffff #f7f7f4 -
+12 2-14 #0a5894 #f7f7f4 b
+12 14-80 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-26 #19612f #f7f7f4 -
+13 26-80 #ffffff #f7f7f4 -
+14 0-2 #ffffff #f7f7f4 -
+14 2-45 #19612f #f7f7f4 -
+14 45-80 #ffffff #f7f7f4 -
+15 0-80 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-6 #0a5894 #f7f7f4 b
+16 6-80 #ffffff #f7f7f4 -
+17 0-2 #ffffff #f7f7f4 -
+17 2-25 #1d232c #f7f7f4 -
+17 25-80 #ffffff #f7f7f4 -
+18 0-80 #ffffff #f7f7f4 -
+19 0-80 #ffffff #f7f7f4 -
+20 0-80 #ffffff #f7f7f4 -
+21 0-80 #ffffff #f7f7f4 -
+22 0-80 #ffffff #f7f7f4 -
+23 0-80 #ffffff #f7f7f4 -
+24 0-80 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-78 #ecedea #f7f7f4 -
+25 78-80 #ffffff #f7f7f4 -
+26 0-2 #ffffff #f7f7f4 -
+26 2-6 #0a5894 #ecedea -
+26 6-78 #ffffff #ecedea -
+26 78-80 #ffffff #f7f7f4 -
+27 0-2 #ffffff #f7f7f4 -
+27 2-78 #ecedea #f7f7f4 -
+27 78-80 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-79 #545e6c #ecedea -
+28 79-80 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-11 #1d232c #caced3 b
+29 11-21 #545e6c #f7f7f4 -
+29 21-23 #1d232c #caced3 b
+29 23-34 #545e6c #f7f7f4 -
+29 34-37 #1d232c #caced3 b
+29 37-42 #545e6c #f7f7f4 -
+29 42-80 #ffffff #f7f7f4 -

@@ -6,9 +6,11 @@ import { deleteHistorySession } from "../history/store.ts";
 import { basename, join } from "node:path";
 import type {
   AssistantContent,
+  AssistantTelemetry,
   CompactionRecord,
   ConversationItem,
   SessionRecord,
+  ToolTelemetry,
   UserContent,
 } from "../conversation/types.ts";
 import type { Workspace } from "../workspace/workspace.ts";
@@ -372,6 +374,9 @@ function toSessionRecord(value: unknown, formatVersion = 1): SessionRecord {
       }
       item.providerMetadata = value.providerMetadata;
     }
+    // Telemetry is optional evidence: a malformed value is dropped and never fails the conversation record.
+    const telemetry = assistantTelemetry(value.telemetry);
+    if (telemetry) item.telemetry = telemetry;
     return item;
   }
   if (value.type === "tool_result") {
@@ -382,12 +387,14 @@ function toSessionRecord(value: unknown, formatVersion = 1): SessionRecord {
     ) {
       throw malformedRecord();
     }
+    const telemetry = toolTelemetry(value.telemetry);
     return {
       type: "tool_result",
       id: value.id,
       toolCallId: value.toolCallId,
       content: value.content,
       isError: value.isError,
+      ...(telemetry ? { telemetry } : {}),
     };
   }
   if (value.type === "turn_undo") {
@@ -425,6 +432,32 @@ function toSessionRecord(value: unknown, formatVersion = 1): SessionRecord {
     return record;
   }
   throw malformedRecord();
+}
+
+const isMs = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const isIsoTime = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
+const isTokenCount = (value: unknown): value is number | null | undefined => value === undefined || value === null || isMs(value);
+
+/** Rebuild valid assistant telemetry field by field; anything malformed yields undefined. */
+function assistantTelemetry(value: unknown): AssistantTelemetry | undefined {
+  if (!isPlainObject(value) || !isIsoTime(value.startedAt) || !(value.firstDeltaMs === null || isMs(value.firstDeltaMs)) || !isMs(value.attemptMs)
+    || !isMs(value.totalMs) || !isMs(value.attempts) || value.attempts < 1 || !isMs(value.retryWaitMs) || !isPlainObject(value.usage)) return undefined;
+  const usage = value.usage;
+  if (!(usage.inputTokens === null || isMs(usage.inputTokens)) || !(usage.outputTokens === null || isMs(usage.outputTokens))
+    || !isTokenCount(usage.cachedInputTokens) || !isTokenCount(usage.reasoningTokens)) return undefined;
+  return {
+    startedAt: value.startedAt, firstDeltaMs: value.firstDeltaMs, attemptMs: value.attemptMs, totalMs: value.totalMs, attempts: value.attempts, retryWaitMs: value.retryWaitMs,
+    usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+      ...(usage.cachedInputTokens !== undefined ? { cachedInputTokens: usage.cachedInputTokens } : {}),
+      ...(usage.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}) },
+  };
+}
+
+/** Rebuild valid tool telemetry field by field; anything malformed yields undefined. */
+function toolTelemetry(value: unknown): ToolTelemetry | undefined {
+  if (!isPlainObject(value) || !isIsoTime(value.startedAt) || !isMs(value.durationMs)
+    || !(value.approvalWaitMs === undefined || (isMs(value.approvalWaitMs) && value.approvalWaitMs <= value.durationMs))) return undefined;
+  return { startedAt: value.startedAt, durationMs: value.durationMs, ...(value.approvalWaitMs !== undefined ? { approvalWaitMs: value.approvalWaitMs } : {}) };
 }
 
 function isUserContent(value: unknown): value is UserContent {

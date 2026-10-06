@@ -1,0 +1,117 @@
+schway-screen 1
+screen history-timing-partial
+title Partly reported turn timing
+description When only some model calls reported cached counts, the cached share is shown as a lower bound.
+variant light-120
+size 120x30
+cursor 1 1 hidden
+== text
+ ⚡ schway  ~/demo on main
+
+  Turn 1 · ✓ Done
+
+  Check tomorrow's Bangkok weather and how long the drive to the airport takes
+  2026-01-15 09:29 UTC · 58s
+  Model 57s · Tools 0.4s · 40%+ cached
+
+  Files · 0
+    No file changes observed
+
+  Commands · 1
+    ✓ date · Exit 0 · 0.4s
+
+  Undo
+    No file edits to undo
+
+
+
+
+
+
+
+
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ ›
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ● Ready   scripted/scripted-model                                                                      ctx ~27
+  PgUp/PgDn scroll · F2 details · Esc back
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-22 #545e6c #ecedea -
+00 22-26 #6a3fb0 #ecedea -
+00 26-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-2 #ffffff #f7f7f4 -
+02 2-11 #1d232c #f7f7f4 b
+02 11-17 #19612f #f7f7f4 b
+02 17-120 #ffffff #f7f7f4 -
+03 0-120 #ffffff #f7f7f4 -
+04 0-2 #ffffff #f7f7f4 -
+04 2-78 #1d232c #f7f7f4 -
+04 78-120 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-28 #545e6c #f7f7f4 -
+05 28-120 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-38 #545e6c #f7f7f4 -
+06 38-120 #ffffff #f7f7f4 -
+07 0-120 #ffffff #f7f7f4 -
+08 0-2 #ffffff #f7f7f4 -
+08 2-11 #0a5894 #f7f7f4 b
+08 11-120 #ffffff #f7f7f4 -
+09 0-2 #ffffff #f7f7f4 -
+09 2-28 #545e6c #f7f7f4 -
+09 28-120 #ffffff #f7f7f4 -
+10 0-120 #ffffff #f7f7f4 -
+11 0-2 #ffffff #f7f7f4 -
+11 2-14 #0a5894 #f7f7f4 b
+11 14-120 #ffffff #f7f7f4 -
+12 0-2 #ffffff #f7f7f4 -
+12 2-26 #19612f #f7f7f4 -
+12 26-120 #ffffff #f7f7f4 -
+13 0-120 #ffffff #f7f7f4 -
+14 0-2 #ffffff #f7f7f4 -
+14 2-6 #0a5894 #f7f7f4 b
+14 6-120 #ffffff #f7f7f4 -
+15 0-2 #ffffff #f7f7f4 -
+15 2-25 #1d232c #f7f7f4 -
+15 25-120 #ffffff #f7f7f4 -
+16 0-120 #ffffff #f7f7f4 -
+17 0-120 #ffffff #f7f7f4 -
+18 0-120 #ffffff #f7f7f4 -
+19 0-120 #ffffff #f7f7f4 -
+20 0-120 #ffffff #f7f7f4 -
+21 0-120 #ffffff #f7f7f4 -
+22 0-120 #ffffff #f7f7f4 -
+23 0-120 #ffffff #f7f7f4 -
+24 0-120 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-118 #ecedea #f7f7f4 -
+25 118-120 #ffffff #f7f7f4 -
+26 0-2 #ffffff #f7f7f4 -
+26 2-6 #0a5894 #ecedea -
+26 6-118 #ffffff #ecedea -
+26 118-120 #ffffff #f7f7f4 -
+27 0-2 #ffffff #f7f7f4 -
+27 2-118 #ecedea #f7f7f4 -
+27 118-120 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-17 #19612f #d3dcd4 b
+28 17-18 #545e6c #ecedea -
+28 18-43 #1d232c #e1e3df -
+28 43-119 #545e6c #ecedea -
+28 119-120 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-11 #1d232c #caced3 b
+29 11-21 #545e6c #f7f7f4 -
+29 21-23 #1d232c #caced3 b
+29 23-34 #545e6c #f7f7f4 -
+29 34-37 #1d232c #caced3 b
+29 37-42 #545e6c #f7f7f4 -
+29 42-120 #ffffff #f7f7f4 -

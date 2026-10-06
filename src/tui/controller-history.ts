@@ -2,9 +2,10 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { createHistoryCollector, historyGitFailure, historyTurnIdentity, type HistoryCollector, type HistoryObservation } from "../history/collector.ts";
-import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome } from "../history/records.ts";
+import { HISTORY_PAGE_SIZE, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES, type HistoryCommand, type HistoryOutcome, type HistoryTelemetry } from "../history/records.ts";
 import { openHistoryStore, type HistoryRead } from "../history/store.ts";
-import { buildHistoryTimeline, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
+import { buildHistoryTimeline, type HistoryAttempt, type HistoryTimeline, type HistoryTurn } from "../history/timeline.ts";
+import { combineHistoryTelemetry } from "../history/telemetry.ts";
 import { collectUndoEvidence, describeUndoLimits, observeUndoFile, undoTargetVerdict, type UndoTargetVerdict } from "../undo/evidence.ts";
 import type { Session } from "../session/session.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
@@ -96,14 +97,80 @@ export function historyTaskLabel(turn: Pick<HistoryTurn, "task" | "taskTruncated
   return turn.task ? `${turn.task}${turn.taskTruncated ? "…" : ""}` : "No task text";
 }
 
-/** One command summary with its observed ending; an exit code describes the command only. */
+/** One command summary with its observed ending and, when measured, its run time excluding approval wait; an exit code describes the command only. */
 export function historyCommandLine(command: HistoryCommand): { glyph: string; text: string; tone: "success" | "warning" | "muted" | "error" } {
   const text = `${command.command}${command.commandTruncated ? "…" : ""}`;
-  if (command.status === "cancelled") return { glyph: "−", text: `${text} · Stopped`, tone: "muted" };
-  if (command.ended === "timed-out") return { glyph: "!", text: `${text} · Timed out`, tone: "error" };
-  if (command.status === "error" && command.exitCode === null) return { glyph: "!", text: `${text} · Tool error`, tone: "error" };
-  if (command.exitCode !== null) return command.exitCode === 0 ? { glyph: "✓", text: `${text} · Exit 0`, tone: "success" } : { glyph: "!", text: `${text} · Exit ${command.exitCode}`, tone: "warning" };
-  return { glyph: "−", text: `${text} · ${command.ended === "stopped" ? "Stopped" : "No exit observed"}`, tone: "muted" };
+  const ran = command.durationMs === undefined ? "" : ` · ${formatDuration(Math.max(0, command.durationMs - (command.approvalWaitMs ?? 0)))}`;
+  if (command.status === "cancelled") return { glyph: "−", text: `${text} · Stopped${ran}`, tone: "muted" };
+  if (command.ended === "timed-out") return { glyph: "!", text: `${text} · Timed out${ran}`, tone: "error" };
+  if (command.status === "error" && command.exitCode === null) return { glyph: "!", text: `${text} · Tool error${ran}`, tone: "error" };
+  if (command.exitCode !== null) return command.exitCode === 0 ? { glyph: "✓", text: `${text} · Exit 0${ran}`, tone: "success" } : { glyph: "!", text: `${text} · Exit ${command.exitCode}${ran}`, tone: "warning" };
+  return { glyph: "−", text: `${text} · ${command.ended === "stopped" ? "Stopped" : "No exit observed"}${ran}`, tone: "muted" };
+}
+
+/** Turn telemetry over attempts that recorded it; `complete` is false when another attempt recorded none, making totals lower bounds. */
+export function historyTurnTelemetry(turn: Pick<HistoryTurn, "evidence" | "attempts">): { telemetry: HistoryTelemetry; complete: boolean } | undefined {
+  if (turn.evidence === "missing") return undefined;
+  const recorded = turn.attempts.flatMap(attempt => attempt.telemetry ? [attempt.telemetry] : []);
+  return recorded.length ? { telemetry: combineHistoryTelemetry(recorded), complete: recorded.length === turn.attempts.length } : undefined;
+}
+
+/** Cached share of input when every call reported both counts with `0 ≤ cached ≤ input` per call; a lower bound when only some calls reported cached counts; otherwise not reported. */
+export function historyCacheLabel(telemetry: HistoryTelemetry, complete = true): string {
+  const { input, cachedInput } = telemetry.tokens;
+  const calls = telemetry.modelCalls;
+  if (!calls) return "";
+  const allInput = complete && input.reportedCalls === calls;
+  const share = () => input.total ? Math.floor((cachedInput.total / input.total) * 100) : 0;
+  // A call whose cached count exceeded its own input makes every cache figure untrustworthy.
+  if (!cachedInput.reportedCalls || cachedInput.inconsistentCalls || (allInput && cachedInput.total > input.total)) return "Cache not reported";
+  if (allInput) return `${share()}%${complete && cachedInput.reportedCalls === calls ? "" : "+"} cached`;
+  // Without every input count no share can be bounded, but the reported cached tokens are a lower bound.
+  return `${cachedInput.total.toLocaleString("en-US")}+ tokens cached`;
+}
+
+/** Muted detail segments such as `Model 2m 42s`, `Tools 5m 42s` and `81% cached`; empty for turns without telemetry, never zeros. */
+export function historyTimingSegments(turn: Pick<HistoryTurn, "evidence" | "attempts">): { times: string[]; cache: string } {
+  const summary = historyTurnTelemetry(turn);
+  if (!summary) return { times: [], cache: "" };
+  const { telemetry, complete } = summary;
+  const bound = complete ? "" : "+";
+  const times = [telemetry.modelCalls ? `Model ${formatDuration(telemetry.modelMs)}${bound}` : "", telemetry.toolCalls ? `Tools ${formatDuration(telemetry.toolMs)}${bound}` : ""].filter(Boolean);
+  return { times, cache: historyCacheLabel(telemetry, complete) };
+}
+
+/** Fit the timing line to `columns`, dropping the cache segment before any time segment. */
+export function historyTimingLine(turn: Pick<HistoryTurn, "evidence" | "attempts">, columns: number): string {
+  const { times, cache } = historyTimingSegments(turn);
+  const full = [...times, cache].filter(Boolean).join(" · ");
+  return Bun.stringWidth(full) <= columns || !times.length ? full : times.join(" · ");
+}
+
+/** F2 evidence lines for one attempt's timing and tokens; legacy attempts say nothing was recorded. */
+export function historyTelemetryDetails(attempt: Pick<HistoryAttempt, "telemetry" | "outcome">): string[] {
+  const telemetry = attempt.telemetry;
+  if (!telemetry) return [attempt.outcome ? "  Timing and token details were not recorded for this attempt." : "  Timing and token details are unknown (no outcome recorded)."];
+  const first = telemetry.firstDelta;
+  const firstOutput = !telemetry.modelCalls ? "" : !first ? " · no text or thinking before completion"
+    : ` · first output ${first.minMs === first.maxMs ? formatDuration(first.minMs) : `${formatDuration(first.minMs)}–${formatDuration(first.maxMs)}`}${first.calls < telemetry.modelCalls ? ` (${first.calls} of ${formatCount(telemetry.modelCalls, "call")})` : ""}`;
+  // A backoff that a stop cut short is waited time without a retry.
+  const retries = telemetry.retries ? ` · ${formatCount(telemetry.retries, "retry", "retries")}, ${formatDuration(telemetry.retryWaitMs)} backoff`
+    : telemetry.retryWaitMs ? ` · no retries · ${formatDuration(telemetry.retryWaitMs)} backoff before stop` : " · no retries";
+  /** One token figure with a single note for partial coverage and ignored calls whose subset exceeded their own bound. */
+  const token = (label: string, total: HistoryTelemetry["tokens"]["input"], bound?: string) => {
+    const ignored = total.inconsistentCalls ? `${formatCount(total.inconsistentCalls, "call")} ignored, ${bound}` : "";
+    if (!total.reportedCalls) return ignored ? `${label} unusable (${ignored})` : `${label} not reported`;
+    const coverage = total.reportedCalls < telemetry.modelCalls ? `${total.reportedCalls} of ${formatCount(telemetry.modelCalls, "call")} ${ignored ? "counted" : "reported"}` : "";
+    const note = [coverage, ignored].filter(Boolean).join("; ");
+    return `${label} ${total.total.toLocaleString("en-US")}${note ? ` (${note})` : ""}`;
+  };
+  const { input, cachedInput, output, reasoning } = telemetry.tokens;
+  return [
+    telemetry.modelCalls ? `  Model: ${formatCount(telemetry.modelCalls, "call")} · ${formatDuration(telemetry.modelMs)}${firstOutput}${retries}` : "  Model: no calls",
+    telemetry.toolCalls ? `  Tools: ${formatCount(telemetry.toolCalls, "timed call")} · ${formatDuration(telemetry.toolMs)} wall time${telemetry.approvalWaitMs ? ` · ${formatDuration(telemetry.approvalWaitMs)} approval wait` : ""}`
+      : "  Tools: no timed calls",
+    ...(telemetry.modelCalls ? [`  Tokens: ${[token("input", input), token("cached input", cachedInput, "cached above input"), token("output", output), token("reasoning", reasoning, "reasoning above output")].join(" · ")}`] : []),
+  ];
 }
 
 /** Durable undo outcome or current `/undo` eligibility for one turn, never offering rollback from the timeline. */
@@ -139,12 +206,19 @@ export function historyDetailsText(state: Pick<HistorySnapshot, "unsaved"> & { r
           : `Git snapshots unavailable: ${{ off: "change tracking is off", "no-workspace": "no workspace was active", "non-git": "not a Git workspace", failed: "the snapshot failed", "not-captured": "no snapshot was captured", headless: "headless runs take no snapshots" }[attempt.git.reason]}${attempt.git.detail ? ` (${attempt.git.detail})` : ""}`;
         lines.push(`Attempt ${index + 1}: ${attempt.mode === "tui" ? "interactive" : "headless"} · ${attempt.workspaceRoot} · started ${historyTimeLabel(attempt)} · ${attempt.outcome ? historyOutcomeLabel({ evidence: "recorded", outcome: attempt.outcome }) : "no outcome recorded"} · ${attempt.activeMs === null ? "time unknown" : formatDuration(attempt.activeMs)}`);
         lines.push(`  ${git}`);
+        lines.push(...historyTelemetryDetails(attempt));
       });
       if (turn.incompleteAttempts) lines.push(`${formatCount(turn.incompleteAttempts, "attempt")} saved a start but no outcome, after a crash, forced quit or failed write. Its files, commands and time are unknown, so counts below are lower bounds.`);
       lines.push(`${formatCount(turn.toolResults, "tool result")}; ${formatCount(turn.failedTools, "failed tool")}.`);
       lines.push(`Commands: ${turn.commands.exitZero} exited 0, ${turn.commands.nonzero} nonzero, ${turn.commands.unknown} without an observed exit.`);
       if (turn.commands.truncated) lines.push(`The command list shows ${turn.commands.items.length} of ${turn.commands.total} summaries; each keeps at most 200 characters.`);
       if (turn.files.truncated) lines.push(`The file list shows ${turn.files.items.length} of ${turn.files.total} observed paths${turn.oversized ? `; ${formatCount(turn.oversized, "oversized path")} could not be stored` : ""}.`);
+      if (turn.attempts.some(attempt => attempt.telemetry)) lines.push(
+        "Token counts are what the provider reported, not billing. Cached input is part of input and reasoning is part of output.",
+        "Model time adds every model attempt, including failed ones. Tool time is wall time with at least one tool running, so parallel tools count once; approval waits are part of it.",
+        "Command times exclude approval waits. No first output means no text or thinking arrived before the call completed.",
+        "A backoff cut short by a stop counts as waited time, not a retry. A call reporting more cached than input tokens, or more reasoning than output tokens, is ignored for that count.",
+      );
     }
     lines.push("");
   }

@@ -337,6 +337,17 @@ a saved copy is missing, a file can't be read or changes without saved undo stay
 `Nothing to undo · /undo shows why`. A completed turn or an
 `Exit 0` row is not proof that tests passed.
 
+A turn that recorded timing adds one muted line below its time and duration,
+such as `Model 2m 42s · Tools 5m 42s · 81% cached`. Model time adds every model
+attempt; tool time is wall time with at least one tool running, so parallel
+calls count once. The cached share appears only when every call reported its
+input and cached counts; otherwise the line says `Cache not reported` or a lower
+bound such as `40%+ cached`. Narrow terminals drop the cache segment first.
+Each command shows its run time, excluding any approval wait, beside its exit.
+Turns recorded before timing existed show no timing line. F2 details list each
+attempt's model calls, time to first output, retries and backoff, tool wall time,
+approval wait and reported token totals with how many calls reported them.
+
 In a turn, Up/Down selects an observed file and Enter shows its
 `Current diff`, labelled `Current content · not turn N's patch`. It is read from
 Git on request, honors `git.changeTracking`, and can include earlier, later or
@@ -940,8 +951,8 @@ show unknown capacity even though the runtime uses a conservative fallback.
 Reasoning support alone does not establish context capacity.
 
 Use `/context` to inspect the estimate's scope, selected model, last reported turn
-request usage and active summary. Missing input/output usage remains unknown,
-including after resume. Reported usage is separate from the local estimate and
+request usage (input with its cached part, output with its reasoning part) and
+active summary. Missing usage counts remain unknown, including after resume. Reported usage is separate from the local estimate and
 is not a billing total. Inspection never sends a model request, compacts history,
 changes branches or writes a session record.
 

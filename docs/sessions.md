@@ -215,6 +215,46 @@ The loader validates the complete graph, including inactive branches, before rep
 
 A syntactically incomplete or malformed final JSON line is treated as an interrupted write; recovery removes only that suffix and retains the preceding bytes. Malformed interior JSON and valid JSON with invalid semantic content are errors, including semantic corruption in the final line. If an append reports an I/O failure, that in-memory persisted handle refuses further writes: reload so the last complete operation can be recovered before continuing. These guarantees cover process interruption and append failure; session files are not a multi-process transaction store and should have one writer.
 
+### Call telemetry
+
+`assistant` and `tool_result` items may carry an optional `telemetry` object
+written by the existing `branch_append` path; the session format version does
+not change. Schway measures it in the harness with a monotonic clock (adapters
+only parse provider usage). Durations are whole milliseconds and start times are
+ISO 8601 wall-clock strings:
+
+```json
+{"type":"assistant","id":"B","content":[…],"telemetry":{"startedAt":"2026-01-15T09:30:00.000Z","firstDeltaMs":812,"attemptMs":23800,"totalMs":25100,"attempts":2,"retryWaitMs":1000,"usage":{"inputTokens":81000,"outputTokens":2400,"cachedInputTokens":65536,"reasoningTokens":2100}}}
+{"type":"tool_result","id":"C","toolCallId":"call-1","content":"…","isError":false,"telemetry":{"startedAt":"2026-01-15T09:30:25.100Z","durationMs":4800,"approvalWaitMs":3000}}
+```
+
+- **Assistant.** `startedAt` is the first attempt's start. `firstDeltaMs` is
+  the successful attempt's time to its first text or thinking delta, or `null`
+  when none arrived before completion (for example a tool-call-only response);
+  it is never the completion time. `attemptMs` runs from that attempt's start to
+  the end of its stream. `totalMs` runs from the first attempt's start to
+  completion, including failed attempts and backoff. `attempts` is 1 plus the
+  transient retries, and `retryWaitMs` is the backoff actually waited, measured
+  with the same monotonic clock. `usage` is the
+  successful attempt's final reported usage.
+- **Usage.** `cachedInputTokens` is the part of `inputTokens` the provider
+  served from its prompt cache, and `reasoningTokens` is the part of
+  `outputTokens` it reports as reasoning. Both are subsets, never added to their
+  totals. `null` or an absent field means the provider did not report the
+  number; `0` means it reported none. Counts are what the provider reported, not
+  billing.
+- **Tool result.** `durationMs` runs from scheduler start to settlement.
+  `approvalWaitMs`, present only when the call waited for approval, is the part
+  of `durationMs` spent waiting, so execution time is
+  `durationMs − approvalWaitMs`. Results that never ran (unknown tools, invalid
+  arguments, calls cancelled before they started, interrupted-call settlements)
+  carry no telemetry instead of a zero.
+- **Reading.** The loader validates `telemetry` field by field and keeps it on
+  resume, fork and branch selection. A malformed value is dropped, never failing
+  resume or discovery. Older builds ignore the field. Telemetry never reaches
+  provider requests, compaction summary input or model context, and nothing is
+  backfilled for older sessions.
+
 ### Legacy migration
 
 Formats 1 and 2, including a format 1 header followed by a format 2 upgrade, load as one default `main` branch at the validated linear tip. Reading a valid settled legacy session preserves its bytes. Its first conversation/branch mutation or interrupted-call settlement appends:
@@ -354,6 +394,35 @@ root; later lines are attempt starts and revisioned outcomes:
   Identity fields are validated, never truncated. Readers use a bounded line
   reader and skip malformed, oversized or unknown lines; a header from a newer
   format makes the file unsupported rather than guessed at.
+- **Timing and tokens.** A `turn_finalize` may carry an optional `telemetry`
+  object, and each command may carry `durationMs` and `approvalWaitMs`; the
+  record `version` stays 1. The collector folds `model.usage` and
+  `tool.finished` events in both TUI and headless runs. All times are whole
+  milliseconds:
+
+  ```json
+  "telemetry":{"modelCalls":12,"modelMs":162000,"firstDelta":{"minMs":4700,"maxMs":31000,"calls":12},"retries":1,"retryWaitMs":1000,"toolCalls":30,"toolMs":342000,"approvalWaitMs":0,"tokens":{"input":{"total":530000,"reportedCalls":12},"cachedInput":{"total":429300,"reportedCalls":12},"output":{"total":9000,"reportedCalls":12},"reasoning":{"total":7000,"reportedCalls":12}}}
+  ```
+
+  `modelCalls` counts turn model attempts, including failed and cancelled ones;
+  compaction calls are excluded. `modelMs` adds every attempt's duration.
+  `firstDelta` is the range of time to first text or thinking output over the
+  `calls` that produced any, or `null`. `retries` counts transient retries that
+  started another attempt, and `retryWaitMs` is the backoff actually waited,
+  including a backoff that cancellation cut short. `toolCalls` counts calls with a
+  measured duration; `toolMs` is wall time with at least one of them running,
+  approval waits included, so parallel calls count once and `modelMs + toolMs`
+  stays within `activeMs` up to clock rounding. `approvalWaitMs` adds the
+  approval waits. Each token total covers only the `reportedCalls` that reported
+  that dimension; fewer reporting calls than `modelCalls` make it a lower bound.
+  A call whose cached or reasoning count exceeds its own input or output total
+  is left out of that subset and counted in an optional `inconsistentCalls`;
+  any such call makes the cache share read `Cache not reported`.
+  A command's `durationMs` runs from scheduler start to settlement and its
+  `approvalWaitMs` is the part spent waiting. Readers validate these fields
+  strictly when present. Duplicate finalizations that differ only in times do not
+  add a revision. Records written before these fields existed stay readable and
+  show their timings as unknown; nothing is rebuilt from `committedAt`.
 - **Privacy.** Terminal controls are stripped and known secrets redacted before
   bounding. Records keep no provider payloads, reasoning, credentials, full tool
   output or file contents. Slash commands and credential-like tasks store no

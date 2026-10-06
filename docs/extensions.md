@@ -57,6 +57,7 @@ after an intentional public contract change.
 | `ApprovalMode` | User-selected handling of tools that can change state. |
 | `AssistantContent` | Allowed assistant content block: text, reasoning, or a requested tool invocation. |
 | `AssistantMessage` | Assembled assistant output with ordered content blocks and opaque metadata retained for adapter replay. |
+| `AssistantTelemetry` | Harness-measured timing and reported usage of the model call that produced a message; never sent to a provider. Durations are whole milliseconds. |
 | `BeforeAgentHook` | Append turn-only sections, deny the turn, or leave the preceding hook's result unchanged. |
 | `BeforeAgentInput` | Detached user input and accumulated turn-only context, supplied once per submitted turn. |
 | `BeforeModelHook` | Replace ephemeral request data, deny the request, or retain the preceding hook's result. |
@@ -79,7 +80,7 @@ after an intentional public contract change.
 | `JsonSchema` | JSON Schema object used as a public tool input contract. |
 | `ModelRequest` | Provider-independent model request built by the agent loop. |
 | `ModelTool` | Tool description sent to a provider adapter. |
-| `ModelUsage` | Reported token counts for one provider attempt; null means that dimension was not reported. |
+| `ModelUsage` | Reported token counts for one provider attempt; null or absent means that dimension was not reported, while 0 means the provider reported none. |
 | `ProviderMetadata` | Opaque adapter-owned data preserved alongside Schway's provider-independent conversation records. |
 | `RuntimeEvent` | Normalized runtime events for TUI, headless `--json`, and diagnostics. |
 | `TextContent` | Plain text carried in a user or assistant message. |
@@ -94,6 +95,7 @@ after an intentional public contract change.
 | `ToolExecutionResult` | Result of a single tool `execute` call, before it is stored on the session. |
 | `ToolOutputChunk` | A stdout or stderr chunk emitted while a tool is running. |
 | `ToolResult` | Model-facing outcome linked to a tool-call id, with errors marked explicitly. |
+| `ToolTelemetry` | Harness-measured timing of one tool call from scheduler start to settlement, in whole milliseconds; never sent to a provider. |
 | `UserContent` | Content accepted in user messages, currently limited to plain text. |
 | `UserMessage` | Identified user input stored in session history and sent to the model. |
 | `Workspace` | Workspace directories whose primary root anchors relative tool paths, with launch location and optional extra roots. |
@@ -462,6 +464,33 @@ and disposal discard it. Retained prompt capabilities close when the handler
 settles or its owner is cancelled; multiple prompt submissions are rejected.
 Strings and errors are bounded to 50,000 characters and redact known credentials.
 Command failures identify their extension and leave the editor usable.
+
+## Usage and timing fields
+
+These optional fields were added without changing any existing field, so
+extensions that build `ModelUsage` with two fields or ignore the new ones keep
+working.
+
+- `ModelUsage.cachedInputTokens` is the part of `inputTokens` the provider
+  served from its prompt cache, and `ModelUsage.reasoningTokens` is the part of
+  `outputTokens` it reports as reasoning. Both are subsets, never added to their
+  totals. `null` or absent means not reported; `0` means reported as none. The
+  Responses adapters (OpenAI, xAI and the Grok subscription route) and the
+  ChatGPT subscription adapter parse them; the OpenAI-compatible adapter does
+  not report them yet.
+- `AssistantMessage.telemetry` (`AssistantTelemetry`) and `ToolResult.telemetry`
+  (`ToolTelemetry`) are measured by the harness, never by adapters, and never
+  sent to a provider. See [call telemetry](sessions.md#call-telemetry) for their
+  fields, units and null semantics. A `beforeModel` hook sees them on items in
+  `request.items`; adapters ignore them.
+- The `model.usage` event adds `startedAt`, `firstDeltaMs` (null when no text
+  or thinking delta arrived) and `attemptMs` for every turn attempt, including
+  failed and cancelled ones. A failed attempt followed by a retry backoff also
+  carries `retryWaitMs`, the backoff actually waited, even when cancellation cut
+  it short. Compaction usage events carry none of them.
+- The `tool.finished` event adds `startedAt`, `durationMs` and, when the call
+  waited for approval, `approvalWaitMs`. They are absent for calls that never
+  ran, such as unknown tools or invalid arguments.
 
 ## Observers and disposal
 

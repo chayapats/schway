@@ -43,7 +43,8 @@ const shellRow = (ui: ScreenHarness, id: string, command: string, status: "succe
   ui.session.append({ type: "assistant", id: `request-${id}`, content: [{ type: "tool_call", id, name: "bash", arguments: { command } }] });
   ui.controller.applyEvent({ type: "tool.started", toolCallId: id, name: "bash" });
   ui.advance();
-  ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "bash", status, content, details });
+  // The scheduler measures run time; these synthetic rows carry the 1.2s each shell screen's clock advances.
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "bash", status, content, details, startedAt: "2026-01-15T09:30:00.000Z", durationMs: 1200 });
   ui.session.append({ type: "tool_result", id: `result-${id}`, toolCallId: id, content, isError: status !== "success" });
 };
 const longFailure = async (ui: ScreenHarness, expanded = false) => {
@@ -312,6 +313,14 @@ export const SCREENS: readonly Screen[] = [
     ready: s => historyReady("list", 1)(s) && s.history!.turns.filter(turn => turn.evidence === "missing").length === 2 },
   { id: "history-truncation", title: "Truncated turn history", description: "A turn with more observations than a record keeps shows how many files and commands are listed.", noColor: true, drive: async ui => { await openHistory(ui, 0, true); },
     ready: s => historyReady("detail")(s) && s.history!.turns[0]!.files.truncated },
+  { id: "history-timing", title: "Turn timing in history", description: "A turn that recorded timing shows model time, tool time and the cached share below its duration, and each command's run time.", noColor: true,
+    drive: async ui => { await openHistory(ui, 0, true); }, ready: s => historyReady("detail")(s) && !!s.history!.turns[0]!.attempts[0]?.telemetry },
+  { id: "history-timing-cache-unreported", title: "Turn timing without cache counts", description: "When the provider reported no cached counts, the timing line says the cache was not reported instead of showing a share.", noColor: true,
+    drive: async ui => { await openHistory(ui, 0, true); }, ready: s => historyReady("detail")(s) && !!s.history!.turns[0]!.attempts[0]?.telemetry },
+  { id: "history-timing-partial", title: "Partly reported turn timing", description: "When only some model calls reported cached counts, the cached share is shown as a lower bound.", noColor: true,
+    drive: async ui => { await openHistory(ui, 0, true); }, ready: s => historyReady("detail")(s) && !!s.history!.turns[0]!.attempts[0]?.telemetry },
+  { id: "history-timing-details", title: "Turn timing details", description: "F2 details list model calls, first output, retries, tool wall time and token totals with their caveats.", noColor: true,
+    drive: async ui => { await openHistory(ui, 0, true); openDetails(ui); await ui.settle(); }, ready: s => historyReady("detail")(s) && s.history!.showingDetails },
   { id: "delete-session-busy", title: "Session deletion retry", description: "A busy session deletion names its reason, retry command and details action.", noColor: true, drive: ui => enter(ui, "/delete-session saved-session"), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.startsWith("Cannot delete session: Undo store busy ·")) },
   { id: "session-picker", title: "Session picker", description: "Alt+S lists saved sessions for this workspace with their activity and resume keys.", drive: async ui => { ui.mockInput.pressKey("s", { meta: true }); },
     ready: s => !!s.sessionPicker && !s.sessionPicker.loading && s.sessionPicker.entries.length === 3 },

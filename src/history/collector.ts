@@ -4,6 +4,7 @@ import type { Session } from "../session/session.ts";
 import { buildEditDiff, type DiffHunk } from "../text/diff.ts";
 import { historyCallDigest, isHistoryId, isHistoryRoot, isHistorySessionId, MAX_HISTORY_COMMANDS, MAX_HISTORY_FILES,
   type HistoryCommand, type HistoryFile, type HistoryGitEvidence, type HistoryMode, type HistoryOutcome, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
+import { createHistoryTelemetryFold } from "./telemetry.ts";
 import { historyCommandSummary, historyDetail, historyExcerpt, historyPath } from "./sanitize.ts";
 import { HISTORY_SESSION_MISSING, type HistoryStore } from "./store.ts";
 
@@ -74,6 +75,7 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
   let commandTotal = 0;
   const seenCalls = new Set<string>();
   const files = new Map<string, HistoryFile>();
+  const telemetry = createHistoryTelemetryFold();
 
   /** Store a workspace-relative `/` path when inside the attempt's root, otherwise the absolute path. */
   const displayPath = (absolute: string): string => {
@@ -110,11 +112,12 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
         terminal = event.reason === "error" ? "failed" : event.reason === "cancelled" ? "stopped" : event.reason === "max_turns" ? "limit" : "completed";
         return;
       }
-      if (event.type !== "tool.finished") return;
+      if (event.type !== "tool.finished") { telemetry.observe(event); return; }
       const digest = historyCallDigest(event.toolCallId);
       // Duplicate delivery of the same result must not add a second observation.
       if (seenCalls.has(digest)) return;
       seenCalls.add(digest);
+      telemetry.observe(event);
       toolResults++;
       if (event.status === "error") failedTools++;
       const details = event.details && typeof event.details === "object" && !Array.isArray(event.details) ? event.details as Record<string, unknown> : undefined;
@@ -134,7 +137,9 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
         if (commands.length < MAX_HISTORY_COMMANDS) {
           const summary = historyCommandSummary(typeof details?.command === "string" ? details.command : requestedCommand(options.session, event.toolCallId) ?? "bash", secrets);
           commands.push({ id: digest, command: summary.text, ...(summary.truncated ? { commandTruncated: true as const } : {}), exitCode, ended,
-            status: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error" });
+            status: event.status === "success" ? "success" : event.status === "cancelled" ? "cancelled" : "error",
+            ...(isMs(event.durationMs) ? { durationMs: event.durationMs } : {}),
+            ...(isMs(event.durationMs) && isMs(event.approvalWaitMs) ? { approvalWaitMs: Math.min(event.approvalWaitMs, event.durationMs) } : {}) });
         }
       }
     },
@@ -155,9 +160,11 @@ export function createHistoryCollector(options: { store: HistoryStore; identity:
         files: { total: fileItems.length + oversized, truncated: fileItems.length > MAX_HISTORY_FILES || oversized > 0, items: fileItems.slice(0, MAX_HISTORY_FILES).map(file => ({ ...file })) },
         git,
         ...(oversized ? { oversized } : {}),
+        telemetry: telemetry.summary(),
       };
       // Idempotent: identical evidence (ignoring time) is not appended again; changed evidence gets the next revision.
-      const payload = JSON.stringify({ ...body, activeMs: undefined });
+      const payload = JSON.stringify({ ...body, activeMs: undefined, telemetry: { ...body.telemetry, modelMs: undefined, firstDelta: undefined, retryWaitMs: undefined, toolMs: undefined, approvalWaitMs: undefined },
+        commands: { ...body.commands, items: body.commands.items.map(command => ({ ...command, durationMs: undefined, approvalWaitMs: undefined })) } });
       if (payload === lastPayload && finalizeState) return finalizeState;
       lastPayload = payload;
       const record: HistoryTurnFinalize = { type: "turn_finalize", version: 1, turnId: identity.turnId, attemptId, revision: ++revision, finishedAt: now().toISOString(), ...body };
@@ -205,6 +212,11 @@ function editHunks(value: unknown): DiffHunk[] | undefined {
     hunks.push({ startLine: hunk.startLine, oldText: hunk.oldText, newText: hunk.newText });
   }
   return hunks;
+}
+
+/** Whole nonnegative milliseconds, the only durations a record accepts. */
+function isMs(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isCode(error: unknown, code: string): boolean {

@@ -26,7 +26,20 @@ export type RuntimeEvent =
       content: { type: "text"; text: string } | { type: "thinking"; text: string };
     }
   | { type: "model.finished" }
-  | { type: "model.usage"; phase: "turn" | "compaction"; usage: ModelUsage; complete: boolean }
+  | {
+      type: "model.usage";
+      phase: "turn" | "compaction";
+      usage: ModelUsage;
+      complete: boolean;
+      /** ISO wall-clock start of this attempt; turn attempts only. */
+      startedAt?: string;
+      /** Milliseconds from this attempt's start to its first text or thinking delta; null when none arrived. Turn attempts only. */
+      firstDeltaMs?: number | null;
+      /** Milliseconds from this attempt's start to the end of its stream, including failed and cancelled attempts. Turn attempts only. */
+      attemptMs?: number;
+      /** Milliseconds of retry backoff actually waited after this failed attempt, including a backoff cut short by cancellation; absent when no backoff followed. */
+      retryWaitMs?: number;
+    }
   | {
       type: "model.retry";
       attempt: number;
@@ -52,6 +65,12 @@ export type RuntimeEvent =
       status: ToolCallStatus;
       content: string;
       details?: unknown;
+      /** ISO wall-clock time the scheduler started the call; absent when the call never ran. */
+      startedAt?: string;
+      /** Milliseconds from scheduler start to settlement, including any approval wait; absent when the call never ran. */
+      durationMs?: number;
+      /** Part of `durationMs` spent waiting for approval; absent when the call did not wait. */
+      approvalWaitMs?: number;
     }
   | { type: "compaction.started"; reason: CompactionReason }
   | {

@@ -307,3 +307,26 @@ test("tool denial diagnostics record mode and redact reason without tool argumen
   expect(record).toMatchObject({ event: "tool.denied", fields: { name: "write", toolCallId: "write-call", mode: "read-only", reason: "Read-only ***" } });
   expect(record.fields).not.toHaveProperty("arguments");
 }));
+
+test("usage and tool records carry token subsets and timings but never model text, arguments or tool output", async () => temporary(async home => {
+  const sink = createDiagnosticSink({ home, enabled: true });
+  const raw = "private-model-text-and-tool-output";
+  sink.runtime({ type: "model.delta", content: { type: "text", text: raw } });
+  sink.runtime({ type: "model.usage", phase: "turn", complete: true, startedAt: "2026-01-15T09:30:00.000Z", firstDeltaMs: 812, attemptMs: 23_800,
+    usage: { inputTokens: 81_000, outputTokens: 2400, cachedInputTokens: 65_536, reasoningTokens: 0 } });
+  sink.runtime({ type: "model.usage", phase: "turn", complete: false, firstDeltaMs: null, attemptMs: 200, retryWaitMs: 1000, usage: { inputTokens: null, outputTokens: null } });
+  sink.runtime({ type: "model.usage", phase: "compaction", complete: true, usage: { inputTokens: 10, outputTokens: 2 } });
+  sink.runtime({ type: "tool.finished", toolCallId: "bash-call", name: "bash", status: "success", content: raw, details: { command: raw }, startedAt: "2026-01-15T09:30:24.000Z", durationMs: 4800, approvalWaitMs: 3000 });
+  sink.runtime({ type: "tool.finished", toolCallId: "unknown-call", name: "missing", status: "error", content: raw });
+  await sink.close();
+  const text = await readFile(diagnosticPath(home), "utf8");
+  const fields = text.trim().split("\n").map(line => JSON.parse(line) as { event: string; fields: Record<string, unknown> }).map(record => [record.event, record.fields]);
+  expect(fields).toEqual([
+    ["model.usage", { phase: "turn", complete: true, inputCount: 81_000, generatedCount: 2400, cachedInputCount: 65_536, reasoningCount: 0, firstDeltaMs: 812, attemptMs: 23_800 }],
+    ["model.usage", { phase: "turn", complete: false, inputCount: null, generatedCount: null, cachedInputCount: null, reasoningCount: null, firstDeltaMs: null, attemptMs: 200, retryWaitMs: 1000 }],
+    ["model.usage", { phase: "compaction", complete: true, inputCount: 10, generatedCount: 2, cachedInputCount: null, reasoningCount: null }],
+    ["tool.finished", { name: "bash", toolCallId: "bash-call", status: "success", durationMs: 4800, approvalWaitMs: 3000 }],
+    ["tool.finished", { name: "missing", toolCallId: "unknown-call", status: "error" }],
+  ]);
+  expect(text).not.toContain(raw);
+}));

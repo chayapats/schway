@@ -463,12 +463,14 @@ test("real read, edit, write and bash results render summaries with deterministi
       await writeFile(join(root, "clamp.ts"), "before\nold\nafter\n");
       const path = `created-${limit}.txt`;
       const content = Array.from({ length: 42 }, (_, i) => `created line ${i + 1}`).join("\n") + "\n";
-      let clock = 1000;
+      let clock = 1000, tick = 0;
       const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { ui: { inlineDiffLines: limit } } });
       const ui = await setup(120, 40, {}, undefined, {
         workspace, contextManager: createContextManager(workspace), configEditor,
         tools: createToolRegistry([readTool, editTool, writeTool, bashTool]), activityClock: () => clock,
         onRuntimeEvent: event => { if (event.type === "tool.finished") clock += 1200; },
+        // Tool rows show the scheduler's measured duration: its start and settlement reads are 1.2s apart.
+        agentClock: { now: () => Date.parse("2026-01-15T09:30:00.000Z"), monotonicNow: () => (tick += 1200), sleep: async () => {} },
         model: createScriptedModel({ responses: [
           { toolCalls: [{ id: "read", name: "read", arguments: { path: "clamp.ts" } }] },
           { toolCalls: [{ id: "edit", name: "edit", arguments: { path: "clamp.ts", edits: [{ oldText: "old", newText: "new" }] } }] },

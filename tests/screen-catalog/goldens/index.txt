@@ -78,6 +78,10 @@ history-stopped-turn
 history-undo-note
 history-missing-evidence
 history-truncation
+history-timing
+history-timing-cache-unreported
+history-timing-partial
+history-timing-details
 delete-session-busy
 session-picker
 branch-tree-continue
