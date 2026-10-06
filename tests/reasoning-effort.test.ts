@@ -9,11 +9,12 @@ import { grokSubscriptionIdentity } from "../src/auth/store.ts";
 import { runCli } from "../src/cli/runtime.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { createContextManager } from "../src/context/manager.ts";
-import { parseHistoryLine, serializeHistoryFinalize, type HistoryReasoning, type HistoryTurnFinalize } from "../src/history/records.ts";
+import { HISTORY_REASONING_LEVELS, parseHistoryLine, serializeHistoryFinalize, type HistoryReasoning, type HistoryTurnFinalize } from "../src/history/records.ts";
 import { openHistoryStore } from "../src/history/store.ts";
 import { buildHistoryTimeline } from "../src/history/timeline.ts";
 import type { ModelCapability } from "../src/model/catalog.ts";
 import { loadProviderModel, type ProviderLoaderInput } from "../src/model/loader.ts";
+import { THINKING_LEVELS } from "../src/model/model.ts";
 import { resolveCodexReasoning } from "../src/model/providers/codex-subscription.ts";
 import { describeEffectiveThinking, MODEL_THINKING_DEFAULTS, modelReasoning, resolveEffectiveThinking, resolveReasoningRecord, type ModelThinkingDefault } from "../src/model/thinking.ts";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
@@ -164,6 +165,8 @@ test("a finalize record with reasoning stays version 1, passes the 0af6f9a valid
     { ...reasoning, model: "grok\u0007" }, { ...reasoning, level: "low", source: "custom" },
   ]) expect(parseHistoryLine(JSON.stringify(finalize(bad))), JSON.stringify(bad)).toBeUndefined();
   expect(() => serializeHistoryFinalize(finalize({ ...reasoning, source: "explicit" }))).toThrow("Invalid history identity or record");
+  // The sidecar keeps its own level list so session commands never load model modules; it must match the shared levels.
+  expect(HISTORY_REASONING_LEVELS).toEqual(THINKING_LEVELS);
 });
 
 test("a session and sidecar written by 0af6f9a load unchanged and say the effort was not recorded, never inferring it", async () => {

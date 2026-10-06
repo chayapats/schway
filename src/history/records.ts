@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
-import { THINKING_LEVELS } from "../model/model.ts";
 import type { ReasoningRecord } from "../model/thinking.ts";
 
 /** Current sidecar format version written in the header and every turn record. */
@@ -151,6 +150,9 @@ export interface HistoryTurnFinalize {
 /** Plain-data reasoning evidence for one attempt: provider, model, route, the level sent (null for none) and who chose it. */
 export type HistoryReasoning = ReasoningRecord;
 
+/** Thinking levels a record may name; kept local so session commands that read history never load model modules. */
+export const HISTORY_REASONING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
 /** Any validated sidecar line. */
 export type HistoryRecord = HistoryHeader | HistoryTurnStart | HistoryTurnFinalize;
 
@@ -281,7 +283,7 @@ export function isHistoryReasoning(value: unknown): value is HistoryReasoning {
   const sent = reasoning.level !== null;
   return isHistoryId(reasoning.provider) && isHistoryId(reasoning.model)
     && (reasoning.route === undefined || ["api-key", "grok", "codex"].includes(reasoning.route as string))
-    && (!sent || THINKING_LEVELS.includes(reasoning.level as never))
+    && (!sent || HISTORY_REASONING_LEVELS.includes(reasoning.level as string))
     && (sent ? reasoning.source === "explicit" || reasoning.source === "model-default" : reasoning.source === "provider-default" || reasoning.source === "custom");
 }
 
