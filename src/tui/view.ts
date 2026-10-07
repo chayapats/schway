@@ -24,6 +24,7 @@ import { PALETTE_APPROVAL, PALETTE_NO_MATCHES, PALETTE_PLACEHOLDER, PALETTE_RUNN
 import { slashEnter, slashPaletteHint, type SlashEnter } from "./palette.ts";
 import { formatDiffRows, hasInlineDiff } from "./transcript-format.ts";
 import { taskExampleLines, taskExamplesEligible } from "./empty-guidance.ts";
+import { outcomeStripActions, readinessCardActions, surfaceOwnsInput } from "./background-hints.ts";
 import { currentDiffLabel, emptyFilesLabel, fitPathStart, reviewDetailsLabel, reviewFileBadge, reviewFilesLabel } from "./review-scope.ts";
 import { UNDO_REVIEW_DETAILS, UNDO_REVIEW_FILES, UNDO_REVIEW_NO_FILES, undoEscape, undoHeading, undoHint, undoRows } from "./undo-view.ts";
 import { createReaderDocument, paintReader, panReader, readerBodyPosition, readerEnd, readerLayout, revealMatch, scrollReader, type ReaderDocument, type ReaderLayout, type ReaderSearch } from "./reader-view.ts";
@@ -856,11 +857,17 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     renderer.dropLive();
   }
 
+  // A `/` draft that is not yet a whole command browses the slash palette.
+  const slashBrowsing = () => !panelMode && !reader && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery && !completeCommand(editor.plainText);
+  // One ownership answer hides every background hint together: the readiness card's action line and the task examples.
+  const backgroundOwned = (snapshot: TuiSnapshot) => surfaceOwnsInput({ panel: panelMode, slashBrowsing: slashBrowsing(), inspection: !!inspection,
+    details: !!detailsReturn, reader: !!reader, toolApproval: !!snapshot.toolApproval });
+
   // Task examples are static decoration below readiness: they only use rows the
   // empty conversation leaves free above the composer and never touch the editor.
   function paintTaskExamples(snapshot: TuiSnapshot, path: string, connection: string, route: string, action: string, width: number, draftRows: number) {
     const eligible = transcript.visible && taskExamplesEligible(snapshot, { draft: editor.plainText,
-      owned: !!panelMode || !!inspection || !!detailsReturn, draftNotice: draftRows > 0 });
+      owned: backgroundOwned(snapshot), draftNotice: draftRows > 0 });
     const lineWidth = width - 1;
     const rowsFor = (text: string) => { const cells = Bun.stringWidth(text); return cells <= lineWidth ? 1 : Math.ceil(cells / lineWidth) + 1; };
     const margin = (value: number | string) => typeof value === "number" ? value : 0;
@@ -1167,26 +1174,25 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       returnContext.content = (safe(snapshot.recentSession
         ? `New conversation · Alt+B resume: ${snapshot.recentSession.title}\n${snapshot.recentSession.previewIncomplete ? "Resume saved work · Alt+B resume · /sessions browse" : "/sessions for all history"}`
         : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${connection}${route ? ` · ${route}` : ""}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
-      const action = snapshot.readiness === "loading" ? "Checking connection · Type a task · Esc cancel"
-        : snapshot.readiness === "ready" ? "Type a task · Enter sends"
-        : snapshot.readiness === "connect" ? "Connect to continue · Alt+L sign in"
-        : snapshot.readiness === "choose-model" ? "Choose a model · Alt+M browse models"
-        : snapshot.recovery?.category === "credential-store" ? "Unlock credential storage · Ctrl+R retry"
-        : "Repair connection · Alt+M choose model";
+      // While another surface owns the keys, the card keeps its status lines and drops its key hints; that surface names the live keys.
+      const cardActions = readinessCardActions(snapshot, backgroundOwned(snapshot));
+      const actionChunks = cardActions.flatMap((line, index) => [...(index ? [fg(theme.muted)("\n")] : []), ...keyHintChunks(safe(line), hintColors(theme.background))]);
+      const cardLower = [
+        ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(safe(snapshot.readinessDetail)), ...(actionChunks.length ? [fg(theme.muted)("\n")] : [])] : []),
+        ...actionChunks,
+      ];
       // The top bar already names the workspace; repeat it only when that bar is hidden.
       empty.content = snapshot.readiness === "not-connected" ? new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
-        bold(fg(theme.text)("Not connected")), fg(theme.muted)("\n"),
-        ...keyHintChunks("Connect a provider · Alt+L", hintColors(theme.background)),
+        bold(fg(theme.text)("Not connected")),
+        ...(actionChunks.length ? [fg(theme.muted)("\n"), ...actionChunks] : []),
       ]) : new StyledText([
         ...(topBar.visible ? [] : [fg(theme.muted)(`${safe(path)}\n`)]),
         bold(fg(theme.text)(safe(connection))),
-        ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}\n\n`))] : [fg(theme.muted)("\n\n")]),
-        ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(`${safe(snapshot.readinessDetail)}\n`)] : []),
-        ...keyHintChunks(safe(action), hintColors(theme.background)),
-        ...(snapshot.recovery?.actions.includes("details") ? [fg(theme.muted)("\n"), ...keyHintChunks("F2 details · Esc keep editing", hintColors(theme.background))] : []),
+        ...(snapshot.modelId ? [fg(theme.muted)(safe(` · ${route}`))] : []),
+        ...(cardLower.length ? [fg(theme.muted)("\n\n"), ...cardLower] : []),
       ]);
-      paintTaskExamples(snapshot, path, connection, route, action, width, draftStatus.visible ? draftStatus.height : 0);
+      paintTaskExamples(snapshot, path, connection, route, cardActions[0] ?? "", width, draftStatus.visible ? draftStatus.height : 0);
       const ids = new Set(entries.map(entry => entry.id));
       if (previousInspection && !inspectionEntry(previousInspection, entries)) previousInspection = undefined;
       if (inspection && !inspectionEntry(inspection, entries)) clearInspection();
@@ -1250,7 +1256,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       footerParts.override = searchOpen && !activity.visible ? searchStatus : undefined;
       const completed = snapshot.outcome;
       // Alt+R review and F2 details act only from the conversation; panels and the reader own those keys, and open details ignore F2.
-      const outcomeText = completed ? formatOutcomeLine(completed, width, !panelMode && !reader, !!detailsReturn) : "";
+      const outcomeText = completed ? formatOutcomeLine(completed, width, outcomeStripActions({ panel: panelMode, reader: !!reader, details: !!detailsReturn, loading: snapshot.readiness === "loading" })) : "";
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
@@ -1265,7 +1271,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : outcomeText ? { text: outcomeText.slice(outcomeGlyph!.length + 1), tone: outcomeTone, glyph: outcomeGlyph, outcome: true } : { text: "", tone: "muted" };
       activity.onMouseUp = () => { if (!searchOpen) { latest(); refresh(); } };
 
-      const browsing = panelMode === "help" || (!panelMode && !reader && editor.plainText.startsWith("/") && editor.plainText !== dismissedQuery && !completeCommand(editor.plainText));
+      const browsing = panelMode === "help" || slashBrowsing();
       if (browsing && !discoveryOpen) refreshDiscovery();
       discoveryOpen = browsing;
       // Guidance belongs to the query it was opened from; any query edit returns to results.

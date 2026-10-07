@@ -36,6 +36,6 @@ test("narrow outcomes drop elapsed then all commands then files while preserving
 });
 
 test("an outcome shown under a panel keeps its summary but names no Alt+R or F2 action", () => {
-  expect(formatOutcomeLine(outcome({ reason: "failed", files: [{ path: "a.ts", added: 1, removed: 1, source: "tool" }] }), 120, false)).toBe("✗ Failed · 1 file +1 −1 · 14s");
-  expect(formatOutcomeLine(outcome(), 120, false)).toBe("✓ Done · 14s");
+  expect(formatOutcomeLine(outcome({ reason: "failed", files: [{ path: "a.ts", added: 1, removed: 1, source: "tool" }] }), 120, { review: false, details: false })).toBe("✗ Failed · 1 file +1 −1 · 14s");
+  expect(formatOutcomeLine(outcome(), 120, { review: false, details: false })).toBe("✓ Done · 14s");
 });

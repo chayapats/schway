@@ -6,7 +6,7 @@ variant dark-40x8
 size 40x8
 cursor 1 1 hidden
 == text
- Type a task · Enter sends
+ API key
   Sign in to Grok
   1 Open x.ai/device
   2 Enter ABCD-EFGH
@@ -16,10 +16,8 @@ cursor 1 1 hidden
  Auto · Esc cancel
 == styles
 00 0-1 #ffffff #0e1117 -
-00 1-15 #8b95a7 #0e1117 -
-00 15-20 #e6eaf0 #293140 b
-00 20-26 #8b95a7 #0e1117 -
-00 26-40 #ffffff #0e1117 -
+00 1-8 #8b95a7 #0e1117 -
+00 8-40 #ffffff #0e1117 -
 01 0-1 #ffffff #0e1117 -
 01 1-2 #ffffff #1e2430 -
 01 2-17 #7cc4ff #1e2430 -

@@ -8,10 +8,10 @@ cursor 6 16 visible
 == text
  ⚡ schway  ~/demo
 
+
  openai/gpt-6-astra · ChatGPT
  subscription
 
- Type a task · Enter sends
 
 
   Choose model · Enter use · Esc back
@@ -34,19 +34,15 @@ cursor 6 16 visible
 00 10-18 #8b95a7 #161b24 -
 00 18-40 #ffffff #161b24 -
 01 0-40 #ffffff #0e1117 -
-02 0-1 #ffffff #0e1117 -
-02 1-19 #e6eaf0 #0e1117 b
-02 19-30 #8b95a7 #0e1117 -
-02 30-40 #ffffff #0e1117 -
+02 0-40 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
-03 1-13 #8b95a7 #0e1117 -
-03 13-40 #ffffff #0e1117 -
-04 0-40 #ffffff #0e1117 -
-05 0-1 #ffffff #0e1117 -
-05 1-15 #8b95a7 #0e1117 -
-05 15-20 #e6eaf0 #293140 b
-05 20-26 #8b95a7 #0e1117 -
-05 26-40 #ffffff #0e1117 -
+03 1-19 #e6eaf0 #0e1117 b
+03 19-30 #8b95a7 #0e1117 -
+03 30-40 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-13 #8b95a7 #0e1117 -
+04 13-40 #ffffff #0e1117 -
+05 0-40 #ffffff #0e1117 -
 06 0-40 #ffffff #0e1117 -
 07 0-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -

@@ -73,8 +73,8 @@ test("without diagnostics no cause line is emitted", () => {
 test("the outcome strip omits F2 details while details are open and keeps Alt+R review", () => {
   const failed = outcome({ reason: "failed" });
   expect(formatOutcomeLine(failed, 120)).toBe("✗ Failed · 14s · Alt+R review · F2 details");
-  expect(formatOutcomeLine(failed, 120, true, true)).toBe("✗ Failed · 14s · Alt+R review");
-  expect(formatOutcomeLine(failed, 40, true, true)).toBe("✗ Failed · 14s · Alt+R review");
-  expect(formatOutcomeLine(failed, 120, false, true)).toBe("✗ Failed · 14s");
-  expect(formatOutcomeLine(outcome(), 120, true, true)).toBe("✓ Done · 14s · Alt+R review");
+  expect(formatOutcomeLine(failed, 120, { review: true, details: false })).toBe("✗ Failed · 14s · Alt+R review");
+  expect(formatOutcomeLine(failed, 40, { review: true, details: false })).toBe("✗ Failed · 14s · Alt+R review");
+  expect(formatOutcomeLine(failed, 120, { review: false, details: false })).toBe("✗ Failed · 14s");
+  expect(formatOutcomeLine(outcome(), 120, { review: true, details: false })).toBe("✓ Done · 14s · Alt+R review");
 });
