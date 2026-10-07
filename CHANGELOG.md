@@ -85,7 +85,8 @@
 
 - While work runs, the hint row names the Esc action (`Esc stop`,
   `Esc restore`, `Esc back`) and the status bar no longer repeats it, so the
-  status bar has room for the model name at 50 columns. The status bar names Esc only when
+  status bar has room for the model name at 50 columns (a retry pill can still
+  fill that width). The status bar names Esc only when
   the hint row is hidden on short terminals, as in `Auto · Esc stop`. A model
   chip too narrow for `provider/model` shows the model ID without the provider
   before shortening it with `…` (#310).

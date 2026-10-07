@@ -35,7 +35,8 @@ estimate (`ctx ~132`) when capacity is unknown; `/context` explains it. At narro
 widths the pill and the context estimate take priority; the route and reasoning chip
 drop first, then the model name loses its provider prefix before it is shortened
 with `…`. While work runs the hint row names `Esc stop`, so the status bar spends
-that width on the model; when the hint row is hidden, the compact status bar
+that width on the model, though at 50 columns a retry pill such as
+`Retry · Attempt 2/3 in 2s` still leaves no room for it; when the hint row is hidden, the compact status bar
 names the mode and the stop key, as in `Auto · Esc stop`.
 
 The reasoning chip shows the effort in effect whenever a model is selected, from
