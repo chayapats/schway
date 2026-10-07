@@ -2,7 +2,8 @@ import OpenAI from "openai";
 import type { ModelCapability } from "../catalog.ts";
 import { assertThinking } from "../thinking.ts";
 import { lookupModel } from "../catalog.ts";
-import type { Model, ModelRequest, ThinkingLevel } from "../model.ts";
+import type { Model, ModelCallOptions, ModelRequest, ThinkingLevel } from "../model.ts";
+import { isPromptCacheKey } from "../prompt-cache-key.ts";
 import { assembleResponsesStream, buildResponsesRequest, type ResponsesReasoning } from "./responses-stream.ts";
 
 /** Public xAI Responses API origin used when tests do not inject a base URL. */
@@ -64,9 +65,15 @@ export function createXaiModel(options: {
     provider: "xai",
     id: modelId,
     /** Stream Schway events; function-call JSON is assembled before message_complete. */
-    async *stream(request: ModelRequest) {
+    async *stream(request: ModelRequest, call?: ModelCallOptions) {
       const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability, modelId, options.authRoute);
-      const body = buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" });
+      const cacheKey = call?.promptCacheKey;
+      const body = {
+        ...buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" }),
+        // xAI documents `prompt_cache_key` on POST /v1/responses, which both routes call; the
+        // `x-grok-conv-id` header is documented only for Chat Completions and gRPC, so it is not sent.
+        ...(isPromptCacheKey(cacheKey) ? { prompt_cache_key: cacheKey } : {}),
+      };
       let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal) : options.apiKey;
       const tokens = [token];
       const safeError = (error: unknown): unknown => {

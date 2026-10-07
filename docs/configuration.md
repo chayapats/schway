@@ -485,6 +485,38 @@ After interactive sign-in, use the [complete Grok headless flow](headless.md#exi
 
 Test coverage for this guide: [release verification](release-verification.md#configuration).
 
+## Prompt cache key
+
+xAI caches a repeated prompt prefix on the server that handled it. On both xAI
+routes (API key and Grok subscription), every conversation request carries a
+`prompt_cache_key`, so a conversation's requests go to the same server and its
+prefix can be served from cache. xAI documents this field for
+`POST /v1/responses`, the endpoint both routes call
+([Maximizing cache hits](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits)).
+Schway does not send the `x-grok-conv-id` header: xAI documents it for Chat
+Completions and gRPC, not for Responses.
+
+- **One key per session branch.** The key is `schway-v1-` followed by 32
+  lowercase hex digits, the start of a SHA-256 digest of the session ID and the
+  selected branch ID. It contains no session or branch ID, path, model ID,
+  account or credential.
+- **Stable within a conversation.** Every model round, every turn, transport
+  retries, the Grok token refresh resend, compaction, overflow recovery and a
+  model or reasoning change keep the same key. Resuming a session gives back
+  its key; the key is derived each time and never saved.
+- **New for new work.** `/new`, `/clear` and a headless run without `--resume`
+  start a session with a new key. Forking or selecting a branch uses that
+  branch's key, and returning to a branch gives back its original key.
+- **Only conversation requests.** Compaction summaries, model lists and
+  capability checks send no key. Extension hooks never see it.
+- **Other routes are unchanged.** The ChatGPT subscription endpoint has no
+  public documentation of `prompt_cache_key`, so its requests send none. Native
+  OpenAI API-key and OpenAI-compatible requests also send none.
+
+`/history` shows how much of each turn's input the provider served from its
+cache. To measure the effect on a route, an operator can run the opt-in
+[prompt cache probe](live-providers.md#prompt-cache-probe).
+
 ## Undo retention
 
 `undo.maxAgeDays` defaults to `30`; `undo.maxSizeMB` defaults to `500` MiB.

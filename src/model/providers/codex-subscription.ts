@@ -951,6 +951,7 @@ export function toCodexResponsesBody(
 ): Record<string, unknown> {
   const reasoning = resolveCodexReasoning(request.thinking, modelId, capability);
   // This endpoint rejects output-token caps, unlike the public Responses API.
+  // It also sends no `prompt_cache_key`: no public documentation says this endpoint accepts one (#320).
   return {
     model: modelId,
     store: false,

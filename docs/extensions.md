@@ -314,7 +314,9 @@ and conversation. Keep existing context names and complete tool-call/result grou
 The return must keep the exact supplied `signal`; spreading the input request is
 the simplest way to do that. Extra request or conversation fields are rejected.
 Opaque native `providerMetadata` is retained for replay, not a provider-payload
-interception API. Public types include `BeforeAgentInput`, `BeforeAgentHook`,
+interception API. Schway attaches its prompt-cache key after `beforeModel`
+returns, so hooks never see it and cannot set or change it (see
+[prompt cache key](configuration.md#prompt-cache-key)). Public types include `BeforeAgentInput`, `BeforeAgentHook`,
 `ContextHook`, `BeforeModelHook`, `ExtensionModelRequest`, `ExtensionDenial`,
 `ContextSection`, `ConversationItem`, `UserMessage`, and `ModelTool`.
 
