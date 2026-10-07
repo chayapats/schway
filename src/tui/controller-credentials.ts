@@ -7,7 +7,7 @@ import { validateThinking } from "../model/thinking.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { parseLoginTarget, LOGIN_USAGE } from "./commands.ts";
 import { isValidProfileBaseUrl } from "../config/profile-name.ts";
-import type { LoginChooserSnapshot } from "./controller-types.ts";
+import type { LoginChooserSnapshot, TuiSnapshot } from "./controller-types.ts";
 import { ControllerCore } from "./controller-core.ts";
 import { BROWSER_NOT_OPENED, browserNotOpened, codexDeviceApproval, deviceAddress, signInTimeout, type SignInProvider } from "./sign-in-wait.ts";
 
@@ -269,6 +269,16 @@ export abstract class CredentialsLayer extends ControllerCore {
       },
     });
     return true;
+  }
+
+  /** Snapshot masked entry with a readable title: the provider's chooser name (`OpenAI`, `xAI`) or the endpoint label, never the internal provider ID. */
+  protected credentialEntrySnapshot(): TuiSnapshot["credentialEntry"] {
+    const entry = this.credentialEntry?.snapshot();
+    if (!entry) return undefined;
+    const provider = this.credentialTarget?.provider;
+    const label = LOGIN_GROUPS.flatMap<(typeof LOGIN_GROUPS)[number]["rows"][number]>(group => group.rows)
+      .find(row => row.action.kind === "api-key" && row.action.provider === provider)?.label ?? entry.label;
+    return { ...entry, label, ...(this.endpointInputUrl !== undefined ? { returnsToUrl: true as const } : {}) };
   }
 
   /** Route secret text directly to the masked buffer without creating a transcript or session item. */

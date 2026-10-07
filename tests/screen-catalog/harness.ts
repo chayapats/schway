@@ -41,6 +41,8 @@ export type ScreenHarness = Awaited<ReturnType<typeof buildScreen>>;
 export const CATALOG_API_KEY = "sk-catalog-fixture-4f7a9c2e1b";
 /** Fixture browser callback pasted into masked entry; no golden may contain any part of it. */
 export const CATALOG_CALLBACK = "http://localhost:1455/auth/callback?code=catalog-fixture-code&state=catalog-fixture-state";
+/** Saved endpoint URL that `endpoint-url-prefilled` finds in the field and `endpoint-key-entry` types (#309). */
+export const CATALOG_ENDPOINT_URL = "http://localhost:8787/api";
 /** Fixed time stamped on fixture session records so pickers show only the catalog clock. */
 export const CATALOG_TIME = "2026-01-15T09:30:00.000Z";
 /** Named panel sub-states the catalog must capture in addition to every `PANEL_MODES` entry. */
@@ -88,7 +90,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const resumedReview = screen.id.startsWith("resumed-review");
   const historyScreen = screen.id.startsWith("history-");
   // Screens that run file-touching commands (/sessions, /resume, /login and the rest) always use a temporary home.
-  const commandFiles = ["api-key-entry", "callback-entry", "branch-tree-continue", "branch-tree-fork", "command-routing"].includes(screen.id) || screen.id.startsWith("session-picker");
+  const commandFiles = ["api-key-entry", "api-key-entry-empty", "callback-entry", "branch-tree-continue", "branch-tree-fork", "command-routing"].includes(screen.id) || screen.id.startsWith("session-picker");
   const askEdit = screen.id === "approval-edit" || screen.id === "approval-deny-reason" || screen.id === "approval-diff-overflow";
   const disk = commandFiles || askEdit || screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout", "reasoning-chip-explicit"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
   if (disk) {
@@ -236,7 +238,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     execute: async (input: unknown, context: Parameters<typeof definition.execute>[1]) => { try { return await definition.execute(input, context); } finally { activityTime += 1200; } } })));
   const timed = (model: ReturnType<typeof createScriptedModel>): ReturnType<typeof createScriptedModel> => ({ provider: model.provider, id: model.id,
     async *stream(request) { for await (const event of model.stream(request)) { if (event.type === "message_complete") activityTime += 300; yield event; } } });
-  const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "subscription-sign-in", ...SIGN_IN_FIXTURE_SCREENS].includes(screen.id);
+  const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "endpoint-url-prefilled", "endpoint-key-entry", "subscription-sign-in", ...SIGN_IN_FIXTURE_SCREENS].includes(screen.id);
   const picker = screen.id === "model-picker" || screen.id === "details-model";
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
@@ -286,7 +288,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
     const loaded = await loadExtensions({ modules: ["local.ts"], workspace, home, tools });
     options.tools = loaded.tools; options.extensions = loaded.runtime;
   }
-  if (screen.id.startsWith("endpoint-url")) {
+  if (screen.id.startsWith("endpoint-url") || screen.id === "endpoint-key-entry") {
+    if (screen.id === "endpoint-url-prefilled") options.baseUrl = CATALOG_ENDPOINT_URL;
     options.configEditor = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
     options.stageSettings = async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) });
   }

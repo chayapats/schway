@@ -5,6 +5,7 @@ import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/stor
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type PasteEvent, type Selection, type TextChunk } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
+import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEntryValue } from "./credential-entry.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
@@ -319,6 +320,24 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   composer.add(editor);
   const credential = new TextRenderable(renderer, { id: "credential", visible: false, fg: theme.text, flexGrow: 1, minWidth: 1 });
   composer.add(credential);
+  // Sign-in typing surfaces put the title, value or placeholder, field error and keys on their own rows. Text renderables
+  // skip render hooks, so the laid-out box places the caret from the value row's rendered rows: it matches what the frame
+  // shows and adds nothing about a secret. The value row keeps one spare cell so a caret after a full row stays inside.
+  const entry = new BoxRenderable(renderer, { id: "credential-entry", flexDirection: "column", flexGrow: 1, minWidth: 1, visible: false,
+    renderAfter() { if (entryCaret) placeEntryCaret(entryValue); } });
+  const entryTitle = new TextRenderable(renderer, { id: "credential-title", fg: theme.text, wrapMode: "word" });
+  const entryValue = new TextRenderable(renderer, { id: "credential-value", fg: theme.text, wrapMode: "char", marginRight: 1 });
+  const entryError = new TextRenderable(renderer, { id: "credential-error", fg: theme.error, wrapMode: "word", visible: false });
+  const entryHint = new TextRenderable(renderer, { id: "credential-hint", fg: theme.muted, wrapMode: "word" });
+  for (const row of [entryTitle, entryValue, entryError, entryHint]) entry.add(row);
+  composer.add(entry);
+  let entryCaret: { empty: boolean } | undefined;
+  /** Show the terminal cursor after the displayed value in the composer's own cursor style and color. */
+  const placeEntryCaret = (value: TextRenderable) => {
+    const cell = credentialCaretCell({ x: value.screenX, y: value.screenY }, value.lineInfo.lineWidthCols, entryCaret!.empty);
+    renderer.setCursorPosition(cell.x, cell.y, true);
+    renderer.setCursorStyle({ ...editor.cursorStyle, color: editor.cursorColor });
+  };
   const composerBottom = new TextRenderable(renderer, { id: "composer-bottom", height: 1, flexShrink: 0, fg: theme.surface, wrapMode: "none" });
   body.add(composerBottom);
   const footer = new TextRenderable(renderer, { id: "footer", height: 1, flexShrink: 0, fg: theme.muted, bg: theme.surface, wrapMode: "none" });
@@ -660,7 +679,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     editor.selectionBg = theme.border;
     toolApprovalPanel.backgroundColor = theme.surface2;
     toolApprovalHeading.fg = toolApprovalText.fg = toolApprovalChoices.fg = theme.text;
-    credential.fg = reviewText.fg = reviewList.fg = reviewHeading.fg = theme.text;
+    credential.fg = reviewText.fg = reviewList.fg = reviewHeading.fg = entryTitle.fg = theme.text;
+    entryError.fg = theme.error; entryHint.fg = theme.muted;
     reviewDivider.fg = theme.border;
     hints.fg = footer.fg = empty.fg = theme.muted;
     pillFrom = pillColors(pill.tone).bg;
@@ -1001,23 +1021,31 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       draftStatus.visible = !!draftMessage;
       draftStatus.height = draftMessage.includes("\n") ? 2 : 1;
       draftStatus.content = draftMessage;
-      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.history && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !reader;
+      editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.history && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !snapshot.loginChooser && !reader;
       // An open approval without reason entry takes the composer's rows for its choices.
       composerTop.visible = composer.visible = composerBottom.visible = !reader && (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason);
-      credential.visible = !!snapshot.endpointUrlEntry || !!snapshot.credentialEntry || !!snapshot.loginCallbackEntry || !!snapshot.loginApproval;
+      const entryPanel = credentialEntryPanel(snapshot);
+      // The sign-in chooser is not a typing surface either: the composer gives way to the same note and shows no caret.
+      credential.visible = !entryPanel && (!!snapshot.loginApproval || !!snapshot.loginChooser);
+      entry.visible = !!entryPanel;
+      const caret = entryPanel && composer.visible ? { empty: !entryPanel.value } : undefined;
+      // Leaving a typing surface hides its caret; a refocused composer shows its own cursor on the next frame.
+      if (entryCaret && !caret) renderer.setCursorPosition(0, 0, false);
+      entryCaret = caret;
       if (snapshot.undoPreview || snapshot.changeReview || snapshot.history || panelMode === "tool-approval" && !snapshot.toolApproval?.enteringReason) { editor.blur(); }
-      else if (snapshot.endpointUrlEntry || snapshot.credentialEntry || snapshot.loginCallbackEntry || snapshot.loginApproval) {
+      else if (entryPanel || snapshot.loginApproval || snapshot.loginChooser) {
         editor.blur();
-        credential.content = snapshot.endpointUrlEntry
-          ? new StyledText([
-            fg(snapshot.endpointUrlEntry.value ? theme.text : theme.muted)(safe(`Endpoint URL · ${snapshot.endpointUrlEntry.value || "http://localhost:8787"}`)),
-            ...(snapshot.endpointUrlEntry.error ? [fg(theme.error)(safe(`\n${snapshot.endpointUrlEntry.error}`))] : []),
-          ])
-          : snapshot.credentialEntry
-          ? safe(`API key · ${snapshot.credentialEntry.label}\n${snapshot.credentialEntry.masked || "Enter key…"}\nEnter save · Esc cancel`)
-          : snapshot.loginCallbackEntry
-            ? safe(`Browser callback · ${snapshot.loginCallbackEntry.masked || "Paste redirect URL or code…"} · Enter sign in · Esc cancel`)
-            : SIGN_IN_COMPOSER_TEXT;
+        if (entryPanel) {
+          entryTitle.content = safe(entryPanel.title);
+          // Words tell the placeholder from a value; the muted shade is only a second cue.
+          // A long URL keeps its end in at most as many rows as the composer editor may use, so the caret and keys stay on screen.
+          const valueRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 4)));
+          entryValue.content = entryPanel.value ? fitEntryValue(safe(entryPanel.value), width - 5, valueRows) : new StyledText([fg(theme.muted)(entryPanel.placeholder)]);
+          entryValue.fg = theme.text;
+          entryError.visible = !!entryPanel.error;
+          entryError.content = safe(entryPanel.error ?? "");
+          entryHint.content = entryPanel.hint;
+        } else credential.content = SIGN_IN_COMPOSER_TEXT;
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
       editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
@@ -1057,7 +1085,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           // A chooser over a sign-in that Esc already cancelled goes back like any chooser.
           : snapshot.loginWait && !(snapshot.loginWait.cancelling && !snapshot.loginWait.saving && snapshot.loginChooser) ? hints.visible || snapshot.loginWait.saving || snapshot.loginWait.cancelling ? "" : SIGN_IN_WAIT_COMPACT_ACTION
           : searchOpen || reader?.search ? "Esc restore" : panelMode === "undo" ? undoEscape(snapshot.undoPreview)
-          : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : panelMode === "credential" || panelMode === "callback" ? "Esc cancel" : panelMode || inspection || detailsReturn || reader ? "Esc back"
+          : panelMode === "preferences" && snapshot.preferences ? preferenceEscape(snapshot.preferences) : entryPanel ? credentialEntryEscape(entryPanel) : panelMode || inspection || detailsReturn || reader ? "Esc back"
           : snapshot.activity || snapshot.status === "running" ? "Esc stop"
           : snapshot.readiness === "loading" ? "Esc cancel"
           : snapshot.recovery?.actions.includes("details") ? "F2 details"
@@ -1486,7 +1514,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : panelMode === "credential" ? "Enter save · Esc cancel" : panelMode === "callback" ? "Enter sign in · Esc cancel" : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

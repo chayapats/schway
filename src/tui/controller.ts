@@ -78,7 +78,7 @@ export class TuiController extends HistoryLayer {
       restored: this.restored,
       sessionPicker: this.sessionPicker ? structuredClone(this.sessionPicker) : undefined,
       modelPicker: this.modelPicker ? structuredClone(this.modelPicker) : undefined,
-      credentialEntry: this.credentialEntry?.snapshot(),
+      credentialEntry: this.credentialEntrySnapshot(),
       ...(this.loginChooserState ? { loginChooser: this.loginChooserSnapshot() } : {}),
       ...(this.endpointUrlEntry ? { endpointUrlEntry: { ...this.endpointUrlEntry } } : {}),
       ...(this.loginCallbackValue !== undefined ? { loginCallbackEntry: { masked: "•".repeat(Math.min(this.loginCallbackValue.length, 64)) } } : {}),

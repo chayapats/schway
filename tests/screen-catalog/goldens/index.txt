@@ -15,9 +15,12 @@ sign-in-chooser
 chatgpt-more-options
 grok-more-options
 api-key-entry
+api-key-entry-empty
 callback-entry
 endpoint-url-empty
 endpoint-url-error
+endpoint-url-prefilled
+endpoint-key-entry
 subscription-sign-in
 chatgpt-device-approval
 grok-browser-approval

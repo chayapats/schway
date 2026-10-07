@@ -642,7 +642,27 @@ timeout reads `Sign-in timed out · Alt+L retry · F2 details`, with the
 provider's recovery steps in F2 details; both keys work from the chooser that
 reopens after a ChatGPT timeout. When the browser cannot open, the
 link stays in the conversation above `Browser didn't open · Open the link above`.
-Credential and callback entry mask their text. Resizing reflows the active
+Credential and callback entry mask their text. Endpoint URL, API-key and
+browser callback entry each show a title row, the value row, any field error and
+their keys: `Enter continue · Esc cancel` for the endpoint URL, `Enter save · Esc
+cancel` for an API key and `Enter sign in · Esc cancel` for a callback. The
+endpoint key step reads `Enter save · Esc back` because Esc returns to the typed
+URL. The hint row and the compact status bar name the same keys. API-key titles
+name the provider (`API key · OpenAI`, `API key · xAI`) or the compatible endpoint
+label. An empty field shows a verb-first instruction ending in `…` (`Paste or type
+a URL…`, `Paste key…`, `Paste redirect URL or code…`), never a sample value, so
+the words tell it apart from a typed value even without color; a saved endpoint
+URL fills the field as a real value. The terminal cursor, in the composer's style,
+color and blink, sits right after the last displayed character (the last `•` of a
+mask or the last URL character), or where the value starts while the field is
+empty. It follows wrapped rows and stays on the value row while an error shows; a
+URL longer than the rows the composer may use shows its end behind a leading `…`,
+so the caret and keys stay on screen. Its position comes only from the displayed
+mask, so it reveals nothing more about a secret. Entry is append and backspace
+only. The sign-in chooser and sign-in waits are not typing surfaces: the composer
+row reads `Typing resumes after sign-in`, no cursor shows, and typed or pasted text
+goes nowhere. Closing an entry or the chooser gives the composer back its draft and
+its own cursor at the saved position. Resizing reflows the active
 panel without changing its selection or operation. At 24×8 and 32×12,
 preferences put the selected field and value choice above longer guidance,
 clipping long display values so both controls remain visible. Ctrl+L
@@ -654,7 +674,7 @@ reading position.
 | Preferences | Up/Down field, Left/Right value, Tab scope, Enter preview/confirm, Esc cancel a preview, otherwise Esc back |
 | Model, sessions, sign-in | Up/Down selection, Enter select, Esc back; model Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery; sessions F2 shows a failure's details |
 | Tool approval | Up/Down choose; Enter allow once, allow for session, add reason or deny with reason, as the hint names; Esc deny; PageUp/PageDown scroll; Ctrl+C cancel turn |
-| Credential, callback, device approval | Masked entry or external wait, Enter only on entry, Esc cancel |
+| Endpoint URL, credential, callback, device approval | Entry with a visible caret or an external wait, Enter only on entry, Esc cancel; Esc back from the endpoint key step to the typed URL |
 | Branch tree, change review | Up/Down selection, Esc back; the branch tree uses Enter continue or Enter fork and Tab new fork or Tab existing; review uses PageUp/PageDown and Ctrl+R reload |
 | Help, search | Panel-specific navigation, Enter chosen action, Esc restore the draft or position |
 | Command completion | Up/Down select, Enter insert a differing choice or send a matching draft, Tab complete, Esc keep editing |

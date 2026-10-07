@@ -984,7 +984,7 @@ test("xAI API key sits under OpenAI API key and Esc restores the draft at both s
     expect(xai).toBeGreaterThan(openai);
     ui.mockInput.pressEnter();
     await settle(ui);
-    expect(ui.captureCharFrame()).toContain("API key · xai");
+    expect(ui.captureCharFrame()).toContain("API key · xAI");
     expect(ui.captureCharFrame()).toContain("Enter save · Esc cancel");
     // The hint row names the same Enter and Esc verbs as the entry, never the generic panel keys.
     const credentialRows = ui.captureCharFrame().split("\n").map(line => line.trim());
@@ -2620,8 +2620,8 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
       await selectRenderedLoginRow(ui, chain); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-api-key");
     } else if (chain === "endpoint") {
       await selectRenderedLoginRow(ui, "compatible"); ui.mockInput.pressEnter(); await settle(ui);
-      expect(ui.captureCharFrame()).toContain("Endpoint URL · http://localhost:8787");
-      const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable; expect(hints.plainText).toBe("Enter confirm · Esc back");
+      expect(ui.captureCharFrame()).toContain("Paste or type a URL…");
+      const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable; expect(hints.plainText).toBe("Enter continue · Esc cancel");
       await ui.mockInput.pasteBracketedText("http://localhost:8787"); ui.mockInput.pressEnter(); await settle(ui); await ui.mockInput.pasteBracketedText("private-endpoint-key");
       expect(ui.editor.plainText).toBe("");
       ui.mockInput.pressEscape(); await settle(ui); expect(ui.controller.snapshot().endpointUrlEntry!.value).toBe("http://localhost:8787");
@@ -2635,6 +2635,7 @@ for (const chain of ["more-options", "openai", "xai", "callback", "endpoint", "c
       ui.mockInput.pressEscape(); await ui.controller.waitForIdle(); await settle(ui);
     }
     expect(ui.editor.plainText).toBe(draft); expect(ui.editor.cursorOffset).toBe(cursor); expect(ui.session.items).toEqual([]);
+    expect(ui.renderer.getCursorState().visible).toBe(true);
     expect(ui.editor.plainText).not.toContain("http://localhost:8787");
     // Recall the submitted ordinary task: ephemeral URL/key/callback input never becomes a prompt.
     ui.mockInput.pressEnter(); await ui.controller.waitForIdle(); await settle(ui); ui.mockInput.pressArrow("up");

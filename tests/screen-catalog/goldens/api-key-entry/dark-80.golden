@@ -4,7 +4,7 @@ title API key entry
 description An API key typed after /login shows only masked characters.
 variant dark-80
 size 80x30
-cursor 1 1 hidden
+cursor 21 26 visible
 == text
  ⚡ schway  ~/demo
 
@@ -30,7 +30,7 @@ cursor 1 1 hidden
 
 
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › API key · openai
+  ▌ › API key · OpenAI
       ••••••••••••••
       Enter save · Esc cancel
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -83,7 +83,7 @@ cursor 1 1 hidden
 25 78-80 #ffffff #0e1117 -
 26 0-2 #ffffff #0e1117 -
 26 2-6 #ffffff #161b24 -
-26 6-29 #e6eaf0 #161b24 -
+26 6-29 #8b95a7 #161b24 -
 26 29-78 #ffffff #161b24 -
 26 78-80 #ffffff #0e1117 -
 27 0-2 #ffffff #0e1117 -
