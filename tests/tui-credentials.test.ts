@@ -882,6 +882,9 @@ test("the sign-in chooser is not a typing surface: no caret, typed keys never re
       ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
       expect(ui.controller.snapshot().loginChooser).toBeDefined();
       expect(ui.renderer.getCursorState().visible).toBe(false);
+      // Nothing has started yet, so the composer note doesn't claim typing waits for a sign-in.
+      expect(ui.captureCharFrame()).toContain("Choosing sign-in");
+      expect(ui.captureCharFrame()).not.toContain("Typing resumes after sign-in");
       await ui.mockInput.typeText("xyz"); await ui.mockInput.pasteBracketedText("pasted"); await ui.settle();
       expect(ui.renderer.getCursorState().visible).toBe(false);
       expect(ui.captureCharFrame()).not.toMatch(/xyz|pasted/);

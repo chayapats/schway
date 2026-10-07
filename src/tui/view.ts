@@ -33,7 +33,7 @@ import type { ReaderPosition } from "./reader.ts";
 import { CONVERSATION_FIND_PLACEHOLDER, conversationFindHint, conversationFindStatus, fitFindStatus, readerFindKeys } from "./find-hints.ts";
 import { createHistoryPanel } from "./history-view.ts";
 import { approvalAction, approvalChoices, approvalHint, approvalPanelLayout, charWrappedRows, type ApprovalPanelLayout } from "./approval-layout.ts";
-import { SIGN_IN_CANCELLING_HINT, SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, fitSignInWaitRows, signInChooserHint, signInWaitRows } from "./sign-in-wait.ts";
+import { SIGN_IN_CANCELLING_HINT, SIGN_IN_CHOOSER_COMPOSER_TEXT, SIGN_IN_COMPOSER_TEXT, SIGN_IN_SAVING_HINT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, fitSignInWaitRows, signInChooserHint, signInWaitRows } from "./sign-in-wait.ts";
 import { branchTreeEscInStatusBar, branchTreeHint, branchTreeModeLine, branchTreePlaceholder } from "./branch-tree-hints.ts";
 
 /** Dependencies for the interactive presentation; submission remains owned by the application. */
@@ -1025,7 +1025,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // An open approval without reason entry takes the composer's rows for its choices.
       composerTop.visible = composer.visible = composerBottom.visible = !reader && (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason);
       const entryPanel = credentialEntryPanel(snapshot);
-      // The sign-in chooser is not a typing surface either: the composer gives way to the same note and shows no caret.
+      // The sign-in chooser is not a typing surface either: the composer gives way to a note and shows no caret.
       credential.visible = !entryPanel && (!!snapshot.loginApproval || !!snapshot.loginChooser);
       entry.visible = !!entryPanel;
       const caret = entryPanel && composer.visible ? { empty: !entryPanel.value } : undefined;
@@ -1038,14 +1038,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         if (entryPanel) {
           entryTitle.content = safe(entryPanel.title);
           // Words tell the placeholder from a value; the muted shade is only a second cue.
-          // A long URL keeps its end in at most as many rows as the composer editor may use, so the caret and keys stay on screen.
+          // A long URL keeps its end in a few rows, so the caret stays on the last value row.
           const valueRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 4)));
           entryValue.content = entryPanel.value ? fitEntryValue(safe(entryPanel.value), width - 5, valueRows) : new StyledText([fg(theme.muted)(entryPanel.placeholder)]);
           entryValue.fg = theme.text;
           entryError.visible = !!entryPanel.error;
           entryError.content = safe(entryPanel.error ?? "");
           entryHint.content = entryPanel.hint;
-        } else credential.content = SIGN_IN_COMPOSER_TEXT;
+        } else credential.content = snapshot.loginApproval ? SIGN_IN_COMPOSER_TEXT : SIGN_IN_CHOOSER_COMPOSER_TEXT;
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
       editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";

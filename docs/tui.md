@@ -656,12 +656,12 @@ URL fills the field as a real value. The terminal cursor, in the composer's styl
 color and blink, sits right after the last displayed character (the last `•` of a
 mask or the last URL character), or where the value starts while the field is
 empty. It follows wrapped rows and stays on the value row while an error shows; a
-URL longer than the rows the composer may use shows its end behind a leading `…`,
-so the caret and keys stay on screen. Its position comes only from the displayed
+long URL shows its end behind a leading `…` in a few rows, so the caret stays on
+the last value row. Its position comes only from the displayed
 mask, so it reveals nothing more about a secret. Entry is append and backspace
 only. The sign-in chooser and sign-in waits are not typing surfaces: the composer
-row reads `Typing resumes after sign-in`, no cursor shows, and typed or pasted text
-goes nowhere. Closing an entry or the chooser gives the composer back its draft and
+row reads `Choosing sign-in` or `Typing resumes after sign-in`, no cursor shows,
+and typed or pasted text goes nowhere. Closing an entry or the chooser gives the composer back its draft and
 its own cursor at the saved position. Resizing reflows the active
 panel without changing its selection or operation. At 24×8 and 32×12,
 preferences put the selected field and value choice above longer guidance,
