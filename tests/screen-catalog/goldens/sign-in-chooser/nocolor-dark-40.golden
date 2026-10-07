@@ -32,7 +32,7 @@ cursor 1 1 hidden
     Custom endpoint
         OpenAI-compatible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Typing resumes after sign-in
+ ▌ › Choosing sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ○ Not connected  Esc back
  Enter · Tab more options · Esc back
@@ -109,8 +109,8 @@ cursor 1 1 hidden
 25 1-39 #161b24 #0e1117 -
 25 39-40 #ffffff #0e1117 -
 26 0-1 #ffffff #0e1117 -
-26 1-33 #e6eaf0 #161b24 -
-26 33-39 #ffffff #161b24 -
+26 1-21 #e6eaf0 #161b24 -
+26 21-39 #ffffff #161b24 -
 26 39-40 #ffffff #0e1117 -
 27 0-1 #ffffff #0e1117 -
 27 1-39 #161b24 #0e1117 -

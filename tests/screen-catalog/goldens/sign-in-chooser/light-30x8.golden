@@ -6,41 +6,38 @@ variant light-30x8
 size 30x8
 cursor 1 1 hidden
 == text
- Connect a provider · Alt+L
+ /project
+ Not connected
   Sign in
       › ChatGPT
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Typing resumes after
-     sign-in
+ ▌ › Choosing sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Auto · Esc back
 == styles
 00 0-1 #ffffff #f7f7f4 -
-00 1-22 #545e6c #f7f7f4 -
-00 22-27 #1d232c #caced3 b
-00 27-30 #ffffff #f7f7f4 -
+00 1-9 #545e6c #f7f7f4 -
+00 9-30 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
-01 1-2 #ffffff #e1e3df -
-01 2-9 #0a5894 #e1e3df -
-01 9-29 #ffffff #e1e3df -
-01 29-30 #ffffff #f7f7f4 -
+01 1-14 #1d232c #f7f7f4 b
+01 14-30 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
 02 1-2 #ffffff #e1e3df -
-02 2-15 #0a5894 #c7d2d6 -
-02 15-29 #ffffff #e1e3df -
+02 2-9 #0a5894 #e1e3df -
+02 9-29 #ffffff #e1e3df -
 02 29-30 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-29 #ecedea #f7f7f4 -
+03 1-2 #ffffff #e1e3df -
+03 2-15 #0a5894 #c7d2d6 -
+03 15-29 #ffffff #e1e3df -
 03 29-30 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
-04 1-5 #0a5894 #ecedea -
-04 5-26 #1d232c #ecedea -
-04 26-29 #ffffff #ecedea -
+04 1-29 #ecedea #f7f7f4 -
 04 29-30 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
-05 1-5 #ffffff #ecedea -
-05 5-12 #1d232c #ecedea -
-05 12-29 #ffffff #ecedea -
+05 1-5 #0a5894 #ecedea -
+05 5-21 #1d232c #ecedea -
+05 21-29 #ffffff #ecedea -
 05 29-30 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-29 #ecedea #f7f7f4 -

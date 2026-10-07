@@ -10,7 +10,7 @@ cursor 6 26 visible
 
 
  Not connected
- Connect a provider · Alt+L
+
 
 
 
@@ -48,10 +48,7 @@ cursor 6 26 visible
 03 0-1 #ffffff #f7f7f4 -
 03 1-14 #1d232c #f7f7f4 b
 03 14-50 #ffffff #f7f7f4 -
-04 0-1 #ffffff #f7f7f4 -
-04 1-22 #545e6c #f7f7f4 -
-04 22-27 #1d232c #caced3 b
-04 27-50 #ffffff #f7f7f4 -
+04 0-50 #ffffff #f7f7f4 -
 05 0-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -
 07 0-50 #ffffff #f7f7f4 -

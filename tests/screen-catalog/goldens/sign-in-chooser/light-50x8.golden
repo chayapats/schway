@@ -11,7 +11,7 @@ cursor 1 1 hidden
   Sign in
       › ChatGPT            recommended · browser
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Typing resumes after sign-in
+ ▌ › Choosing sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Auto · Esc back
 == styles
@@ -37,8 +37,8 @@ cursor 1 1 hidden
 04 49-50 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
 05 1-5 #0a5894 #ecedea -
-05 5-33 #1d232c #ecedea -
-05 33-49 #ffffff #ecedea -
+05 5-21 #1d232c #ecedea -
+05 21-49 #ffffff #ecedea -
 05 49-50 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-49 #ecedea #f7f7f4 -

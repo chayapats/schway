@@ -32,7 +32,7 @@ cursor 1 1 hidden
      Custom endpoint
          OpenAI-compatible  URL + key
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Typing resumes after sign-in
+  ▌ › Choosing sign-in
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ○ Not connected  Esc back
   ↑↓ select · Enter · Tab more options · Esc back
@@ -113,8 +113,8 @@ cursor 1 1 hidden
 25 118-120 #ffffff #f7f7f4 -
 26 0-2 #ffffff #f7f7f4 -
 26 2-6 #0a5894 #ecedea -
-26 6-34 #1d232c #ecedea -
-26 34-118 #ffffff #ecedea -
+26 6-22 #1d232c #ecedea -
+26 22-118 #ffffff #ecedea -
 26 118-120 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
 27 2-118 #ecedea #f7f7f4 -

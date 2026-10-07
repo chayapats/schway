@@ -6,40 +6,38 @@ variant dark-24
 size 24x8
 cursor 1 1 hidden
 == text
- Alt+L
+ /project
+ Not connected
   Sign in
       › ChatGPT
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Typing resumes
-     after sign-in
+ ▌ › Choosing sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Auto · Esc back
 == styles
 00 0-1 #ffffff #0e1117 -
-00 1-6 #e6eaf0 #293140 b
-00 6-24 #ffffff #0e1117 -
+00 1-9 #8b95a7 #0e1117 -
+00 9-24 #ffffff #0e1117 -
 01 0-1 #ffffff #0e1117 -
-01 1-2 #ffffff #1e2430 -
-01 2-9 #7cc4ff #1e2430 -
-01 9-23 #ffffff #1e2430 -
-01 23-24 #ffffff #0e1117 -
+01 1-14 #e6eaf0 #0e1117 b
+01 14-24 #ffffff #0e1117 -
 02 0-1 #ffffff #0e1117 -
 02 1-2 #ffffff #1e2430 -
-02 2-15 #7cc4ff #33475e -
-02 15-23 #ffffff #1e2430 -
+02 2-9 #7cc4ff #1e2430 -
+02 9-23 #ffffff #1e2430 -
 02 23-24 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
-03 1-23 #161b24 #0e1117 -
+03 1-2 #ffffff #1e2430 -
+03 2-15 #7cc4ff #33475e -
+03 15-23 #ffffff #1e2430 -
 03 23-24 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-5 #7cc4ff #161b24 -
-04 5-20 #e6eaf0 #161b24 -
-04 20-23 #ffffff #161b24 -
+04 1-23 #161b24 #0e1117 -
 04 23-24 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
-05 1-5 #ffffff #161b24 -
-05 5-18 #e6eaf0 #161b24 -
-05 18-23 #ffffff #161b24 -
+05 1-5 #7cc4ff #161b24 -
+05 5-21 #e6eaf0 #161b24 -
+05 21-23 #ffffff #161b24 -
 05 23-24 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
 06 1-23 #161b24 #0e1117 -

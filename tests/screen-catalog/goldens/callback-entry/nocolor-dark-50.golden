@@ -11,7 +11,7 @@ cursor 46 26 visible
 
  scripted/scripted-model · scripted API key
 
- Type a task · Enter sends
+
 
 
 
@@ -34,7 +34,7 @@ cursor 46 26 visible
      ••••••••••••••••••••••••••••••••••••••••
      Enter sign in · Esc cancel
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-m…    ctx ~0
+ ◆ Auto  ● Ready   scripted-model          ctx ~0
  Enter sign in · Esc cancel
 == styles
 00 0-1 #ffffff #161b24 -
@@ -50,11 +50,7 @@ cursor 46 26 visible
 03 24-43 #8b95a7 #0e1117 -
 03 43-50 #ffffff #0e1117 -
 04 0-50 #ffffff #0e1117 -
-05 0-1 #ffffff #0e1117 -
-05 1-15 #8b95a7 #0e1117 -
-05 15-20 #e6eaf0 #293140 b
-05 20-26 #8b95a7 #0e1117 -
-05 26-50 #ffffff #0e1117 -
+05 0-50 #ffffff #0e1117 -
 06 0-50 #ffffff #0e1117 -
 07 0-50 #ffffff #0e1117 -
 08 0-50 #ffffff #0e1117 -
@@ -97,8 +93,8 @@ cursor 46 26 visible
 28 7-8 #8b95a7 #161b24 -
 28 8-17 #e6eaf0 #444951 b
 28 17-18 #8b95a7 #161b24 -
-28 18-40 #e6eaf0 #1e2430 -
-28 40-49 #8b95a7 #161b24 -
+28 18-34 #e6eaf0 #1e2430 -
+28 34-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
 29 1-6 #e6eaf0 #293140 b
