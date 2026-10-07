@@ -114,7 +114,7 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/help (Alt+H) - search commands and keyboard actions; Enter inserts a command or shows keys, never runs it",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
-    "Esc stops the running turn. With no selection, Ctrl+C cancels a turn or quits when idle.",
+    "Press Esc to stop the running turn. With no selection, Ctrl+C cancels a turn or quits when idle.",
     "Drag conversation text to copy it. Ctrl+C copies a selection. Click a web link to open your browser.",
     "Enter sends. Shift+Enter or Ctrl+J inserts a newline. Up/Down recalls prompts at editor boundaries.",
     "Ctrl+O expands/collapses tool output; click a tool heading to toggle one result.",

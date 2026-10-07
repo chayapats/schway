@@ -24,7 +24,7 @@ cursor 6 17 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Draft your next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- Auto · Esc stop
+ ◆ Auto  ⠋ Receiving   ctx ~7
  Working · Esc stop
 == styles
 00 0-1 #ffffff #161b24 -
@@ -90,9 +90,11 @@ cursor 6 17 visible
 17 1-29 #161b24 #0e1117 -
 17 29-30 #ffffff #0e1117 -
 18 0-1 #8b95a7 #161b24 -
-18 1-5 #e6eaf0 #161b24 b
-18 5-16 #8b95a7 #161b24 -
-18 16-30 #ffffff #0e1117 -
+18 1-7 #e6eaf0 #161b24 b
+18 7-8 #8b95a7 #161b24 -
+18 8-21 #0e1117 #7cc4ff b
+18 21-29 #8b95a7 #161b24 -
+18 29-30 #ffffff #0e1117 -
 19 0-1 #ffffff #0e1117 -
 19 1-11 #8b95a7 #0e1117 -
 19 11-14 #e6eaf0 #293140 b

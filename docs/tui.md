@@ -6,8 +6,11 @@ branch; the conversation sits on the canvas; the composer is a raised block; the
 status bar below it carries the state pill, model, effective reasoning effort, and context
 meter; key hints sit on the last row. At narrow widths arrow and paging hints drop
 first, then trailing actions; the main action, disclosures such as `Tab more
-options` and the Esc way out stay. When the status bar already names an Esc
-action, the hint row can drop its own. `/session` reveals session IDs, the conversation branch, and attached
+options` and the Esc way out stay. The hint row names what Esc does next. The
+status bar names it only where the hint row cannot: when the hint row is hidden on
+short terminals, on the not-connected bar, while a tool request waits for
+approval, or in the compact bar below 30 columns when no work runs. Only then can
+the hint row drop its own. `/session` reveals session IDs, the conversation branch, and attached
 workspace paths. A conversation branch is distinct from a Git branch.
 
 The status pill follows the active operation's runtime events: `Preparing`,
@@ -29,8 +32,12 @@ percentage or a hang warning. The activity row above the composer describes the
 current work; parallel tools share a compact count summary. The context
 meter shows the estimated share of known capacity (`ctx ━━━━ 19%`), or the token
 estimate (`ctx ~132`) when capacity is unknown; `/context` explains it. At narrow
-widths the pill, `Esc stop` and the context estimate take priority; the route,
-reasoning chip and then the model name are shortened first.
+widths the pill and the context estimate take priority; the route and reasoning chip
+drop first, then the model name loses its provider prefix before it is shortened
+with `…`. While work runs the hint row names `Esc stop`, so the status bar spends
+that width on the model, though at 50 columns a retry pill such as
+`Retry · Attempt 2/3 in 2s` still leaves no room for it; when the hint row is hidden, the compact status bar
+names the mode and the stop key, as in `Auto · Esc stop`.
 
 The reasoning chip shows the effort in effect whenever a model is selected, from
 the same policy as `/thinking`: an explicit level such as `high`, `Provider
@@ -93,8 +100,8 @@ a nonblocking bolt accent. Set `ui.splash` to `always`, `first-run` (default), o
 `SCHWAY_MOTION=off` also suppresses startup effects and reduces other animation.
 See [color roles](#color-roles) and [motion and startup splash](#motion-and-startup-splash) for the palette, motion and offline preview.
 
-Esc stops the running turn through the shared AbortSignal path and returns to
-the input editor. Ctrl+C cancels when running and quits when idle. Quitting
+Press Esc to stop the running turn; it uses the shared AbortSignal path and returns
+to the input editor. Ctrl+C cancels when running and quits when idle. Quitting
 restores the terminal and releases resources. Resume rebuilds history from the
 saved JSONL without replaying old tool effects. Missing credentials and runtime failures appear as actionable errors. Interactive
 `/login` and `/logout` manage API keys and ChatGPT subscription credentials. Successful

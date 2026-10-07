@@ -98,6 +98,12 @@ export function fitLine(text: string, columns: number): string {
   return `${result}…`;
 }
 
+/** Status-bar model text within `columns`: `provider/model` when it fits, otherwise the model ID alone, shortened with `…` only when even that does not fit. */
+export function fitModelLabel(label: string, modelId: string, columns: number): string {
+  const full = displayText(label).replace(/\s+/g, " ");
+  return Bun.stringWidth(full) <= columns ? full : fitLine(modelId, columns);
+}
+
 /** Short forms of work statuses that still say what happened, including compaction outcomes, on narrow rows. */
 const SHORT_WORK_STATUS: Readonly<Record<string, string>> = {
   "Preparing request": "Preparing", "Waiting for response": "Waiting", "Receiving response": "Receiving",
@@ -107,7 +113,7 @@ const SHORT_WORK_STATUS: Readonly<Record<string, string>> = {
 
 /** Fit a work status row and its `Esc …` action into `columns` without cutting either mid-word, shortening the status before dropping the action. */
 // Order: full row; leading status segments (a retry cause without its attempt) or the short status, with the action;
-// then the status alone (whole, leading segments, short), since narrow status bars repeat `Esc stop`; then the action alone.
+// then the status alone (whole, leading segments, short), since the hint row (or, when it is hidden, the status bar) names `Esc stop`; then the action alone.
 export function fitStatusAction(text: string, columns: number): string {
   const line = displayText(text).replace(/\s+/g, " ");
   const separator = line.lastIndexOf(" · ");

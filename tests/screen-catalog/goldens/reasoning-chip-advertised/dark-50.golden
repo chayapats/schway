@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   openai/gpt-6-…    ctx ━━━━━ 0%
+ ◆ Auto  ● Ready   gpt-6-luna        ctx ━━━━━ 0%
  Shift+Tab change mode · Enter send · Ctrl+F find
 == styles
 00 0-1 #ffffff #161b24 -
@@ -98,8 +98,8 @@ cursor 6 27 visible
 28 7-8 #8b95a7 #161b24 -
 28 8-17 #8fd19e #31433f b
 28 17-18 #8b95a7 #161b24 -
-28 18-34 #e6eaf0 #1e2430 -
-28 34-41 #8b95a7 #161b24 -
+28 18-30 #e6eaf0 #1e2430 -
+28 30-41 #8b95a7 #161b24 -
 28 41-46 #2c3444 #161b24 -
 28 46-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -

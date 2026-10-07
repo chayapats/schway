@@ -44,7 +44,7 @@ cursor 6 37 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted…    ctx ~109
+ ◆ Auto  ● Ready   scripted-model        ctx ~109
  Shift+Tab change mode · Enter send · Ctrl+F find
 == styles
 00 0-1 #ffffff #161b24 -
@@ -203,8 +203,8 @@ cursor 6 37 visible
 38 7-8 #8b95a7 #161b24 -
 38 8-17 #8fd19e #31433f b
 38 17-18 #8b95a7 #161b24 -
-38 18-38 #e6eaf0 #1e2430 -
-38 38-49 #8b95a7 #161b24 -
+38 18-34 #e6eaf0 #1e2430 -
+38 34-49 #8b95a7 #161b24 -
 38 49-50 #ffffff #0e1117 -
 39 0-1 #ffffff #0e1117 -
 39 1-10 #e6eaf0 #293140 b

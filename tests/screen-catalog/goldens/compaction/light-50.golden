@@ -34,7 +34,7 @@ cursor 6 27 visible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Draft your next task…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ⠋ Compacting 3.0s      Esc stop  ctx ~48
+ ◆ Auto  ⠋ Compacting 3.0s   scripted…    ctx ~48
  Wait, then Enter sends · Esc stop
 == styles
 00 0-1 #ffffff #ecedea -
@@ -113,9 +113,9 @@ cursor 6 27 visible
 28 1-7 #1d232c #ecedea b
 28 7-8 #545e6c #ecedea -
 28 8-27 #ffffff #0a5894 b
-28 27-32 #545e6c #ecedea -
-28 32-35 #1d232c #c9cdd2 b
-28 35-49 #545e6c #ecedea -
+28 27-28 #545e6c #ecedea -
+28 28-39 #1d232c #e1e3df -
+28 39-49 #545e6c #ecedea -
 28 49-50 #ffffff #f7f7f4 -
 29 0-1 #ffffff #f7f7f4 -
 29 1-26 #545e6c #f7f7f4 -

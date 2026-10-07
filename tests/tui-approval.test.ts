@@ -283,9 +283,15 @@ for (const mode of ["auto", "ask", "read-only"] as const) test(`running ${mode} 
     await ui.mockInput.pasteBracketedText(draft); ui.editor.cursorOffset = 4; await ui.settle();
     ui.mockInput.pressKey("f", { ctrl: true }); await ui.settle();
     await ui.mockInput.typeText("project"); await ui.settle();
+    const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
     for (const [width, height] of [[120, 28], [80, 28], [50, 28], ...shortLayouts]) {
       ui.resize(width!, height!); await ui.settle();
-      expect(footer.plainText).toContain("Esc restore");
+      // The hint row owns Esc restore while it is visible; the status bar names it only when the hint row is hidden.
+      expect(hints.visible).toBe(height! >= 14);
+      if (hints.visible) {
+        expect(hints.plainText).toContain("Esc restore");
+        expect(footer.plainText).not.toContain("Esc");
+      } else expect(footer.plainText).toContain("Esc restore");
       expect(footer.plainText).not.toContain("Esc stop");
       expect(ui.captureCharFrame()).not.toContain("Shift+Tab change mode");
       expect(Bun.stringWidth(footer.plainText)).toBeLessThanOrEqual(width!);
