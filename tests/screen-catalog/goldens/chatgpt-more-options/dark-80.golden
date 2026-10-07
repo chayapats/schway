@@ -4,7 +4,7 @@ title ChatGPT more options
 description Device approval and a pasted callback are alternate ChatGPT methods.
 variant dark-80
 size 80x30
-cursor 7 27 visible
+cursor 1 1 hidden
 == text
  ⚡ schway  /project
 
@@ -32,7 +32,7 @@ cursor 7 27 visible
        › Device approval
          Paste browser callback
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Ask Schway…
+  ▌ › Typing resumes after sign-in
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ○ Not connected  Esc back
   ↑↓ select · Enter · Esc back
@@ -86,8 +86,8 @@ cursor 7 27 visible
 25 78-80 #ffffff #0e1117 -
 26 0-2 #ffffff #0e1117 -
 26 2-6 #7cc4ff #161b24 -
-26 6-17 #8b95a7 #161b24 -
-26 17-78 #ffffff #161b24 -
+26 6-34 #e6eaf0 #161b24 -
+26 34-78 #ffffff #161b24 -
 26 78-80 #ffffff #0e1117 -
 27 0-2 #ffffff #0e1117 -
 27 2-78 #161b24 #0e1117 -

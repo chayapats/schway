@@ -4,7 +4,7 @@ title Sign-in chooser
 description The connection chooser groups subscriptions, API keys and a custom endpoint.
 variant light-40
 size 40x30
-cursor 6 27 visible
+cursor 1 1 hidden
 == text
  ⚡ schway  /project
 
@@ -32,7 +32,7 @@ cursor 6 27 visible
     Custom endpoint
         OpenAI-compatible
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Ask Schway…
+ ▌ › Typing resumes after sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ○ Not connected  Esc back
  Enter · Tab more options · Esc back
@@ -110,8 +110,8 @@ cursor 6 27 visible
 25 39-40 #ffffff #f7f7f4 -
 26 0-1 #ffffff #f7f7f4 -
 26 1-5 #0a5894 #ecedea -
-26 5-16 #545e6c #ecedea -
-26 16-39 #ffffff #ecedea -
+26 5-33 #1d232c #ecedea -
+26 33-39 #ffffff #ecedea -
 26 39-40 #ffffff #f7f7f4 -
 27 0-1 #ffffff #f7f7f4 -
 27 1-39 #ecedea #f7f7f4 -

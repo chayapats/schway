@@ -4,40 +4,42 @@ title Sign-in chooser
 description The connection chooser groups subscriptions, API keys and a custom endpoint.
 variant light-24
 size 24x8
-cursor 6 6 visible
+cursor 1 1 hidden
 == text
- /project
- Not connected
+ Alt+L
   Sign in
       › ChatGPT
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Ask Schway…
+ ▌ › Typing resumes
+     after sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Auto · Esc back
 == styles
 00 0-1 #ffffff #f7f7f4 -
-00 1-9 #545e6c #f7f7f4 -
-00 9-24 #ffffff #f7f7f4 -
+00 1-6 #1d232c #caced3 b
+00 6-24 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
-01 1-14 #1d232c #f7f7f4 b
-01 14-24 #ffffff #f7f7f4 -
+01 1-2 #ffffff #e1e3df -
+01 2-9 #0a5894 #e1e3df -
+01 9-23 #ffffff #e1e3df -
+01 23-24 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
 02 1-2 #ffffff #e1e3df -
-02 2-9 #0a5894 #e1e3df -
-02 9-23 #ffffff #e1e3df -
+02 2-15 #0a5894 #c7d2d6 -
+02 15-23 #ffffff #e1e3df -
 02 23-24 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-2 #ffffff #e1e3df -
-03 2-15 #0a5894 #c7d2d6 -
-03 15-23 #ffffff #e1e3df -
+03 1-23 #ecedea #f7f7f4 -
 03 23-24 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
-04 1-23 #ecedea #f7f7f4 -
+04 1-5 #0a5894 #ecedea -
+04 5-20 #1d232c #ecedea -
+04 20-23 #ffffff #ecedea -
 04 23-24 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
-05 1-5 #0a5894 #ecedea -
-05 5-16 #545e6c #ecedea -
-05 16-23 #ffffff #ecedea -
+05 1-5 #ffffff #ecedea -
+05 5-18 #1d232c #ecedea -
+05 18-23 #ffffff #ecedea -
 05 23-24 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-23 #ecedea #f7f7f4 -

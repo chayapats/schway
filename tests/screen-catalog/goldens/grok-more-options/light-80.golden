@@ -4,7 +4,7 @@ title Grok more options
 description Device code is the alternate Grok method.
 variant light-80
 size 80x30
-cursor 7 27 visible
+cursor 1 1 hidden
 == text
  ⚡ schway  /project
 
@@ -32,7 +32,7 @@ cursor 7 27 visible
    Grok · more options
        › Device code
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Ask Schway…
+  ▌ › Typing resumes after sign-in
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ○ Not connected  Esc back
   ↑↓ select · Enter · Esc back
@@ -82,8 +82,8 @@ cursor 7 27 visible
 25 78-80 #ffffff #f7f7f4 -
 26 0-2 #ffffff #f7f7f4 -
 26 2-6 #0a5894 #ecedea -
-26 6-17 #545e6c #ecedea -
-26 17-78 #ffffff #ecedea -
+26 6-34 #1d232c #ecedea -
+26 34-78 #ffffff #ecedea -
 26 78-80 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
 27 2-78 #ecedea #f7f7f4 -
