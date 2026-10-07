@@ -125,11 +125,12 @@ Open `/branch tree` to preview conversation history. Opening it never changes th
 
 The browser starts in **Continue existing** mode. `●` marks the active path and `›` the preview selection. Labels and bounded task previews identify paths; numbered rows distinguish duplicate labels, even when they share one head. Selection uses the underlying stable branch ID. The list pages around the highlight, including paths beyond the first page.
 
-- `Up`/`Down` previews existing paths without activation.
-- `Tab` changes to **New fork at complete turn**; arrows browse complete turns. Type an optional human name, then `Enter` creates and selects a new branch, even if that turn already heads an existing branch. `Tab` returns to existing paths.
-- `Enter` in Continue existing mode selects that exact path. Successful confirmation returns to the conversation and restores the ordinary draft.
-- `Esc` closes preview and restores the draft, cursor and reading position. It does not cancel a running turn while the browser is open; close the browser first to cancel the turn.
-- Files/Git remain unchanged is shown beside confirmation controls, including at narrow widths. This browser changes conversation ancestry, never file contents or Git branches.
+- `↑↓ preview` browses existing paths without activation.
+- `Tab new fork` changes to **New fork at complete turn**; arrows browse complete turns. Type an optional human name, then `Enter fork` creates and selects a new branch, even if that turn already heads an existing branch. `Tab existing` returns to existing paths.
+- `Enter continue` in Continue existing mode selects that exact path. Successful confirmation returns to the conversation and restores the ordinary draft.
+- `Esc back` closes preview and restores the draft, cursor and reading position. It does not cancel a running turn while the browser is open; close the browser first to cancel the turn.
+- `Files/Git unchanged` leads the hint row beside the confirmation controls at every width, including narrow widths. This browser changes conversation ancestry, never file contents or Git branches.
+- The hint row names the current mode's Tab action. When it is narrow, it drops `↑↓ preview` first, then the Enter action, then the Tab action; the mode line (12 rows and taller) and the empty composer's placeholder still name Tab, though a typed fork name on a very short terminal can hide both. When the row cannot hold both `Files/Git unchanged` and `Esc back`, the status bar shows `Esc back` instead.
 - Busy or failed confirmation keeps the previous ancestry and saved draft.
 - `/branch list | fork <entry-id> [name] | switch <branch-id>` still works for scripts and retains exact-ID selection.
 - `/resume <session-id> [branch-id]` restores one saved branch; a missing branch reports an error and keeps the current session.

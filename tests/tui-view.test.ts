@@ -2412,6 +2412,7 @@ test("branch browsing pages Unicode duplicate labels beyond the cap at narrow wi
   const branches = Array.from({ length: 65 }, () => session.forkBranch("a", "日本語ไทย🙂".repeat(8)));
   const ui = await setup(44, 18, {}, undefined, { session });
   await ui.mockInput.pasteBracketedText("keep me");
+  ui.editor.cursorOffset = 2;
   ui.transcript.scrollTo(12); await settle(ui);
   const before = ui.transcript.scrollTop;
   ui.controller.openBranchTree(); await settle(ui);
@@ -2424,8 +2425,14 @@ test("branch browsing pages Unicode duplicate labels beyond the cap at narrow wi
   expect(session.activeBranchId).toBe(branches.at(-1)!);
   ui.resize(36, 16); await settle(ui);
   expect(ui.captureCharFrame()).toContain("Files/Git unchanged");
+  // Where the hint row holds only the Files/Git note, the status bar names Esc back.
+  ui.resize(31, 16); await settle(ui);
+  const rows = ui.captureCharFrame().trimEnd().split("\n").map(row => row.trim());
+  expect(rows.at(-1)).toBe("Files/Git unchanged");
+  expect(rows.at(-2)).toEndWith("Esc back");
   ui.mockInput.pressEscape(); await settle(ui);
   expect(ui.editor.plainText).toBe("keep me");
+  expect(ui.editor.cursorOffset).toBe(2);
   // Restore the original dimensions before comparing viewport position.
   ui.resize(44, 18); await settle(ui);
   expect(ui.transcript.scrollTop).toBe(before);

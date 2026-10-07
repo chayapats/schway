@@ -10,8 +10,7 @@ cursor 7 27 visible
 
   Conversation branches
   ● Active: 1. Conversation path
-  Continue existing · Tab: new fork
-  ↑/↓ preview · Enter confirm · Esc cancel
+  Continue existing · Tab new fork
   ›● 1. Fix the clamp upper bound
    2. Inclusive bounds
    3. Exclusive upper bound
@@ -31,11 +30,12 @@ cursor 7 27 visible
 
 
 
+
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Continue · Tab: fork
+  ▌ › Continue · Tab new fork
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/scripted-model   Provider default           ctx ~29
-  Files/Git unchanged · Enter confirm · Esc back
+  Files/Git unchanged · ↑↓ preview · Enter continue · Tab new fork · Esc back
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -51,42 +51,40 @@ cursor 7 27 visible
 03 2-32 #545e6c #f7f7f4 -
 03 32-80 #ffffff #f7f7f4 -
 04 0-2 #ffffff #f7f7f4 -
-04 2-35 #0a5894 #f7f7f4 -
-04 35-80 #ffffff #f7f7f4 -
+04 2-34 #0a5894 #f7f7f4 -
+04 34-80 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
-05 2-42 #545e6c #f7f7f4 -
-05 42-80 #ffffff #f7f7f4 -
+05 2-33 #0a5894 #f7f7f4 -
+05 33-80 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
-06 2-33 #0a5894 #f7f7f4 -
-06 33-80 #ffffff #f7f7f4 -
+06 2-22 #1d232c #f7f7f4 -
+06 22-80 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
-07 2-22 #1d232c #f7f7f4 -
-07 22-80 #ffffff #f7f7f4 -
+07 2-27 #1d232c #f7f7f4 -
+07 27-80 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
-08 2-27 #1d232c #f7f7f4 -
-08 27-80 #ffffff #f7f7f4 -
-09 0-2 #ffffff #f7f7f4 -
-09 2-32 #545e6c #f7f7f4 -
-09 32-80 #ffffff #f7f7f4 -
-10 0-80 #ffffff #f7f7f4 -
+08 2-32 #545e6c #f7f7f4 -
+08 32-80 #ffffff #f7f7f4 -
+09 0-80 #ffffff #f7f7f4 -
+10 0-2 #ffffff #f7f7f4 -
+10 2-9 #0a5894 #f7f7f4 -
+10 9-80 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
-11 2-9 #0a5894 #f7f7f4 -
-11 9-80 #ffffff #f7f7f4 -
-12 0-2 #ffffff #f7f7f4 -
-12 2-33 #545e6c #f7f7f4 -
-12 33-80 #ffffff #f7f7f4 -
-13 0-80 #ffffff #f7f7f4 -
-14 0-2 #ffffff #f7f7f4 -
-14 2-56 #545e6c #f7f7f4 -
-14 56-80 #ffffff #f7f7f4 -
-15 0-80 #ffffff #f7f7f4 -
-16 0-2 #ffffff #f7f7f4 -
-16 2-25 #545e6c #f7f7f4 -
-16 25-80 #ffffff #f7f7f4 -
-17 0-80 #ffffff #f7f7f4 -
-18 0-2 #ffffff #f7f7f4 -
-18 2-35 #545e6c #f7f7f4 -
-18 35-80 #ffffff #f7f7f4 -
+11 2-33 #545e6c #f7f7f4 -
+11 33-80 #ffffff #f7f7f4 -
+12 0-80 #ffffff #f7f7f4 -
+13 0-2 #ffffff #f7f7f4 -
+13 2-56 #545e6c #f7f7f4 -
+13 56-80 #ffffff #f7f7f4 -
+14 0-80 #ffffff #f7f7f4 -
+15 0-2 #ffffff #f7f7f4 -
+15 2-25 #545e6c #f7f7f4 -
+15 25-80 #ffffff #f7f7f4 -
+16 0-80 #ffffff #f7f7f4 -
+17 0-2 #ffffff #f7f7f4 -
+17 2-35 #545e6c #f7f7f4 -
+17 35-80 #ffffff #f7f7f4 -
+18 0-80 #ffffff #f7f7f4 -
 19 0-80 #ffffff #f7f7f4 -
 20 0-80 #ffffff #f7f7f4 -
 21 0-80 #ffffff #f7f7f4 -
@@ -98,8 +96,8 @@ cursor 7 27 visible
 25 78-80 #ffffff #f7f7f4 -
 26 0-2 #ffffff #f7f7f4 -
 26 2-6 #0a5894 #ecedea -
-26 6-26 #545e6c #ecedea -
-26 26-78 #ffffff #ecedea -
+26 6-29 #545e6c #ecedea -
+26 29-78 #ffffff #ecedea -
 26 78-80 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
 27 2-78 #ecedea #f7f7f4 -
@@ -116,8 +114,12 @@ cursor 7 27 visible
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
 29 2-24 #545e6c #f7f7f4 -
-29 24-29 #1d232c #caced3 b
-29 29-40 #545e6c #f7f7f4 -
-29 40-43 #1d232c #caced3 b
-29 43-48 #545e6c #f7f7f4 -
-29 48-80 #ffffff #f7f7f4 -
+29 24-26 #1d232c #caced3 b
+29 26-37 #545e6c #f7f7f4 -
+29 37-42 #1d232c #caced3 b
+29 42-54 #545e6c #f7f7f4 -
+29 54-57 #1d232c #caced3 b
+29 57-69 #545e6c #f7f7f4 -
+29 69-72 #1d232c #caced3 b
+29 72-77 #545e6c #f7f7f4 -
+29 77-80 #ffffff #f7f7f4 -

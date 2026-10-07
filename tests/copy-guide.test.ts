@@ -41,8 +41,7 @@ test("voice guide and banned-copy patterns cannot drift", async () => {
 interface EscException { screen: string; phrase: string; owner: string }
 
 // Each entry must still match a golden, so an owner that fixes its surface has to delete the entry.
-// Surfaces those owners also keep but the lint does not flag (valid verbs in the wrong place) need no entry:
-// L5 (#312) keeps the branch tree's in-panel `Esc cancel` beside its `Esc back` hint row.
+// Surfaces those owners also keep but the lint does not flag (valid verbs in the wrong place) need no entry.
 const ESC_EXCEPTIONS: readonly EscException[] = [
 ];
 
