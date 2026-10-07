@@ -4,14 +4,14 @@ title Sign-in chooser
 description The connection chooser groups subscriptions, API keys and a custom endpoint.
 variant light-30x8
 size 30x8
-cursor 6 6 visible
+cursor 1 1 hidden
 == text
  /project
  Not connected
   Sign in
       › ChatGPT
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Ask Schway…
+ ▌ › Choosing sign-in
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  Auto · Esc back
 == styles
@@ -36,8 +36,8 @@ cursor 6 6 visible
 04 29-30 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
 05 1-5 #0a5894 #ecedea -
-05 5-16 #545e6c #ecedea -
-05 16-29 #ffffff #ecedea -
+05 5-21 #1d232c #ecedea -
+05 21-29 #ffffff #ecedea -
 05 29-30 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-29 #ecedea #f7f7f4 -

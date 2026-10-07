@@ -4,7 +4,7 @@ title Browser callback entry
 description A pasted ChatGPT browser callback shows only masked characters.
 variant dark-50
 size 50x30
-cursor 1 1 hidden
+cursor 46 26 visible
 == text
  ⚡ schway  ~/demo
 
@@ -30,8 +30,8 @@ cursor 1 1 hidden
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- ▌ › Browser callback ·
-     •••••••••••••••••••••••••••••••••••••••• ·
+ ▌ › Browser callback
+     ••••••••••••••••••••••••••••••••••••••••
      Enter sign in · Esc cancel
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted-model          ctx ~0
@@ -73,17 +73,17 @@ cursor 1 1 hidden
 23 49-50 #ffffff #0e1117 -
 24 0-1 #ffffff #0e1117 -
 24 1-5 #7cc4ff #161b24 -
-24 5-24 #e6eaf0 #161b24 -
-24 24-49 #ffffff #161b24 -
+24 5-21 #e6eaf0 #161b24 -
+24 21-49 #ffffff #161b24 -
 24 49-50 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
 25 1-5 #ffffff #161b24 -
-25 5-48 #e6eaf0 #161b24 -
-25 48-49 #ffffff #161b24 -
+25 5-45 #e6eaf0 #161b24 -
+25 45-49 #ffffff #161b24 -
 25 49-50 #ffffff #0e1117 -
 26 0-1 #ffffff #0e1117 -
 26 1-5 #ffffff #161b24 -
-26 5-31 #e6eaf0 #161b24 -
+26 5-31 #8b95a7 #161b24 -
 26 31-49 #ffffff #161b24 -
 26 49-50 #ffffff #0e1117 -
 27 0-1 #ffffff #0e1117 -

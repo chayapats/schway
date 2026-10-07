@@ -4,7 +4,7 @@ title Sign-in timed out
 description A browser callback timeout shows a short status and reopens ChatGPT's other sign-in methods.
 variant light-120
 size 120x30
-cursor 7 27 visible
+cursor 1 1 hidden
 == text
  ⚡ schway  /project
 
@@ -32,7 +32,7 @@ cursor 7 27 visible
        › Device approval
          Paste browser callback
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  ▌ › Ask Schway…
+  ▌ › Choosing sign-in
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ! Attention  Esc back
   ↑↓ select · Enter · Esc back
@@ -97,8 +97,8 @@ cursor 7 27 visible
 26 0-2 #ffffff #f7f7f4 -
 26 2-3 #a61f16 #ecedea -
 26 3-6 #0a5894 #ecedea -
-26 6-17 #545e6c #ecedea -
-26 17-118 #ffffff #ecedea -
+26 6-22 #1d232c #ecedea -
+26 22-118 #ffffff #ecedea -
 26 118-120 #ffffff #f7f7f4 -
 27 0-2 #ffffff #f7f7f4 -
 27 2-118 #ecedea #f7f7f4 -

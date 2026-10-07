@@ -190,7 +190,8 @@ export interface TuiSnapshot {
     /** Full text of the last discovery failure, kept until discovery succeeds so it returns once a resume failure clears. */
     discoveryError?: string };
   modelPicker?: ModelPickerSnapshot;
-  credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]>;
+  /** Masked API-key entry; `label` is the provider display name or endpoint label, and `returnsToUrl` marks the endpoint key step whose Esc goes back to the typed URL. */
+  credentialEntry?: ReturnType<MaskedCredentialEntry["snapshot"]> & { returnsToUrl?: true };
   /** Available sign-in actions while the interactive chooser is open. */
   loginChooser?: LoginChooserSnapshot;
   /** Ephemeral plain endpoint input and its field-local validation message, excluded from conversation persistence. */

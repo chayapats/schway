@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TuiSnapshot } from "../../src/tui/controller.ts";
-import { CATALOG_API_KEY, CATALOG_CALLBACK, type ScreenHarness } from "./harness.ts";
+import { CATALOG_API_KEY, CATALOG_CALLBACK, CATALOG_ENDPOINT_URL, type ScreenHarness } from "./harness.ts";
 import { displayUrl } from "../../src/tools/web-fetch-display.ts";
 
 /** One catalog state reached through input and guarded by observable controller state. */
@@ -154,6 +154,12 @@ const loginChoice = async (ui: ScreenHarness, id: string, more = false) => {
   while (ui.controller.snapshot().loginChooser?.selectedId !== id) { ui.mockInput.pressArrow("down"); await ui.settle(); }
   ui.mockInput.pressEnter();
 };
+/** Open custom endpoint URL entry from the sign-in chooser with Alt+L and the arrow keys. */
+const openEndpointEntry = async (ui: ScreenHarness) => {
+  ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+  while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter(); await ui.waitFor(s => !!s.endpointUrlEntry);
+};
 /** Load the fixture branch session with /resume, then open its branch tree with /branch tree. */
 const openBranchTree = async (ui: ScreenHarness) => {
   await enter(ui, "/resume branch-demo"); await ui.waitFor(s => s.sessionId === "branch-demo" && s.status === "idle");
@@ -181,14 +187,21 @@ export const SCREENS: readonly Screen[] = [
   { id: "sign-in-chooser", title: "Sign-in chooser", description: "The connection chooser groups subscriptions, API keys and a custom endpoint.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); }, ready: s => !!s.loginChooser },
   { id: "chatgpt-more-options", title: "ChatGPT more options", description: "Device approval and a pasted callback are alternate ChatGPT methods.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressTab(); }, ready: s => s.loginChooser?.level === "chatgpt" },
   { id: "grok-more-options", title: "Grok more options", description: "Device code is the alternate Grok method.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "grok") ui.mockInput.pressArrow("down"); ui.mockInput.pressTab(); }, ready: s => s.loginChooser?.level === "grok" },
-  { id: "api-key-entry", title: "API key entry", description: "An API key typed after /login shows only masked characters.", drive: async ui => {
+  { id: "api-key-entry", title: "API key entry", description: "An API key typed after /login shows only masked characters.", noColorWidths: true, drive: async ui => {
     await loginChoice(ui, "openai"); await ui.waitFor(s => !!s.credentialEntry); await ui.mockInput.typeText(CATALOG_API_KEY.slice(0, 14));
   }, ready: s => s.credentialEntry?.masked.length === 14 },
-  { id: "callback-entry", title: "Browser callback entry", description: "A pasted ChatGPT browser callback shows only masked characters.", drive: async ui => {
+  { id: "api-key-entry-empty", title: "API key entry, empty", description: "An empty API key field names the provider, asks for a paste and puts the caret where the key starts.", noColorWidths: true, drive: async ui => {
+    await loginChoice(ui, "openai"); await ui.waitFor(s => !!s.credentialEntry);
+  }, ready: s => s.credentialEntry?.masked === "" },
+  { id: "callback-entry", title: "Browser callback entry", description: "A pasted ChatGPT browser callback shows only masked characters.", noColorWidths: true, drive: async ui => {
     await loginChoice(ui, "chatgpt-callback", true); await ui.waitFor(s => !!s.loginCallbackEntry); await ui.mockInput.pasteBracketedText(CATALOG_CALLBACK.slice(0, 40));
   }, ready: s => s.loginCallbackEntry?.masked.length === 40 },
   { id: "endpoint-url-empty", title: "Endpoint URL", description: "A custom endpoint starts with an ephemeral, unmasked URL field.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); }, ready: s => !!s.endpointUrlEntry && !s.endpointUrlEntry.value },
   { id: "endpoint-url-error", title: "Endpoint URL validation", description: "A malformed URL stays in the field with a corrective action.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); while (ui.controller.snapshot().loginChooser?.selectedId !== "compatible") ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter(); await ui.settle(); await ui.mockInput.typeText("localhost:8787"); ui.mockInput.pressEnter(); }, ready: s => !!s.endpointUrlEntry?.error },
+  { id: "endpoint-url-prefilled", title: "Endpoint URL, prefilled", description: "A saved endpoint URL fills the field as a value with the caret after it.", noColorWidths: true, drive: ui => openEndpointEntry(ui), ready: s => s.endpointUrlEntry?.value === CATALOG_ENDPOINT_URL },
+  { id: "endpoint-key-entry", title: "Endpoint key entry", description: "After a valid URL the endpoint asks for its key, and Esc goes back to the URL.", noColorWidths: true, drive: async ui => {
+    await openEndpointEntry(ui); await ui.mockInput.typeText(CATALOG_ENDPOINT_URL); ui.mockInput.pressEnter();
+  }, ready: s => !!s.credentialEntry?.returnsToUrl },
   { id: "subscription-sign-in", title: "Subscription sign-in", description: "Browser sign-in is waiting for authorization.", drive: async ui => { ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter(); }, ready: (s, ui) => s.status === "running" && ui.loginCalled() },
   { id: "chatgpt-device-approval", title: "ChatGPT device approval", description: "ChatGPT device sign-in lists the address step before the ephemeral code.", drive: async ui => {
     ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressTab(); await ui.settle(); ui.mockInput.pressEnter();

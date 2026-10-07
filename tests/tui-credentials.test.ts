@@ -611,3 +611,318 @@ test("endpoint entry fails clearly when session settings cannot be committed", (
   try { expect(controller.beginEndpointLogin()).toBe(false); expect(controller.snapshot().endpointUrlEntry).toBeUndefined(); expect(controller.snapshot().transcript.at(-1)?.text).toBe("Endpoint setup unavailable · Restart Schway · Alt+L sign in"); }
   finally { controller.dispose(); }
 });
+
+type EntrySurface = "endpoint" | "openai" | "xai" | "endpoint-key" | "callback";
+type EntryView = Awaited<ReturnType<typeof entryView>>;
+
+/** Build a real renderer, view and controller whose sign-in surfaces open through keys, with no network and an in-memory credential store. */
+async function entryView(width: number, height = 24, viewEnv: Record<string, string> = {}, motion?: "full" | "reduced" | "off", baseUrl?: string) {
+  const { createTestRenderer } = await import("@opentui/core/testing");
+  const { createConversationView } = await import("../src/tui/view.ts");
+  const { dispatchEditorInput } = await import("../src/tui/commands.ts");
+  const terminal = await createTestRenderer({ width, height, kittyKeyboard: true });
+  const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
+  const wait = async ({ signal }: { signal: AbortSignal }) => { await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return { ok: false as const, message: "Cancelled" }; };
+  const store = fakeCredentialStore();
+  const controller = new TuiController({ session: createSession(), workspace, provider: "scripted", modelId: "test-model", sessionId: "entry-caret",
+    model: createScriptedModel(), contextManager: createContextManager(workspace), secrets: [],
+    ...(baseUrl ? { baseUrl } : {}), configEditor: new ConfigEditor({}, { user: "/home/test/.schway/config.json", project: "/project/.schway/config.json" }),
+    stageSettings: async settings => ({ model: createScriptedModel({ provider: settings.provider, id: settings.model }), contextManager: createContextManager(workspace) }),
+    credentials: { store, env: {}, reload: async () => ({ model: createScriptedModel() }), codexLogin: wait, grokLogin: wait },
+  });
+  const view = createConversationView(terminal.renderer, { controller, workspaceRoot: "/project", home: "/home/test", env: viewEnv, secrets: [], quit: () => {}, openUrl: async () => {},
+    ...(motion ? { motion } : {}), submit: (value, accepted) => dispatchEditorInput(value, controller, async () => false, accepted) });
+  const settle = async () => { await Bun.sleep(2); view.refresh(); await terminal.flush(); };
+  await settle();
+  const editor = terminal.renderer.root.findDescendantById("prompt") as import("@opentui/core").TextareaRenderable;
+  const dispose = () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); };
+  return { ...terminal, controller, view, editor, store, settle, dispose };
+}
+
+/** Open one sign-in typing surface the way a user does: Alt+L, the chooser keys and, for the key step, a typed endpoint URL. */
+async function openEntry(ui: EntryView, surface: EntrySurface): Promise<void> {
+  ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+  if (surface === "callback") { ui.mockInput.pressTab(); await ui.settle(); }
+  const id = surface === "callback" ? "chatgpt-callback" : surface === "openai" || surface === "xai" ? surface : "compatible";
+  while (ui.controller.snapshot().loginChooser!.selectedId !== id) ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter(); await ui.settle();
+  if (surface === "endpoint-key") { await ui.mockInput.typeText("http://h:1"); ui.mockInput.pressEnter(); await ui.settle(); }
+}
+
+/** Panel title each surface shows. */
+const ENTRY_TITLES: Record<EntrySurface, string> = { endpoint: "Endpoint URL", openai: "API key · OpenAI", xai: "API key · xAI", "endpoint-key": "API key · Compatible endpoint (h:1)", callback: "Browser callback" };
+/** Placeholder each surface shows while its field is empty. */
+const ENTRY_PLACEHOLDERS: Record<EntrySurface, string> = { endpoint: "Paste or type a URL…", openai: "Paste key…", xai: "Paste key…", "endpoint-key": "Paste key…", callback: "Paste redirect URL or code…" };
+
+/** Read the expected one-based caret cell from the frame: after the last displayed value cell, or at the placeholder's first cell. */
+function frameCaret(ui: EntryView, surface: EntrySurface, displayed: string): { x: number; y: number } {
+  const rows = ui.captureCharFrame().split("\n"), title = ENTRY_TITLES[surface];
+  const firstRow = rows.findIndex(row => row.includes(title.slice(0, 9)));
+  expect(firstRow, ui.captureCharFrame()).toBeGreaterThanOrEqual(0);
+  const column = rows[firstRow]!.indexOf(title.slice(0, 9));
+  // A long title wraps by words onto further rows; the value starts on the row after its last one.
+  let titleRow = firstRow, titleText = rows[firstRow]!.slice(column);
+  while (titleText.replace(/\s/g, "") !== title.replace(/\s/g, "")) titleText += rows[++titleRow]!.slice(column);
+  if (!displayed) {
+    expect(rows[titleRow + 1]!.slice(column).trimEnd()).toBe(ENTRY_PLACEHOLDERS[surface]);
+    return { x: column + 1, y: titleRow + 2 };
+  }
+  // The value wraps by cells; collect its rows until they spell exactly the displayed value.
+  let text = "", row = titleRow;
+  while (text.length < displayed.length) text += rows[++row]!.slice(column).trimEnd();
+  expect(text).toBe(displayed);
+  return { x: column + rows[row]!.slice(column).trimEnd().length + 1, y: row + 1 };
+}
+
+/** Assert the terminal cursor is visible at the expected entry cell in the composer's cursor style. */
+function expectEntryCaret(ui: EntryView, surface: EntrySurface, displayed: string, composer: ReturnType<EntryView["renderer"]["getCursorState"]>): void {
+  const cursor = ui.renderer.getCursorState();
+  expect({ visible: cursor.visible, ...frameCaret(ui, surface, displayed) }, ui.captureCharFrame()).toEqual({ visible: true, x: cursor.x, y: cursor.y });
+  expect({ style: cursor.style, blinking: cursor.blinking, color: cursor.color }).toEqual({ style: composer.style, blinking: composer.blinking, color: composer.color });
+}
+
+for (const surface of ["endpoint", "openai", "xai", "endpoint-key", "callback"] as const) test(`${surface} entry shows a visible caret after the displayed value when empty, typed, pasted and backspaced at 80, 50 and 40 columns`, async () => {
+  for (const width of [80, 50, 40]) {
+    const ui = await entryView(width);
+    try {
+      const composer = ui.renderer.getCursorState();
+      expect(composer.visible).toBe(true);
+      await openEntry(ui, surface);
+      const masked = surface !== "endpoint";
+      // Masks show at most 64 bullets, so a longer secret never reveals its length.
+      const shown = (value: string) => masked ? "•".repeat(Math.min(value.length, 64)) : value;
+      const typed = masked ? "typed-secret-1" : "https://api.example.test";
+      // A long paste wraps the mask below 80 columns, so the caret follows the last value row.
+      const pasted = masked ? "-pasted-secret-sentinel".repeat(surface === "callback" ? 3 : 1) : "/v1/models/route";
+      expectEntryCaret(ui, surface, "", composer);
+      await ui.mockInput.typeText(typed); await ui.settle();
+      expectEntryCaret(ui, surface, shown(typed), composer);
+      await ui.mockInput.pasteBracketedText(pasted); await ui.settle();
+      expectEntryCaret(ui, surface, shown(typed + pasted), composer);
+      for (const _ of typed + pasted) ui.mockInput.pressBackspace();
+      await ui.settle();
+      expectEntryCaret(ui, surface, "", composer);
+      if (masked) expect(ui.captureCharFrame()).not.toMatch(/typed-secret|pasted-secret/);
+    } finally { ui.dispose(); }
+  }
+});
+
+test("a long pasted callback wraps the mask and the caret follows its last row", async () => {
+  for (const width of [50, 40]) {
+    const ui = await entryView(width);
+    try {
+      const composer = ui.renderer.getCursorState();
+      await openEntry(ui, "callback");
+      await ui.mockInput.pasteBracketedText(`http://localhost:1455/auth/callback?code=${"x".repeat(40)}`); await ui.settle();
+      const masked = ui.controller.snapshot().loginCallbackEntry!.masked;
+      const rows = ui.captureCharFrame().split("\n").filter(row => row.includes("•"));
+      expect(rows.length).toBeGreaterThan(1);
+      expectEntryCaret(ui, "callback", masked, composer);
+      expect(ui.renderer.getCursorState().y).toBe(ui.captureCharFrame().split("\n").findLastIndex(row => row.includes("•")) + 1);
+    } finally { ui.dispose(); }
+  }
+});
+
+test("the endpoint caret stays on the value row while its validation error shows", async () => {
+  for (const width of [80, 50, 40]) {
+    const ui = await entryView(width);
+    try {
+      const composer = ui.renderer.getCursorState();
+      await openEntry(ui, "endpoint");
+      await ui.mockInput.typeText("localhost:8787"); ui.mockInput.pressEnter(); await ui.settle();
+      expect(ui.controller.snapshot().endpointUrlEntry?.error).toBe("Enter a full URL · Use http:// or https://");
+      expectEntryCaret(ui, "endpoint", "localhost:8787", composer);
+      const rows = ui.captureCharFrame().split("\n");
+      expect(rows[ui.renderer.getCursorState().y]).toContain("Enter a full URL");
+    } finally { ui.dispose(); }
+  }
+});
+
+test("a prefilled endpoint URL is a value with the caret after it, never a placeholder", async () => {
+  const ui = await entryView(80, 24, {}, undefined, "http://localhost:8787/v1");
+  try {
+    const composer = ui.renderer.getCursorState();
+    await openEntry(ui, "endpoint");
+    expect(ui.controller.snapshot().endpointUrlEntry?.value).toBe("http://localhost:8787/v1");
+    expectEntryCaret(ui, "endpoint", "http://localhost:8787/v1", composer);
+    expect(ui.captureCharFrame()).not.toContain("Paste or type a URL…");
+  } finally { ui.dispose(); }
+});
+
+test("in NO_COLOR the empty endpoint field shows an instruction, not a URL, and differs from a typed value in its text", async () => {
+  const ui = await entryView(80, 24, { NO_COLOR: "1" });
+  try {
+    await openEntry(ui, "endpoint");
+    const valueRow = (frame: string) => { const rows = frame.split("\n"); return rows[rows.findIndex(row => row.includes("Endpoint URL")) + 1]!.trim(); };
+    const empty = ui.captureCharFrame();
+    expect(valueRow(empty)).toBe("Paste or type a URL…");
+    // Any URL in the panel must carry an example marker; the value slot itself holds none.
+    for (const match of empty.matchAll(/https?:\/\/\S+/g)) expect(empty.slice(Math.max(0, match.index! - 5), match.index)).toBe("like ");
+    expect(valueRow(empty)).not.toMatch(/https?:\/\//);
+    await ui.mockInput.typeText("http://localhost:8787"); await ui.settle();
+    const typed = ui.captureCharFrame();
+    expect(valueRow(typed)).toBe("http://localhost:8787");
+    expect(valueRow(typed)).not.toBe(valueRow(empty));
+  } finally { ui.dispose(); }
+});
+
+test("each entry names its Enter and Esc verbs alike in the panel, hint row and compact status bar", async () => {
+  const { escPhraseProblems } = await import("./helpers/esc-verbs.ts");
+  const hints: Record<EntrySurface, string> = { endpoint: "Enter continue · Esc cancel", openai: "Enter save · Esc cancel", xai: "Enter save · Esc cancel", "endpoint-key": "Enter save · Esc back", callback: "Enter sign in · Esc cancel" };
+  for (const surface of ["endpoint", "openai", "endpoint-key", "callback"] as const) for (const [width, height] of [[80, 24], [50, 24], [40, 24], [60, 12]] as const) {
+    const ui = await entryView(width, height);
+    try {
+      await openEntry(ui, surface);
+      const rows = ui.captureCharFrame().trimEnd().split("\n").map(row => row.trim());
+      const escape = hints[surface].slice(hints[surface].indexOf("Esc "));
+      // The panel names both keys; the hint row repeats them, or below 14 rows the status bar names the same Esc action.
+      expect(rows.filter(row => row.endsWith(hints[surface])).length, rows.join("\n")).toBe(height < 14 ? 1 : 2);
+      if (height < 14) expect(rows.at(-1)!.endsWith(escape)).toBe(true);
+      expect(rows.join("\n")).not.toMatch(surface === "endpoint-key" ? /Esc cancel/ : /Esc back/);
+      expect(rows.join("\n")).not.toContain("Enter confirm");
+      expect(escPhraseProblems(rows)).toEqual([]);
+    } finally { ui.dispose(); }
+  }
+});
+
+test("Esc from each entry restores a multiline Thai draft, its cursor offset and the visible composer cursor", async () => {
+  const draft = "ช่วยอ่านไฟล์นี้\nอธิบายเป็นภาษาไทย\nอย่าเพิ่งส่ง";
+  for (const surface of ["endpoint", "openai", "endpoint-key", "callback"] as const) {
+    const ui = await entryView(80);
+    try {
+      await ui.mockInput.pasteBracketedText(draft);
+      for (let step = 0; step < 6; step++) ui.mockInput.pressArrow("left");
+      ui.mockInput.pressArrow("up"); await ui.settle();
+      const offset = ui.editor.cursorOffset, before = ui.renderer.getCursorState();
+      expect(offset).toBeGreaterThan(0); expect(offset).toBeLessThan(draft.length);
+      await openEntry(ui, surface);
+      await ui.mockInput.typeText("abc"); await ui.settle();
+      expect(ui.renderer.getCursorState().visible).toBe(true);
+      for (let step = 0; step < 4 && (ui.controller.running || ui.controller.snapshot().loginChooser); step++) { ui.mockInput.pressEscape(); await ui.settle(); }
+      expect(ui.editor.plainText).toBe(draft);
+      expect(ui.editor.cursorOffset).toBe(offset);
+      const after = ui.renderer.getCursorState();
+      expect({ visible: after.visible, x: after.x, y: after.y }).toEqual({ visible: true, x: before.x, y: before.y });
+    } finally { ui.dispose(); }
+  }
+});
+
+test("the endpoint key step's Esc goes back to the typed URL with the caret after it", async () => {
+  const ui = await entryView(80);
+  try {
+    const composer = ui.renderer.getCursorState();
+    await openEntry(ui, "endpoint-key");
+    expect(ui.controller.snapshot().credentialEntry?.returnsToUrl).toBe(true);
+    ui.mockInput.pressEscape(); await ui.settle();
+    expect(ui.controller.snapshot().endpointUrlEntry?.value).toBe("http://h:1");
+    expectEntryCaret(ui, "endpoint", "http://h:1", composer);
+  } finally { ui.dispose(); }
+});
+
+test("submitting or externally cancelling an entry closes its caret: the composer cursor returns, and a sign-in wait shows none", async () => {
+  const ui = await entryView(80);
+  try {
+    const composer = ui.renderer.getCursorState();
+    await openEntry(ui, "openai");
+    await ui.mockInput.typeText("sk-submitted"); ui.mockInput.pressEnter();
+    await ui.controller.waitForIdle(); await ui.settle();
+    expect(ui.controller.snapshot().credentialEntry).toBeUndefined();
+    expect(ui.renderer.getCursorState()).toMatchObject({ visible: true, x: composer.x, y: composer.y });
+    expect(ui.captureCharFrame()).not.toContain("sk-submitted");
+    // An external cancel closes the entry the same way: no entry caret remains once the composer is back.
+    await openEntry(ui, "xai"); await ui.mockInput.typeText("abc"); await ui.settle();
+    ui.controller.cancel(); await ui.settle();
+    expect(ui.controller.snapshot().credentialEntry).toBeUndefined();
+    while (ui.controller.snapshot().loginChooser) { ui.mockInput.pressEscape(); await ui.settle(); }
+    expect(ui.renderer.getCursorState()).toMatchObject({ visible: true, x: composer.x, y: composer.y });
+    await openEntry(ui, "callback");
+    await ui.mockInput.pasteBracketedText("fixture-callback-code"); ui.mockInput.pressEnter(); await ui.settle();
+    expect(ui.controller.snapshot().loginApproval).toBeDefined();
+    expect(ui.renderer.getCursorState().visible).toBe(false);
+    ui.controller.cancel(); await ui.controller.waitForIdle(); await ui.settle();
+    while (ui.controller.snapshot().loginChooser) { ui.mockInput.pressEscape(); await ui.settle(); }
+    expect(ui.renderer.getCursorState()).toMatchObject({ visible: true, x: composer.x, y: composer.y });
+  } finally { ui.dispose(); }
+});
+
+for (const motion of ["full", "reduced", "off"] as const) test(`under SCHWAY_MOTION=${motion} the entry caret uses the composer's cursor style, color and blink`, async () => {
+  const ui = await entryView(80, 24, {}, motion);
+  try {
+    const composer = ui.renderer.getCursorState();
+    await openEntry(ui, "openai");
+    expectEntryCaret(ui, "openai", "", composer);
+  } finally { ui.dispose(); }
+});
+
+test("a mask that exactly fills its row keeps the caret in the spare cell inside the composer", async () => {
+  // Masks stop at 64 bullets, so only rows narrower than that can be filled exactly.
+  for (const width of [50, 40]) {
+    const ui = await entryView(width);
+    try {
+      const composer = ui.renderer.getCursorState();
+      await openEntry(ui, "openai");
+      const value = ui.renderer.root.findDescendantById("credential-value")!;
+      await ui.mockInput.pasteBracketedText("k".repeat(value.width)); await ui.settle();
+      expectEntryCaret(ui, "openai", "•".repeat(value.width), composer);
+      const cursor = ui.renderer.getCursorState(), rows = ui.captureCharFrame().split("\n");
+      expect(rows.filter(row => row.includes("•"))).toHaveLength(1);
+      // The caret sits on the cell after the last bullet, still inside the composer's surface rather than its padding.
+      expect(cursor.x).toBe(value.screenX + value.width + 1);
+      expect(cursor.x).toBeLessThanOrEqual(ui.renderer.root.findDescendantById("composer")!.screenX + ui.renderer.root.findDescendantById("composer")!.width);
+    } finally { ui.dispose(); }
+  }
+});
+
+test("the sign-in chooser is not a typing surface: no caret, typed keys never reach the draft, and Esc restores it", async () => {
+  for (const width of [80, 40]) {
+    const ui = await entryView(width);
+    try {
+      await ui.mockInput.pasteBracketedText("keep this\ndraft"); ui.mockInput.pressArrow("left"); await ui.settle();
+      const offset = ui.editor.cursorOffset, before = ui.renderer.getCursorState();
+      ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+      expect(ui.controller.snapshot().loginChooser).toBeDefined();
+      expect(ui.renderer.getCursorState().visible).toBe(false);
+      // Nothing has started yet, so the composer note doesn't claim typing waits for a sign-in.
+      expect(ui.captureCharFrame()).toContain("Choosing sign-in");
+      expect(ui.captureCharFrame()).not.toContain("Typing resumes after sign-in");
+      await ui.mockInput.typeText("xyz"); await ui.mockInput.pasteBracketedText("pasted"); await ui.settle();
+      expect(ui.renderer.getCursorState().visible).toBe(false);
+      expect(ui.captureCharFrame()).not.toMatch(/xyz|pasted/);
+      // The alternate-method level is the same chooser.
+      ui.mockInput.pressTab(); await ui.settle();
+      expect(ui.controller.snapshot().loginChooser?.level).toBe("chatgpt");
+      expect(ui.renderer.getCursorState().visible).toBe(false);
+      while (ui.controller.snapshot().loginChooser) { ui.mockInput.pressEscape(); await ui.settle(); }
+      expect(ui.editor.plainText).toBe("keep this\ndraft");
+      expect(ui.editor.cursorOffset).toBe(offset);
+      const after = ui.renderer.getCursorState();
+      expect({ visible: after.visible, x: after.x, y: after.y }).toEqual({ visible: true, x: before.x, y: before.y });
+    } finally { ui.dispose(); }
+  }
+});
+
+test("a very long endpoint URL keeps its end in bounded rows, with the caret and keys on screen", async () => {
+  for (const [width, height] of [[40, 16], [50, 16], [40, 24], [50, 24]] as const) {
+    const ui = await entryView(width, height);
+    try {
+      const composer = ui.renderer.getCursorState();
+      await openEntry(ui, "endpoint");
+      const url = `http://example.test/${"a".repeat(399)}z`;
+      await ui.mockInput.pasteBracketedText(url); await ui.settle();
+      expect(ui.controller.snapshot().endpointUrlEntry?.value).toBe(url);
+      const rows = ui.captureCharFrame().split("\n"), cursor = ui.renderer.getCursorState();
+      expect(cursor.visible).toBe(true);
+      expect(cursor.y).toBeLessThanOrEqual(height);
+      // The value shows its end behind `…`, the caret follows its last character, and the keys keep their own row.
+      const titleRow = rows.findIndex(row => row.includes("Endpoint URL"));
+      const valueRows = rows.slice(titleRow + 1, rows.findIndex(row => row.includes("Enter continue · Esc cancel")));
+      expect(valueRows.length).toBeLessThanOrEqual(Math.max(1, Math.min(6, Math.floor(height / 4))));
+      expect(valueRows[0]!.trim().startsWith("…")).toBe(true);
+      expect(valueRows.at(-1)!.trimEnd().endsWith("az")).toBe(true);
+      expect(cursor.y).toBe(titleRow + valueRows.length + 1);
+      expect(cursor.x).toBe(valueRows.at(-1)!.trimEnd().length + 1);
+      expect({ style: cursor.style, color: cursor.color }).toEqual({ style: composer.style, color: composer.color });
+      expect(ui.captureCharFrame().trimEnd().split("\n").at(-1)!.trim()).toBe("Enter continue · Esc cancel");
+    } finally { ui.dispose(); }
+  }
+});

@@ -13,6 +13,8 @@ export const SIGN_IN_SAVING_HINT = "Wait for secure storage";
 export const SIGN_IN_CANCELLING_HINT = "Wait for sign-in to stop";
 /** Key-free composer text while the wait panel owns input. */
 export const SIGN_IN_COMPOSER_TEXT = "Typing resumes after sign-in";
+/** Key-free composer text while the sign-in chooser owns input; Esc gives the draft back without signing in. */
+export const SIGN_IN_CHOOSER_COMPOSER_TEXT = "Choosing sign-in";
 /** Primary transcript status after a browser launcher failure; the authorization link is the line above. */
 export const BROWSER_NOT_OPENED = "Browser didn't open · Open the link above";
 /** Primary status for any subscription sign-in timeout; F2 details keep the provider's recovery text. */
