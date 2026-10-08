@@ -31,6 +31,10 @@ grok-plan-error | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspe
 model-picker | ↑↓ select | Enter use | Esc back
 details-model | ↑↓ select | Enter use | Esc back
 model-picker-unconnected | Esc back | ↑↓ select | Enter open
+model-picker-loading | ↑↓ select | Enter use | Esc back
+model-picker-offline | ↑↓ select | Enter use | Esc back
+model-picker-failed | ↑↓ select | Enter use | Esc back
+model-picker-partial | ↑↓ select | Enter use | Esc back
 reasoning-chip-explicit | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 reasoning-chip-provider-default | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
 reasoning-chip-advertised | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
@@ -70,6 +74,16 @@ details-unavailable | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I i
 retry-countdown | Esc stop | Shift+Tab change mode | Ctrl+F find
 retry-rate-limit | Esc stop | Shift+Tab change mode | Ctrl+F find
 retry-network | Esc stop | Shift+Tab change mode | Ctrl+F find
+recovery-auth | Alt+L connect | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
+recovery-credential-store | Ctrl+R retry credential access | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode
+recovery-model | Alt+M choose model | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
+recovery-offline | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
+recovery-rate-limit | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
+recovery-session-write | F2 details | Esc keep editing | Alt+R review | /new start fresh | /sessions browse | Shift+Tab change mode
+startup-auth | Alt+L connect | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find
+startup-credential-store | Ctrl+R retry credential access | F2 details | Esc keep editing | Shift+Tab change mode
+startup-model | Alt+M choose model | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find
+startup-provider | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
 review-panel | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
 details-review | PgUp/PgDn scroll | F2 files | Esc back
 review-multi-turn | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
@@ -113,6 +127,7 @@ compaction-completed | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I 
 compaction-cancelled | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 compaction-failed | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 compaction-noop | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+compaction-in-turn | Esc stop | Shift+Tab change mode | Ctrl+F find
 no-color | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find | Alt+I inspect | Ctrl+O tools | / commands
 narrow-layout | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 table-and-code | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect

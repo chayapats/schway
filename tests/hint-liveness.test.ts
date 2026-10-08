@@ -247,7 +247,7 @@ const pagingFits = (screen: string, note: string): ChipAllowEntry => ({ screen, 
 const CHIP_ALLOWLIST: readonly ChipAllowEntry[] = [
   ...["auto-mode", "read-only-mode", "ask-mode", "grok-plan-error", "reasoning-chip-explicit", "reasoning-chip-provider-default", "reasoning-chip-advertised",
     "reasoning-chip-unavailable", "command-palette-inserted", "thai-composer", "draft-restored", "draft-not-saved", "web-search-line", "stopped-streaming",
-    "details-unavailable", "delete-session-busy", "recent-work-resume", "compaction-completed", "compaction-cancelled", "compaction-failed", "compaction-noop", "no-color"].map(inspectNothing),
+    "details-unavailable", "delete-session-busy", "recent-work-resume", "compaction-completed", "compaction-cancelled", "compaction-failed", "compaction-noop", "no-color", "startup-provider"].map(inspectNothing),
   { screen: "disconnected-search", chip: "↑↓ previous/next", reason: "single-item", note: "README matches once; `running-search` moves between several matches." },
   { screen: "read-only-search-matches", chip: "↑↓ previous/next", reason: "single-item", note: "README matches once; `running-search` moves between several matches." },
   { screen: "grok-more-options", chip: "↑↓ select", reason: "single-item", note: "Grok has one other method; `chatgpt-more-options` moves between two." },
