@@ -72,17 +72,22 @@ async function reachOnce(screen: Screen, variant: Variant, encoding: ChipEncodin
   } catch (error) { await ui.dispose(); throw error; }
 }
 
-/** Snapshot text without transcript rows that are only failure notices, or the error status such a row sets. */
-function snapshotKey(snapshot: TuiSnapshot): string {
-  const failure = (text: string) => FAILURE_NOTICES.some(notice => notice.test(text));
-  const transcript = snapshot.transcript.filter(entry => !failure(entry.text));
-  const status = snapshot.status === "error" && snapshot.transcript.at(-1) && failure(snapshot.transcript.at(-1)!.text) ? "failure-notice" : snapshot.status;
-  return JSON.stringify({ ...snapshot, transcript, status });
+const failureNotice = (text: string) => FAILURE_NOTICES.some(notice => notice.test(text));
+/**
+ * True when the controller snapshot changed for a reason other than failure notices: transcript rows that are failure
+ * notices are ignored, and so is the error status when every row added since `before` is one (`fail("Unknown command …")`).
+ */
+function snapshotChanged(before: TuiSnapshot, after: TuiSnapshot): boolean {
+  const known = new Set(before.transcript.map(entry => entry.id));
+  const added = after.transcript.filter(entry => !known.has(entry.id));
+  const noticeStatus = added.length > 0 && added.every(entry => failureNotice(entry.text)) && after.status === "error";
+  const key = (snapshot: TuiSnapshot, status: string) => JSON.stringify({ ...snapshot, transcript: snapshot.transcript.filter(entry => !failureNotice(entry.text)), status });
+  return key(before, before.status) !== key(after, noticeStatus ? before.status : after.status);
 }
-interface Observation { snapshot: string; status: string; screen: string; text: string[]; editor: string; cursor: number; spies: Spies }
+interface Observation { state: TuiSnapshot; status: string; screen: string; text: string[]; editor: string; cursor: number; spies: Spies }
 function observe({ ui, spies }: Reached): Observation {
   const frame = ui.captureSpans(), snapshot = ui.controller.snapshot();
-  return { snapshot: snapshotKey(snapshot), status: snapshot.status, screen: serializeScreen(frame, { screen: "", title: "", description: "", variant: "", cursor: ui.renderer.getCursorState() }),
+  return { state: JSON.parse(JSON.stringify(snapshot)) as TuiSnapshot, status: snapshot.status, screen: serializeScreen(frame, { screen: "", title: "", description: "", variant: "", cursor: ui.renderer.getCursorState() }),
     text: frame.lines.map(line => line.spans.map(span => span.text).join("")),
     editor: ui.editor.plainText, cursor: ui.editor.cursorOffset, spies: { ...spies, submits: [...spies.submits] } };
 }
@@ -95,7 +100,7 @@ function newNotice(before: Observation, after: Observation): string | undefined 
 }
 /** Same observation twice across a few renders: background work (Git reads, lazy panels) has finished before a press. */
 async function quiet(reached: Reached): Promise<Observation> {
-  const same = (a: Observation, b: Observation) => a.screen === b.screen && a.snapshot === b.snapshot && a.editor === b.editor && a.cursor === b.cursor;
+  const same = (a: Observation, b: Observation) => a.screen === b.screen && !snapshotChanged(a.state, b.state) && a.editor === b.editor && a.cursor === b.cursor;
   let previous = observe(reached);
   for (const start = performance.now(); performance.now() - start < 2000;) {
     await reached.ui.settle(); await Bun.sleep(5); await reached.ui.settle();
@@ -128,7 +133,7 @@ const expectationFor = (labels: readonly string[]): Expectation =>
  * writes, `openUrl` calls and reload requests act at once. A submit call or an editor change acts once the frame shows
  * more than a failure notice; a press whose only visible effect is a failure notice does not act.
  */
-async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding, expectation: Expectation, before: Observation): Promise<{ verdict: "live" | "dead" | "notice"; detail: string }> {
+async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding, expectation: Expectation, before: Observation, draft = ""): Promise<{ verdict: "live" | "dead" | "notice"; detail: string }> {
   const { ui } = reached;
   ui.renderer.stdin.emit("data", Buffer.from(bytes));
   // A lone legacy ESC resolves only after the decoder's 20 ms timeout.
@@ -136,7 +141,7 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
   const start = performance.now();
   let notice = "", pending: string[] = [];
   // A redraw or snapshot change acts only if it survives settling: re-reading the same diff flickers a loading state and returns.
-  const lasting = async () => { const settled = await quiet(reached); return settled.screen !== before.screen || settled.snapshot !== before.snapshot || settled.editor !== before.editor || settled.cursor !== before.cursor; };
+  const lasting = async () => { const settled = await quiet(reached); return settled.screen !== before.screen || snapshotChanged(before.state, settled.state) || settled.editor !== before.editor || settled.cursor !== before.cursor; };
   while (performance.now() - start < EFFECT_WINDOW_MS) {
     await ui.settle();
     const after = observe(reached);
@@ -147,13 +152,15 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
     const spied = [after.spies.clipboard > before.spies.clipboard && "clipboard write", after.spies.urls > before.spies.urls && "openUrl call", after.spies.reloads > before.spies.reloads && "reload request"].filter(Boolean) as string[];
     if (expectation !== "send" && spied.length) return { verdict: "live", detail: spied.join(", ") };
     const strong = expectation === "send"
-      // Sent means a turn started, or a local command accepted the draft and changed the conversation.
-      ? [after.status === "running" && before.status !== "running" && "started a turn", before.editor && !after.editor && after.snapshot !== before.snapshot && "accepted the draft"]
-      : [after.snapshot !== before.snapshot && "controller snapshot"];
+      // Sent means a turn started with exactly the draft, or a local command took the whole draft and changed the conversation.
+      ? [after.status === "running" && before.status !== "running" && after.state.transcript.some(entry => entry.kind === "user" && entry.text === draft && !before.state.transcript.some(old => old.id === entry.id)) && "started a turn with the draft",
+        before.editor === draft && !after.editor && after.spies.submits.length === before.spies.submits.length && snapshotChanged(before.state, after.state) && "accepted the draft"]
+      : [snapshotChanged(before.state, after.state) && "controller snapshot"];
     const evidence = strong.filter(Boolean) as string[];
     if (evidence.length) { if (expectation === "send" || await lasting()) return { verdict: "live", detail: evidence.join(", ") }; break; }
     pending = (expectation === "send"
-      ? [after.spies.submits.length > before.spies.submits.length && `dispatched ${JSON.stringify(after.spies.submits.at(-1))}`]
+      // Only the exact draft counts: a truncated or re-encoded Thai or emoji draft is not the one the chip sent.
+      ? [after.spies.submits.length > before.spies.submits.length && after.spies.submits.at(-1) === draft && `dispatched ${JSON.stringify(draft)}`]
       : [after.editor !== before.editor && "editor text", after.cursor !== before.cursor && "editor cursor", after.spies.submits.length > before.spies.submits.length && "submit call"]
     ).filter(Boolean) as string[];
     if (after.screen !== before.screen) {
@@ -168,7 +175,7 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
   }
   if (notice) return { verdict: "notice", detail: `only showed the failure notice "${notice}"` };
   if (pending.length) return { verdict: "live", detail: pending.join(", ") };
-  return { verdict: "dead", detail: expectation === "send" ? "the draft was not dispatched" : expectation === "reload" ? "requested no reload" : "nothing changed" };
+  return { verdict: "dead", detail: expectation === "send" ? `the draft ${JSON.stringify(draft)} was not dispatched whole` : expectation === "reload" ? "requested no reload" : "nothing changed" };
 }
 
 /**
@@ -198,11 +205,11 @@ async function probe(screen: Screen, encoding: ChipEncoding, variant = probedVar
         reached ??= await fresh();
         if (expectation === "send" && !reached.ui.editor.plainText) { await reached.ui.mockInput.pasteBracketedText(SEND_DRAFT); await reached.ui.settle(); }
         const before = await quiet(reached);
-        const outcome = await pressOnce(reached, press.bytes, encoding, expectation, before);
+        const outcome = await pressOnce(reached, press.bytes, encoding, expectation, before, before.editor);
         detail = presses.length > 1 ? `${detail ? `${detail}; ` : ""}${press.direction}: ${outcome.detail}` : outcome.detail;
         // Reuse the state only when the press changed nothing at all.
         const after = observe(reached);
-        if (after.screen !== before.screen || after.snapshot !== before.snapshot || after.editor !== before.editor || outcome.verdict !== "dead") { await reached.ui.dispose(); reached = undefined; }
+        if (after.screen !== before.screen || snapshotChanged(before.state, after.state) || after.editor !== before.editor || outcome.verdict !== "dead") { await reached.ui.dispose(); reached = undefined; }
         if (outcome.verdict === "live") { verdict = "live"; break; }
         if (outcome.verdict === "notice") verdict = "notice";
       }
@@ -463,4 +470,19 @@ test("chip discovery excludes palette rows that only document keys", () => {
     [["       ", selected], ["Ctrl+C", selected, true], [" cancel turn", selected]],
   ]);
   expect(discoverChips(frame)).toEqual([]);
+});
+
+test("a press that only adds failure notices leaves the snapshot unchanged, even when it sets or keeps error status", () => {
+  const snapshot = (status: string, rows: [string, TuiSnapshot["transcript"][number]["kind"], string][]) =>
+    ({ status, transcript: rows.map(([id, kind, text]) => ({ id, kind, text })) }) as unknown as TuiSnapshot;
+  const failed = snapshot("error", [["u1", "user", "Summarize the changes"], ["e1", "error", "Request failed · Inspect details before continuing"]]);
+  // Already in error: an appended notice keeps the key, though the last row is now a notice.
+  expect(snapshotChanged(failed, snapshot("error", [...failed.transcript.map(entry => [entry.id, entry.kind, entry.text] as [string, "user", string]), ["s1", "system", "Wait for this turn · Esc stop"]]))).toBe(false);
+  // Idle to error only because fail("Unknown command …") added its row.
+  const idle = snapshot("idle", [["u1", "user", "Summarize the changes"]]);
+  expect(snapshotChanged(idle, snapshot("error", [["u1", "user", "Summarize the changes"], ["e2", "error", "Unknown command · /help browse commands"]]))).toBe(false);
+  // A real effect still counts: an ordinary row, or a status change without a notice row.
+  expect(snapshotChanged(idle, snapshot("idle", [["u1", "user", "Summarize the changes"], ["s2", "system", "Session: catalog-session"]]))).toBe(true);
+  expect(snapshotChanged(idle, snapshot("running", [["u1", "user", "Summarize the changes"]]))).toBe(true);
+  expect(snapshotChanged(idle, snapshot("error", [["u1", "user", "Summarize the changes"], ["e3", "error", "Request failed"]]))).toBe(true);
 });
