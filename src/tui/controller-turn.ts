@@ -7,7 +7,7 @@ import { retryAttemptLabel, retryCauseLabel } from "../text/retry-status.ts";
 import { credentialStoreError } from "../auth/store.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { TuiRecovery, TuiTranscriptEntry, TuiControllerOptions } from "./controller-types.ts";
-import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, asShellOutcome, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, summarizeToolResult, webFetchCallUrl } from "./transcript-format.ts";
+import { MAX_TOOL_DISPLAY_CHARS, asEditDetails, asShellOutcome, boundDisplay, formatToolFinishedText, formatNumberedEditDiff, hostedSearchEntryText, summarizeToolResult, webFetchCallUrl } from "./transcript-format.ts";
 import { buildEditDiff, countLines, type DiffRow } from "../text/diff.ts";
 import { recoveryMessage, startupFailureCategory, startupRecoveryMessage, redactRecoveryDetails } from "./controller-support.ts";
 import { CompactionLayer } from "./controller-compaction.ts";
@@ -283,6 +283,7 @@ export abstract class TurnLayer extends CompactionLayer {
         maxConcurrentTools: this.maxConcurrentTools,
         extensions: this.extensions,
         clock: this.agentClock,
+        webSearch: this.configEditor?.settings.webSearch,
       })) {
         // Drain accepted calls on cancellation; replaced sessions ignore stale display events.
         if (this.activeAbort?.signal === signal) {
@@ -390,6 +391,7 @@ export abstract class TurnLayer extends CompactionLayer {
           } else {
             this.discardProvisionalAssistant();
           }
+          this.showHostedSearches(accepted);
         }
         this.currentAssistantId = undefined;
         this.modelAttemptStarted = false;
@@ -583,6 +585,12 @@ export abstract class TurnLayer extends CompactionLayer {
     this.currentAssistantId = entry.id;
     this.transcript.push(entry);
     return entry;
+  }
+
+  /** Add one compact hosted-search line after the committed answer, matching its place when the session is resumed. */
+  protected showHostedSearches(message: Parameters<typeof hostedSearchEntryText>[0]): void {
+    const text = hostedSearchEntryText(message);
+    if (text) this.transcript.push({ id: this.nextId("sys"), kind: "system", text });
   }
 
   /** Mark the current stream preview as abandoned without changing session history. */

@@ -14,6 +14,22 @@
 
 ### Added
 
+- xAI server-side web search on routes that are verified for it. With the new
+  `webSearch` setting at its default `"auto"`, requests on the xAI API-key route
+  with `grok-4.7` add `{"type": "web_search"}` after the function tools; the
+  Grok subscription route, native OpenAI, the ChatGPT subscription and
+  compatible endpoints send nothing new. `"webSearch": "off"` turns it off. xAI
+  bills hosted searches per call on the API-key route. Returned
+  `web_search_call` items are kept, capped at 8 KiB each and 32 per answer, in
+  the message's existing `providerMetadata` and replayed in their original
+  positions; the session format is unchanged. The TUI shows one `Searched the
+  web` line per answer that searched. Extension API (minor): `ModelRequest`
+  gains optional `hostedTools` with the new `HostedTool` type, set by Schway
+  after `beforeModel` and never visible to hooks (`ExtensionModelRequest` omits
+  it), and `ModelUsage` gains optional `hostedSearchCalls` and
+  `reportedHostedSearchCalls`. ADR 0007 records the boundary. An opt-in
+  `src/live/web-search-probe.ts --enable-live` check confirms a route; see
+  docs/live-providers.md (#323).
 - `chatgpt` names the ChatGPT subscription route wherever you type it:
   `--openai-auth chatgpt`, `/login chatgpt [--device] [--code …]`,
   `/logout chatgpt`, `"openaiAuth": "chatgpt"` and `/config set openaiAuth

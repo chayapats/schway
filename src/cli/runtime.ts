@@ -460,6 +460,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         ...(io.clock ? { clock: io.clock } : {}),
         maxTurns: settings.maxTurns,
         maxConcurrentTools: settings.maxConcurrentTools,
+        webSearch: settings.webSearch,
       })) {
         diagnostics.runtime(event);
         history?.observe(event);

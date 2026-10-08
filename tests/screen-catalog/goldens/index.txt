@@ -59,6 +59,7 @@ shell-long-failure
 shell-long-failure-expanded
 shell-outcomes
 web-fetch-rows
+web-search-line
 large-edit
 stopped-streaming
 stopped-tool

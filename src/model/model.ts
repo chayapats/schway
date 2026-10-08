@@ -19,12 +19,17 @@ export interface ModelTool {
   inputSchema: Record<string, unknown>;
 }
 
+/** Provider-hosted read-only lookup a model may run inside one response; a closed union that adapters may ignore. */
+export type HostedTool = "web_search";
+
 /** Provider-independent model request built by the agent loop. */
 export interface ModelRequest {
   systemPrompt: string;
   context: readonly ContextSection[];
   items: readonly ConversationItem[];
   tools?: readonly ModelTool[];
+  /** Hosted tools Schway chose for this session after extension hooks ran; an adapter that cannot honor an entry ignores it. */
+  hostedTools?: readonly HostedTool[];
   signal?: AbortSignal;
   /** Requested reasoning level; adapters fall back to their construction default when unset. */
   thinking?: ThinkingLevel;
@@ -38,6 +43,10 @@ export interface ModelUsage {
   cachedInputTokens?: number | null;
   /** Part of `outputTokens` the provider reports as reasoning; a subset, never added to the total. */
   reasoningTokens?: number | null;
+  /** Hosted web searches the response returned as items Schway kept; absent when the response returned none. */
+  hostedSearchCalls?: number;
+  /** Hosted web searches the provider's server-side tool counter reported, 0 included; absent when the provider sent no such counter. */
+  reportedHostedSearchCalls?: number;
 }
 
 /** Normalize nonnegative integer provider counters without inventing consumption. */

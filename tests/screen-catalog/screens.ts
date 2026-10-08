@@ -65,6 +65,14 @@ const fetchRow = (ui: ScreenHarness, id: string, url: string, finish?: { status:
   ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "web_fetch", ...finish, details: { ...(finish.details as object), statusLine } });
   ui.session.append({ type: "tool_result", id: `result-${id}`, toolCallId: id, content: finish.content, isError: finish.status !== "success" });
 };
+/** Commit one answer through the live controller path; `searches` adds that many kept hosted web search items. */
+const searchAnswer = (ui: ScreenHarness, id: string, answer: string, searches: number) => {
+  ui.controller.applyEvent({ type: "model.started", provider: "xai", model: "grok-4.7" });
+  ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: answer } });
+  const hosted = Array.from({ length: searches }, (_, index) => ({ position: 0, item: { type: "web_search_call", id: `ws-${id}-${index}`, status: "completed", action: { type: "search", query: "bangkok weather" } } }));
+  ui.session.append({ type: "assistant", id, content: [{ type: "text", text: answer }], ...(searches ? { providerMetadata: { xai: { response_id: `resp-${id}`, hosted_items: hosted } } } : {}) });
+  ui.controller.applyEvent({ type: "model.finished" });
+};
 const fetchDetails = (url: string, status: number, rawBytes: number, durationMs: number, extra: Record<string, unknown> = {}) =>
   ({ url, finalUrl: url, status, contentType: "text/html", rawBytes, textBytes: Math.round(rawBytes / 4), truncated: false, durationMs, ...extra });
 const longFailure = async (ui: ScreenHarness, expanded = false) => {
@@ -283,6 +291,11 @@ export const SCREENS: readonly Screen[] = [
     fetchRow(ui, "fetch-401", denied, { status: "error", content: `HTTP 401 Unauthorized · application/json · 58 bytes · ${denied}\n\nThe server returned HTTP 401 Unauthorized.\n\n{"error":"invalid token","docs":"${denied}"}`, details: { ...fetchDetails(denied, 401, 58, 180, { errorKind: "http-status" }), contentType: "application/json" } });
     fetchRow(ui, "fetch-running", "https://maps.example.test/route?from=Siam&to=Asok&api_key=AIzaSyFixture123");
   }, ready: (s, ui) => s.transcript.filter(entry => entry.kind === "tool").length === 4 && !/sk-live|AIzaSy/.test(ui.captureCharFrame()) },
+  { id: "web-search-line", title: "Hosted web search", description: "An answer that used hosted web search shows one compact line with its search count; an answer without search shows none.", noColorWidths: true, drive: async ui => {
+    searchAnswer(ui, "search-two", "Rain is likely in Bangkok after 3 pm, so leave before 2:30 pm. ฝนตกช่วงบ่าย 🌧️", 2);
+    searchAnswer(ui, "search-none", "The route from Siam to Asok takes about 12 minutes by BTS.", 0);
+    searchAnswer(ui, "search-one", "The BTS runs until midnight today.", 1);
+  }, ready: s => s.transcript.filter(entry => entry.kind === "system" && entry.text.startsWith("Searched the web")).length === 2 && s.transcript.filter(entry => entry.kind === "assistant").length === 3 },
   { id: "large-edit", title: "Large edit", description: "An edit above the inline limit keeps its summary and disclosure marker.", noColor: true, drive: ui => enter(ui, "Update the clamp implementation"), ready: completed },
   { id: "stopped-streaming", title: "Stopped streaming", description: "A requested stop retains incomplete output and an unsent Thai draft with a neutral continuation notice.", noColorWidths: true, drive: ui => stopWork(ui, false), ready: stopped },
   { id: "stopped-tool", title: "Stopped command", description: "A stopped shell keeps the completed file write and offers explicit continuation without sending the next draft.", noColorWidths: true, drive: ui => stopWork(ui, true), ready: stopped },
@@ -447,6 +460,7 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (screen.id.startsWith("web-fetch-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
+  if (screen.id === "web-search-line") variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   // Palettes and the sign-in chooser need a width where hint rows drop segments, showing what survives the cut.
   if (screen.id.startsWith("command-palette") || screen.id.startsWith("help-palette") || screen.id === "sign-in-chooser") variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   // Session picker and branch tree panels need 40-column variants so the narrow Esc invariant covers them.

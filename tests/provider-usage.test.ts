@@ -44,7 +44,7 @@ function withUsage(events: readonly object[], usage: unknown): object[] {
   return [...events.slice(0, -1), { ...complete, response: { ...complete.response, usage } }];
 }
 
-const DETAIL_CASES: Array<{ name: string; usage: unknown; expected: Required<ModelUsage> }> = [
+const DETAIL_CASES: Array<{ name: string; usage: unknown; expected: Required<Pick<ModelUsage, "inputTokens" | "outputTokens" | "cachedInputTokens" | "reasoningTokens">> }> = [
   { name: "reported details", usage: { input_tokens: 1200, output_tokens: 300, input_tokens_details: { cached_tokens: 1024 }, output_tokens_details: { reasoning_tokens: 256 } },
     expected: { inputTokens: 1200, outputTokens: 300, cachedInputTokens: 1024, reasoningTokens: 256 } },
   { name: "no detail objects", usage: { input_tokens: 3, output_tokens: 2 },

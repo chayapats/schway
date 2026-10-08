@@ -169,6 +169,75 @@ probe with protocol fixtures only; that is not live evidence.
 xAI routes because xAI documents `prompt_cache_key` for its Responses API, not
 because of a probe result.
 
+## Hosted web search check
+
+This operator procedure decides whether an xAI route may receive hosted
+[web search](configuration.md#web-search) and whether it accepts the hosted
+items Schway replays. It is a **paid/remote opt-in**: never a default
+`bun test` case, CI job or eval, and it runs only when an operator chooses to.
+Run it for the Grok subscription route, and for the xAI API-key route when a
+key is available. It reads `hostedSearchCalls`, `reportedHostedSearchCalls`,
+`inputTokens` and `outputTokens` from the `ModelUsage` contract.
+
+```sh
+# Plan only: prints a skipped report, reads no credential and sends nothing.
+bun --no-env-file src/live/web-search-probe.ts --route grok
+# Grok subscription (sign in first with /login grok):
+bun --no-env-file src/live/web-search-probe.ts --enable-live --route grok --model grok-4.7
+# xAI API key, from the environment only (export it deliberately, not in argv):
+bun --no-env-file src/live/web-search-probe.ts --enable-live --route xai-api-key --model grok-4.7
+```
+
+- **Opt-in and credentials.** Nothing is read or sent without `--enable-live`.
+  Each lane uses its existing credential source only: the saved
+  `grok-subscription:xai` login for `grok`, and `XAI_API_KEY` in the
+  environment for `xai-api-key`. No credential is accepted in argv, and none
+  appears in the output. The check never starts a sign-in and never switches
+  routes. A missing login reports `pending/missing_subscription`; a missing
+  `XAI_API_KEY` reports `skipped/missing_credentials`.
+- **Calls.** One turn asks a question that needs current web facts, with hosted
+  web search enabled. Two follow-ups then resend that turn: one replays its
+  hosted items in their original positions, and one leaves them out, as the
+  per-route omit switch would. All three send `{"type": "web_search"}`.
+- **Bounds.** Every call sends `max_output_tokens` (`--max-output-tokens`,
+  default 4096, 1024–65536); the cap counts reasoning. Each call has its own
+  deadline (`--timeout-ms`, default 120000) and a 2 MiB response-body budget.
+  Thinking stays unset, so no model list is read. Redirects are refused. No
+  retries run.
+- **Report.** JSON on stdout with UTC `testedAt`, checked-out `revision`,
+  `route`, `model` and `maxOutputTokens`. For each call it gives the phase
+  (`search`, `replay-with-hosted`, `replay-without-hosted`), status or error
+  class (`ok`, `incomplete`, `http_error`, `network_error`, `timeout`,
+  `output_limit`, `error`), the last HTTP status, the hosted items kept from the
+  response and replayed in the request, `hostedSearchCalls`,
+  `reportedHostedSearchCalls`, `inputTokens`, `outputTokens`, time to the first
+  text or thinking delta and total time. It never includes a token, header,
+  endpoint, the question, a search query, a source URL, the answer or a raw
+  response.
+- **Verdict.** `summary` gives `firstAccepted`, `hostedItems`,
+  `replayWithHostedAccepted`, `replayWithoutHostedAccepted` and a `verdict`:
+  `pass` (search accepted, hosted items returned, replay accepted),
+  `replay_rejected` (a 4xx on the replay with hosted items, while the follow-up
+  without them passed), `unsupported` (a 4xx on the search request),
+  `no_search` (accepted, but no hosted item came back) or `inconclusive`.
+  Exit code 0 means every call completed, 2 means skipped or incomplete, 1 a
+  failure or usage error.
+
+Preserve the JSON with its date, revision, model and route, and record it in
+the PR that changes the allowlist (`HOSTED_TOOL_ALLOWLIST` in
+`src/model/hosted-tools.ts`) and in the table below. A `pass` admits the route
+and model. `replay_rejected` admits it with that route's
+`XAI_HOSTED_ITEM_REPLAY` switch turned off. `unsupported` is recorded here as
+unsupported. `bun test tests/web-search-probe.test.ts` checks the procedure with
+protocol fixtures only; that is not live evidence.
+
+| Route | Model | Status | Evidence |
+| --- | --- | --- | --- |
+| xAI API key | `grok-4.7` | **Allowed from documentation; live check not run** | xAI documents hosted web search on `/v1/responses` with `grok-4.7` ([web search](https://docs.x.ai/developers/tools/web-search), read 2026-10-08) and resending earlier output items for stateless conversations ([advanced usage](https://docs.x.ai/docs/guides/tools/advanced-usage)). Replay is on. |
+| Grok subscription | `grok-4.7` | **Off; live check not run** | No official xAI page covers server-side tools with a subscription login. |
+
+**Recorded runs: none.** No operator has run this check.
+
 ## Reasoning controls and deterministic verification
 
 Normal Schway CLI/TUI requests share the reasoning policy described in

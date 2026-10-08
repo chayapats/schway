@@ -41,6 +41,8 @@ export interface ProviderLoaderInput {
   codexStore?: CredentialStore;
   /** Verified route capabilities used by Codex, xAI/Grok and OpenRouter. */
   modelCapability?: ModelCapability;
+  /** Probe-only override of the xAI per-route hosted item replay switch; production leaves it unset. */
+  replayHostedItems?: boolean;
 }
 
 /**
@@ -81,6 +83,7 @@ async function loadSelectedModel(input: ProviderLoaderInput, fetchFn?: FetchLike
         refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
         authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
         model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, authRoute: "grok", fetch: fetchFn,
+        replayHostedItems: input.replayHostedItems,
       }));
     }
     return createXaiModel({
@@ -90,6 +93,7 @@ async function loadSelectedModel(input: ProviderLoaderInput, fetchFn?: FetchLike
       thinking: input.thinking,
       modelCapability: input.modelCapability,
       fetch: fetchFn,
+      replayHostedItems: input.replayHostedItems,
     });
   }
   if (input.provider === "openai") {

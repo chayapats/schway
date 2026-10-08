@@ -12,7 +12,9 @@ import type {
   ProviderMetadata,
 } from "../../conversation/types.ts";
 import { reportedTokens } from "../model.ts";
+import { HOSTED_ITEMS_KEY, MAX_HOSTED_ITEM_BYTES, MAX_HOSTED_ITEMS, keptHostedItems, serializedBytes, type KeptHostedItem } from "../hosted-tools.ts";
 import type {
+  HostedTool,
   ModelRequest,
   ModelStreamEvent,
   ModelTool,
@@ -27,26 +29,32 @@ export type ResponsesReasoning =
   | { effort: "none"; summary?: "auto" }
   | { effort: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"; summary: "auto" };
 
-/** Build one Responses request that stores nothing and asks for encrypted reasoning. */
+/** Build one Responses request that stores nothing and asks for encrypted reasoning; hosted tools follow the function tools. */
 export function buildResponsesRequest<Reasoning extends ResponsesReasoning | undefined>(input: {
   model: string;
   maxOutputTokens: number;
   reasoning?: Reasoning;
   request: ModelRequest;
   namespace: ResponsesNamespace;
+  /** Hosted tools this adapter honors; the caller passes only entries its route accepts. */
+  hostedTools?: readonly HostedTool[];
+  /** Replay kept hosted items from this namespace at their original positions; off leaves them stored but unsent. */
+  replayHostedItems?: boolean;
 }) {
+  const tools = [
+    ...(input.request.tools && input.request.tools.length > 0 ? toResponsesTools(input.request.tools) : []),
+    ...toHostedTools(input.hostedTools),
+  ];
   return {
     model: input.model,
     stream: true as const,
     store: false as const,
     ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
     instructions: toInstructions(input.request),
-    input: toResponsesInput(input.request.items, input.namespace),
+    input: toResponsesInput(input.request.items, input.namespace, input.replayHostedItems === true),
     max_output_tokens: input.maxOutputTokens,
     include: ["reasoning.encrypted_content"] as ["reasoning.encrypted_content"],
-    ...(input.request.tools && input.request.tools.length > 0
-      ? { tools: toResponsesTools(input.request.tools) }
-      : {}),
+    ...(tools.length > 0 ? { tools } : {}),
   };
 }
 
@@ -60,7 +68,9 @@ export async function* assembleResponsesStream(input: {
   for await (const event of input.stream) {
     if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
       const usage = event.response.usage;
-      if (usage) yield { type: "usage", usage: responsesUsage(usage) };
+      // Searches are counted only from items Schway kept; nothing is inferred when none arrived.
+      const searches = builder.hosted().filter(kept => kept.item.type === "web_search_call").length;
+      if (usage) yield { type: "usage", usage: { ...responsesUsage(usage), ...(searches > 0 ? { hostedSearchCalls: searches } : {}) } };
     }
     if (event.type === "response.incomplete") {
       throw new Error(`${input.label} response incomplete`);
@@ -81,11 +91,15 @@ export function responsesUsage(usage: unknown): ModelUsage {
   const record = isRecord(usage) ? usage : {};
   const inputDetails = isRecord(record.input_tokens_details) ? record.input_tokens_details : {};
   const outputDetails = isRecord(record.output_tokens_details) ? record.output_tokens_details : {};
+  // xAI reports executed server-side tools per kind; a missing counter is left out rather than read as zero.
+  const toolDetails = isRecord(record.server_side_tool_usage_details) ? record.server_side_tool_usage_details : {};
+  const reportedSearches = reportedTokens(toolDetails.web_search_calls);
   return {
     inputTokens: reportedTokens(record.input_tokens),
     outputTokens: reportedTokens(record.output_tokens),
     cachedInputTokens: reportedTokens(inputDetails.cached_tokens),
     reasoningTokens: reportedTokens(outputDetails.reasoning_tokens),
+    ...(reportedSearches !== null ? { reportedHostedSearchCalls: reportedSearches } : {}),
   };
 }
 
@@ -112,11 +126,16 @@ function toResponsesTools(tools: readonly ModelTool[]) {
   }));
 }
 
+/** Map hosted tools onto Responses tool entries, once each, with no extra options. */
+function toHostedTools(hosted: readonly HostedTool[] | undefined) {
+  return hosted?.includes("web_search") ? [{ type: "web_search" as const }] : [];
+}
+
 /**
  * Convert Schway conversation items to Responses input for one metadata namespace.
- * Other providers' reasoning items and function-call IDs are omitted.
+ * Other providers' reasoning items, hosted items and function-call IDs are omitted.
  */
-function toResponsesInput(items: readonly ConversationItem[], namespace: ResponsesNamespace): ResponseInput {
+function toResponsesInput(items: readonly ConversationItem[], namespace: ResponsesNamespace, replayHosted: boolean): ResponseInput {
   const input: ResponseInput = [];
   for (const item of items) {
     if (item.type === "user") {
@@ -137,7 +156,11 @@ function toResponsesInput(items: readonly ConversationItem[], namespace: Respons
       });
       continue;
     }
-    for (const block of item.content) {
+    // Each kept hosted item goes back before the content block that followed it in the original response.
+    const hosted = replayHosted ? keptHostedItems(item.providerMetadata?.[namespace]).sort((a, b) => a.position - b.position) : [];
+    let next = 0;
+    for (const [index, block] of item.content.entries()) {
+      while (next < hosted.length && hosted[next]!.position <= index) input.push(hosted[next++]!.item as unknown as ResponseInput[number]);
       if (block.type === "thinking") {
         const reasoning = namespaceField(block.providerMetadata, namespace, "item");
         if (reasoning && typeof reasoning === "object" && !Array.isArray(reasoning)) {
@@ -162,6 +185,7 @@ function toResponsesInput(items: readonly ConversationItem[], namespace: Respons
         ...(typeof itemId === "string" && itemId.length > 0 ? { id: itemId } : {}),
       });
     }
+    while (next < hosted.length) input.push(hosted[next++]!.item as unknown as ResponseInput[number]);
   }
   return input;
 }
@@ -188,7 +212,8 @@ function namespaceField(
 type StreamBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string; item?: unknown }
-  | { type: "tool_call"; id: string; name: string; json: string; itemId?: string };
+  | { type: "tool_call"; id: string; name: string; json: string; itemId?: string }
+  | { type: "hosted"; item?: Record<string, unknown> };
 
 /** Accumulate Responses stream events into Schway deltas and a final message. */
 function createStreamBuilder(namespace: ResponsesNamespace) {
@@ -225,42 +250,21 @@ function createStreamBuilder(namespace: ResponsesNamespace) {
           status = event.response.status;
           return [];
         default:
+          // Includes response.web_search_call.* progress, which carries no text or thinking.
           return [];
       }
     },
+    /** Completed hosted items within the size and count caps, each with the number of content blocks before it. */
+    hosted(): KeptHostedItem[] {
+      return assemble(blocks, namespace).hosted;
+    },
     /** Build the Schway assistant message after the stream ends. */
     complete(): AssistantMessage {
-      const content: AssistantContent[] = [];
-      for (const block of blocks) {
-        if (!block) continue;
-        if (block.type === "text") {
-          content.push({ type: "text", text: block.text });
-          continue;
-        }
-        if (block.type === "thinking") {
-          if (!block.text && block.item === undefined) continue;
-          content.push({
-            type: "thinking",
-            text: block.text,
-            ...(block.item !== undefined
-              ? { providerMetadata: { [namespace]: { item: block.item } } }
-              : {}),
-          });
-          continue;
-        }
-        content.push({
-          type: "tool_call",
-          id: block.id,
-          name: block.name,
-          arguments: parseToolArguments(block.json),
-          ...(block.itemId
-            ? { providerMetadata: { [namespace]: { item_id: block.itemId } } }
-            : {}),
-        });
-      }
+      const { content, hosted } = assemble(blocks, namespace);
       const metadata: Record<string, unknown> = {};
       if (responseId) metadata.response_id = responseId;
       if (status) metadata.status = status;
+      if (hosted.length > 0) metadata[HOSTED_ITEMS_KEY] = hosted;
       return {
         type: "assistant",
         id,
@@ -271,6 +275,54 @@ function createStreamBuilder(namespace: ResponsesNamespace) {
       };
     },
   };
+}
+
+/** Build content blocks in output order and keep hosted items with their position among those blocks. */
+function assemble(blocks: readonly StreamBlock[], namespace: ResponsesNamespace): { content: AssistantContent[]; hosted: KeptHostedItem[] } {
+  const content: AssistantContent[] = [];
+  const hosted: KeptHostedItem[] = [];
+  for (const block of blocks) {
+    if (!block) continue;
+    if (block.type === "hosted") {
+      // Only completed items are kept; an oversized item or one past the count cap is dropped, and the message still commits.
+      if (block.item && hosted.length < MAX_HOSTED_ITEMS && serializedBytes(block.item) <= MAX_HOSTED_ITEM_BYTES) {
+        hosted.push({ position: content.length, item: block.item });
+      }
+      continue;
+    }
+    if (block.type === "text") {
+      content.push({ type: "text", text: block.text });
+      continue;
+    }
+    if (block.type === "thinking") {
+      if (!block.text && block.item === undefined) continue;
+      content.push({
+        type: "thinking",
+        text: block.text,
+        ...(block.item !== undefined
+          ? { providerMetadata: { [namespace]: { item: block.item } } }
+          : {}),
+      });
+      continue;
+    }
+    content.push({
+      type: "tool_call",
+      id: block.id,
+      name: block.name,
+      arguments: parseToolArguments(block.json),
+      ...(block.itemId
+        ? { providerMetadata: { [namespace]: { item_id: block.itemId } } }
+        : {}),
+    });
+  }
+  return { content, hosted };
+}
+
+/** Keep only the fields a Responses `web_search_call` input item accepts: type, id, status and action. */
+function hostedReplayItem(item: Record<string, unknown>): Record<string, unknown> {
+  const kept: Record<string, unknown> = { type: item.type };
+  for (const key of ["id", "status", "action"] as const) if (item[key] !== undefined && item[key] !== null) kept[key] = item[key];
+  return kept;
 }
 
 /** Open a stream block from an output_item.added payload. */
@@ -284,10 +336,15 @@ function startBlock(blocks: StreamBlock[], index: number, item: ResponseOutputIt
     return;
   }
   if (item.type === "function_call") blocks[index] = toolCallBlock(item);
+  else if (item.type === "web_search_call") blocks[index] = { type: "hosted" };
 }
 
-/** Finalize a block from output_item.done, capturing reasoning metadata. */
+/** Finalize a block from output_item.done, capturing reasoning metadata and completed hosted items. */
 function finishBlock(blocks: StreamBlock[], index: number, item: ResponseOutputItem): void {
+  if (item.type === "web_search_call") {
+    blocks[index] = { type: "hosted", item: hostedReplayItem(item as unknown as Record<string, unknown>) };
+    return;
+  }
   if (item.type === "reasoning") {
     const current = blocks[index];
     const summary = reasoningSummaryText(item);

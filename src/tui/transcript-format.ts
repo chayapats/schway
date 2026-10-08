@@ -5,6 +5,7 @@ import type { SessionRecord } from "../conversation/types.ts";
 import type { TuiShellOutcome, TuiTranscriptEntry } from "./controller-types.ts";
 import { buildEditDiff, buildEditDiffHunks, type DiffRow } from "../text/diff.ts";
 import { formatCount, formatDuration } from "../text/format.ts";
+import { hostedSearchCount } from "../model/hosted-tools.ts";
 
 /** Bound on displayed tool-result characters; session data stays complete. */
 export const MAX_TOOL_DISPLAY_CHARS = 2000;
@@ -133,6 +134,12 @@ function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+/** One compact transcript line for an assistant message whose response ran hosted web searches; undefined when it ran none. */
+export function hostedSearchEntryText(message: Parameters<typeof hostedSearchCount>[0]): string | undefined {
+  const count = hostedSearchCount(message);
+  return count === 0 ? undefined : count === 1 ? "Searched the web" : `Searched the web (${count})`;
+}
+
 /** Rebuild bounded display history without replaying tools, pairing results chronologically within each accepted call group. */
 export function buildTranscriptFromSession(items: readonly SessionRecord[]): TuiTranscriptEntry[] {
   const transcript: TuiTranscriptEntry[] = [];
@@ -175,6 +182,9 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
       if (text.length > 0) {
         transcript.push({ id: nextId("asst"), kind: "assistant", text });
       }
+      // The search line follows its answer, so it reads as part of that answer rather than the next one.
+      const searched = hostedSearchEntryText(item);
+      if (searched) transcript.push({ id: nextId("sys"), kind: "system", text: searched });
     } else if (item.type === "tool_result") {
       const entry = pending.get(item.toolCallId);
       if (entry) {
