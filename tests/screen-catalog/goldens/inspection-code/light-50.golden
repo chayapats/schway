@@ -28,7 +28,7 @@ cursor 1 1 hidden
    json                           Alt+I inspect
   {"next":true}
 
-  ✓  READ  ผลลัพธ์ภาษาไทย 🧪                  ▸
+  ✓  READ   ผลลัพธ์ภาษาไทย 🧪                 ▸
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -123,9 +123,9 @@ cursor 1 1 hidden
 22 1-2 #0a5894 #e1e3df -
 22 2-3 #19612f #e1e3df b
 22 3-4 #1d232c #e1e3df -
-22 4-10 #0a5894 #c7d2d6 b
-22 10-26 #1d232c #e1e3df -
-22 26-46 #545e6c #e1e3df -
+22 4-11 #0a5894 #c7d2d6 b
+22 11-27 #1d232c #e1e3df -
+22 27-46 #545e6c #e1e3df -
 22 46-48 #ffffff #e1e3df -
 22 48-50 #ffffff #f7f7f4 -
 23 0-50 #ffffff #f7f7f4 -

@@ -8,7 +8,7 @@ cursor 6 27 visible
 == text
  ⚡ schway  /project
 
-  !  BASH  printf '%s\n' … Exit 1 ▾
+  !  BASH   printf '%s\n'… Exit 1 ▾
     Exit code: 1
     ตรวจผลลัพธ์ภาษาไทย 🧪
     The command returned a nonzero
@@ -48,8 +48,8 @@ cursor 6 27 visible
 02 1-2 #0a5894 #e1e3df -
 02 2-3 #7a5000 #e1e3df b
 02 3-4 #1d232c #e1e3df -
-02 4-10 #6a3fb0 #d3cfd9 b
-02 10-26 #1d232c #e1e3df -
+02 4-11 #6a3fb0 #d3cfd9 b
+02 11-26 #1d232c #e1e3df -
 02 26-27 #545e6c #e1e3df -
 02 27-33 #7a5000 #e1e3df -
 02 33-36 #545e6c #e1e3df -

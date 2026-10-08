@@ -28,8 +28,8 @@ cursor 7 27 visible
 
    Choose model · Enter use · Esc back
    › fake-coder · API · localhost:8787
-    Browse all models
-    Connect a provider
+     Browse all models
+     Connect a provider
    Checking models · Esc back
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Search models or type provider/model…
@@ -77,13 +77,13 @@ cursor 7 27 visible
 21 78-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -
-22 3-21 #e6eaf0 #1e2430 -
-22 21-78 #ffffff #1e2430 -
+22 3-22 #e6eaf0 #1e2430 -
+22 22-78 #ffffff #1e2430 -
 22 78-80 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
-23 3-22 #e6eaf0 #1e2430 -
-23 22-78 #ffffff #1e2430 -
+23 3-23 #e6eaf0 #1e2430 -
+23 23-78 #ffffff #1e2430 -
 23 78-80 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -

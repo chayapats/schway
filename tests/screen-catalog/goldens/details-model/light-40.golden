@@ -16,9 +16,9 @@ cursor 6 16 visible
 
   Choose model · Enter use · Esc back
   › GPT-6 As… · ChatGPT subscription ✓
-   fake-coder · API · localhost:8787
-   Browse all models
-   Connect a provider
+    fake-coder · API · localhost:8787
+    Browse all models
+    Connect a provider
   gpt-6-astra · 1,050,000 context · 1…
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Sear
@@ -57,18 +57,18 @@ cursor 6 16 visible
 09 39-40 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-2 #ffffff #e1e3df -
-10 2-36 #1d232c #e1e3df -
-10 36-39 #ffffff #e1e3df -
+10 2-37 #1d232c #e1e3df -
+10 37-39 #ffffff #e1e3df -
 10 39-40 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
 11 1-2 #ffffff #e1e3df -
-11 2-20 #1d232c #e1e3df -
-11 20-39 #ffffff #e1e3df -
+11 2-21 #1d232c #e1e3df -
+11 21-39 #ffffff #e1e3df -
 11 39-40 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
 12 1-2 #ffffff #e1e3df -
-12 2-21 #1d232c #e1e3df -
-12 21-39 #ffffff #e1e3df -
+12 2-22 #1d232c #e1e3df -
+12 22-39 #ffffff #e1e3df -
 12 39-40 #ffffff #f7f7f4 -
 13 0-1 #ffffff #f7f7f4 -
 13 1-2 #ffffff #e1e3df -

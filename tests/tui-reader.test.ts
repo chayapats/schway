@@ -337,7 +337,7 @@ test("R reads code and tables while existing tool and code identities keep their
   const toolId = ui.controller.snapshot().transcript.find(entry => entry.kind === "tool")!.id;
   const focused = () => {
     const label = (node: unknown) => ((node as { getChildren(): unknown[] }).getChildren()[0] as { getChildren(): TextRenderable[] }).getChildren()[0]!.plainText;
-    if ((ui.renderer.root.findDescendantById(`message-${toolId}`)!.getChildren()[0] as TextRenderable).plainText.startsWith(" › ")) return "tool";
+    if ((ui.renderer.root.findDescendantById(`message-${toolId}`)!.getChildren()[0] as TextRenderable).plainText.startsWith("›")) return "tool";
     return [`code-${id}-0`, `table-${id}-0`, `code-${id}-1`, `table-${id}-1`].find(target => label(ui.renderer.root.findDescendantById(target)).includes("›")) ?? "none";
   };
   const order: string[] = [];

@@ -8,7 +8,7 @@ cursor 6 27 visible
 == text
  ⚡ schway  /project
 
-  !  BASH  printf '%s\n' … Exit 1 ▸
+  !  BASH   printf '%s\n'… Exit 1 ▸
 
 
 
@@ -48,8 +48,8 @@ cursor 6 27 visible
 02 1-2 #e6eaf0 #1e2430 -
 02 2-3 #e6eaf0 #1e2430 b
 02 3-4 #e6eaf0 #1e2430 -
-02 4-10 #e6eaf0 #4a505a b
-02 10-26 #e6eaf0 #1e2430 -
+02 4-11 #e6eaf0 #4a505a b
+02 11-26 #e6eaf0 #1e2430 -
 02 26-27 #8b95a7 #1e2430 -
 02 27-33 #e6eaf0 #1e2430 -
 02 33-36 #8b95a7 #1e2430 -

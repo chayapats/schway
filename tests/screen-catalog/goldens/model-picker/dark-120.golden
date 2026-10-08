@@ -27,9 +27,9 @@ cursor 7 27 visible
 
    Choose model · Enter use · Esc back
    › GPT-6 Astra · ChatGPT subscription ✓
-    fake-coder · API · localhost:8787
-    Browse all models
-    Connect a provider
+     fake-coder · API · localhost:8787
+     Browse all models
+     Connect a provider
    Type to search · Ctrl+P pin · F2 details
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Search models or type provider/model…
@@ -76,18 +76,18 @@ cursor 7 27 visible
 20 118-120 #ffffff #0e1117 -
 21 0-2 #ffffff #0e1117 -
 21 2-3 #ffffff #1e2430 -
-21 3-37 #e6eaf0 #1e2430 -
-21 37-118 #ffffff #1e2430 -
+21 3-38 #e6eaf0 #1e2430 -
+21 38-118 #ffffff #1e2430 -
 21 118-120 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -
-22 3-21 #e6eaf0 #1e2430 -
-22 21-118 #ffffff #1e2430 -
+22 3-22 #e6eaf0 #1e2430 -
+22 22-118 #ffffff #1e2430 -
 22 118-120 #ffffff #0e1117 -
 23 0-2 #ffffff #0e1117 -
 23 2-3 #ffffff #1e2430 -
-23 3-22 #e6eaf0 #1e2430 -
-23 22-118 #ffffff #1e2430 -
+23 3-23 #e6eaf0 #1e2430 -
+23 23-118 #ffffff #1e2430 -
 23 118-120 #ffffff #0e1117 -
 24 0-2 #ffffff #0e1117 -
 24 2-3 #ffffff #1e2430 -

@@ -8,19 +8,19 @@ cursor 7 33 visible
 == text
  ⚡ schway  /project
 
-   ✓  BASH  exit 0                                                                                 Exit 0 · 1.2s ▸
-   !  BASH  exit 7                                                                                 Exit 7 · 1.2s ▸
-   −  BASH  kill -TERM $$                                                                         Stopped · 1.2s ▸
-   −  BASH  sleep 5                                                                                      Stopped ▸
+   ✓  BASH   exit 0                                                                                Exit 0 · 1.2s ▸
+   !  BASH   exit 7                                                                                Exit 7 · 1.2s ▸
+   −  BASH   kill -TERM $$                                                                        Stopped · 1.2s ▸
+   −  BASH   sleep 5                                                                                     Stopped ▸
      Command cancelled.
 
-   !  BASH  sleep 5                                                                                    Timed out ▾
+   !  BASH   sleep 5                                                                                   Timed out ▾
      Command timed out.
      Tool failed. Inspect this result before continuing.
 
-   −  BASH  run saved command                                                            No exit observed · 1.2s ▸
-   −  BASH  inspect invalid exit details                                                 No exit observed · 1.2s ▸
-   !  BASH  run unavailable command                                                                   Tool error ▾
+   −  BASH   run saved command                                                           No exit observed · 1.2s ▸
+   −  BASH   inspect invalid exit details                                                No exit observed · 1.2s ▸
+   !  BASH   run unavailable command                                                                  Tool error ▾
      Command could not start.
      Tool failed. Inspect this result before continuing.
 
@@ -54,9 +54,9 @@ cursor 7 33 visible
 02 2-3 #0a5894 #e1e3df -
 02 3-4 #19612f #e1e3df b
 02 4-5 #1d232c #e1e3df -
-02 5-11 #6a3fb0 #d3cfd9 b
-02 11-18 #1d232c #e1e3df -
-02 18-99 #545e6c #e1e3df -
+02 5-12 #6a3fb0 #d3cfd9 b
+02 12-19 #1d232c #e1e3df -
+02 19-99 #545e6c #e1e3df -
 02 99-112 #19612f #e1e3df -
 02 112-115 #545e6c #e1e3df -
 02 115-117 #ffffff #e1e3df -
@@ -65,9 +65,9 @@ cursor 7 33 visible
 03 2-3 #0a5894 #e1e3df -
 03 3-4 #7a5000 #e1e3df b
 03 4-5 #1d232c #e1e3df -
-03 5-11 #6a3fb0 #d3cfd9 b
-03 11-18 #1d232c #e1e3df -
-03 18-99 #545e6c #e1e3df -
+03 5-12 #6a3fb0 #d3cfd9 b
+03 12-19 #1d232c #e1e3df -
+03 19-99 #545e6c #e1e3df -
 03 99-112 #7a5000 #e1e3df -
 03 112-115 #545e6c #e1e3df -
 03 115-117 #ffffff #e1e3df -
@@ -76,18 +76,18 @@ cursor 7 33 visible
 04 2-3 #0a5894 #e1e3df -
 04 3-4 #545e6c #e1e3df b
 04 4-5 #1d232c #e1e3df -
-04 5-11 #6a3fb0 #d3cfd9 b
-04 11-25 #1d232c #e1e3df -
-04 25-115 #545e6c #e1e3df -
+04 5-12 #6a3fb0 #d3cfd9 b
+04 12-26 #1d232c #e1e3df -
+04 26-115 #545e6c #e1e3df -
 04 115-117 #ffffff #e1e3df -
 04 117-120 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
 05 2-3 #0a5894 #e1e3df -
 05 3-4 #545e6c #e1e3df b
 05 4-5 #1d232c #e1e3df -
-05 5-11 #6a3fb0 #d3cfd9 b
-05 11-19 #1d232c #e1e3df -
-05 19-115 #545e6c #e1e3df -
+05 5-12 #6a3fb0 #d3cfd9 b
+05 12-20 #1d232c #e1e3df -
+05 20-115 #545e6c #e1e3df -
 05 115-117 #ffffff #e1e3df -
 05 117-120 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
@@ -100,9 +100,9 @@ cursor 7 33 visible
 08 2-3 #0a5894 #e1e3df -
 08 3-4 #a61f16 #e1e3df b
 08 4-5 #1d232c #e1e3df -
-08 5-11 #6a3fb0 #d3cfd9 b
-08 11-19 #1d232c #e1e3df -
-08 19-103 #545e6c #e1e3df -
+08 5-12 #6a3fb0 #d3cfd9 b
+08 12-20 #1d232c #e1e3df -
+08 20-103 #545e6c #e1e3df -
 08 103-112 #a61f16 #e1e3df -
 08 112-115 #545e6c #e1e3df -
 08 115-117 #ffffff #e1e3df -
@@ -122,27 +122,27 @@ cursor 7 33 visible
 12 2-3 #0a5894 #e1e3df -
 12 3-4 #545e6c #e1e3df b
 12 4-5 #1d232c #e1e3df -
-12 5-11 #6a3fb0 #d3cfd9 b
-12 11-29 #1d232c #e1e3df -
-12 29-115 #545e6c #e1e3df -
+12 5-12 #6a3fb0 #d3cfd9 b
+12 12-30 #1d232c #e1e3df -
+12 30-115 #545e6c #e1e3df -
 12 115-117 #ffffff #e1e3df -
 12 117-120 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
 13 2-3 #0a5894 #e1e3df -
 13 3-4 #545e6c #e1e3df b
 13 4-5 #1d232c #e1e3df -
-13 5-11 #6a3fb0 #d3cfd9 b
-13 11-40 #1d232c #e1e3df -
-13 40-115 #545e6c #e1e3df -
+13 5-12 #6a3fb0 #d3cfd9 b
+13 12-41 #1d232c #e1e3df -
+13 41-115 #545e6c #e1e3df -
 13 115-117 #ffffff #e1e3df -
 13 117-120 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
 14 2-3 #0a5894 #e1e3df -
 14 3-4 #a61f16 #e1e3df b
 14 4-5 #1d232c #e1e3df -
-14 5-11 #6a3fb0 #d3cfd9 b
-14 11-35 #1d232c #e1e3df -
-14 35-102 #545e6c #e1e3df -
+14 5-12 #6a3fb0 #d3cfd9 b
+14 12-36 #1d232c #e1e3df -
+14 36-102 #545e6c #e1e3df -
 14 102-112 #a61f16 #e1e3df -
 14 112-115 #545e6c #e1e3df -
 14 115-117 #ffffff #e1e3df -

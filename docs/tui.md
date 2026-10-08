@@ -611,7 +611,8 @@ detected here` marks newer turns with the same limit.
 Code headers show **Alt+I inspect** until selected. Inspection returns to a
 still-valid previous target; otherwise it starts with the first block or result
 in view, or the nearest one when none is visible. The selected code or table header shows
-**›** and **R read · C copy · Esc back**, including without color. Opening inspection
+**›** and **R read · C copy · Esc back**, including without color. A selected tool
+result shows **›** in its leading cell, and the row does not move. Opening inspection
 never copies. If a selection needs to scroll or repaint, `Showing selection · C
 copy again` asks for another explicit C; it does not queue a copy.
 

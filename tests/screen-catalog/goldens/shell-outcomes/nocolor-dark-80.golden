@@ -8,19 +8,19 @@ cursor 7 33 visible
 == text
  ⚡ schway  /project
 
-   ✓  BASH  exit 0                                         Exit 0 · 1.2s ▸
-   !  BASH  exit 7                                         Exit 7 · 1.2s ▸
-   −  BASH  kill -TERM $$                                 Stopped · 1.2s ▸
-   −  BASH  sleep 5                                              Stopped ▸
+   ✓  BASH   exit 0                                        Exit 0 · 1.2s ▸
+   !  BASH   exit 7                                        Exit 7 · 1.2s ▸
+   −  BASH   kill -TERM $$                                Stopped · 1.2s ▸
+   −  BASH   sleep 5                                             Stopped ▸
      Command cancelled.
 
-   !  BASH  sleep 5                                            Timed out ▾
+   !  BASH   sleep 5                                           Timed out ▾
      Command timed out.
      Tool failed. Inspect this result before continuing.
 
-   −  BASH  run saved command                    No exit observed · 1.2s ▸
-   −  BASH  inspect invalid exit details         No exit observed · 1.2s ▸
-   !  BASH  run unavailable command                           Tool error ▾
+   −  BASH   run saved command                   No exit observed · 1.2s ▸
+   −  BASH   inspect invalid exit details        No exit observed · 1.2s ▸
+   !  BASH   run unavailable command                          Tool error ▾
      Command could not start.
      Tool failed. Inspect this result before continuing.
 
@@ -54,9 +54,9 @@ cursor 7 33 visible
 02 2-3 #e6eaf0 #1e2430 -
 02 3-4 #e6eaf0 #1e2430 b
 02 4-5 #e6eaf0 #1e2430 -
-02 5-11 #e6eaf0 #4a505a b
-02 11-18 #e6eaf0 #1e2430 -
-02 18-59 #8b95a7 #1e2430 -
+02 5-12 #e6eaf0 #4a505a b
+02 12-19 #e6eaf0 #1e2430 -
+02 19-59 #8b95a7 #1e2430 -
 02 59-72 #e6eaf0 #1e2430 -
 02 72-75 #8b95a7 #1e2430 -
 02 75-77 #ffffff #1e2430 -
@@ -65,9 +65,9 @@ cursor 7 33 visible
 03 2-3 #e6eaf0 #1e2430 -
 03 3-4 #e6eaf0 #1e2430 b
 03 4-5 #e6eaf0 #1e2430 -
-03 5-11 #e6eaf0 #4a505a b
-03 11-18 #e6eaf0 #1e2430 -
-03 18-59 #8b95a7 #1e2430 -
+03 5-12 #e6eaf0 #4a505a b
+03 12-19 #e6eaf0 #1e2430 -
+03 19-59 #8b95a7 #1e2430 -
 03 59-72 #e6eaf0 #1e2430 -
 03 72-75 #8b95a7 #1e2430 -
 03 75-77 #ffffff #1e2430 -
@@ -76,18 +76,18 @@ cursor 7 33 visible
 04 2-3 #e6eaf0 #1e2430 -
 04 3-4 #8b95a7 #1e2430 b
 04 4-5 #e6eaf0 #1e2430 -
-04 5-11 #e6eaf0 #4a505a b
-04 11-25 #e6eaf0 #1e2430 -
-04 25-75 #8b95a7 #1e2430 -
+04 5-12 #e6eaf0 #4a505a b
+04 12-26 #e6eaf0 #1e2430 -
+04 26-75 #8b95a7 #1e2430 -
 04 75-77 #ffffff #1e2430 -
 04 77-80 #ffffff #0e1117 -
 05 0-2 #ffffff #0e1117 -
 05 2-3 #e6eaf0 #1e2430 -
 05 3-4 #8b95a7 #1e2430 b
 05 4-5 #e6eaf0 #1e2430 -
-05 5-11 #e6eaf0 #4a505a b
-05 11-19 #e6eaf0 #1e2430 -
-05 19-75 #8b95a7 #1e2430 -
+05 5-12 #e6eaf0 #4a505a b
+05 12-20 #e6eaf0 #1e2430 -
+05 20-75 #8b95a7 #1e2430 -
 05 75-77 #ffffff #1e2430 -
 05 77-80 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
@@ -100,9 +100,9 @@ cursor 7 33 visible
 08 2-3 #e6eaf0 #1e2430 -
 08 3-4 #e6eaf0 #1e2430 b
 08 4-5 #e6eaf0 #1e2430 -
-08 5-11 #e6eaf0 #4a505a b
-08 11-19 #e6eaf0 #1e2430 -
-08 19-63 #8b95a7 #1e2430 -
+08 5-12 #e6eaf0 #4a505a b
+08 12-20 #e6eaf0 #1e2430 -
+08 20-63 #8b95a7 #1e2430 -
 08 63-72 #e6eaf0 #1e2430 -
 08 72-75 #8b95a7 #1e2430 -
 08 75-77 #ffffff #1e2430 -
@@ -122,27 +122,27 @@ cursor 7 33 visible
 12 2-3 #e6eaf0 #1e2430 -
 12 3-4 #8b95a7 #1e2430 b
 12 4-5 #e6eaf0 #1e2430 -
-12 5-11 #e6eaf0 #4a505a b
-12 11-29 #e6eaf0 #1e2430 -
-12 29-75 #8b95a7 #1e2430 -
+12 5-12 #e6eaf0 #4a505a b
+12 12-30 #e6eaf0 #1e2430 -
+12 30-75 #8b95a7 #1e2430 -
 12 75-77 #ffffff #1e2430 -
 12 77-80 #ffffff #0e1117 -
 13 0-2 #ffffff #0e1117 -
 13 2-3 #e6eaf0 #1e2430 -
 13 3-4 #8b95a7 #1e2430 b
 13 4-5 #e6eaf0 #1e2430 -
-13 5-11 #e6eaf0 #4a505a b
-13 11-40 #e6eaf0 #1e2430 -
-13 40-75 #8b95a7 #1e2430 -
+13 5-12 #e6eaf0 #4a505a b
+13 12-41 #e6eaf0 #1e2430 -
+13 41-75 #8b95a7 #1e2430 -
 13 75-77 #ffffff #1e2430 -
 13 77-80 #ffffff #0e1117 -
 14 0-2 #ffffff #0e1117 -
 14 2-3 #e6eaf0 #1e2430 -
 14 3-4 #e6eaf0 #1e2430 b
 14 4-5 #e6eaf0 #1e2430 -
-14 5-11 #e6eaf0 #4a505a b
-14 11-35 #e6eaf0 #1e2430 -
-14 35-62 #8b95a7 #1e2430 -
+14 5-12 #e6eaf0 #4a505a b
+14 12-36 #e6eaf0 #1e2430 -
+14 36-62 #8b95a7 #1e2430 -
 14 62-72 #e6eaf0 #1e2430 -
 14 72-75 #8b95a7 #1e2430 -
 14 75-77 #ffffff #1e2430 -
