@@ -65,7 +65,7 @@ async function providerTimeouts() {
 
 test("provider timeout messages used outside the TUI stay unchanged", async () => {
   expect(await providerTimeouts()).toEqual({
-    codex: "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.",
+    codex: "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login chatgpt --code <callback-url-or-code>; otherwise retry /login chatgpt, or use /login chatgpt --device on headless machines.",
     grokBrowser: "Grok sign-in timed out waiting for browser approval. Retry /login grok.",
     grokDevice: "Grok device sign-in timed out waiting for approval. Restart /login grok --device.",
   });
@@ -99,8 +99,8 @@ test("ChatGPT callback timeout shows a short status, keeps the recovery recipe i
   expect(chooser.rows.map(row => row.kind === "choice" ? row.label : "")).toEqual(["Device approval", "Paste browser callback"]);
   expect(controller.inspectNoticeDetails()).toBe(true);
   const details = controller.snapshot().transcript.at(-1)!.text;
-  expect(details).toContain("paste the redirect with /login codex --code");
-  expect(details).toContain("/login codex --device");
+  expect(details).toContain("paste the redirect with /login chatgpt --code");
+  expect(details).toContain("/login chatgpt --device");
 });
 
 for (const device of [false, true]) test(`Grok ${device ? "device" : "browser"} timeout shows the same short status with recovery text in details`, async () => {
@@ -343,7 +343,7 @@ test("after a ChatGPT timeout the reopened chooser lets F2 open the details and 
       expect(controller.snapshot().loginChooser).toBeUndefined();
       const details = controller.snapshot().transcript.at(-1)!.text;
       expect(details).toStartWith("Details");
-      expect(details).toContain("/login codex --code");
+      expect(details).toContain("/login chatgpt --code");
       expect(ui.captureCharFrame().replace(/\s+/g, " ")).toContain("Details");
     } else {
       ui.mockInput.pressKey("l", { meta: true }); await ui.settle();

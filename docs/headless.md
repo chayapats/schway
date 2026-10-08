@@ -40,20 +40,20 @@ schway -p "Continue this explanation" --provider openai --openai-auth api-key --
 
 ### Existing ChatGPT/Codex subscription
 
-First sign into **Schway** interactively with `/login codex` or
-`/login codex --device`, then return to your shell. Schway does not read another
+First sign into **Schway** interactively with `/login chatgpt` or
+`/login chatgpt --device`, then return to your shell. Schway does not read another
 CLI's login cache. These commands use only the stored subscription, even when
 `OPENAI_API_KEY` is set. Missing or rejected subscription access needs sign-in or
 an explicit route change; there is no automatic API-key billing fallback.
 
 <!-- headless-flow:codex -->
 ```sh
-schway models list --provider openai --openai-auth codex
+schway models list --provider openai --openai-auth chatgpt
 IFS= read -r MODEL_ID
-schway -p "Explain this project" --provider openai --openai-auth codex --model "$MODEL_ID" --approval read-only --show-session
+schway -p "Explain this project" --provider openai --openai-auth chatgpt --model "$MODEL_ID" --approval read-only --show-session
 schway sessions list
 IFS= read -r SESSION_ID
-schway -p "Continue this explanation" --provider openai --openai-auth codex --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
+schway -p "Continue this explanation" --provider openai --openai-auth chatgpt --model "$MODEL_ID" --resume="$SESSION_ID" --approval read-only --show-session
 ```
 
 ### xAI API key
@@ -306,7 +306,7 @@ between invocations. See [session discovery](sessions.md) for saved-work states.
 
 ```bash
 schway models list
-schway models list --provider openai --openai-auth codex
+schway models list --provider openai --openai-auth chatgpt
 schway models list --provider xai --xai-auth api-key --filter grok
 schway models list --profile local --json
 schway models list --offline --json
@@ -323,7 +323,7 @@ Valid execution-only settings such as model and thinking do not limit discovery;
 malformed configuration still reports its source and repair guidance.
 
 Online listing makes the selected route's catalog request. Explicit
-`--openai-auth codex|api-key` and `--xai-auth grok|api-key` use only that identity;
+`--openai-auth chatgpt|api-key` and `--xai-auth grok|api-key` use only that identity;
 `auto` uses the existing credential precedence. A selected subscription may
 refresh its token. One five-second remote-operation deadline covers route
 credential reads, token refresh, catalog request and response-body consumption.

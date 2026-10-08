@@ -366,3 +366,28 @@ for (const configDeprecations of [[], [{ key: "undo.oldAge", replacement: "undo.
     });
   });
 }
+
+test("/config set openaiAuth chatgpt resolves to codex in every scope and files store codex", async () => withTempDir(async root => {
+  const home = join(root, "home"), workspaceRoot = join(root, "work");
+  await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+  const paths = { user: join(home, ".schway/config.json"), project: join(workspaceRoot, ".schway/config.json") };
+  // A hand-written alias stays on disk until Schway rewrites that file.
+  await writeFile(paths.user, JSON.stringify({ openaiAuth: "chatgpt", maxTurns: 4 }));
+  const editor = await loadConfigEditor({ home, workspaceRoot, cli: { provider: "openai" } });
+  expect(editor.settings.openaiAuth).toBe("codex");
+  expect(JSON.parse(await readFile(paths.user, "utf8"))).toEqual({ openaiAuth: "chatgpt", maxTurns: 4 });
+  await (await editor.prepare({ scope: "user", key: "maxTurns", value: 5 })).commit();
+  expect(JSON.parse(await readFile(paths.user, "utf8"))).toEqual({ openaiAuth: "codex", maxTurns: 5 });
+  for (const scope of ["session", "user", "project"] as const) {
+    await (await editor.prepare({ scope, key: "openaiAuth", value: "api-key" })).commit();
+    const transaction = await editor.prepare({ scope, key: "openaiAuth", value: scope === "project" ? "CHATGPT" : "chatgpt" });
+    expect(transaction.settings.openaiAuth).toBe("codex");
+    await transaction.commit();
+    expect(editor.settings.openaiAuth).toBe("codex");
+    if (scope !== "session") expect(JSON.parse(await readFile(paths[scope], "utf8")).openaiAuth).toBe("codex");
+  }
+  await (await editor.prepare({ scope: "project", key: "openaiAuth", value: undefined })).commit();
+  expect(editor.settings.openaiAuth).toBe("codex");
+  expect(JSON.parse(await readFile(paths.project, "utf8"))).not.toHaveProperty("openaiAuth");
+  expect(await readFile(paths.user, "utf8")).not.toContain("chatgpt");
+}));

@@ -83,6 +83,8 @@ for (const route of ["openai-api", "codex", "xai-api", "grok", "compatible"] as 
       const text = await readFile(join(repo, "docs/headless.md"), "utf8");
       if (route === "compatible") await writeFile(join(home, ".schway/config.json"), block(text, "config:compatible", "json"));
       const selected = route === "xai-api" || route === "grok" ? "grok-4.7" : route === "compatible" ? "fixture-selected" : "gpt-4.1";
+      // The documented subscription flow types the `chatgpt` alias; the fixture route keeps its canonical `codex` name.
+      if (route === "codex") expect([...block(text, `flow:${route}`).matchAll(/--openai-auth \S+/g)].map(match => match[0])).toEqual(Array(3).fill("--openai-auth chatgpt"));
       const result = await guide(block(text, `flow:${route}`), cwd, env, { model: selected, session: true });
       expect(result.exit, result.stderr).toBe(0);
       const hints = [...result.stderr.matchAll(/^Session (\S+) · Resume with --resume \1$/gm)];

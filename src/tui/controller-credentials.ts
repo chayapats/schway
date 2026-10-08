@@ -445,7 +445,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     if (routed.kind === "grok") { if (routed.device) { this.fail(LOGIN_USAGE); return false; } return this.runGrokLogout(); }
     if (routed.kind === "codex") {
       if (routed.device || routed.code !== undefined) {
-        this.fail("Usage: /logout codex takes no flags.");
+        this.fail("Usage: /logout chatgpt takes no flags.");
         return false;
       }
       return this.runCodexLogout();
@@ -871,7 +871,7 @@ export abstract class CredentialsLayer extends ControllerCore {
         this.status = "idle";
         return true;
       } catch {
-        this.fail("ChatGPT connection not refreshed · /login codex retry");
+        this.fail("ChatGPT connection not refreshed · /login chatgpt retry");
         return false;
       }
     })();

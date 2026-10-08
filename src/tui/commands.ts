@@ -108,9 +108,9 @@ export function helpText(commands: readonly ExtensionCommandInfo[] = []): string
     "/config reset <key> [--scope user|project] - remove an override and inherit its fallback",
     "/login - choose a provider and sign-in method",
     "/login <openai|xai|openai-compatible> - enter an API key in a masked prompt",
-    "/login codex [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
+    "/login chatgpt [--device] [--code <callback-url-or-code>] - sign in with a ChatGPT Plus/Pro subscription",
     "/login grok [--device] - sign in with a Grok subscription",
-    "/logout <openai|xai|openai-compatible|codex|grok> - remove the selected stored credential",
+    "/logout <openai|xai|openai-compatible|chatgpt|grok> - remove the selected stored credential",
     "/help (Alt+H) - search commands and keyboard actions; Enter inserts a command or shows keys, never runs it",
     "/quit - quit schway",
     ...commands.map((command) => `/${command.name}${command.arguments ? ` ${command.arguments}` : ""} - ${command.description} [extension: ${command.source}]`),
@@ -316,7 +316,7 @@ function isPickerProvider(value: string): value is ModelPickerProvider {
 
 /** Usage guidance for credential commands, keeping API keys out of slash arguments. */
 export const LOGIN_USAGE =
-  "Usage: /login to choose a method, /login <openai|xai|openai-compatible>, /login codex [--device] [--code <callback-url-or-code>], or /login grok [--device]. Enter API keys only in the masked prompt.";
+  "Usage: /login to choose a method, /login <openai|xai|openai-compatible>, /login chatgpt [--device] [--code <callback-url-or-code>], or /login grok [--device]. Enter API keys only in the masked prompt.";
 
 /** Requested credential action from /login or /logout arguments. */
 export type LoginTarget =
@@ -336,7 +336,8 @@ export function parseLoginTarget(args: string): LoginTarget {
     return { kind: "api-key", provider: name };
   }
   if (name === "grok") return tokens.length === 1 || (tokens.length === 2 && tokens[1] === "--device") ? { kind: "grok", device: tokens.length === 2 } : { error: LOGIN_USAGE };
-  if (name === "codex") {
+  // `chatgpt` is the name users type; `codex` stays accepted as an alias for the same route.
+  if (name === "chatgpt" || name === "codex") {
     let device = false;
     let code: string | undefined;
     for (let i = 1; i < tokens.length; i++) {
@@ -365,7 +366,7 @@ export function parseLoginTarget(args: string): LoginTarget {
       return { error: LOGIN_USAGE };
     }
     if (device && code !== undefined) {
-      return { error: "Usage: /login codex [--device] or /login codex --code <callback-url-or-code>. Device and pasted-code flows are separate attempts." };
+      return { error: "Usage: /login chatgpt [--device] or /login chatgpt --code <callback-url-or-code>. Device and pasted-code flows are separate attempts." };
     }
     return code !== undefined ? { kind: "codex", device, code } : { kind: "codex", device };
   }

@@ -199,7 +199,7 @@ export function extractCodeFromCallbackUrl(
   }
   const state = url.searchParams.get("state");
   if (expectedState && state !== expectedState) {
-    return { error: "The callback state does not match this login attempt. Restart /login codex and paste the newest redirect URL." };
+    return { error: "The callback state does not match this login attempt. Restart /login chatgpt and paste the newest redirect URL." };
   }
   const code = url.searchParams.get("code")?.trim();
   if (!code) {
@@ -215,22 +215,22 @@ export function codexDeniedError(_detail?: string): string {
 
 /** Actionable error when an authorization code or device code has expired. */
 export function codexExpiredCodeError(): string {
-  return "The sign-in code expired before it was exchanged. Restart /login codex for a fresh code; codes are single-use and short-lived.";
+  return "The sign-in code expired before it was exchanged. Restart /login chatgpt for a fresh code; codes are single-use and short-lived.";
 }
 
 /** Actionable error when no subscription login is stored for a headless run. */
 export function codexMissingLoginError(): string {
-  return "No ChatGPT subscription login found. Sign in in interactive mode with /login codex (or /login codex --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
+  return "No ChatGPT subscription login found. Sign in in interactive mode with /login chatgpt (or /login chatgpt --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
 }
 
 /** Actionable error when the access token expired and no refresh token can renew it. */
 export function codexExpiredSessionError(): string {
-  return "The ChatGPT subscription session expired and has no refresh token. Sign in again in interactive mode with /login codex.";
+  return "The ChatGPT subscription session expired and has no refresh token. Sign in again in interactive mode with /login chatgpt.";
 }
 
 /** Actionable error when the provider rejects renewal, marking revocation distinctly from expiry. */
 export function codexRevokedSessionError(): string {
-  return "The ChatGPT subscription session was revoked or rejected by the provider. Sign in again in interactive mode with /login codex; stored API keys are never used as a silent fallback.";
+  return "The ChatGPT subscription session was revoked or rejected by the provider. Sign in again in interactive mode with /login chatgpt; stored API keys are never used as a silent fallback.";
 }
 
 /** Actionable error when renewal fails transiently, keeping retry ownership with Schway. */
@@ -533,7 +533,7 @@ export async function fetchSubscriptionCatalog(input: {
   if (!response.ok) {
     void response.body?.cancel().catch(() => {});
     if (response.status === 401 || response.status === 403) {
-      throw new Error("ChatGPT model catalog rejected this subscription. Retry /login codex; no API key fallback was used.");
+      throw new Error("ChatGPT model catalog rejected this subscription. Retry /login chatgpt; no API key fallback was used.");
     }
     throw new Error(`ChatGPT model catalog returned HTTP ${response.status}. Retry /model.`);
   }
@@ -618,7 +618,7 @@ export async function loginWithBrowserFlow(input: {
         throw new Error(codexExpiredCodeError());
       }
       throw new Error(
-        "No active browser sign-in attempt. Start with /login codex to open the browser, then paste the newest redirect with /login codex --code <callback-url>.",
+        "No active browser sign-in attempt. Start with /login chatgpt to open the browser, then paste the newest redirect with /login chatgpt --code <callback-url>.",
       );
     }
     const extracted = extractCodeFromCallbackUrl(input.pastedCode, pending.state);
@@ -650,7 +650,7 @@ export async function loginWithBrowserFlow(input: {
       catch { deps.onProgress?.("The browser could not be opened automatically; use the printed URL instead."); }
     }
     throw new Error(
-      "The localhost callback is unavailable in this environment. Retry with /login codex --device, or paste the redirect with /login codex --code <callback-url>.",
+      "The localhost callback is unavailable in this environment. Retry with /login chatgpt --device, or paste the redirect with /login chatgpt --code <callback-url>.",
     );
   }
   const listenerAbort = new AbortController();
@@ -662,7 +662,7 @@ export async function loginWithBrowserFlow(input: {
     const waiting = waitWithTimeout(
       callback,
       timeoutMs,
-      "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.",
+      "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login chatgpt --code <callback-url-or-code>; otherwise retry /login chatgpt, or use /login chatgpt --device on headless machines.",
       abort,
     );
     // Some platform launchers stay alive until the browser closes.
@@ -749,7 +749,7 @@ export function waitForLocalhostCallback(input: {
       return;
     }
     const timer = setTimeout(() => {
-      settle(() => reject(new Error("ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines.")));
+      settle(() => reject(new Error("ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login chatgpt --code <callback-url-or-code>; otherwise retry /login chatgpt, or use /login chatgpt --device on headless machines.")));
     }, input.timeoutMs);
     const onAbort = () => {
       settle(() => reject(new DOMException("Aborted", "AbortError")));
@@ -789,22 +789,22 @@ export async function requestDeviceAuthorization(input: {
     });
   } catch (error) {
     throwIfAborted(input.signal);
-    throw new Error(`Starting device sign-in failed (${messageOf(error)}). Retry /login codex --device.`);
+    throw new Error(`Starting device sign-in failed (${messageOf(error)}). Retry /login chatgpt --device.`);
   }
   throwIfAborted(input.signal);
   let payload: Record<string, unknown>;
   try {
     payload = (await response.json()) as Record<string, unknown>;
   } catch {
-    throw new Error("Starting device sign-in returned an unreadable response. Retry /login codex --device.");
+    throw new Error("Starting device sign-in returned an unreadable response. Retry /login chatgpt --device.");
   }
   if (!response.ok) {
-    throw new Error(`Starting device sign-in failed (HTTP ${response.status}). Retry /login codex --device.`);
+    throw new Error(`Starting device sign-in failed (HTTP ${response.status}). Retry /login chatgpt --device.`);
   }
   const userCode = typeof payload.user_code === "string" ? payload.user_code.trim() : "";
   const deviceAuthId = typeof payload.device_auth_id === "string" ? payload.device_auth_id.trim() : "";
   if (!userCode || !deviceAuthId) {
-    throw new Error("Starting device sign-in returned an incomplete authorization. Retry /login codex --device.");
+    throw new Error("Starting device sign-in returned an incomplete authorization. Retry /login chatgpt --device.");
   }
   const verificationUri = typeof payload.verification_uri === "string" && payload.verification_uri.trim()
     ? payload.verification_uri.trim()
@@ -836,7 +836,7 @@ export async function pollDeviceAuthorization(input: {
   for (;;) {
     throwIfAborted(input.signal);
     if (Date.now() - started >= timeoutMs) {
-      throw new Error("Device sign-in timed out after 900s without approval. Restart /login codex --device for a fresh code.");
+      throw new Error("Device sign-in timed out after 900s without approval. Restart /login chatgpt --device for a fresh code.");
     }
     let response: Response;
     try {
@@ -859,7 +859,7 @@ export async function pollDeviceAuthorization(input: {
     try {
       payload = (await response.json()) as Record<string, unknown>;
     } catch {
-      throw new Error("Device sign-in polling returned an unreadable response. Retry /login codex --device.");
+      throw new Error("Device sign-in polling returned an unreadable response. Retry /login chatgpt --device.");
     }
     const authorizationCode = typeof payload.authorization_code === "string" ? payload.authorization_code.trim() : "";
     const codeVerifier = typeof payload.code_verifier === "string" ? payload.code_verifier.trim() : "";
@@ -869,7 +869,7 @@ export async function pollDeviceAuthorization(input: {
     );
     if (success) {
       if (!authorizationCode || !codeVerifier) {
-        throw new Error("Device sign-in polling returned an incomplete authorization. Retry /login codex --device.");
+        throw new Error("Device sign-in polling returned an incomplete authorization. Retry /login chatgpt --device.");
       }
       try {
         return await exchangeCodeForTokens({
@@ -883,12 +883,12 @@ export async function pollDeviceAuthorization(input: {
         throwIfAborted(input.signal);
         const message = messageOf(error);
         if (/^The sign-in code expired/.test(message)) {
-          throw new Error("The device sign-in code expired before it was exchanged. Restart /login codex --device for a fresh code.");
+          throw new Error("The device sign-in code expired before it was exchanged. Restart /login chatgpt --device for a fresh code.");
         }
         if (/^(ChatGPT sign-in was denied|The sign-in response has no access token|The sign-in endpoint|Exchanging the sign-in code failed)/.test(message)) {
           throw error instanceof Error ? error : new Error(message);
         }
-        throw new Error(`Device sign-in code exchange failed (${message}). Retry /login codex --device.`);
+        throw new Error(`Device sign-in code exchange failed (${message}). Retry /login chatgpt --device.`);
       }
     }
     const error = devicePollErrorCode(payload, response.status);
@@ -907,7 +907,7 @@ export async function pollDeviceAuthorization(input: {
     if (isDeviceExpiredError(error)) {
       throw new Error(codexExpiredCodeError());
     }
-    throw new Error(`Device sign-in polling failed (${error}). Retry /login codex --device.`);
+    throw new Error(`Device sign-in polling failed (${error}). Retry /login chatgpt --device.`);
   }
 }
 
@@ -1553,7 +1553,7 @@ function isDeviceExpiredError(code: string): boolean {
 function toCodexTokens(payload: Record<string, unknown>): CodexTokens {
   const accessToken = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
   if (!accessToken) {
-    throw new Error("The sign-in response has no access token. Restart /login codex for a fresh attempt.");
+    throw new Error("The sign-in response has no access token. Restart /login chatgpt for a fresh attempt.");
   }
   const refreshToken = typeof payload.refresh_token === "string" && payload.refresh_token.trim()
     ? payload.refresh_token.trim()

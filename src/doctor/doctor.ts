@@ -217,6 +217,7 @@ export async function diagnose(input: {
     const grok = settings.provider === "xai";
     const subscriptionRoute = grok ? "grok" : "codex";
     const subscriptionLabel = grok ? "Grok" : "ChatGPT";
+    const subscriptionLogin = grok ? "grok" : "chatgpt";
     const preferred = grok ? settings.xaiAuth ?? "auto" : settings.provider === "openai" ? settings.openaiAuth ?? "auto" : "api-key";
     const optional = settings.provider === "openai-compatible" && (settings.auth ?? "optional") !== "required";
     const none = settings.provider === "openai-compatible" && settings.auth === "none";
@@ -263,7 +264,7 @@ export async function diagnose(input: {
       report.authSource = "subscription";
       if (sub === "present") add("auth", "ok", `${subscriptionLabel} subscription login present; access-token status checked locally.`);
       else if (sub === "refresh") add("auth", "warning", `${subscriptionLabel} access token needs refresh; refresh token present (not tested).`, "Refresh occurs during a future model request; sign in again if it fails.");
-      else add("auth", "error", sub === "expired" ? `${subscriptionLabel} access token expired without a refresh token.` : sub === "unavailable" ? "OS secure store unavailable or locked." : sub === "invalid" ? "Stored subscription login is invalid." : `No ${subscriptionLabel} subscription login found.`, `Unlock the OS secure store or sign in interactively with /login ${subscriptionRoute}; choose --${grok ? "xai" : "openai"}-auth api-key to use an API key.`);
+      else add("auth", "error", sub === "expired" ? `${subscriptionLabel} access token expired without a refresh token.` : sub === "unavailable" ? "OS secure store unavailable or locked." : sub === "invalid" ? "Stored subscription login is invalid." : `No ${subscriptionLabel} subscription login found.`, `Unlock the OS secure store or sign in interactively with /login ${subscriptionLogin}; choose --${grok ? "xai" : "openai"}-auth api-key to use an API key.`);
     } else if (runtime?.trim()) {
       report.authSource = "runtime";
       add("auth", "ok", "Runtime API key present.");

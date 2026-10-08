@@ -534,7 +534,7 @@ test("device exchange expiry remaps to restart with --device and stays actionabl
   };
   await expect(
     pollDeviceAuthorization({ deviceAuthId: "d", userCode: "u", pollIntervalMs: 1, fetch: expiredExchange }),
-  ).rejects.toThrow(/Restart \/login codex --device/);
+  ).rejects.toThrow(/Restart \/login chatgpt --device/);
 
   const store = fakeCredentialStore();
   const runner = createCodexLoginRunner({
@@ -560,7 +560,7 @@ test("device exchange expiry remaps to restart with --device and stays actionabl
   });
   expect(result.ok).toBe(false);
   if (!result.ok) {
-    expect(result.message).toMatch(/Restart \/login codex --device/);
+    expect(result.message).toMatch(/Restart \/login chatgpt --device/);
     expect(result.message).not.toMatch(/could not complete/);
   }
 });
@@ -742,7 +742,7 @@ test("auto prefers runtime and environment keys while explicit codex never falls
     await selectOpenAITransport({ openaiAuth: "codex", env: { OPENAI_API_KEY: "env-key" }, store: subscribed }),
   ).toMatchObject({ transport: "codex", notice: expect.stringContaining("ignores") });
   expect(await selectOpenAITransport({ openaiAuth: "codex", env: {}, store: empty })).toMatchObject({
-    error: expect.stringContaining("/login codex"),
+    error: expect.stringContaining("/login chatgpt"),
   });
   expect(
     await selectOpenAITransport({ openaiAuth: "api-key", env: {}, store: subscribed }),
@@ -1659,7 +1659,7 @@ test("interactive model loading proves the selected transport without starting a
     secrets: [],
     createModel: stub,
   });
-  expect(missing).toMatchObject({ error: expect.stringContaining("/login codex") });
+  expect(missing).toMatchObject({ error: expect.stringContaining("/login chatgpt") });
 });
 
 test("headless codex selection reaches the loop without a browser and fails actionably when missing", async () => {
@@ -1703,7 +1703,7 @@ test("headless codex selection reaches the loop without a browser and fails acti
       createModel: (async () => createScriptedModel()) as Parameters<typeof runCli>[1]["createModel"],
     });
     expect(exitCode).toBe(1);
-    expect(stderr.join("")).toContain("/login codex");
+    expect(stderr.join("")).toContain("/login chatgpt");
   });
 });
 

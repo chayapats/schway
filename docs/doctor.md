@@ -32,7 +32,7 @@ are not a promised healthy result after interactive sign-in.
 schway doctor
 schway doctor --json
 schway doctor --provider openai-compatible --base-url http://127.0.0.1:11434/v1 --auth none --model "$MODEL_ID"
-schway doctor --provider openai --openai-auth codex --model "$MODEL_ID"
+schway doctor --provider openai --openai-auth chatgpt --model "$MODEL_ID"
 ```
 
 For a missing-model error, list the intended route's models, choose an exact ID,

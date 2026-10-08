@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { CLI_AUTH_MODES, CLI_OPENAI_AUTH_MODES, CLI_PROVIDERS, CLI_THINKING_LEVELS, CLI_XAI_AUTH_MODES, parseArgs, type CliArgs } from "../src/cli/args.ts";
+import { CLI_AUTH_MODES, CLI_OPENAI_AUTH_CHOICES, CLI_PROVIDERS, CLI_THINKING_LEVELS, CLI_XAI_AUTH_MODES, parseArgs, type CliArgs } from "../src/cli/args.ts";
 import { CLI_OPTIONS, formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
 import { parseSessionsArguments } from "../src/cli/sessions.ts";
-import { parseModelsCommand } from "../src/cli/models.ts";
+import { MODELS_HELP, parseModelsCommand } from "../src/cli/models.ts";
 
 test("main help groups options and examples in the documented order", () => {
   const lines = formatHelp().trimEnd().split("\n");
@@ -170,18 +170,34 @@ test("help value lists use every accepted parser value without changing normaliz
   for (const [flag, values, field] of [
     ["--provider", CLI_PROVIDERS, "provider"],
     ["--thinking", CLI_THINKING_LEVELS, "thinking"],
-    ["--openai-auth", CLI_OPENAI_AUTH_MODES, "openaiAuth"],
+    ["--openai-auth", CLI_OPENAI_AUTH_CHOICES, "openaiAuth"],
     ["--xai-auth", CLI_XAI_AUTH_MODES, "xaiAuth"],
     ["--auth", CLI_AUTH_MODES, "auth"],
   ] as const) {
     const row = formatHelp().split("\n").find((line) => line.startsWith(`  ${flag} `))!;
     for (const value of values) {
       expect(row).toContain(value);
-      expect(parseArgs([flag, value])).toEqual({ args: { json: false, help: false, [field]: value } });
+      expect(parseArgs([flag, value])).toEqual({ args: { json: false, help: false, [field]: value === "chatgpt" ? "codex" : value } });
     }
     expect(parseArgs([flag, "unsupported"])).toHaveProperty("error");
   }
   expect(parseArgs(["--thinking", " LOW "])).toHaveProperty("args.thinking", "low");
   expect(parseArgs(["--openai-auth", " AUTO "])).toHaveProperty("args.openaiAuth", "auto");
   for (const flag of ["--provider", "--auth", "--xai-auth"]) expect(parseArgs([flag, " AUTO "])).toHaveProperty("error");
+});
+
+test("--openai-auth accepts chatgpt and codex for main, doctor and models list, and help names only chatgpt", () => {
+  for (const argv of [["--openai-auth", "chatgpt"], ["--openai-auth=CHATGPT"], ["--openai-auth", " ChatGPT "], ["--openai-auth", "codex"], ["--openai-auth=Codex"]]) {
+    expect(parseArgs([...argv, "-p", "x"])).toEqual({ args: { json: false, help: false, prompt: "x", openaiAuth: "codex" } });
+    // `schway doctor` parses everything after its subcommand with the main parser.
+    expect(parseArgs([...argv, "--provider", "openai", "--json"])).toEqual({ args: { json: true, help: false, provider: "openai", openaiAuth: "codex" } });
+    expect(parseModelsCommand(["models", "list", ...argv])).toEqual({ args: { json: false, help: false, offline: false, openaiAuth: "codex" } });
+  }
+  expect(parseArgs(["--openai-auth", "chat-gpt"])).toEqual({ error: "Unknown OpenAI auth preference: chat-gpt · Use auto, chatgpt, or api-key" });
+  const row = (text: string, flag: string) => text.split("\n").find(line => line.startsWith(`  ${flag} `))!;
+  for (const text of [formatHelp(), formatDoctorHelp()]) {
+    expect(row(text, "--openai-auth")).toBe("  --openai-auth <mode>       Use auto, chatgpt, api-key");
+    expect(row(text, "--max-turns")).toBe("  --max-turns <n>            Stop after n agent rounds");
+  }
+  expect(row(MODELS_HELP, "--openai-auth")).toBe("  --openai-auth <route>   auto, chatgpt or api-key");
 });

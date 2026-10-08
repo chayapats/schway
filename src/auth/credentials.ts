@@ -68,7 +68,7 @@ export function isOpenAIAuthPreference(value: unknown): value is OpenAIAuthPrefe
 
 /** Guidance returned when explicit codex selection has no stored subscription login. */
 export const MISSING_CODEX_SUBSCRIPTION =
-  "No ChatGPT subscription login found. Sign in in interactive mode with /login codex (or /login codex --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
+  "No ChatGPT subscription login found. Sign in in interactive mode with /login chatgpt (or /login chatgpt --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
 
 /** Selected OpenAI transport, or actionable guidance that never silently changes billing. */
 export type OpenAITransport =
@@ -87,7 +87,7 @@ export async function selectOpenAITransport(input: {
 }): Promise<OpenAITransport> {
   const preference = input.openaiAuth ?? "auto";
   if (!isOpenAIAuthPreference(preference)) {
-    return { error: `Unknown OpenAI auth preference: ${String(input.openaiAuth)}. Use auto, codex, or api-key.` };
+    return { error: `Unknown OpenAI auth preference: ${String(input.openaiAuth)}. Use auto, chatgpt, or api-key.` };
   }
   if (input.runtimeApiKey !== undefined && !input.runtimeApiKey.trim()) {
     return { error: "Explicit API key is empty. Supply a nonempty --api-key or omit the override." };
@@ -137,7 +137,7 @@ export async function selectOpenAITransport(input: {
   }
   return {
     error:
-      `${MISSING_OPENAI_API_KEY} No stored subscription login was found either; sign in in interactive mode with /login codex, or stay on API-key billing.`,
+      `${MISSING_OPENAI_API_KEY} No stored subscription login was found either; sign in in interactive mode with /login chatgpt, or stay on API-key billing.`,
   };
 }
 

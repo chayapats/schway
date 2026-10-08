@@ -4,6 +4,7 @@ import type { ConfigLayer } from "../config/config.ts";
 import { removedProviderMessage } from "../config/removed-provider.ts";
 import { PROFILE_NAME_PATTERN, isValidProfileName } from "../config/profile-name.ts";
 import { parseVersionCommand } from "./version.ts";
+import { canonicalOpenAIAuth, OPENAI_AUTH_CHOICES } from "../auth/chatgpt-route.ts";
 
 /** Provider families accepted by the CLI without loading a provider adapter. */
 export const CLI_PROVIDERS = ["openai", "xai", "openai-compatible"] as const;
@@ -11,8 +12,11 @@ export const CLI_PROVIDERS = ["openai", "xai", "openai-compatible"] as const;
 /** Reasoning levels accepted by the CLI in increasing strength. */
 export const CLI_THINKING_LEVELS = THINKING_LEVELS;
 
-/** OpenAI credential preferences accepted by the CLI. */
+/** Canonical OpenAI credential preferences the CLI resolves to; `chatgpt` input becomes `codex`. */
 export const CLI_OPENAI_AUTH_MODES = ["auto", "codex", "api-key"] as const;
+
+/** OpenAI credential preferences named in CLI help and errors, with `chatgpt` for the subscription route. */
+export const CLI_OPENAI_AUTH_CHOICES = OPENAI_AUTH_CHOICES;
 
 /** xAI credential preferences accepted by the CLI. */
 export const CLI_XAI_AUTH_MODES = ["auto", "grok", "api-key"] as const;
@@ -447,14 +451,14 @@ function parseAuth(value: string): CliAuthMode | { error: string } {
   };
 }
 
-/** Accept the OpenAI credential preference separately from compatible auth modes. */
+/** Accept the OpenAI credential preference, mapping the `chatgpt` alias to `codex`, separately from compatible auth modes. */
 function parseOpenAIAuth(value: string): CliOpenAIAuth | { error: string } {
-  const preference = value.trim().toLowerCase();
+  const preference = canonicalOpenAIAuth(value.trim().toLowerCase());
   if (CLI_OPENAI_AUTH_MODES.includes(preference as CliOpenAIAuth)) {
     return preference as CliOpenAIAuth;
   }
   return {
-    error: `Unknown OpenAI auth preference: ${value} · Use auto, codex, or api-key`,
+    error: `Unknown OpenAI auth preference: ${value} · Use auto, chatgpt, or api-key`,
   };
 }
 
