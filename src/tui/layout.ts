@@ -35,11 +35,9 @@ export function bodyPadding(columns: number): number {
   return columns < LAYOUT_BREAKPOINTS.wideBodyPadding ? 1 : 2;
 }
 
-/**
- * Content width inside the body padding at `columns` terminal columns, never below 8. Rules that compare this width
- * compare it with `bodyWidth(breakpoint)`, which keeps their switch at the breakpoint's terminal width; no breakpoint
- * sits where the padding change makes this width step back (60 columns).
- */
+// Rules that compare the body width compare it with `bodyWidth(breakpoint)`, which keeps their switch at the
+// breakpoint's terminal width; no such breakpoint sits where the padding change makes this width step back (60 columns).
+/** Content width inside the body padding at `columns` terminal columns, never below 8. */
 export function bodyWidth(columns: number): number {
   return Math.max(8, columns - 2 * bodyPadding(columns));
 }

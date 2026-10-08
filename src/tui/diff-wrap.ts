@@ -7,12 +7,9 @@ export function diffGutter(line: number, sign: string, undo: boolean): string {
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/**
- * Rows of one numbered diff line at most `columns` cells wide: the gutter and the text that fits, then continuation
- * rows under a blank hanging gutter as wide as `gutter`, so no continuation starts under the line numbers. Text breaks
- * at grapheme boundaries measured with `Bun.stringWidth`, so Thai marks and emoji stay whole. When the gutter leaves no
- * room, the line is returned unwrapped.
- */
+// Text breaks at grapheme boundaries measured with `Bun.stringWidth`, so Thai marks and emoji stay whole; when the
+// gutter leaves no room, the line comes back unwrapped for the renderer to wrap.
+/** Rows of one numbered diff line at most `columns` cells wide, continuations under a blank gutter as wide as `gutter`. */
 export function wrapDiffLine(gutter: string, text: string, columns: number): string[] {
   const indent = Bun.stringWidth(gutter);
   const room = columns - indent;
