@@ -32,6 +32,10 @@ import { codexSubscriptionIdentity, grokSubscriptionIdentity } from "../../src/a
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
 import type { Screen, Variant } from "./screens.ts";
 import { serializeScreen } from "./format.ts";
+import type { BoxRenderable, TextRenderable } from "@opentui/core";
+import { approvalChoices } from "../../src/tui/approval-layout.ts";
+import { credentialEntryPanel } from "../../src/tui/credential-entry.ts";
+import type { FrameState } from "../helpers/screen-invariants.ts";
 
 /** Fixed animation time keeps reduced-motion fixtures independent of wall time. */
 export const CATALOG_VIEW_NOW_MS = 1_000_000;
@@ -64,6 +68,47 @@ export function panelCoverageGaps(screenIds: readonly string[], captures: Readon
     ...PANEL_MODES.filter(mode => !seen.some(capture => capture.modes.has(mode))).map(mode => `panel mode "${mode}"`),
     ...CATALOG_SUB_STATES.filter(state => !seen.some(capture => capture.subStates.has(state.name))).map(state => `sub-state "${state.name}"`),
   ];
+}
+/** Frame-state record of each captured `screen/variant`, read by the screen invariant checker (#304). */
+export const catalogFrameStates = new Map<string, FrameState>();
+/** Name of the editor's typing surface in each panel mode that types into it; the composer otherwise. */
+const QUERY_SURFACES: Partial<Record<PanelMode | "", string>> = { "tool-approval": "approval reason", search: "find query", help: "palette query", model: "model query", sessions: "session query", tree: "branch query" };
+/** Map the editor's cursor offset, which counts display cells plus one per line break, to a UTF-16 index into `value`. */
+function cellOffsetToIndex(value: string, offset: number): number {
+  let cells = 0, index = 0;
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value)) {
+    if (cells >= offset) break;
+    cells += segment === "\n" ? 1 : Bun.stringWidth(segment); index += segment.length;
+  }
+  return index;
+}
+/** Record the controller and view facts that classify the frame about to be captured. */
+function captureFrameState(ui: ScreenHarness, snapshot: TuiSnapshot, mode: PanelMode | ""): FrameState {
+  const approval = snapshot.toolApproval;
+  const detailsId = ui.view.detailsEntryId(), details = detailsId ? snapshot.transcript.find(entry => entry.id === detailsId) : undefined;
+  const detailLines = details?.text.split("\n") ?? [];
+  const find = (id: string) => ui.renderer.root.findDescendantById(id);
+  const composer = find("composer") as BoxRenderable | undefined, entry = find("credential-entry") as BoxRenderable | undefined;
+  const entryPanel = credentialEntryPanel(snapshot), entryValue = find("credential-value") as TextRenderable | undefined;
+  let input: FrameState["input"];
+  if (composer?.visible && entryPanel) {
+    // The open entry, not its renderable, makes this a typing surface; a missing or hidden value row records no visible row and fails I4.
+    const shown = !!entry?.visible && !!entryValue?.visible, value = entryPanel.value && shown ? entryValue!.plainText : entryPanel.value;
+    input = { surface: `${entryPanel.kind} entry`, row: shown ? entryValue!.screenY : -1, col: shown ? entryValue!.screenX : 0, columns: shown ? entryValue!.width : 0,
+      value, cursor: value.length, placeholder: entryPanel.placeholder };
+  } else if (composer?.visible && ui.editor.visible && ui.editor.focused) {
+    // The editor reports its logical cursor in cells; map it back to a UTF-16 offset so the checker measures cells itself.
+    const value = ui.editor.plainText, placeholder = ui.editor.placeholder;
+    input = { surface: QUERY_SURFACES[mode] ?? "composer", row: ui.editor.screenY, col: ui.editor.screenX, columns: ui.editor.width, value,
+      cursor: cellOffsetToIndex(value, ui.editor.cursorOffset), placeholder: typeof placeholder === "string" ? placeholder : placeholder?.chunks.map(chunk => chunk.text).join("") ?? "", scroll: ui.editor.scrollY };
+  }
+  return {
+    panel: mode,
+    ...(approval ? { approval: { selected: approvalChoices(approval.request.toolName)[approval.selected] ?? "", enteringReason: approval.enteringReason } } : {}),
+    idle: snapshot.status !== "running" && !snapshot.activity && snapshot.readiness !== "loading" && !snapshot.loginWait && !snapshot.loginApproval,
+    ...(details && snapshot.outcome?.reason === "failed" ? { failedDetails: { heading: detailLines[0] ?? "", cause: detailLines.find(line => line.startsWith("Failure details:")) ?? "" } } : {}),
+    ...(input ? { input } : {}),
+  };
 }
 /** Write one version-4 session file whose IDs and commit times are fixed, for pickers and resume. */
 async function writeFixtureSession(directory: string, id: string, root: string, operations: readonly Record<string, unknown>[]) {
@@ -388,6 +433,7 @@ export async function renderScreen(screen: Screen, variant: Variant): Promise<st
     capture.modes.add(mode);
     for (const state of CATALOG_SUB_STATES) if (state.matches(mode, snapshot, ui)) capture.subStates.add(state.name);
     catalogCaptures.set(screen.id, capture);
+    catalogFrameStates.set(`${screen.id}/${variant.id}`, captureFrameState(ui, snapshot, mode));
     const cursor = ui.renderer.getCursorState();
     return serializeScreen(ui.captureSpans(), { screen: screen.id, title: screen.title, description: screen.description, variant: variant.id, cursor });
   } finally { await ui.dispose(); }

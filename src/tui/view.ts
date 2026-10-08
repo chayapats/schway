@@ -2146,6 +2146,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     refresh,
     /** Report the panel mode shown in place of the conversation body, or "" when none is open. */
     panelMode: (): PanelMode | "" => panelMode,
+    /** Report the transcript entry that open F2 details show, or undefined while details are closed. */
+    detailsEntryId: (): string | undefined => detailsReturn?.entryId,
     /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */
     freezeDraftForExit(): { task?: ExitDraftCheckpoint; saved: boolean; failed: boolean } {
       const snapshot = controller.snapshot();

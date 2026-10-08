@@ -16,6 +16,7 @@ import { SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
 import { activityDetail } from "../src/tui/presentation.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { handleSlashCommand } from "../src/tui/app.ts";
+import { formatInvariantFailure, screenInvariantFailures } from "./helpers/screen-invariants.ts";
 
 function history(count = 8): ConversationItem[] {
   return Array.from({ length: count }, (_, i) => [
@@ -276,6 +277,11 @@ async function renderedCompaction(options: { session: ReturnType<typeof createSe
       expect(snapshot.transcript.filter(row => row.text.includes("Esc stop"))).toEqual([]);
       const frame = terminal.captureCharFrame();
       expect(frame).not.toContain("Esc stop");
+      // The same frame passes the catalog's I3 invariant: nothing offers a stop while nothing runs (#304).
+      const text = frame.split("\n");
+      const golden = { screen: "compaction-end", title: "", description: "", variant: "nocolor-dark-120", cols: 120, rows: text.length, text, styles: [], cursor: { x: 1, y: 1, visible: false } };
+      expect(snapshot.readiness).not.toBe("loading");
+      expect(screenInvariantFailures(golden, { panel: "", idle: true }).map(formatInvariantFailure)).toEqual([]);
       return frame;
     },
     dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); await rm(home, { recursive: true, force: true }); },

@@ -8,6 +8,8 @@ import { CATALOG_API_KEY, CATALOG_CALLBACK, catalogCaptures, panelCoverageGaps, 
 import { parseScreen, serializeScreen } from "./screen-catalog/format.ts";
 import { TUI_THEMES } from "../src/tui/theme.ts";
 import { buildGallery } from "./screen-catalog/gallery.ts";
+import { catalogFrameStates } from "./screen-catalog/harness.ts";
+import { applyExemptions, formatInvariantFailure, screenInvariantFailures, SCREEN_INVARIANT_EXEMPTIONS, type InvariantFailure } from "./helpers/screen-invariants.ts";
 
 const directory = join(import.meta.dir, "screen-catalog/goldens");
 const update = process.env.SCHWAY_UPDATE_SCREENS === "1";
@@ -54,9 +56,19 @@ function diff(expected: string, actual: string): string {
   }
   return changed.join("\n");
 }
+/** Unexempted and exempted invariant failures of each rendered `screen/variant`, for the stale-exemption check. */
+const invariantFailures = new Map<string, InvariantFailure[]>();
+/** Check the #304 cross-screen invariants on one rendered frame, classified by its captured frame state, and throw on any unexempted failure. */
+function checkInvariants(screenId: string, variantId: string, actual: string): void {
+  const failures = screenInvariantFailures(parseScreen(actual), catalogFrameStates.get(`${screenId}/${variantId}`)!);
+  invariantFailures.set(`${screenId}/${variantId}`, failures);
+  const { remaining } = applyExemptions(failures, SCREEN_INVARIANT_EXEMPTIONS);
+  if (remaining.length) throw new Error(`Screen invariants failed:\n${remaining.map(formatInvariantFailure).join("\n")}`);
+}
 for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`screen ${screen.id} ${variant.id}`, async () => {
   setSystemTime(new Date(fixedTime));
   const actual = await renderScreen(screen, variant);
+  checkInvariants(screen.id, variant.id, actual);
   if (screen.id.startsWith("draft-")) {
     const text = parseScreen(actual).text.join("\n");
     expect(text).toContain(screen.id === "draft-restored" ? "Draft restored" : "Draft not saved");
@@ -288,6 +300,21 @@ test("every panel mode and required sub-state has a catalog screen", async () =>
   expect(without("callback-entry")).toEqual(['panel mode "callback"']);
   expect(without("approval-deny-reason")).toEqual(['sub-state "tool approval with reason entry"']);
   expect(without("branch-tree-fork")).toEqual(['sub-state "branch tree after Tab switches to a new fork"']);
+}, 600_000);
+test("every screen invariant exemption still covers a failure", async () => {
+  for (const exemption of SCREEN_INVARIANT_EXEMPTIONS) {
+    const screen = SCREENS.find(entry => entry.id === exemption.screen);
+    if (!screen) throw new Error(`Stale invariant exemption: no screen ${exemption.screen}`);
+    // A focused run renders only some variants; render each variant the exemption names so the check always sees it.
+    for (const variant of variantsFor(screen).filter(entry => exemption.variant === undefined || entry.id === exemption.variant)) {
+      if (invariantFailures.has(`${screen.id}/${variant.id}`)) continue;
+      setSystemTime(new Date(fixedTime));
+      const actual = await renderScreen(screen, variant);
+      invariantFailures.set(`${screen.id}/${variant.id}`, screenInvariantFailures(parseScreen(actual), catalogFrameStates.get(`${screen.id}/${variant.id}`)!));
+    }
+    const { used } = applyExemptions([...invariantFailures.values()].flat(), [exemption]);
+    if (!used.size) throw new Error(`Stale invariant exemption: ${exemption.screen}${exemption.variant ? ` ${exemption.variant}` : ""} ${exemption.invariant} covers no failure (${exemption.reason})`);
+  }
 }, 600_000);
 const fixture: CapturedFrame = { cols: 5, rows: 1, cursor: [4, 1], lines: [{ spans: [
   { text: "ก้", width: 1, fg: RGBA.fromInts(12, 34, 56, 128), bg: RGBA.defaultBackground(), attributes: 0x1ff },
