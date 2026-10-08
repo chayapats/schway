@@ -203,7 +203,11 @@ async function probe(screen: Screen, encoding: ChipEncoding, variant = probedVar
       let verdict: Verdict = "dead", detail = "";
       for (const press of presses) {
         reached ??= await fresh();
-        if (expectation === "send" && !reached.ui.editor.plainText) { await reached.ui.mockInput.pasteBracketedText(SEND_DRAFT); await reached.ui.settle(); }
+        if (expectation === "send" && !reached.ui.editor.plainText) {
+          await reached.ui.mockInput.pasteBracketedText(SEND_DRAFT); await reached.ui.settle();
+          // The pasted draft must arrive whole, so the send rule below compares against SEND_DRAFT itself.
+          expect(reached.ui.editor.plainText).toBe(SEND_DRAFT);
+        }
         const before = await quiet(reached);
         const outcome = await pressOnce(reached, press.bytes, encoding, expectation, before, before.editor);
         detail = presses.length > 1 ? `${detail ? `${detail}; ` : ""}${press.direction}: ${outcome.detail}` : outcome.detail;
