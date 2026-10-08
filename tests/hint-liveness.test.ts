@@ -228,8 +228,8 @@ const resultFor = (screen: Screen, encoding: ChipEncoding) => {
 };
 
 // Unowned dead chips found by #305; each constant names the open issue that fixes the chip.
-const FOLLOW_UP_CTRL_O_NO_TOOLS = 305;
-const FOLLOW_UP_F2_WHILE_DETAILS_OPEN = 305;
+const FOLLOW_UP_CTRL_O_NO_TOOLS = 355;
+const FOLLOW_UP_F2_WHILE_DETAILS_OPEN = 356;
 const inspectNothing = (screen: string): ChipAllowEntry => ({ screen, chip: "Alt+I inspect", reason: "notice-by-design",
   note: "Nothing to inspect yet: the notice says so and names the next step (#275)." });
 const pagingFits = (screen: string, note: string): ChipAllowEntry => ({ screen, chip: "PgUp/PgDn scroll", reason: "content-fits", note });
