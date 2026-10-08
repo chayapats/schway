@@ -8,11 +8,15 @@ import type { Model } from "../model/model.ts";
 import { describeEffectiveThinking } from "../config/config.ts";
 import { parseModelArgs, parseThinkingArgs } from "./commands.ts";
 import { filterXaiModels, type ListedModel } from "../model/model-list.ts";
-import { modelPickerEntries, modelPickerIdentity, presentModelPicker, rememberedPickerModels, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
+import { modelPickerDiagnosticOpen, modelPickerEntries, modelPickerIdentity, presentModelPicker, rememberedPickerModels, type ModelPickerEntry, type ModelPickerSnapshot } from "./model-picker.ts";
 import { ModelPreferences, type ModelPreferencesSnapshot } from "../config/model-preferences.ts";
 import { loadModelPickerAccess } from "./model-access.ts";
 import type { ModelAccess } from "./model-access.ts";
 import { CommandsLayer } from "./controller-commands.ts";
+import { redactRecoveryDetails } from "./controller-support.ts";
+
+/** Route names a partial discovery failure shows, in picker route order. */
+const ROUTE_LIST_NAMES = { api: "OpenAI API", compatible: "Endpoint", xai: "xAI", grok: "Grok" } as const;
 
 
 /** Model picker, auth-route selection, profiles and thinking-level actions. */
@@ -24,6 +28,8 @@ export abstract class ModelsLayer extends CommandsLayer {
   private pickerReturnView?: { browsing?: boolean; connecting?: boolean };
   private pickerModelQuery = "";
   private pickerBrowseQuery = "";
+  /** Last redacted diagnostic of each route list that failed, cleared when that list loads. */
+  private pickerRouteFailures = new Map<keyof typeof ROUTE_LIST_NAMES, string>();
 
   /** Use user-wide storage only when an explicit home is available. */
   private preferenceStore(): ModelPreferences | undefined { return this.home ? new ModelPreferences(this.home) : undefined; }
@@ -39,7 +45,8 @@ export abstract class ModelsLayer extends CommandsLayer {
   togglePickerFavorite(): boolean {
     const picker = this.modelPicker;
     const entry = picker?.entries[picker.selectedIndex];
-    if (!picker || entry?.kind !== "model") return false;
+    // The diagnostic hides the list, so nothing hidden can be pinned.
+    if (!picker || entry?.kind !== "model" || modelPickerDiagnosticOpen(picker)) return false;
     try {
       const pinned = !this.pickerPreferences.favorites.includes(entry.identity);
       this.pickerPreferences = this.preferenceStore()?.pin(entry.identity, pinned, entry) ?? { ...this.pickerPreferences,
@@ -49,7 +56,7 @@ export abstract class ModelsLayer extends CommandsLayer {
       this.pickerSelectionTouched = true;
       this.searchModels(picker.query, true);
       return true;
-    } catch (error) { picker.error = "Favorite not saved · Ctrl+P retry · Esc back"; this.notice(picker.error, String(error)); return false; }
+    } catch (error) { picker.error = "Favorite not saved · Ctrl+P retry · Esc back"; picker.errorDetails = undefined; picker.details = false; this.notice(picker.error, String(error)); return false; }
   }
 
   /** Open the complete connected catalog, restoring the previous search when returning. */
@@ -72,10 +79,12 @@ export abstract class ModelsLayer extends CommandsLayer {
     this.searchModels("");
   }
 
-  /** Reveal the selected model's exact ID and capacity on demand. */
+  /** Toggle the shown error's diagnostic while one shows, otherwise the selected model's exact ID and capacity. */
   togglePickerDetails(): void {
     const picker = this.modelPicker;
-    if (this.disposed || !picker || picker.loading || picker.error || picker.entries[picker.selectedIndex]?.kind !== "model") return;
+    if (this.disposed || !picker || picker.loading) return;
+    if (picker.error) { if (picker.errorDetails) picker.details = !picker.details; return; }
+    if (picker.entries[picker.selectedIndex]?.kind !== "model") return;
     picker.details = !picker.details;
   }
 
@@ -190,15 +199,24 @@ export abstract class ModelsLayer extends CommandsLayer {
         picker.accessLoading = false;
         if (discoveryStage === "access") { this.modelPickerAccess = this.unavailablePickerAccess(); this.pickerCachedAccess = undefined; this.pickerActiveAccess = "Login required"; }
         if (discoveryStage === "catalog") this.subscriptionListUnavailable = true;
-        const message = redactSecrets(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350);
-        picker.catalogState = /offline|network|fetch|timeout|aborted/i.test(message) ? "offline" : "failed";
-        picker.error = `${discoveryStage === "access" ? "Connections" : "Models"} unavailable · Ctrl+R retry · Esc back`;
+        const message = this.pickerDiagnostic(error);
+        const offline = /offline|network|fetch|timeout|aborted/i.test(message);
+        picker.catalogState = offline ? "offline" : "failed";
+        // Offline and other failures get distinct statuses; the diagnostic itself stays behind F2.
+        picker.error = `${discoveryStage === "access" ? "Connections" : "Models"} ${offline ? "offline" : "unavailable"} · Ctrl+R retry · F2 details`;
+        picker.errorDetails = `${discoveryStage === "access" ? "Connection check" : "ChatGPT model list"}: ${message}`;
+        picker.details = false;
       }
     } finally {
       if (current()) {
         picker.loading = false;
-        if (!picker.error && (this.apiModelsUnavailable || this.compatibleModelsUnavailable || this.xaiModelsUnavailable || this.grokModelsUnavailable)) {
-          picker.error = "Some models unavailable · Ctrl+R retry · Esc back"; picker.catalogState = "failed";
+        const missing = ([["api", this.apiModelsUnavailable], ["compatible", this.compatibleModelsUnavailable], ["xai", this.xaiModelsUnavailable], ["grok", this.grokModelsUnavailable]] as const)
+          .filter(([, unavailable]) => unavailable).map(([route]) => route);
+        if (!picker.error && missing.length) {
+          // Name one missing route; a count stands in for several, and F2 lists each with its diagnostic.
+          picker.error = `${missing.length === 1 ? `${ROUTE_LIST_NAMES[missing[0]!]} models` : `${missing.length} model lists`} unavailable · Ctrl+R retry · F2 details`;
+          picker.errorDetails = missing.map(route => `${ROUTE_LIST_NAMES[route]} models: ${this.pickerRouteFailures.get(route) ?? "No diagnostic recorded."}`).join("\n");
+          picker.catalogState = "failed"; picker.details = false;
         }
         this.searchModels(picker.query, true);
       }
@@ -214,9 +232,9 @@ export abstract class ModelsLayer extends CommandsLayer {
       tasks.push((async () => {
         try {
           const models = await this.boundedPickerTask(signal, load("api-key", signal));
-          if (current()) { this.apiModels = models; this.apiModelsUnavailable = false; }
-        } catch {
-          if (current()) { this.apiModels = undefined; this.apiModelsUnavailable = true; }
+          if (current()) { this.apiModels = models; this.apiModelsUnavailable = false; this.pickerRouteFailures.delete("api"); }
+        } catch (error) {
+          if (current()) { this.apiModels = undefined; this.apiModelsUnavailable = true; this.pickerRouteFailures.set("api", this.pickerDiagnostic(error)); }
         }
       })());
     }
@@ -229,10 +247,11 @@ export abstract class ModelsLayer extends CommandsLayer {
           if (current()) {
             this.compatibleModels = models;
             this.compatibleModelsUnavailable = false;
+            this.pickerRouteFailures.delete("compatible");
             if (isOpenRouterEndpoint(baseUrl)) this.configEditor?.setEndpointCapabilities("https://openrouter.ai/api/v1", openRouterModelCapabilities(this.compatibleModels));
           }
-        } catch {
-          if (current()) { this.compatibleModels = undefined; this.compatibleModelsUnavailable = true; }
+        } catch (error) {
+          if (current()) { this.compatibleModels = undefined; this.compatibleModelsUnavailable = true; this.pickerRouteFailures.set("compatible", this.pickerDiagnostic(error)); }
         }
       })());
     }
@@ -244,11 +263,13 @@ export abstract class ModelsLayer extends CommandsLayer {
           if (!current()) return;
           this.xaiModels = listed;
           this.xaiModelsUnavailable = false;
+          this.pickerRouteFailures.delete("xai");
           if (!this.grokSelected()) this.installXaiCapabilities(listed);
-        } catch {
+        } catch (error) {
           if (current()) {
             this.xaiModels = undefined;
             this.xaiModelsUnavailable = true;
+            this.pickerRouteFailures.set("xai", this.pickerDiagnostic(error));
             if (!this.grokSelected()) this.clearXaiCapabilities("api-key");
           }
         }
@@ -256,13 +277,18 @@ export abstract class ModelsLayer extends CommandsLayer {
     }
     if (this.modelPickerAccess?.grok === "Grok" && this.credentials?.listGrokModels) {
       tasks.push((async () => {
-        try { const models = filterXaiModels(await this.boundedPickerTask(signal, this.credentials!.listGrokModels!(signal))); if (current()) { this.grokModels = models; this.grokModelsUnavailable = false; } }
-        catch (error) { if (current()) { this.grokModels = undefined; this.grokModelsUnavailable = true; if (error instanceof Error && error.message.startsWith("Your Grok plan")) this.fail(error.message); } }
+        try { const models = filterXaiModels(await this.boundedPickerTask(signal, this.credentials!.listGrokModels!(signal))); if (current()) { this.grokModels = models; this.grokModelsUnavailable = false; this.pickerRouteFailures.delete("grok"); } }
+        catch (error) { if (current()) { this.grokModels = undefined; this.grokModelsUnavailable = true; this.pickerRouteFailures.set("grok", this.pickerDiagnostic(error)); if (error instanceof Error && error.message.startsWith("Your Grok plan")) this.fail(error.message); } }
       })());
     }
     await Promise.all(tasks.map(task => task.finally(() => {
       if (current() && this.modelPicker) this.searchModels(this.modelPicker.query, true);
     })));
+  }
+
+  /** Redact and bound a discovery failure for F2 details; it never reaches the primary row. */
+  private pickerDiagnostic(error: unknown): string {
+    return redactRecoveryDetails(error instanceof Error ? error.message : String(error), this.secrets).slice(0, 350) || "No diagnostic recorded.";
   }
 
   /** Enforce the picker deadline even when a credential store or catalog ignores cancellation. */
@@ -287,6 +313,8 @@ export abstract class ModelsLayer extends CommandsLayer {
     picker.loading = true;
     picker.accessLoading = true;
     picker.error = undefined;
+    picker.errorDetails = undefined;
+    picker.details = false;
     picker.catalogState = "loading";
     void this.refreshModelPicker(picker, abort);
     return true;
@@ -322,7 +350,7 @@ export abstract class ModelsLayer extends CommandsLayer {
 
   /** Filter catalog and profile choices with fallback budgets for typed ids. */
   searchModels(query: string, refresh = false): void {
-    if (!this.modelPicker || this.running) return;
+    if (!this.modelPicker || this.running || (!refresh && modelPickerDiagnosticOpen(this.modelPicker))) return;
     const picker = this.modelPicker;
     const queryChanged = !refresh && picker.query !== query;
     if (queryChanged) { this.pickerPreferredIdentity = undefined; this.pickerSelectionTouched = false; }
@@ -368,7 +396,7 @@ export abstract class ModelsLayer extends CommandsLayer {
   /** Move the highlighted choice with wraparound, skipping informational route headers. */
   moveModelPicker(delta: number): void {
     const picker = this.modelPicker;
-    if (!picker || this.running || !picker.entries.length || !delta) return;
+    if (!picker || this.running || !picker.entries.length || !delta || modelPickerDiagnosticOpen(picker)) return;
     this.pickerPreferredIdentity = undefined;
     this.pickerPreferredRoute = undefined;
     this.pickerSelectionTouched = true;
@@ -445,7 +473,8 @@ export abstract class ModelsLayer extends CommandsLayer {
   /** Stage and commit the highlighted model or profile, leaving the picker open on failure. */
   async selectPickerModel(): Promise<boolean> {
     const selection = this.modelPicker?.entries[this.modelPicker.selectedIndex];
-    if (!selection || selection.kind === "header") return false;
+    // A hidden highlight never selects a model or billing route while the diagnostic covers the list.
+    if (!selection || selection.kind === "header" || modelPickerDiagnosticOpen(this.modelPicker!)) return false;
     if (selection.kind === "browse") { this.browsePickerModels(); return true; }
     if (selection.kind === "connect") { this.connectPickerProviders(); return true; }
     if (this.modelPicker?.accessLoading) { this.notice("Checking sign-in · Wait or Esc back"); return false; }

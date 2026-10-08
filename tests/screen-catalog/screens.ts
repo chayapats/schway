@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type { TuiSnapshot } from "../../src/tui/controller.ts";
 import { CATALOG_API_KEY, CATALOG_CALLBACK, CATALOG_ENDPOINT_URL, type ScreenHarness } from "./harness.ts";
 import { displayUrl } from "../../src/tools/web-fetch-display.ts";
+import type { TuiRecovery } from "../../src/tui/controller-types.ts";
+import type { STARTUP_RECOVERY_CATEGORIES } from "../../src/tui/controller-support.ts";
 
 /** One catalog state reached through input and guarded by observable controller state. */
 export interface Screen { id: string; title: string; description: string; noColor?: boolean; noColorWidths?: boolean; rows?: number; elapsed?: number; drive(ui: ScreenHarness): Promise<void>; ready(snapshot: TuiSnapshot, ui: ScreenHarness): boolean }
@@ -36,6 +38,20 @@ const streamingTurn = async (ui: ScreenHarness) => {
 export const COMPACTION_RESULTS = { completed: "Context compacted · /context inspect summary", cancelled: "Compaction cancelled · /compact retry",
   failed: "Compaction failed · F2 repair details", noop: "Context unchanged · /compact retry after more turns" } as const;
 const compactionSettled = (result: string) => (s: TuiSnapshot) => s.status === "idle" && !s.activity && s.transcript.at(-1)?.text === result;
+/** The screen that records each turn recovery category; `provider` is the generic failed turn (#306). */
+export const RECOVERY_SCREENS: Readonly<Record<TuiRecovery["category"], string>> = { auth: "recovery-auth", "credential-store": "recovery-credential-store",
+  model: "recovery-model", offline: "recovery-offline", "rate-limit": "recovery-rate-limit", provider: "failed-turn", "session-write": "recovery-session-write" };
+/** The screen that records each startup recovery category (#306). */
+export const STARTUP_RECOVERY_SCREENS: Readonly<Record<(typeof STARTUP_RECOVERY_CATEGORIES)[number], string>> = { auth: "startup-auth",
+  "credential-store": "startup-credential-store", model: "startup-model", provider: "startup-provider" };
+/** A turn whose scripted runtime failure (harness `RECOVERY_FIXTURES`) leaves `category`'s recovery offered for the accepted task. */
+const recoveryScreen = (category: TuiRecovery["category"], title: string, description: string): Screen => ({ id: RECOVERY_SCREENS[category], title, description, noColorWidths: true,
+  drive: ui => enter(ui, "Summarize the changes"), ready: s => s.status === "error" && s.recovery?.category === category && s.recovery.accepted });
+/** A saved conversation reopened while its model fails to load (harness `STARTUP_FIXTURES`), offering `category`'s recovery before any task is accepted. */
+const startupScreen = (category: keyof typeof STARTUP_RECOVERY_SCREENS, title: string, description: string): Screen => ({ id: STARTUP_RECOVERY_SCREENS[category], title, description, noColorWidths: true,
+  drive: async () => {}, ready: s => s.status === "error" && s.recovery?.category === category && !s.recovery.accepted });
+/** The model picker is open and its discovery has settled. */
+const pickerSettled = (s: TuiSnapshot) => !!s.modelPicker && !s.modelPicker.loading;
 /** Open the session picker with Alt+S and wait until discovery finishes. */
 const openSessions = async (ui: ScreenHarness) => { ui.mockInput.pressKey("s", { meta: true }); await ui.waitFor(s => !!s.sessionPicker && !s.sessionPicker.loading); };
 const thai = "ช่วยอ่านไฟล์ README.md\nแล้วสรุปเป็นภาษาไทย\nสั้น ๆ สามบรรทัด";
@@ -228,6 +244,14 @@ export const SCREENS: readonly Screen[] = [
     ui.mockInput.pressKey("m", { meta: true }); await ui.waitFor(s => !!s.modelPicker && !s.modelPicker.loading); openDetails(ui);
   }, ready: s => s.modelPicker?.details === true },
   { id: "model-picker-unconnected", title: "Model picker, connect a provider", description: "An empty model list offers one action to connect a provider.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
+  { id: "model-picker-loading", title: "Model picker, checking models", description: "While the account model list loads, the picker says so and keeps the way back.", noColorWidths: true,
+    drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker?.loading && s.modelPicker.accessLoading === false && s.modelPicker.entries.some(entry => entry.modelId === "fake-coder") },
+  { id: "model-picker-offline", title: "Model picker, offline", description: "An offline account model list says so, offers retry and keeps its diagnostic behind F2.", noColorWidths: true,
+    drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => pickerSettled(s) && s.modelPicker!.catalogState === "offline" },
+  { id: "model-picker-failed", title: "Model picker, list failed", description: "A failed account model list reads differently from offline and keeps its diagnostic behind F2.", noColorWidths: true,
+    drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => pickerSettled(s) && s.modelPicker!.catalogState === "failed" && !!s.modelPicker!.error?.startsWith("Models unavailable") },
+  { id: "model-picker-partial", title: "Model picker, one route missing", description: "When only the endpoint list fails, the picker names it and keeps the loaded models selectable.", noColorWidths: true,
+    drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => pickerSettled(s) && !!s.modelPicker!.error?.startsWith("Endpoint models unavailable") },
   { id: "reasoning-chip-explicit", title: "Reasoning chip, explicit level", description: "After /thinking high the footer chip shows the level Schway sends.", noColor: true,
     drive: ui => enter(ui, "/thinking high"), ready: s => s.thinkingChip === "high" && s.status === "idle" },
   { id: "reasoning-chip-provider-default", title: "Reasoning chip, provider default", description: "With thinking unset the footer chip says the provider default applies.", noColor: true,
@@ -315,6 +339,16 @@ export const SCREENS: readonly Screen[] = [
     drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.retry?.cause === "rate-limit" },
   { id: "retry-network", title: "Network retry", description: "A lost connection retries after the default backoff.", noColor: true, elapsed: 400,
     drive: ui => enter(ui, "Summarize the changes"), ready: s => s.activity?.retry?.cause === "offline" },
+  recoveryScreen("auth", "Access rejected", "A rejected credential offers sign-in, not continuation, and keeps the draft."),
+  recoveryScreen("credential-store", "Credential storage locked", "A locked secure store offers to retry credential access after unlocking."),
+  recoveryScreen("model", "Model unavailable", "A model the provider no longer serves offers model choice before continuing."),
+  recoveryScreen("offline", "Connection unavailable", "A network failure that outlasts its retries offers continuation from saved progress."),
+  recoveryScreen("rate-limit", "Usage limit reached", "A rate limit that outlasts its retries asks to wait, then continue."),
+  recoveryScreen("session-write", "Progress not saved", "A refused session write blocks this session and leads with a fresh or saved session."),
+  startupScreen("auth", "Startup sign-in needed", "A reopened conversation without credentials offers sign-in before any task is sent."),
+  startupScreen("credential-store", "Startup credential storage locked", "A reopened conversation that cannot read the secure store offers to retry credential access."),
+  startupScreen("model", "Startup model unavailable", "A reopened conversation whose model is gone offers model choice."),
+  startupScreen("provider", "Startup connection unavailable", "A reopened conversation whose provider setup failed offers its details."),
   // Render the loading panel before yielding to Git so scrollbar initialization has a fixed order.
   { id: "review-panel", title: "Review panel", description: "The change review displays the completed clamp fix.", noColor: true, drive: async ui => { await enter(ui, "Fix the clamp upper bound"); await ui.waitFor(completed); ui.mockInput.pressKey("r", { meta: true }); await ui.renderOnce(); await ui.flush(); }, ready: s => !!s.changeReview && !s.changeReview.loading && s.changeReview.files.length > 0 && s.changeReview.detail.length > 0 },
   { id: "details-review", title: "Review details", description: "F2 shows the completed turn's tool evidence from the selected file review.", noColorWidths: true, drive: async ui => {
@@ -430,6 +464,8 @@ export const SCREENS: readonly Screen[] = [
   }, ready: compactionSettled(COMPACTION_RESULTS.cancelled) },
   { id: "compaction-failed", title: "Compaction failed", description: "A failed summary keeps history and offers its repair details once.", drive: ui => enter(ui, "/compact"), ready: compactionSettled(COMPACTION_RESULTS.failed) },
   { id: "compaction-noop", title: "Compaction unchanged", description: "With no older turns to summarize, /compact reports one unchanged result.", drive: ui => enter(ui, "/compact"), ready: compactionSettled(COMPACTION_RESULTS.noop) },
+  { id: "compaction-in-turn", title: "Compaction inside a turn", description: "Context pressure compacts older turns, and the running turn names the result while it continues.", drive: ui => enter(ui, "Continue the session loader work"),
+    ready: s => s.status === "running" && s.activity?.compactionOutcome === "completed" && s.activity.phase === "streaming" && s.transcript.some(entry => entry.kind === "assistant" && entry.text.startsWith("Continuing")) },
   { id: "no-color", title: "No color", description: "Failure recovery remains readable without terminal colors.", drive: ui => enter(ui, "Summarize the changes"), ready: failed },
   { id: "narrow-layout", title: "Narrow layout", description: "A table and code block fit the narrow conversation layout.", drive: ui => enter(ui, "Compare the options"), ready: completed },
   { id: "table-and-code", title: "Table and code wrapping", description: "Wide table cells and long code lines wrap without losing their text.", rows: 40, noColorWidths: true, drive: ui => enter(ui, "Show wrapping"), ready: completed },
@@ -458,6 +494,8 @@ export function variantsFor(screen: Screen): Variant[] {
   if (screen.id.startsWith("history-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
+  // Turn and startup recovery screens share the failed turn's narrow variants (#306).
+  if (screen.id.startsWith("recovery-") || screen.id.startsWith("startup-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("draft-") || screen.id.startsWith("shell-") || screen.id.startsWith("inspection-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (screen.id.startsWith("web-fetch-")) variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));
   if (screen.id === "web-search-line") variants.push(make("dark", 40), make("light", 40), make("dark", 40, screen.rows ?? 30, true));

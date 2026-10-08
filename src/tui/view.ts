@@ -7,7 +7,8 @@ import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEntryValue } from "./credential-entry.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
-import { modelPickerAction, modelPickerName } from "./model-picker.ts";
+import { modelPickerAction, modelPickerDiagnosticOpen, modelPickerErrorRows, modelPickerName } from "./model-picker.ts";
+import { fitHintSegments } from "./hint-text.ts";
 import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
@@ -1352,7 +1353,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // Without the footer hint row, the picker's one hint row moves into the panel; Esc stays only in the status bar.
       const sessionLines = snapshot.sessionPicker ? sessionPanelLines(snapshot.sessionPicker, { columns: width - 2, height: renderer.height, visibleRows: sessionVisibleRows, home: options.home, now: wallClock(), currentSessionId: snapshot.sessionId,
         ...(hints.visible ? {} : { hint: { text: sessionHintText(snapshot.sessionPicker, width - 2), tone: "muted" as const } }) }) : [];
-      const pickerRows = snapshot.sessionPicker ? Math.max(1, sessionLines.length) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? Math.min(maxRows, snapshot.modelPicker.entries.length) + 2 : guide ? guidanceHeight(guide, width - 2) : Math.max(1, Math.min(maxRows, commandRows.length)) + (paletteNote ? 1 : 0) + (selectedDetail ? 1 : 0);
+      // F2 on a discovery error swaps the model rows for its diagnostic until Esc returns to the list.
+      const pickerErrorRows = snapshot.modelPicker ? modelPickerErrorRows(snapshot.modelPicker, width - 2, maxRows) : undefined;
+      const pickerRows = snapshot.sessionPicker ? Math.max(1, sessionLines.length) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? (pickerErrorRows?.length ?? Math.min(maxRows, snapshot.modelPicker.entries.length)) + 2 : guide ? guidanceHeight(guide, width - 2) : Math.max(1, Math.min(maxRows, commandRows.length)) + (paletteNote ? 1 : 0) + (selectedDetail ? 1 : 0);
       const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + (draftStatus.visible ? draftStatus.height : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
@@ -1404,9 +1407,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const models = snapshot.modelPicker;
           if (editor.plainText !== models.query) setDraft(models.query);
           const room = Math.max(1, width - 2);
-          textRow(picker, fitLine(`${models.connecting ? "Connect a provider" : "Choose model"} · Enter ${modelPickerAction(models.entries[models.selectedIndex])} · Esc back`, room), theme.accent);
+          textRow(picker, fitLine(pickerErrorRows ? "Discovery details · Esc back" : `${models.connecting ? "Connect a provider" : "Choose model"} · Enter ${modelPickerAction(models.entries[models.selectedIndex])} · Esc back`, room), theme.accent);
           const start = Math.max(0, Math.min(models.selectedIndex - Math.floor(maxRows / 2), models.entries.length - maxRows));
-          models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
+          for (const row of pickerErrorRows ?? []) textRow(picker, row, theme.text);
+          if (!pickerErrorRows) models.entries.slice(start, start + maxRows).forEach((entry, offset) => {
             const selected = start + offset === models.selectedIndex;
             const prefix = `${selected ? "›" : " "} `;
             let line = entry.groupLabel;
@@ -1423,7 +1427,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           const detail = models.details && selected?.kind === "model"
             ? `${selected.modelId} · ${selected.contextWindow.toLocaleString("en-US")} context · ${selected.maxOutput.toLocaleString("en-US")} output`
             : models.loading ? "Checking models · Esc back" : models.connecting ? "Type to search · ↑↓ select · Esc back" : selected?.kind === "model" ? `Type to search · Ctrl+P ${selected.favorite ? "unpin" : "pin"} · F2 details` : "↑↓ select · Enter open · Esc back";
-          textRow(picker, fitLine(models.error ?? detail, room), models.error ? theme.error : theme.muted);
+          // A discovery error drops whole trailing keys at narrow widths rather than cutting one.
+          textRow(picker, models.error ? fitHintSegments(pickerErrorRows ? `${models.error.split(" · ")[0]} · Esc back` : models.error, room) : fitLine(detail, room), models.error ? theme.error : theme.muted);
         } else if (browsing && guide) {
           const tones = { accent: theme.accent, text: theme.text, muted: theme.muted, warning: theme.warning, success: theme.success };
           for (const line of guidanceLines(guide, width - 2)) textRow(picker, line.text, tones[line.tone]);
@@ -1522,7 +1527,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "sessions" && snapshot.sessionPicker) {
         hints.content = sessionHintContent(snapshot.sessionPicker, width);
       } else if (snapshot.modelPicker) {
-        hints.content = fittedHints(`↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
+        // While the diagnostic covers the list, only retry, F2 and Esc act.
+        hints.content = fittedHints(modelPickerDiagnosticOpen(snapshot.modelPicker) ? "Ctrl+R retry · F2 back · Esc back" : `↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
       } else {
         const modeHint = "Shift+Tab change mode · ";
         const working = !!snapshot.activity || snapshot.status === "running";
@@ -2043,7 +2049,10 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     if (refreshing || destroyed) return;
     if (observedDraft !== editor.plainText) { observedDraft = editor.plainText; editorRevision++; }
     if (controller.snapshot().sessionPicker) controller.searchSessions(editor.plainText);
-    if (controller.snapshot().modelPicker) controller.searchModels(editor.plainText);
+    const models = controller.snapshot().modelPicker;
+    // Typing cannot search a list the diagnostic hides; the query field keeps its text.
+    if (models && modelPickerDiagnosticOpen(models) && editor.plainText !== models.query) { setDraft(models.query); return; }
+    if (models) controller.searchModels(editor.plainText);
     refresh();
   };
   renderer.keyInput.on("keypress", onKey);

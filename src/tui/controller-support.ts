@@ -11,10 +11,15 @@ export function recoveryMessage(category: TuiRecovery["category"]): string {
     case "offline": return "Connection unavailable · Check your network";
     case "rate-limit": return "Usage limit reached · Wait before continuing";
     case "session-write": return "Progress not saved · Repair storage before continuing";
-    case "tool": return "Tool failed · Inspect the result";
     default: return "Request failed · Inspect details before continuing";
   }
 }
+
+/** Every turn recovery category, each reachable from a runtime error the agent loop emits. */
+export const RECOVERY_CATEGORIES = Object.keys({ auth: 1, "credential-store": 1, model: 1, offline: 1, "rate-limit": 1, provider: 1, "session-write": 1 } satisfies Record<TuiRecovery["category"], 1>) as readonly TuiRecovery["category"][];
+
+/** Every startup recovery category that `startupFailureCategory` can return. */
+export const STARTUP_RECOVERY_CATEGORIES = ["auth", "credential-store", "model", "provider"] as const satisfies readonly ReturnType<typeof startupFailureCategory>[];
 
 /** Classify startup adapter failures before showing any provider or OS diagnostic text. */
 export function startupFailureCategory(message: string): "auth" | "credential-store" | "model" | "provider" {
