@@ -46,6 +46,7 @@
     "typecheck": "tsc --noEmit",
     "screens:update": "SCHWAY_UPDATE_SCREENS=1 bun test tests/screen-catalog.test.ts",
     "screens:gallery": "bun tests/screen-catalog/gallery.ts",
+    "screens:sweep": "SCHWAY_SCREEN_SWEEP=1 bun test tests/screen-sweep.test.ts",
     "demo:record": "vhs docs/demo/demo.tape",
     "prepack": "bun scripts/build-extension-types.ts"
   },

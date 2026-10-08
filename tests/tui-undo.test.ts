@@ -832,3 +832,62 @@ test("undo heading and hint row name one Esc verb per state at every width", () 
     for (const width of [120, 50, 40, 20]) expect(undoHint(undo, width)).toEndWith(escape);
   }
 });
+
+test("narrow undo hints end with Esc alone, or keep Alt+R review when the status bar names Esc (#307)", () => {
+  const base: UndoPreview = { turnId: "t1", turnNumber: 1, files: [], selected: 0, result: false };
+  // Today's choices at 30 columns (28 content cells) and wider stay the same.
+  expect(undoHint(base, 28)).toBe("Alt+R review · Esc cancel");
+  expect(undoHint(base, 22)).toBe("Esc cancel");
+  expect(undoHint(base, 22, true)).toBe("Alt+R review · Esc cancel");
+  const readOnly = { ...base, readOnlyStatus: "No saved undo for these changes" };
+  expect(undoHint(readOnly, 23)).toBe("Alt+R review · Esc back");
+  expect(undoHint(readOnly, 22)).toBe("Esc back");
+});
+
+test("undo diff continuations keep a blank hanging gutter at 24, 40 and 59 columns, Thai and emoji included (#307)", async () => {
+  await withTempDir(async root => {
+    const long = "export const note = \"บันทึกภาษาไทย 🧪 keeps every continuation under its own gutter column\";";
+    const ui = await setup(root, undefined, [], [{ toolCalls: [{ id: "write-long", name: "write", arguments: { path: "long.ts", content: `${long}\n` } }] }, { text: "Saved." }]);
+    try {
+      await ui.send("Write the note"); await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview?.files[0]?.path).toBe("long.ts");
+      for (const width of [24, 40, 59]) {
+        ui.resize(width, 30); await ui.settle();
+        const rows = ui.captureCharFrame().split("\n");
+        const first = rows.findIndex(row => row.startsWith("   1 │-"));
+        expect(first).toBeGreaterThanOrEqual(0);
+        // Undo removes the created line; rows after the numbered row continue at its text column under blank gutter cells until the line ends.
+        let text = rows[first]!.slice(" ".length + 6).trimEnd(), next = first + 1;
+        for (; rows[next]?.startsWith(" ".repeat(7)) && rows[next]!.trim(); next++) text += rows[next]!.slice(7).trimEnd();
+        expect(next).toBeGreaterThan(first + 1);
+        expect(text.replace(/\s/g, "")).toBe(long.replace(/\s/g, ""));
+        expect(rows.slice(first, next).every(row => Bun.stringWidth(row.trimEnd()) <= width - 2)).toBe(true);
+      }
+    } finally { await ui.dispose(); }
+  });
+});
+
+test("tab-indented undo diff continuations stay under the blank gutter at 24 and 40 columns (#307)", async () => {
+  await withTempDir(async root => {
+    const long = "\t\treturn Math.min(hi, Math.max(lo, n)) // tab-indented continuation";
+    const ui = await setup(root, undefined, [], [{ toolCalls: [{ id: "write-tabs", name: "write", arguments: { path: "tabs.go", content: `${long}\n` } }] }, { text: "Saved." }]);
+    try {
+      await ui.send("Write the tabs"); await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview?.files[0]?.path).toBe("tabs.go");
+      for (const width of [24, 40]) {
+        ui.resize(width, 30); await ui.settle();
+        const rows = ui.captureCharFrame().split("\n");
+        const first = rows.findIndex(row => row.startsWith("   1 │-"));
+        expect(first).toBeGreaterThanOrEqual(0);
+        // Tabs expand to 4-column stops, so the first row starts with 8 spaces of indentation after the gutter.
+        expect(rows[first]!.slice(7, 15)).toBe(" ".repeat(8));
+        let next = first + 1, text = rows[first]!.slice(7).trimEnd();
+        for (; rows[next]?.startsWith(" ".repeat(7)) && rows[next]!.trim(); next++) text += rows[next]!.slice(7).trimEnd();
+        expect(next).toBeGreaterThan(first + 1);
+        // Every row of the line is accounted for: no piece wrapped to the left edge under the line numbers.
+        expect(text.replace(/\s/g, "")).toBe(long.replace(/\s/g, ""));
+        expect(rows.slice(first, next).every(row => Bun.stringWidth(row.trimEnd()) <= width - 2)).toBe(true);
+      }
+    } finally { await ui.dispose(); }
+  });
+});

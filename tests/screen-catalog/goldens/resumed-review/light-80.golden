@@ -13,7 +13,7 @@ cursor 1 1 hidden
   Current working tree  │ Current diff · clamp.ts
   › clamp.ts   unstaged │ Unstaged · index → worktree
     notes.md  untracked │   1   export function clamp(n: number, lo: number,
-                        │ hi: number) {
+                        │        hi: number) {
                         │   2 -   return Math.max(lo, n);
                         │   2 +   return Math.min(hi, Math.max(lo, n));
                         │   3   }
@@ -63,12 +63,12 @@ cursor 1 1 hidden
 06 0-2 #ffffff #f7f7f4 -
 06 2-23 #1d232c #f7f7f4 -
 06 23-26 #c5c9cf #f7f7f4 -
-06 26-77 #1d232c #f7f7f4 -
-06 77-80 #ffffff #f7f7f4 -
+06 26-76 #1d232c #f7f7f4 -
+06 76-80 #ffffff #f7f7f4 -
 07 0-23 #ffffff #f7f7f4 -
 07 23-26 #c5c9cf #f7f7f4 -
-07 26-39 #1d232c #f7f7f4 -
-07 39-80 #ffffff #f7f7f4 -
+07 26-46 #1d232c #f7f7f4 -
+07 46-80 #ffffff #f7f7f4 -
 08 0-23 #ffffff #f7f7f4 -
 08 23-26 #c5c9cf #f7f7f4 -
 08 26-57 #a61f16 #f7f7f4 -

@@ -1,4 +1,5 @@
 import type { ScreenGolden } from "../screen-catalog/format.ts";
+import { hintRowSegments } from "./hint-grammar.ts";
 
 /**
  * Cross-screen invariants every catalog frame must hold (#304). The checker is pure: it reads a parsed golden and a
@@ -152,3 +153,157 @@ export const INVARIANT_EVIDENCE_FRAMES: readonly { screen: string; variant?: str
   ...["compaction", "compaction-completed", "compaction-cancelled", "compaction-failed", "compaction-noop"].map(screen => ({ screen, invariant: "I3" as const })),
   ...["endpoint-url-empty", "endpoint-url-error", "api-key-entry", "callback-entry"].map(screen => ({ screen, invariant: "I4" as const })),
 ];
+
+/*
+ * Breakpoint-sweep invariants (#307). The sweep renders screens one column either side of every layout breakpoint
+ * without writing goldens and checks S1–S5 on each frame, from layout facts captured with it.
+ */
+
+/** Identifier of one sweep invariant: S1 whole hint segments, S2 clean breaks, S3 diff gutter kept, S4 Esc exit kept, S5 mode shown. */
+export type SweepInvariantId = "S1" | "S2" | "S3" | "S4" | "S5";
+
+/** Layout facts captured with one sweep frame. Rows are zero-based text rows; `x` is a zero-based cell. */
+export interface SweepFrameState {
+  /** The whole hint text the view set and the rows its visible hint row occupies (two or more when review or history wraps it). */
+  hint?: { text: string; top: number; rows: number };
+  /** Row of the status bar, when it shows. */
+  status?: number;
+  /** Row ranges the view wraps itself, such as the undo, review and history headings; S2 checks each as one block. */
+  wrapped: { top: number; rows: number }[];
+  /**
+   * The undo or review diff text area: its first and last visible row, the cell where its text starts, whether it is
+   * the undo panel (whose notes and explanations S2 also checks) and every numbered diff line as gutter plus text.
+   */
+  diff?: { top: number; bottom: number; x: number; undo: boolean; lines: string[] };
+}
+
+/** One frame of a sweep: its parsed text, terminal width and captured state. */
+export interface SweepFrame { golden: ScreenGolden; width: number; state: SweepFrameState }
+
+/** One violated sweep invariant, naming the screen, width and, when one is at fault, the offending zero-based row. */
+export interface SweepFailure { screen: string; width: number; invariant: SweepInvariantId; message: string; row?: number; text?: string }
+
+/** A reasoned exception for one screen (and optionally one width) and sweep invariant; an entry that matches no failure is stale. */
+export interface SweepExemption { screen: string; width?: number; invariant: SweepInvariantId; reason: string }
+
+/** Key names that must never end a wrapped row while their action starts the next one. */
+const WRAP_KEY = /^(?:Enter|Esc|Tab|Shift\+Tab|F2|PgUp\/PgDn|↑↓|←→|(?:Alt|Ctrl)\+\S+)$/;
+/** Gutter of a numbered undo (`  2 │-`) or review (`  2 - `) diff row. */
+const DIFF_GUTTER = /^ *\d+ (?:│[-+ ]|[-+ ] )/;
+const ESC_EXIT = /(?:^|\s)Esc(?:\s|$)/;
+const MODE = /^(?:◆ )?(?:Auto|Ask|Read-only)(?:\s|$)/;
+
+/** Rows of a numbered diff line's continuations that start under the line numbers, and every continuation row seen. */
+function diffContinuations(golden: ScreenGolden, diff: NonNullable<SweepFrameState["diff"]>) {
+  const misplaced: number[] = [], continuations = new Set<number>(), numbered = new Set<number>();
+  for (let row = diff.top; row <= diff.bottom; row++) {
+    const shown = sliceCells(golden.text[row] ?? "", diff.x).trimEnd();
+    const gutter = DIFF_GUTTER.exec(shown)?.[0];
+    if (!gutter || continuations.has(row)) continue;
+    numbered.add(row);
+    const start = compact(shown);
+    const lines = diff.lines.filter(line => DIFF_GUTTER.exec(line)?.[0] === gutter && compact(line).startsWith(start));
+    // A row that shows a whole line, or one the checker cannot attribute, has no continuation to check.
+    if (!lines.length || lines.some(line => compact(line) === start)) continue;
+    const wanted = compact(lines[0]!), indent = Bun.stringWidth(gutter);
+    let seen = start;
+    for (let next = row + 1; next <= diff.bottom && seen.length < wanted.length; next++) {
+      const text = sliceCells(golden.text[next] ?? "", diff.x);
+      if (!text.trim()) break;
+      continuations.add(next);
+      if (text.slice(0, indent).trim()) misplaced.push(next);
+      seen += compact(text);
+    }
+  }
+  return { misplaced, continuations, numbered };
+}
+
+/** Text after the leading body padding and gutter glyphs of a row. */
+const content = (row: string) => row.replace(/^[\s│┃▌▐]+/, "");
+
+/** Check S2 on each adjacent pair of rows in one wrapped block from `top` through `bottom`. */
+function cleanBreakFailures(golden: ScreenGolden, top: number, bottom: number, fail: (invariant: SweepInvariantId, message: string, row?: number) => void) {
+  for (let row = top; row < bottom; row++) {
+    const line = (golden.text[row] ?? "").trimEnd(), next = content(golden.text[row + 1] ?? "");
+    if (!line.trim() || !next) continue;
+    const last = line.trim().split(/\s+/).at(-1)!;
+    if (/(?:^|\s)·$/.test(line)) fail("S2", "a wrapped row ends with a dangling ` ·`", row);
+    else if (next === "·" || next.startsWith("· ")) fail("S2", "a wrapped row starts with `· `", row + 1);
+    else if (WRAP_KEY.test(last)) fail("S2", `a wrapped row ends with ${last} and its action starts the next row`, row);
+  }
+}
+
+/** Check S1, S2, S3 and S5 against one sweep frame; S4 compares frames and lives in `escExitFailures`. */
+export function sweepFrameFailures(frame: SweepFrame): SweepFailure[] {
+  const { golden, width, state } = frame;
+  const failures: SweepFailure[] = [];
+  const fail = (invariant: SweepInvariantId, message: string, row?: number) =>
+    failures.push({ screen: golden.screen, width, invariant, message, ...(row === undefined ? {} : { row, text: golden.text[row] ?? "" }) });
+
+  // S1: the hint row shows only whole ` · ` segments of the text the view set; a wrapped review or history hint counts as one row.
+  if (state.hint && state.hint.text) {
+    const whole = new Set(hintRowSegments(state.hint.text));
+    const parts = Array.from({ length: state.hint.rows }, (_, index) => state.hint!.top + index)
+      .flatMap(row => hintRowSegments(golden.text[row] ?? "").map(text => ({ row, text })));
+    for (let index = 0; index < parts.length; index++) {
+      const { row } = parts[index]!;
+      let text = parts[index]!.text;
+      // A segment wider than its row may wrap inside itself; rejoin it before checking.
+      while (!whole.has(text) && index + 1 < parts.length && [...whole].some(segment => segment.startsWith(`${text} `))) text = `${text} ${parts[++index]!.text}`;
+      if (!whole.has(text)) fail("S1", `hint segment "${text}" is not a whole segment of "${state.hint.text}"`, row);
+    }
+  }
+
+  // S3: a numbered diff line's continuation starts at its text column under a blank gutter.
+  const diff = state.diff && diffContinuations(golden, state.diff);
+  for (const row of diff?.misplaced ?? []) fail("S3", "a diff continuation starts under the line numbers", row);
+
+  // S2: hint rows, panel headings and undo notes and explanations break between whole key-and-action segments.
+  const blocks = [...(state.hint ? [{ top: state.hint.top, rows: state.hint.rows }] : []), ...state.wrapped];
+  for (const block of blocks) cleanBreakFailures(golden, block.top, block.top + block.rows - 1, fail);
+  if (state.diff?.undo && diff) {
+    let start = -1;
+    for (let row = state.diff.top; row <= state.diff.bottom + 1; row++) {
+      const explanation = row <= state.diff.bottom && !diff.numbered.has(row) && !diff.continuations.has(row) && !!sliceCells(golden.text[row] ?? "", state.diff.x).trim();
+      if (explanation && start < 0) start = row;
+      if (!explanation && start >= 0) { cleanBreakFailures(golden, start, row - 1, fail); start = -1; }
+    }
+  }
+
+  // S5: the status bar names the effective mode, in full or compact form.
+  if (state.status !== undefined && !MODE.test((golden.text[state.status] ?? "").trim())) fail("S5", "the status bar does not show the mode", state.status);
+  return failures;
+}
+
+/** True when the frame's hint row or status bar offers an Esc action. */
+export function escExitShown(frame: SweepFrame): boolean {
+  const rows = [...(frame.state.hint ? Array.from({ length: frame.state.hint.rows }, (_, index) => frame.state.hint!.top + index) : []), ...(frame.state.status === undefined ? [] : [frame.state.status])];
+  return rows.some(row => ESC_EXIT.test(frame.golden.text[row] ?? ""));
+}
+
+/** S4: once a width of a screen shows an Esc exit in its hint row or status bar, every narrower frame of that screen shows one too. */
+export function escExitFailures(frames: readonly SweepFrame[]): SweepFailure[] {
+  const widest = [...frames].sort((a, b) => b.width - a.width).find(escExitShown);
+  if (!widest) return [];
+  return frames.filter(frame => frame.width < widest.width && !escExitShown(frame)).map(frame => ({
+    screen: frame.golden.screen, width: frame.width, invariant: "S4" as const,
+    message: `no Esc exit in the hint row or status bar, though ${widest.width} columns show one`,
+    ...(frame.state.status === undefined ? {} : { row: frame.state.status, text: frame.golden.text[frame.state.status] ?? "" }),
+  }));
+}
+
+/** Split sweep failures into those an exemption covers and those that remain, and report the exemptions used. */
+export function applySweepExemptions(failures: readonly SweepFailure[], exemptions: readonly SweepExemption[]): { remaining: SweepFailure[]; used: Set<SweepExemption> } {
+  const used = new Set<SweepExemption>();
+  const remaining = failures.filter(failure => {
+    const exemption = exemptions.find(entry => entry.screen === failure.screen && entry.invariant === failure.invariant && (entry.width === undefined || entry.width === failure.width));
+    if (exemption) used.add(exemption);
+    return !exemption;
+  });
+  return { remaining, used };
+}
+
+/** One readable line per sweep failure: screen, width, invariant, message and the offending row. */
+export function formatSweepFailure(failure: SweepFailure): string {
+  return `${failure.screen} ${failure.width} columns ${failure.invariant}: ${failure.message}${failure.row === undefined ? "" : ` (row ${failure.row}: ${JSON.stringify(failure.text)})`}`;
+}

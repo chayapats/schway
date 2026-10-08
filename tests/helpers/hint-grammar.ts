@@ -103,6 +103,11 @@ function segments(line: string): Segment[] {
   return result;
 }
 
+/** Segments of one rendered row, split at ` · ` separators and column gaps without leading status glyphs or markers, as R1–R7 read them. */
+export function hintRowSegments(line: string): string[] {
+  return segments(line.replace(trailingFrame, "")).map(segment => segment.text);
+}
+
 /** True when an action equals an allowed entry or names a target after it with `: `. */
 function allowed(key: string, action: string): boolean {
   return (HINT_ACTIONS[key] ?? []).some(entry => action === entry || action.startsWith(`${entry}: `));

@@ -13,13 +13,17 @@ export function undoEscape(undo: UndoPreview | undefined): string {
   return undo && !undo.result && !undo.readOnlyStatus ? "Esc cancel" : "Esc back";
 }
 
-/** Widest undo hint that fits, dropping scroll help before the review action and never dropping Esc. */
-export function undoHint(undo: UndoPreview | undefined, width: number): string {
+/**
+ * Widest undo hint that fits, dropping scroll help before the review action. Esc alone is the last choice, so no
+ * segment is ever clipped; when the status bar already names Esc (`escInStatusBar`), the row keeps its review action
+ * instead and the caller's fitting drops Esc.
+ */
+export function undoHint(undo: UndoPreview | undefined, width: number, escInStatusBar = false): string {
   const escape = undoEscape(undo);
   const choices = undo && !undo.result
     ? [`↑↓ select · PgUp/PgDn scroll · Alt+R review · ${escape}`, `↑↓ select · Alt+R review · ${escape}`, `Alt+R review · ${escape}`]
     : [`↑↓ select · PgUp/PgDn scroll · ${escape}`, `↑↓ select · ${escape}`];
-  return choices.find(choice => Bun.stringWidth(choice) <= width) ?? choices.at(-1)!;
+  return choices.find(choice => Bun.stringWidth(choice) <= width) ?? (escInStatusBar ? choices.at(-1)! : escape);
 }
 
 /** Explanation lines, then the selected file's header and diff or read-only explanation. */

@@ -9,6 +9,8 @@ import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEn
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerDiagnosticOpen, modelPickerErrorRows, modelPickerName } from "./model-picker.ts";
 import { fitHintSegments } from "./hint-text.ts";
+import { LAYOUT_BREAKPOINTS, bodyPadding as layoutBodyPadding, bodyWidth } from "./layout.ts";
+import { diffGutter, wrapDiffLine } from "./diff-wrap.ts";
 import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
@@ -372,6 +374,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let gitHead: { root: string; at: number; value?: string } | undefined;
   let pickerWasVisible = false;
   let bodyPadding = 2;
+  // The whole hint text the hint row was last fitted or wrapped from, before any segment dropped (#307 sweep).
+  let hintSource = "";
 
   // Like a primary ScrollView, non-scrollable chrome routes wheel input to the
   // conversation. Preserve native handling over a scroller or multiline editor.
@@ -711,7 +715,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
    * While work runs with the hint row visible, the hint row owns Esc.
    */
   const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") && (branchTreeEscInFooter || chooserEscInFooter || !hints.visible || !!footerParts.toolApproval ||
-    footerParts.override === undefined && !!footerParts.notConnected || renderer.width < 30 && !footerParts.running);
+    footerParts.override === undefined && !!footerParts.notConnected || renderer.width < LAYOUT_BREAKPOINTS.compactStatusBar && !footerParts.running);
 
   /**
    * Key-chip hints that fit `columns`. Arrow and paging hints drop first, then trailing actions; primary actions
@@ -719,6 +723,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
    * A row already written in priority order (the reader, where scrolling is the main action) drops from the end.
    */
   function fittedHints(text: string, columns: number, base = theme.background, ordered = false): StyledText {
+    hintSource = text;
     const segments = text.split(" · ");
     const escape = (segment: string) => segment === "Esc" || segment.startsWith("Esc ");
     const navigation = (segment: string) => /^(?:[↑↓←→]|PgUp|PgDn|PageUp|PageDown|Home|End)/.test(segment);
@@ -736,6 +741,16 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     while (!fits() && dropLast(segment => !escape(segment)));
     const chunks = keyHintChunks(segments.join(" · "), hintColors(base));
     return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
+  }
+
+  /**
+   * Hint rows for a navigation group and an action group: one row when both fit, otherwise each group wraps only
+   * between ` · ` segments, so a key stays with its action and no row ends or starts with a separator (#307).
+   */
+  function wrappedHintContent(navigation: string, actions: string, columns: number): StyledText {
+    hintSource = [navigation, actions].filter(Boolean).join(" · ");
+    const rows = Bun.stringWidth(hintSource) <= columns ? [hintSource] : [navigation, actions].filter(Boolean).flatMap(group => wrapHintSegments(group, columns));
+    return new StyledText(rows.flatMap((row, index) => [...(index ? [fg(theme.muted)("\n")] : []), ...keyHintChunks(row, hintColors(theme.background))]));
   }
 
   /** The session picker's one hint row as text: its status, then paired actions that fit `columns`. */
@@ -777,7 +792,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     };
     // An Esc action the hint row already names stays off the status bar, so the bar can spend that width on the model.
     const nextAction = footerParts.nextAction.startsWith("Esc") && !footerNamesEsc() ? "" : footerParts.nextAction;
-    if (columns < 30 || !hints.visible) { compactFooter(nextAction); return; }
+    if (columns < LAYOUT_BREAKPOINTS.compactStatusBar || !hints.visible) { compactFooter(nextAction); return; }
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitFindStatus(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
@@ -800,7 +815,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
     const thinking = footerParts.thinking ? [bg(tint(theme, theme.violet, theme.surface))(fg(theme.violet)(` ${footerParts.thinking} `))] : [];
     const route = footerParts.route ? [fg(theme.muted)(` ${footerParts.route}`)] : [];
-    const cells = columns < 70 ? 5 : 10;
+    const cells = columns < LAYOUT_BREAKPOINTS.fullComposerHint ? 5 : 10;
     const filled = footerParts.ctxPercent === undefined ? 0 : Math.max(footerParts.ctxPercent > 0 ? 1 : 0, Math.round(footerParts.ctxPercent / 100 * cells));
     const meterColor = (footerParts.ctxPercent ?? 0) < 60 ? theme.accent : (footerParts.ctxPercent ?? 0) < 85 ? theme.warning : theme.error;
     const ctx = footerParts.ctxPercent === undefined
@@ -932,8 +947,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // Startup readiness is transient chrome; recovery details remain available on demand.
       const entries = snapshot.readiness !== "ready" && snapshot.transcript.length === 1 && !snapshot.recovery?.accepted && snapshot.transcript[0]?.id === snapshot.recovery?.entryId ? [] : snapshot.transcript;
       paintedCancellationId = snapshot.activity?.cancellation === "requested" ? snapshot.activity.operationId : undefined;
-      const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
-      bodyPadding = renderer.width < 60 ? 1 : 2;
+      const width = bodyWidth(renderer.width);
+      bodyPadding = layoutBodyPadding(renderer.width);
       body.paddingX = hintBar.paddingX = bodyPadding;
       composerTop.content = "▄".repeat(width);
       composerBottom.content = "▀".repeat(width);
@@ -1057,7 +1072,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         } else credential.content = snapshot.loginApproval ? SIGN_IN_COMPOSER_TEXT : SIGN_IN_CHOOSER_COMPOSER_TEXT;
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < LAYOUT_BREAKPOINTS.shortSessionPlaceholder ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -1067,13 +1082,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const room = Math.max(0, renderer.width - 2 - Bun.stringWidth("⚡ schway  "));
       const final = safe(path).split("/").filter(Boolean).at(-1) ?? path;
       const shortest = shortenWorkspacePath(safe(workspacePath), options.home, Bun.stringWidth(`…/${final}`));
-      const branchRoom = renderer.width >= 40 ? Math.max(0, room - Bun.stringWidth(shortest) - 4) : 0;
+      const branchRoom = renderer.width >= LAYOUT_BREAKPOINTS.topBarBranch ? Math.max(0, room - Bun.stringWidth(shortest) - 4) : 0;
       // A shortened detached commit is an identity, not a label we can abbreviate again.
       const shortSha = /^[0-9a-f]{7}$/.test(branchLabel);
       headerBranch = branchRoom > 0 && (!shortSha || branchRoom >= 7) ? fitLine(branchLabel, branchRoom) : "";
       headerPath = shortenWorkspacePath(safe(workspacePath), options.home, room - (headerBranch ? Bun.stringWidth(headerBranch) + 4 : 0));
       paintHeader(now());
-      const nextPill = statusPill(snapshot, width < 32);
+      const nextPill = statusPill(snapshot, width < bodyWidth(LAYOUT_BREAKPOINTS.compactStatusPill));
       if (nextPill.tone !== pill.tone) { pillFrom = pillColors(pill.tone).bg; pillChangedAt = now(); }
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
@@ -1089,7 +1104,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
         // Ctrl+C lives only in the approval activity row; the hint row carries Enter's meaning when it is visible.
-        nextAction: panelMode === "tool-approval" && snapshot.toolApproval ? hints.visible && renderer.width >= 30 ? "Esc deny" : approvalAction(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason)
+        nextAction: panelMode === "tool-approval" && snapshot.toolApproval ? hints.visible && renderer.width >= LAYOUT_BREAKPOINTS.compactStatusBar ? "Esc deny" : approvalAction(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason)
           // A request waiting behind another view: name Esc exactly as that view's hint row and reader status do.
           : snapshot.toolApproval ? "Esc back to request"
           // A sign-in wait names Esc once: in the hint row, or here only when the hint row is hidden; a submitted save names none.
@@ -1160,7 +1175,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const selected = undo?.files[undo.selected];
         const review = undo ? { heading: undoHeading(undo), selected: undo.selected,
           rows: undoRows(undo), showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
-        const stacked = !!undo || renderer.width < 80;
+        const stacked = !!undo || renderer.width < LAYOUT_BREAKPOINTS.reviewSideBySide;
         const scope = undo ? undefined : snapshot.changeReview!.scope;
         // A review opened from the undo panel lists that panel's paths with current-diff titles but no turn source badges.
         const fromUndo = !undo && !!snapshot.changeReview!.fromUndo, titled = !!scope || fromUndo;
@@ -1202,15 +1217,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));
         reviewDivider.visible = !stacked && fileRows.length > 0;
         reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
-        // Explanations without a file list wrap at words; diff rows wrap anywhere to keep line numbers aligned.
+        // Explanations without a file list wrap at words; diff rows arrive pre-wrapped under their gutter, and char wrap only backs that up.
         reviewText.wrapMode = review.showingDetails || (!undo && !review.files.length) ? "word" : "char";
-        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode, width, stacked]);
+        // The diff column keeps a padding cell and the scrollbar column (#250), so pre-wrapped rows never meet either.
+        const diffWidth = Math.max(1, (stacked ? width : width - fileWidth - 3) - 2);
+        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode, width, stacked, diffWidth]);
         if (content !== reviewContent) {
-          // Word-wrapped explanation rows such as "Current changes unavailable · Ctrl+R reload" break at ` · `; the diff column keeps a padding cell and the scrollbar.
-          const explanationWidth = review.showingDetails || (!undo && !review.files.length) ? Math.max(1, (stacked ? width : width - fileWidth - 3) - 2) : 0;
+          // Word-wrapped explanation rows such as "Current changes unavailable · Ctrl+R reload" break at ` · `.
+          const explanationWidth = review.showingDetails || (!undo && !review.files.length) ? diffWidth : 0;
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
-            const body = row.line === undefined && explanationWidth && row.text.includes(" · ") ? wrapHintSegments(safe(row.text), explanationWidth).join("\n") : safe(row.text);
-            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${undo ? "│" : ""}${row.sign}${undo ? "" : " "}`}${body}${index < review.rows.length - 1 ? "\n" : ""}`;
+            // Numbered rows continue under a blank hanging gutter; notes, headers and read-only explanations beside them
+            // wrap between ` · ` segments, then at words, never mid-word (#307).
+            const body = row.line !== undefined ? wrapDiffLine(diffGutter(row.line, row.sign, !!undo), safe(row.text), diffWidth).join("\n")
+              : (explanationWidth ? row.text.includes(" · ") : Bun.stringWidth(safe(row.text)) > diffWidth) ? wrapHintSegments(safe(row.text), diffWidth).join("\n") : safe(row.text);
+            const text = `${body}${index < review.rows.length - 1 ? "\n" : ""}`;
             if (row.comparison) return bold(fg(theme.accent)(text));
             return fg(row.sign === "+" ? theme.success : row.sign === "-" ? theme.error : theme.text)(text);
           }));
@@ -1315,7 +1335,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
-        : snapshot.toolApproval ? { text: `${width >= 40 ? "Approval required" : "Approval"} · Ctrl+C cancel turn`, tone: "warning", glyph: "◌", chips: true }
+        : snapshot.toolApproval ? { text: `${width >= bodyWidth(LAYOUT_BREAKPOINTS.approvalRequiredLabel) ? "Approval required" : "Approval"} · Ctrl+C cancel turn`, tone: "warning", glyph: "◌", chips: true }
         : searchOpen ? { text: fitFindStatus(searchStatus, renderer.width - 2 * bodyPadding - 2), tone: "accent", glyph: "⌕" }
         : Date.now() < interactionNoticeUntil ? { text: interactionNotice, tone: "muted" }
         : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
@@ -1367,7 +1387,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         clear(preferencePanel);
         if (snapshot.preferences) {
           const panel = snapshot.preferences;
-          const compact = renderer.width < 45 || renderer.height < 16;
+          const compact = renderer.width < LAYOUT_BREAKPOINTS.compactPreferences || renderer.height < 16;
           const lines = preferenceLines(panel, compact);
           // Rows wrap one cell short of the panel whether or not the scrollbar shows, so it never clips a row's last word.
           preferencePanel.content.minWidth = preferencePanel.content.maxWidth = Math.max(1, width - 1);
@@ -1504,7 +1524,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "tool-approval" && snapshot.toolApproval) {
         hints.content = fittedHints(approvalHint(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason, !!toolApprovalLayout?.overflow), width);
       } else if (panelMode === "undo") {
-        hints.content = fittedHints(undoHint(snapshot.undoPreview, width), width, theme.background, true);
+        hints.content = fittedHints(undoHint(snapshot.undoPreview, width, footerNamesEsc()), width, theme.background, true);
       } else if (panelMode === "history" && snapshot.history) {
         const history = snapshot.history;
         const files = history.turns[history.selected]?.files.items.length ?? 0;
@@ -1514,8 +1534,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : history.view === "detail" ? [files ? "↑↓ files · Enter current diff" : "PgUp/PgDn scroll", "F2 details · Esc back"]
           : history.total ? ["↑↓ select · Enter open", "F2 details · Esc back"] : ["", "Esc back"];
         // Keep each key with its action when the hint needs a second row, as in review.
-        const separator = navigation && Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : navigation ? " · " : "";
-        hints.content = new StyledText([...(navigation ? keyHintChunks(navigation, hintColors(theme.background)) : []), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
+        hints.content = wrappedHintContent(navigation, actions, width);
       } else if (panelMode === "review") {
         const navigation = snapshot.changeReview?.showingDetails || !snapshot.changeReview?.files.length ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
         const reload = (snapshot.changeReview?.scope || snapshot.changeReview?.fromUndo) && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
@@ -1523,10 +1542,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const details = !!snapshot.changeReview?.scope || !!snapshot.changeReview?.fromUndo && !!snapshot.outcome;
         const actions = `${reload}${details ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
         // Keep each key with its action when the review hint needs a second row.
-        const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
-        hints.content = new StyledText([...keyHintChunks(navigation, hintColors(theme.background)), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
+        hints.content = wrappedHintContent(navigation, actions, width);
       } else if (panelMode === "sessions" && snapshot.sessionPicker) {
         hints.content = sessionHintContent(snapshot.sessionPicker, width);
+        const sessionHint = sessionPickerHint(snapshot.sessionPicker);
+        hintSource = [sessionHint.status ?? "", ...sessionHint.actions.flatMap(action => [action.text, action.short ?? ""])].filter(Boolean).join(" · ");
       } else if (snapshot.modelPicker) {
         // While the diagnostic covers the list, only retry, F2 and Esc act.
         hints.content = fittedHints(modelPickerDiagnosticOpen(snapshot.modelPicker) ? "Ctrl+R retry · F2 back · Esc back" : `↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
@@ -1537,7 +1557,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · ${signInChooserActions(snapshot.loginChooser)}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · ${signInChooserActions(snapshot.loginChooser)}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < LAYOUT_BREAKPOINTS.fullComposerHint ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();
@@ -2158,6 +2178,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     panelMode: (): PanelMode | "" => panelMode,
     /** Report the transcript entry that open F2 details show, or undefined while details are closed. */
     detailsEntryId: (): string | undefined => detailsReturn?.entryId,
+    /** Report the whole hint text the hint row was last built from; the row shows whole ` · ` segments of it. */
+    hintText: (): string => hintSource,
     /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */
     freezeDraftForExit(): { task?: ExitDraftCheckpoint; saved: boolean; failed: boolean } {
       const snapshot = controller.snapshot();

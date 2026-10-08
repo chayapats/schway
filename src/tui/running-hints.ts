@@ -1,8 +1,9 @@
 import type { TuiRecovery } from "./controller-types.ts";
+import { LAYOUT_BREAKPOINTS } from "./layout.ts";
 
 /** Composer placeholder while a turn runs: text typed now is an unsent draft, never queued work. */
 export function runningPlaceholder(columns: number): string {
-  return columns >= 30 ? "Draft your next task…" : "Draft next task…";
+  return columns >= LAYOUT_BREAKPOINTS.compactStatusBar ? "Draft your next task…" : "Draft next task…";
 }
 
 /** Hint-row guidance while a turn runs; Enter sends only after the turn ends, and stopping stays available. */

@@ -98,6 +98,14 @@
 
 ### Changed
 
+- Narrow undo and review panels stay readable. A wrapped diff row continues
+  under a blank gutter at its text column instead of under the line numbers;
+  undo notes and read-only explanations wrap between ` · ` segments and at
+  words, never mid-word; review and history hint rows wrap only between
+  segments; and below 30 columns the undo hint ends with its Esc action alone
+  when the status bar does not name one. Layout widths live in
+  `LAYOUT_BREAKPOINTS`, and `bun run screens:sweep` renders every catalog
+  screen either side of each breakpoint (#307).
 - Model picker discovery failures say what failed and keep the provider's
   message behind F2. Offline discovery reads `Models offline` (or `Connections
   offline`) instead of the same `Models unavailable` used for other failures, a
