@@ -329,7 +329,8 @@ export const SCREENS: readonly Screen[] = [
     await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); await ui.settle(); openDetails(ui);
   }, ready: s => s.noticeDetailsAvailable === false && s.transcript.at(-1)?.text.includes("The choice could not be saved.") === true },
   { id: "details-recovery", title: "Recovery details", description: "F2 opens a failed turn's diagnostic evidence while Escape remains available to return.", noColorWidths: true, drive: async ui => {
-    await enter(ui, "Summarize the changes"); await ui.waitFor(failed); await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); openDetails(ui);
+    // F2 opens details only once the failed turn has released the controller; recovery is recorded just before that.
+    await enter(ui, "Summarize the changes"); await ui.waitFor(s => failed(s) && !ui.controller.running); await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); openDetails(ui);
   }, ready: s => !!s.recovery && s.transcript.at(-1)?.text.includes("Failure details:") === true },
   { id: "details-unavailable", title: "Details unavailable", description: "F2 leaves a fresh composer unchanged when there is no evidence to show.", noColorWidths: true, drive: async ui => {
     await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); openDetails(ui);

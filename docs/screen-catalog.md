@@ -8,7 +8,7 @@ Run `bun test tests/screen-catalog.test.ts` to compare every screen against comm
 
 1. Edit the ordered `SCREENS` list in `tests/screen-catalog/screens.ts`. Supply a sentence-case title, one-sentence description, input-driven `drive` function and controller-state `ready` predicate. Update the explicit screen-order assertion in the runner when adding an ID.
 2. Add scripted dependencies in `harness.ts` when needed. Each variant gets a fresh renderer at its final dimensions. Prefer mock keyboard input and typed slash commands, such as Alt+S, `/sessions`, `/resume <id>`, `/branch tree` and `/login`. Call a public controller method only for a state with no keyboard route, and say so in a comment.
-3. Run `bun run screens:update`. This writes the goldens and ordered index, and prunes obsolete files/directories. Normal test runs never update them.
+3. Run `bun run screens:update`. This writes the goldens and ordered index, and prunes obsolete files/directories. Normal test runs never update them. Then run `SCHWAY_UPDATE_SCREENS=1 bun test tests/hint-liveness.test.ts` to refresh `tests/screen-catalog/chip-inventory.txt`, the key chips each screen advertises (see [Key chip liveness](#key-chip-liveness)).
 4. Review and commit the implementation and goldens together.
 
 ## Command routing and isolated files
@@ -31,6 +31,24 @@ The runner checks four invariants on every screen in `SCREENS` and every variant
 - **I4 Visible cursor in a focused input.** When a typing surface has focus (the composer; the find, palette, model, session and branch queries; approval reason entry; endpoint URL, API-key and callback entry), the `cursor` header is visible, on that surface's input row, at the cell of its logical cursor. An empty field puts it on the placeholder's first cell; a masked value puts it after the last mask cell. Cells are measured with `Bun.stringWidth`, so Thai and emoji values map correctly. Review, history, undo, the reader, inspection, sign-in approval and the approval choices have no text field and are exempt.
 
 `tests/screen-invariants.test.ts` gives each invariant passing and failing synthetic frames. To exempt a frame that is correct as shown, add `{ screen, variant?, invariant, reason }` to `SCREEN_INVARIANT_EXEMPTIONS` in the checker module; omit `variant` to cover every variant of the screen. An entry that covers no failure fails the runner, and no entry may cover a frame in `INVARIANT_EVIDENCE_FRAMES`.
+
+## Key chip liveness
+
+Every advertised key chip must act in both key encodings. `tests/hint-liveness.test.ts` runs in the default `bun test`, makes no network requests and uses the scripted model. It probes one variant per screen in `SCREENS`: `dark-80`, or the screen's first variant when it has none (`nocolor-dark-120` for `no-color`). Each state is built with `buildScreen` the way the app runs: Ctrl+C reaches the view (`exitOnCtrlC: false`, no exit signals) and preference screens get an offline settings stub. The test runs every chip under kitty and legacy encoding.
+
+- **What counts as a chip.** A chip is a bold run whose whole text is one `HINT_KEY` token, on a background that differs from the next cell, as `keyHintChunks` paints it on any row: the hint row, status bar, outcome strip, readiness card, transcript error rows and panel hint lines. Every key-led ` · ` segment of the hint row is also a chip. A key followed by ` or ` or a column gap only documents itself, as palette result rows do, and is not a chip. `tests/screen-catalog/chip-inventory.txt` lists each screen's chips. A changed list fails, so a screen whose chips disappear fails visibly. After an intended change, run `SCHWAY_UPDATE_SCREENS=1 bun test tests/hint-liveness.test.ts`.
+- **How a chip is pressed.** `chipPresses` in `tests/helpers/chip-liveness.ts` maps each key token to the bytes a terminal sends in each encoding. Unknown chip text fails and names the screen and chip. A two-way chip (`↑↓`, `←→`, `PgUp/PgDn`) acts if either direction acts, and each direction starts from a fresh state. Each press starts from a fresh `buildScreen`, `drive` and `ready`; a state is reused only after a press that changed nothing. Under legacy, a key that sends the same bytes as another key fails as not distinguishable, even if the press changes something: `Ctrl+I` is Tab, `Ctrl+M` is Enter, `Ctrl+H` is Backspace and `Ctrl+[` is Esc.
+- **What counts as acting.** After the press, at least one of these changes: the controller snapshot, the char frame, the style spans, the editor text or cursor, an OSC 52 clipboard write, an `openUrl` call or a call to the view's `submit` callback. A change that only shows a failure notice (`Unknown command`, `Nothing to …`, `No … to show`, `Wait for this turn`) does not count. A `send` chip types a Thai and emoji draft into an empty composer first. It acts only if that exact draft (or the screen's own draft) is dispatched, starts a turn, or is accepted whole by a local command. A `reload` chip acts only if it requests a reload.
+
+`CHIP_ALLOWLIST` in the test accepts a chip that does not act, as `{ screen, chip, encoding?, reason, note, issue? }`. Prefer a stronger precondition to a new entry. The reasons are:
+
+- `single-item`: the list has one item. The note names, in backticks, a catalog screen (optionally `screen/variant`) where the same chip acts, or a `tests/*.test.ts` file and quoted test name. The test checks that the place exists and that the chip acts there.
+- `content-fits`: the content already fits, or the key repeats a state the screen already shows. The note names a proof, as for `single-item`.
+- `notice-by-design`: the notice is the intended answer, such as `Alt+I inspect` with nothing to inspect (#275).
+- `encoding-limit`: legacy cannot send the key distinctly (`encoding: "legacy"`). This is allowed only when another chip on the same screen reaches the same action in legacy, for example `F2` for `Ctrl+I`.
+- `known-defect`: the chip is wrong today. `issue` names the open issue that fixes it, and that fix removes the entry.
+
+An entry whose chip no longer appears, or now acts, fails until it is deleted. An entry without `encoding` that acts in one encoding must name the other.
 
 ## Variants
 
