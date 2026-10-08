@@ -13,17 +13,18 @@ export const PANEL_SWEEP_SCREEN = /^(?:undo-|review-|resumed-review|history-)/;
 
 /**
  * Narrowest sweep width at which a screen's `ready` predicate can hold, for screens whose predicate reads copy that a
- * narrower frame clips. The sweep skips narrower widths of these screens; the named width is the narrowest that passed.
+ * narrower frame clips. The sweep skips narrower widths of these screens. The named width is the narrowest at which
+ * `ready` holds; the full sweep fails an entry whose screen renders there and also one column narrower, as it does a stale exemption.
  */
 export const SWEEP_MIN_WIDTHS: readonly { screen: string; width: number; reason: string }[] = [
   { screen: "command-palette-exact", width: 31, reason: "ready reads `Enter send`, which the 30-column hint row drops for `Esc keep editing`" },
   { screen: "help-palette-actions", width: 31, reason: "ready reads `Enter show keys`, which the narrower hint row drops" },
   { screen: "help-palette-disabled", width: 35, reason: "ready reads the whole `! No details to show · Esc back` reason row" },
   { screen: "help-palette-guidance", width: 40, reason: "ready reads the guidance sentence `Return to the conversation and press`, which wraps below 40 columns" },
-  { screen: "help-palette-no-matches", width: 29, reason: "ready reads `No matches · Esc restore`, which 24 columns clip" },
-  { screen: "inspection-tool", width: 29, reason: "ready reads `Second result line`, which 24 columns clip" },
-  { screen: "reader-code", width: 33, reason: "ready reads the `Col ` position, which the reader drops below 33 columns" },
-  { screen: "reader-no-matches", width: 29, reason: "ready reads the reader's `No matches` status, which 24 columns drop" },
+  { screen: "help-palette-no-matches", width: 28, reason: "ready reads `No matches · Esc restore`, which narrower frames clip" },
+  { screen: "inspection-tool", width: 25, reason: "ready reads `Second result line`, which 24 columns clip" },
+  { screen: "reader-code", width: 32, reason: "ready reads the `Col ` position, which the reader drops below 32 columns" },
+  { screen: "reader-no-matches", width: 26, reason: "ready reads the reader's `No matches` status, which narrower frames drop" },
 ];
 
 /** Sweep widths for one screen, widest first: 24, each `LAYOUT_BREAKPOINTS` value and the column either side, and 24–64 for panel screens. */
@@ -64,7 +65,7 @@ export const SWEEP_EXEMPTIONS: readonly SweepExemption[] = [
 export const SWEEP_EVIDENCE_FRAMES: readonly { screen: string; width: number; invariant: SweepInvariantId }[] = [
   ...[24, 40, 50, 59].flatMap(width => ["review-panel", "resumed-review", "review-multi-turn", "review-staged-unstaged"].map(screen => ({ screen, width, invariant: "S3" as const }))),
   ...[24, 40, 46].map(width => ({ screen: "undo-preview", width, invariant: "S3" as const })),
-  { screen: "undo-preview", width: 24, invariant: "S1" },
+  ...["undo-preview", "undo-older-target", "undo-shell-only"].map(screen => ({ screen, width: 24, invariant: "S1" as const })),
   ...[24, 29, 32, 33].map(width => ({ screen: "undo-preview", width, invariant: "S2" as const })),
   ...[39, 40, 41, 42, 43, 44].map(width => ({ screen: "undo-older-target", width, invariant: "S2" as const })),
   ...[24, 30, 41, 42, 43, 44, 45, 46, 50].map(width => ({ screen: "undo-shell-only", width, invariant: "S2" as const })),

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
 import { SCREENS } from "./screen-catalog/screens.ts";
 import { applySweepExemptions, escExitFailures, formatSweepFailure, sweepFrameFailures, type SweepExemption, type SweepFailure, type SweepFrame } from "./helpers/screen-invariants.ts";
-import { SWEEP_EVIDENCE_FRAMES, SWEEP_EXEMPTIONS, SWEEP_SMOKE, sweepFrame, sweepWidths } from "./helpers/screen-sweep.ts";
+import { SWEEP_EVIDENCE_FRAMES, SWEEP_EXEMPTIONS, SWEEP_MIN_WIDTHS, SWEEP_SMOKE, sweepFrame, sweepWidths } from "./helpers/screen-sweep.ts";
 
 // Breakpoint sweep (#307): `SCHWAY_SCREEN_SWEEP=1` (`bun run screens:sweep`) renders every catalog screen one column either
 // side of each layout breakpoint and checks S1–S5; plain `bun test` runs only the smoke subset.
@@ -57,6 +57,15 @@ if (full) {
     swept++;
     check(failures, frames, used);
   }, 600_000);
+  // A minimum width is stale once `ready` also holds one column narrower; each failed attempt costs the harness's 10-second wait.
+  for (const entry of SWEEP_MIN_WIDTHS) test(`sweep minimum width for ${entry.screen} is still the narrowest ready width`, async () => {
+    const screen = SCREENS.find(item => item.id === entry.screen)!;
+    setSystemTime(new Date(fixedTime));
+    expect((await sweepFrame(screen, entry.width)).width).toBe(entry.width);
+    setSystemTime(new Date(fixedTime));
+    const narrower = await sweepFrame(screen, entry.width - 1).then(() => "ready", (error: Error) => error.message.split("\n")[0]!);
+    expect(narrower, `${entry.screen} reaches ready at ${entry.width - 1} columns; lower or delete its SWEEP_MIN_WIDTHS entry`).not.toBe("ready");
+  }, 60_000);
   test("every sweep exemption covers a failure", () => {
     // A focused run cannot tell a stale entry from one for a screen it skipped.
     if (swept < SCREENS.length) return;

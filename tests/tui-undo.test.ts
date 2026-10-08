@@ -866,3 +866,28 @@ test("undo diff continuations keep a blank hanging gutter at 24, 40 and 59 colum
     } finally { await ui.dispose(); }
   });
 });
+
+test("tab-indented undo diff continuations stay under the blank gutter at 24 and 40 columns (#307)", async () => {
+  await withTempDir(async root => {
+    const long = "\t\treturn Math.min(hi, Math.max(lo, n)) // tab-indented continuation";
+    const ui = await setup(root, undefined, [], [{ toolCalls: [{ id: "write-tabs", name: "write", arguments: { path: "tabs.go", content: `${long}\n` } }] }, { text: "Saved." }]);
+    try {
+      await ui.send("Write the tabs"); await ui.send("/undo");
+      expect(ui.controller.snapshot().undoPreview?.files[0]?.path).toBe("tabs.go");
+      for (const width of [24, 40]) {
+        ui.resize(width, 30); await ui.settle();
+        const rows = ui.captureCharFrame().split("\n");
+        const first = rows.findIndex(row => row.startsWith("   1 │-"));
+        expect(first).toBeGreaterThanOrEqual(0);
+        // Tabs expand to 4-column stops, so the first row starts with 8 spaces of indentation after the gutter.
+        expect(rows[first]!.slice(7, 15)).toBe(" ".repeat(8));
+        let next = first + 1, text = rows[first]!.slice(7).trimEnd();
+        for (; rows[next]?.startsWith(" ".repeat(7)) && rows[next]!.trim(); next++) text += rows[next]!.slice(7).trimEnd();
+        expect(next).toBeGreaterThan(first + 1);
+        // Every row of the line is accounted for: no piece wrapped to the left edge under the line numbers.
+        expect(text.replace(/\s/g, "")).toBe(long.replace(/\s/g, ""));
+        expect(rows.slice(first, next).every(row => Bun.stringWidth(row.trimEnd()) <= width - 2)).toBe(true);
+      }
+    } finally { await ui.dispose(); }
+  });
+});

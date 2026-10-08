@@ -4,7 +4,7 @@ import {
   applySweepExemptions, escExitFailures, formatSweepFailure, sweepFrameFailures,
   type SweepExemption, type SweepFrame, type SweepFrameState,
 } from "./helpers/screen-invariants.ts";
-import { diffGutter, wrapDiffLine } from "../src/tui/diff-wrap.ts";
+import { diffGutter, expandTabs, wrapDiffLine } from "../src/tui/diff-wrap.ts";
 import { SWEEP_SMOKE, sweepWidths } from "./helpers/screen-sweep.ts";
 import { LAYOUT_BREAKPOINTS } from "../src/tui/layout.ts";
 
@@ -86,6 +86,17 @@ test("S3 measures Thai and emoji diff rows by cells and keeps their continuation
   let first = "";
   for (const grapheme of graphemes) { if (Bun.stringWidth(first + grapheme) > cut) break; first += grapheme; }
   expect(invariants(frame([` ${first}`, ` ${flat.slice(first.length)}`, " ◆ Auto"], { diff, status: 2 }, { width: 26 }))).toContain("S3");
+});
+
+test("tab-indented diff rows expand tabs to 4-column stops before wrapping, so no piece reaches the left edge", () => {
+  expect(expandTabs("\t\treturn")).toBe(`${" ".repeat(8)}return`);
+  expect(expandTabs("ab\tc")).toBe("ab  c");
+  const gutter = diffGutter(2, "-", true);
+  for (const columns of [20, 24, 40]) {
+    const rows = wrapDiffLine(gutter, "\t\treturn Math.min(hi, Math.max(lo, n));", columns);
+    expect(rows.every(row => !row.includes("\t") && Bun.stringWidth(row) <= columns)).toBe(true);
+    expect(rows.slice(1).every(row => row.startsWith(" ".repeat(6)))).toBe(true);
+  }
 });
 
 test("S2 checks undo notes and read-only explanations in the diff area, not numbered rows", () => {
