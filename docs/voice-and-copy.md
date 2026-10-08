@@ -65,6 +65,28 @@ Counts agree with their noun: `1 file`, `2 files`, `1 command`, `2 commands`; us
 Good: `1 file changed · Esc back`  
 Bad: `1 files changed · Esc back`
 
+### Write key hints
+
+A key hint is a key or command followed by the action it takes, such as `Enter send` or `/sessions browse`. `tests/helpers/hint-grammar.ts` checks every catalog golden against these points; its rule IDs are in brackets. Add a new key and action pair to its allowlist on purpose.
+
+Key first, then an imperative verb [R1, R3].  
+Good: `Ready · Enter send · Esc stop`  
+Bad: `Ready · Enter sends · Esc stop` [R3]
+
+Use `↑↓`, not `↑/↓` [R4].  
+Good: `↑↓ select · Enter continue · Esc back`  
+Bad: `↑/↓ select · Enter continue · Esc back` [R4]
+
+No bare keys, and no key followed by `…` or a cut verb [R2].  
+Good: `Connect a provider · Alt+L sign in`  
+Bad: `↑↓ select · Enter · Esc back` [R2]
+
+Keep the key and its action on one row; wrap at ` · ` and never leave ` ·` at a row end [R5, R6].  
+Good: `Type a task` / `Enter send`  
+Bad: `Type a task · Enter` / `send` [R6]
+
+Hint rows give each leading key a chip [R7]. Prose may conjugate a verb after a key, as in “Wait, then Enter sends”; the rules apply to segments that start with a key.
+
 ## Esc verbs
 
 Pair Esc with the one verb that names what it does on that screen. The definitions below are the contract; `tests/helpers/esc-verbs.ts` lists the same rows, and the catalog lint checks every rendered Esc phrase against them.
@@ -152,5 +174,6 @@ Copy this checklist into a PR that changes user-visible text.
 - [ ] Pair every status color with a glyph or word, including without color.
 - [ ] Check singular and plural counts against their nouns.
 - [ ] Use the Esc verb from the Esc verbs table for what Esc does on that screen.
+- [ ] Write each key hint as a key and an imperative verb on one row, with `↑↓` arrows and no bare keys.
 - [ ] Update screen-catalog goldens with `bun run screens:update` (#135) and review them in the [gallery](screen-catalog.md#review-the-gallery-and-pr-diff).
 - [ ] Check narrow widths so statuses and next actions remain visible.

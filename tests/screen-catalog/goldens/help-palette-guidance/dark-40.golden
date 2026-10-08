@@ -19,8 +19,8 @@ cursor 10 27 visible
 
 
 
-  Copy code or a result · Alt+I, then
-  C
+  Copy code or a result
+  Alt+I, then C
   Inspect a block before copying it
   Return to the conversation and press
   Alt+I. Use ↑↓ to select a code
@@ -29,8 +29,8 @@ cursor 10 27 visible
   copies code and tables; it does not
   copy tool results. R opens a code
   block or table in the reader.
-  ! Nothing to inspect · Enter send a
-  task
+  ! Nothing to inspect
+  Enter send a task
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › copy
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -62,13 +62,13 @@ cursor 10 27 visible
 12 0-40 #ffffff #0e1117 -
 13 0-1 #ffffff #0e1117 -
 13 1-2 #ffffff #1e2430 -
-13 2-38 #7cc4ff #1e2430 -
-13 38-39 #ffffff #1e2430 -
+13 2-23 #7cc4ff #1e2430 -
+13 23-39 #ffffff #1e2430 -
 13 39-40 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
 14 1-2 #ffffff #1e2430 -
-14 2-3 #7cc4ff #1e2430 -
-14 3-39 #ffffff #1e2430 -
+14 2-15 #7cc4ff #1e2430 -
+14 15-39 #ffffff #1e2430 -
 14 39-40 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
 15 1-2 #ffffff #1e2430 -
@@ -112,13 +112,13 @@ cursor 10 27 visible
 22 39-40 #ffffff #0e1117 -
 23 0-1 #ffffff #0e1117 -
 23 1-2 #ffffff #1e2430 -
-23 2-38 #f0c674 #1e2430 -
-23 38-39 #ffffff #1e2430 -
+23 2-22 #f0c674 #1e2430 -
+23 22-39 #ffffff #1e2430 -
 23 39-40 #ffffff #0e1117 -
 24 0-1 #ffffff #0e1117 -
 24 1-2 #ffffff #1e2430 -
-24 2-6 #f0c674 #1e2430 -
-24 6-39 #ffffff #1e2430 -
+24 2-19 #f0c674 #1e2430 -
+24 19-39 #ffffff #1e2430 -
 24 39-40 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
 25 1-39 #161b24 #0e1117 -

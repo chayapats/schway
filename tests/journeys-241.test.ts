@@ -226,7 +226,7 @@ for (const width of [40, 44, 48]) test(`[legacy ${width}x30] the sign-in chooser
   const ui = await setup("legacy", width, 30);
   await ui.input("\x1bl");
   expect(ui.controller.snapshot().loginChooser).toBeDefined();
-  expect(ui.hints()).toContain("Enter · Tab more options");
+  expect(ui.hints()).toContain("Enter continue · Tab more options");
   // The Esc exit stays visible in the hint row or the status bar.
   expect(`${ui.hints()}\n${ui.frame().split("\n").at(-3)}`).toContain("Esc back");
 });

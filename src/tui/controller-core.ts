@@ -322,7 +322,7 @@ export abstract class ControllerCore {
   /** Append an actionable error line and mark the status as error. */
   fail(text: string, details?: string): void {
     if (details) this.retainNoticeDetails(details);
-    if (text === "Your Grok plan doesn't include API access. Use an xAI API key instead.") text = "Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L";
+    if (text === "Your Grok plan doesn't include API access. Use an xAI API key instead.") text = "Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L sign in";
     this.transcript.push({
       id: this.nextId("err"),
       kind: "error",

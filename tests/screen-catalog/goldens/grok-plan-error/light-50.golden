@@ -10,7 +10,7 @@ cursor 6 27 visible
 
  ▌ ! Error
  ▌ Your Grok plan doesn't include API access.
- ▌ Use an xAI API key instead · Alt+L
+ ▌ Use an xAI API key instead · Alt+L sign in
 
 
 
@@ -53,14 +53,14 @@ cursor 6 27 visible
 03 0-1 #ffffff #f7f7f4 -
 03 1-2 #a61f16 #edddd9 -
 03 2-3 #ffffff #edddd9 -
-03 3-46 #a61f16 #edddd9 -
-03 46-48 #ffffff #edddd9 -
+03 3-45 #a61f16 #edddd9 -
+03 45-48 #ffffff #edddd9 -
 03 48-50 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-2 #a61f16 #edddd9 -
 04 2-3 #ffffff #edddd9 -
-04 3-37 #a61f16 #edddd9 -
-04 37-48 #ffffff #edddd9 -
+04 3-45 #a61f16 #edddd9 -
+04 45-48 #ffffff #edddd9 -
 04 48-50 #ffffff #f7f7f4 -
 05 0-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -

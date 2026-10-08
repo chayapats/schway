@@ -6,8 +6,8 @@ variant dark-24
 size 24x8
 cursor 16 6 visible
 == text
- Details · Esc keep
- editing
+ Details
+ Esc keep editing
  The choice could not
  be saved.
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -16,11 +16,11 @@ cursor 16 6 visible
  Auto · Esc back
 == styles
 00 0-1 #ffffff #0e1117 -
-00 1-20 #8b95a7 #0e1117 -
-00 20-24 #ffffff #0e1117 -
+00 1-8 #8b95a7 #0e1117 -
+00 8-24 #ffffff #0e1117 -
 01 0-1 #ffffff #0e1117 -
-01 1-8 #8b95a7 #0e1117 -
-01 8-24 #ffffff #0e1117 -
+01 1-17 #8b95a7 #0e1117 -
+01 17-24 #ffffff #0e1117 -
 02 0-1 #ffffff #0e1117 -
 02 1-22 #8b95a7 #0e1117 -
 02 22-24 #ffffff #0e1117 -

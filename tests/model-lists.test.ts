@@ -65,7 +65,7 @@ test("a fresh install names no model, keeps typed text, and will not send", asyn
   try {
     await terminal.flush();
     const frame = terminal.captureCharFrame();
-    for (const copy of ["○ Not connected", "Not connected", "Connect a provider · Alt+L", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
+    for (const copy of ["○ Not connected", "Not connected", "Connect a provider · Alt+L sign in", "Alt+L sign in · / commands"]) expect(frame).toContain(copy);
     for (const copy of ["Ctrl+I failure details", "Enter send", "No model yet", "Ready", "Attention", "anthropic", "ctx"]) expect(frame).not.toContain(copy);
     expect(controller.snapshot().readiness).toBe("not-connected");
     let accepted = false;
@@ -292,7 +292,7 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
         expect(controller.snapshot().readiness).toBe("ready");
         expect(frame).toContain("● Ready");
         expect(frame).toContain(`openai/${ROUTE_FALLBACK_MODELS.openai} · OpenAI API key`);
-        expect(frame).toContain("Type a task · Enter sends");
+        expect(frame).toContain("Type a task · Enter send");
         expect(frame).toContain("Enter send");
       }
     } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }

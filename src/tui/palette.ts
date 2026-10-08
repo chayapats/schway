@@ -1,4 +1,5 @@
 import type { KeyboardGuideAvailability, KeyboardGuideChoice, KeyboardGuideId, PaletteChoice } from "./command-catalog.ts";
+import { fitHintSegments, wrapHintSegments } from "./hint-text.ts";
 import { fitLine } from "./presentation.ts";
 
 /** Composer prompt shown while the help palette owns the search field. */
@@ -100,8 +101,9 @@ export function keyboardRowParts(row: KeyboardGuideChoice, selected: boolean, na
   const label = fitLine(row.label, room);
   const rest = Math.max(0, room - Bun.stringWidth(label));
   const detail = row.available ? ` · ${row.description}` : ` · ${row.reason}`;
-  // An available row drops its description rather than clipping it; a reason clips but keeps its start.
-  return { lead, label, detail: row.available ? Bun.stringWidth(detail) <= rest ? detail : "" : fitLine(detail, rest) };
+  // An available row drops its description rather than clipping it; a reason keeps its start and drops whole trailing segments.
+  const reason = row.available ? "" : fitHintSegments(fitLine(row.reason, Number.MAX_SAFE_INTEGER), rest - 3);
+  return { lead, label, detail: row.available ? Bun.stringWidth(detail) <= rest ? detail : "" : reason && ` · ${reason}` };
 }
 
 /** The selected keyboard row's full description or unavailable reason, shown beneath clipped results. */
@@ -113,19 +115,23 @@ export function paletteDetail(row: PaletteChoice | undefined): { text: string; w
 /** A guidance line with a semantic tone; `wrap` lines may use several terminal rows. */
 export type GuidanceLine = { text: string; tone: "accent" | "text" | "muted" | "warning" | "success"; wrap: boolean };
 
-/** Read-only guidance for one keyboard action: exact key, description, prerequisites and current availability. */
-export function guidanceLines(row: KeyboardGuideChoice): GuidanceLine[] {
+/**
+ * Read-only guidance for one keyboard action: exact key, description, prerequisites and current availability. With
+ * `columns`, the heading and availability lines break at ` · ` into `\n`-separated rows so each key stays with its action.
+ */
+export function guidanceLines(row: KeyboardGuideChoice, columns?: number): GuidanceLine[] {
+  const hint = (text: string) => columns === undefined ? text : wrapHintSegments(text, columns).join("\n");
   return [
-    { text: `${row.label} · ${row.shortcut}`, tone: "accent", wrap: true },
+    { text: hint(`${row.label} · ${row.shortcut}`), tone: "accent", wrap: true },
     { text: row.description, tone: "muted", wrap: true },
     { text: row.guidance, tone: "text", wrap: true },
-    row.available ? { text: "✓ Available now", tone: "success", wrap: true } : { text: `! ${row.reason}`, tone: "warning", wrap: true },
+    row.available ? { text: "✓ Available now", tone: "success", wrap: true } : { text: hint(`! ${row.reason}`), tone: "warning", wrap: true },
   ];
 }
 
 /** Estimate terminal rows used by guidance at `columns`, so the composer can reserve space. */
 export function guidanceHeight(row: KeyboardGuideChoice, columns: number): number {
-  return guidanceLines(row).reduce((sum, line) => sum + Math.max(1, Math.ceil(Bun.stringWidth(line.text) / Math.max(1, columns))), 0);
+  return guidanceLines(row, columns).flatMap(line => line.text.split("\n")).reduce((sum, text) => sum + Math.max(1, Math.ceil(Bun.stringWidth(text) / Math.max(1, columns))), 0);
 }
 
 /** Esc phrase for the help palette: back from read-only guidance to results, restore from results to the draft. */

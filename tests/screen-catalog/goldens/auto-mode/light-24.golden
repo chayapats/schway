@@ -8,8 +8,8 @@ cursor 6 6 visible
 == text
  key
 
- Type a task · Enter
- sends
+ Type a task
+ Enter send
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -20,13 +20,12 @@ cursor 6 6 visible
 00 4-24 #ffffff #f7f7f4 -
 01 0-24 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
-02 1-15 #545e6c #f7f7f4 -
-02 15-20 #1d232c #caced3 b
-02 20-21 #545e6c #f7f7f4 -
-02 21-24 #ffffff #f7f7f4 -
+02 1-12 #545e6c #f7f7f4 -
+02 12-24 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-6 #545e6c #f7f7f4 -
-03 6-24 #ffffff #f7f7f4 -
+03 1-6 #1d232c #caced3 b
+03 6-11 #545e6c #f7f7f4 -
+03 11-24 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-23 #ecedea #f7f7f4 -
 04 23-24 #ffffff #f7f7f4 -

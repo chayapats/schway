@@ -32,11 +32,11 @@ test("one ownership answer hides the task examples and the card action line toge
   const ready = snapshot();
   expect(surfaceOwnsInput(unowned)).toBe(false);
   expect(taskExamplesEligible(ready, { draft: "", owned: surfaceOwnsInput(unowned), draftNotice: false })).toBe(true);
-  expect(readinessCardActions(ready, surfaceOwnsInput(unowned))).toEqual(["Type a task · Enter sends"]);
+  expect(readinessCardActions(ready, surfaceOwnsInput(unowned))).toEqual(["Type a task · Enter send"]);
   // An ordinary draft hides only the examples: Enter still sends it, so the card keeps saying so.
   for (const draft of ["Fix the clamp", "อธิบาย 🧪", " "]) {
     expect(taskExamplesEligible(ready, { draft, owned: surfaceOwnsInput(unowned), draftNotice: false })).toBe(false);
-    expect(readinessCardActions(ready, surfaceOwnsInput(unowned))).toEqual(["Type a task · Enter sends"]);
+    expect(readinessCardActions(ready, surfaceOwnsInput(unowned))).toEqual(["Type a task · Enter send"]);
   }
   for (const change of owners) {
     const owned = surfaceOwnsInput({ ...unowned, ...change });
@@ -48,9 +48,9 @@ test("one ownership answer hides the task examples and the card action line toge
 
 test("each readiness keeps its card action line only while nothing else owns the keys", () => {
   const cases: [Partial<TuiSnapshot>, string[]][] = [
-    [{ readiness: "not-connected" }, ["Connect a provider · Alt+L"]],
+    [{ readiness: "not-connected" }, ["Connect a provider · Alt+L sign in"]],
     [{ readiness: "loading" }, ["Checking connection · Type a task · Esc cancel"]],
-    [{ readiness: "ready" }, ["Type a task · Enter sends"]],
+    [{ readiness: "ready" }, ["Type a task · Enter send"]],
     [{ readiness: "connect", recovery: { actions: ["connect", "details", "keep-editing"] } as unknown as TuiSnapshot["recovery"] }, ["Connect to continue · Alt+L sign in", "F2 details · Esc keep editing"]],
     [{ readiness: "choose-model" }, ["Choose a model · Alt+M browse models"]],
     [{ readiness: "repair", recovery: { category: "credential-store", actions: ["retry-credentials"] } as unknown as TuiSnapshot["recovery"] }, ["Unlock credential storage · Ctrl+R retry"]],
@@ -84,8 +84,8 @@ const variant = { id: "dark-80", theme: "dark" as const, cols: 80, rows: 30, noC
 /** Existing harness fixtures reused as probes: one unconnected and one ready scripted workspace, each in a temporary home. */
 const probe = (id: string): Screen => ({ id, title: "Background hints", description: "Hints behind an owning surface.", drive: async () => {}, ready: () => true });
 const STATES = {
-  "not connected": { probe: "model-picker-unconnected", status: "Not connected", action: "Connect a provider · Alt+L", gap: "\n" },
-  ready: { probe: "command-routing", status: "scripted/scripted-model · scripted API key", action: "Type a task · Enter sends", gap: "\n\n" },
+  "not connected": { probe: "model-picker-unconnected", status: "Not connected", action: "Connect a provider · Alt+L sign in", gap: "\n" },
+  ready: { probe: "command-routing", status: "scripted/scripted-model · scripted API key", action: "Type a task · Enter send", gap: "\n\n" },
 } as const;
 const cardText = (ui: ScreenHarness) => (ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable).chunks.map(chunk => chunk.text).join("");
 const frame = (ui: ScreenHarness) => ui.captureCharFrame();
@@ -147,8 +147,8 @@ for (const [state, expected] of Object.entries(STATES)) {
         // Only the status line stays; the panel's own heading and hint row name the live keys.
         expect(cardText(ui)).toBe(status);
         expect(frame(ui)).not.toContain(expected.action);
-        expect(frame(ui)).not.toContain("Type a task · Enter sends");
-        expect(frame(ui)).not.toContain("Connect a provider · Alt+L");
+        expect(frame(ui)).not.toContain("Type a task · Enter send");
+        expect(frame(ui)).not.toContain("Connect a provider · Alt+L sign in");
         if (!surface.replacesConversation) expect(frame(ui).split("\n").slice(0, 6).join("\n")).toContain(status);
 
         for (let press = 0; press < surface.escapes; press++) await escape(ui);

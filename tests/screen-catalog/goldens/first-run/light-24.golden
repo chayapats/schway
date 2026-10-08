@@ -8,8 +8,8 @@ cursor 6 6 visible
 == text
  /project
  Not connected
- Connect a provider ·
- Alt+L
+ Connect a provider
+ Alt+L sign in
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -22,11 +22,12 @@ cursor 6 6 visible
 01 1-14 #1d232c #f7f7f4 b
 01 14-24 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
-02 1-22 #545e6c #f7f7f4 -
-02 22-24 #ffffff #f7f7f4 -
+02 1-19 #545e6c #f7f7f4 -
+02 19-24 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
 03 1-6 #1d232c #caced3 b
-03 6-24 #ffffff #f7f7f4 -
+03 6-14 #545e6c #f7f7f4 -
+03 14-24 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-23 #ecedea #f7f7f4 -
 04 23-24 #ffffff #f7f7f4 -

@@ -8,10 +8,10 @@ cursor 16 27 visible
 == text
  ⚡ schway  ~/demo
 
- ▌ Request failed · Inspect details before
- ▌ continuing
- ▌ Ctrl+R continue · F2 details · Esc keep
- ▌ editing
+ ▌ Request failed
+ ▌ Inspect details before continuing
+ ▌ Ctrl+R continue · F2 details
+ ▌ Esc keep editing
 
  ✗ Failed
  Failure details: Provider request failed after
@@ -47,14 +47,14 @@ cursor 16 27 visible
 02 0-1 #ffffff #f7f7f4 -
 02 1-2 #a61f16 #edddd9 -
 02 2-3 #ffffff #edddd9 -
-02 3-43 #a61f16 #edddd9 -
-02 43-48 #ffffff #edddd9 -
+02 3-17 #a61f16 #edddd9 -
+02 17-48 #ffffff #edddd9 -
 02 48-50 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
 03 1-2 #a61f16 #edddd9 -
 03 2-3 #ffffff #edddd9 -
-03 3-13 #a61f16 #edddd9 -
-03 13-48 #ffffff #edddd9 -
+03 3-36 #a61f16 #edddd9 -
+03 36-48 #ffffff #edddd9 -
 03 48-50 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-2 #a61f16 #edddd9 -
@@ -62,16 +62,15 @@ cursor 16 27 visible
 04 3-9 #1d232c #c9cbd0 b
 04 9-21 #a61f16 #edddd9 -
 04 21-23 #1d232c #c9cbd0 b
-04 23-34 #a61f16 #edddd9 -
-04 34-37 #1d232c #c9cbd0 b
-04 37-43 #a61f16 #edddd9 -
-04 43-48 #ffffff #edddd9 -
+04 23-31 #a61f16 #edddd9 -
+04 31-48 #ffffff #edddd9 -
 04 48-50 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
 05 1-2 #a61f16 #edddd9 -
 05 2-3 #ffffff #edddd9 -
-05 3-10 #a61f16 #edddd9 -
-05 10-48 #ffffff #edddd9 -
+05 3-6 #1d232c #c9cbd0 b
+05 6-19 #a61f16 #edddd9 -
+05 19-48 #ffffff #edddd9 -
 05 48-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -

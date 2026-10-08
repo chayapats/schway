@@ -26,11 +26,11 @@ cursor 7 27 visible
 
 
       Skills
-      /grill-me       Stress-test a p…
+      /grill-me       Stress-test a…
       Extensions
-      /greet          … · greeting-pkg
-      /local          Loca… · local.ts
-  ›   /delete-session Delet… · deletes
+      /greet          greeting-pkg
+      /local          local.ts
+  ›   /delete-session deletes
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › /
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -73,8 +73,8 @@ cursor 7 27 visible
 19 39-40 #ffffff #f7f7f4 -
 20 0-1 #ffffff #f7f7f4 -
 20 1-2 #ffffff #e1e3df -
-20 2-38 #545e6c #e1e3df -
-20 38-39 #ffffff #e1e3df -
+20 2-36 #545e6c #e1e3df -
+20 36-39 #ffffff #e1e3df -
 20 39-40 #ffffff #f7f7f4 -
 21 0-1 #ffffff #f7f7f4 -
 21 1-2 #ffffff #e1e3df -
@@ -83,19 +83,19 @@ cursor 7 27 visible
 21 39-40 #ffffff #f7f7f4 -
 22 0-1 #ffffff #f7f7f4 -
 22 1-2 #ffffff #e1e3df -
-22 2-38 #545e6c #e1e3df -
-22 38-39 #ffffff #e1e3df -
+22 2-34 #545e6c #e1e3df -
+22 34-39 #ffffff #e1e3df -
 22 39-40 #ffffff #f7f7f4 -
 23 0-1 #ffffff #f7f7f4 -
 23 1-2 #ffffff #e1e3df -
-23 2-38 #545e6c #e1e3df -
-23 38-39 #ffffff #e1e3df -
+23 2-30 #545e6c #e1e3df -
+23 30-39 #ffffff #e1e3df -
 23 39-40 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #ffffff #e1e3df -
-24 2-28 #1d232c #c7d2d6 -
-24 28-38 #675736 #c7d2d6 -
-24 38-39 #ffffff #e1e3df -
+24 2-22 #1d232c #c7d2d6 -
+24 22-29 #675736 #c7d2d6 -
+24 29-39 #ffffff #e1e3df -
 24 39-40 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-39 #ecedea #f7f7f4 -

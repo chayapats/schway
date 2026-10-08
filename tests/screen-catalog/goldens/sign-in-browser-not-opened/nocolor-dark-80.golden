@@ -35,7 +35,7 @@ cursor 1 1 hidden
   ▌ › Typing resumes after sign-in
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ⠋ Signing in
-  ↑↓ select · Enter · Esc cancel sign-in
+  ↑↓ select · Enter continue · Esc cancel sign-in
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #e6eaf0 #161b24 b
@@ -107,7 +107,7 @@ cursor 1 1 hidden
 29 2-4 #e6eaf0 #293140 b
 29 4-14 #8b95a7 #0e1117 -
 29 14-19 #e6eaf0 #293140 b
-29 19-22 #8b95a7 #0e1117 -
-29 22-25 #e6eaf0 #293140 b
-29 25-40 #8b95a7 #0e1117 -
-29 40-80 #ffffff #0e1117 -
+29 19-31 #8b95a7 #0e1117 -
+29 31-34 #e6eaf0 #293140 b
+29 34-49 #8b95a7 #0e1117 -
+29 49-80 #ffffff #0e1117 -

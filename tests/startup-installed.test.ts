@@ -229,7 +229,7 @@ void (async () => {
     terminal.mockInput.pressKey("c", { ctrl: true });
     return;
   }
-  const startupAction = scenario.startsWith("returning") ? "Type a task · Enter sends"
+  const startupAction = scenario.startsWith("returning") ? "Type a task · Enter send"
     : scenario === "denied" ? "Unlock credential storage"
     : scenario.startsWith("invalid-model") ? "Choose a model" : "Connect a provider";
   await settle(() => terminal.renderer.root.findDescendantById("prompt")?.focused && screenIncludes(startupAction), "startup readiness");

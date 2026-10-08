@@ -9,7 +9,7 @@ cursor 7 27 visible
  ⚡ schway  /project
 
   ▌ ! Error
-  ▌ Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L
+  ▌ Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L sign in
 
 
 
@@ -53,8 +53,8 @@ cursor 7 27 visible
 03 0-2 #ffffff #0e1117 -
 03 2-3 #f79d9d #2a2227 -
 03 3-4 #ffffff #2a2227 -
-03 4-81 #f79d9d #2a2227 -
-03 81-117 #ffffff #2a2227 -
+03 4-89 #f79d9d #2a2227 -
+03 89-117 #ffffff #2a2227 -
 03 117-120 #ffffff #0e1117 -
 04 0-120 #ffffff #0e1117 -
 05 0-120 #ffffff #0e1117 -

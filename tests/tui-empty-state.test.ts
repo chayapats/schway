@@ -62,7 +62,7 @@ function expectSafeLayout(ui: Ui) {
   const composer = rowOf(ui, "Ask Schway…");
   expect(composer).toBeGreaterThan(0);
   if (!shown(ui)) return 0;
-  const action = rowOf(ui, "Type a task · Enter sends"), heading = rowOf(ui, TASK_EXAMPLES_HEADING);
+  const action = rowOf(ui, "Type a task · Enter send"), heading = rowOf(ui, TASK_EXAMPLES_HEADING);
   expect(action).toBeGreaterThanOrEqual(0);
   expect(heading).toBeGreaterThan(action);
   let visible = 0;
@@ -121,7 +121,7 @@ test("ready empty conversation shows examples below readiness at 120/80/50 and o
       if (expected >= 0) expect(visible).toBe(expected);
       if (height >= 14) expect(ui.captureCharFrame()).toContain("Enter send");
       expect(ui.captureCharFrame()).toContain("Auto");
-      if (height >= 10) expect(ui.captureCharFrame()).toContain("Type a task · Enter sends");
+      if (height >= 10) expect(ui.captureCharFrame()).toContain("Type a task · Enter send");
     }
     expect(ui.calls).toEqual({ model: 0, tool: 0 });
   }

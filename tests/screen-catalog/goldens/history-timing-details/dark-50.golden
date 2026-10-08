@@ -10,18 +10,18 @@ cursor 1 1 hidden
 
  Turn 1 details
 
- Attempt 1: interactive · /home/test/demo ·     ▀
+ Attempt 1: interactive · /home/test/demo       ▀
  started 2026-01-15 09:26 UTC · ✓ Done · 3m 20s
    Git snapshots captured before and after the
  attempt
-   Model: 4 calls · 1m 58s · first output 4.
- 7s–31s · no retries
+   Model: 4 calls · 1m 58s
+ first output 4.7s–31s · no retries
    Tools: 3 timed calls · 1m 21s wall time
    Tokens: input 160,000 · cached input 129,600
- · output 6,000 · reasoning 4,800
+ output 6,000 · reasoning 4,800
    Reasoning: no level sent; the provider's
- default applied · xai/grok-4.7 via Grok
- subscription
+ default applied
+ xai/grok-4.7 via Grok subscription
  3 tool results; 0 failed tools.
  Commands: 3 exited 0, 0 nonzero, 0 without an
  observed exit.
@@ -50,8 +50,8 @@ cursor 1 1 hidden
 02 15-50 #ffffff #0e1117 -
 03 0-50 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-44 #e6eaf0 #0e1117 -
-04 44-48 #ffffff #0e1117 -
+04 1-41 #e6eaf0 #0e1117 -
+04 41-48 #ffffff #0e1117 -
 04 48-49 #9a9ea3 #252527 -
 04 49-50 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
@@ -70,13 +70,13 @@ cursor 1 1 hidden
 07 48-49 #ffffff #252527 -
 07 49-50 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-44 #e6eaf0 #0e1117 -
-08 44-48 #ffffff #0e1117 -
+08 1-26 #e6eaf0 #0e1117 -
+08 26-48 #ffffff #0e1117 -
 08 48-49 #ffffff #252527 -
 08 49-50 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-20 #e6eaf0 #0e1117 -
-09 20-48 #ffffff #0e1117 -
+09 1-35 #e6eaf0 #0e1117 -
+09 35-48 #ffffff #0e1117 -
 09 48-49 #ffffff #252527 -
 09 49-50 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
@@ -85,27 +85,28 @@ cursor 1 1 hidden
 10 48-49 #ffffff #252527 -
 10 49-50 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-48 #e6eaf0 #0e1117 -
+11 1-47 #e6eaf0 #0e1117 -
+11 47-48 #ffffff #0e1117 -
 11 48-49 #ffffff #252527 -
 11 49-50 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-33 #e6eaf0 #0e1117 -
-12 33-48 #ffffff #0e1117 -
+12 1-31 #e6eaf0 #0e1117 -
+12 31-48 #ffffff #0e1117 -
 12 48-49 #ffffff #252527 -
 12 49-50 #ffffff #0e1117 -
 13 0-1 #ffffff #0e1117 -
-13 1-44 #e6eaf0 #0e1117 -
-13 44-48 #ffffff #0e1117 -
+13 1-43 #e6eaf0 #0e1117 -
+13 43-48 #ffffff #0e1117 -
 13 48-49 #ffffff #252527 -
 13 49-50 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
-14 1-41 #e6eaf0 #0e1117 -
-14 41-48 #ffffff #0e1117 -
+14 1-16 #e6eaf0 #0e1117 -
+14 16-48 #ffffff #0e1117 -
 14 48-49 #ffffff #252527 -
 14 49-50 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
-15 1-13 #e6eaf0 #0e1117 -
-15 13-48 #ffffff #0e1117 -
+15 1-35 #e6eaf0 #0e1117 -
+15 35-48 #ffffff #0e1117 -
 15 48-49 #ffffff #252527 -
 15 49-50 #ffffff #0e1117 -
 16 0-1 #ffffff #0e1117 -

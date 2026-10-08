@@ -7,7 +7,7 @@ size 40x8
 cursor 15 5 visible
 == text
 
- Type a task · Enter sends
+ Type a task · Enter send
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › ร่างภาษาไทย
      ยังไม่ส่ง 🧪
@@ -19,8 +19,8 @@ cursor 15 5 visible
 01 0-1 #ffffff #f7f7f4 -
 01 1-15 #545e6c #f7f7f4 -
 01 15-20 #1d232c #caced3 b
-01 20-26 #545e6c #f7f7f4 -
-01 26-40 #ffffff #f7f7f4 -
+01 20-25 #545e6c #f7f7f4 -
+01 25-40 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
 02 1-39 #ecedea #f7f7f4 -
 02 39-40 #ffffff #f7f7f4 -

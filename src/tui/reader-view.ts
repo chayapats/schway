@@ -1,4 +1,5 @@
 import { StyledText, bg, bold, fg, underline, type TextChunk } from "@opentui/core";
+import { fitHintSegments } from "./hint-text.ts";
 import { fitLine } from "./presentation.ts";
 import { FIND_ARROWS, FIND_KEEP, FIND_RESTORE } from "./find-hints.ts";
 import { ReaderSnapshot, READER_SOURCE_LIMIT, type ReaderPosition, type ReaderRow, type ReaderSearchMatch, type ReaderTarget, type ReaderViewport } from "./reader.ts";
@@ -251,7 +252,7 @@ export function paintReader(input: {
   const selected = input.search?.query ? input.search.selected : -1;
   if (layout.status.includes("approval")) {
     const approval = width("◌ Approval waiting · Esc back to request") <= columns ? "◌ Approval waiting · Esc back to request" : "◌ Approval · Esc back to request";
-    lines.push([bold(fg(theme.warning)(fitLine(approval, columns)))]);
+    lines.push([bold(fg(theme.warning)(fitHintSegments(approval, columns)))]);
   }
   if (layout.title) {
     const left = `Read ${document.kind}${document.kind === "code" && document.title !== "code" ? ` · ${document.title}` : ""}`;
@@ -262,9 +263,9 @@ export function paintReader(input: {
     lines.push([bold(fg(theme.text)(title)), fg(theme.muted)(right ? " ".repeat(Math.max(2, columns - width(title) - width(right))) + right : "")]);
   }
   for (const status of layout.status) {
-    if (status === "snapshot") lines.push([fg(theme.accent)(fitLine("Snapshot · Esc back", columns))]);
-    if (status === "truncated") lines.push([fg(theme.warning)(fitLine(`Showing first ${READER_SOURCE_LIMIT.toLocaleString("en-US")} characters · C copies this part`, columns))]);
-    if (status === "table") lines.push([fg(theme.muted)(fitLine(document.aligned ? "Aligned columns · C copies Markdown source" : "Markdown source · C copy", columns))]);
+    if (status === "snapshot") lines.push([fg(theme.accent)(fitHintSegments("Snapshot · Esc back", columns))]);
+    if (status === "truncated") lines.push([fg(theme.warning)(fitHintSegments(`Showing first ${READER_SOURCE_LIMIT.toLocaleString("en-US")} characters · C copy this part`, columns))]);
+    if (status === "table") lines.push([fg(theme.muted)(fitHintSegments(document.aligned ? "Aligned columns · C copy Markdown source" : "Markdown source · C copy", columns))]);
   }
   const gutter = (row: ReaderRow | undefined) => layout.gutter ? [fg(theme.muted)(row && !row.continuation ? String(row.line).padStart(layout.gutter - 1) + " " : " ".repeat(layout.gutter))] : [];
   const paintRow = (row: ReaderRow, color: string, header = false) => {
@@ -292,7 +293,7 @@ export function paintReader(input: {
     const choices = !input.search?.query ? [`Find in this block · Type a query · ${escape}`, `Type a query · ${escape}`]
       : result.matches.length ? [`Find: ${query} · ${count} · ${FIND_ARROWS} · ${FIND_KEEP} · ${escape}`, `Find: ${query} · ${count} · ${FIND_KEEP} · ${escape}`, `Find: ${query} · ${count} · ${escape}`, `${count} · ${escape}`]
       : [`Find: ${query} · No matches · ${escape}`, `No matches · ${escape}`, `None · ${escape}`];
-    lines.push([fg(theme.accent)(fitLine(choices.find(choice => width(choice) <= columns) ?? escape, columns))]);
+    lines.push([fg(theme.accent)(fitHintSegments(choices.find(choice => width(choice) <= columns) ?? escape, columns))]);
   }
   return new StyledText(lines.flatMap((chunks, index) => index ? [fg(theme.muted)("\n"), ...chunks] : chunks));
 }

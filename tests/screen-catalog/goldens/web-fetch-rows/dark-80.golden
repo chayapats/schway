@@ -11,8 +11,8 @@ cursor 7 27 visible
    ✓  WEB_FETCH  https://weather.example.test/th/bangkok/today           ▸
    ✓  WEB_FETCH  https://reader.example.test/article/42                  ▸
    !  WEB_FETCH  https://api.example.test/forecast?city=…&access_… error ▾
-     HTTP 401 Unauthorized · application/json · 58 bytes · https://api.
-     example.test/forecast?city=…&access_token=…
+     HTTP 401 Unauthorized · application/json · 58 bytes
+     https://api.example.test/forecast?city=…&access_token=…
 
      The server returned HTTP 401 Unauthorized.
 
@@ -75,13 +75,13 @@ cursor 7 27 visible
 04 77-80 #ffffff #0e1117 -
 05 0-2 #ffffff #0e1117 -
 05 2-5 #ffffff #1e2430 -
-05 5-71 #8b95a7 #1e2430 -
-05 71-77 #ffffff #1e2430 -
+05 5-56 #8b95a7 #1e2430 -
+05 56-77 #ffffff #1e2430 -
 05 77-80 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
 06 2-5 #ffffff #1e2430 -
-06 5-48 #8b95a7 #1e2430 -
-06 48-77 #ffffff #1e2430 -
+06 5-60 #8b95a7 #1e2430 -
+06 60-77 #ffffff #1e2430 -
 06 77-80 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
 07 2-77 #ffffff #1e2430 -

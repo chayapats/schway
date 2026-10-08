@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import { sanitizeBaseUrl } from "./transcript-format.ts";
 import { displaySetting } from "./controller-support.ts";
 import { UndoLayer } from "./controller-undo.ts";
+import { previewScopeText } from "./preferences-view.ts";
 
 
 /** Preferences, config commands and settings publication. */
@@ -124,7 +125,7 @@ export abstract class SettingsLayer extends UndoLayer {
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin
           ? advanced ? ` Saved but not effective: shadowed by ${origin}.` : ` Saved but not effective: overridden by ${friendlyPreferenceOrigin(origin)}.` : "";
         const evidence = advanced ? ` [${origin}]` : "";
-        panel.preview = redactSecrets(`${PREFERENCE_SCOPES[panel.scope]} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing}`, this.secrets);
+        panel.preview = redactSecrets(`${previewScopeText(panel.scope)} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing}`, this.secrets);
         panel.error = undefined;
         return true;
       } catch (error) {

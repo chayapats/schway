@@ -29,8 +29,8 @@ cursor 10 27 visible
 
 
   ›   /sessions       Open saved work
-      /session        Session and workspace det…
-      /delete-session Delete a saved … · deletes
+      /session        Session and workspace…
+      /delete-session Delete a saved… · deletes
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › /ses
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -74,14 +74,14 @@ cursor 10 27 visible
 22 49-50 #ffffff #0e1117 -
 23 0-1 #ffffff #0e1117 -
 23 1-2 #ffffff #1e2430 -
-23 2-48 #8b95a7 #1e2430 -
-23 48-49 #ffffff #1e2430 -
+23 2-44 #8b95a7 #1e2430 -
+23 44-49 #ffffff #1e2430 -
 23 49-50 #ffffff #0e1117 -
 24 0-1 #ffffff #0e1117 -
 24 1-2 #ffffff #1e2430 -
-24 2-38 #e6eaf0 #1e2430 -
-24 38-48 #b9c0cc #1e2430 -
-24 48-49 #ffffff #1e2430 -
+24 2-37 #e6eaf0 #1e2430 -
+24 37-47 #b9c0cc #1e2430 -
+24 47-49 #ffffff #1e2430 -
 24 49-50 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -
 25 1-49 #161b24 #0e1117 -
