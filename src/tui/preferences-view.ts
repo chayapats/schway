@@ -1,7 +1,13 @@
+import { HINT_KEY } from "./hint-text.ts";
 import { PREFERENCE_SCOPES, preferenceChoice, type PreferencesSnapshot } from "./preferences.ts";
 
 /** Keys for a staged preference preview, shown once in the panel and once in the hint row. */
 export const PREFERENCE_PREVIEW_ACTIONS = "Enter confirm · Esc cancel";
+
+/** A scope's description for the staged preview sentence, without key hints; the panel line below the preview names the keys. */
+export function previewScopeText(scope: PreferencesSnapshot["scope"]): string {
+  return PREFERENCE_SCOPES[scope].split(" · ").filter(segment => !HINT_KEY.test(segment)).join(" · ");
+}
 
 /** Esc phrase for preferences: cancel while a staged preview waits, back otherwise; Esc clears only the preview first. */
 export function preferenceEscape(panel: PreferencesSnapshot): string {
@@ -19,7 +25,7 @@ export function preferenceLines(panel: PreferencesSnapshot, compact: boolean): s
   const value = (item: typeof row) => preferenceChoice(advanced ? item.value : item.effectiveValue ?? item.value);
   const selected = `› ${row.label}: ${value(row)}`;
   const hint = action ? "Enter open · Esc back" : "←→ change · Enter preview · Esc back";
-  const state = panel.error ? `! Not saved: ${choice}` : panel.preview ? `Enter saves · ${choice}` : action ? hint : `Choice: ${choice}`;
+  const state = panel.error ? `! Not saved: ${choice}` : panel.preview ? `Enter save · ${choice}` : action ? hint : `Choice: ${choice}`;
   const lines = [compact ? `Preferences · ${panel.scope}` : `Preferences · ${advanced ? "Advanced" : "Basic"} · ${scope}`, selected, state];
   if (panel.preview || panel.error) {
     lines.push(panel.error ?? panel.preview!, panel.error ? `←→ change · ${escape}` : PREFERENCE_PREVIEW_ACTIONS);

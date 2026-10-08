@@ -3,6 +3,7 @@ import { formatCount } from "../text/format.ts";
 import type { HistoryTurn } from "../history/timeline.ts";
 import { historyCommandLine, historyCountsLabel, historyDurationLabel, historyOutcomeLabel, historyOutcomeTone, historyReasoningLine, historyTaskLabel, historyTimeLabel, historyTimingLine, historyUndoLine,
   type HistorySnapshot } from "./controller-history.ts";
+import { wrapHintSegments } from "./hint-text.ts";
 import { displayText } from "./presentation.ts";
 import { currentDiffLabel, fitPathStart } from "./review-scope.ts";
 import type { TuiTheme } from "./theme.ts";
@@ -90,7 +91,8 @@ export function createHistoryPanel(renderer: CliRenderer) {
       lines.push({ text: "Reading saved turn evidence · Esc back", color: theme.muted });
     } else if (history.showingDetails) {
       heading.content = new StyledText([bold(fg(theme.accent)(clip(history.view === "list" ? "History details" : `Turn ${turn?.ordinal ?? ""} details`, width)))]);
-      for (const text of history.details.split("\n")) lines.push({ text: safe(text), color: theme.text });
+      // Detail lines wrap at ` · ` so no row ends on a dangling separator.
+      for (const text of history.details.split("\n")) for (const row of text.includes(" · ") ? wrapHintSegments(safe(text), inner) : [safe(text)]) lines.push({ text: row, color: theme.text });
     } else if (history.view === "current" && history.current) {
       const current = history.current;
       const label = currentDiffLabel("");

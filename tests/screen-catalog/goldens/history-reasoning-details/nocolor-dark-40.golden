@@ -10,15 +10,15 @@ cursor 1 1 hidden
 
  Turn 1 details
 
- Attempt 1: interactive · /home/test/ █
- demo · started 2026-01-15 09:28 UTC ·
+ Attempt 1: interactive               ▀
+ /home/test/demo
+ started 2026-01-15 09:28 UTC
  − Stopped · 31s
    Git snapshots captured before and
  after the attempt
    Timing and token details were not
  recorded for this attempt.
    Reasoning: no level sent; the
- provider's default applied · xai/
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -40,47 +40,48 @@ cursor 1 1 hidden
 02 15-40 #ffffff #0e1117 -
 03 0-40 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-37 #e6eaf0 #0e1117 -
-04 37-38 #ffffff #0e1117 -
+04 1-23 #e6eaf0 #0e1117 -
+04 23-38 #ffffff #0e1117 -
 04 38-39 #9a9ea3 #252527 -
 04 39-40 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
-05 1-38 #e6eaf0 #0e1117 -
+05 1-16 #e6eaf0 #0e1117 -
+05 16-38 #ffffff #0e1117 -
 05 38-39 #ffffff #252527 -
 05 39-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-16 #e6eaf0 #0e1117 -
-06 16-38 #ffffff #0e1117 -
+06 1-29 #e6eaf0 #0e1117 -
+06 29-38 #ffffff #0e1117 -
 06 38-39 #ffffff #252527 -
 06 39-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-37 #e6eaf0 #0e1117 -
-07 37-38 #ffffff #0e1117 -
+07 1-16 #e6eaf0 #0e1117 -
+07 16-38 #ffffff #0e1117 -
 07 38-39 #ffffff #252527 -
 07 39-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-18 #e6eaf0 #0e1117 -
-08 18-38 #ffffff #0e1117 -
+08 1-37 #e6eaf0 #0e1117 -
+08 37-38 #ffffff #0e1117 -
 08 38-39 #ffffff #252527 -
 08 39-40 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-37 #e6eaf0 #0e1117 -
-09 37-38 #ffffff #0e1117 -
+09 1-18 #e6eaf0 #0e1117 -
+09 18-38 #ffffff #0e1117 -
 09 38-39 #ffffff #252527 -
 09 39-40 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-27 #e6eaf0 #0e1117 -
-10 27-38 #ffffff #0e1117 -
+10 1-37 #e6eaf0 #0e1117 -
+10 37-38 #ffffff #0e1117 -
 10 38-39 #ffffff #252527 -
 10 39-40 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-33 #e6eaf0 #0e1117 -
-11 33-38 #ffffff #0e1117 -
+11 1-27 #e6eaf0 #0e1117 -
+11 27-38 #ffffff #0e1117 -
 11 38-39 #ffffff #252527 -
 11 39-40 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-34 #e6eaf0 #0e1117 -
-12 34-38 #ffffff #0e1117 -
+12 1-32 #e6eaf0 #0e1117 -
+12 32-38 #ffffff #0e1117 -
 12 38-39 #ffffff #252527 -
 12 39-40 #ffffff #0e1117 -
 13 0-40 #ffffff #0e1117 -

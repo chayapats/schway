@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BANNED_COPY } from "./helpers/banned-copy.ts";
 import { ESC_BANNED_SYNONYMS, ESC_VERBS, escPhraseProblems, type EscPhraseProblem } from "./helpers/esc-verbs.ts";
+import { applyHintExemptions, hintGrammarFailures, type HintExemption, type HintFailure, type HintRule } from "./helpers/hint-grammar.ts";
 import { parseScreen } from "./screen-catalog/format.ts";
 import { SCREENS, variantsFor } from "./screen-catalog/screens.ts";
 
@@ -108,4 +109,55 @@ test("every catalog golden uses Esc verbs from the voice guide", async () => {
   const { unexcused, stale } = applyEscExceptions(problems, ESC_EXCEPTIONS);
   expect(unexcused.map(problem => `${problem.file}:${problem.row + 1}: ${problem.phrase} (${problem.problem})`)).toEqual([]);
   expect(stale.map(entry => `${entry.screen}: ${entry.phrase} (${entry.owner}) no longer matches a golden; delete it`)).toEqual([]);
+});
+
+// Prose and listing rows the key-hint lint would misread. Each entry covers one screen and one rule, states why the row
+// is not a key hint, and must still match a golden; none may cover a hint the lint exists to catch.
+const HINT_EXEMPTIONS: readonly HintExemption[] = [
+  { screen: "help-palette-disabled", rule: "R1", pattern: /^\s*(?:›\s+)?(?:!\s+)?(?:Esc or Ctrl\+C|F2 or Ctrl\+I|Shift\+Enter or Ctrl\+J)\s/, reason: "Keyboard listing: the shortcut column names alternative keys and the label column names the action." },
+  { screen: "help-palette-disabled", rule: "R2", pattern: /^\s*(?:›\s+)?(?:!\s+)?(?:Ctrl\+C|Shift\+Tab|Alt\+R)\s{2,}[A-Z]|Shift\+Enter or Ctrl\+J Insert a …/, reason: "Keyboard listing: a shortcut column beside its label, which narrow rows shorten at a word boundary." },
+  { screen: "help-palette-actions", rule: "R2", pattern: /^\s*(?:›\s+)?Alt\+R(?:\s{2,}Review changes| · Inspect changed files)/, reason: "Keyboard listing and its description row: the shortcut beside its label." },
+  ...["command-palette", "command-palette-exact", "command-palette-query"].map(screen => ({ screen, rule: "R2" as const, pattern: /^\s*(?:›\s+)?\/[a-z][\w-]*\s{2,}[A-Z]/,
+    reason: "Command listing: the name column beside its description, not a hint segment." })),
+  { screen: "login-argument-choices", rule: "R2", pattern: /^\s*(?:›\s+)?\/login [\w-]+…?\s+[\w-]+$/,
+    reason: "Argument completion listing: the completed command column beside the value it inserts, not a hint segment." },
+  { screen: "help-palette-guidance", rule: "R3", pattern: /^\s*Enter copies code and tables/, reason: "Guidance prose describes what Enter does; it is not a hint segment." },
+  { screen: "help-palette-guidance", rule: "R6", pattern: /then C$|block\. Enter$/, reason: "Guidance prose wraps as a sentence; its keys are not hint segments." },
+  { screen: "resumed-review-details", rule: "R6", pattern: /when Ctrl\+R$|or Ctrl\+R$/, reason: "Details prose says when Ctrl+R reloads; it is not a hint segment." },
+  { screen: "endpoint-url-error", rule: "R1", pattern: /Enter a full URL · Use http:\/\/ or https:\/\//, reason: "Field error prose: \"Enter\" is the verb, not the key." },
+  { screen: "table-and-code", rule: "R1", pattern: /\bC seven\s+D Ada|pneumono\S*\s+ready\s+seven|^\s*End of wrapping report/, reason: "Fixture answer table and prose; their words are content, not keys." },
+  { screen: "table-and-code", rule: "R2", pattern: /^\s*A\s{2,}B\s{2,}C(?:\s{2,}|$)/, reason: "Fixture answer table cell, not a key." },
+];
+
+test("every catalog golden follows the key-hint grammar", async () => {
+  const root = join(import.meta.dir, "screen-catalog/goldens");
+  const files = (await readdir(root, { recursive: true })).filter(file => file.endsWith(".golden")).sort();
+  const expected = SCREENS.flatMap(screen => variantsFor(screen).map(variant => `${screen.id}/${variant.id}.golden`)).sort();
+  expect(files).toEqual(expected);
+  const failures: HintFailure[] = [];
+  for (const file of files) failures.push(...hintGrammarFailures(parseScreen(await readFile(join(root, file), "utf8"))));
+  for (const exemption of HINT_EXEMPTIONS) expect(exemption.reason.length, exemption.screen).toBeGreaterThan(10);
+  const { unexempt, stale } = applyHintExemptions(failures, HINT_EXEMPTIONS);
+  expect(unexempt.map(failure => failure.message)).toEqual([]);
+  expect(stale.map(entry => `${entry.screen} ${entry.rule} ${entry.pattern} no longer matches a golden; delete it`)).toEqual([]);
+});
+
+test("voice guide key-hint examples pass and fail the rules they state", async () => {
+  const guide = await readFile(join(import.meta.dir, "../docs/voice-and-copy.md"), "utf8");
+  const section = guide.split("### Write key hints\n")[1]?.split("\n## ")[0]?.split("\n### ")[0];
+  expect(section).toBeDefined();
+  const rows = (line: string) => [...line.matchAll(/`([^`]+)`/g)].map(match => match[1]!);
+  const screen = (text: string[]) => ({ screen: "guide", title: "Guide", description: "Guide example.", variant: "dark-80", cols: 80, rows: text.length,
+    cursor: { x: 1, y: 1, visible: false }, text, styles: [] });
+  const good = section!.split("\n").filter(line => line.startsWith("Good: "));
+  const bad = section!.split("\n").filter(line => line.startsWith("Bad: "));
+  expect(good.length).toBeGreaterThanOrEqual(4);
+  expect(bad.length).toBe(good.length);
+  for (const line of good) expect(hintGrammarFailures(screen(rows(line))).map(failure => failure.message), line).toEqual([]);
+  for (const line of bad) {
+    const rule = /\[(R\d)\]\s*$/.exec(line)?.[1];
+    expect(rule, line).toBeDefined();
+    expect(hintGrammarFailures(screen(rows(line))).map(failure => failure.rule), line).toContain(rule as HintRule);
+  }
+  expect(guide).toContain("- [ ] Write each key hint as a key and an imperative verb on one row");
 });

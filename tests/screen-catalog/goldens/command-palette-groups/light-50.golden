@@ -30,7 +30,7 @@ cursor 7 27 visible
       Extensions
       /greet          Say hello · greeting-pkg
       /local          Local action · local.ts
-  ›   /delete-session Delete a saved … · deletes
+  ›   /delete-session Delete a saved… · deletes
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › /
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -91,9 +91,9 @@ cursor 7 27 visible
 23 49-50 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #ffffff #e1e3df -
-24 2-38 #1d232c #c7d2d6 -
-24 38-48 #675736 #c7d2d6 -
-24 48-49 #ffffff #e1e3df -
+24 2-37 #1d232c #c7d2d6 -
+24 37-47 #675736 #c7d2d6 -
+24 47-49 #ffffff #e1e3df -
 24 49-50 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-49 #ecedea #f7f7f4 -

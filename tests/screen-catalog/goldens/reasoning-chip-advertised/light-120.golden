@@ -11,7 +11,7 @@ cursor 7 27 visible
 
   openai/gpt-6-luna · OpenAI API key
 
-  Type a task · Enter sends
+  Type a task · Enter send
 
   Try a task
     Explain how this project starts.
@@ -53,8 +53,8 @@ cursor 7 27 visible
 05 0-2 #ffffff #f7f7f4 -
 05 2-16 #545e6c #f7f7f4 -
 05 16-21 #1d232c #caced3 b
-05 21-27 #545e6c #f7f7f4 -
-05 27-120 #ffffff #f7f7f4 -
+05 21-26 #545e6c #f7f7f4 -
+05 26-120 #ffffff #f7f7f4 -
 06 0-120 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-12 #545e6c #f7f7f4 -

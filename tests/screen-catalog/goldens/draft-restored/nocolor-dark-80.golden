@@ -11,7 +11,7 @@ cursor 16 26 visible
 
   scripted/scripted-model · scripted API key
 
-  Type a task · Enter sends
+  Type a task · Enter send
 
 
 
@@ -53,8 +53,8 @@ cursor 16 26 visible
 05 0-2 #ffffff #0e1117 -
 05 2-16 #8b95a7 #0e1117 -
 05 16-21 #e6eaf0 #293140 b
-05 21-27 #8b95a7 #0e1117 -
-05 27-80 #ffffff #0e1117 -
+05 21-26 #8b95a7 #0e1117 -
+05 26-80 #ffffff #0e1117 -
 06 0-80 #ffffff #0e1117 -
 07 0-80 #ffffff #0e1117 -
 08 0-80 #ffffff #0e1117 -

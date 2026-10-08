@@ -413,7 +413,7 @@ for (const width of [120, 80, 50]) test(`reader reaches every code and table cel
   ui.mockInput.pressArrow("down"); await ui.settle();
   ui.mockInput.pressKey("r"); await ui.settle();
   expect(ui.readerText()).toContain("Read table");
-  expect(ui.readerText()).toContain("Aligned columns · C copies Markdown source");
+  expect(ui.readerText()).toContain("Aligned columns · C copy Markdown source");
   for (let page = 0; page < 3; page++) ui.mockInput.pressKey("\u001b[6~");
   await ui.settle();
   const tableLines = ui.readerText().split("\n");
@@ -641,7 +641,7 @@ test("table alignment preserves every cell and labels the copied Markdown source
   const text = paintReader({ document, layout, position: { offset: 0, horizontal: 0 }, columns: 60, rows: 10, theme: TUI_THEMES.dark }).chunks.map(chunk => chunk.text).join("");
   expect(text.split("\n")).toHaveLength(10);
   expect(text).toContain("◌ Approval waiting · Esc back to request");
-  expect(text).toContain("Aligned columns · C copies Markdown source");
+  expect(text).toContain("Aligned columns · C copy Markdown source");
 });
 
 test("capped sources show the limit and never claim a complete copy", () => {
@@ -652,7 +652,7 @@ test("capped sources show the limit and never claim a complete copy", () => {
   const layout = readerLayout(document, true, 60, 12, { approval: false, search: false });
   expect(layout.status).toContain("truncated");
   const text = paintReader({ document, layout, position: { offset: 0, horizontal: 0 }, columns: 60, rows: 12, theme: TUI_THEMES.light }).chunks.map(chunk => chunk.text).join("");
-  expect(text).toContain("Showing first 8,000,000 characters · C copies this part");
+  expect(text).toContain("Showing first 8,000,000 characters · C copy this part");
 });
 
 for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred approval waits while reading and ${outcome} keeps the reader closed until an explicit return`, async () => withTempDir(async root => {

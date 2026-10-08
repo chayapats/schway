@@ -8,7 +8,7 @@ cursor 1 1 hidden
 == text
  ⚡ schway  ~/demo on main
 
- No saved undo for these changes · Alt+R review ·
+ No saved undo for these changes · Alt+R review
  Esc back
 
  › gen/out.json            turn 1 · no saved undo
@@ -46,8 +46,8 @@ cursor 1 1 hidden
 00 26-50 #ffffff #161b24 -
 01 0-50 #ffffff #0e1117 -
 02 0-1 #ffffff #0e1117 -
-02 1-49 #e6eaf0 #0e1117 -
-02 49-50 #ffffff #0e1117 -
+02 1-47 #e6eaf0 #0e1117 -
+02 47-50 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
 03 1-9 #e6eaf0 #0e1117 -
 03 9-50 #ffffff #0e1117 -
@@ -104,5 +104,10 @@ cursor 1 1 hidden
 28 34-49 #8b95a7 #161b24 -
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
-29 1-36 #8b95a7 #0e1117 -
+29 1-3 #e6eaf0 #293140 b
+29 3-13 #8b95a7 #0e1117 -
+29 13-18 #e6eaf0 #293140 b
+29 18-28 #8b95a7 #0e1117 -
+29 28-31 #e6eaf0 #293140 b
+29 31-36 #8b95a7 #0e1117 -
 29 36-50 #ffffff #0e1117 -

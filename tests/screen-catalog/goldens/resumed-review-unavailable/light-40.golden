@@ -14,9 +14,9 @@ cursor 1 1 hidden
    None listed
 
  Current diff
- Workspace unavailable · Ctrl+R reload
+ Workspace unavailable
+ Ctrl+R reload
  Restore ***/home/demo, then reload.
-
 
 
 
@@ -49,12 +49,14 @@ cursor 1 1 hidden
 07 1-13 #0a5894 #f7f7f4 b
 07 13-40 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -
-08 1-38 #1d232c #f7f7f4 -
-08 38-40 #ffffff #f7f7f4 -
+08 1-22 #1d232c #f7f7f4 -
+08 22-40 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
-09 1-36 #1d232c #f7f7f4 -
-09 36-40 #ffffff #f7f7f4 -
-10 0-40 #ffffff #f7f7f4 -
+09 1-14 #1d232c #f7f7f4 -
+09 14-40 #ffffff #f7f7f4 -
+10 0-1 #ffffff #f7f7f4 -
+10 1-36 #1d232c #f7f7f4 -
+10 36-40 #ffffff #f7f7f4 -
 11 0-40 #ffffff #f7f7f4 -
 12 0-40 #ffffff #f7f7f4 -
 13 0-40 #ffffff #f7f7f4 -

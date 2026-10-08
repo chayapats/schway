@@ -26,11 +26,11 @@ cursor 7 27 visible
 
 
   ›   /model          Choose model
-      /new            Start a new con…
-      /clear          Start a new con…
+      /new            Start a new…
+      /clear          Start a new…
       /sessions       Open saved work
       /changes        Review changes
-      /undo           Undo the last t…
+      /undo           Undo the last…
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › /
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -73,13 +73,13 @@ cursor 7 27 visible
 19 39-40 #ffffff #f7f7f4 -
 20 0-1 #ffffff #f7f7f4 -
 20 1-2 #ffffff #e1e3df -
-20 2-38 #545e6c #e1e3df -
-20 38-39 #ffffff #e1e3df -
+20 2-34 #545e6c #e1e3df -
+20 34-39 #ffffff #e1e3df -
 20 39-40 #ffffff #f7f7f4 -
 21 0-1 #ffffff #f7f7f4 -
 21 1-2 #ffffff #e1e3df -
-21 2-38 #545e6c #e1e3df -
-21 38-39 #ffffff #e1e3df -
+21 2-34 #545e6c #e1e3df -
+21 34-39 #ffffff #e1e3df -
 21 39-40 #ffffff #f7f7f4 -
 22 0-1 #ffffff #f7f7f4 -
 22 1-2 #ffffff #e1e3df -
@@ -93,8 +93,8 @@ cursor 7 27 visible
 23 39-40 #ffffff #f7f7f4 -
 24 0-1 #ffffff #f7f7f4 -
 24 1-2 #ffffff #e1e3df -
-24 2-38 #545e6c #e1e3df -
-24 38-39 #ffffff #e1e3df -
+24 2-36 #545e6c #e1e3df -
+24 36-39 #ffffff #e1e3df -
 24 39-40 #ffffff #f7f7f4 -
 25 0-1 #ffffff #f7f7f4 -
 25 1-39 #ecedea #f7f7f4 -

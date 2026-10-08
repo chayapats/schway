@@ -112,5 +112,12 @@ cursor 1 1 hidden
 28 62-79 #545e6c #ecedea -
 28 79-80 #ffffff #f7f7f4 -
 29 0-2 #ffffff #f7f7f4 -
-29 2-58 #545e6c #f7f7f4 -
+29 2-4 #1d232c #caced3 b
+29 4-14 #545e6c #f7f7f4 -
+29 14-23 #1d232c #caced3 b
+29 23-33 #545e6c #f7f7f4 -
+29 33-38 #1d232c #caced3 b
+29 38-48 #545e6c #f7f7f4 -
+29 48-51 #1d232c #caced3 b
+29 51-58 #545e6c #f7f7f4 -
 29 58-80 #ffffff #f7f7f4 -

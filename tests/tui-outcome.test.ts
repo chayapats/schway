@@ -35,6 +35,22 @@ test("narrow outcomes drop elapsed then all commands then files while preserving
   expect(Bun.stringWidth(formatOutcomeLine({ ...value, reason: "failed" }, 20))).toBeLessThanOrEqual(20);
 });
 
+test("narrow outcomes drop whole action keys and never cut one mid-word", async () => {
+  const { hintGrammarFailures } = await import("./helpers/hint-grammar.ts");
+  const value = outcome({ reason: "failed", files: [{ path: "a", added: 1, removed: 1, source: "tool" }], commandCounts: { exitZero: 2, nonzero: 0, unknown: 0 } });
+  for (const reason of ["failed", "completed"] as const) for (let width = 20; width <= 36; width++) {
+    const line = formatOutcomeLine({ ...value, reason }, width);
+    expect(Bun.stringWidth(line), `${reason} ${width}`).toBeLessThanOrEqual(width);
+    expect(line, `${reason} ${width}`).not.toMatch(/(?:Alt\+R|F2) \S*…|(?:Alt\+R|F2)$/);
+    const failures = hintGrammarFailures({ screen: "outcome", title: "Outcome", description: "Outcome strip.", variant: `dark-${width}`, cols: width, rows: 1,
+      cursor: { x: 1, y: 1, visible: false }, text: [line], styles: [] });
+    expect(failures.map(failure => failure.message), line).toEqual([]);
+  }
+  expect(formatOutcomeLine(value, 28)).toBe("✗ Failed · Alt+R review");
+  expect(formatOutcomeLine({ ...value, reason: "completed" }, 21)).toBe("✓ Done · Alt+R review");
+  expect(formatOutcomeLine({ ...value, reason: "completed" }, 20)).toBe("✓ Done");
+});
+
 test("an outcome shown under a panel keeps its summary but names no Alt+R or F2 action", () => {
   expect(formatOutcomeLine(outcome({ reason: "failed", files: [{ path: "a.ts", added: 1, removed: 1, source: "tool" }] }), 120, { review: false, details: false })).toBe("✗ Failed · 1 file +1 −1 · 14s");
   expect(formatOutcomeLine(outcome(), 120, { review: false, details: false })).toBe("✓ Done · 14s");

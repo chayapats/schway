@@ -8,8 +8,8 @@ import { bindCredentialInput } from "./credential-input.ts";
 import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEntryValue } from "./credential-entry.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
-import { activityDetail, displayText, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
-import { keyHintChunks } from "./hints.ts";
+import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
+import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
 import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
 import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
@@ -357,6 +357,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let footerParts: { approvalMode: TuiSnapshot["approvalMode"]; model: string; modelId?: string; thinking?: string; route: string; ctx: string; ctxPercent?: number; running: boolean; nextAction: string; toolApproval?: boolean; notConnected?: boolean; override?: string } = { approvalMode: "auto", model: "", route: "", ctx: "", running: false, nextAction: "Enter send" };
   // The branch tree hands Esc back to the status bar when its hint row cannot hold both Files/Git unchanged and Esc back.
   let branchTreeEscInFooter = false;
+  // The sign-in chooser keeps Enter continue and Tab more options; when its hint row cannot also hold Esc back, the status bar names it.
+  let chooserEscInFooter = false;
   type ActivityPaint = { text: string; tone: "muted" | "accent" | "warning" | "error" | "success"; glyph?: string; spin?: boolean; chips?: boolean; outcome?: boolean };
   let activityPaint: ActivityPaint = { text: "", tone: "muted" };
   let pickerOpenedAt: number | undefined;
@@ -642,13 +644,14 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const label = name + " ".repeat(Math.max(0, nameColumns - Bun.stringWidth(name)) + 1);
     const remaining = Math.max(0, columns - Bun.stringWidth(prefix + label));
     const suffix = fitLine(entry.destructive ? " · deletes" : entry.provenance ? ` · ${safe(entry.provenance)}` : "", remaining);
-    const description = fitLine(safe(entry.description), Math.max(0, remaining - Bun.stringWidth(suffix)));
+    const description = fitDescription(fitLine(safe(entry.description), Number.MAX_SAFE_INTEGER), Math.max(0, remaining - Bun.stringWidth(suffix)));
     // Metadata keeps its quieter role but is re-measured on the selection fill it sits on.
     const metadata = entry.destructive ? mixColor(theme.warning, theme.muted, 0.5) : theme.muted;
     const suffixColor = selected ? textOn(metadata, tint(theme, theme.accent)) : metadata;
     const row = new TextRenderable(renderer, { content: new StyledText([
       fg(color)(prefix + label + description),
-      fg(suffixColor)(suffix),
+      // A description too narrow to show whole words is omitted, and its separator with it.
+      fg(suffixColor)(description ? suffix : suffix.replace(/^ · /, "")),
     ]), flexShrink: 0, height: 1, wrapMode: "none" });
     if (selected) row.bg = tint(theme, theme.accent);
     picker.add(row);
@@ -706,7 +709,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
    * status bar names one, a waiting approval keeps its own (audit U2), or an idle compact bar below 30 columns names one.
    * While work runs with the hint row visible, the hint row owns Esc.
    */
-  const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") && (branchTreeEscInFooter || !hints.visible || !!footerParts.toolApproval ||
+  const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") && (branchTreeEscInFooter || chooserEscInFooter || !hints.visible || !!footerParts.toolApproval ||
     footerParts.override === undefined && !!footerParts.notConnected || renderer.width < 30 && !footerParts.running);
 
   /**
@@ -748,6 +751,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       ...(fitted.status && fitted.actions ? [fg(theme.muted)(" · ")] : []),
       ...(fitted.actions ? keyHintChunks(fitted.actions, hintColors(theme.background)) : []),
     ]);
+  }
+
+  /** The chooser's actions after its arrows: Enter continue, and Tab more options when the selected choice has more. */
+  function signInChooserActions(chooser: NonNullable<TuiSnapshot["loginChooser"]>): string {
+    return `Enter continue${chooser.level === "main" && chooser.rows.some(row => row.kind === "choice" && row.id === chooser.selectedId && row.hasMore) ? " · Tab more options" : ""}`;
   }
 
   /** Render the status pill within terminal width, adding model details only after connection. */
@@ -797,7 +805,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const ctx = footerParts.ctxPercent === undefined
       ? [fg(theme.muted)(`ctx ${footerParts.ctx}`)]
       : [fg(theme.muted)("ctx "), fg(meterColor)("━".repeat(filled)), fg(theme.border)("━".repeat(cells - filled)), fg(theme.muted)(` ${footerParts.ctxPercent}%`)];
-    const esc = (footerParts.running || branchTreeEscInFooter) && nextAction ? keyHintChunks(nextAction, hintColors(theme.surface)) : [];
+    const esc = (footerParts.running || branchTreeEscInFooter || chooserEscInFooter) && nextAction ? keyHintChunks(nextAction, hintColors(theme.surface)) : [];
     const gapChunk = (size: number) => [fg(theme.muted)(" ".repeat(Math.max(1, size)))];
     // Keep mode and the active action; drop route, reasoning, model and context as space tightens.
     const include = { route: true, thinking: thinking.length > 0, ctx: true };
@@ -836,7 +844,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const glyph = paint.spin ? spinnerFrame(at, motion) : paint.glyph;
     const lead = glyph ? [bold(fg(color)(glyph)), fg(theme.muted)(" ")] : [];
     // Work rows keep their Esc stop whole; status words give way first.
-    const text = (paint.spin ? fitStatusAction : fitLine)(paint.text, width - (glyph ? 2 : 0));
+    const text = (paint.spin ? fitStatusAction : fitActionLine)(paint.text, width - (glyph ? 2 : 0));
     const labelEnd = text.indexOf(" · ");
     const chunks = paint.outcome ? [bold(fg(color)(labelEnd < 0 ? text : text.slice(0, labelEnd))), ...(labelEnd < 0 ? [] : keyHintChunks(text.slice(labelEnd), hintColors(theme.background)))]
       : paint.spin ? shimmer(text, at, theme.muted, theme.text, motion)
@@ -1069,6 +1077,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
       branchTreeEscInFooter = panelMode === "tree" && !snapshot.toolApproval && branchTreeEscInStatusBar(width);
+      chooserEscInFooter = !!snapshot.loginChooser && !snapshot.loginWait && !snapshot.toolApproval && !snapshot.preferences
+        && Bun.stringWidth(`${signInChooserActions(snapshot.loginChooser)} · Esc back`) > width;
       footerParts = {
         approvalMode: snapshot.approvalMode,
         model: snapshot.modelId ? safe(`${snapshot.provider}/${snapshot.modelId}`) : "", modelId: snapshot.modelId ? safe(snapshot.modelId) : undefined, thinking: snapshot.modelId && snapshot.thinkingChip ? safe(snapshot.thinkingChip) : undefined,
@@ -1157,7 +1167,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const filesTitle = scope ? reviewFilesLabel(scope) : fromUndo ? UNDO_REVIEW_FILES : "";
         const longestFile = fileRows.reduce((longest, row) => Math.max(longest, Bun.stringWidth(`  ${row.path}${row.badge ? `  ${row.badge}` : ""}`)), Math.max(20, Bun.stringWidth(filesTitle)));
         const fileWidth = stacked ? width : Math.min(Math.floor(width * 0.4), longestFile);
-        reviewHeading.content = safe(review.heading);
+        // Headings such as "No saved undo · Alt+R review · Esc back" wrap at ` · `, keeping each key with its action.
+        reviewHeading.content = wrapHintSegments(safe(review.heading), width).join("\n");
         reviewColumns.flexDirection = stacked ? "column" : "row";
         // Turn evidence keeps its own title and empty state; current content is titled by the path it was loaded for.
         reviewFilesTitle.visible = reviewDiffTitle.visible = titled;
@@ -1192,10 +1203,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
         // Explanations without a file list wrap at words; diff rows wrap anywhere to keep line numbers aligned.
         reviewText.wrapMode = review.showingDetails || (!undo && !review.files.length) ? "word" : "char";
-        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode]);
+        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode, width, stacked]);
         if (content !== reviewContent) {
+          // Word-wrapped explanation rows such as "Current changes unavailable · Ctrl+R reload" break at ` · `; the diff column keeps a padding cell and the scrollbar.
+          const explanationWidth = review.showingDetails || (!undo && !review.files.length) ? Math.max(1, (stacked ? width : width - fileWidth - 3) - 2) : 0;
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
-            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${undo ? "│" : ""}${row.sign}${undo ? "" : " "}`}${safe(row.text)}${index < review.rows.length - 1 ? "\n" : ""}`;
+            const body = row.line === undefined && explanationWidth && row.text.includes(" · ") ? wrapHintSegments(safe(row.text), explanationWidth).join("\n") : safe(row.text);
+            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${undo ? "│" : ""}${row.sign}${undo ? "" : " "}`}${body}${index < review.rows.length - 1 ? "\n" : ""}`;
             if (row.comparison) return bold(fg(theme.accent)(text));
             return fg(row.sign === "+" ? theme.success : row.sign === "-" ? theme.error : theme.text)(text);
           }));
@@ -1214,7 +1228,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         : snapshot.restored ? `Restored workspace: ${path}\nBranch: ${snapshot.branchId}\nCurrent connection: ${connection}${route ? ` · ${route}` : ""}${snapshot.profile ? ` · profile:${snapshot.profile}` : ""}` : "")).split("\n").map(line => fitLine(line, width)).join("\n");
       // While another surface owns the keys, the card keeps its status lines and drops its key hints; that surface names the live keys.
       const cardActions = readinessCardActions(snapshot, backgroundOwned(snapshot));
-      const actionChunks = cardActions.flatMap((line, index) => [...(index ? [fg(theme.muted)("\n")] : []), ...keyHintChunks(safe(line), hintColors(theme.background))]);
+      // Narrow cards wrap each action line at ` · ` so a key never ends a row apart from its verb.
+      const actionChunks = cardActions.flatMap((line, index) => wrapHintSegments(safe(line), width).flatMap((row, rowIndex) =>
+        [...(index || rowIndex ? [fg(theme.muted)("\n")] : []), ...keyHintChunks(row, hintColors(theme.background))]));
       const cardLower = [
         ...(snapshot.readinessDetail ? [fg(snapshot.readiness === "ready" || snapshot.readiness === "loading" ? theme.muted : theme.warning)(safe(snapshot.readinessDetail)), ...(actionChunks.length ? [fg(theme.muted)("\n")] : [])] : []),
         ...actionChunks,
@@ -1410,7 +1426,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           textRow(picker, fitLine(models.error ?? detail, room), models.error ? theme.error : theme.muted);
         } else if (browsing && guide) {
           const tones = { accent: theme.accent, text: theme.text, muted: theme.muted, warning: theme.warning, success: theme.success };
-          for (const line of guidanceLines(guide)) textRow(picker, line.text, tones[line.tone]);
+          for (const line of guidanceLines(guide, width - 2)) textRow(picker, line.text, tones[line.tone]);
         } else if (browsing) {
           const selectedRow = commandRows.findIndex(row => "index" in row && row.index === completionIndex);
           const start = Math.max(0, Math.min(selectedRow - Math.floor(maxRows / 2), commandRows.length - maxRows));
@@ -1478,11 +1494,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         // Esc leads so narrow hint rows keep the way out when trailing actions are dropped.
         hints.content = fittedHints([snapshot.toolApproval ? "Esc back to request" : reader.search ? "Esc restore" : "Esc back", ...navigation].join(" · "), width, theme.background, true);
       } else if (snapshot.toolApproval && panelMode !== "tool-approval") {
-        hints.content = "Esc back to request";
+        hints.content = fittedHints(APPROVAL_RETURN_HINT, width);
       } else if (panelMode === "tool-approval" && snapshot.toolApproval) {
         hints.content = fittedHints(approvalHint(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason, !!toolApprovalLayout?.overflow), width);
       } else if (panelMode === "undo") {
-        hints.content = undoHint(snapshot.undoPreview, width);
+        hints.content = fittedHints(undoHint(snapshot.undoPreview, width), width, theme.background, true);
       } else if (panelMode === "history" && snapshot.history) {
         const history = snapshot.history;
         const files = history.turns[history.selected]?.files.items.length ?? 0;
@@ -1514,7 +1530,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · Enter${snapshot.loginChooser.level === "main" && snapshot.loginChooser.rows.some(row => row.kind === "choice" && row.id === snapshot.loginChooser!.selectedId && row.hasMore) ? " · Tab more options" : ""}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · ${signInChooserActions(snapshot.loginChooser)}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

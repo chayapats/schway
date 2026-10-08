@@ -21,7 +21,7 @@ import { editTool } from "../src/tools/edit.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { ScrollBoxRenderable, TextareaRenderable, TextRenderable } from "@opentui/core";
+import { ScrollBoxRenderable, StyledText, TextAttributes, TextareaRenderable, TextRenderable } from "@opentui/core";
 import { createConversationView } from "../src/tui/view.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -635,6 +635,13 @@ for (const panel of ["model", "preferences", "help", "search"] as const) test(`$
   expect(ui.captureCharFrame()).not.toContain("Esc stop");
   const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
   expect(hints.plainText).toBe("Esc back to request");
+  // The return hint shows Esc as a bold key chip on its own background, like every other hint row.
+  const [chip, action] = (hints.content as StyledText).chunks;
+  expect(chip?.text).toBe("Esc");
+  expect((chip?.attributes ?? 0) & TextAttributes.BOLD).toBe(TextAttributes.BOLD);
+  expect(chip?.bg).toBeDefined();
+  expect(action?.text).toBe(" back to request");
+  expect(action?.bg).toBeUndefined();
   const request = ui.controller.snapshot().toolApproval;
   const footer = ui.renderer.root.findDescendantById("footer") as TextRenderable;
   for (const width of [120, 80, 50]) {

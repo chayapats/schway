@@ -7,7 +7,7 @@ size 30x8
 cursor 15 4 visible
 == text
 
- Type a task · Enter sends
+ Type a task · Enter send
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › ยังไม่ส่ง 🧪
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -19,8 +19,8 @@ cursor 15 4 visible
 01 0-1 #ffffff #0e1117 -
 01 1-15 #8b95a7 #0e1117 -
 01 15-20 #e6eaf0 #293140 b
-01 20-26 #8b95a7 #0e1117 -
-01 26-30 #ffffff #0e1117 -
+01 20-25 #8b95a7 #0e1117 -
+01 25-30 #ffffff #0e1117 -
 02 0-1 #ffffff #0e1117 -
 02 1-29 #161b24 #0e1117 -
 02 29-30 #ffffff #0e1117 -

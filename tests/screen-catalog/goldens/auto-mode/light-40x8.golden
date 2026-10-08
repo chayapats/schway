@@ -9,7 +9,7 @@ cursor 6 6 visible
  scripted/scripted-model · scripted
  API key
 
- Type a task · Enter sends
+ Type a task · Enter send
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -26,8 +26,8 @@ cursor 6 6 visible
 03 0-1 #ffffff #f7f7f4 -
 03 1-15 #545e6c #f7f7f4 -
 03 15-20 #1d232c #caced3 b
-03 20-26 #545e6c #f7f7f4 -
-03 26-40 #ffffff #f7f7f4 -
+03 20-25 #545e6c #f7f7f4 -
+03 25-40 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-39 #ecedea #f7f7f4 -
 04 39-40 #ffffff #f7f7f4 -

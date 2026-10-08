@@ -11,7 +11,7 @@ cursor 7 27 visible
 
   openai/gpt-5.4 · OpenAI API key
 
-  Type a task · Enter sends
+  Type a task · Enter send
 
   Try a task
     Explain how this project starts.
@@ -53,8 +53,8 @@ cursor 7 27 visible
 05 0-2 #ffffff #0e1117 -
 05 2-16 #8b95a7 #0e1117 -
 05 16-21 #e6eaf0 #293140 b
-05 21-27 #8b95a7 #0e1117 -
-05 27-120 #ffffff #0e1117 -
+05 21-26 #8b95a7 #0e1117 -
+05 26-120 #ffffff #0e1117 -
 06 0-120 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
 07 2-12 #8b95a7 #0e1117 -

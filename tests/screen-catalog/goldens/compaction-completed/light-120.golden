@@ -20,7 +20,7 @@ cursor 7 27 visible
 
   Read the records, validate them, and restore the conversation.
 
-  Active summary boundary · earlier rows remain history; recent model context starts below · /context
+  Active summary boundary · earlier rows remain history; recent model context starts below · /context inspect
 
   Context compacted · /context inspect summary
 
@@ -81,8 +81,8 @@ cursor 7 27 visible
 12 64-120 #ffffff #f7f7f4 -
 13 0-120 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
-14 2-101 #545e6c #f7f7f4 -
-14 101-120 #ffffff #f7f7f4 -
+14 2-109 #545e6c #f7f7f4 -
+14 109-120 #ffffff #f7f7f4 -
 15 0-120 #ffffff #f7f7f4 -
 16 0-2 #ffffff #f7f7f4 -
 16 2-46 #545e6c #f7f7f4 -

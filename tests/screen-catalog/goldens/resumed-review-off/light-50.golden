@@ -14,8 +14,8 @@ cursor 1 1 hidden
    None listed
 
  Current diff
- Change tracking is off · /config set git {
- "changeTracking":"on-demand"} enable
+ Change tracking is off · /config set git
+ {"changeTracking":"on-demand"} enable
  No Git state was read. Esc back
 
 
@@ -60,11 +60,11 @@ cursor 1 1 hidden
 07 1-13 #0a5894 #f7f7f4 b
 07 13-50 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -
-08 1-43 #1d232c #f7f7f4 -
-08 43-50 #ffffff #f7f7f4 -
+08 1-41 #1d232c #f7f7f4 -
+08 41-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
-09 1-37 #1d232c #f7f7f4 -
-09 37-50 #ffffff #f7f7f4 -
+09 1-38 #1d232c #f7f7f4 -
+09 38-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-32 #1d232c #f7f7f4 -
 10 32-50 #ffffff #f7f7f4 -

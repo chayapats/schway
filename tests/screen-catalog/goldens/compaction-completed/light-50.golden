@@ -23,8 +23,8 @@ cursor 6 27 visible
  the conversation.
 
  Active summary boundary · earlier rows remain
- history; recent model context starts below · /
- context
+ history; recent model context starts below
+ /context inspect
 
  Context compacted · /context inspect summary
 
@@ -87,14 +87,14 @@ cursor 6 27 visible
 14 18-50 #ffffff #f7f7f4 -
 15 0-50 #ffffff #f7f7f4 -
 16 0-1 #ffffff #f7f7f4 -
-16 1-47 #545e6c #f7f7f4 -
-16 47-50 #ffffff #f7f7f4 -
+16 1-46 #545e6c #f7f7f4 -
+16 46-50 #ffffff #f7f7f4 -
 17 0-1 #ffffff #f7f7f4 -
-17 1-47 #545e6c #f7f7f4 -
-17 47-50 #ffffff #f7f7f4 -
+17 1-43 #545e6c #f7f7f4 -
+17 43-50 #ffffff #f7f7f4 -
 18 0-1 #ffffff #f7f7f4 -
-18 1-8 #545e6c #f7f7f4 -
-18 8-50 #ffffff #f7f7f4 -
+18 1-17 #545e6c #f7f7f4 -
+18 17-50 #ffffff #f7f7f4 -
 19 0-50 #ffffff #f7f7f4 -
 20 0-1 #ffffff #f7f7f4 -
 20 1-45 #545e6c #f7f7f4 -

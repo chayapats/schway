@@ -7,7 +7,7 @@ size 40x8
 cursor 1 1 hidden
 == text
  Read table          3–5/36 · Col 2–5/8
- Aligned columns · C copies Markdown s…
+ Aligned columns
  ‹Owner │ Q1 revenue │ Q2 revenue │ Ch›
  ‹──────┼────────────┼────────────┼───›
  ‹Dana  │ 1,274      │ 1,382      │ +3›
@@ -20,8 +20,8 @@ cursor 1 1 hidden
 00 11-39 #545e6c #f7f7f4 -
 00 39-40 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
-01 1-39 #545e6c #f7f7f4 -
-01 39-40 #ffffff #f7f7f4 -
+01 1-16 #545e6c #f7f7f4 -
+01 16-40 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
 02 1-2 #545e6c #f7f7f4 -
 02 2-38 #1d232c #f7f7f4 b

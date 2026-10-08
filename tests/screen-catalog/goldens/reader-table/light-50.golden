@@ -9,7 +9,7 @@ cursor 1 1 hidden
  ⚡ schway  /project
 
  Read table   Rows 17–36 of 36 · Columns 2–6 of 8
- Aligned columns · C copies Markdown source
+ Aligned columns · C copy Markdown source
  ‹Owner │ Q1 revenue │ Q2 revenue │ Change │ Sta›
  ‹──────┼────────────┼────────────┼────────┼────›
  ‹Dana  │ 1,792      │ 1,956      │ +8%    │ Rev›
@@ -49,8 +49,8 @@ cursor 1 1 hidden
 02 11-49 #545e6c #f7f7f4 -
 02 49-50 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-43 #545e6c #f7f7f4 -
-03 43-50 #ffffff #f7f7f4 -
+03 1-41 #545e6c #f7f7f4 -
+03 41-50 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-2 #545e6c #f7f7f4 -
 04 2-48 #1d232c #f7f7f4 b

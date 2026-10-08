@@ -15,8 +15,8 @@ cursor 6 27 visible
  Read the records, validate them, and restore
  the conversation.
 
- Context unchanged · /compact retry after more
- turns
+ Context unchanged
+ /compact retry after more turns
 
 
 
@@ -66,11 +66,11 @@ cursor 6 27 visible
 07 18-50 #ffffff #0e1117 -
 08 0-50 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-47 #8b95a7 #0e1117 -
-09 47-50 #ffffff #0e1117 -
+09 1-18 #8b95a7 #0e1117 -
+09 18-50 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-6 #8b95a7 #0e1117 -
-10 6-50 #ffffff #0e1117 -
+10 1-32 #8b95a7 #0e1117 -
+10 32-50 #ffffff #0e1117 -
 11 0-50 #ffffff #0e1117 -
 12 0-50 #ffffff #0e1117 -
 13 0-50 #ffffff #0e1117 -

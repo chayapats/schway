@@ -11,8 +11,8 @@ cursor 1 1 hidden
   Review · current changes
 
   Current working tree │ Current diff
-    None listed        │ Change tracking is off · /config set git {
-                       │ "changeTracking":"on-demand"} enable
+    None listed        │ Change tracking is off · /config set git
+                       │ {"changeTracking":"on-demand"} enable
                        │ No Git state was read. Esc back
                        │
                        │
@@ -58,12 +58,12 @@ cursor 1 1 hidden
 05 2-15 #e6eaf0 #0e1117 -
 05 15-22 #ffffff #0e1117 -
 05 22-25 #2c3444 #0e1117 -
-05 25-67 #e6eaf0 #0e1117 -
-05 67-80 #ffffff #0e1117 -
+05 25-65 #e6eaf0 #0e1117 -
+05 65-80 #ffffff #0e1117 -
 06 0-22 #ffffff #0e1117 -
 06 22-25 #2c3444 #0e1117 -
-06 25-61 #e6eaf0 #0e1117 -
-06 61-80 #ffffff #0e1117 -
+06 25-62 #e6eaf0 #0e1117 -
+06 62-80 #ffffff #0e1117 -
 07 0-22 #ffffff #0e1117 -
 07 22-25 #2c3444 #0e1117 -
 07 25-56 #e6eaf0 #0e1117 -

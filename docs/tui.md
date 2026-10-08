@@ -113,7 +113,7 @@ see [credentials](credentials.md) and
 
 ## First launch and readiness
 
-A fresh install shows two lines: **Not connected**, then **Connect a provider · Alt+L**. Its hint row reads **Alt+L sign in · / commands**; narrow widths
+A fresh install shows two lines: **Not connected**, then **Connect a provider · Alt+L sign in**. Its hint row reads **Alt+L sign in · / commands**; narrow widths
 keep the sign-in action. Enter leaves an ordinary draft and its cursor unchanged
 until a model is active.
 
@@ -126,8 +126,8 @@ clears remembered interactive choices.
 
 While a panel, palette, find, inspection, F2 details or an approval owns the keys,
 the empty-conversation card keeps its status lines, such as **Not connected** or
-the model and route, but hides its action line, such as **Connect a provider · Alt+L**
-or **Type a task · Enter sends**. The open surface's own heading and hint row name
+the model and route, but hides its action line, such as **Connect a provider · Alt+L sign in**
+or **Type a task · Enter send**. The open surface's own heading and hint row name
 the keys that work there. Closing it brings the action line back unchanged.
 
 A ready, empty conversation with an empty composer also lists up to three fixed
@@ -594,7 +594,7 @@ detected here` marks newer turns with the same limit.
 | Forget remembered workspace choice | `/model forget` (or `/model reset`); reveals inherited explicit config/defaults without deleting credentials |
 | Preferences | `/config` or Alt+P; Up/Down row, Enter open Model/Connections/Advanced, Left/Right value/reset, Tab/Shift+Tab scope, Enter preview then confirm, Esc cancel/back; PageUp/PageDown scroll details |
 | Model picker | `/model` or Alt+M; Up/Down selects, Enter uses or opens, Ctrl+P pins/unpins, F2 shows details, Ctrl+R retries discovery, Esc goes back |
-| Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter, Tab more options, Esc back; Esc cancel sign-in while a sign-in still waits behind it |
+| Sign-in chooser | `/login` or Alt+L; ↑↓ select, Enter continue, Tab more options, Esc back; Esc cancel sign-in while a sign-in still waits behind it |
 | Tool details | Ctrl+O toggles expandable results; click a heading or press Enter in Alt+I inspection to toggle one; small inline diffs stay visible |
 | Review turn or current changes and command evidence | Alt+R or `/changes review`; Up/Down selects a file, PageUp/PageDown scrolls, Ctrl+R reloads the current diff, Esc back to the draft and reading position |
 | Undo a turn's file edits | `/undo`; Up/Down selects, PageUp/PageDown scrolls, Enter applies, Esc cancel before Enter, Esc back from a result |
@@ -900,7 +900,7 @@ and the draft, cursor and transcript position return unchanged on Esc.
   same source line at the top. Line numbers are presentation only.
 - Tables show aligned columns with ` │ ` between cells. The header and its
   separator stay pinned when there is room, Left/Right step one column, and the
-  title reports `Columns 2–5 of 8`. The label `Aligned columns · C copies
+  title reports `Columns 2–5 of 8`. The label `Aligned columns · C copy
   Markdown source` marks that the copy keeps the original Markdown. Extra cells
   beyond the header stay visible; no column is hidden.
 - **C** copies the canonical source: exact sanitized code with its line

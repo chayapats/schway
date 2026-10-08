@@ -12,10 +12,10 @@ cursor 6 27 visible
  ▌ Summarize the changes
 
  ▌ ! Error
- ▌ Request failed · Inspect details before
- ▌ continuing
- ▌ Ctrl+R continue · F2 details · Esc keep
- ▌ editing
+ ▌ Request failed
+ ▌ Inspect details before continuing
+ ▌ Ctrl+R continue · F2 details
+ ▌ Esc keep editing
 
 
 
@@ -66,14 +66,14 @@ cursor 6 27 visible
 06 0-1 #ffffff #0e1117 -
 06 1-2 #f79d9d #2a2227 -
 06 2-3 #ffffff #2a2227 -
-06 3-43 #f79d9d #2a2227 -
-06 43-48 #ffffff #2a2227 -
+06 3-17 #f79d9d #2a2227 -
+06 17-48 #ffffff #2a2227 -
 06 48-50 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
 07 1-2 #f79d9d #2a2227 -
 07 2-3 #ffffff #2a2227 -
-07 3-13 #f79d9d #2a2227 -
-07 13-48 #ffffff #2a2227 -
+07 3-36 #f79d9d #2a2227 -
+07 36-48 #ffffff #2a2227 -
 07 48-50 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
 08 1-2 #f79d9d #2a2227 -
@@ -81,16 +81,15 @@ cursor 6 27 visible
 08 3-9 #e6eaf0 #2c3241 b
 08 9-21 #f79d9d #2a2227 -
 08 21-23 #e6eaf0 #2c3241 b
-08 23-34 #f79d9d #2a2227 -
-08 34-37 #e6eaf0 #2c3241 b
-08 37-43 #f79d9d #2a2227 -
-08 43-48 #ffffff #2a2227 -
+08 23-31 #f79d9d #2a2227 -
+08 31-48 #ffffff #2a2227 -
 08 48-50 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
 09 1-2 #f79d9d #2a2227 -
 09 2-3 #ffffff #2a2227 -
-09 3-10 #f79d9d #2a2227 -
-09 10-48 #ffffff #2a2227 -
+09 3-6 #e6eaf0 #2c3241 b
+09 6-19 #f79d9d #2a2227 -
+09 19-48 #ffffff #2a2227 -
 09 48-50 #ffffff #0e1117 -
 10 0-50 #ffffff #0e1117 -
 11 0-50 #ffffff #0e1117 -

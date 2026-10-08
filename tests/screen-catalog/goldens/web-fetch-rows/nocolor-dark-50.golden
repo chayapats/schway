@@ -11,9 +11,10 @@ cursor 6 27 visible
   ✓  WEB_FETCH  https://weather.example.te… ▸
   ✓  WEB_FETCH  https://reader.example.tes… ▸
   !  WEB_FETCH  https://api.example.… error ▾
-    HTTP 401 Unauthorized · application/json ·
-    58 bytes · https://api.example.test/
-    forecast?city=…&access_token=…
+    HTTP 401 Unauthorized · application/json
+    58 bytes
+    https://api.example.test/forecast?
+    city=…&access_token=…
 
     The server returned HTTP 401 Unauthorized.
 
@@ -24,7 +25,6 @@ cursor 6 27 visible
     continuing.
 
   ⠋  WEB_FETCH  https://maps.exam… running… ▸
-
 
 
 
@@ -75,66 +75,70 @@ cursor 6 27 visible
 04 48-50 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
 05 1-4 #ffffff #1e2430 -
-05 4-47 #8b95a7 #1e2430 -
-05 47-48 #ffffff #1e2430 -
+05 4-44 #8b95a7 #1e2430 -
+05 44-48 #ffffff #1e2430 -
 05 48-50 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
 06 1-4 #ffffff #1e2430 -
-06 4-40 #8b95a7 #1e2430 -
-06 40-48 #ffffff #1e2430 -
+06 4-12 #8b95a7 #1e2430 -
+06 12-48 #ffffff #1e2430 -
 06 48-50 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
 07 1-4 #ffffff #1e2430 -
-07 4-34 #8b95a7 #1e2430 -
-07 34-48 #ffffff #1e2430 -
+07 4-38 #8b95a7 #1e2430 -
+07 38-48 #ffffff #1e2430 -
 07 48-50 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-48 #ffffff #1e2430 -
+08 1-4 #ffffff #1e2430 -
+08 4-25 #8b95a7 #1e2430 -
+08 25-48 #ffffff #1e2430 -
 08 48-50 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-4 #ffffff #1e2430 -
-09 4-46 #8b95a7 #1e2430 -
-09 46-48 #ffffff #1e2430 -
+09 1-48 #ffffff #1e2430 -
 09 48-50 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-48 #ffffff #1e2430 -
+10 1-4 #ffffff #1e2430 -
+10 4-46 #8b95a7 #1e2430 -
+10 46-48 #ffffff #1e2430 -
 10 48-50 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-4 #ffffff #1e2430 -
-11 4-45 #8b95a7 #1e2430 -
-11 45-48 #ffffff #1e2430 -
+11 1-48 #ffffff #1e2430 -
 11 48-50 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
 12 1-4 #ffffff #1e2430 -
-12 4-30 #8b95a7 #1e2430 -
-12 30-48 #ffffff #1e2430 -
+12 4-45 #8b95a7 #1e2430 -
+12 45-48 #ffffff #1e2430 -
 12 48-50 #ffffff #0e1117 -
 13 0-1 #ffffff #0e1117 -
 13 1-4 #ffffff #1e2430 -
-13 4-35 #8b95a7 #1e2430 -
-13 35-48 #ffffff #1e2430 -
+13 4-30 #8b95a7 #1e2430 -
+13 30-48 #ffffff #1e2430 -
 13 48-50 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
 14 1-4 #ffffff #1e2430 -
-14 4-44 #8b95a7 #1e2430 -
-14 44-48 #ffffff #1e2430 -
+14 4-35 #8b95a7 #1e2430 -
+14 35-48 #ffffff #1e2430 -
 14 48-50 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
 15 1-4 #ffffff #1e2430 -
-15 4-15 #8b95a7 #1e2430 -
-15 15-48 #ffffff #1e2430 -
+15 4-44 #8b95a7 #1e2430 -
+15 44-48 #ffffff #1e2430 -
 15 48-50 #ffffff #0e1117 -
-16 0-50 #ffffff #0e1117 -
-17 0-1 #ffffff #0e1117 -
-17 1-2 #e6eaf0 #1e2430 -
-17 2-3 #e6eaf0 #1e2430 b
-17 3-4 #e6eaf0 #1e2430 -
-17 4-15 #e6eaf0 #4a505a b
-17 15-34 #e6eaf0 #1e2430 -
-17 34-46 #8b95a7 #1e2430 -
-17 46-48 #ffffff #1e2430 -
-17 48-50 #ffffff #0e1117 -
-18 0-50 #ffffff #0e1117 -
+16 0-1 #ffffff #0e1117 -
+16 1-4 #ffffff #1e2430 -
+16 4-15 #8b95a7 #1e2430 -
+16 15-48 #ffffff #1e2430 -
+16 48-50 #ffffff #0e1117 -
+17 0-50 #ffffff #0e1117 -
+18 0-1 #ffffff #0e1117 -
+18 1-2 #e6eaf0 #1e2430 -
+18 2-3 #e6eaf0 #1e2430 b
+18 3-4 #e6eaf0 #1e2430 -
+18 4-15 #e6eaf0 #4a505a b
+18 15-34 #e6eaf0 #1e2430 -
+18 34-46 #8b95a7 #1e2430 -
+18 46-48 #ffffff #1e2430 -
+18 48-50 #ffffff #0e1117 -
 19 0-50 #ffffff #0e1117 -
 20 0-50 #ffffff #0e1117 -
 21 0-50 #ffffff #0e1117 -

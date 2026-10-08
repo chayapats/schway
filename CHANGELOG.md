@@ -96,6 +96,15 @@
   full text, when that makes them shorter. The turn in progress, the saved session, resume, `/history` and
   compaction summaries keep full results. Extension `beforeModel` hooks see the
   shortened results (#322).
+- Every key hint pairs its key with an imperative verb on one row:
+  `Enter continue` in the sign-in chooser, `Alt+L sign in` after
+  `Connect a provider` and the Grok plan error, `Type a task · Enter send`,
+  `Enter save` in a staged preference and `C copy` in the reader. Notices,
+  error and recovery lines, panel headings and empty-state actions wrap at
+  ` · ` so a key never ends a row apart from its action, and narrow rows drop
+  whole segments instead of cutting a verb. The undo panel's hint row and the
+  `Esc back to request` hint now show key chips. A catalog lint checks every
+  screen for these rules (#302).
 - The status bar's reasoning chip always shows the effective effort while a
   model is selected, not only an explicit level: `Provider default` when Schway
   sends no reasoning control, with the advertised level such as

@@ -118,7 +118,7 @@ Each turn's model requests also include your local date, weekday, time zone name
 
 Start Schway with `bun run start` (or `schway` after installation). Set the selected provider's API key in the environment or pass `--api-key` at launch. Configuration does not store API keys.
 
-A fresh install names no model. The screen shows `Not connected; Connect a provider · Alt+L`, and sending stays unavailable until a model is usable. Typed text is kept. Headless runs do not invent a model: without a provider and model in config or `--provider` and `--model`, Schway exits non-zero with `No model configured · Pass --provider and --model, or set them in config`
+A fresh install names no model. The screen shows `Not connected; Connect a provider · Alt+L sign in`, and sending stays unavailable until a model is usable. Typed text is kept. Headless runs do not invent a model: without a provider and model in config or `--provider` and `--model`, Schway exits non-zero with `No model configured · Pass --provider and --model, or set them in config`
 
 Enter `/model` or press Alt+M to choose a model without losing your draft. The initial list has at most eight model rows: current choice, user-wide favorites, then recent successful choices. Rows are deduplicated by exact model, auth route, endpoint and profile identity. Disconnected routes and their favorites stay hidden. With no favorites or history, Schway offers a small selection from connected providers instead of their full catalogs.
 

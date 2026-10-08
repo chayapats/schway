@@ -10,23 +10,23 @@ cursor 1 1 hidden
 
  Turn 1 details
 
- Attempt 1: interactive · /home/test/demo ·     ▀
+ Attempt 1: interactive · /home/test/demo       ▀
  started 2026-01-15 09:28 UTC · − Stopped · 31s
    Git snapshots captured before and after the
  attempt
    Timing and token details were not recorded
  for this attempt.
    Reasoning: no level sent; the provider's
- default applied · xai/grok-4.7 via Grok
- subscription
- Attempt 2: interactive · /home/test/demo ·
+ default applied
+ xai/grok-4.7 via Grok subscription
+ Attempt 2: interactive · /home/test/demo
  started 2026-01-15 09:29 UTC · ✓ Done · 24s
    Git snapshots captured before and after the
  attempt
    Timing and token details were not recorded
  for this attempt.
-   Reasoning: low sent (explicit level) · xai/
- grok-4.7 via Grok subscription
+   Reasoning: low sent (explicit level)
+ xai/grok-4.7 via Grok subscription
  0 tool results; 0 failed tools.
  Commands: 0 exited 0, 0 nonzero, 0 without an
 
@@ -50,8 +50,8 @@ cursor 1 1 hidden
 02 15-50 #ffffff #0e1117 -
 03 0-50 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-44 #e6eaf0 #0e1117 -
-04 44-48 #ffffff #0e1117 -
+04 1-41 #e6eaf0 #0e1117 -
+04 41-48 #ffffff #0e1117 -
 04 48-49 #9a9ea3 #252527 -
 04 49-50 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
@@ -80,23 +80,23 @@ cursor 1 1 hidden
 09 48-49 #ffffff #252527 -
 09 49-50 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-44 #e6eaf0 #0e1117 -
-10 44-48 #ffffff #0e1117 -
+10 1-43 #e6eaf0 #0e1117 -
+10 43-48 #ffffff #0e1117 -
 10 48-49 #ffffff #252527 -
 10 49-50 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-41 #e6eaf0 #0e1117 -
-11 41-48 #ffffff #0e1117 -
+11 1-16 #e6eaf0 #0e1117 -
+11 16-48 #ffffff #0e1117 -
 11 48-49 #ffffff #252527 -
 11 49-50 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-13 #e6eaf0 #0e1117 -
-12 13-48 #ffffff #0e1117 -
+12 1-35 #e6eaf0 #0e1117 -
+12 35-48 #ffffff #0e1117 -
 12 48-49 #ffffff #252527 -
 12 49-50 #ffffff #0e1117 -
 13 0-1 #ffffff #0e1117 -
-13 1-44 #e6eaf0 #0e1117 -
-13 44-48 #ffffff #0e1117 -
+13 1-41 #e6eaf0 #0e1117 -
+13 41-48 #ffffff #0e1117 -
 13 48-49 #ffffff #252527 -
 13 49-50 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
@@ -125,13 +125,13 @@ cursor 1 1 hidden
 18 48-49 #ffffff #252527 -
 18 49-50 #ffffff #0e1117 -
 19 0-1 #ffffff #0e1117 -
-19 1-46 #e6eaf0 #0e1117 -
-19 46-48 #ffffff #0e1117 -
+19 1-39 #e6eaf0 #0e1117 -
+19 39-48 #ffffff #0e1117 -
 19 48-49 #ffffff #252527 -
 19 49-50 #ffffff #0e1117 -
 20 0-1 #ffffff #0e1117 -
-20 1-31 #e6eaf0 #0e1117 -
-20 31-48 #ffffff #0e1117 -
+20 1-35 #e6eaf0 #0e1117 -
+20 35-48 #ffffff #0e1117 -
 20 48-49 #ffffff #252527 -
 20 49-50 #ffffff #0e1117 -
 21 0-1 #ffffff #0e1117 -

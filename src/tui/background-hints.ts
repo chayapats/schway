@@ -24,9 +24,9 @@ export function surfaceOwnsInput(owners: InputOwners): boolean {
 /** The empty-conversation card's key-hint lines for this readiness, or none while another surface owns the keys. */
 export function readinessCardActions(snapshot: Pick<TuiSnapshot, "readiness" | "recovery">, owned: boolean): string[] {
   if (owned) return [];
-  if (snapshot.readiness === "not-connected") return ["Connect a provider · Alt+L"];
+  if (snapshot.readiness === "not-connected") return ["Connect a provider · Alt+L sign in"];
   const action = snapshot.readiness === "loading" ? "Checking connection · Type a task · Esc cancel"
-    : snapshot.readiness === "ready" ? "Type a task · Enter sends"
+    : snapshot.readiness === "ready" ? "Type a task · Enter send"
     : snapshot.readiness === "connect" ? "Connect to continue · Alt+L sign in"
     : snapshot.readiness === "choose-model" ? "Choose a model · Alt+M browse models"
     : snapshot.recovery?.category === "credential-store" ? "Unlock credential storage · Ctrl+R retry"

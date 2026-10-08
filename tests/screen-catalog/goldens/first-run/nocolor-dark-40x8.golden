@@ -9,7 +9,7 @@ cursor 6 6 visible
 
  /project
  Not connected
- Connect a provider · Alt+L
+ Connect a provider · Alt+L sign in
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -25,7 +25,8 @@ cursor 6 6 visible
 03 0-1 #ffffff #0e1117 -
 03 1-22 #8b95a7 #0e1117 -
 03 22-27 #e6eaf0 #293140 b
-03 27-40 #ffffff #0e1117 -
+03 27-35 #8b95a7 #0e1117 -
+03 35-40 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
 04 1-39 #161b24 #0e1117 -
 04 39-40 #ffffff #0e1117 -

@@ -97,11 +97,12 @@ test("not-connected copy and neutral pill survive no-color, narrow widths and re
       expect(ui.captureCharFrame()).toContain("Auto");
       if (height >= 10) expect(ui.captureCharFrame()).toContain("Alt+L sign in");
       const empty = ui.renderer.root.findDescendantById("empty-conversation") as TextRenderable;
-      expect(empty.chunks.map(chunk => chunk.text).join("")).toContain("Not connected\nConnect a provider · Alt+L");
+      // Narrow cards wrap the action line at its separator, keeping Alt+L with its verb.
+      expect(empty.chunks.map(chunk => chunk.text).join("")).toContain(width < 36 ? "Not connected\nConnect a provider\nAlt+L sign in" : "Not connected\nConnect a provider · Alt+L sign in");
       if (height < 10) expect(empty.chunks.map(chunk => chunk.text).join("")).toStartWith("/project\n");
       if (width >= 44) {
         expect(ui.captureCharFrame()).toContain("Not connected");
-        expect(ui.captureCharFrame()).toContain("Connect a provider · Alt+L");
+        expect(ui.captureCharFrame()).toContain("Connect a provider · Alt+L sign in");
       }
       for (const copy of ["gpt-", "openai/", "claude", "anthropic", "No model yet", "Ready", "Attention", "ctx", "Ctrl+I failure details", "Enter send"]) expect(ui.captureCharFrame()).not.toContain(copy);
     }
@@ -492,6 +493,23 @@ test("real read, edit, write and bash results render summaries with deterministi
       expect(ui.session.items.filter(item => item.type === "tool_result").some(item => item.type === "tool_result" && item.content.includes("│"))).toBe(false);
     }
   });
+});
+
+test("raw tool output keeps its own ` · ` separators at narrow widths; only web_fetch's status line rewraps", async () => {
+  const ui = await setup(40, 30);
+  const output = "README.md:72:Good: `1 file changed · Esc back` and more text · here · there";
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "grep", name: "bash" });
+  await settle(ui);
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "grep", name: "bash", status: "error", content: output });
+  await settle(ui);
+  const entry = ui.controller.snapshot().transcript.find(item => item.kind === "tool")!;
+  const texts: string[] = [];
+  const visit = (node: { getChildren(): unknown[] }) => {
+    for (const child of node.getChildren() as { getChildren(): unknown[] }[]) { if (child instanceof TextRenderable) texts.push(child.plainText); visit(child); }
+  };
+  visit(ui.renderer.root.findDescendantById(`message-${entry.id}`)!);
+  // The body is the tool's text as written: no separator is dropped and no row break is inserted.
+  expect(texts.some(text => text.split("\n").includes(output)), texts.join("\n---\n")).toBe(true);
 });
 
 test("inline edit and created-write rows ignore mouse, inspection Enter and Ctrl+O toggles", async () => {
@@ -1529,7 +1547,7 @@ test("narrow preferences keep the selected field and keyboard choice visible wit
     ui.mockInput.pressArrow("right"); await preferenceEnter(ui);
     ui.resize(32, 12); await settle(ui);
     expect(ui.captureCharFrame()).toContain("› Thinking");
-    expect(ui.captureCharFrame()).toContain("Enter saves");
+    expect(ui.captureCharFrame()).toContain("Enter save ·");
     ui.mockInput.pressEscape(); ui.mockInput.pressEscape(); await settle(ui);
     expect(ui.editor.plainText).toBe("draft 日本語");
     expect(ui.editor.cursorOffset).toBe(3);
@@ -1572,7 +1590,7 @@ test("compact preferences show project scope and confirmation before a write", a
     ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("right");
     await preferenceEnter(ui);
     expect(ui.controller.snapshot().preferences?.preview).not.toContain("Esc");
-    expect(ui.captureCharFrame()).toContain("Enter saves");
+    expect(ui.captureCharFrame()).toContain("Enter save ·");
     await preferenceEnter(ui);
     const applied = ui.controller.snapshot().transcript.at(-1)?.text ?? "";
     expect(applied).toEndWith(" Applied.");
@@ -2578,11 +2596,11 @@ for (const width of [120, 80]) test(`grouped sign-in rows, muted details and glo
   expect(new Set(detailColumns).size).toBe(1);
   expect(rows.some(row => row.plainText.includes("↑↓"))).toBe(false);
   const hints = ui.renderer.root.findDescendantById("hints") as TextRenderable;
-  expect(hints.plainText).toBe("↑↓ select · Enter · Tab more options · Esc back");
-  await selectRenderedLoginRow(ui, "openai"); expect(hints.plainText).toBe("↑↓ select · Enter · Esc back");
+  expect(hints.plainText).toBe("↑↓ select · Enter continue · Tab more options · Esc back");
+  await selectRenderedLoginRow(ui, "openai"); expect(hints.plainText).toBe("↑↓ select · Enter continue · Esc back");
   await selectRenderedLoginRow(ui, "chatgpt"); ui.mockInput.pressTab(); await settle(ui);
   expect(picker.getChildren().filter((row): row is TextRenderable => row instanceof TextRenderable).map(row => row.plainText.trim())).toEqual(["ChatGPT · more options", "› Device approval", "Paste browser callback"]);
-  expect(hints.plainText).toBe("↑↓ select · Enter · Esc back");
+  expect(hints.plainText).toBe("↑↓ select · Enter continue · Esc back");
   ui.mockInput.pressEscape(); await settle(ui); await selectRenderedLoginRow(ui, "grok"); ui.mockInput.pressTab(); await settle(ui);
   expect(picker.getChildren().filter((row): row is TextRenderable => row instanceof TextRenderable).map(row => row.plainText.trim())).toEqual(["Grok · more options", "› Device code"]);
 });

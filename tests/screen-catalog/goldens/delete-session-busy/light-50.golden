@@ -9,8 +9,8 @@ cursor 35 27 visible
  ⚡ schway  ~/demo
 
  ▌ ! Error
- ▌ Cannot delete session: Undo store busy · /
- ▌ delete-session retry · F2 details
+ ▌ Cannot delete session: Undo store busy
+ ▌ /delete-session retry · F2 details
 
 
 
@@ -53,14 +53,14 @@ cursor 35 27 visible
 03 0-1 #ffffff #f7f7f4 -
 03 1-2 #a61f16 #edddd9 -
 03 2-3 #ffffff #edddd9 -
-03 3-45 #a61f16 #edddd9 -
-03 45-48 #ffffff #edddd9 -
+03 3-41 #a61f16 #edddd9 -
+03 41-48 #ffffff #edddd9 -
 03 48-50 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-2 #a61f16 #edddd9 -
 04 2-3 #ffffff #edddd9 -
-04 3-36 #a61f16 #edddd9 -
-04 36-48 #ffffff #edddd9 -
+04 3-37 #a61f16 #edddd9 -
+04 37-48 #ffffff #edddd9 -
 04 48-50 #ffffff #f7f7f4 -
 05 0-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -

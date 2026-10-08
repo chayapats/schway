@@ -27,7 +27,7 @@ cursor 11 27 visible
        Shift+Enter or Ctrl+J Insert a newline
        Ctrl+C                Copy selected text
    › ! F2 or Ctrl+I          Inspect details · No details to show · Esc back
-     ! Esc or Ctrl+C         Stop running work · Nothing running · Enter sen…
+     ! Esc or Ctrl+C         Stop running work · Nothing running
        Shift+Tab             Change approval mode
        Alt+R                 Review changes
    ! No details to show · Esc back
@@ -84,8 +84,8 @@ cursor 11 27 visible
 21 0-2 #ffffff #0e1117 -
 21 2-3 #ffffff #1e2430 -
 21 3-46 #8b95a7 #1e2430 -
-21 46-77 #f0c674 #1e2430 -
-21 77-78 #ffffff #1e2430 -
+21 46-64 #f0c674 #1e2430 -
+21 64-78 #ffffff #1e2430 -
 21 78-80 #ffffff #0e1117 -
 22 0-2 #ffffff #0e1117 -
 22 2-3 #ffffff #1e2430 -

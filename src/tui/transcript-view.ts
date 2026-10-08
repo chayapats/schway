@@ -1,7 +1,7 @@
 import { BoxRenderable, MarkdownRenderable, RGBA, TextBufferRenderable, TextTableRenderable, TextRenderable, SyntaxStyle, StyledText, fg, bg, bold, italic, underline, link, type BaseRenderable, type BorderCharacters, type CliRenderer, type Renderable, type RenderNodeContext, type TextChunk } from "@opentui/core";
 import type { TuiTranscriptEntry } from "./controller.ts";
 import { highlightCode } from "./highlight.ts";
-import { HINT_KEY, keyHintChunks } from "./hints.ts";
+import { HINT_KEY, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { displayText, fitLine, toolPresentation } from "./presentation.ts";
 import { mixColor, TEXT_ROLES, textOn, themeOn, tint, type TuiTheme } from "./theme.ts";
@@ -448,7 +448,9 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         const bodyWidth = Math.max(1, width - 4);
         if (body instanceof TextRenderable) body.wrapMode = isDiff ? "char" : "word";
         const paintBody = () => {
-          body.content = linkify(detail.split("\n").flatMap((line, index) => {
+          // web_fetch's own status line ("HTTP 401 · application/json · 58 bytes · <url>") wraps at ` · `; raw output keeps its text as written.
+          const lines = detail.split("\n").flatMap((line, index) => entry.toolName === "web_fetch" && index === 0 && line.includes(" · ") ? wrapHintSegments(line, bodyWidth) : [line]);
+          body.content = linkify(lines.flatMap((line, index) => {
             const numbered = isDiff ? line.match(/^(\s*\d+ │)([+-])(.*)$/) : null;
             const sign = numbered?.[2] === "+" ? theme.success : numbered?.[2] === "-" ? theme.error : undefined;
             const prefix = index ? "\n" : "";
@@ -475,11 +477,13 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
           }
           const color = entry.kind === "error" ? ink.error : entry.kind === "system" ? ink.muted : ink.text;
           // Recovery lines such as "Ctrl+R continue · Esc keep editing" get key chips inside error blocks.
+          // Notice and error lines wrap at ` · ` so a key never ends a row apart from its action; wrapped recovery rows keep their chips.
+          const columns = Math.max(1, width - (entry.kind === "error" ? 3 : 0));
           const errorLines = (line: string, index: number): TextChunk[] => {
-            const prefix = index ? [fg(color)("\n")] : [];
-            return entry.kind === "error" && HINT_KEY.test(line) && line.includes(" ")
-              ? [...prefix, ...keyHintChunks(line, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: ink.error })]
-              : [...prefix, fg(color)(line)];
+            const chips = entry.kind === "error" && HINT_KEY.test(line) && line.includes(" ");
+            const rows = (entry.kind === "error" || entry.kind === "system") && line.includes(" · ") ? wrapHintSegments(line, columns) : [line];
+            return rows.flatMap((row, rowIndex) => [...(index || rowIndex ? [fg(color)("\n")] : []),
+              ...(chips ? keyHintChunks(row, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: ink.error }) : [fg(color)(row)])]);
           };
           if (body instanceof MarkdownRenderable && refill) {
             painters = painters.filter(painter => !painter.node.isDestroyed);
