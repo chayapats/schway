@@ -309,7 +309,9 @@ This keeps structural sections identifiable throughout interception.
 
 `beforeModel` runs after the context waterfall. Its native `items` are conversation
 records (`user`, `assistant`, and `tool_result`), never provider wire messages or
-durable compaction markers. It may transform the ephemeral system prompt, context,
+durable compaction markers. Tool results from earlier user turns arrive shortened
+as described in [replay earlier results](tools.md#replay-earlier-results); the
+durable session keeps them in full. It may transform the ephemeral system prompt, context,
 and conversation. Keep existing context names and complete tool-call/result groups.
 The return must keep the exact supplied `signal`; spreading the input request is
 the simplest way to do that. Extra request or conversation fields are rejected.

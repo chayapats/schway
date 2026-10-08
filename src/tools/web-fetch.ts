@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { version } from "../../package.json";
 import { abortError } from "./fs.ts";
 import { htmlToText } from "./html-text.ts";
+import { utf8ByteLength as utf8Length, utf8Prefix } from "./output-budget.ts";
 import { displayUrl } from "./web-fetch-display.ts";
 import type { ToolContext, ToolDefinition, ToolExecutionResult } from "./types.ts";
 
@@ -31,7 +32,6 @@ const MAX_URL_DISPLAY_CHARS = 8_192;
 const MAX_REASON_CHARS = 64;
 /** Longest server-supplied media type kept in a status line. */
 const MAX_TYPE_CHARS = 100;
-const encoder = new TextEncoder();
 
 /** Accept one required absolute http(s) URL and reject unknown keys; compiled once at registration. */
 export const webFetchInputSchema = Type.Object(
@@ -285,7 +285,7 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
       return { content: `${statusLine.text}\n\n${message}`, details: { ...base, textBytes: 0, truncated: false, durationMs: elapsed() } };
     }
 
-    const textBytes = encoder.encode(text).length;
+    const textBytes = utf8Length(text);
     const capNote = body.capped ? `\n\n[Stopped reading at the read limit (${formatBytes(maxRawBytes)}); the rest was not fetched.]` : "";
     const head = `${statusLine.text}\n\n`;
     if (utf8Length(head) + textBytes + utf8Length(capNote) <= maxOutputBytes) {
@@ -532,20 +532,6 @@ function clipText(text: string, max: number): string {
   const high = text.charCodeAt(max - 1);
   const end = high >= 0xd800 && high <= 0xdbff ? max - 1 : max;
   return `${text.slice(0, end)}…`;
-}
-
-/** UTF-8 byte length. */
-function utf8Length(text: string): number {
-  return encoder.encode(text).length;
-}
-
-/** Longest prefix whose UTF-8 encoding fits `maxBytes`, cut on a code-point boundary. */
-function utf8Prefix(text: string, maxBytes: number): string {
-  const bytes = encoder.encode(text);
-  if (bytes.length <= maxBytes) return text;
-  let end = maxBytes;
-  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
-  return new TextDecoder().decode(bytes.subarray(0, end));
 }
 
 /** Bound a whole result by UTF-8 bytes, marking a cut with an ellipsis. */

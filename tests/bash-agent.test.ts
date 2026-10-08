@@ -10,7 +10,9 @@ import type {
 } from "../src/conversation/types.ts";
 import type { ModelRequest } from "../src/model/model.ts";
 import { createSession } from "../src/session/session.ts";
-import { bashTool, MAX_BASH_CHARS } from "../src/tools/bash.ts";
+import { buildResponsesRequest } from "../src/model/providers/responses-stream.ts";
+import { bashTool, MAX_BASH_BYTES } from "../src/tools/bash.ts";
+import { utf8ByteLength } from "../src/tools/output-budget.ts";
 import { readTool } from "../src/tools/read.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import { withTempDir } from "./helpers.ts";
@@ -212,7 +214,7 @@ test("oversized bash output is bounded for the model and spilled to a file", asy
                   id: "big",
                   name: "bash",
                   arguments: {
-                    command: `bun -e 'process.stdout.write("x".repeat(${MAX_BASH_CHARS + extra}))'`,
+                    command: `bun -e 'process.stdout.write("x".repeat(${MAX_BASH_BYTES + extra}))'`,
                   },
                 },
               ],
@@ -230,8 +232,46 @@ test("oversized bash output is bounded for the model and spilled to a file", asy
     );
 
     expect(fed).toContain("truncated");
-    expect(fed.includes("x".repeat(MAX_BASH_CHARS + extra))).toBe(false);
+    expect(fed.includes("x".repeat(MAX_BASH_BYTES + extra))).toBe(false);
     expect(fed).toContain("Full output:");
+  });
+});
+
+test("the next Responses request carries bounded non-ASCII bash output and the notice", async () => {
+  await withTempDir(async (dir) => {
+    // 20,000 Thai characters: 20,000 UTF-16 units but 60,000 UTF-8 bytes.
+    const full = "ก".repeat(20_000);
+    await writeFile(join(dir, "emit.js"), `process.stdout.write(${JSON.stringify(full)});`);
+    const project = { root: dir, launchCwd: dir, extraRoots: [] };
+    const session = createSession([user("scrape")]);
+    let next: ModelRequest | undefined;
+    await collect(
+      runAgentLoop({
+        session,
+        model: createScriptedModel({
+          responses: [
+            { toolCalls: [{ id: "scrape", name: "bash", arguments: { command: "bun emit.js" } }] },
+            (request) => {
+              next = request;
+              return { text: "done" };
+            },
+          ],
+        }),
+        contextManager: createContextManager(project),
+        tools: createToolRegistry([bashTool]),
+        workspace: project,
+      }),
+    );
+
+    const body = buildResponsesRequest({ model: "grok-4.7", maxOutputTokens: 8192, request: next!, namespace: "xai" });
+    const outputs = body.input.filter(item => "type" in item && item.type === "function_call_output");
+    expect(outputs).toHaveLength(1);
+    const output = (outputs[0] as { output: string }).output;
+    const kept = "ก".repeat(Math.floor(MAX_BASH_BYTES / 3));
+    expect(output.startsWith(`Exit code: 0\n\nstdout:\n${kept}\n\n[Output truncated: showing ${utf8ByteLength(kept)} of 60000 bytes. Full output: `)).toBe(true);
+    expect(output).toEndWith(". Use read with offset to see the rest.]");
+    expect(output.includes(full)).toBe(false);
+    expect(output.isWellFormed()).toBe(true);
   });
 });
 

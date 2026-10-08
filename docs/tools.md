@@ -3,14 +3,34 @@
 ## Read bounded output
 
 Every core tool returns bounded model-facing output; oversized results are truncated with continuation guidance and never flood model context.
+Bounds count UTF-8 bytes, not characters, so Thai, emoji and other multibyte text gets the same byte budget as ASCII. Cuts fall on a code-point boundary and never split a character.
 
-- `read`: ranged reads default to 2000 lines; model-facing text is capped at 50,000 characters with continuation info.
-- `bash`: streaming stdout/stderr is capped at 50,000 characters; oversized output spills the full content to a temporary file and reports its path.
-- `grep`: defaults to 100 matches; model-facing text is capped at 50,000 characters. Truncated searches say to narrow with `path`, `glob`, `maxResults`, or a more specific pattern.
-- `find`: model-facing text is capped at 50,000 characters. Truncated listings say to narrow with a more specific pattern or path.
-- `ls`: lists to depth 1 by default; model-facing text is capped at 50,000 characters.
+- `read`: ranged reads default to 2000 lines; model-facing text is capped at 50,000 bytes with continuation info.
+- `bash`: combined stdout and stderr are capped at 50,000 bytes, keeping stdout first. Oversized output spills the full stdout and stderr to a private `0600` temporary file, and the result ends with `[Output truncated: showing N of M bytes. Full output: <path>. Use read with offset to see the rest.]`. The `Exit code:` header and this notice do not count against the cap. Details add `shownBytes` and `totalBytes` when output is truncated.
+- `grep`: defaults to 100 matches; model-facing text is capped at 50,000 bytes. Truncated searches say to narrow with `path`, `glob`, `maxResults`, or a more specific pattern.
+- `find`: model-facing text is capped at 50,000 bytes. Truncated listings say to narrow with a more specific pattern or path.
+- `ls`: lists to depth 1 by default; model-facing text is capped at 50,000 bytes.
+- The error result Schway builds when a tool call fails, such as a thrown tool error or an unknown tool, is capped at 50,000 bytes.
 - `web_fetch`: model-facing text is capped at 32 KiB (32,768 UTF-8 bytes); oversized text spills to a temporary file whose path the result names. See [Fetch web pages](#fetch-web-pages).
 - A non-zero `bash` exit code is ordinary command data (`{ stdout, stderr, exitCode }`), not infrastructure failure.
+
+## Replay earlier results
+
+Each model request resends the conversation. A tool result from an earlier user
+turn that is over 8,000 bytes is sent as its first 8,000 bytes, cut on a
+code-point boundary, followed by
+`[Earlier output shortened from N bytes. Run the call again if you need the full text.]`.
+A result only slightly over 8,000 bytes, where the note would leave it no
+shorter, is sent whole.
+Results from the turn in progress are always sent in full. Shortening applies
+only to the request: the session file, resume, branches, `/history` and
+compaction summaries keep the full result. The shortened text depends only on
+the result, so it is the same in every later request. The resent prefix
+therefore changes once per result, at the first request of the next user turn,
+which costs one prompt-cache miss for the rest of the request at that point.
+Extension `beforeModel` hooks see the shortened results. The status bar's
+context meter and `/context` still count earlier results at full size, so they
+can read higher than what is sent.
 
 ## Fetch web pages
 

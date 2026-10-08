@@ -6,6 +6,7 @@ import {
   filesystemError,
   isAbortError,
 } from "./fs.ts";
+import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
 import { resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
@@ -15,8 +16,8 @@ import type {
 
 /** Default number of lines returned when the model omits `limit`. */
 export const DEFAULT_READ_LINE_LIMIT = 2000;
-/** Character budget for numbered file text before any truncation notice is appended. */
-export const MAX_READ_CHARS = 50_000;
+/** UTF-8 byte budget for numbered file text before any truncation notice is appended. */
+export const MAX_READ_BYTES = TOOL_OUTPUT_BUDGET_BYTES;
 
 /**
  * Accept a file path with optional positive line offset and limit, rejecting unknown keys during validation.
@@ -72,7 +73,7 @@ export const readTool: ToolDefinition<ReadInput> = {
 /**
  * Read a file as line-numbered, bounded text.
  * Relative paths resolve from the workspace root; numbered text uses the
- * {@link MAX_READ_CHARS} budget before a truncation notice is appended.
+ * {@link MAX_READ_BYTES} budget before a truncation notice is appended.
  * File, binary-content, and offset failures return error results; stream cancellation rejects.
  */
 export async function executeRead(
@@ -156,25 +157,25 @@ export async function executeRead(
   const width = Math.max(6, String(requestedEnd).length);
 
   const formatted: string[] = [];
-  let chars = 0;
+  let bytes = 0;
   let lastIncluded = startLine - 2;
   let slicedLine = scanned.slicedLine;
   for (const [offset, text] of scanned.window.entries()) {
     const lineNumber = startLine + offset;
     const line = `${String(lineNumber).padStart(width)}|${text}`;
-    const extra = (formatted.length === 0 ? 0 : 1) + line.length;
-    if (formatted.length > 0 && chars + extra > MAX_READ_CHARS) {
+    const extra = (formatted.length === 0 ? 0 : 1) + utf8ByteLength(line);
+    if (formatted.length > 0 && bytes + extra > MAX_READ_BYTES) {
       break;
     }
-    if (formatted.length === 0 && extra > MAX_READ_CHARS) {
-      formatted.push(line.slice(0, MAX_READ_CHARS));
+    if (formatted.length === 0 && extra > MAX_READ_BYTES) {
+      formatted.push(utf8Prefix(line, MAX_READ_BYTES));
       lastIncluded = lineNumber - 1;
-      chars = MAX_READ_CHARS;
+      bytes = MAX_READ_BYTES;
       slicedLine = true;
       break;
     }
     formatted.push(line);
-    chars += extra;
+    bytes += extra;
     lastIncluded = lineNumber - 1;
   }
 
@@ -233,7 +234,7 @@ async function scanFileWindow(
   return { lineCount, window, slicedLine, binary: false };
 }
 
-/** Yield newline-split lines, capping any single line at {@link MAX_READ_CHARS}. */
+/** Yield newline-split lines, capping any single line at {@link MAX_READ_BYTES} UTF-8 bytes on a code-point boundary. */
 async function* iterateFileLines(
   path: string,
   signal?: AbortSignal,
@@ -268,8 +269,9 @@ async function* iterateFileLines(
       while (text.length > 0) {
         const newline = text.indexOf("\n");
         if (newline === -1) {
-          if (text.length > MAX_READ_CHARS) {
-            yield { text: text.slice(0, MAX_READ_CHARS), truncated: true };
+          // Carried text stays under the budget in UTF-16 units, which bounds memory; the byte cut happens when the line ends.
+          if (text.length > MAX_READ_BYTES) {
+            yield { text: utf8Prefix(text, MAX_READ_BYTES), truncated: true };
             skipRestOfLine = true;
             text = "";
           } else {
@@ -281,8 +283,8 @@ async function* iterateFileLines(
 
         const raw = text.slice(0, newline);
         text = text.slice(newline + 1);
-        if (raw.length > MAX_READ_CHARS) {
-          yield { text: raw.slice(0, MAX_READ_CHARS), truncated: true };
+        if (utf8ByteLength(raw) > MAX_READ_BYTES) {
+          yield { text: utf8Prefix(raw, MAX_READ_BYTES), truncated: true };
         } else {
           yield { text: raw, truncated: false };
         }
@@ -294,9 +296,10 @@ async function* iterateFileLines(
     }
     const tail = carry + decoder.decode();
     if (tail.length > 0) {
+      const truncated = utf8ByteLength(tail) > MAX_READ_BYTES;
       yield {
-        text: tail.slice(0, MAX_READ_CHARS),
-        truncated: tail.length > MAX_READ_CHARS,
+        text: truncated ? utf8Prefix(tail, MAX_READ_BYTES) : tail,
+        truncated,
       };
     }
   } finally {

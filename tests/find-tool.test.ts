@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MAX_FIND_CHARS, findTool } from "../src/tools/find.ts";
+import { MAX_FIND_BYTES, findTool } from "../src/tools/find.ts";
+import { utf8ByteLength } from "../src/tools/output-budget.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -127,7 +128,7 @@ test("find bounds oversized output and says how to narrow", async () => {
       contextFor(dir),
     );
     expect(result.isError).toBeUndefined();
-    expect(result.content.length).toBeLessThanOrEqual(MAX_FIND_CHARS + 160);
+    expect(result.content.length).toBeLessThanOrEqual(MAX_FIND_BYTES + 160);
     expect(result.content).toContain("truncated");
     expect(result.content).toContain("more specific pattern or path");
     expect(result.details).toMatchObject({ truncated: true });
@@ -145,5 +146,22 @@ test("find aborts an in-flight search", async () => {
         { ...contextFor(dir), signal: controller.signal },
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+test("find bounds non-ASCII paths by UTF-8 bytes and says how to narrow", async () => {
+  await withTempDir(async (dir) => {
+    // 300 names of about 85 UTF-16 units (under the old cap in total) but about 245 UTF-8 bytes each.
+    const name = `${"ไฟล์".repeat(20)}.ts`;
+    for (let index = 0; index < 300; index++) {
+      await writeFile(join(dir, `${index}-${name}`), "export {}\n");
+    }
+    const result = await findTool.execute({ pattern: "**/*.ts" }, contextFor(dir));
+    const [body, notice] = result.content.split("\n... truncated: ");
+    expect(utf8ByteLength(body!)).toBeLessThanOrEqual(MAX_FIND_BYTES);
+    expect(body!.length).toBeLessThan(MAX_FIND_BYTES / 2);
+    expect(notice).toBe("too many files. Narrow with a more specific pattern or path.");
+    expect(result.details).toMatchObject({ truncated: true });
+    expect((result.details as { fileCount: number }).fileCount).toBeLessThan(300);
   });
 });

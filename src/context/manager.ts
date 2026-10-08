@@ -20,6 +20,7 @@ import {
 } from "./compaction.ts";
 import { formatLocalDate, LOCAL_DATE_SECTION_NAME, systemTimeZone } from "./date-section.ts";
 import { assembleSystemPrompt } from "./prompt.ts";
+import { shortenEarlierTurnToolResults } from "./replay.ts";
 import {
   estimatePreparedTokens,
   estimateSessionTokens,
@@ -54,6 +55,7 @@ export interface ContextSection {
 export interface PreparedContext {
   systemPrompt: string;
   context: ContextSection[];
+  /** Effective conversation for this request, with tool results from earlier user turns shortened for replay. */
   items: readonly ConversationItem[];
   /** Compaction record created by this prepare via pressure, if any. */
   compaction?: CompactionRecord;
@@ -195,7 +197,8 @@ export function createContextManager(
       }
 
       let summary = getEffectiveSummary(session.items);
-      let items = getEffectiveConversation(session.items);
+      // Request-only: the estimate, overflow recovery, hooks and adapters all see these shortened items; the session keeps full results.
+      let items = shortenEarlierTurnToolResults(getEffectiveConversation(session.items));
       let compaction: CompactionRecord | undefined;
       let compactionOutcome: CompactionOutcome | undefined;
 
@@ -217,7 +220,7 @@ export function createContextManager(
           if (record) {
             compaction = record;
             summary = record.summary;
-            items = getEffectiveConversation(session.items);
+            items = shortenEarlierTurnToolResults(getEffectiveConversation(session.items));
           }
         }
       }

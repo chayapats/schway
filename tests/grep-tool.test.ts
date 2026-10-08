@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { RIPGREP_MISSING_GUIDANCE, grepTool } from "../src/tools/grep.ts";
+import { MAX_GREP_BYTES, RIPGREP_MISSING_GUIDANCE, grepTool } from "../src/tools/grep.ts";
+import { utf8ByteLength } from "../src/tools/output-budget.ts";
 import { readTool } from "../src/tools/read.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
@@ -212,5 +213,35 @@ test("grep reports actionable setup guidance when rg is missing", async () => {
     expect(result.isError).toBe(true);
     expect(result.content).toBe(RIPGREP_MISSING_GUIDANCE);
     expect(result.content).toContain("brew install ripgrep");
+  });
+});
+
+test("grep bounds non-ASCII matches by UTF-8 bytes and says how to narrow", async () => {
+  await withTempDir(async (dir) => {
+    // 200 matches of about 110 UTF-16 units each fit the old 50,000-unit cap, but are about 66,000 UTF-8 bytes.
+    const lines = Array.from({ length: 200 }, (_, index) => `ค้นหา ${"ไ".repeat(100)} ${index}`);
+    await writeFile(join(dir, "thai.txt"), `${lines.join("\n")}\n`);
+    const result = await grepTool.execute({ pattern: "ค้นหา", maxResults: 200 }, contextFor(dir));
+    const [body, notice] = result.content.split("\n... truncated: ");
+    expect(utf8ByteLength(body!)).toBeLessThanOrEqual(MAX_GREP_BYTES);
+    expect(notice).toBe("stopped early. Narrow with path, glob, maxResults, or a more specific pattern.");
+    const details = result.details as { matchCount: number; truncated: boolean };
+    expect(details.truncated).toBe(true);
+    expect(details.matchCount).toBeLessThan(200);
+    expect(body!.split("\n")).toHaveLength(details.matchCount);
+  });
+});
+
+test("grep cuts an oversized first non-ASCII match on a code-point boundary", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "wide.txt"), `match ${"🙂".repeat(15_000)}\n`);
+    const result = await grepTool.execute({ pattern: "match" }, contextFor(dir));
+    const [body, notice] = result.content.split("\n... truncated: ");
+    expect(body!.startsWith("wide.txt:1:match 🙂")).toBe(true);
+    expect(utf8ByteLength(body!)).toBeLessThanOrEqual(MAX_GREP_BYTES);
+    expect(utf8ByteLength(body!)).toBeGreaterThan(MAX_GREP_BYTES - 4);
+    expect(body!.isWellFormed()).toBe(true);
+    expect(notice).toContain("Narrow with path");
+    expect(result.details).toMatchObject({ matchCount: 1, truncated: true });
   });
 });
