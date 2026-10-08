@@ -4,6 +4,7 @@ import { parseModelArgs } from "./commands.ts";
 import type { ModelAccess, ModelPickerAccess } from "./model-access.ts";
 import { createHash } from "node:crypto";
 import { fuzzyRank } from "./fuzzy.ts";
+import { displayText } from "./presentation.ts";
 
 /** Order real auth-route groups independently of connection state and the active model. */
 export const MODEL_PICKER_ROUTE_GROUPS = [
@@ -73,7 +74,39 @@ export interface ModelPickerSnapshot {
   loading?: boolean;
   accessLoading?: boolean;
   error?: string;
+  /** Redacted, bounded discovery diagnostic behind F2 while `error` shows; never part of the primary row. */
+  errorDetails?: string;
   catalogState?: "loading" | "ready" | "empty" | "offline" | "failed";
+}
+
+/** True while F2 shows a discovery error's diagnostic in place of the model rows, so list keys must not act. */
+export function modelPickerDiagnosticOpen(picker: Pick<ModelPickerSnapshot, "error" | "errorDetails" | "details">): boolean {
+  return !!picker.error && !!picker.details && !!picker.errorDetails;
+}
+
+/**
+ * Word-wrapped rows of the open error diagnostic, at most `maxRows` with `…` marking a cut, or undefined when F2 has
+ * not opened one; terminal control sequences are removed so provider text cannot style the terminal.
+ */
+export function modelPickerErrorRows(picker: Pick<ModelPickerSnapshot, "error" | "errorDetails" | "details">, columns: number, maxRows: number): string[] | undefined {
+  if (!modelPickerDiagnosticOpen(picker)) return undefined;
+  const width = Math.max(1, columns), rows: string[] = [];
+  const clip = (text: string, cells = width) => { let out = ""; for (const char of text) { if (Bun.stringWidth(out + char) > cells) break; out += char; } return out; };
+  for (const paragraph of displayText(picker.errorDetails!).split("\n")) {
+    let line = "";
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word;
+      if (Bun.stringWidth(next) <= width) { line = next; continue; }
+      if (line) rows.push(line);
+      line = word;
+      while (Bun.stringWidth(line) > width) { const head = clip(line) || [...line][0]!; rows.push(head); line = line.slice(head.length); }
+    }
+    rows.push(line);
+  }
+  if (rows.length <= maxRows) return rows;
+  const kept = rows.slice(0, Math.max(1, maxRows));
+  kept[kept.length - 1] = `${clip(kept.at(-1)!, width - 1)}…`;
+  return kept;
 }
 
 /** Name Enter's action for the selected model, navigation row or connection target. */

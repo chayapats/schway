@@ -98,6 +98,16 @@
 
 ### Changed
 
+- Model picker discovery failures say what failed and keep the provider's
+  message behind F2. Offline discovery reads `Models offline` (or `Connections
+  offline`) instead of the same `Models unavailable` used for other failures, a
+  single failed route list is named (`xAI models unavailable`) and several show a
+  count. While the error shows, F2 opens the redacted diagnostic and Esc returns
+  to the list; otherwise F2 still shows the selected model's details. The
+  unreachable `tool` turn recovery category is removed. The screen catalog adds
+  every turn and startup recovery category, the picker's loading, offline,
+  failed and partial states, and automatic compaction during a running turn
+  (#306).
 - Core tool output bounds count UTF-8 bytes instead of UTF-16 characters. The
   50,000 cap for `bash` stdout and stderr, `read`, `grep`, `find`, `ls` and tool
   error results is now 50,000 bytes, so ASCII output keeps the same bound and

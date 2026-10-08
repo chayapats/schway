@@ -824,7 +824,17 @@ targets. Cancelling connection restores the target and query; Esc from custom
 endpoint key entry first returns to the typed URL. A successful connection returns
 to matching models without replacing an already selected model.
 
-F2 reveals the exact ID and context/output budgets. Ctrl+R retries failed
+F2 reveals the exact ID and context/output budgets. While discovery runs, the
+picker reads `Checking models · Esc back`. When discovery fails, the bottom row
+names the state and keeps the provider's message out of view: `Models offline`
+or `Connections offline` for a network failure, `Models unavailable` or
+`Connections unavailable` otherwise, each with `Ctrl+R retry · F2 details`. When
+only some route lists fail, it names the route, such as `xAI models unavailable`,
+or a count such as `2 model lists unavailable`; models from the routes that
+loaded stay selectable. While an error shows, F2 opens its redacted diagnostic
+(each failed route with its message) in place of the list; while it shows, only
+Ctrl+R retry, F2 and Esc act, so arrows, Enter, Ctrl+P and typing cannot move,
+use, pin or search the hidden list, and F2 or Esc returns to the list; without an error, F2 shows the selected model's details. Ctrl+R retries failed
 catalog or access discovery. Reopening can display cached lists while access is
 checked, and search and pinning remain available during refresh. A disappearing
 highlight cannot silently select another billing route. Pins and recents store

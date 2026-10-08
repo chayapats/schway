@@ -2829,7 +2829,7 @@ test("failed route list offers retry while capacity stays behind details", async
     credentials: { store: fakeCredentialStore(), env: { OPENAI_API_KEY: "fixture-key" }, reload: async () => ({ error: "unused" }), listRouteModels: async () => { throw Error("offline"); } } });
   ui.controller.openModelPicker(); await waitForUiState(ui, () => !ui.controller.snapshot().modelPicker?.loading, "failed list");
   ui.controller.searchModels("gpt-5.4"); await settle(ui);
-  const frame = ui.captureCharFrame(); expect(frame.match(/Some models unavailable/g)).toHaveLength(1);
+  const frame = ui.captureCharFrame(); expect(frame.match(/OpenAI API models unavailable/g)).toHaveLength(1);
   expect(frame).not.toContain("256,000 context");
   expect(frame).toContain("Ctrl+R retry");
   expect(ui.controller.snapshot().modelPicker!.entries.filter(entry => entry.kind === "model")).toHaveLength(1);

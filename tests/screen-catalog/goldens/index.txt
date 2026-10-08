@@ -31,6 +31,10 @@ grok-plan-error
 model-picker
 details-model
 model-picker-unconnected
+model-picker-loading
+model-picker-offline
+model-picker-failed
+model-picker-partial
 reasoning-chip-explicit
 reasoning-chip-provider-default
 reasoning-chip-advertised
@@ -70,6 +74,16 @@ details-unavailable
 retry-countdown
 retry-rate-limit
 retry-network
+recovery-auth
+recovery-credential-store
+recovery-model
+recovery-offline
+recovery-rate-limit
+recovery-session-write
+startup-auth
+startup-credential-store
+startup-model
+startup-provider
 review-panel
 details-review
 review-multi-turn
@@ -113,6 +127,7 @@ compaction-completed
 compaction-cancelled
 compaction-failed
 compaction-noop
+compaction-in-turn
 no-color
 narrow-layout
 table-and-code

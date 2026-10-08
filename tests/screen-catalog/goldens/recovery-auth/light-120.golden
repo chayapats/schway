@@ -1,0 +1,146 @@
+schway-screen 1
+screen recovery-auth
+title Access rejected
+description A rejected credential offers sign-in, not continuation, and keeps the draft.
+variant light-120
+size 120x30
+cursor 7 27 visible
+== text
+ ⚡ schway  /project
+
+  ▌ You
+  ▌ Summarize the changes
+
+  ▌ ! Error
+  ▌ Access rejected · Connect again to continue
+  ▌ Alt+L connect · F2 details · Esc keep editing
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ✗ Failed · 0.0s · Alt+R review · F2 details
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ▌ › Ask Schway…
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ◆ Auto  ! Attention   scripted/scripted-model   Provider default                                                ctx ~6
+  Alt+L connect · F2 details · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+== styles
+00 0-1 #ffffff #ecedea -
+00 1-3 #b27b00 #ecedea b
+00 3-4 #1d232c #ecedea -
+00 4-10 #1d232c #ecedea b
+00 10-20 #545e6c #ecedea -
+00 20-120 #ffffff #ecedea -
+01 0-120 #ffffff #f7f7f4 -
+02 0-2 #ffffff #f7f7f4 -
+02 2-3 #0a5894 #ecedea -
+02 3-4 #ffffff #ecedea -
+02 4-7 #0a5894 #ecedea b
+02 7-117 #ffffff #ecedea -
+02 117-120 #ffffff #f7f7f4 -
+03 0-2 #ffffff #f7f7f4 -
+03 2-3 #0a5894 #ecedea -
+03 3-4 #ffffff #ecedea -
+03 4-25 #1d232c #ecedea -
+03 25-117 #ffffff #ecedea -
+03 117-120 #ffffff #f7f7f4 -
+04 0-120 #ffffff #f7f7f4 -
+05 0-2 #ffffff #f7f7f4 -
+05 2-3 #a61f16 #edddd9 -
+05 3-4 #ffffff #edddd9 -
+05 4-11 #a61f16 #edddd9 b
+05 11-117 #ffffff #edddd9 -
+05 117-120 #ffffff #f7f7f4 -
+06 0-2 #ffffff #f7f7f4 -
+06 2-3 #a61f16 #edddd9 -
+06 3-4 #ffffff #edddd9 -
+06 4-47 #a61f16 #edddd9 -
+06 47-117 #ffffff #edddd9 -
+06 117-120 #ffffff #f7f7f4 -
+07 0-2 #ffffff #f7f7f4 -
+07 2-3 #a61f16 #edddd9 -
+07 3-4 #ffffff #edddd9 -
+07 4-9 #1d232c #c9cbd0 b
+07 9-20 #a61f16 #edddd9 -
+07 20-22 #1d232c #c9cbd0 b
+07 22-33 #a61f16 #edddd9 -
+07 33-36 #1d232c #c9cbd0 b
+07 36-49 #a61f16 #edddd9 -
+07 49-117 #ffffff #edddd9 -
+07 117-120 #ffffff #f7f7f4 -
+08 0-120 #ffffff #f7f7f4 -
+09 0-120 #ffffff #f7f7f4 -
+10 0-120 #ffffff #f7f7f4 -
+11 0-120 #ffffff #f7f7f4 -
+12 0-120 #ffffff #f7f7f4 -
+13 0-120 #ffffff #f7f7f4 -
+14 0-120 #ffffff #f7f7f4 -
+15 0-120 #ffffff #f7f7f4 -
+16 0-120 #ffffff #f7f7f4 -
+17 0-120 #ffffff #f7f7f4 -
+18 0-120 #ffffff #f7f7f4 -
+19 0-120 #ffffff #f7f7f4 -
+20 0-120 #ffffff #f7f7f4 -
+21 0-120 #ffffff #f7f7f4 -
+22 0-120 #ffffff #f7f7f4 -
+23 0-120 #ffffff #f7f7f4 -
+24 0-2 #ffffff #f7f7f4 -
+24 2-3 #a61f16 #f7f7f4 b
+24 3-4 #545e6c #f7f7f4 -
+24 4-10 #a61f16 #f7f7f4 b
+24 10-20 #545e6c #f7f7f4 -
+24 20-25 #1d232c #caced3 b
+24 25-35 #545e6c #f7f7f4 -
+24 35-37 #1d232c #caced3 b
+24 37-45 #545e6c #f7f7f4 -
+24 45-120 #ffffff #f7f7f4 -
+25 0-2 #ffffff #f7f7f4 -
+25 2-118 #ecedea #f7f7f4 -
+25 118-120 #ffffff #f7f7f4 -
+26 0-2 #ffffff #f7f7f4 -
+26 2-3 #a61f16 #ecedea -
+26 3-6 #0a5894 #ecedea -
+26 6-17 #545e6c #ecedea -
+26 17-118 #ffffff #ecedea -
+26 118-120 #ffffff #f7f7f4 -
+27 0-2 #ffffff #f7f7f4 -
+27 2-118 #ecedea #f7f7f4 -
+27 118-120 #ffffff #f7f7f4 -
+28 0-1 #545e6c #ecedea -
+28 1-7 #1d232c #ecedea b
+28 7-8 #545e6c #ecedea -
+28 8-21 #ffffff #a61f16 b
+28 21-22 #545e6c #ecedea -
+28 22-47 #1d232c #e1e3df -
+28 47-48 #545e6c #ecedea -
+28 48-66 #6a3fb0 #dcd8e3 -
+28 66-119 #545e6c #ecedea -
+28 119-120 #ffffff #f7f7f4 -
+29 0-2 #ffffff #f7f7f4 -
+29 2-7 #1d232c #caced3 b
+29 7-18 #545e6c #f7f7f4 -
+29 18-20 #1d232c #caced3 b
+29 20-31 #545e6c #f7f7f4 -
+29 31-40 #1d232c #caced3 b
+29 40-55 #545e6c #f7f7f4 -
+29 55-61 #1d232c #caced3 b
+29 61-69 #545e6c #f7f7f4 -
+29 69-74 #1d232c #caced3 b
+29 74-85 #545e6c #f7f7f4 -
+29 85-91 #1d232c #caced3 b
+29 91-100 #545e6c #f7f7f4 -
+29 100-101 #1d232c #caced3 b
+29 101-110 #545e6c #f7f7f4 -
+29 110-120 #ffffff #f7f7f4 -

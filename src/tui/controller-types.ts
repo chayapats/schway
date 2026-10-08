@@ -50,7 +50,7 @@ export type TuiShellOutcome = { kind: "exit"; code: number } | { kind: "stopped"
 export interface TuiRecovery {
   operationId: number;
   entryId: string;
-  category: "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" | "tool" | "session-write";
+  category: "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" | "session-write";
   accepted: boolean;
   actions: readonly ("connect" | "retry-credentials" | "choose-model" | "continue" | "details" | "keep-editing")[];
 }

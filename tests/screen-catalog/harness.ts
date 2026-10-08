@@ -36,6 +36,7 @@ import type { BoxRenderable, TextRenderable } from "@opentui/core";
 import { approvalChoices } from "../../src/tui/approval-layout.ts";
 import { credentialEntryPanel } from "../../src/tui/credential-entry.ts";
 import type { FrameState } from "../helpers/screen-invariants.ts";
+import { credentialStoreError } from "../../src/auth/store.ts";
 
 /** Fixed animation time keeps reduced-motion fixtures independent of wall time. */
 export const CATALOG_VIEW_NOW_MS = 1_000_000;
@@ -192,7 +193,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   }
   if (screen.id.startsWith("history-timing")) await historyTimingFixture(screen.id, historySession!, home);
   if (screen.id.startsWith("history-reasoning")) await historyReasoningFixture(screen.id, historySession!, home);
-  const session = durableSession ?? resumed ?? historySession ?? createSession();
+  const session = durableSession ?? resumed ?? historySession ?? createSession([], [], screen.id === "recovery-session-write" ? deniedSessionWrites() : {});
   const draftStore = durableSession ? openDraftStore({ home, workspaceRoot: root, sessionId: durableSession.header.id }) : undefined;
   if (draftStore) draftStore.save(screen.id === "draft-restored" ? "ร่างภาษาไทย\nยังไม่ส่ง 🧪" : "Previously saved", 1);
   if (screen.id === "recent-work-resume") {
@@ -214,6 +215,11 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   if (screen.id === "compaction-failed") responses = [{ error: "summary unavailable" }];
   if (screen.id === "narrow-layout") responses = [{ text: "| Option | Speed | Use |\n| --- | --- | --- |\n| Read | Fast | Inspect |\n| Edit | Fast | Change |\n| Bash | Varies | Verify |\n\n```ts\nconst lo = 0;\nconst hi = 10;\nconst n = 12;\nMath.min(hi, Math.max(lo, n));\n```" }];
   if (screen.id === "table-and-code") responses = [{ text: MARKDOWN_ANSWER }];
+  // Turn recovery screens fail through the runtime path users hit; offline and rate-limit failures exhaust their retries first.
+  const recovery = RECOVERY_FIXTURES[screen.id];
+  if (recovery) responses = Array.from({ length: recovery.attempts ?? 1 }, () => recovery.turn);
+  // Pressure compaction summarizes first, then the turn's own request stays open so the interim result shows while it runs.
+  if (screen.id === "compaction-in-turn") responses = [{ text: "Session loading reads, validates and restores records." }, { chunks: ["Continuing with the loader validation step."], waitForAbort: true }];
   let tools = createToolRegistry();
   if (screen.id === "stopped-tool") {
     tools = createToolRegistry([writeTool, bashTool]);
@@ -284,7 +290,7 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const timed = (model: ReturnType<typeof createScriptedModel>): ReturnType<typeof createScriptedModel> => ({ provider: model.provider, id: model.id,
     async *stream(request) { for await (const event of model.stream(request)) { if (event.type === "message_complete") activityTime += 300; yield event; } } });
   const fresh = ["first-run", "disconnected-search", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "endpoint-url-empty", "endpoint-url-error", "endpoint-url-prefilled", "endpoint-key-entry", "subscription-sign-in", ...SIGN_IN_FIXTURE_SCREENS].includes(screen.id);
-  const picker = screen.id === "model-picker" || screen.id === "details-model";
+  const picker = screen.id === "model-picker" || screen.id === "details-model" || PICKER_FAILURE_SCREENS.includes(screen.id);
   const unconnectedPicker = screen.id === "model-picker-unconnected";
   const store = fakeCredentialStore();
   const options: TuiControllerOptions = {
@@ -324,6 +330,18 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       options.credentials!.listRouteModels = async () => [{ id: "fake-coder", contextWindow: 32768 }];
     }
   }
+  // Picker discovery stays gated, or one list rejects: the account catalog offline or failing, or the endpoint route alone.
+  if (screen.id === "model-picker-loading") options.credentials!.listSubscriptionCatalog = async signal => { await stopped(signal); return []; };
+  if (screen.id === "model-picker-offline") options.credentials!.listSubscriptionCatalog = async () => { throw new Error("fetch failed: network offline (getaddrinfo ENOTFOUND chatgpt.com)"); };
+  if (screen.id === "model-picker-failed") options.credentials!.listSubscriptionCatalog = async () => { throw new Error("Account model catalog returned HTTP 500 Internal Server Error"); };
+  if (screen.id === "model-picker-partial") options.credentials!.listRouteModels = async () => { throw new Error("Endpoint returned HTTP 502 Bad Gateway for /v1/models"); };
+  // Startup recovery screens reopen a saved conversation without an adapter, as the app does after a failed model load;
+  // the saved turn keeps the conversation visible, so the recovery row shows instead of the empty-conversation card.
+  if (STARTUP_FIXTURES[screen.id]) {
+    session.append({ type: "user", id: "saved-user", content: [{ type: "text", text: "Explain the config loader" }] }, { type: "assistant", id: "saved-answer", content: [{ type: "text", text: "It merges defaults, user and project settings." }] });
+    options.model = undefined; options.startupError = STARTUP_FIXTURES[screen.id];
+  }
+  if (screen.id === "compaction-in-turn") options.contextManager = createContextManager(workspace, { home, keepTurns: 1, contextWindow: 1 });
   if (palette) {
     await Bun.write(join(root, ".agents/skills/grill-me/SKILL.md"), "---\nname: grill-me\ndescription: Stress-test a plan\n---\nTask");
     await Bun.write(join(root, "node_modules/greeting-pkg/package.json"), JSON.stringify({ name: "greeting-pkg", schway: { extensions: ["main.ts"] } }));
@@ -497,6 +515,32 @@ async function historyTimingFixture(id: string, session: Awaited<ReturnType<type
     files: { total: 0, truncated: false, items: [] }, git: { status: "captured" }, telemetry,
     // The weather turn ran with no thinking set, so the provider's default applied.
     reasoning: { provider: "xai", model: "grok-4.7", route: "grok", level: null, source: "provider-default" } });
+}
+
+/** Model picker screens that keep the connected picker fixture but gate or reject one discovery list (#306). */
+const PICKER_FAILURE_SCREENS = ["model-picker-loading", "model-picker-offline", "model-picker-failed", "model-picker-partial"];
+
+/** Scripted runtime failures behind each turn recovery screen, classified by the agent loop as users meet them (#306). */
+const RECOVERY_FIXTURES: Record<string, { turn: ScriptedTurn; attempts?: number }> = {
+  "recovery-auth": { turn: { error: "Incorrect API key provided", status: 401 } },
+  "recovery-credential-store": { turn: { error: credentialStoreError("read") } },
+  "recovery-model": { turn: { error: "The model scripted-model does not exist", status: 404, code: "model_not_found" } },
+  "recovery-offline": { turn: { error: "fetch failed", code: "ENETUNREACH" }, attempts: 3 },
+  "recovery-rate-limit": { turn: { error: "Rate limit exceeded", status: 429, headers: { "Retry-After": "2" } }, attempts: 3 },
+};
+
+/** Startup diagnostics behind each startup recovery screen; the fake credential store keeps the OS store untouched (#306). */
+const STARTUP_FIXTURES: Record<string, string> = {
+  "startup-auth": "Missing OpenAI API key. Set OPENAI_API_KEY or run /login.",
+  "startup-credential-store": credentialStoreError("read"),
+  "startup-model": "Selected model is not available in this account.",
+  "startup-provider": "Provider setup failed: connect ECONNREFUSED 127.0.0.1:8787",
+};
+
+/** Session storage that saves the prompt, then refuses the next write, as a full or read-only disk does. */
+function deniedSessionWrites() {
+  let writes = 0;
+  return { writeOperation() { if (++writes > 1) throw new Error("EACCES: permission denied, write session file"); } };
 }
 
 /** Fresh-install screens whose scripted ChatGPT runner shows a device code, a callback timeout or a browser launcher failure (#297). */

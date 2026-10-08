@@ -467,7 +467,7 @@ test("a credential-read timeout is labelled as access discovery, not catalog fai
       const started = Date.now();
       while (controller.snapshot().modelPicker?.loading && Date.now() - started < 7_000) await Bun.sleep(20);
       expect(controller.snapshot().modelPicker?.loading).toBe(false);
-      expect(controller.snapshot().modelPicker?.error).toBe("Connections unavailable · Ctrl+R retry · Esc back");
+      expect(controller.snapshot().modelPicker?.error).toBe("Connections unavailable · Ctrl+R retry · F2 details");
       expect(controller.snapshot().modelPicker?.error).not.toContain("ChatGPT catalog");
     } finally { controller.dispose(); }
   });
