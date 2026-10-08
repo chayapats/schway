@@ -135,6 +135,8 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
   if (encoding === "legacy" && bytes === "\x1b") await Bun.sleep(30);
   const start = performance.now();
   let notice = "", pending: string[] = [];
+  // A redraw or snapshot change acts only if it survives settling: re-reading the same diff flickers a loading state and returns.
+  const lasting = async () => { const settled = await quiet(reached); return settled.screen !== before.screen || settled.snapshot !== before.snapshot || settled.editor !== before.editor || settled.cursor !== before.cursor; };
   while (performance.now() - start < EFFECT_WINDOW_MS) {
     await ui.settle();
     const after = observe(reached);
@@ -142,13 +144,14 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
       if (after.spies.reloads > before.spies.reloads) return { verdict: "live", detail: "requested a reload" };
       continue;
     }
+    const spied = [after.spies.clipboard > before.spies.clipboard && "clipboard write", after.spies.urls > before.spies.urls && "openUrl call", after.spies.reloads > before.spies.reloads && "reload request"].filter(Boolean) as string[];
+    if (expectation !== "send" && spied.length) return { verdict: "live", detail: spied.join(", ") };
     const strong = expectation === "send"
       // Sent means a turn started, or a local command accepted the draft and changed the conversation.
       ? [after.status === "running" && before.status !== "running" && "started a turn", before.editor && !after.editor && after.snapshot !== before.snapshot && "accepted the draft"]
-      : [after.snapshot !== before.snapshot && "controller snapshot", after.spies.clipboard > before.spies.clipboard && "clipboard write",
-        after.spies.urls > before.spies.urls && "openUrl call", after.spies.reloads > before.spies.reloads && "reload request"];
+      : [after.snapshot !== before.snapshot && "controller snapshot"];
     const evidence = strong.filter(Boolean) as string[];
-    if (evidence.length) return { verdict: "live", detail: evidence.join(", ") };
+    if (evidence.length) { if (expectation === "send" || await lasting()) return { verdict: "live", detail: evidence.join(", ") }; break; }
     pending = (expectation === "send"
       ? [after.spies.submits.length > before.spies.submits.length && `dispatched ${JSON.stringify(after.spies.submits.at(-1))}`]
       : [after.editor !== before.editor && "editor text", after.cursor !== before.cursor && "editor cursor", after.spies.submits.length > before.spies.submits.length && "submit call"]
@@ -156,8 +159,11 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
     if (after.screen !== before.screen) {
       // A new failure notice with no state change is the key being heard but unable to act, whatever else it redraws.
       notice = newNotice(before, after) ?? "";
-      const quiet = after.editor === before.editor && after.cursor === before.cursor;
-      if (!(notice && quiet) && (expectation !== "send" || pending.length)) return { verdict: "live", detail: [...pending, "frame"].join(", ") };
+      const draftKept = after.editor === before.editor && after.cursor === before.cursor;
+      if (!(notice && draftKept) && (expectation !== "send" || pending.length)) {
+        if (expectation === "send" || pending.includes("submit call") || await lasting()) return { verdict: "live", detail: [...pending, "frame"].join(", ") };
+        break;
+      }
     }
   }
   if (notice) return { verdict: "notice", detail: `only showed the failure notice "${notice}"` };
