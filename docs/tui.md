@@ -254,6 +254,8 @@ The current diff names each comparison it shows: `Unstaged · index → worktree
 `Untracked · current file`. Removals use old line numbers; additions and context use
 new line numbers. Colors and ASCII `-`/`+` signs distinguish changes. Below 80
 terminal columns, the file list stacks above the diff and both labels stay visible.
+A diff line wider than its column continues under a blank gutter at its text column,
+in the same color, in review and in the undo panel.
 Binary, deleted, renamed and truncated previews have short explanations instead of
 Git metadata. Detected paths begin with `Found by Git snapshot · not undoable`.
 

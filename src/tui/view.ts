@@ -10,6 +10,7 @@ import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscript
 import { modelPickerAction, modelPickerDiagnosticOpen, modelPickerErrorRows, modelPickerName } from "./model-picker.ts";
 import { fitHintSegments } from "./hint-text.ts";
 import { LAYOUT_BREAKPOINTS, bodyPadding as layoutBodyPadding, bodyWidth } from "./layout.ts";
+import { diffGutter, wrapDiffLine } from "./diff-wrap.ts";
 import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
@@ -373,6 +374,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let gitHead: { root: string; at: number; value?: string } | undefined;
   let pickerWasVisible = false;
   let bodyPadding = 2;
+  // The whole hint text the hint row was last fitted or wrapped from, before any segment dropped (#307 sweep).
+  let hintSource = "";
 
   // Like a primary ScrollView, non-scrollable chrome routes wheel input to the
   // conversation. Preserve native handling over a scroller or multiline editor.
@@ -720,6 +723,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
    * A row already written in priority order (the reader, where scrolling is the main action) drops from the end.
    */
   function fittedHints(text: string, columns: number, base = theme.background, ordered = false): StyledText {
+    hintSource = text;
     const segments = text.split(" · ");
     const escape = (segment: string) => segment === "Esc" || segment.startsWith("Esc ");
     const navigation = (segment: string) => /^(?:[↑↓←→]|PgUp|PgDn|PageUp|PageDown|Home|End)/.test(segment);
@@ -737,6 +741,16 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     while (!fits() && dropLast(segment => !escape(segment)));
     const chunks = keyHintChunks(segments.join(" · "), hintColors(base));
     return new StyledText(chunkWidth(chunks) <= columns ? chunks : [fg(theme.muted)(fitLine(text, columns))]);
+  }
+
+  /**
+   * Hint rows for a navigation group and an action group: one row when both fit, otherwise each group wraps only
+   * between ` · ` segments, so a key stays with its action and no row ends or starts with a separator (#307).
+   */
+  function wrappedHintContent(navigation: string, actions: string, columns: number): StyledText {
+    hintSource = [navigation, actions].filter(Boolean).join(" · ");
+    const rows = Bun.stringWidth(hintSource) <= columns ? [hintSource] : [navigation, actions].filter(Boolean).flatMap(group => wrapHintSegments(group, columns));
+    return new StyledText(rows.flatMap((row, index) => [...(index ? [fg(theme.muted)("\n")] : []), ...keyHintChunks(row, hintColors(theme.background))]));
   }
 
   /** The session picker's one hint row as text: its status, then paired actions that fit `columns`. */
@@ -1203,15 +1217,20 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         reviewFiles.scrollTo(Math.max(0, review.selected - Math.max(1, reviewFiles.height) + 1));
         reviewDivider.visible = !stacked && fileRows.length > 0;
         reviewDivider.content = Array.from({ length: renderer.height }, () => " │ ").join("\n");
-        // Explanations without a file list wrap at words; diff rows wrap anywhere to keep line numbers aligned.
+        // Explanations without a file list wrap at words; diff rows arrive pre-wrapped under their gutter, and char wrap only backs that up.
         reviewText.wrapMode = review.showingDetails || (!undo && !review.files.length) ? "word" : "char";
-        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode, width, stacked]);
+        // The diff column keeps a padding cell and the scrollbar column (#250), so pre-wrapped rows never meet either.
+        const diffWidth = Math.max(1, (stacked ? width : width - fileWidth - 3) - 2);
+        const content = JSON.stringify([review.showingDetails, review.rows, review.detail, review.details, mode, width, stacked, diffWidth]);
         if (content !== reviewContent) {
-          // Word-wrapped explanation rows such as "Current changes unavailable · Ctrl+R reload" break at ` · `; the diff column keeps a padding cell and the scrollbar.
-          const explanationWidth = review.showingDetails || (!undo && !review.files.length) ? Math.max(1, (stacked ? width : width - fileWidth - 3) - 2) : 0;
+          // Word-wrapped explanation rows such as "Current changes unavailable · Ctrl+R reload" break at ` · `.
+          const explanationWidth = review.showingDetails || (!undo && !review.files.length) ? diffWidth : 0;
           reviewText.content = review.showingDetails ? safe(review.details) : new StyledText(review.rows.map((row, index) => {
-            const body = row.line === undefined && explanationWidth && row.text.includes(" · ") ? wrapHintSegments(safe(row.text), explanationWidth).join("\n") : safe(row.text);
-            const text = `${row.line === undefined ? "" : `${String(row.line).padStart(3)} ${undo ? "│" : ""}${row.sign}${undo ? "" : " "}`}${body}${index < review.rows.length - 1 ? "\n" : ""}`;
+            // Numbered rows continue under a blank hanging gutter; notes, headers and read-only explanations beside them
+            // wrap between ` · ` segments, then at words, never mid-word (#307).
+            const body = row.line !== undefined ? wrapDiffLine(diffGutter(row.line, row.sign, !!undo), safe(row.text), diffWidth).join("\n")
+              : (explanationWidth ? row.text.includes(" · ") : Bun.stringWidth(safe(row.text)) > diffWidth) ? wrapHintSegments(safe(row.text), diffWidth).join("\n") : safe(row.text);
+            const text = `${body}${index < review.rows.length - 1 ? "\n" : ""}`;
             if (row.comparison) return bold(fg(theme.accent)(text));
             return fg(row.sign === "+" ? theme.success : row.sign === "-" ? theme.error : theme.text)(text);
           }));
@@ -1505,7 +1524,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       } else if (panelMode === "tool-approval" && snapshot.toolApproval) {
         hints.content = fittedHints(approvalHint(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason, !!toolApprovalLayout?.overflow), width);
       } else if (panelMode === "undo") {
-        hints.content = fittedHints(undoHint(snapshot.undoPreview, width), width, theme.background, true);
+        hints.content = fittedHints(undoHint(snapshot.undoPreview, width, footerNamesEsc()), width, theme.background, true);
       } else if (panelMode === "history" && snapshot.history) {
         const history = snapshot.history;
         const files = history.turns[history.selected]?.files.items.length ?? 0;
@@ -1515,8 +1534,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
           : history.view === "detail" ? [files ? "↑↓ files · Enter current diff" : "PgUp/PgDn scroll", "F2 details · Esc back"]
           : history.total ? ["↑↓ select · Enter open", "F2 details · Esc back"] : ["", "Esc back"];
         // Keep each key with its action when the hint needs a second row, as in review.
-        const separator = navigation && Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : navigation ? " · " : "";
-        hints.content = new StyledText([...(navigation ? keyHintChunks(navigation, hintColors(theme.background)) : []), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
+        hints.content = wrappedHintContent(navigation, actions, width);
       } else if (panelMode === "review") {
         const navigation = snapshot.changeReview?.showingDetails || !snapshot.changeReview?.files.length ? "PgUp/PgDn scroll" : "↑↓ files · PgUp/PgDn scroll";
         const reload = (snapshot.changeReview?.scope || snapshot.changeReview?.fromUndo) && !snapshot.changeReview.showingDetails ? "Ctrl+R reload · " : "";
@@ -1524,10 +1542,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const details = !!snapshot.changeReview?.scope || !!snapshot.changeReview?.fromUndo && !!snapshot.outcome;
         const actions = `${reload}${details ? snapshot.changeReview?.showingDetails ? "F2 files · " : "F2 details · " : ""}Esc back`;
         // Keep each key with its action when the review hint needs a second row.
-        const separator = Bun.stringWidth(`${navigation} · ${actions}`) > width ? "\n" : " · ";
-        hints.content = new StyledText([...keyHintChunks(navigation, hintColors(theme.background)), fg(theme.muted)(separator), ...keyHintChunks(actions, hintColors(theme.background))]);
+        hints.content = wrappedHintContent(navigation, actions, width);
       } else if (panelMode === "sessions" && snapshot.sessionPicker) {
         hints.content = sessionHintContent(snapshot.sessionPicker, width);
+        const sessionHint = sessionPickerHint(snapshot.sessionPicker);
+        hintSource = [sessionHint.status ?? "", ...sessionHint.actions.flatMap(action => [action.text, action.short ?? ""])].filter(Boolean).join(" · ");
       } else if (snapshot.modelPicker) {
         // While the diagnostic covers the list, only retry, F2 and Esc act.
         hints.content = fittedHints(modelPickerDiagnosticOpen(snapshot.modelPicker) ? "Ctrl+R retry · F2 back · Esc back" : `↑↓ select · Enter ${modelPickerAction(snapshot.modelPicker.entries[snapshot.modelPicker.selectedIndex])} · Esc back`, width);
@@ -2159,6 +2178,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     panelMode: (): PanelMode | "" => panelMode,
     /** Report the transcript entry that open F2 details show, or undefined while details are closed. */
     detailsEntryId: (): string | undefined => detailsReturn?.entryId,
+    /** Report the whole hint text the hint row was last built from; the row shows whole ` · ` segments of it. */
+    hintText: (): string => hintSource,
     /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */
     freezeDraftForExit(): { task?: ExitDraftCheckpoint; saved: boolean; failed: boolean } {
       const snapshot = controller.snapshot();

@@ -493,6 +493,8 @@ export function variantsFor(screen: Screen): Variant[] {
   if (SIGN_IN_WAIT_SCREENS.includes(screen.id) || ["sign-in-browser-not-opened", "sign-in-timeout"].includes(screen.id)) variants.push(make("dark", 40), make("light", 40), make("dark", 40, 30, true), make("dark", 80, 30, true));
   if (SIGN_IN_WAIT_SCREENS.includes(screen.id)) variants.push(make("dark", 40, 8));
   if (screen.id.startsWith("history-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
+  // Undo panels at 40 columns keep diff continuations under their gutter and the Esc exit the 50-column hint shows (#307).
+  if (["undo-preview", "undo-older-target", "undo-shell-only"].includes(screen.id)) variants.push(make("dark", 40), make("light", 40), make("dark", 40, 30, true));
   if (screen.id === "review-multi-turn" || screen.id.startsWith("resumed-review")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   if (screen.id.startsWith("stopped-") || screen.id === "failed-turn" || screen.id.startsWith("details-")) variants.push(make("dark", 40, 20), make("light", 40, 20), make("dark", 40, 20, true));
   // Turn and startup recovery screens share the failed turn's narrow variants (#306).
