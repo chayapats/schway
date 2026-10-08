@@ -12,6 +12,13 @@ export const XAI_BASE_URL = "https://api.x.ai/v1";
 /** Public model-list endpoint for an xAI API key. */
 export const XAI_MODELS_URL = "https://api.x.ai/v1/models";
 
+/**
+ * Per-route switch for replaying kept hosted items (such as `web_search_call`) on later requests.
+ * xAI documents passing earlier output items back for stateless multi-turn use; a route whose live
+ * check shows it rejects them on `store: false` turns this off, which keeps them stored but unsent.
+ */
+export const XAI_HOSTED_ITEM_REPLAY: Readonly<Record<"api-key" | "grok", boolean>> = { "api-key": true, grok: true };
+
 /** Optional fetch override used by protocol tests. */
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -48,11 +55,14 @@ export function createXaiModel(options: {
   fetch?: FetchLike;
   /** Test-only origin; production uses `XAI_BASE_URL`. */
   baseUrl?: string;
+  /** Test-only override of `XAI_HOSTED_ITEM_REPLAY` for this adapter's route. */
+  replayHostedItems?: boolean;
 }): Model {
   const modelId = requiredModelId(options.model);
   const maxTokens = options.maxTokens ?? lookupModel("xai", modelId).maxOutput;
   const defaultThinking = options.thinking;
   const capability = options.modelCapability;
+  const replayHostedItems = options.replayHostedItems ?? XAI_HOSTED_ITEM_REPLAY[options.authRoute ?? "api-key"];
   const clientFor = (token: string) => new OpenAI({
     apiKey: token,
     baseURL: options.baseUrl ?? XAI_BASE_URL,
@@ -69,7 +79,7 @@ export function createXaiModel(options: {
       const reasoning = resolveXaiReasoning(request.thinking ?? defaultThinking, capability, modelId, options.authRoute);
       const cacheKey = call?.promptCacheKey;
       const body = {
-        ...buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai" }),
+        ...buildResponsesRequest({ model: modelId, maxOutputTokens: maxTokens, reasoning, request, namespace: "xai", hostedTools: request.hostedTools, replayHostedItems }),
         // xAI documents `prompt_cache_key` on POST /v1/responses, which both routes call; the
         // `x-grok-conv-id` header is documented only for Chat Completions and gRPC, so it is not sent.
         ...(isPromptCacheKey(cacheKey) ? { prompt_cache_key: cacheKey } : {}),

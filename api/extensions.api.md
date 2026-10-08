@@ -169,10 +169,13 @@ export type ExtensionEventListener = (event: ExtensionEvent, context: {
 }) => void | Promise<void>;
 
 // @public
-export interface ExtensionModelRequest extends ModelRequest {
+export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools"> {
     // (undocumented)
     readonly signal: AbortSignal;
 }
+
+// @public
+export type HostedTool = "web_search";
 
 // @public
 export type JsonSchema = Record<string, unknown>;
@@ -181,6 +184,7 @@ export type JsonSchema = Record<string, unknown>;
 export interface ModelRequest {
     // (undocumented)
     context: readonly ContextSection[];
+    hostedTools?: readonly HostedTool[];
     // (undocumented)
     items: readonly ConversationItem[];
     // (undocumented)
@@ -205,11 +209,13 @@ export interface ModelTool {
 // @public
 export interface ModelUsage {
     cachedInputTokens?: number | null;
+    hostedSearchCalls?: number;
     // (undocumented)
     inputTokens: number | null;
     // (undocumented)
     outputTokens: number | null;
     reasoningTokens?: number | null;
+    reportedHostedSearchCalls?: number;
 }
 
 // @public

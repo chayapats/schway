@@ -14,7 +14,7 @@ export type {
 /** Harness-measured model-call and tool-call telemetry carried by assistant messages and tool results. */
 export type { AssistantTelemetry, ToolTelemetry } from "../conversation/types.ts";
 /** Native request, tool selection, reasoning, and usage contracts exposed to hooks and observers. */
-export type { ModelRequest, ModelTool, ModelUsage, ThinkingLevel } from "../model/model.ts";
+export type { HostedTool, ModelRequest, ModelTool, ModelUsage, ThinkingLevel } from "../model/model.ts";
 
 /** Native event variants delivered to extension observers. */
 export type { RuntimeEvent } from "../agent/events.ts";
@@ -41,8 +41,8 @@ export type BeforeAgentHook = (input: BeforeAgentInput) => void | { context: rea
 export type ContextHook = (input: { context: readonly ContextSection[]; readonly signal: AbortSignal }) =>
   void | readonly ContextSection[] | Promise<void | readonly ContextSection[]>;
 
-/** Detached provider-independent request with a cancellation signal owned by Schway. */
-export interface ExtensionModelRequest extends ModelRequest { readonly signal: AbortSignal }
+/** Detached provider-independent request with a cancellation signal owned by Schway; Schway adds hosted tools after hooks, so hooks never see or set them. */
+export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools"> { readonly signal: AbortSignal }
 
 /** Replace ephemeral request data, deny the request, or retain the preceding hook's result. */
 export type BeforeModelHook = (request: ExtensionModelRequest) =>

@@ -462,7 +462,10 @@ function assistantTelemetry(value: unknown): AssistantTelemetry | undefined {
     startedAt: value.startedAt, firstDeltaMs: value.firstDeltaMs, attemptMs: value.attemptMs, totalMs: value.totalMs, attempts: value.attempts, retryWaitMs: value.retryWaitMs,
     usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
       ...(usage.cachedInputTokens !== undefined ? { cachedInputTokens: usage.cachedInputTokens } : {}),
-      ...(usage.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}) },
+      ...(usage.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
+      // Hosted-search counts are optional evidence; an invalid count is dropped without discarding the rest.
+      ...(isMs(usage.hostedSearchCalls) ? { hostedSearchCalls: usage.hostedSearchCalls } : {}),
+      ...(isMs(usage.reportedHostedSearchCalls) ? { reportedHostedSearchCalls: usage.reportedHostedSearchCalls } : {}) },
   };
 }
 

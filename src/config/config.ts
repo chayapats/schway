@@ -15,6 +15,7 @@ import {
 } from "../model/catalog.ts";
 import { validateThinking, resolveThinkingPolicy, isOpenRouterEndpoint } from "../model/thinking.ts";
 import { THINKING_LEVELS, type ThinkingLevel } from "../model/model.ts";
+import { WEB_SEARCH_SETTINGS, type WebSearchSetting } from "../model/hosted-tools.ts";
 import { removedProviderMessage } from "./removed-provider.ts";
 import {
   DEFAULT_UNDO_MAX_AGE_DAYS,
@@ -59,6 +60,7 @@ export const CONFIG_SETTING_NAMES = [
   "approval",
   "appearance",
   "ui",
+  "webSearch",
 ] as const;
 
 const ProviderSchema = Type.Union([
@@ -171,6 +173,7 @@ export const ConfigSchema = Type.Object(
     approval: Type.Optional(Type.Object({ mode: Type.Optional(Type.Union(APPROVAL_MODES.map(mode => Type.Literal(mode)))) }, { additionalProperties: false })),
     appearance: Type.Optional(AppearanceSchema),
     ui: Type.Optional(UiConfigSchema),
+    webSearch: Type.Optional(Type.Union(WEB_SEARCH_SETTINGS.map(value => Type.Literal(value)))),
   },
   { additionalProperties: false },
 );
@@ -267,6 +270,8 @@ export interface ResolvedSettings {
   inlineDiffLines: number;
   /** Effective startup decoration preference; defaults to the first launch of each installed version. */
   splash: SplashSetting;
+  /** Hosted web search preference; `auto` sends it only on routes the allowlist confirms. */
+  webSearch: WebSearchSetting;
 }
 
 /** Lowest-precedence settings. Files and CLI override these; nothing writes them. */
@@ -664,6 +669,7 @@ function finishResolvedSettings(input: {
     appearance: input.merged.appearance ?? "auto",
     inlineDiffLines: input.merged.ui?.inlineDiffLines ?? DEFAULT_INLINE_DIFF_LINES,
     splash: input.merged.ui?.splash ?? "first-run",
+    webSearch: input.merged.webSearch ?? "auto",
     openaiAuth: input.merged.openaiAuth ?? "auto",
     xaiAuth: input.merged.xaiAuth ?? "auto",
     ...(input.merged.contextWindow !== undefined ? { explicitContextWindow: input.merged.contextWindow } : {}),

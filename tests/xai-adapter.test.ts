@@ -277,3 +277,53 @@ test("the Grok subscription route sends the same key on the first request and on
   expect(bodies[1]).toEqual(bodies[0]!);
   expect(convIds).toEqual([null, null]);
 });
+
+const READ_TOOL = { name: "read", description: "Read a file.", inputSchema: { type: "object", properties: { path: { type: "string" } } } };
+
+/** Raw request bodies an xAI API-key adapter sends, as the exact JSON text on the wire. */
+async function apiKeyBodies(request: Parameters<ReturnType<typeof createXaiModel>["stream"]>[0]): Promise<string[]> {
+  const bodies: string[] = [];
+  const model = createXaiModel({ apiKey: "xai-test-key", model: "grok-4.7", baseUrl: "https://xai.test/v1", fetch: async (_url, init) => {
+    bodies.push(String(init!.body));
+    return new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+  } });
+  await collect(model.stream(request));
+  return bodies;
+}
+
+test("the API-key route sends the function tools then one web_search entry and nothing else new", async () => {
+  const [plain] = await apiKeyBodies({ ...sampleRequest(), tools: [READ_TOOL] });
+  const [hosted] = await apiKeyBodies({ ...sampleRequest(), tools: [READ_TOOL], hostedTools: ["web_search"] });
+  const before = JSON.parse(plain!) as Record<string, unknown>;
+  const after = JSON.parse(hosted!) as Record<string, unknown>;
+  expect(after.tools).toEqual([...(before.tools as unknown[]), { type: "web_search" }]);
+  expect({ ...after, tools: before.tools } as Record<string, unknown>).toEqual(before);
+  expect(after.include).toEqual(["reasoning.encrypted_content"]);
+  // With no function tools the hosted entry is the whole tools list.
+  const [alone] = await apiKeyBodies({ ...sampleRequest(), hostedTools: ["web_search"] });
+  expect((JSON.parse(alone!) as { tools: unknown[] }).tools).toEqual([{ type: "web_search" }]);
+});
+
+test("a request with no hosted tools, or an empty list, sends a body byte-identical to one without the field", async () => {
+  const [plain] = await apiKeyBodies({ ...sampleRequest(), tools: [READ_TOOL] });
+  const [empty] = await apiKeyBodies({ ...sampleRequest(), tools: [READ_TOOL], hostedTools: [] });
+  expect(empty).toBe(plain!);
+});
+
+test("the Grok subscription route sends the web_search entry on the first request and on the one 401 refresh resend", async () => {
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "old-grok-token", refreshToken: "refresh", obtainedAt: 0 });
+  const bodies: string[] = [];
+  const model = await loadProviderModel({ provider: "xai", model: "grok-4.7", xaiAuth: "grok", grokStore: store }, async (url, init) => {
+    if (String(url) === GROK_TOKEN_URL) return Response.json({ access_token: "renewed-grok-token" });
+    bodies.push(String(init!.body));
+    return bodies.length === 1
+      ? Response.json({}, { status: 401 })
+      : new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+  });
+  const events = await collect(model.stream({ ...sampleRequest(), tools: [READ_TOOL], hostedTools: ["web_search"] }));
+  expect(events.at(-1)?.type).toBe("message_complete");
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1]).toBe(bodies[0]!);
+  expect((JSON.parse(bodies[0]!) as { tools: Array<{ type: string; name?: string }> }).tools.map(tool => tool.name ?? tool.type)).toEqual(["read", "web_search"]);
+});

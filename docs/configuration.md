@@ -517,6 +517,52 @@ Completions and gRPC, not for Responses.
 cache. To measure the effect on a route, an operator can run the opt-in
 [prompt cache probe](live-providers.md#prompt-cache-probe).
 
+## Web search
+
+`webSearch` controls xAI's server-side web search, where xAI runs a search inside
+one model response instead of Schway fetching pages through tools.
+
+```json
+{ "webSearch": "off" }
+```
+
+- `"auto"` (the default) sends hosted search only where Schway's allowlist
+  confirms the route and model. Today that is the xAI API-key route with
+  `grok-4.7`, which xAI documents
+  ([web search](https://docs.x.ai/developers/tools/web-search)).
+- `"off"` never sends it. Any other value fails with
+  `Invalid webSearch · Use auto or off`.
+
+The Grok subscription route, native OpenAI, the ChatGPT subscription and
+OpenAI-compatible endpoints never get hosted search, whatever the setting. An
+extension that registers its own tool named `web_search` keeps it, and hosted
+search stays off for that session.
+
+- **Billing.** xAI may bill hosted searches separately from tokens on some
+  routes. On the API-key route it charges per search call
+  ([pricing](https://docs.x.ai/developers/pricing)). Set `"off"` to avoid that
+  charge.
+- **Approval.** Hosted search reads only, so it runs in every approval mode,
+  like `web_fetch`. xAI derives each search query from the conversation, so
+  workspace content can reach its search engine.
+- **One choice per session model.** Schway decides when it builds the
+  session's model and sends the same choice on every round and turn, which
+  keeps the request prefix cacheable. Changing the model or route decides
+  again. Compaction summaries, model lists, evals and live-smoke runs never
+  send hosted search.
+- **Storage.** Each search xAI returns is kept in the session with the answer
+  and sent back with later requests, as xAI documents for conversations that
+  keep no state on its servers. Search queries are saved like other session
+  content. Each kept search is capped at 8 KiB, and each answer at 32 searches.
+- **What you see.** An answer that searched shows one line such as
+  `Searched the web (2)`. Headless text and `--json` output are unchanged,
+  except that the `model.usage` record carries the search counts
+  ([usage fields](extensions.md#usage-and-timing-fields)).
+
+The decision is recorded in
+[ADR 0007](adr/0007-provider-hosted-lookups.md). An operator can check a route
+with the opt-in [hosted web search check](live-providers.md#hosted-web-search-check).
+
 ## Undo retention
 
 `undo.maxAgeDays` defaults to `30`; `undo.maxSizeMB` defaults to `500` MiB.

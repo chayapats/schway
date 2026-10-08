@@ -3,7 +3,9 @@ import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts";
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
 import type { ContextManager, ContextSection, PreparedContext } from "../context/manager.ts";
-import type { Model, ModelCallOptions, ModelRequest, ModelTool } from "../model/model.ts";
+import type { HostedTool, Model, ModelCallOptions, ModelRequest, ModelTool } from "../model/model.ts";
+import { resolveHostedTools, type WebSearchSetting } from "../model/hosted-tools.ts";
+import { isGrokModel } from "../model/loader.ts";
 import { promptCacheKey } from "../model/prompt-cache-key.ts";
 import type { Session } from "../session/session.ts";
 import { createActivateSkillTool } from "../skills/activate.ts";
@@ -40,6 +42,8 @@ export interface AgentLoopOptions {
   /** Consult the live approval mode after tool hooks; omission preserves automatic execution. */
   approval?: ApprovalPolicy;
   undo?: UndoStore;
+  /** Configured hosted web search preference; absent sends no hosted tools, as evals and smoke runs expect. */
+  webSearch?: WebSearchSetting;
 }
 
 /** Stream context, model and tool events while persisting accepted outcomes and settling calls before cancellation finishes. */
@@ -70,6 +74,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
     ? AbortSignal.any([options.extensions!.signal, ...(options.signal ? [options.signal] : [])])
     : options.signal;
   let turnContext: ContextSection[] = [];
+  let hostedTools: readonly HostedTool[] = [];
   // The operation lease holds the branch fixed, so every round, retry and recovery shares one key.
   // It travels beside the request, never through it, so extension hooks cannot see, drop or change it.
   const call: ModelCallOptions = { promptCacheKey: promptCacheKey(options.session) };
@@ -114,9 +119,9 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
       tools: toModelTools(tools),
       signal,
     };
-    return hooks
-      ? hooks.prepare(request, turnContext, signal!)
-      : request;
+    const intercepted = hooks ? await hooks.prepare(request, turnContext, signal!) : request;
+    // Hosted tools are attached after the hooks, so a beforeModel hook can neither see nor change them.
+    return hostedTools.length > 0 ? { ...intercepted, hostedTools } : intercepted;
   }
 
   /** Force one compaction and retry the overflowed turn once; null when terminated. */
@@ -212,6 +217,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         createActivateSkillTool(options.contextManager),
       ]);
     }
+    hostedTools = hostedToolsFor(options.model, options.webSearch, tools);
     if (hooks && user?.type === "user") {
       turnContext = await hooks.beginTurn(user, signal!);
     }
@@ -301,6 +307,17 @@ function toolCallsOf(message: AssistantMessage): ToolCallContent[] {
   return message.content.filter(
     (block): block is ToolCallContent => block.type === "tool_call",
   );
+}
+
+/** Decide hosted tools from the session's model, its route, config and the registered function tools; fixed for every round. */
+function hostedToolsFor(model: Model, webSearch: WebSearchSetting | undefined, registry: ToolRegistry | undefined): readonly HostedTool[] {
+  return resolveHostedTools({
+    provider: model.provider,
+    route: model.provider === "xai" ? isGrokModel(model) ? "grok" : "api-key" : undefined,
+    model: model.id,
+    webSearch,
+    functionToolNames: registry?.definitions().map(definition => definition.name) ?? [],
+  });
 }
 
 /** Strip execute functions and TypeBox symbols before sending tools to a model. */

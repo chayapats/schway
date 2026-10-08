@@ -76,7 +76,8 @@ after an intentional public contract change.
 | `ExtensionDenial` | Deny an agent turn or model request with a nonempty explanation shown to the user. |
 | `ExtensionEvent` | Recursively readonly event data, detached from authoritative runtime and session objects. |
 | `ExtensionEventListener` | Observe native runtime events sequentially, using the signal to stop work on unsubscribe or session disposal. |
-| `ExtensionModelRequest` | Detached provider-independent request with a cancellation signal owned by Schway. |
+| `ExtensionModelRequest` | Detached provider-independent request with a cancellation signal owned by Schway; Schway adds hosted tools after hooks, so hooks never see or set them. |
+| `HostedTool` | Provider-hosted read-only lookup a model may run inside one response; a closed union that adapters may ignore. |
 | `JsonSchema` | JSON Schema object used as a public tool input contract. |
 | `ModelRequest` | Provider-independent model request built by the agent loop. |
 | `ModelTool` | Tool description sent to a provider adapter. |
@@ -318,9 +319,19 @@ the simplest way to do that. Extra request or conversation fields are rejected.
 Opaque native `providerMetadata` is retained for replay, not a provider-payload
 interception API. Schway attaches its prompt-cache key after `beforeModel`
 returns, so hooks never see it and cannot set or change it (see
-[prompt cache key](configuration.md#prompt-cache-key)). Public types include `BeforeAgentInput`, `BeforeAgentHook`,
+[prompt cache key](configuration.md#prompt-cache-key)). Hosted tools work the
+same way: Schway sets the optional `ModelRequest.hostedTools` (such as
+`["web_search"]`) on the request `beforeModel` returns, from its
+[web search](configuration.md#web-search) decision for the session. The hook
+input never has the field, so a hook cannot add, remove or change it, and a
+result that sets `hostedTools` is rejected as an unsupported field with the
+usual extension error. It is attached even when no `beforeModel` hook is
+registered. `ExtensionModelRequest` therefore omits `hostedTools`. An extension
+tool named `web_search` keeps its name; Schway then sends no hosted search for
+that session. Public types include `BeforeAgentInput`, `BeforeAgentHook`,
 `ContextHook`, `BeforeModelHook`, `ExtensionModelRequest`, `ExtensionDenial`,
-`ContextSection`, `ConversationItem`, `UserMessage`, and `ModelTool`.
+`ContextSection`, `ConversationItem`, `UserMessage`, `ModelTool`, and
+`HostedTool`.
 
 The optional `tools` list contains descriptions only. A hook may select or reorder
 registered definitions, including `activate_skill`, or return an empty/omitted
@@ -482,6 +493,14 @@ working.
   Responses adapters (OpenAI, xAI and the Grok subscription route) and the
   ChatGPT subscription adapter parse them; the OpenAI-compatible adapter does
   not report them yet.
+- `ModelUsage.hostedSearchCalls` counts the hosted web searches a response
+  returned that Schway kept, and is absent when there were none.
+  `ModelUsage.reportedHostedSearchCalls` is the provider's own counter of
+  executed web searches (xAI's `server_side_tool_usage_details.web_search_calls`),
+  present only when the provider reports it. Neither is ever inferred. Kept
+  hosted items live in the assistant message's `providerMetadata` under the
+  provider's namespace, as `hosted_items`, and adapters replay them; treat them
+  as opaque.
 - `AssistantMessage.telemetry` (`AssistantTelemetry`) and `ToolResult.telemetry`
   (`ToolTelemetry`) are measured by the harness, never by adapters, and never
   sent to a provider. See [call telemetry](sessions.md#call-telemetry) for their

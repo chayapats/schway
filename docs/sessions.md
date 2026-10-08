@@ -242,8 +242,12 @@ ISO 8601 wall-clock strings:
   served from its prompt cache, and `reasoningTokens` is the part of
   `outputTokens` it reports as reasoning. Both are subsets, never added to their
   totals. `null` or an absent field means the provider did not report the
-  number; `0` means it reported none. Counts are what the provider reported, not
-  billing.
+  number; `0` means it reported none. Token counts are what the provider
+  reported, not billing. Two optional counts cover hosted web search:
+  `hostedSearchCalls` is the number of search items Schway kept from the
+  response, and `reportedHostedSearchCalls` is the provider's own search counter.
+  Each is absent when not observed (see
+  [Web search](configuration.md#web-search)).
 - **Tool result.** `durationMs` runs from scheduler start to settlement.
   `approvalWaitMs`, present only when the call waited for approval, is the part
   of `durationMs` spent waiting, so execution time is
