@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { abortError } from "./fs.ts";
+import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
 import { resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
@@ -12,8 +13,8 @@ import type {
   ToolExecutionResult,
 } from "./types.ts";
 
-/** Combined stdout/stderr character cap before exit metadata and truncation notices are added. */
-export const MAX_BASH_CHARS = 50_000;
+/** Combined stdout/stderr UTF-8 byte cap before exit metadata and truncation notices are added. */
+export const MAX_BASH_BYTES = TOOL_OUTPUT_BUDGET_BYTES;
 
 /**
  * Accept a nonempty shell command with optional cwd and positive millisecond timeout, rejecting unknown keys.
@@ -44,7 +45,7 @@ export const bashInputSchema = Type.Object(
 /** Shell command, optional working directory, and millisecond timeout accepted by the bash schema. */
 export type BashInput = Static<typeof bashInputSchema>;
 
-/** Shell exit status and bounded streams with optional timeout flag and full-output spill-file path. */
+/** Shell exit status and bounded streams with optional timeout flag, full-output spill-file path and byte counts. */
 export interface BashDetails {
   command: string;
   cwd: string;
@@ -54,6 +55,10 @@ export interface BashDetails {
   truncated: boolean;
   outputPath?: string;
   timedOut?: boolean;
+  /** UTF-8 bytes of stdout plus stderr kept in the result; set when output is truncated. */
+  shownBytes?: number;
+  /** UTF-8 bytes of the full stdout plus stderr; set when output is truncated. */
+  totalBytes?: number;
 }
 
 /** Shell-execution definition that runs behind an exclusive scheduling barrier. */
@@ -86,8 +91,9 @@ export async function executeBash(
     : ctx.workspace.root;
 
   const collected = await runShell(input.command, cwd, input.timeout, ctx);
-  const truncated =
-    collected.stdout.length + collected.stderr.length > MAX_BASH_CHARS;
+  const totalBytes =
+    utf8ByteLength(collected.stdout) + utf8ByteLength(collected.stderr);
+  const truncated = totalBytes > MAX_BASH_BYTES;
   let outputPath: string | undefined;
   if (truncated) {
     outputPath = join(tmpdir(), `schway-bash-${crypto.randomUUID()}.log`);
@@ -101,7 +107,7 @@ export async function executeBash(
   const bounded = boundStreams(
     collected.stdout,
     collected.stderr,
-    MAX_BASH_CHARS,
+    MAX_BASH_BYTES,
   );
 
   const details: BashDetails = {
@@ -113,6 +119,13 @@ export async function executeBash(
     truncated,
     ...(outputPath ? { outputPath } : {}),
     ...(collected.timedOut ? { timedOut: true } : {}),
+    ...(truncated
+      ? {
+          shownBytes:
+            utf8ByteLength(bounded.stdout) + utf8ByteLength(bounded.stderr),
+          totalBytes,
+        }
+      : {}),
   };
 
   return {
@@ -327,22 +340,26 @@ function formatContent(details: BashDetails): string {
     sections.push("", "stderr:", details.stderr);
   }
   if (details.truncated && details.outputPath) {
-    sections.push("", `... truncated. Full output: ${details.outputPath}`);
+    sections.push(
+      "",
+      `[Output truncated: showing ${details.shownBytes} of ${details.totalBytes} bytes. Full output: ${details.outputPath}. Use read with offset to see the rest.]`,
+    );
   }
   return sections.join("\n");
 }
 
-/** Cap combined stdout+stderr at `max`, preferring to keep stdout. */
+/** Cap combined stdout+stderr at `maxBytes` UTF-8 bytes on code-point boundaries, preferring to keep stdout. */
 function boundStreams(
   stdout: string,
   stderr: string,
-  max: number,
+  maxBytes: number,
 ): { stdout: string; stderr: string } {
-  if (stdout.length + stderr.length <= max) {
+  const stdoutBytes = utf8ByteLength(stdout);
+  if (stdoutBytes + utf8ByteLength(stderr) <= maxBytes) {
     return { stdout, stderr };
   }
-  if (stdout.length >= max) {
-    return { stdout: stdout.slice(0, max), stderr: "" };
+  if (stdoutBytes >= maxBytes) {
+    return { stdout: utf8Prefix(stdout, maxBytes), stderr: "" };
   }
-  return { stdout, stderr: stderr.slice(0, max - stdout.length) };
+  return { stdout, stderr: utf8Prefix(stderr, maxBytes - stdoutBytes) };
 }

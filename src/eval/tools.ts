@@ -4,7 +4,8 @@ import type { EvalCase } from "./cases.ts";
 import { dirname } from "node:path";
 import { bashTool } from "../tools/bash.ts";
 import { editTool } from "../tools/edit.ts";
-import { DEFAULT_LS_DEPTH, MAX_LS_CHARS, lsTool, type LsDetails } from "../tools/ls.ts";
+import { DEFAULT_LS_DEPTH, MAX_LS_BYTES, lsTool, type LsDetails } from "../tools/ls.ts";
+import { utf8ByteLength } from "../tools/output-budget.ts";
 import { displayToolPath, resolveToolPath } from "../tools/path.ts";
 import { readTool } from "../tools/read.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
@@ -52,16 +53,16 @@ export function createEvalTools(project: string, selected?: EvalCase): ToolRegis
       if (!directories.has(resolvedPath)) throw new Error("Eval listing path is outside the allowed case directories");
       const depth = input.depth ?? DEFAULT_LS_DEPTH;
       const lines: string[] = [];
-      let chars = 0;
+      let bytes = 0;
       const walk = (directory: string, remaining: number): boolean => {
         ctx.signal?.throwIfAborted();
         for (const entry of entries.filter(target => dirname(target) === directory)) {
           const isDirectory = directories.has(entry);
           const line = displayToolPath(root, entry) + (isDirectory ? "/" : "");
-          const extra = (lines.length === 0 ? 0 : 1) + line.length;
-          if (lines.length > 0 && chars + extra > MAX_LS_CHARS) return true;
+          const extra = (lines.length === 0 ? 0 : 1) + utf8ByteLength(line);
+          if (lines.length > 0 && bytes + extra > MAX_LS_BYTES) return true;
           lines.push(line);
-          chars += extra;
+          bytes += extra;
           if (isDirectory && remaining > 1 && walk(entry, remaining - 1)) return true;
         }
         return false;

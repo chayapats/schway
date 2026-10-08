@@ -3,9 +3,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DEFAULT_READ_LINE_LIMIT,
-  MAX_READ_CHARS,
+  MAX_READ_BYTES,
   readTool,
+  type ReadDetails,
 } from "../src/tools/read.ts";
+import { utf8ByteLength } from "../src/tools/output-budget.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -112,12 +114,12 @@ test("read bounds oversized output and includes continuation", async () => {
 
 test("read truncates a single oversized line", async () => {
   await withTempDir(async (dir) => {
-    await writeFile(join(dir, "huge.txt"), `${"x".repeat(MAX_READ_CHARS + 80)}\n`);
+    await writeFile(join(dir, "huge.txt"), `${"x".repeat(MAX_READ_BYTES + 80)}\n`);
     const result = await readTool.execute(
       { path: "huge.txt" },
       await contextFor(dir),
     );
-    expect(result.content.length).toBeLessThanOrEqual(MAX_READ_CHARS + 80);
+    expect(result.content.length).toBeLessThanOrEqual(MAX_READ_BYTES + 80);
     expect(result.content).toContain("truncated");
   });
 });
@@ -144,5 +146,36 @@ test("read reports a model-visible error for a missing file", async () => {
     );
     expect(result.isError).toBe(true);
     expect(result.content).toBe("File not found: missing.txt");
+  });
+});
+
+test("read bounds non-ASCII lines by UTF-8 bytes and keeps continuation offsets", async () => {
+  await withTempDir(async (dir) => {
+    // 400 lines of 100 Thai characters: about 42,800 UTF-16 units but 122,800 UTF-8 bytes.
+    const lines = Array.from({ length: 400 }, (_, index) => `${"ภ".repeat(99)}${index % 10}`);
+    await writeFile(join(dir, "thai.txt"), `${lines.join("\n")}\n`);
+    const first = await readTool.execute({ path: "thai.txt" }, await contextFor(dir));
+    const [body, notice] = first.content.split("\n... truncated: ");
+    // Each numbered line is 6 + 1 + 298 = 305 bytes plus a newline separator: 163 lines fit in 50,000 bytes.
+    expect(utf8ByteLength(body!)).toBeLessThanOrEqual(MAX_READ_BYTES);
+    expect(body!.split("\n")).toHaveLength(163);
+    expect(notice).toBe("237 lines remaining. Use offset=164 to continue.");
+    expect(first.details).toMatchObject({ truncated: true, endLine: 163, nextOffset: 164 } satisfies Partial<ReadDetails>);
+
+    const second = await readTool.execute({ path: "thai.txt", offset: 164 }, await contextFor(dir));
+    expect(second.content.split("\n")[0]).toBe(`   164|${lines[163]}`);
+  });
+});
+
+test("read cuts a single oversized non-ASCII line on a code-point boundary", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "emoji.txt"), `${"🙂".repeat(15_000)}\n`);
+    const result = await readTool.execute({ path: "emoji.txt" }, await contextFor(dir));
+    const [body, notice] = result.content.split("\n... truncated: ");
+    // "     1|" is 7 bytes, leaving room for 12,498 four-byte emoji.
+    expect(body).toBe(`     1|${"🙂".repeat(12_498)}`);
+    expect(utf8ByteLength(body!)).toBeLessThanOrEqual(MAX_READ_BYTES);
+    expect(result.content.isWellFormed()).toBe(true);
+    expect(notice).toBe("line 1 exceeded the output budget.");
   });
 });

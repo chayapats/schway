@@ -3,6 +3,7 @@ import { toolEffect } from "./types.ts";
 import { undoFailureReason } from "../undo/errors.ts";
 import type { UndoStore, UndoTurn } from "../undo/store.ts";
 import { resolveToolPath, displayToolPath } from "./path.ts";
+import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
 import type { ToolCallContent, ToolResult } from "../conversation/types.ts";
 import type { ExtensionToolHooks } from "../extensions/tool-hooks.ts";
 import type { Workspace } from "../workspace/workspace.ts";
@@ -10,7 +11,7 @@ import type { ToolRegistry } from "./registry.ts";
 import type { ToolCallStatus, ToolOutputChunk } from "./types.ts";
 
 const CANCELLED_CONTENT = "Tool call cancelled";
-const MAX_RESULT_CHARS = 50_000;
+const MAX_RESULT_BYTES = TOOL_OUTPUT_BUDGET_BYTES;
 const TRUNCATED_RESULT = "\n[Tool output truncated; narrow the request or use pagination.]";
 
 /** Conversation tool result plus the status used in runtime events. */
@@ -189,9 +190,9 @@ function cancelled(call: ToolCallContent): ExecutedToolCall {
 
 /** Build a model-visible error result without throwing. */
 function failure(call: ToolCallContent, content: string): ExecutedToolCall {
-  const bounded = content.length <= MAX_RESULT_CHARS
+  const bounded = utf8ByteLength(content) <= MAX_RESULT_BYTES
     ? content
-    : content.slice(0, MAX_RESULT_CHARS - TRUNCATED_RESULT.length) + TRUNCATED_RESULT;
+    : utf8Prefix(content, MAX_RESULT_BYTES - utf8ByteLength(TRUNCATED_RESULT)) + TRUNCATED_RESULT;
   return {
     result: toolResult(call, bounded, true),
     status: "error",

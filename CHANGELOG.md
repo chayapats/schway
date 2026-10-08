@@ -75,6 +75,20 @@
 
 ### Changed
 
+- Core tool output bounds count UTF-8 bytes instead of UTF-16 characters. The
+  50,000 cap for `bash` stdout and stderr, `read`, `grep`, `find`, `ls` and tool
+  error results is now 50,000 bytes, so ASCII output keeps the same bound and
+  Thai, emoji and other multibyte output can no longer reach about three times
+  that size. Cuts never split a character. A truncated `bash` result now says
+  how many bytes it shows out of the total, names the spill file and says to
+  read the rest with `read` and `offset`; `BashDetails` gains optional
+  `shownBytes` and `totalBytes`. The `web_fetch` tool shares the same byte
+  measure (#322).
+- Tool results from earlier user turns that are over 8,000 bytes are sent to
+  the model as their first 8,000 bytes plus a note to run the call again for the
+  full text, when that makes them shorter. The turn in progress, the saved session, resume, `/history` and
+  compaction summaries keep full results. Extension `beforeModel` hooks see the
+  shortened results (#322).
 - The status bar's reasoning chip always shows the effective effort while a
   model is selected, not only an explicit level: `Provider default` when Schway
   sends no reasoning control, with the advertised level such as

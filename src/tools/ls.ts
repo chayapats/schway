@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
+import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength } from "./output-budget.ts";
 import { displayToolPath, resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
@@ -11,8 +12,8 @@ import type {
 
 /** Default listing depth when the model omits `depth`. */
 export const DEFAULT_LS_DEPTH = 1;
-/** Character budget checked before adding further entries; the first entry and truncation note may exceed it. */
-export const MAX_LS_CHARS = 50_000;
+/** UTF-8 byte budget checked before adding further entries; the first entry and truncation note may exceed it. */
+export const MAX_LS_BYTES = TOOL_OUTPUT_BUDGET_BYTES;
 
 /**
  * Accept an optional directory and positive listing depth, rejecting unknown keys during validation.
@@ -100,7 +101,7 @@ export async function executeLs(
       depth,
       ctx,
       lines,
-      { chars: 0 },
+      { bytes: 0 },
       true,
     );
   } catch (error) {
@@ -137,7 +138,7 @@ async function walkDirectory(
   depth: number,
   ctx: ToolContext,
   lines: string[],
-  state: { chars: number },
+  state: { bytes: number },
   topLevel = false,
 ): Promise<boolean> {
   if (ctx.signal?.aborted) {
@@ -165,12 +166,12 @@ async function walkDirectory(
     const relative = displayToolPath(ctx.workspace.root, child);
     const isDir = entry.isDirectory();
     const line = isDir ? `${relative}/` : relative;
-    const extra = (lines.length === 0 ? 0 : 1) + line.length;
-    if (lines.length > 0 && state.chars + extra > MAX_LS_CHARS) {
+    const extra = (lines.length === 0 ? 0 : 1) + utf8ByteLength(line);
+    if (lines.length > 0 && state.bytes + extra > MAX_LS_BYTES) {
       return true;
     }
     lines.push(line);
-    state.chars += extra;
+    state.bytes += extra;
     if (isDir && depth > 1) {
       const truncated = await walkDirectory(child, depth - 1, ctx, lines, state);
       if (truncated) {

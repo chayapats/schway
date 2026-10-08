@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MAX_LS_CHARS, lsTool } from "../src/tools/ls.ts";
+import { MAX_LS_BYTES, lsTool } from "../src/tools/ls.ts";
+import { utf8ByteLength } from "../src/tools/output-budget.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -119,7 +120,7 @@ test("ls bounds oversized output and says how to narrow", async () => {
     }
     const result = await lsTool.execute({}, contextFor(dir));
     expect(result.isError).toBeUndefined();
-    expect(result.content.length).toBeLessThanOrEqual(MAX_LS_CHARS + 160);
+    expect(result.content.length).toBeLessThanOrEqual(MAX_LS_BYTES + 160);
     expect(result.content).toContain("truncated");
     expect(result.content).toContain("more specific path");
     expect(result.details).toMatchObject({ truncated: true });
@@ -150,5 +151,22 @@ test("ls lists a directory at depth 1 without recursing", async () => {
       truncated: false,
       depth: 1,
     });
+  });
+});
+
+test("ls bounds non-ASCII entries by UTF-8 bytes and says how to narrow", async () => {
+  await withTempDir(async (dir) => {
+    // 300 names of about 85 UTF-16 units (under the old cap in total) but about 245 UTF-8 bytes each.
+    const name = `${"ไฟล์".repeat(20)}.txt`;
+    for (let index = 0; index < 300; index++) {
+      await writeFile(join(dir, `${index}-${name}`), "\n");
+    }
+    const result = await lsTool.execute({}, contextFor(dir));
+    const [body, notice] = result.content.split("\n... truncated: ");
+    expect(utf8ByteLength(body!)).toBeLessThanOrEqual(MAX_LS_BYTES);
+    expect(body!.length).toBeLessThan(MAX_LS_BYTES / 2);
+    expect(notice).toBe("output limited. Use a more specific path or lower depth.");
+    expect(result.details).toMatchObject({ truncated: true });
+    expect((result.details as { entryCount: number }).entryCount).toBeLessThan(300);
   });
 });

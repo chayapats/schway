@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { bashTool, MAX_BASH_CHARS } from "../src/tools/bash.ts";
+import { bashTool, MAX_BASH_BYTES, type BashDetails } from "../src/tools/bash.ts";
+import { utf8ByteLength } from "../src/tools/output-budget.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { withTempDir } from "./helpers.ts";
 import { runBashProbe } from "./fixtures/bash-spawn-failure.ts";
@@ -191,7 +192,7 @@ test("bash bounds oversized output and spills the full log to a temp file", asyn
     const extra = 80;
     const result = await bashTool.execute(
       {
-        command: `bun -e 'process.stdout.write("x".repeat(${MAX_BASH_CHARS + extra}))'`,
+        command: `bun -e 'process.stdout.write("x".repeat(${MAX_BASH_BYTES + extra}))'`,
       },
       contextFor(dir),
     );
@@ -205,14 +206,111 @@ test("bash bounds oversized output and spills the full log to a temp file", asyn
       outputPath?: string;
       truncated: boolean;
     };
-    expect(details.stdout.length).toBeLessThanOrEqual(MAX_BASH_CHARS);
+    expect(details.stdout.length).toBeLessThanOrEqual(MAX_BASH_BYTES);
     expect(result.content).toContain("truncated");
     expect(details.outputPath).toBeDefined();
     const spilled = await readFile(details.outputPath!, "utf8");
-    expect(spilled).toContain("x".repeat(MAX_BASH_CHARS + extra));
+    expect(spilled).toContain("x".repeat(MAX_BASH_BYTES + extra));
     expect(result.content).toContain(details.outputPath!);
     const spilledInfo = await stat(details.outputPath!);
     expect(spilledInfo.mode & 0o777).toBe(0o600);
+  });
+});
+
+/** Run a script that writes exactly `stdout` and `stderr`, returning the result and its details. */
+async function emit(dir: string, stdout: string, stderr = "") {
+  await writeFile(
+    join(dir, "emit.js"),
+    `process.stdout.write(${JSON.stringify(stdout)});process.stderr.write(${JSON.stringify(stderr)});`,
+  );
+  const result = await bashTool.execute({ command: "bun emit.js" }, contextFor(dir));
+  return { result, details: result.details as BashDetails };
+}
+
+/** Assert a bounded stream is a well-formed prefix of its source with no replacement character introduced. */
+function expectCleanPrefix(shown: string, source: string): void {
+  expect(source.startsWith(shown)).toBe(true);
+  expect(shown.isWellFormed()).toBe(true);
+  expect(shown.includes("\uFFFD")).toBe(false);
+}
+
+test("bash bounds non-ASCII output by UTF-8 bytes and spills the full streams", async () => {
+  await withTempDir(async (dir) => {
+    // 2,500 repeats: 32,500 UTF-16 units (under the old cap) but 62,500 UTF-8 bytes.
+    const stdout = "สวัสดี hello ".repeat(2_500);
+    const stderr = "warning: ภาษาไทย\n";
+    expect(stdout.length).toBeLessThan(MAX_BASH_BYTES);
+    const total = utf8ByteLength(stdout) + utf8ByteLength(stderr);
+    expect(total).toBeGreaterThan(MAX_BASH_BYTES);
+
+    const { result, details } = await emit(dir, stdout, stderr);
+    expect(result.isError).toBeUndefined();
+    expect(details.truncated).toBe(true);
+    const shown = utf8ByteLength(details.stdout) + utf8ByteLength(details.stderr);
+    expect(shown).toBeLessThanOrEqual(MAX_BASH_BYTES);
+    expect(shown).toBeGreaterThan(MAX_BASH_BYTES - 4);
+    expect(details.stderr).toBe("");
+    expectCleanPrefix(details.stdout, stdout);
+    expect(details).toMatchObject({ shownBytes: shown, totalBytes: total });
+
+    expect(result.content).toBe(
+      `Exit code: 0\n\nstdout:\n${details.stdout}\n\n[Output truncated: showing ${shown} of ${total} bytes. Full output: ${details.outputPath}. Use read with offset to see the rest.]`,
+    );
+    expect(await readFile(details.outputPath!, "utf8")).toBe(`stdout:\n${stdout}\nstderr:\n${stderr}\n`);
+    expect((await stat(details.outputPath!)).mode & 0o777).toBe(0o600);
+  });
+});
+
+test("bash keeps exactly the byte budget of ASCII output and truncates one byte more", async () => {
+  await withTempDir(async (dir) => {
+    const exact = await emit(dir, "x".repeat(MAX_BASH_BYTES));
+    expect(exact.details.truncated).toBe(false);
+    expect(exact.details.stdout).toHaveLength(MAX_BASH_BYTES);
+    expect(exact.details.outputPath).toBeUndefined();
+    expect(exact.details.shownBytes).toBeUndefined();
+    expect(exact.result.content).not.toContain("Output truncated");
+
+    const over = await emit(dir, "x".repeat(MAX_BASH_BYTES + 1));
+    expect(over.details).toMatchObject({ truncated: true, shownBytes: MAX_BASH_BYTES, totalBytes: MAX_BASH_BYTES + 1 });
+    expect(over.details.stdout).toHaveLength(MAX_BASH_BYTES);
+    expect(over.result.content).toContain(`showing ${MAX_BASH_BYTES} of ${MAX_BASH_BYTES + 1} bytes`);
+  });
+});
+
+test("bash never splits a code point at the byte budget", async () => {
+  await withTempDir(async (dir) => {
+    // stdout only: the boundary falls inside a 4-byte emoji, then inside a 3-byte Thai character.
+    const emoji = `a${"🙂".repeat(12_500)}`;
+    const emojiRun = await emit(dir, emoji);
+    expectCleanPrefix(emojiRun.details.stdout, emoji);
+    expect(emojiRun.details.stdout).toBe(`a${"🙂".repeat(12_499)}`);
+    expect(emojiRun.details.shownBytes).toBe(MAX_BASH_BYTES - 3);
+
+    const thai = `a${"ก".repeat(16_667)}`;
+    const thaiRun = await emit(dir, thai);
+    expectCleanPrefix(thaiRun.details.stdout, thai);
+    expect(thaiRun.details.stdout).toBe(`a${"ก".repeat(16_666)}`);
+    expect(thaiRun.details.shownBytes).toBe(MAX_BASH_BYTES - 1);
+
+    // stderr only: the same emoji boundary inside the stream that gets the remaining budget.
+    const stderrRun = await emit(dir, "", emoji);
+    expect(stderrRun.details.stdout).toBe("");
+    expectCleanPrefix(stderrRun.details.stderr, emoji);
+    expect(stderrRun.details.stderr).toBe(`a${"🙂".repeat(12_499)}`);
+
+    // stdout exactly fills the budget, so stderr that starts with an emoji is dropped whole.
+    const full = `${"ก".repeat(16_666)}ab`;
+    expect(utf8ByteLength(full)).toBe(MAX_BASH_BYTES);
+    const fullRun = await emit(dir, full, "🙂 tail");
+    expect(fullRun.details.stdout).toBe(full);
+    expect(fullRun.details.stderr).toBe("");
+    expect(fullRun.details).toMatchObject({ truncated: true, shownBytes: MAX_BASH_BYTES, totalBytes: MAX_BASH_BYTES + 9 });
+
+    for (const run of [emojiRun, thaiRun, stderrRun, fullRun]) {
+      expect(run.result.content.isWellFormed()).toBe(true);
+      expect(run.result.content.includes("\uFFFD")).toBe(false);
+      expect(utf8ByteLength(run.details.stdout) + utf8ByteLength(run.details.stderr)).toBeLessThanOrEqual(MAX_BASH_BYTES);
+    }
   });
 });
 

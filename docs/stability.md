@@ -51,7 +51,7 @@ and `ls`. Any change to their meaning needs a major version. Semantic changes in
 - Changing the declared effect: reads only or can change state.
 - Changing when a call is an error.
 - Editing a core tool’s model-facing description text.
-- Changing output bounds, such as the 50,000-character cap or the `web_fetch`
+- Changing output bounds, such as the 50,000-byte cap or the `web_fetch`
   deadlines, raw-body cap, 32 KiB output cap and redirect limit.
 
 ## Changelog

@@ -8,6 +8,7 @@ import {
   isAbortError,
   isErrno,
 } from "./fs.ts";
+import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength } from "./output-budget.ts";
 import { displayToolPath, resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
@@ -15,8 +16,8 @@ import type {
   ToolExecutionResult,
 } from "./types.ts";
 
-/** Character budget checked before adding further paths; the first path and truncation note may exceed it. */
-export const MAX_FIND_CHARS = 50_000;
+/** UTF-8 byte budget checked before adding further paths; the first path and truncation note may exceed it. */
+export const MAX_FIND_BYTES = TOOL_OUTPUT_BUDGET_BYTES;
 
 /**
  * Accept a nonempty glob and optional search directory, rejecting unknown keys during validation.
@@ -142,7 +143,7 @@ async function collectMatches(
 ): Promise<{ matches: string[]; truncated: boolean }> {
   const glob = new Bun.Glob(pattern);
   const matches: string[] = [];
-  let chars = 0;
+  let bytes = 0;
   let truncated = false;
   for await (const file of glob.scan({
     cwd,
@@ -153,13 +154,13 @@ async function collectMatches(
       throw abortError();
     }
     const display = displayToolPath(ctx.workspace.root, resolve(cwd, file));
-    const extra = (matches.length === 0 ? 0 : 1) + display.length;
-    if (matches.length > 0 && chars + extra > MAX_FIND_CHARS) {
+    const extra = (matches.length === 0 ? 0 : 1) + utf8ByteLength(display);
+    if (matches.length > 0 && bytes + extra > MAX_FIND_BYTES) {
       truncated = true;
       break;
     }
     matches.push(display);
-    chars += extra;
+    bytes += extra;
   }
   matches.sort((a, b) => a.localeCompare(b));
   return { matches, truncated };

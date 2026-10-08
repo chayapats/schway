@@ -478,7 +478,7 @@ Long sessions compact context instead of failing when pressure builds.
 - Automatic pressure compaction triggers at 80% of the resolved context window and retains the 10 most recent complete turns plus the running summary.
 - Context overflow (`context_length_exceeded` / `prompt-too-long`) forces one compaction and retries once; repeated overflow terminates with a clear error instead of looping.
 - Compaction never splits a tool-call/result group: the retained window starts at a turn boundary.
-- Oversized tool output is pruned only for summarization input; raw history keeps the full records.
+- Oversized tool output is pruned for summarization input, and long tool results from earlier user turns are shortened in each request (see [Replay earlier results](tools.md#replay-earlier-results)); raw history keeps the full records.
 - The summary plus retained records reconstruct identically after `--resume`.
 
 Interactive `/compact` runs the same context manager's manual compaction path. Automatic pressure and overflow recovery also apply in headless and interactive runs.

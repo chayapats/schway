@@ -1,6 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { stat } from "node:fs/promises";
 import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
+import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
 import { displayToolPath, resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
@@ -10,8 +11,8 @@ import type {
 
 /** Default match cap when the model omits `maxResults`. */
 export const DEFAULT_GREP_MAX_RESULTS = 100;
-/** Character budget for formatted matches before any truncation notice is appended. */
-export const MAX_GREP_CHARS = 50_000;
+/** UTF-8 byte budget for formatted matches before any truncation notice is appended. */
+export const MAX_GREP_BYTES = TOOL_OUTPUT_BUDGET_BYTES;
 
 /** Actionable setup text when ripgrep is not installed. */
 export const RIPGREP_MISSING_GUIDANCE =
@@ -162,23 +163,23 @@ export async function executeGrep(
 
   const lines: string[] = [];
   const matches: GrepMatch[] = [];
-  let chars = 0;
+  let bytes = 0;
   for (const match of collected) {
     const line = `${match.path}:${match.line}:${match.text}`;
-    const extra = (lines.length === 0 ? 0 : 1) + line.length;
-    if (lines.length > 0 && chars + extra > MAX_GREP_CHARS) {
+    const extra = (lines.length === 0 ? 0 : 1) + utf8ByteLength(line);
+    if (lines.length > 0 && bytes + extra > MAX_GREP_BYTES) {
       truncated = true;
       break;
     }
-    if (lines.length === 0 && extra > MAX_GREP_CHARS) {
-      lines.push(line.slice(0, MAX_GREP_CHARS));
+    if (lines.length === 0 && extra > MAX_GREP_BYTES) {
+      lines.push(utf8Prefix(line, MAX_GREP_BYTES));
       matches.push({ path: match.path, line: match.line });
       truncated = true;
       break;
     }
     lines.push(line);
     matches.push({ path: match.path, line: match.line });
-    chars += extra;
+    bytes += extra;
   }
 
   let content = lines.length === 0 ? "(no matches)" : lines.join("\n");
