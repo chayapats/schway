@@ -1,7 +1,7 @@
 import { bg, bold, fg, type TextChunk } from "@opentui/core";
 import { HINT_KEY } from "./hint-text.ts";
 
-export { APPROVAL_RETURN_HINT, HINT_KEY, fitHintSegments, wrapHintSegments } from "./hint-text.ts";
+export { APPROVAL_RETURN_HINT, HINT_KEY, fitDescription, fitHintSegments, wrapHintSegments } from "./hint-text.ts";
 
 /** Style "Key action · Key action" hints as tight key chips and muted actions; the plain text is unchanged. */
 export function keyHintChunks(text: string, colors: { key: string; chip: string; action: string }): TextChunk[] {

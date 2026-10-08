@@ -9,7 +9,7 @@ import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEn
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerName } from "./model-picker.ts";
 import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
-import { APPROVAL_RETURN_HINT, fitHintSegments, keyHintChunks, wrapHintSegments } from "./hints.ts";
+import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
 import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
 import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
@@ -644,7 +644,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const label = name + " ".repeat(Math.max(0, nameColumns - Bun.stringWidth(name)) + 1);
     const remaining = Math.max(0, columns - Bun.stringWidth(prefix + label));
     const suffix = fitLine(entry.destructive ? " · deletes" : entry.provenance ? ` · ${safe(entry.provenance)}` : "", remaining);
-    const description = fitHintSegments(fitLine(safe(entry.description), Number.MAX_SAFE_INTEGER), Math.max(0, remaining - Bun.stringWidth(suffix)));
+    const description = fitDescription(fitLine(safe(entry.description), Number.MAX_SAFE_INTEGER), Math.max(0, remaining - Bun.stringWidth(suffix)));
     // Metadata keeps its quieter role but is re-measured on the selection fill it sits on.
     const metadata = entry.destructive ? mixColor(theme.warning, theme.muted, 0.5) : theme.muted;
     const suffixColor = selected ? textOn(metadata, tint(theme, theme.accent)) : metadata;

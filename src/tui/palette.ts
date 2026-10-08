@@ -1,5 +1,5 @@
 import type { KeyboardGuideAvailability, KeyboardGuideChoice, KeyboardGuideId, PaletteChoice } from "./command-catalog.ts";
-import { fitHintSegments, wrapHintSegments } from "./hint-text.ts";
+import { fitDescription, wrapHintSegments } from "./hint-text.ts";
 import { fitLine } from "./presentation.ts";
 
 /** Composer prompt shown while the help palette owns the search field. */
@@ -102,7 +102,7 @@ export function keyboardRowParts(row: KeyboardGuideChoice, selected: boolean, na
   const rest = Math.max(0, room - Bun.stringWidth(label));
   const detail = row.available ? ` · ${row.description}` : ` · ${row.reason}`;
   // An available row drops its description rather than clipping it; a reason keeps its start and drops whole trailing segments.
-  const reason = row.available ? "" : fitHintSegments(fitLine(row.reason, Number.MAX_SAFE_INTEGER), rest - 3);
+  const reason = row.available ? "" : fitDescription(fitLine(row.reason, Number.MAX_SAFE_INTEGER), rest - 3);
   return { lead, label, detail: row.available ? Bun.stringWidth(detail) <= rest ? detail : "" : reason && ` · ${reason}` };
 }
 

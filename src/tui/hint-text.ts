@@ -81,8 +81,21 @@ export function fitHintSegments(text: string, columns: number): string {
   drop(() => true);
   if (width(segments) <= columns) return segments.join(" · ");
   if (keyed(segments[0]!)) return "";
+  return shortenAtWord(segments[0]!, columns);
+}
+
+/**
+ * Fit a palette description or reason to `columns`: text with ` · ` segments fits like a hint, while plain prose
+ * shortens at a word boundary with `…` even when its first word looks like a key (`End the current…`).
+ */
+export function fitDescription(text: string, columns: number): string {
+  if (Bun.stringWidth(text) <= columns) return text;
+  return text.includes(" · ") ? fitHintSegments(text, columns) : shortenAtWord(text, columns);
+}
+
+function shortenAtWord(text: string, columns: number): string {
   let fitted = "";
-  for (const unit of hintUnits(segments[0]!)) {
+  for (const unit of hintUnits(text)) {
     const next = fitted ? `${fitted} ${unit}` : unit;
     if (Bun.stringWidth(`${next}…`) > columns) break;
     fitted = next;

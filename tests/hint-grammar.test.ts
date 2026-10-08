@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { BRANCH_TREE_ARROWS, branchTreeHint, branchTreeModeLine, branchTreePlaceholder } from "../src/tui/branch-tree-hints.ts";
 import { credentialEntryPanel } from "../src/tui/credential-entry.ts";
-import { APPROVAL_RETURN_HINT, fitHintSegments, HINT_KEY, wrapHintSegments } from "../src/tui/hints.ts";
+import { APPROVAL_RETURN_HINT, fitDescription, fitHintSegments, HINT_KEY, wrapHintSegments } from "../src/tui/hints.ts";
 import { PREFERENCE_SCOPES, type PreferencesSnapshot } from "../src/tui/preferences.ts";
 import { preferenceHint, preferenceLines, previewScopeText } from "../src/tui/preferences-view.ts";
 import { SIGN_IN_TIMED_OUT, SIGN_IN_WAIT_COMPACT_ACTION, SIGN_IN_WAIT_HINT, signInChooserHint, signInWaitRows } from "../src/tui/sign-in-wait.ts";
@@ -176,6 +176,15 @@ test("hint fitting drops whole segments, keeps Esc over status and never cuts a 
   expect(fitHintSegments("Approval · Ctrl+C cancel turn", 26)).toBe("Ctrl+C cancel turn");
   expect(fitHintSegments("Approval · Ctrl+C cancel turn", 17)).toBe("Approval");
   for (const columns of [8, 12, 20, 30, 40]) passes(golden([fitHintSegments("Aligned columns · C copy Markdown source", columns)]));
+});
+
+test("palette descriptions shorten prose at a word even when it starts with a key-like word", () => {
+  // Extension command descriptions are prose: `End`, `Tab` or `Enter` here is a word, not a key hint.
+  expect(fitDescription("End the current sprint and archive it", 20)).toBe("End the current…");
+  expect(fitDescription("Tab completion for branch names", 18)).toBe("Tab completion…");
+  expect(fitDescription("End the current sprint", 22)).toBe("End the current sprint");
+  // Text with ` · ` segments still fits like a hint, so a key-led segment never gains `…`.
+  expect(fitDescription("Busy · Esc keep editing", 12)).toBe("Busy");
 });
 
 test("every hint producer outside the catalog passes the checker", () => {
