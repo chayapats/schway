@@ -124,8 +124,24 @@ const fixtureTurn = (branchId: string, parentId: string, id: string, task: strin
 ] });
 const stopped = (signal?: AbortSignal) => signal?.aborted ? Promise.resolve() : new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
 
+/** Opt-in settings for tests that press keys on a catalog state (#305); omitting every field keeps each golden byte-identical. */
+export interface BuildScreenOptions {
+  /** Key encoding the renderer decodes and `mockInput` sends: kitty (the default) or legacy terminal bytes. */
+  encoding?: "kitty" | "legacy";
+  /** Renderer Ctrl+C exit; the app passes false so Ctrl+C reaches the view. */
+  exitOnCtrlC?: boolean;
+  /** Process signals the renderer handles; the app passes none. */
+  exitSignals?: NodeJS.Signals[];
+  /** Give screens without settings staging an offline stub that resolves a scripted model, as the app always provides one. */
+  offlineStageSettings?: boolean;
+  /** Observe each URL the view asks to open. */
+  onOpenUrl?(url: string): void;
+  /** Observe each value the view submits, before the production command dispatch runs it. */
+  onSubmit?(value: string): void;
+}
+
 /** Build an isolated final-size renderer and scripted dependencies for one screen. */
-export async function buildScreen(screen: Screen, variant: Variant) {
+export async function buildScreen(screen: Screen, variant: Variant, harnessOptions: BuildScreenOptions = {}) {
   let temp: string | undefined;
   let home = "/home/test", root = "/project", sessionDirectory: string | undefined;
   let activityTime = 10_000, loginCalled = false;
@@ -381,7 +397,9 @@ export async function buildScreen(screen: Screen, variant: Variant) {
       { user: join(home, "config.json"), project: join(root, "config.json") }, capabilities);
     options.provider = "openai-compatible"; options.modelId = model; options.baseUrl = baseUrl;
   }
-  const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: true });
+  if (harnessOptions.offlineStageSettings && !options.stageSettings) options.stageSettings = async next => ({ model: createScriptedModel({ id: next.model }), contextManager: createContextManager(workspace) });
+  const terminal = await createTestRenderer({ width: variant.cols, height: variant.rows, kittyKeyboard: harnessOptions.encoding !== "legacy",
+    ...(harnessOptions.exitOnCtrlC === undefined ? {} : { exitOnCtrlC: harnessOptions.exitOnCtrlC }), ...(harnessOptions.exitSignals ? { exitSignals: harnessOptions.exitSignals } : {}) });
   const controller = new TuiController(options);
   let undoLock: Database | undefined;
   if (screen.id === "delete-session-busy") {
@@ -424,8 +442,8 @@ export async function buildScreen(screen: Screen, variant: Variant) {
   const secrets = options.secrets ?? [];
   const catalogConfig = new ConfigEditor({}, { user: join(home, "config.json"), project: join(root, "config.json") });
   const commandContext = { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root, manager: controller.activeContextManager() }, sessionsDir: sessionsDirectory(home), settings: () => catalogConfig.settings, env: {}, secrets, finishQuit() {}, stderr: { write() {} } };
-  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets, workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, wallClock: () => Date.parse(CATALOG_TIME), quit: () => {}, openUrl: async () => {},
-    submit: (value, accepted) => dispatchEditorInput(value, controller, (command, onAccepted) => handleSlashCommand(command.name, command.args, commandContext, command.raw, onAccepted), accepted) });
+  const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets, workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, wallClock: () => Date.parse(CATALOG_TIME), quit: () => {}, openUrl: async url => { harnessOptions.onOpenUrl?.(url); },
+    submit: (value, accepted) => { harnessOptions.onSubmit?.(value); return dispatchEditorInput(value, controller, (command, onAccepted) => handleSlashCommand(command.name, command.args, commandContext, command.raw, onAccepted), accepted); } });
   const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();

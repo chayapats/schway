@@ -1,0 +1,126 @@
+first-run | Alt+L sign in | Shift+Tab change mode | / commands
+disconnected-search | Esc restore | ↑↓ previous/next | Enter keep | Ctrl+End latest
+auto-mode | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+read-only-mode | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+ask-mode | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+approval-modes-help | ↑↓ select | Enter open | Esc back
+read-only-search-empty | Esc restore | Ctrl+End latest
+read-only-search-matches | ↑↓ previous/next | Enter keep | Esc restore | Ctrl+End latest
+read-only-search-no-matches | Esc restore | Ctrl+End latest
+approval-command | Ctrl+C cancel turn | Esc deny | ↑↓ choose | Enter allow once
+approval-edit | Ctrl+C cancel turn | Esc deny | ↑↓ choose | Enter allow once
+approval-deny-reason | Ctrl+C cancel turn | Esc deny | Enter deny with reason
+approval-diff-overflow | Ctrl+C cancel turn | Esc deny | ↑↓ choose | Enter allow once | PgUp/PgDn scroll
+sign-in-chooser | Esc back | ↑↓ select | Enter continue | Tab more options
+chatgpt-more-options | Esc back | ↑↓ select | Enter continue
+grok-more-options | Esc back | ↑↓ select | Enter continue
+api-key-entry | Enter save | Esc cancel
+api-key-entry-empty | Enter save | Esc cancel
+callback-entry | Enter sign in | Esc cancel
+endpoint-url-empty | Esc cancel | Enter continue
+endpoint-url-error | Esc cancel | Enter continue
+endpoint-url-prefilled | Esc cancel | Enter continue
+endpoint-key-entry | Esc back | Enter save
+subscription-sign-in | Esc cancel sign-in
+chatgpt-device-approval | Esc cancel sign-in
+grok-browser-approval | Esc cancel sign-in
+grok-device-approval | Esc cancel sign-in
+sign-in-browser-not-opened | ↑↓ select | Enter continue | Esc cancel sign-in
+sign-in-timeout | Esc back | ↑↓ select | Enter continue
+grok-plan-error | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+model-picker | ↑↓ select | Enter use | Esc back
+details-model | ↑↓ select | Enter use | Esc back
+model-picker-unconnected | Esc back | ↑↓ select | Enter open
+reasoning-chip-explicit | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+reasoning-chip-provider-default | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+reasoning-chip-advertised | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+reasoning-chip-unavailable | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+thinking-controls | ←→ change | Enter preview | Esc back
+command-palette | ↑↓ select | Enter insert | Tab complete | Esc keep editing
+command-palette-groups | ↑↓ select | Enter insert | Tab complete | Esc keep editing
+command-palette-query | ↑↓ select | Enter insert | Tab complete | Esc keep editing
+command-palette-exact | ↑↓ select | Enter send | Esc keep editing
+command-palette-inserted | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+login-argument-choices | ↑↓ select | Enter insert | Tab complete | Esc keep editing
+help-palette-actions | ↑↓ select | Enter show keys | Esc restore
+help-palette-disabled | ↑↓ select | Enter show keys | Esc restore
+help-palette-guidance | Esc back
+help-palette-no-matches | Esc restore
+thai-composer | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+draft-restored | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+draft-not-saved | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+streaming-answer | Esc stop | Shift+Tab change mode | Ctrl+F find
+running-search | ↑↓ previous/next | Enter keep | Esc restore | Ctrl+End latest
+running-empty | Esc stop | Shift+Tab change mode | Ctrl+F find
+running-draft | Esc stop | Shift+Tab change mode | Ctrl+F find
+parallel-tools | Esc stop | Shift+Tab change mode | Ctrl+F find
+completed-turn | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+shell-long-failure | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+shell-long-failure-expanded | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+shell-outcomes | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+web-fetch-rows | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+web-search-line | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+large-edit | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+stopped-streaming | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+stopped-tool | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+failed-turn | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
+details-notice | PgUp/PgDn scroll | Esc back
+details-recovery | Ctrl+R continue | F2 details | Esc keep editing | Esc back | Alt+R review | PgUp/PgDn scroll
+details-unavailable | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+retry-countdown | Esc stop | Shift+Tab change mode | Ctrl+F find
+retry-rate-limit | Esc stop | Shift+Tab change mode | Ctrl+F find
+retry-network | Esc stop | Shift+Tab change mode | Ctrl+F find
+review-panel | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+details-review | PgUp/PgDn scroll | F2 files | Esc back
+review-multi-turn | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+review-staged-unstaged | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+resumed-review | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+resumed-review-details | PgUp/PgDn scroll | F2 files | Esc back
+resumed-review-clean | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+resumed-review-no-git | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+resumed-review-off | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+resumed-review-unavailable | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+resumed-review-git-failed | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+undo-preview | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc cancel
+undo-preview-no-git | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc cancel
+undo-shell-only | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc back
+undo-shell-only-review | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
+undo-older-target | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc cancel
+undo-detection-unavailable | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+history-list | ↑↓ select | Enter open | F2 details | Esc back
+history-detail | ↑↓ files | Enter current diff | F2 details | Esc back
+history-stopped-turn | ↑↓ files | Enter current diff | F2 details | Esc back
+history-undo-note | ↑↓ files | Enter current diff | F2 details | Esc back
+history-missing-evidence | ↑↓ select | Enter open | F2 details | Esc back
+history-truncation | ↑↓ files | Enter current diff | F2 details | Esc back
+history-timing | PgUp/PgDn scroll | F2 details | Esc back
+history-timing-cache-unreported | PgUp/PgDn scroll | F2 details | Esc back
+history-timing-partial | PgUp/PgDn scroll | F2 details | Esc back
+history-timing-details | PgUp/PgDn scroll | F2 back | Esc back
+history-reasoning | PgUp/PgDn scroll | F2 details | Esc back
+history-reasoning-details | PgUp/PgDn scroll | F2 back | Esc back
+history-reasoning-legacy | PgUp/PgDn scroll | F2 details | Esc back
+delete-session-busy | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+session-picker | ↑↓ select | Enter resume | Ctrl+W scope | Esc back
+session-picker-resume-failed | ↑↓ choose another | F2 details | Esc back
+session-picker-empty | Ctrl+W other workspaces | Esc back
+session-picker-no-matches | Esc back
+branch-tree-continue | ↑↓ preview | Enter continue | Tab new fork | Esc back
+branch-tree-fork | ↑↓ preview | Enter fork | Tab existing | Esc back
+recent-work-resume | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
+compaction | Esc stop | Shift+Tab change mode | Ctrl+F find
+compaction-completed | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+compaction-cancelled | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+compaction-failed | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+compaction-noop | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+no-color | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find | Alt+I inspect | Ctrl+O tools | / commands
+narrow-layout | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+table-and-code | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+inspection-unfocused | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+inspection-code | ↑↓ move | R read | C copy | Esc back
+inspection-tool | ↑↓ move | Enter toggle | C copy | Esc back
+reader-code | Esc back | ↑↓ scroll | ←→ pan | W wrap | C copy | Ctrl+F find
+reader-code-wrapped | Esc back | ↑↓ scroll | W unwrap | C copy | Ctrl+F find
+reader-table | Esc back | ↑↓ scroll | ←→ columns | C copy | Ctrl+F find
+reader-no-matches | Esc restore
+reader-approval | Ctrl+C cancel turn | Esc back to request | ↑↓ scroll | ←→ pan | W wrap | C copy | Ctrl+F find
