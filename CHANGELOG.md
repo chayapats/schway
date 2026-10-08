@@ -14,6 +14,13 @@
 
 ### Added
 
+- `chatgpt` names the ChatGPT subscription route wherever you type it:
+  `--openai-auth chatgpt`, `/login chatgpt [--device] [--code …]`,
+  `/logout chatgpt`, `"openaiAuth": "chatgpt"` and `/config set openaiAuth
+  chatgpt`. Help, usage and recovery text now say `chatgpt`. `codex` stays
+  accepted everywhere with the same behavior. Schway still resolves and saves
+  the value as `codex`, and machine output (`route`, `authRoute`, doctor JSON)
+  keeps `codex` (#314).
 - xAI requests, on both the API-key and Grok subscription routes, send a
   `prompt_cache_key` so a conversation's requests reach the server that holds
   its cached prompt prefix. The key is derived from the session and selected

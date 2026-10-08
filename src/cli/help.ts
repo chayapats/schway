@@ -1,6 +1,6 @@
 import {
   CLI_AUTH_MODES,
-  CLI_OPENAI_AUTH_MODES,
+  CLI_OPENAI_AUTH_CHOICES,
   CLI_PROVIDERS,
   CLI_THINKING_LEVELS,
   CLI_XAI_AUTH_MODES,
@@ -31,7 +31,7 @@ export const CLI_OPTIONS: readonly Option[] = [
   { flags: ["--model"], value: "<id>", section: "Model and auth", description: "Choose a model", doctor: true, doctorDescription: "Use this model for local checks", sample: "example-model" },
   { flags: ["--profile"], value: "<name>", section: "Model and auth", description: "Use a named compatible endpoint profile", doctor: true, sample: "local" },
   { flags: ["--thinking"], value: "<level>", section: "Model and auth", description: `Use ${CLI_THINKING_LEVELS.join(",")}`, doctor: true, sample: "low" },
-  { flags: ["--openai-auth"], value: "<mode>", section: "Model and auth", description: `Use ${CLI_OPENAI_AUTH_MODES.join(", ")}`, doctor: true, sample: "auto" },
+  { flags: ["--openai-auth"], value: "<mode>", section: "Model and auth", description: `Use ${CLI_OPENAI_AUTH_CHOICES.join(", ")}`, doctor: true, sample: "auto" },
   { flags: ["--xai-auth"], value: "<mode>", section: "Model and auth", description: `Use ${CLI_XAI_AUTH_MODES.join(", ")}`, doctor: true, sample: "auto" },
   { flags: ["--api-key"], value: "<key>", section: "Model and auth", description: "Use an API key for this run only", doctor: true, sample: "example-key" },
   { flags: ["--resume"], value: "<session-id>", section: "Sessions", description: "Continue a saved session", doctor: false, sample: "example-session" },

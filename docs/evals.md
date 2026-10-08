@@ -55,7 +55,7 @@ Artifact fields: `runId`, `case` (id/version), `sourceRevision` (harness Git HEA
 
 ## Subscription routes
 
-Sign in first in interactive Schway with `/login codex` for ChatGPT or `/login grok` for Grok. Evals use only Schway's stored sign-in; they never launch login, read another CLI's credential cache, or fall back to API keys.
+Sign in first in interactive Schway with `/login chatgpt` for ChatGPT or `/login grok` for Grok. Evals use only Schway's stored sign-in; they never launch login, read another CLI's credential cache, or fall back to API keys.
 
 ```sh
 bun run eval --provider codex --model gpt-6-astra --allow-paid --case all

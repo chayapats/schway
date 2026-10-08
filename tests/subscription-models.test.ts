@@ -395,7 +395,7 @@ test("local /skills works without subscription credentials or catalog access", a
       fetch: async () => { contacted++; throw Error("local command must not call provider"); },
     });
     expect(code).toBe(0);
-    expect(stderr.join("")).not.toContain("/login codex");
+    expect(stderr.join("")).not.toContain("/login chatgpt");
     expect(stdout.join("")).toContain("skill");
     expect(contacted).toBe(0);
   });
@@ -457,7 +457,7 @@ test("catalog rejects absent auth, malformed/oversized responses and status erro
   const store = fakeCredentialStore();
   let contacted = 0;
   const fetch = async () => { contacted++; return Response.json(catalog); };
-  await expect(fetchSubscriptionModels({ store, fetch })).rejects.toThrow("/login codex");
+  await expect(fetchSubscriptionModels({ store, fetch })).rejects.toThrow("/login chatgpt");
   expect(contacted).toBe(0);
   await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "subscription-secret", expiresAt: Date.now() + 600_000 }));
   for (const response of [

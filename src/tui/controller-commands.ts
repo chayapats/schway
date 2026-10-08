@@ -90,7 +90,7 @@ export abstract class CommandsLayer extends CredentialsLayer {
       const name = match[1]!;
       if (commands.some(entry => entry.name === name && !entry.available)) return commands.filter(entry => entry.name === name);
       const applicable = this.thinkingSelection().choices;
-      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "xai", "openai-compatible", "codex", "grok"];
+      const values = name === "thinking" ? ["reset", ...applicable] : name === "theme" ? ["auto", "dark", "light"] : ["openai", "xai", "openai-compatible", "chatgpt", "grok"];
       return values.filter(value => value.startsWith(match[2]!)).map(value => ({ id: `${name}:${value}`, name: `${name} ${value}`, insertion: `/${name} ${value}`, source: "argument", description: name === "thinking" && value === "reset" ? "Inherit configured default" : value, available: true }));
     }
     if (!/^\/[^\s]*$/.test(input)) return [];

@@ -105,7 +105,7 @@ to the input editor. Ctrl+C cancels when running and quits when idle. Quitting
 restores the terminal and releases resources. Resume rebuilds history from the
 saved JSONL without replaying old tool effects. Missing credentials and runtime failures appear as actionable errors. Interactive
 `/login` and `/logout` manage API keys and ChatGPT subscription credentials. Successful
-`/login codex` selects the subscription and an available model for this session without
+`/login chatgpt` selects the subscription and an available model for this session without
 editing saved preferences. `/model` fetches that account's model and thinking capabilities
 instead of showing static OpenAI guesses, and `/thinking` shows the model's default and supported levels;
 see [credentials](credentials.md) and

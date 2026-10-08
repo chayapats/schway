@@ -334,37 +334,37 @@ Choose the credential explicitly so billing never changes silently:
 ```json
 {
   "provider": "openai",
-  "openaiAuth": "codex"
+  "openaiAuth": "chatgpt"
 }
 ```
 
-- `openaiAuth: "codex"` uses the stored subscription login only. Missing, expired, revoked, or refresh-failed sessions fail with distinct actionable errors and never fall back to paid API-key billing.
+- `openaiAuth: "chatgpt"` uses the stored subscription login only. Missing, expired, revoked, or refresh-failed sessions fail with distinct actionable errors and never fall back to paid API-key billing.
 - `openaiAuth: "api-key"` uses only `--api-key`, `OPENAI_API_KEY`, or the stored native OpenAI key, and never touches the subscription.
 - `openaiAuth: "auto"` (default) prefers an explicit/runtime or environment API key when one is set, otherwise uses a stored subscription login. Headless runs never start a browser automatically.
 
-This preference is independent of compatible-endpoint `auth` (`required`/`optional`/`none`). Set it with config `"openaiAuth": "codex"`, CLI `--openai-auth codex`, or live with `/config set openaiAuth codex` (session only by default); `/config` shows its value and origin with tokens redacted.
+This preference is independent of compatible-endpoint `auth` (`required`/`optional`/`none`). Set it with config `"openaiAuth": "chatgpt"`, CLI `--openai-auth chatgpt`, or live with `/config set openaiAuth chatgpt` (session only by default); `/config` shows its value and origin with tokens redacted. `codex` is an accepted alias for `chatgpt` in config, flags and `/login`/`/logout`. Schway saves the value as `codex` so older builds can read the file, and `/config` shows `codex`; a hand-written `"chatgpt"` changes to `"codex"` only when Schway next rewrites that file.
 
 Sign in interactively (never paste secrets after the slash command):
 
 ```text
-/login codex
-/login codex --device
-/login codex --code <callback-url-or-authorization-code>
-/logout codex
+/login chatgpt
+/login chatgpt --device
+/login chatgpt --code <callback-url-or-authorization-code>
+/logout chatgpt
 ```
 
-After a successful explicit `/login codex`, Schway discovers this account's visible Codex models and activates the subscription transport and an available model for the current session. It keeps the current model if still visible; otherwise it selects the first advertised visible model. Previous provider/settings remain active if OAuth itself fails or is cancelled. After a successful re-login that replaces subscription credentials, a previous Codex adapter is blocked until the new account's catalog and model activate; this prevents an old model from silently using the new account. Other active providers remain usable if discovery fails. Retry `/model` without repeating OAuth. Saved provider/auth preferences are never overwritten; use `/model` to browse this account's models or `/thinking` to see this model's default and supported levels. Headless Codex runs also discover visible model capabilities before inference: when no available model was selected, Schway uses the first advertised model for that run without editing config; an explicit unavailable `--model` fails instead of silently substituting another ID. `--thinking` is validated against that account's advertised levels before a request. The picker calls `GET https://chatgpt.com/backend-api/codex/models?client_version=0.156.1` using only Schway's stored subscription identity. The query uses a Codex client compatibility version rather than the Schway package version. Update the pinned version only after verifying the model catalog and selected-model transport against that Codex protocol version. The endpoint and `models[].slug` / `visibility` response follow the official open-source [Codex models client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) and [Codex model protocol](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs). Only `visibility: list` entries are shown; errors do not disclose provider payloads or silently switch billing.
+After a successful explicit `/login chatgpt`, Schway discovers this account's visible Codex models and activates the subscription transport and an available model for the current session. It keeps the current model if still visible; otherwise it selects the first advertised visible model. Previous provider/settings remain active if OAuth itself fails or is cancelled. After a successful re-login that replaces subscription credentials, a previous Codex adapter is blocked until the new account's catalog and model activate; this prevents an old model from silently using the new account. Other active providers remain usable if discovery fails. Retry `/model` without repeating OAuth. Saved provider/auth preferences are never overwritten; use `/model` to browse this account's models or `/thinking` to see this model's default and supported levels. Headless Codex runs also discover visible model capabilities before inference: when no available model was selected, Schway uses the first advertised model for that run without editing config; an explicit unavailable `--model` fails instead of silently substituting another ID. `--thinking` is validated against that account's advertised levels before a request. The picker calls `GET https://chatgpt.com/backend-api/codex/models?client_version=0.156.1` using only Schway's stored subscription identity. The query uses a Codex client compatibility version rather than the Schway package version. Update the pinned version only after verifying the model catalog and selected-model transport against that Codex protocol version. The endpoint and `models[].slug` / `visibility` response follow the official open-source [Codex models client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) and [Codex model protocol](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs). Only `visibility: list` entries are shown; errors do not disclose provider payloads or silently switch billing.
 
-`/login codex` opens the provider browser flow with a localhost callback and per-attempt PKCE/state; denial, expiry, timeout, and Esc cancellation settle without leaked listeners. On machines where the browser cannot reach the loopback callback, `/login codex --device` prints a user code to approve at `https://auth.openai.com/codex/device` (beta, 900 s timeout), and `--code` exchanges a manually pasted redirect URL or code. Tokens (short-lived access plus `offline_access` refresh) live only at the subscription secure-store identity with serialized pre-expiry refresh; `/logout codex` removes exactly that identity. Resume rebuilds the native conversation under the currently selected auth identity without replaying tools, and prior provider metadata round-trips across auth switches.
+`/login chatgpt` opens the provider browser flow with a localhost callback and per-attempt PKCE/state; denial, expiry, timeout, and Esc cancellation settle without leaked listeners. On machines where the browser cannot reach the loopback callback, `/login chatgpt --device` prints a user code to approve at `https://auth.openai.com/codex/device` (beta, 900 s timeout), and `--code` exchanges a manually pasted redirect URL or code. Tokens (short-lived access plus `offline_access` refresh) live only at the subscription secure-store identity with serialized pre-expiry refresh; `/logout chatgpt` removes exactly that identity. Resume rebuilds the native conversation under the currently selected auth identity without replaying tools, and prior provider metadata round-trips across auth switches.
 
-The login survives restarts, but the provider selected by `/login codex` applies only to the current session. To use the saved subscription by default on future launches, save both settings once:
+The login survives restarts, but the provider selected by `/login chatgpt` applies only to the current session. To use the saved subscription by default on future launches, save both settings once:
 
 ```text
 /config set provider openai --scope user
-/config set openaiAuth codex --scope user
+/config set openaiAuth chatgpt --scope user
 ```
 
-Without a saved provider preference, Schway starts with its built-in OpenAI provider, where automatic auth uses a stored Codex login when no API key is supplied. You can also use `schway --provider openai --openai-auth codex` without repeating login. Project settings and CLI flags still override user settings.
+Without a saved provider preference, Schway starts with its built-in OpenAI provider, where automatic auth uses a stored Codex login when no API key is supplied. You can also use `schway --provider openai --openai-auth chatgpt` without repeating login. Project settings and CLI flags still override user settings.
 
 `/model` checks configured credentials whenever it opens. It starts with the current choice, favorites and recents on connected routes. Search and Browse all models expose the complete connected catalog; Connect a provider reveals other routes. Subscription/API labels describe configured access, not proof that a remote service will accept a request. In automatic auth mode, a saved Codex login exposes that account's models even when the session started with another provider. Selecting one activates Codex for the session. Explicit API-key preferences and runtime/environment key precedence remain in effect.
 

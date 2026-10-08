@@ -6,6 +6,7 @@ import { configDiagnostic, configDiagnosticSecrets, configReadError, safeConfigS
 import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
+import { canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
 import {
   type ModelCapability,
   lookupModel,
@@ -318,6 +319,8 @@ export function parseConfigObject(
   catch (error) { return configReadError([configDiagnostic(diagnosticSource, error instanceof ConfigDeprecationError ? error.field : "", "type", "Use a JSON object")]); }
   value = migrated.value;
   const record = migrated.value;
+  // `chatgpt` is an input alias for the ChatGPT subscription route; resolved settings only see `codex`.
+  if (Object.hasOwn(record, "openaiAuth")) record.openaiAuth = canonicalOpenAIAuth(record.openaiAuth);
   for (const entry of deprecations) {
     if (entry.replacement) continue;
     const parts = entry.key.split(".");

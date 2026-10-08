@@ -82,7 +82,7 @@ Only reviewed summaries belong in a new top section of
 ## 3. Live verification on the release commit
 
 - [ ] Check out `R`; `git status --porcelain` prints nothing.
-- [ ] ChatGPT is signed in through `/login codex`; Grok through
+- [ ] ChatGPT is signed in through `/login chatgpt`; Grok through
   `/login grok` or `/login grok --device`. Export `OPENAI_API_KEY` and
   `XAI_API_KEY`. Configure `COMPAT_URL` and `COMPAT_MODEL`, with
   `OPENAI_COMPATIBLE_API_KEY` for a remote compatible endpoint. Loopback

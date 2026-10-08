@@ -2,6 +2,7 @@ import { configDiagnostic, configDiagnosticSecrets, configReadError, safeConfigS
 import { CONFIG_DEPRECATIONS, type ConfigDeprecation, type ConfigDeprecationWarning } from "./deprecations.ts";
 import { InteractiveMemory, type InteractiveChoice } from "./interactive-memory.ts";
 import { effectiveInteractiveMemory, resolveApprovalSettings, BUILTIN_DEFAULTS, CONFIG_SETTING_NAMES, isValidProfileName, mergeConfigLayers, mergeProfileMaps, parseConfigObject, profileToLayer, projectConfigPath, readConfigFile, readConfigLayers, resolveSettings, userConfigPath, type CompatibleProfile, type ConfigLayer, type ResolvedSettings } from "./config.ts";
+import { canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
 import { isValidProfileBaseUrl } from "./profile-name.ts";
 import { getThinkingSupport, type ModelCapability } from "../model/catalog.ts";
 import { mkdir, open, readFile, rm } from "node:fs/promises";
@@ -439,6 +440,8 @@ export class ConfigEditor {
           else saved[edit.key] = this.configDeprecations.some(entry => entry.key === edit.key || entry.key.startsWith(`${edit.key}.`))
             ? layer[edit.key] : parsed[edit.key as keyof ConfigLayer];
         }
+        // Rewritten files store the canonical route so older builds can still read a hand-written `chatgpt`.
+        if (Object.hasOwn(saved, "openaiAuth")) saved.openaiAuth = canonicalOpenAIAuth(saved.openaiAuth);
         if (path && !(before === undefined && Object.keys(parsed).length === 0)) await atomicWrite(path, saved, before, signal);
         else signal?.throwIfAborted();
         this.layers = layers;

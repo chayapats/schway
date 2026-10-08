@@ -394,7 +394,7 @@ test("selecting OpenAI without OPENAI_API_KEY fails even when a compatible key i
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toContain("Missing OpenAI API key");
-  expect(result.stderr).toContain("/login codex");
+  expect(result.stderr).toContain("/login chatgpt");
 });
 
 test("selecting OpenAI uses OPENAI_API_KEY and records the provider", async () => {
@@ -1519,5 +1519,20 @@ test("headless deprecation warning stays on stderr once across OpenAI config rel
     expect(stdout.text).not.toContain("deprecated");
     const events = stdout.text.trim().split("\n").map(line => JSON.parse(line));
     expect(events.some(event => event.type === "agent.finished")).toBe(true);
+  });
+});
+
+test("--openai-auth chatgpt selects the codex route and machine output still names codex", async () => {
+  await withTempDir(async home => {
+    for (const route of ["chatgpt", "codex"]) {
+      const json = await run(["models", "list", "--provider", "openai", `--openai-auth=${route}`, "--offline", "--json"], { cwd: home, env: { HOME: home }, credentialStore: fakeCredentialStore() });
+      expect(json.exitCode, json.stderr).toBe(0);
+      expect(JSON.parse(json.stdout)).toMatchObject({ provider: "openai", route: "codex", source: "builtin" });
+      const text = await run(["models", "list", "--provider", "openai", "--openai-auth", route, "--offline"], { cwd: home, env: { HOME: home }, credentialStore: fakeCredentialStore() });
+      expect(text.stdout.split("\n")[0]).toStartWith("Models · openai · codex · builtin");
+      const missing = await run(["-p", "hello", "--provider", "openai", "--openai-auth", route, "--model", "gpt-5.4"], { cwd: home, env: { HOME: home, OPENAI_API_KEY: "sk-unused" }, credentialStore: fakeCredentialStore() });
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stderr).toContain("No ChatGPT subscription login found. Sign in in interactive mode with /login chatgpt (or /login chatgpt --device on headless machines).");
+    }
   });
 });

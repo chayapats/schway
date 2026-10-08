@@ -49,7 +49,7 @@ List models for one connection without sending a prompt.
 Options:
   --provider <name>       openai, xai or openai-compatible
   --profile <name>        Select a saved compatible profile
-  --openai-auth <route>   auto, codex or api-key
+  --openai-auth <route>   auto, chatgpt or api-key
   --xai-auth <route>      auto, grok or api-key
   --base-url <url>        Compatible endpoint base URL
   --auth <mode>           Compatible auth: required, optional or none

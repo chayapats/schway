@@ -83,7 +83,7 @@ test("schway -p --provider openai without credentials fails headlessly", async (
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Missing OpenAI API key");
-    expect(result.stderr).toContain("/login codex");
+    expect(result.stderr).toContain("/login chatgpt");
     expect(result.stdout).toBe("");
     await assertIsolatedCliClean(dirs);
   });

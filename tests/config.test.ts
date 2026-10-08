@@ -637,3 +637,23 @@ test("retired nested settings cannot hide unknown siblings or malformed replacem
   expect(parseConfigObject({ retired: { toggle: true, typo: true } }, "/config.json", table)).toMatchObject({ error: expect.stringContaining('<unknown setting>') });
   expect(parseConfigObject({ oldSplash: "never", ui: false }, "/config.json", [{ key: "oldSplash", replacement: "ui.splash", since: "1.1.0", removeIn: "2.0" }])).toMatchObject({ error: "Invalid config at /config.json: Invalid ui · Use a JSON object" });
 });
+
+test("openaiAuth chatgpt in user and project files loads as codex, and codex files load unchanged", async () => {
+  for (const [scope, spelling] of [["user", "chatgpt"], ["project", "ChatGPT"], ["user", "codex"], ["project", "codex"]] as const) {
+    await withTempDir(async root => {
+      const home = join(root, "home"), workspaceRoot = join(root, "work");
+      await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(join(workspaceRoot, ".schway"), { recursive: true });
+      const path = scope === "user" ? userConfigPath(home) : projectConfigPath(workspaceRoot);
+      const text = JSON.stringify({ provider: "openai", openaiAuth: spelling });
+      await writeFile(path, text);
+      expect(await readConfigFile(path)).toEqual({ provider: "openai", openaiAuth: "codex" });
+      const resolved = await loadResolvedSettings({ home, workspaceRoot });
+      expect(resolved).toMatchObject({ provider: "openai", openaiAuth: "codex" });
+      expect(await readFile(path, "utf8")).toBe(text);
+    });
+  }
+  const input = { openaiAuth: "chatgpt" };
+  expect(parseConfigObject(input, "session")).toEqual({ openaiAuth: "codex" });
+  expect(input).toEqual({ openaiAuth: "chatgpt" });
+  expect(parseConfigObject({ openaiAuth: "chat-gpt" }, "session")).toHaveProperty("error");
+});
