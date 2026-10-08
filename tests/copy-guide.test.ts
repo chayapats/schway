@@ -119,6 +119,8 @@ const HINT_EXEMPTIONS: readonly HintExemption[] = [
   { screen: "help-palette-actions", rule: "R2", pattern: /^\s*(?:›\s+)?Alt\+R(?:\s{2,}Review changes| · Inspect changed files)/, reason: "Keyboard listing and its description row: the shortcut beside its label." },
   ...["command-palette", "command-palette-exact", "command-palette-query"].map(screen => ({ screen, rule: "R2" as const, pattern: /^\s*(?:›\s+)?\/[a-z][\w-]*\s{2,}[A-Z]/,
     reason: "Command listing: the name column beside its description, not a hint segment." })),
+  { screen: "login-argument-choices", rule: "R2", pattern: /^\s*(?:›\s+)?\/login [\w-]+…?\s+[\w-]+$/,
+    reason: "Argument completion listing: the completed command column beside the value it inserts, not a hint segment." },
   { screen: "help-palette-guidance", rule: "R3", pattern: /^\s*Enter copies code and tables/, reason: "Guidance prose describes what Enter does; it is not a hint segment." },
   { screen: "help-palette-guidance", rule: "R6", pattern: /then C$|block\. Enter$/, reason: "Guidance prose wraps as a sentence; its keys are not hint segments." },
   { screen: "resumed-review-details", rule: "R6", pattern: /when Ctrl\+R$|or Ctrl\+R$/, reason: "Details prose says when Ctrl+R reloads; it is not a hint segment." },
