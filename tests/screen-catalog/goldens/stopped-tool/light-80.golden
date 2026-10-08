@@ -14,7 +14,7 @@ cursor 13 27 visible
    ✓  WRITE  saved.txt                                         new · 1 line
      1 │+Completed work ไทย 🧪
 
-   −  BASH  printf 'Ready to stop\n'; sleep 30                   Stopped ▸
+   −  BASH   printf 'Ready to stop\n'; sleep 30                  Stopped ▸
      Tool call cancelled
 
   Stopped · Completed results kept
@@ -78,9 +78,9 @@ cursor 13 27 visible
 08 2-3 #0a5894 #e1e3df -
 08 3-4 #545e6c #e1e3df b
 08 4-5 #1d232c #e1e3df -
-08 5-11 #6a3fb0 #d3cfd9 b
-08 11-46 #1d232c #e1e3df -
-08 46-75 #545e6c #e1e3df -
+08 5-12 #6a3fb0 #d3cfd9 b
+08 12-47 #1d232c #e1e3df -
+08 47-75 #545e6c #e1e3df -
 08 75-77 #ffffff #e1e3df -
 08 77-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -

@@ -147,11 +147,13 @@ export function sessionPanelLines(picker: SessionPickerState, options: {
   const start = Math.max(0, picker.selectedIndex - visibleRows + 1);
   picker.entries.slice(start, start + visibleRows).forEach((entry, index) => {
     const selected = start + index === picker.selectedIndex;
-    const prefix = `${selected ? "›" : " "} ${entry.id === options.currentSessionId ? "● current · " : ""}`;
+    // The 2-cell marker slot stays outside fitLine so selected and unselected titles share one column.
+    const marker = `${selected ? "›" : " "} `;
+    const prefix = `${marker}${entry.id === options.currentSessionId ? "● current · " : ""}`;
     const suffix = ` · ${relativeActivityLabel(entry.activityAt, options.now)}`;
     const room = columns - Bun.stringWidth(prefix) - Bun.stringWidth(suffix);
     // Keep the activity visible by clipping the title first; very narrow rows fall back to clipping the whole line.
-    const text = room >= 6 ? `${prefix}${fitLine(entry.title, room)}${suffix}` : fitLine(`${prefix}${entry.title}${suffix}`, columns);
+    const text = room >= 6 ? `${prefix}${fitLine(entry.title, room)}${suffix}` : `${marker}${fitLine(`${prefix.slice(marker.length)}${entry.title}${suffix}`, columns - 2)}`;
     lines.push({ text, tone: selected ? "accent" : "text", selected });
   });
   const selected = picker.entries[picker.selectedIndex];

@@ -8,7 +8,7 @@ cursor 7 27 visible
 == text
  ⚡ schway  /project
 
-   !  BASH  printf '%s\n' 'ตรวจผลลัพธ์ภาษาไทย 🧪 café ตรวจผลลัพธ์ภาษาไทย 🧪 café ตรวจผลลัพธ์ภาษาไทย 🧪 café ตร… Exit 1 ▾
+   !  BASH   printf '%s\n' 'ตรวจผลลัพธ์ภาษาไทย 🧪 café ตรวจผลลัพธ์ภาษาไทย 🧪 café ตรวจผลลัพธ์ภาษาไทย 🧪 café ต… Exit 1 ▾
      Exit code: 1
      ตรวจผลลัพธ์ภาษาไทย 🧪
      The command returned a nonzero exit.
@@ -48,8 +48,8 @@ cursor 7 27 visible
 02 2-3 #0a5894 #e1e3df -
 02 3-4 #7a5000 #e1e3df b
 02 4-5 #1d232c #e1e3df -
-02 5-11 #6a3fb0 #d3cfd9 b
-02 11-105 #1d232c #e1e3df -
+02 5-12 #6a3fb0 #d3cfd9 b
+02 12-105 #1d232c #e1e3df -
 02 105-106 #545e6c #e1e3df -
 02 106-112 #7a5000 #e1e3df -
 02 112-115 #545e6c #e1e3df -

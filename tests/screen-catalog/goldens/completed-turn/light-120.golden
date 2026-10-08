@@ -11,13 +11,13 @@ cursor 7 27 visible
   ▌ You
   ▌ Fix the clamp upper bound
 
-   ✓  READ  clamp.ts                                                                                     3 lines ▸
-   ✓  EDIT  clamp.ts                                                                                          +1 −1
+   ✓  READ   clamp.ts                                                                                    3 lines ▸
+   ✓  EDIT   clamp.ts                                                                                         +1 −1
      2 │-return Math.max(lo, n);
      2 │+return Math.min(hi, Math.max(lo, n));
 
    ✓  WRITE  src/util/range.ts                                                                    new · 42 lines ▸
-   ✓  BASH  printf 'ok\n'                                                                          Exit 0 · 1.2s ▸
+   ✓  BASH   printf 'ok\n'                                                                         Exit 0 · 1.2s ▸
 
   Fixed clamp so it respects the upper bound.
 
@@ -62,18 +62,18 @@ cursor 7 27 visible
 05 2-3 #0a5894 #e1e3df -
 05 3-4 #19612f #e1e3df b
 05 4-5 #1d232c #e1e3df -
-05 5-11 #0a5894 #c7d2d6 b
-05 11-20 #1d232c #e1e3df -
-05 20-115 #545e6c #e1e3df -
+05 5-12 #0a5894 #c7d2d6 b
+05 12-21 #1d232c #e1e3df -
+05 21-115 #545e6c #e1e3df -
 05 115-117 #ffffff #e1e3df -
 05 117-120 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
 06 2-3 #0a5894 #e1e3df -
 06 3-4 #19612f #e1e3df b
 06 4-5 #1d232c #e1e3df -
-06 5-11 #7a5000 #d5d1c4 b
-06 11-20 #1d232c #e1e3df -
-06 20-115 #545e6c #e1e3df -
+06 5-12 #7a5000 #d5d1c4 b
+06 12-21 #1d232c #e1e3df -
+06 21-115 #545e6c #e1e3df -
 06 115-117 #ffffff #e1e3df -
 06 117-120 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
@@ -102,9 +102,9 @@ cursor 7 27 visible
 11 2-3 #0a5894 #e1e3df -
 11 3-4 #19612f #e1e3df b
 11 4-5 #1d232c #e1e3df -
-11 5-11 #6a3fb0 #d3cfd9 b
-11 11-25 #1d232c #e1e3df -
-11 25-99 #545e6c #e1e3df -
+11 5-12 #6a3fb0 #d3cfd9 b
+11 12-26 #1d232c #e1e3df -
+11 26-99 #545e6c #e1e3df -
 11 99-112 #19612f #e1e3df -
 11 112-115 #545e6c #e1e3df -
 11 115-117 #ffffff #e1e3df -

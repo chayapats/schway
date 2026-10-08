@@ -25,7 +25,7 @@ cursor 1 1 hidden
    json                 Alt+I inspect
   {"next":true}
 
-  › ✓  READ  ผลลัพธ์ภาษาไทย 🧪      ▾
+ ›✓  READ   ผลลัพธ์ภาษาไทย 🧪       ▾
     ผลลัพธ์ภาษาไทย 🧪
     Second result line
 
@@ -111,12 +111,12 @@ cursor 1 1 hidden
 17 38-40 #ffffff #f7f7f4 -
 18 0-40 #ffffff #f7f7f4 -
 19 0-1 #ffffff #f7f7f4 -
-19 1-4 #0a5894 #c7d2d6 -
-19 4-5 #19612f #c7d2d6 b
-19 5-6 #1d232c #c7d2d6 -
-19 6-12 #0a5894 #c7d2d6 b
-19 12-28 #1d232c #c7d2d6 -
-19 28-36 #515a68 #c7d2d6 -
+19 1-2 #0a5894 #c7d2d6 -
+19 2-3 #19612f #c7d2d6 b
+19 3-4 #1d232c #c7d2d6 -
+19 4-11 #0a5894 #c7d2d6 b
+19 11-27 #1d232c #c7d2d6 -
+19 27-36 #515a68 #c7d2d6 -
 19 36-38 #ffffff #c7d2d6 -
 19 38-40 #ffffff #f7f7f4 -
 20 0-1 #ffffff #f7f7f4 -

@@ -11,13 +11,13 @@ cursor 7 27 visible
   ▌ You
   ▌ Fix the clamp upper bound
 
-   ✓  READ  clamp.ts                                             3 lines ▸
-   ✓  EDIT  clamp.ts                                                  +1 −1
+   ✓  READ   clamp.ts                                            3 lines ▸
+   ✓  EDIT   clamp.ts                                                 +1 −1
      2 │-return Math.max(lo, n);
      2 │+return Math.min(hi, Math.max(lo, n));
 
    ✓  WRITE  src/util/range.ts                            new · 42 lines ▸
-   ✓  BASH  printf 'ok\n'                                  Exit 0 · 1.2s ▸
+   ✓  BASH   printf 'ok\n'                                 Exit 0 · 1.2s ▸
 
   Fixed clamp so it respects the upper bound.
 
@@ -62,18 +62,18 @@ cursor 7 27 visible
 05 2-3 #e6eaf0 #1e2430 -
 05 3-4 #e6eaf0 #1e2430 b
 05 4-5 #e6eaf0 #1e2430 -
-05 5-11 #e6eaf0 #4a505a b
-05 11-20 #e6eaf0 #1e2430 -
-05 20-75 #8b95a7 #1e2430 -
+05 5-12 #e6eaf0 #4a505a b
+05 12-21 #e6eaf0 #1e2430 -
+05 21-75 #8b95a7 #1e2430 -
 05 75-77 #ffffff #1e2430 -
 05 77-80 #ffffff #0e1117 -
 06 0-2 #ffffff #0e1117 -
 06 2-3 #e6eaf0 #1e2430 -
 06 3-4 #e6eaf0 #1e2430 b
 06 4-5 #e6eaf0 #1e2430 -
-06 5-11 #e6eaf0 #4a505a b
-06 11-20 #e6eaf0 #1e2430 -
-06 20-75 #8b95a7 #1e2430 -
+06 5-12 #e6eaf0 #4a505a b
+06 12-21 #e6eaf0 #1e2430 -
+06 21-75 #8b95a7 #1e2430 -
 06 75-77 #ffffff #1e2430 -
 06 77-80 #ffffff #0e1117 -
 07 0-2 #ffffff #0e1117 -
@@ -102,9 +102,9 @@ cursor 7 27 visible
 11 2-3 #e6eaf0 #1e2430 -
 11 3-4 #e6eaf0 #1e2430 b
 11 4-5 #e6eaf0 #1e2430 -
-11 5-11 #e6eaf0 #4a505a b
-11 11-25 #e6eaf0 #1e2430 -
-11 25-59 #8b95a7 #1e2430 -
+11 5-12 #e6eaf0 #4a505a b
+11 12-26 #e6eaf0 #1e2430 -
+11 26-59 #8b95a7 #1e2430 -
 11 59-72 #e6eaf0 #1e2430 -
 11 72-75 #8b95a7 #1e2430 -
 11 75-77 #ffffff #1e2430 -

@@ -1421,7 +1421,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
               const suffix = ` · ${route}${marks ? " " + marks : ""}`;
               line = fitLine(label, Math.max(4, room - 2 - Bun.stringWidth(suffix))) + suffix;
             }
-            textRow(picker, fitLine(prefix + line, room), selected ? theme.accent : theme.text);
+            // The marker slot stays outside fitLine, whose whitespace collapsing would pull unselected rows one cell left.
+            textRow(picker, prefix + fitLine(line, Math.max(1, room - 2)), selected ? theme.accent : theme.text);
           });
           const selected = models.entries[models.selectedIndex];
           const detail = models.details && selected?.kind === "model"

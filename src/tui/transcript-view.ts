@@ -22,6 +22,8 @@ function toolColor(name: string | undefined, theme: TuiTheme): string {
 
 /** Blinking caret appended to a streaming answer outside fenced code. */
 const STREAM_CARET = "▍";
+/** Minimum tool kind label width inside its pill: `WRITE`, the widest built-in tool name. */
+const TOOL_KIND_MIN_WIDTH = 5;
 
 /** Clock and motion policy shared by animated transcript rows. */
 export interface TranscriptMotion { now(): number; mode: MotionMode }
@@ -412,11 +414,15 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         const inner = Math.max(8, width - 2);
         const color = toolColor(entry.toolName, theme);
         const pillBg = tint(theme, color);
-        const focus = focusedTool ? "› " : "";
-        const kind = ` ${fitLine((entry.toolName ?? "tool").toUpperCase(), Math.max(1, Math.min(12, inner - 10)))} `;
+        // Focus takes the row's leading cell, so the glyph, pill and target keep their columns.
+        const lead = focusedTool ? "›" : " ";
+        // Built-in kinds pad to WRITE's 5 cells so every target starts in one column; wider names keep the 12-cell cap.
+        const kindRoom = Math.max(1, Math.min(12, inner - 10));
+        const kindName = fitLine((entry.toolName ?? "tool").toUpperCase(), kindRoom);
+        const kind = ` ${kindName}${" ".repeat(Math.max(0, Math.min(TOOL_KIND_MIN_WIDTH, kindRoom) - Bun.stringWidth(kindName)))} `;
         const state = tool.state === "done" ? "" : tool.state === "running" ? "running…" : tool.state;
         const disclosure = inline ? "" : `${expanded ? "▾" : "▸"} `;
-        const fixed = Bun.stringWidth(` ${focus}● ${kind}`);
+        const fixed = Bun.stringWidth(`${lead}● ${kind}`);
         const fullTarget = tool.target ? ` ${fitLine(tool.target, Number.MAX_SAFE_INTEGER)}` : "";
         const candidate = entry.toolStatus === "success" ? displayText(entry.resultSummary ?? "") : "";
         const summary = entry.toolName === "bash" && state && candidate ? `${state} · ${candidate}` : candidate;
@@ -430,7 +436,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         paintLabel = () => {
           const glyph = status === "running" ? spinnerFrame(motion.now(), motion.mode) : tool.marker;
           label.content = new StyledText([
-            fg(ink.accent)(` ${focus}`),
+            fg(ink.accent)(lead),
             bold(fg(ink[tool.tone])(glyph)),
             fg(ink.text)(" "),
             bold(bg(pillBg)(fg(color)(kind))),

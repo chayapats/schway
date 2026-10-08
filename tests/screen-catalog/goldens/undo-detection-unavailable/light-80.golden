@@ -11,7 +11,7 @@ cursor 7 27 visible
   ▌ You
   ▌ Generate the output
 
-   ✓  BASH  mkdir -p gen; printf 'generated\n' > gen/out.json     Exit 0 ▸
+   ✓  BASH   mkdir -p gen; printf 'generated\n' > gen/out.json    Exit 0 ▸
 
   Generated the output file.
 
@@ -61,9 +61,9 @@ cursor 7 27 visible
 05 2-3 #0a5894 #e1e3df -
 05 3-4 #19612f #e1e3df b
 05 4-5 #1d232c #e1e3df -
-05 5-11 #6a3fb0 #d3cfd9 b
-05 11-61 #1d232c #e1e3df -
-05 61-66 #545e6c #e1e3df -
+05 5-12 #6a3fb0 #d3cfd9 b
+05 12-62 #1d232c #e1e3df -
+05 62-66 #545e6c #e1e3df -
 05 66-72 #19612f #e1e3df -
 05 72-75 #545e6c #e1e3df -
 05 75-77 #ffffff #e1e3df -

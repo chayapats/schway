@@ -11,9 +11,9 @@ cursor 6 27 visible
  ▌ You
  ▌ Update the clamp implementation
 
-  ✓  READ  clamp.ts                 3 lines ▸
-  ✓  EDIT  clamp.ts                  +13 −1 ▸
-  ✓  BASH  printf 'ok\n'      Exit 0 · 1.2s ▸
+  ✓  READ   clamp.ts                3 lines ▸
+  ✓  EDIT   clamp.ts                 +13 −1 ▸
+  ✓  BASH   printf 'ok\n'     Exit 0 · 1.2s ▸
 
  Updated the clamp implementation.
 
@@ -62,27 +62,27 @@ cursor 6 27 visible
 05 1-2 #7cc4ff #1e2430 -
 05 2-3 #8fd19e #1e2430 b
 05 3-4 #e6eaf0 #1e2430 -
-05 4-10 #7cc4ff #33475e b
-05 10-19 #e6eaf0 #1e2430 -
-05 19-46 #8b95a7 #1e2430 -
+05 4-11 #7cc4ff #33475e b
+05 11-20 #e6eaf0 #1e2430 -
+05 20-46 #8b95a7 #1e2430 -
 05 46-48 #ffffff #1e2430 -
 05 48-50 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
 06 1-2 #7cc4ff #1e2430 -
 06 2-3 #8fd19e #1e2430 b
 06 3-4 #e6eaf0 #1e2430 -
-06 4-10 #f0c674 #4c483f b
-06 10-19 #e6eaf0 #1e2430 -
-06 19-46 #8b95a7 #1e2430 -
+06 4-11 #f0c674 #4c483f b
+06 11-20 #e6eaf0 #1e2430 -
+06 20-46 #8b95a7 #1e2430 -
 06 46-48 #ffffff #1e2430 -
 06 48-50 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
 07 1-2 #7cc4ff #1e2430 -
 07 2-3 #8fd19e #1e2430 b
 07 3-4 #e6eaf0 #1e2430 -
-07 4-10 #c0acff #42425e b
-07 10-24 #e6eaf0 #1e2430 -
-07 24-30 #8b95a7 #1e2430 -
+07 4-11 #c0acff #42425e b
+07 11-25 #e6eaf0 #1e2430 -
+07 25-30 #8b95a7 #1e2430 -
 07 30-43 #8fd19e #1e2430 -
 07 43-46 #8b95a7 #1e2430 -
 07 46-48 #ffffff #1e2430 -

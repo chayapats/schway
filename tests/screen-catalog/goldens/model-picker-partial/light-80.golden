@@ -27,9 +27,9 @@ cursor 7 27 visible
 
    Choose model · Enter use · Esc back
    › GPT-6 Astra · ChatGPT subscription ✓
-    GPT-4o · API · localhost:8787
-    Browse all models
-    Connect a provider
+     GPT-4o · API · localhost:8787
+     Browse all models
+     Connect a provider
    Endpoint models unavailable · Ctrl+R retry · F2 details
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Search models or type provider/model…
@@ -76,18 +76,18 @@ cursor 7 27 visible
 20 78-80 #ffffff #f7f7f4 -
 21 0-2 #ffffff #f7f7f4 -
 21 2-3 #ffffff #e1e3df -
-21 3-33 #1d232c #e1e3df -
-21 33-78 #ffffff #e1e3df -
+21 3-34 #1d232c #e1e3df -
+21 34-78 #ffffff #e1e3df -
 21 78-80 #ffffff #f7f7f4 -
 22 0-2 #ffffff #f7f7f4 -
 22 2-3 #ffffff #e1e3df -
-22 3-21 #1d232c #e1e3df -
-22 21-78 #ffffff #e1e3df -
+22 3-22 #1d232c #e1e3df -
+22 22-78 #ffffff #e1e3df -
 22 78-80 #ffffff #f7f7f4 -
 23 0-2 #ffffff #f7f7f4 -
 23 2-3 #ffffff #e1e3df -
-23 3-22 #1d232c #e1e3df -
-23 22-78 #ffffff #e1e3df -
+23 3-23 #1d232c #e1e3df -
+23 23-78 #ffffff #e1e3df -
 23 78-80 #ffffff #f7f7f4 -
 24 0-2 #ffffff #f7f7f4 -
 24 2-3 #ffffff #e1e3df -

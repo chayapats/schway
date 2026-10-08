@@ -12,7 +12,7 @@ cursor 12 17 visible
   ✓  WRITE  saved.txt   new · 1 line
     1 │+Completed work ไทย 🧪
 
-  −  BASH  printf 'Ready… Stopped ▸
+  −  BASH   printf 'Read… Stopped ▸
     Tool call cancelled
 
  Stopped · Completed results kept
@@ -56,8 +56,8 @@ cursor 12 17 visible
 06 1-2 #0a5894 #e1e3df -
 06 2-3 #545e6c #e1e3df b
 06 3-4 #1d232c #e1e3df -
-06 4-10 #6a3fb0 #d3cfd9 b
-06 10-25 #1d232c #e1e3df -
+06 4-11 #6a3fb0 #d3cfd9 b
+06 11-25 #1d232c #e1e3df -
 06 25-36 #545e6c #e1e3df -
 06 36-38 #ffffff #e1e3df -
 06 38-40 #ffffff #f7f7f4 -
