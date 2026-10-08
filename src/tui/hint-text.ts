@@ -28,8 +28,8 @@ function hintUnits(segment: string): string[] {
 
 /**
  * Break hint text into rows of at most `columns` cells, only at ` · ` boundaries; the separator at a break is dropped.
- * A segment wider than a row wraps at spaces, never between a key and the word after it; prose that wide may start on
- * the row before it, but a key-led segment always starts a row. Leading indentation stays on the first row only, as a
+ * A segment wider than a row wraps at spaces, never between a key and the word after it, and may start on the row
+ * before it; a segment that fits a row always starts its own. Leading indentation stays on the first row only, as a
  * word-wrapping renderer would show it.
  */
 export function wrapHintSegments(text: string, columns: number): string[] {
@@ -40,8 +40,9 @@ export function wrapHintSegments(text: string, columns: number): string[] {
     const joined = row.trim() ? `${row} · ${segment}` : `${row}${segment}`;
     if (Bun.stringWidth(joined) <= columns) { row = joined; continue; }
     const units = hintUnits(segment);
-    const prose = !HINT_KEY.test(segment) && Bun.stringWidth(segment) > columns;
-    if (prose && row.trim() && Bun.stringWidth(`${row} · ${units[0]}`) <= columns) row = `${row} · ${units.shift()}`;
+    // A segment wider than any row may start beside the one before it; its first unit keeps a key with its verb.
+    const wide = Bun.stringWidth(segment) > columns;
+    if (wide && row.trim() && Bun.stringWidth(`${row} · ${units[0]}`) <= columns) row = `${row} · ${units.shift()}`;
     else if (row.trim()) { rows.push(row); row = ""; }
     for (const unit of units) {
       const next = row.trim() ? `${row} ${unit}` : `${row}${unit}`;
@@ -53,10 +54,16 @@ export function wrapHintSegments(text: string, columns: number): string[] {
   return rows;
 }
 
+/** True for the way out or the stop action (`Esc …`, `Ctrl+C …`), which outrank status decoration when room runs out. */
+function exitAction(segment: string): boolean {
+  return segment.startsWith("Esc") || segment.startsWith("Ctrl+C ");
+}
+
 /**
  * Fit hint text to `columns` without cutting inside a key-led segment. Status decoration after the first segment goes
- * first, then trailing key actions; an Esc action stays longest and outranks the first segment. A remaining lone
- * segment shortens at a word boundary with `…`, or becomes "" when not even its first word, or a key and its verb, fits.
+ * first, then trailing key actions; an Esc or Ctrl+C stop action stays longest and outranks the first segment. A
+ * remaining key-led segment stays whole or becomes ""; remaining status text shortens at a word boundary with `…`,
+ * or becomes "" when not even its first word fits.
  */
 export function fitHintSegments(text: string, columns: number): string {
   const width = (parts: readonly string[]) => Bun.stringWidth(parts.join(" · "));
@@ -67,12 +74,13 @@ export function fitHintSegments(text: string, columns: number): string {
     for (let index = segments.length - 1; index > 0 && width(segments) > columns; index--) if (removable(segments[index]!, index)) segments.splice(index, 1);
   };
   drop(segment => !keyed(segment));
-  drop(segment => !segment.startsWith("Esc"));
-  // The way out outranks the status it follows.
+  drop(segment => !exitAction(segment));
+  // The way out or stop action outranks the status it follows.
   const escape = segments.length > 1 ? segments.at(-1)! : "";
-  if (width(segments) > columns && escape.startsWith("Esc") && width([escape]) <= columns) return escape;
+  if (width(segments) > columns && exitAction(escape) && width([escape]) <= columns) return escape;
   drop(() => true);
   if (width(segments) <= columns) return segments.join(" · ");
+  if (keyed(segments[0]!)) return "";
   let fitted = "";
   for (const unit of hintUnits(segments[0]!)) {
     const next = fitted ? `${fitted} ${unit}` : unit;

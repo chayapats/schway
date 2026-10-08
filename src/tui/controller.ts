@@ -53,7 +53,7 @@ export class TuiController extends HistoryLayer {
               : undefined } : {}),
       ...(this.activity ? { activity: this.activitySnapshot() } : {}),
       transcript: this.transcript.flatMap(entry => context.summaryId && context.firstKeptId === entry.sessionRecordId
-        ? [{ id: `boundary-${context.summaryId}`, kind: "system" as const, text: "Active summary boundary · earlier rows remain history; recent model context starts below · /context" }, entry]
+        ? [{ id: `boundary-${context.summaryId}`, kind: "system" as const, text: "Active summary boundary · earlier rows remain history; recent model context starts below · /context inspect" }, entry]
         : [entry]).map((entry) =>
         this.secrets.length === 0
           ? entry

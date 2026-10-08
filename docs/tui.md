@@ -900,7 +900,7 @@ and the draft, cursor and transcript position return unchanged on Esc.
   same source line at the top. Line numbers are presentation only.
 - Tables show aligned columns with ` │ ` between cells. The header and its
   separator stay pinned when there is room, Left/Right step one column, and the
-  title reports `Columns 2–5 of 8`. The label `Aligned columns · C copies
+  title reports `Columns 2–5 of 8`. The label `Aligned columns · C copy
   Markdown source` marks that the copy keeps the original Markdown. Extra cells
   beyond the header stay visible; no column is hidden.
 - **C** copies the canonical source: exact sanitized code with its line

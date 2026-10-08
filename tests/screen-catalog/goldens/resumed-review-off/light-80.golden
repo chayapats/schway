@@ -11,10 +11,10 @@ cursor 1 1 hidden
   Review · current changes
 
   Current working tree │ Current diff
-    None listed        │ Change tracking is off
-                       │ /config set git {"changeTracking":"on-demand"}
-                       │ enable
+    None listed        │ Change tracking is off · /config set git
+                       │ {"changeTracking":"on-demand"} enable
                        │ No Git state was read. Esc back
+                       │
                        │
                        │
                        │
@@ -58,20 +58,19 @@ cursor 1 1 hidden
 05 2-15 #1d232c #f7f7f4 -
 05 15-22 #ffffff #f7f7f4 -
 05 22-25 #c5c9cf #f7f7f4 -
-05 25-47 #1d232c #f7f7f4 -
-05 47-80 #ffffff #f7f7f4 -
+05 25-65 #1d232c #f7f7f4 -
+05 65-80 #ffffff #f7f7f4 -
 06 0-22 #ffffff #f7f7f4 -
 06 22-25 #c5c9cf #f7f7f4 -
-06 25-71 #1d232c #f7f7f4 -
-06 71-80 #ffffff #f7f7f4 -
+06 25-62 #1d232c #f7f7f4 -
+06 62-80 #ffffff #f7f7f4 -
 07 0-22 #ffffff #f7f7f4 -
 07 22-25 #c5c9cf #f7f7f4 -
-07 25-31 #1d232c #f7f7f4 -
-07 31-80 #ffffff #f7f7f4 -
+07 25-56 #1d232c #f7f7f4 -
+07 56-80 #ffffff #f7f7f4 -
 08 0-22 #ffffff #f7f7f4 -
 08 22-25 #c5c9cf #f7f7f4 -
-08 25-56 #1d232c #f7f7f4 -
-08 56-80 #ffffff #f7f7f4 -
+08 25-80 #ffffff #f7f7f4 -
 09 0-22 #ffffff #f7f7f4 -
 09 22-25 #c5c9cf #f7f7f4 -
 09 25-80 #ffffff #f7f7f4 -

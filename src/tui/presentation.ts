@@ -11,7 +11,7 @@ export function outcomeLabel(outcome: TurnOutcome): string {
   return { completed: "✓ Done", failed: "✗ Failed", cancelled: "− Stopped", limit: "◌ Limit" }[outcome.reason];
 }
 
-/** Fit a turn summary by dropping elapsed, commands, then files before clipping; each action key appears only while `actions` says it acts, and F2 only for a failed turn. */
+/** Fit a turn summary by dropping elapsed, commands, then files, then whole action keys (never cutting one); each action key appears only while `actions` says it acts, and F2 only for a failed turn. */
 export function formatOutcomeLine(outcome: TurnOutcome, columns: number, actions: OutcomeStripActions = { review: true, details: true }): string {
   let elapsed = formatDuration(outcome.elapsedMs);
   const keys = [actions.review ? "Alt+R review" : "", outcome.reason === "failed" && actions.details ? "F2 details" : ""].filter(Boolean).join(" · ");
@@ -25,7 +25,7 @@ export function formatOutcomeLine(outcome: TurnOutcome, columns: number, actions
   if (Bun.stringWidth(line()) > columns) elapsed = "";
   if (Bun.stringWidth(line()) > columns) commands = "";
   if (Bun.stringWidth(line()) > columns) files = "";
-  return fitLine(line(), columns);
+  return fitActionLine(line(), columns);
 }
 
 /** Pair connection and operation states with semantic status-pill colors. */

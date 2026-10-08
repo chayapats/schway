@@ -448,8 +448,8 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
         const bodyWidth = Math.max(1, width - 4);
         if (body instanceof TextRenderable) body.wrapMode = isDiff ? "char" : "word";
         const paintBody = () => {
-          // Detail lines such as "HTTP 401 · application/json · 58 bytes" wrap at ` · ` instead of leaving a separator at a row end.
-          const lines = detail.split("\n").flatMap(line => !isDiff && line.includes(" · ") ? wrapHintSegments(line, bodyWidth) : [line]);
+          // web_fetch's own status line ("HTTP 401 · application/json · 58 bytes · <url>") wraps at ` · `; raw output keeps its text as written.
+          const lines = detail.split("\n").flatMap((line, index) => entry.toolName === "web_fetch" && index === 0 && line.includes(" · ") ? wrapHintSegments(line, bodyWidth) : [line]);
           body.content = linkify(lines.flatMap((line, index) => {
             const numbered = isDiff ? line.match(/^(\s*\d+ │)([+-])(.*)$/) : null;
             const sign = numbered?.[2] === "+" ? theme.success : numbered?.[2] === "-" ? theme.error : undefined;

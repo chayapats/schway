@@ -24,7 +24,7 @@ cursor 6 27 visible
 
  Active summary boundary · earlier rows remain
  history; recent model context starts below
- /context
+ /context inspect
 
  Context compacted · /context inspect summary
 
@@ -93,8 +93,8 @@ cursor 6 27 visible
 17 1-43 #8b95a7 #0e1117 -
 17 43-50 #ffffff #0e1117 -
 18 0-1 #ffffff #0e1117 -
-18 1-9 #8b95a7 #0e1117 -
-18 9-50 #ffffff #0e1117 -
+18 1-17 #8b95a7 #0e1117 -
+18 17-50 #ffffff #0e1117 -
 19 0-50 #ffffff #0e1117 -
 20 0-1 #ffffff #0e1117 -
 20 1-45 #8b95a7 #0e1117 -

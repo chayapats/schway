@@ -62,6 +62,9 @@ test("R1 skips slash-command segments, which R2, R5 and R6 still check", () => {
   passes(golden(["Resume saved work · Alt+B resume · /sessions browse", "/delete-session retry · F2 details", "Shift+Tab change mode · / commands"]));
   fails("R2", golden(["Undo store busy · /"]));
   fails("R2", golden(["/delete-session Delet…"]));
+  // A command name alone names no action.
+  expect(rules(golden(["Active summary boundary · earlier rows remain history · /context"]))).toEqual(["R2"]);
+  passes(golden(["Active summary boundary · earlier rows remain history · /context inspect"]));
   fails("R6", golden(["Cannot delete session: Undo store busy · /", "delete-session retry · F2 details"]));
   fails("R6", golden(["Context unchanged · /compact retry after more", "turns"], { cols: 50 }));
   // A slash segment wider than the row may wrap after its verb.
@@ -149,9 +152,10 @@ test("hint wrapping breaks only at separators and never between a key and its ve
   expect(wrapHintSegments("Type a task · Enter send", 20)).toEqual(["Type a task", "Enter send"]);
   expect(wrapHintSegments("Still working · Wait, then Enter sends", 20)).toEqual(["Still working", "Wait,", "then Enter sends"]);
   expect(wrapHintSegments("  Indented · Esc back", 80)).toEqual(["  Indented · Esc back"]);
-  // Prose wider than a row may start beside the status; a key-led segment always starts its own row.
+  // A segment wider than a row may start beside the status, keeping its key with its verb; one that fits starts its own row.
   expect(wrapHintSegments("Still working · Wait, then Enter sends", 21)).toEqual(["Still working · Wait,", "then Enter sends"]);
-  expect(wrapHintSegments("Done · Ctrl+R retry credential access now", 21)).toEqual(["Done", "Ctrl+R retry", "credential access now"]);
+  expect(wrapHintSegments("Done · Ctrl+R retry credential access now", 21)).toEqual(["Done · Ctrl+R retry", "credential access now"]);
+  expect(wrapHintSegments("Ready · Esc keep editing", 20)).toEqual(["Ready", "Esc keep editing"]);
   for (const [text, columns] of [["Cannot delete session: Undo store busy · /delete-session retry · F2 details", 46], ["Connect a provider · Alt+L sign in", 20]] as const)
     passes(golden(wrapHintSegments(text, columns), { cols: columns }));
 });
@@ -163,6 +167,14 @@ test("hint fitting drops whole segments, keeps Esc over status and never cuts a 
   expect(fitHintSegments("Delete a saved session", 16)).toBe("Delete a saved…");
   expect(fitHintSegments("Delete a saved session", 6)).toBe("");
   expect(fitHintSegments("Ctrl+C cancel turn", 12)).toBe("");
+  // A key-led segment stays whole or goes; it never gains `…` between its key+verb and the full action.
+  for (const [text, columns] of [["Esc keep editing", 12], ["Ctrl+C cancel turn", 15], ["Alt+M browse models", 17]] as const) {
+    expect(fitHintSegments(text, columns), text).toBe("");
+    expect(fitHintSegments(text, Bun.stringWidth(text)), text).toBe(text);
+  }
+  // The stop action outranks status decoration, as Esc does.
+  expect(fitHintSegments("Approval · Ctrl+C cancel turn", 26)).toBe("Ctrl+C cancel turn");
+  expect(fitHintSegments("Approval · Ctrl+C cancel turn", 17)).toBe("Approval");
   for (const columns of [8, 12, 20, 30, 40]) passes(golden([fitHintSegments("Aligned columns · C copy Markdown source", columns)]));
 });
 

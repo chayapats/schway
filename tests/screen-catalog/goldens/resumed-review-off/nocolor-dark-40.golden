@@ -14,10 +14,10 @@ cursor 1 1 hidden
    None listed
 
  Current diff
- Change tracking is off               █
- /config set git                      █
- {"changeTracking":"on-demand"}       ▀
+ Change tracking is off · /config set
+ git {"changeTracking":"on-demand"}
  enable
+ No Git state was read. Esc back
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
@@ -50,25 +50,17 @@ cursor 1 1 hidden
 07 1-13 #e6eaf0 #0e1117 b
 07 13-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-23 #e6eaf0 #0e1117 -
-08 23-38 #ffffff #0e1117 -
-08 38-39 #9a9ea3 #252527 -
-08 39-40 #ffffff #0e1117 -
+08 1-37 #e6eaf0 #0e1117 -
+08 37-40 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-16 #e6eaf0 #0e1117 -
-09 16-38 #ffffff #0e1117 -
-09 38-39 #9a9ea3 #252527 -
-09 39-40 #ffffff #0e1117 -
+09 1-35 #e6eaf0 #0e1117 -
+09 35-40 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
-10 1-31 #e6eaf0 #0e1117 -
-10 31-38 #ffffff #0e1117 -
-10 38-39 #9a9ea3 #252527 -
-10 39-40 #ffffff #0e1117 -
+10 1-7 #e6eaf0 #0e1117 -
+10 7-40 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
-11 1-7 #e6eaf0 #0e1117 -
-11 7-38 #ffffff #0e1117 -
-11 38-39 #ffffff #252527 -
-11 39-40 #ffffff #0e1117 -
+11 1-32 #e6eaf0 #0e1117 -
+11 32-40 #ffffff #0e1117 -
 12 0-40 #ffffff #0e1117 -
 13 0-40 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -

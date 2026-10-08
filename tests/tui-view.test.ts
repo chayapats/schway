@@ -495,6 +495,23 @@ test("real read, edit, write and bash results render summaries with deterministi
   });
 });
 
+test("raw tool output keeps its own ` · ` separators at narrow widths; only web_fetch's status line rewraps", async () => {
+  const ui = await setup(40, 30);
+  const output = "README.md:72:Good: `1 file changed · Esc back` and more text · here · there";
+  ui.controller.applyEvent({ type: "tool.started", toolCallId: "grep", name: "bash" });
+  await settle(ui);
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: "grep", name: "bash", status: "error", content: output });
+  await settle(ui);
+  const entry = ui.controller.snapshot().transcript.find(item => item.kind === "tool")!;
+  const texts: string[] = [];
+  const visit = (node: { getChildren(): unknown[] }) => {
+    for (const child of node.getChildren() as { getChildren(): unknown[] }[]) { if (child instanceof TextRenderable) texts.push(child.plainText); visit(child); }
+  };
+  visit(ui.renderer.root.findDescendantById(`message-${entry.id}`)!);
+  // The body is the tool's text as written: no separator is dropped and no row break is inserted.
+  expect(texts.some(text => text.split("\n").includes(output)), texts.join("\n---\n")).toBe(true);
+});
+
 test("inline edit and created-write rows ignore mouse, inspection Enter and Ctrl+O toggles", async () => {
   const session = createSession();
   const ui = await setup(80, 30, {}, undefined, { session });

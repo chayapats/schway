@@ -150,7 +150,7 @@ export function hintGrammarFailures(golden: ScreenGolden): HintFailure[] {
     const lastWord = clean.trim().split(/\s+/).at(-1) ?? "";
     // A segment wider than a whole row may wrap after its key and first action word, never between them.
     const nextSegment = next?.replace(leadingGutter, "").split(/ · |\s{2,}/)[0] ?? "";
-    const tooWide = !!last && Bun.stringWidth(`${last.text} ${nextSegment}`) > golden.cols - Bun.stringWidth(leadingGutter.exec(clean)?.[0] ?? "") && /\s/.test(last.action);
+    const tooWide = !!last && Bun.stringWidth(`${last.text} ${nextSegment}`) > golden.cols - Bun.stringWidth(leadingGutter.exec(clean)?.[0] ?? "") && !!last.action;
     const openSegment = !!last?.key && !tooWide && (last.key.startsWith("/") ? last.key === "/" || !!last.action : !allowed(last.key, last.action));
     const splitKey = wraps && !!last && (openSegment || leadingKey(lastWord) === lastWord);
     if (splitKey) fail(row, "R6", `${last!.text} / ${nextSegment}`, "the segment wraps across rows; wrap at ` · ` and keep the key with its action");
@@ -160,7 +160,7 @@ export function hintGrammarFailures(golden: ScreenGolden): HintFailure[] {
       const slash = key.startsWith("/");
       const firstWord = action.split(" ")[0] ?? "";
       if (!slash && allowed(key, action)) continue;
-      if (!action && (!slash || key === "/")) fail(row, "R2", segment.text, `bare key ${key} with no action`);
+      if (!action) fail(row, "R2", segment.text, `bare key ${key} with no action`);
       else if (slash ? firstWord.endsWith("…") : action.includes("…")) fail(row, "R2", segment.text, `the action after ${key} is cut off`);
       else if (slash) continue;
       else if (thirdPersonBase(firstWord)) fail(row, "R3", segment.text, `write the imperative "${thirdPersonBase(firstWord)}", not "${firstWord}"`);
