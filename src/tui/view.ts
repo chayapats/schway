@@ -9,6 +9,7 @@ import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEn
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerDiagnosticOpen, modelPickerErrorRows, modelPickerName } from "./model-picker.ts";
 import { fitHintSegments } from "./hint-text.ts";
+import { LAYOUT_BREAKPOINTS, bodyPadding as layoutBodyPadding, bodyWidth } from "./layout.ts";
 import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
@@ -711,7 +712,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
    * While work runs with the hint row visible, the hint row owns Esc.
    */
   const footerNamesEsc = () => footerParts.nextAction.startsWith("Esc") && (branchTreeEscInFooter || chooserEscInFooter || !hints.visible || !!footerParts.toolApproval ||
-    footerParts.override === undefined && !!footerParts.notConnected || renderer.width < 30 && !footerParts.running);
+    footerParts.override === undefined && !!footerParts.notConnected || renderer.width < LAYOUT_BREAKPOINTS.compactStatusBar && !footerParts.running);
 
   /**
    * Key-chip hints that fit `columns`. Arrow and paging hints drop first, then trailing actions; primary actions
@@ -777,7 +778,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     };
     // An Esc action the hint row already names stays off the status bar, so the bar can spend that width on the model.
     const nextAction = footerParts.nextAction.startsWith("Esc") && !footerNamesEsc() ? "" : footerParts.nextAction;
-    if (columns < 30 || !hints.visible) { compactFooter(nextAction); return; }
+    if (columns < LAYOUT_BREAKPOINTS.compactStatusBar || !hints.visible) { compactFooter(nextAction); return; }
     if (footerParts.override !== undefined) { footer.content = new StyledText([fg(theme.muted)(" "), ...modeChip, fg(theme.muted)(fitFindStatus(footerParts.override, columns - chunkWidth(modeChip) - 2))]); return; }
     const colors = pillColors(pill.tone);
     const fade = motion === "full" ? easeOut(progress(at, pillChangedAt, 180)) : 1;
@@ -800,7 +801,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const model = [bg(theme.surface2)(fg(theme.text)(` ${footerParts.model} `))];
     const thinking = footerParts.thinking ? [bg(tint(theme, theme.violet, theme.surface))(fg(theme.violet)(` ${footerParts.thinking} `))] : [];
     const route = footerParts.route ? [fg(theme.muted)(` ${footerParts.route}`)] : [];
-    const cells = columns < 70 ? 5 : 10;
+    const cells = columns < LAYOUT_BREAKPOINTS.fullComposerHint ? 5 : 10;
     const filled = footerParts.ctxPercent === undefined ? 0 : Math.max(footerParts.ctxPercent > 0 ? 1 : 0, Math.round(footerParts.ctxPercent / 100 * cells));
     const meterColor = (footerParts.ctxPercent ?? 0) < 60 ? theme.accent : (footerParts.ctxPercent ?? 0) < 85 ? theme.warning : theme.error;
     const ctx = footerParts.ctxPercent === undefined
@@ -932,8 +933,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // Startup readiness is transient chrome; recovery details remain available on demand.
       const entries = snapshot.readiness !== "ready" && snapshot.transcript.length === 1 && !snapshot.recovery?.accepted && snapshot.transcript[0]?.id === snapshot.recovery?.entryId ? [] : snapshot.transcript;
       paintedCancellationId = snapshot.activity?.cancellation === "requested" ? snapshot.activity.operationId : undefined;
-      const width = Math.max(8, renderer.width - (renderer.width < 60 ? 2 : 4));
-      bodyPadding = renderer.width < 60 ? 1 : 2;
+      const width = bodyWidth(renderer.width);
+      bodyPadding = layoutBodyPadding(renderer.width);
       body.paddingX = hintBar.paddingX = bodyPadding;
       composerTop.content = "▄".repeat(width);
       composerBottom.content = "▀".repeat(width);
@@ -1057,7 +1058,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         } else credential.content = snapshot.loginApproval ? SIGN_IN_COMPOSER_TEXT : SIGN_IN_CHOOSER_COMPOSER_TEXT;
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
-      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < 50 ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
+      editor.placeholder = panelMode === "tool-approval" ? "Why? The agent will see this…" : panelMode === "sessions" ? renderer.width < LAYOUT_BREAKPOINTS.shortSessionPlaceholder ? "Search sessions…" : "Search tasks, workspace or session ID…" : panelMode === "model" ? "Search models or type provider/model…" : panelMode === "tree" ? branchTreePlaceholder(!!snapshot.branchTree?.selectedBranchId, width - 4) : panelMode === "help" ? PALETTE_PLACEHOLDER : panelMode === "search" ? CONVERSATION_FIND_PLACEHOLDER : snapshot.status === "running" ? runningPlaceholder(renderer.width) : "Ask Schway…";
       const workspace = controller.workspaceIdentity();
       const workspacePath = workspace?.root ?? options.workspaceRoot;
       const path = workspacePath === options.home || workspacePath.startsWith(`${options.home}/`) ? `~${workspacePath.slice(options.home.length)}` : workspacePath;
@@ -1067,13 +1068,13 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const room = Math.max(0, renderer.width - 2 - Bun.stringWidth("⚡ schway  "));
       const final = safe(path).split("/").filter(Boolean).at(-1) ?? path;
       const shortest = shortenWorkspacePath(safe(workspacePath), options.home, Bun.stringWidth(`…/${final}`));
-      const branchRoom = renderer.width >= 40 ? Math.max(0, room - Bun.stringWidth(shortest) - 4) : 0;
+      const branchRoom = renderer.width >= LAYOUT_BREAKPOINTS.topBarBranch ? Math.max(0, room - Bun.stringWidth(shortest) - 4) : 0;
       // A shortened detached commit is an identity, not a label we can abbreviate again.
       const shortSha = /^[0-9a-f]{7}$/.test(branchLabel);
       headerBranch = branchRoom > 0 && (!shortSha || branchRoom >= 7) ? fitLine(branchLabel, branchRoom) : "";
       headerPath = shortenWorkspacePath(safe(workspacePath), options.home, room - (headerBranch ? Bun.stringWidth(headerBranch) + 4 : 0));
       paintHeader(now());
-      const nextPill = statusPill(snapshot, width < 32);
+      const nextPill = statusPill(snapshot, width < bodyWidth(LAYOUT_BREAKPOINTS.compactStatusPill));
       if (nextPill.tone !== pill.tone) { pillFrom = pillColors(pill.tone).bg; pillChangedAt = now(); }
       pill = nextPill;
       const ctxPercent = context.capacity ? Math.min(100, Math.round(context.estimatedTokens / context.capacity * 100)) : undefined;
@@ -1089,7 +1090,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         toolApproval: !!snapshot.toolApproval,
         notConnected: snapshot.readiness === "not-connected",
         // Ctrl+C lives only in the approval activity row; the hint row carries Enter's meaning when it is visible.
-        nextAction: panelMode === "tool-approval" && snapshot.toolApproval ? hints.visible && renderer.width >= 30 ? "Esc deny" : approvalAction(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason)
+        nextAction: panelMode === "tool-approval" && snapshot.toolApproval ? hints.visible && renderer.width >= LAYOUT_BREAKPOINTS.compactStatusBar ? "Esc deny" : approvalAction(snapshot.toolApproval.selected, snapshot.toolApproval.enteringReason)
           // A request waiting behind another view: name Esc exactly as that view's hint row and reader status do.
           : snapshot.toolApproval ? "Esc back to request"
           // A sign-in wait names Esc once: in the hint row, or here only when the hint row is hidden; a submitted save names none.
@@ -1160,7 +1161,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const selected = undo?.files[undo.selected];
         const review = undo ? { heading: undoHeading(undo), selected: undo.selected,
           rows: undoRows(undo), showingDetails: false, details: "", detail: JSON.stringify(selected?.rows), files: [] } : snapshot.changeReview!;
-        const stacked = !!undo || renderer.width < 80;
+        const stacked = !!undo || renderer.width < LAYOUT_BREAKPOINTS.reviewSideBySide;
         const scope = undo ? undefined : snapshot.changeReview!.scope;
         // A review opened from the undo panel lists that panel's paths with current-diff titles but no turn source badges.
         const fromUndo = !undo && !!snapshot.changeReview!.fromUndo, titled = !!scope || fromUndo;
@@ -1315,7 +1316,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const outcomeGlyph = completed ? outcomeText.split(" ")[0] : undefined;
       const outcomeTone = completed ? ({ completed: "success", failed: "error", cancelled: "muted", limit: "warning" } as const)[completed.reason] : "muted";
       activityPaint = snapshot.activity?.phase === "stopping" ? { text: activityDetail(snapshot.activity), tone: "warning", glyph: "◌" }
-        : snapshot.toolApproval ? { text: `${width >= 40 ? "Approval required" : "Approval"} · Ctrl+C cancel turn`, tone: "warning", glyph: "◌", chips: true }
+        : snapshot.toolApproval ? { text: `${width >= bodyWidth(LAYOUT_BREAKPOINTS.approvalRequiredLabel) ? "Approval required" : "Approval"} · Ctrl+C cancel turn`, tone: "warning", glyph: "◌", chips: true }
         : searchOpen ? { text: fitFindStatus(searchStatus, renderer.width - 2 * bodyPadding - 2), tone: "accent", glyph: "⌕" }
         : Date.now() < interactionNoticeUntil ? { text: interactionNotice, tone: "muted" }
         : unseen ? { text: "New activity · Ctrl+End to return to latest", tone: "accent", glyph: "↓", chips: true }
@@ -1367,7 +1368,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         clear(preferencePanel);
         if (snapshot.preferences) {
           const panel = snapshot.preferences;
-          const compact = renderer.width < 45 || renderer.height < 16;
+          const compact = renderer.width < LAYOUT_BREAKPOINTS.compactPreferences || renderer.height < 16;
           const lines = preferenceLines(panel, compact);
           // Rows wrap one cell short of the panel whether or not the scrollbar shows, so it never clips a row's last word.
           preferencePanel.content.minWidth = preferencePanel.content.maxWidth = Math.max(1, width - 1);
@@ -1537,7 +1538,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
         const recoveryKeys = blockedSubmitHint(snapshot);
         const composerHint = working ? chunkWidth(keyHintChunks(RUNNING_DRAFT_HINT, hintColors(theme.background))) <= width ? `${RUNNING_DRAFT_HINT} · ${modeHint}` : `${RUNNING_NARROW_HINT} · `
           : recoveryKeys ? `${recoveryKeys} · ${modeHint}` : `${modeHint}${snapshot.readiness === "ready" ? "Enter send · " : ""}`;
-        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · ${signInChooserActions(snapshot.loginChooser)}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < 70 ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
+        hints.content = fittedHints(snapshot.preferences ? preferenceHint(snapshot.preferences) : snapshot.loginChooser ? signInChooserHint(snapshot.loginWait, `↑↓ select · ${signInChooserActions(snapshot.loginChooser)}`) : panelMode === "tree" ? branchTreeHint(!!snapshot.branchTree?.selectedBranchId, width, footerNamesEsc()) : panelMode === "help" ? paletteHint({ guide: !!guide, inserted: helpInserted, selected: available[completionIndex] }, width) : searchOpen ? conversationFindHint(!!searchResult.matches[searchSelected]) : entryPanel ? entryPanel.hint : panelMode === "approval" ? snapshot.loginWait?.saving ? SIGN_IN_SAVING_HINT : snapshot.loginWait?.cancelling ? SIGN_IN_CANCELLING_HINT : SIGN_IN_WAIT_HINT : panelMode ? "Enter confirm · Esc back" : detailsReturn ? "PgUp/PgDn scroll · Esc back" : inspection ? inspection.kind === "tool" ? "↑↓ move · Enter toggle · C copy · Esc back" : "↑↓ move · R read · C copy · Esc back" : available.length ? slashPaletteHint({ enter: slashEnter(available[completionIndex], editor.plainText, { choices: available, chosen: completionChosen }).kind, working }, width) : snapshot.readiness === "not-connected" ? `${modeHint}Alt+L sign in · / commands` : `${composerHint}${renderer.width < LAYOUT_BREAKPOINTS.fullComposerHint ? "Ctrl+F find · Alt+I inspect" : "Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands"}`, width);
       }
       if (!picker.visible) pickerOpenedAt = undefined;
       else if (!pickerWasVisible && motion === "full") pickerOpenedAt = now();

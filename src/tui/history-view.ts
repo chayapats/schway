@@ -4,6 +4,7 @@ import type { HistoryTurn } from "../history/timeline.ts";
 import { historyCommandLine, historyCountsLabel, historyDurationLabel, historyOutcomeLabel, historyOutcomeTone, historyReasoningLine, historyTaskLabel, historyTimeLabel, historyTimingLine, historyUndoLine,
   type HistorySnapshot } from "./controller-history.ts";
 import { wrapHintSegments } from "./hint-text.ts";
+import { LAYOUT_BREAKPOINTS, bodyWidth } from "./layout.ts";
 import { displayText } from "./presentation.ts";
 import { currentDiffLabel, fitPathStart } from "./review-scope.ts";
 import type { TuiTheme } from "./theme.ts";
@@ -79,6 +80,8 @@ export function createHistoryPanel(renderer: CliRenderer) {
     const tone = (turn: HistoryTurn) => ({ success: theme.success, error: theme.error, warning: theme.warning, muted: theme.muted })[historyOutcomeTone(turn)];
     const turn = history.turns[history.selected];
     const lines: Line[] = [];
+    // Narrow terminals give each list row two lines; `width` is the body width, so compare it with the breakpoint's body width.
+    const twoLineRows = width < bodyWidth(LAYOUT_BREAKPOINTS.oneLineHistoryRows);
     // The scroll content reserves one column on the right.
     const inner = Math.max(1, width - 1);
     let focus = -1, focusMore = false;
@@ -158,7 +161,7 @@ export function createHistoryPanel(renderer: CliRenderer) {
       const ordinals = Math.max(1, ...history.turns.map(item => String(item.ordinal).length));
       const labels = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyOutcomeLabel(item, history.unsaved[item.turnId] !== undefined))));
       // Wide rows use full forms; medium and narrow rows keep time and counts in compact forms.
-      const compact = width < 100;
+      const compact = width < bodyWidth(LAYOUT_BREAKPOINTS.fullHistoryColumns);
       const timeWidth = Math.max(0, ...history.turns.map(item => historyTimeLabel(item, compact).length));
       const countsWidth = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyCountsLabel(item, compact))));
       const durationWidth = Math.max(0, ...history.turns.map(item => Bun.stringWidth(historyDurationLabel(item))));
@@ -169,7 +172,7 @@ export function createHistoryPanel(renderer: CliRenderer) {
         const task = safe(historyTaskLabel(item));
         const counts = historyCountsLabel(item, compact), duration = historyDurationLabel(item), time = historyTimeLabel(item, compact);
         if (selected) focus = lines.length;
-        if (width < 60) {
+        if (twoLineRows) {
           // Narrow terminals keep the outcome word and its glyph on the first line and the task below.
           lines.push({ text: clip([`${prefix}${label}`, time, duration].filter(Boolean).join(" · "), inner), color: selected ? theme.accent : tone(item) });
           lines.push({ text: clip(`${" ".repeat(prefix.length)}${[counts, task].filter(Boolean).join(" · ")}`, inner), color: selected ? theme.accent : theme.text });
@@ -197,7 +200,7 @@ export function createHistoryPanel(renderer: CliRenderer) {
     const focusKey = JSON.stringify([key, history.selected, history.file, scroll.viewport.height, focusMore]);
     if (focus >= 0 && !history.showingDetails && focusKey !== paintedFocus && !(history.view === "detail" && history.file === 0)) {
       if (focusMore) reveal(lines.length - 1);
-      else if (width < 60 && history.view === "list") reveal(focus + 1);
+      else if (twoLineRows && history.view === "list") reveal(focus + 1);
       reveal(focus);
     }
     paintedFocus = focusKey;
