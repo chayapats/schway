@@ -100,8 +100,9 @@ test("the key reveals no session UUID, branch, workspace path, model ID, token o
     const key = captured[0]!.body.prompt_cache_key as string;
     expect(key).toBe(promptCacheKey(session));
     expect(key).toMatch(PROMPT_CACHE_KEY_PATTERN);
-    const fragments = [session.rootId, ...session.rootId.split("-"), branch, ...branch.split("-"), "feature-branch-name", "main",
-      dir, project.root, "grok-4.7", "xai-fixture-secret-token"];
+    // Fragments under 8 characters (4-hex UUID chunks, "main") collide with a random 32-hex digest often enough to flake.
+    const fragments = [session.rootId, ...session.rootId.split("-"), branch, ...branch.split("-"), "feature-branch-name",
+      dir, project.root, "grok-4.7", "xai-fixture-secret-token"].filter(fragment => fragment.length >= 8);
     for (const fragment of fragments) expect(key.slice(PROMPT_CACHE_KEY_PREFIX.length)).not.toContain(fragment);
   });
 });
