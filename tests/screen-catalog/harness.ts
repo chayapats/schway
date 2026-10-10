@@ -35,7 +35,7 @@ import { serializeScreen } from "./format.ts";
 import type { BoxRenderable, TextRenderable } from "@opentui/core";
 import { approvalChoices } from "../../src/tui/approval-layout.ts";
 import { credentialEntryPanel } from "../../src/tui/credential-entry.ts";
-import type { FrameState } from "../helpers/screen-invariants.ts";
+import { frameDetailsState, type FrameState } from "../helpers/screen-invariants.ts";
 import { credentialStoreError } from "../../src/auth/store.ts";
 
 /** Fixed animation time keeps reduced-motion fixtures independent of wall time. */
@@ -86,8 +86,7 @@ function cellOffsetToIndex(value: string, offset: number): number {
 /** Record the controller and view facts that classify the frame about to be captured. */
 function captureFrameState(ui: ScreenHarness, snapshot: TuiSnapshot, mode: PanelMode | ""): FrameState {
   const approval = snapshot.toolApproval;
-  const detailsId = ui.view.detailsEntryId(), details = detailsId ? snapshot.transcript.find(entry => entry.id === detailsId) : undefined;
-  const detailLines = details?.text.split("\n") ?? [];
+  const detailsId = ui.view.detailsEntryId(), kind = ui.view.detailsKind(), details = detailsId && kind ? snapshot.transcript.find(entry => entry.id === detailsId) : undefined;
   const find = (id: string) => ui.renderer.root.findDescendantById(id);
   const composer = find("composer") as BoxRenderable | undefined, entry = find("credential-entry") as BoxRenderable | undefined;
   const entryPanel = credentialEntryPanel(snapshot), entryValue = find("credential-value") as TextRenderable | undefined;
@@ -101,13 +100,13 @@ function captureFrameState(ui: ScreenHarness, snapshot: TuiSnapshot, mode: Panel
     // The editor reports its logical cursor in cells; map it back to a UTF-16 offset so the checker measures cells itself.
     const value = ui.editor.plainText, placeholder = ui.editor.placeholder;
     input = { surface: QUERY_SURFACES[mode] ?? "composer", row: ui.editor.screenY, col: ui.editor.screenX, columns: ui.editor.width, value,
-      cursor: cellOffsetToIndex(value, ui.editor.cursorOffset), placeholder: typeof placeholder === "string" ? placeholder : placeholder?.chunks.map(chunk => chunk.text).join("") ?? "", scroll: ui.editor.scrollY };
+      cursor: cellOffsetToIndex(value, ui.editor.cursorOffset), placeholder: typeof placeholder === "string" ? placeholder : placeholder?.chunks.map(chunk => chunk.text).join("") ?? "", scroll: ui.editor.scrollY, wrap: ui.editor.wrapMode === "word" ? "word" : "char" };
   }
   return {
     panel: mode,
     ...(approval ? { approval: { selected: approvalChoices(approval.request.toolName)[approval.selected] ?? "", enteringReason: approval.enteringReason } } : {}),
     idle: snapshot.status !== "running" && !snapshot.activity && snapshot.readiness !== "loading" && !snapshot.loginWait && !snapshot.loginApproval,
-    ...(details && snapshot.outcome?.reason === "failed" ? { failedDetails: { heading: detailLines[0] ?? "", cause: detailLines.find(line => line.startsWith("Failure details:")) ?? "" } } : {}),
+    ...frameDetailsState(details && kind ? { id: details.id, text: details.text, kind } : undefined, snapshot.outcome?.reason === "failed"),
     ...(input ? { input } : {}),
   };
 }

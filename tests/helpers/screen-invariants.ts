@@ -19,13 +19,15 @@ export interface FrameState {
   idle: boolean;
   /** Present while F2 details for a failed turn are open: their outcome heading and the failure cause line ("" when none shows). */
   failedDetails?: { heading: string; cause: string };
+  /** The F2 entry that is open. A notice stays a notice when the latest outcome failed. */
+  openDetails?: { entryId: string; kind: "notice" | "recovery" };
   /**
    * The focused typing surface, if any. `row` and `col` are the zero-based screen cell where the value (or placeholder) starts,
    * `columns` the field width, `value` the displayed value (masked where the view masks it), `cursor` the logical cursor as a
-   * UTF-16 offset into `value`, `placeholder` the text shown while `value` is empty, and `scroll` the field's visual rows
-   * scrolled above `row` (0 when its first row shows).
+   * UTF-16 offset into `value`, `placeholder` the text shown while `value` is empty, `scroll` the field's visual rows
+   * scrolled above `row` (0 when its first row shows), and `wrap` how the field breaks lines (`word` for the composer).
    */
-  input?: { surface: string; row: number; col: number; columns: number; value: string; cursor: number; placeholder: string; scroll?: number };
+  input?: { surface: string; row: number; col: number; columns: number; value: string; cursor: number; placeholder: string; scroll?: number; wrap?: "char" | "word" };
 }
 
 /** One violated invariant, naming the screen, variant and, when one is at fault, the offending zero-based text row. */
@@ -36,16 +38,56 @@ export interface InvariantExemption { screen: string; variant?: string; invarian
 
 const graphemes = (text: string) => [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(part => part.segment);
 
-/** Zero-based cell of a UTF-16 `offset` within `value`, wrapping grapheme by grapheme at `columns` cells and at line breaks. */
-export function cursorCell(value: string, offset: number, columns: number): { x: number; y: number } {
-  let x = 0, y = 0;
-  for (const segment of graphemes(value.slice(0, offset))) {
-    if (segment === "\n") { x = 0; y++; continue; }
-    const width = Bun.stringWidth(segment);
-    if (x > 0 && x + width > columns) { x = 0; y++; }
-    x += width;
+/** Classify the open F2 entry from the kind the view recorded. A notice is not failed-turn details, so I2 does not ask it for a failure cause. */
+export function frameDetailsState(entry: { id: string; text: string; kind: "notice" | "recovery" } | undefined, outcomeFailed: boolean): Pick<FrameState, "openDetails" | "failedDetails"> {
+  if (!entry) return {};
+  const lines = entry.text.split("\n");
+  return {
+    openDetails: { entryId: entry.id, kind: entry.kind },
+    ...(entry.kind === "recovery" && outcomeFailed ? { failedDetails: { heading: lines[0] ?? "", cause: lines.find(line => line.startsWith("Failure details:")) ?? "" } } : {}),
+  };
+}
+
+/** Cell where grapheme `index` is placed, before its width is added. Word wrap breaks before a word that does not fit. */
+function placedCell(x: number, y: number, index: number, segments: readonly string[], columns: number, wrap: "char" | "word"): { x: number; y: number; width: number } {
+  const segment = segments[index]!;
+  if (segment === "\n") return { x: 0, y: y + 1, width: 0 };
+  const width = Bun.stringWidth(segment);
+  let nextX = x, nextY = y;
+  if (wrap === "word" && segment !== " " && nextX > 0) {
+    let wordWidth = 0;
+    for (let cursor = index; cursor < segments.length && segments[cursor] !== " " && segments[cursor] !== "\n"; cursor++) wordWidth += Bun.stringWidth(segments[cursor]!);
+    if (nextX + wordWidth > columns) { nextX = 0; nextY++; }
+  } else if (nextX > 0 && nextX + width > columns) {
+    nextX = 0; nextY++;
+  }
+  return { x: nextX, y: nextY, width };
+}
+
+/** Zero-based cell of a UTF-16 `offset` within `value`. `char` wraps grapheme by grapheme; `word` breaks before a word that does not fit. */
+export function cursorCell(value: string, offset: number, columns: number, wrap: "char" | "word" = "char"): { x: number; y: number } {
+  const segments = graphemes(value);
+  let x = 0, y = 0, consumed = 0;
+  for (let index = 0; index < segments.length && consumed < offset; index++) {
+    const placed = placedCell(x, y, index, segments, columns, wrap);
+    x = placed.x + placed.width;
+    y = placed.y;
+    consumed += segments[index]!.length;
   }
   return { x, y };
+}
+
+/** Text of the first visual line of `value`, using the same wrap as `cursorCell`. */
+function firstWrappedLine(value: string, columns: number, wrap: "char" | "word"): string {
+  const segments = graphemes(value);
+  let x = 0, text = "";
+  for (let index = 0; index < segments.length && segments[index] !== "\n"; index++) {
+    const placed = placedCell(x, 0, index, segments, columns, wrap);
+    if (placed.y > 0) break;
+    text += segments[index];
+    x = placed.x + placed.width;
+  }
+  return text;
 }
 
 /** The part of a text row that starts at terminal cell `start`, measuring cells with `Bun.stringWidth`. */
@@ -108,14 +150,14 @@ export function screenInvariantFailures(golden: ScreenGolden, state: FrameState)
 
   // I4: a focused text field shows the terminal cursor on its input row, at its logical cursor cell.
   if (state.input) {
-    const { surface, row, col, columns, value, cursor, placeholder, scroll = 0 } = state.input;
+    const { surface, row, col, columns, value, cursor, placeholder, scroll = 0, wrap = "char" } = state.input;
     // The input row starts with the value's first visible cells, or the placeholder's first word, which a narrow field may clip.
     const shown = sliceCells(golden.text[row] ?? "", col).trimEnd();
-    const lead = value ? graphemes(value.split("\n")[0]!).reduce((text, part) => Bun.stringWidth(text + part) <= columns ? text + part : text, "").trimEnd()
+    const lead = value ? firstWrappedLine(value.split("\n")[0]!, columns, wrap).trimEnd()
       : placeholder.split(" ")[0]!.replace(/…$/, "");
     const length = Math.min(lead.length, shown.length);
     if (scroll === 0 && lead && (!length || shown.slice(0, length) !== lead.slice(0, length))) fail("I4", `${surface} input row does not start with "${lead}" at cell ${col}`, row);
-    const cell = cursorCell(value, cursor, columns), x = col + cell.x + 1, y = row + cell.y - scroll + 1;
+    const cell = cursorCell(value, cursor, columns, wrap), x = col + cell.x + 1, y = row + cell.y - scroll + 1;
     if (!golden.cursor.visible) fail("I4", `${surface} has focus but the cursor is hidden`, row);
     else if (golden.cursor.x !== x || golden.cursor.y !== y) {
       fail("I4", `${surface} cursor is at ${golden.cursor.x} ${golden.cursor.y}, expected ${x} ${y}`, Math.max(0, golden.cursor.y - 1));
