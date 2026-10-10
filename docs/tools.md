@@ -29,8 +29,7 @@ the result, so it is the same in every later request. The resent prefix
 therefore changes once per result, at the first request of the next user turn,
 which costs one prompt-cache miss for the rest of the request at that point.
 Extension `beforeModel` hooks see the shortened results. The status bar's
-context meter and `/context` still count earlier results at full size, so they
-can read higher than what is sent.
+context meter and `/context` count the same shortened view the request sends.
 
 ## Fetch web pages
 
