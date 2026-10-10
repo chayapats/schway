@@ -118,11 +118,15 @@ test("I4 follows composer word wrap, so a soft-wrapped draft keeps the cursor on
   // Character wrap of "aaaa bbbb" in 7 cells lands at (2, 1). The composer wraps before "bbbb", at (4, 1).
   expect(cursorCell("aaaa bbbb", 9, 7)).toEqual({ x: 2, y: 1 });
   expect(cursorCell("aaaa bbbb", 9, 7, "word")).toEqual({ x: 4, y: 1 });
-  // A word wider than the field fills the row, then continues. A space that does not fit is not drawn on the next row.
+  // A word wider than the field fills the row. A path breaks after `/`, and a run of spaces keeps the overflow space.
   expect(cursorCell("bbbbbbbb", 8, 7, "word")).toEqual({ x: 1, y: 1 });
   expect(cursorCell("bbbbbbbb", 7, 7, "word")).toEqual({ x: 0, y: 1 });
   expect(cursorCell("aaaa b", 4, 4, "word")).toEqual({ x: 4, y: 0 });
   expect(cursorCell("aaaa b", 6, 4, "word")).toEqual({ x: 1, y: 1 });
+  expect(cursorCell("src/tui/view.ts", 15, 10, "word")).toEqual({ x: 7, y: 1 });
+  expect(cursorCell("pre-wrap me", 11, 6, "word")).toEqual({ x: 2, y: 2 });
+  expect(cursorCell("    a", 5, 3, "word")).toEqual({ x: 2, y: 1 });
+  expect(cursorCell("x".repeat(20), 20, 1, "word")).toEqual({ x: 1, y: 19 });
   const value = "aaaa bbbb";
   const state: FrameState = { ...idle, input: { surface: "composer", row: 1, col: 0, columns: 7, value, cursor: value.length, placeholder: "", wrap: "word" } };
   expect(invariants(frame(["", "aaaa", "bbbb"], { cursor: [5, 3] }), state)).toEqual([]);

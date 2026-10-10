@@ -1,9 +1,11 @@
+import { EditBuffer, EditorView } from "@opentui/core";
 import type { ScreenGolden } from "../screen-catalog/format.ts";
 import { hintRowSegments } from "./hint-grammar.ts";
 
 /**
- * Cross-screen invariants every catalog frame must hold (#304). The checker is pure: it reads a parsed golden and a
- * frame-state record captured with it, and classifies the frame from that record rather than from its screen ID.
+ * Cross-screen invariants every catalog frame must hold (#304). The checker reads a parsed golden and a frame-state
+ * record captured with it, and classifies the frame from that record rather than from its screen ID. A word-wrapped
+ * cursor is measured with the composer editor so the break matches the field.
  */
 
 /** Identifier of one screen invariant: I1 approval choices, I2 recovery cause first, I3 no stop when idle, I4 visible input cursor. */
@@ -48,68 +50,76 @@ export function frameDetailsState(entry: { id: string; text: string; kind: "noti
   };
 }
 
-function wordWidth(segments: readonly string[], index: number): number {
-  let width = 0;
-  for (let scan = index; scan < segments.length && segments[scan] !== " " && segments[scan] !== "\n"; scan++) width += Bun.stringWidth(segments[scan]!);
-  return width;
+/** Display cells in the UTF-16 prefix, counting a line break as one cell, as the composer editor's cursor offset does. */
+function cellCount(value: string, offset: number): number {
+  let cells = 0, consumed = 0;
+  for (const segment of graphemes(value)) {
+    if (consumed >= offset) break;
+    cells += segment === "\n" ? 1 : Bun.stringWidth(segment);
+    consumed += segment.length;
+  }
+  return cells;
 }
 
-/**
- * Cursor after one grapheme. `row` is the visual row the grapheme is drawn on, or -1 when a break space is not drawn.
- * Word wrap matches the composer: a word that fits on the next row breaks before the word, a longer word fills the row,
- * and a space that does not fit is not drawn on the next row.
- */
-function consumeGrapheme(x: number, y: number, index: number, segments: readonly string[], columns: number, wrap: "char" | "word"): { x: number; y: number; row: number } {
-  const segment = segments[index]!;
-  if (segment === "\n") return { x: 0, y: y + 1, row: -1 };
-  const width = Bun.stringWidth(segment);
-  if (wrap !== "word") {
-    let nextX = x, nextY = y;
-    if (nextX > 0 && nextX + width > columns) { nextX = 0; nextY++; }
-    return { x: nextX + width, y: nextY, row: nextY };
+/** Run `read` against one editor buffer and destroy both native objects. */
+function withEditor<T>(value: string, columns: number, wrap: "char" | "word", read: (buffer: EditBuffer, view: EditorView) => T): T {
+  const buffer = EditBuffer.create("unicode");
+  const view = EditorView.create(buffer, Math.max(1, columns), graphemes(value).length + 2);
+  try {
+    view.setWrapMode(wrap);
+    buffer.setText(value);
+    return read(buffer, view);
+  } finally {
+    view.destroy();
+    buffer.destroy();
   }
-  const follower = segments[index + 1];
-  if (segment === " ") {
-    if (x + width > columns) return follower && follower !== " " && follower !== "\n" ? { x: 0, y: y + 1, row: -1 } : { x, y, row: -1 };
-    const after = x + width;
-    if (follower && follower !== "\n" && x === 0 && after >= columns) return { x: 0, y: y + 1, row: y };
-    if (follower && follower !== " " && follower !== "\n" && after > 0 && after + wordWidth(segments, index + 1) > columns) return { x: 0, y: y + 1, row: y };
-    return { x: after, y, row: y };
-  }
-  let nextX = x, nextY = y;
-  const startsWord = index === 0 || segments[index - 1] === " " || segments[index - 1] === "\n";
-  if (startsWord && nextX > 0) {
-    const whole = wordWidth(segments, index);
-    if (nextX + whole > columns && whole <= columns) { nextX = 0; nextY++; }
-    else if (nextX + width > columns) { nextX = 0; nextY++; }
-  } else if (nextX + width > columns) { nextX = 0; nextY++; }
-  const placedX = nextX + width;
-  if (follower && follower !== " " && follower !== "\n" && placedX + Bun.stringWidth(follower) > columns) return { x: 0, y: nextY + 1, row: nextY };
-  return { x: placedX, y: nextY, row: nextY };
 }
 
-/** Zero-based cell of a UTF-16 `offset` within `value`. `char` wraps grapheme by grapheme; `word` follows the composer's word wrap. */
+/** Zero-based cell of a UTF-16 `offset` within `value`. `char` wraps grapheme by grapheme; `word` uses the composer editor. */
 export function cursorCell(value: string, offset: number, columns: number, wrap: "char" | "word" = "char"): { x: number; y: number } {
+  if (wrap === "word") {
+    if (columns < 1) return { x: 0, y: 0 };
+    return withEditor(value, columns, wrap, (buffer, view) => {
+      buffer.setCursorByOffset(cellCount(value, offset));
+      const cursor = view.getVisualCursor();
+      return { x: cursor.visualCol, y: cursor.visualRow };
+    });
+  }
   const segments = graphemes(value);
   let x = 0, y = 0, consumed = 0;
-  for (let index = 0; index < segments.length && consumed < offset; index++) {
-    const next = consumeGrapheme(x, y, index, segments, columns, wrap);
-    x = next.x; y = next.y; consumed += segments[index]!.length;
+  for (const segment of segments) {
+    if (consumed >= offset) break;
+    if (segment === "\n") { x = 0; y++; consumed += segment.length; continue; }
+    const width = Bun.stringWidth(segment);
+    if (x > 0 && x + width > columns) { x = 0; y++; }
+    x += width;
+    consumed += segment.length;
   }
   return { x, y };
 }
 
 /** Text of the first visual line of `value`, using the same wrap as `cursorCell`. */
 function firstWrappedLine(value: string, columns: number, wrap: "char" | "word"): string {
-  const segments = graphemes(value);
-  let x = 0, y = 0, text = "";
-  for (let index = 0; index < segments.length && segments[index] !== "\n"; index++) {
-    const next = consumeGrapheme(x, y, index, segments, columns, wrap);
-    if (next.row !== y) break;
-    text += segments[index];
-    const drawn = y;
-    x = next.x; y = next.y;
-    if (y !== drawn) break;
+  const segments = graphemes(value.split("\n")[0]!);
+  if (wrap === "word") {
+    if (columns < 1) return "";
+    return withEditor(value, columns, wrap, (buffer, view) => {
+      let text = "", consumed = 0;
+      for (const segment of segments) {
+        buffer.setCursorByOffset(cellCount(value, consumed));
+        if (view.getVisualCursor().visualRow > 0) break;
+        text += segment;
+        consumed += segment.length;
+      }
+      return text;
+    });
+  }
+  let x = 0, text = "";
+  for (const segment of segments) {
+    const width = Bun.stringWidth(segment);
+    if (x > 0 && x + width > columns) break;
+    text += segment;
+    x += width;
   }
   return text;
 }
