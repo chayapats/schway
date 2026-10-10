@@ -118,9 +118,17 @@ test("I4 follows composer word wrap, so a soft-wrapped draft keeps the cursor on
   // Character wrap of "aaaa bbbb" in 7 cells lands at (2, 1). The composer wraps before "bbbb", at (4, 1).
   expect(cursorCell("aaaa bbbb", 9, 7)).toEqual({ x: 2, y: 1 });
   expect(cursorCell("aaaa bbbb", 9, 7, "word")).toEqual({ x: 4, y: 1 });
+  // A word wider than the field fills the row, then continues. A space that does not fit is not drawn on the next row.
+  expect(cursorCell("bbbbbbbb", 8, 7, "word")).toEqual({ x: 1, y: 1 });
+  expect(cursorCell("bbbbbbbb", 7, 7, "word")).toEqual({ x: 0, y: 1 });
+  expect(cursorCell("aaaa b", 4, 4, "word")).toEqual({ x: 4, y: 0 });
+  expect(cursorCell("aaaa b", 6, 4, "word")).toEqual({ x: 1, y: 1 });
   const value = "aaaa bbbb";
   const state: FrameState = { ...idle, input: { surface: "composer", row: 1, col: 0, columns: 7, value, cursor: value.length, placeholder: "", wrap: "word" } };
   expect(invariants(frame(["", "aaaa", "bbbb"], { cursor: [5, 3] }), state)).toEqual([]);
+  const token = "bbbbbbbb";
+  const wide: FrameState = { ...idle, input: { surface: "composer", row: 0, col: 0, columns: 7, value: token, cursor: token.length, placeholder: "", wrap: "word" } };
+  expect(invariants(frame(["bbbbbbb", "b"], { cursor: [2, 2] }), wide)).toEqual([]);
 });
 
 test("I4 follows line breaks, wrapping and editor scrolling", () => {
