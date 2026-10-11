@@ -60,7 +60,7 @@ const errorRow = (snapshot: TuiSnapshot) => snapshot.transcript.find(entry => en
 
 for (const [category, responses, actions, hint] of [
   ["auth", [{ error: "Incorrect API key secret-sentinel", status: 401 }], ["connect", "details", "keep-editing"], "Alt+L connect · F2 details"],
-  ["credential-store", [{ error: credentialStoreError("read") }], ["retry-credentials", "details", "keep-editing"], "Ctrl+R retry credential access · F2 details"],
+  ["credential-store", [{ error: credentialStoreError("read") }], ["retry-credentials", "details", "keep-editing"], "Ctrl+R retry · F2 details"],
   ["model", [{ error: "The model secret-sentinel does not exist", status: 404, code: "model_not_found" }], ["choose-model", "details", "keep-editing"], "Alt+M choose model · F2 details"],
   ["offline", Array.from({ length: 3 }, () => ({ error: "fetch failed secret-sentinel", code: "ENETUNREACH" })), ["continue", "details", "keep-editing"], "Ctrl+R continue · F2 details"],
   ["rate-limit", Array.from({ length: 3 }, () => ({ error: "Rate limit exceeded secret-sentinel", status: 429, headers: { "Retry-After": "2" } })), ["continue", "details", "keep-editing"], "Ctrl+R continue · F2 details"],
@@ -73,6 +73,8 @@ for (const [category, responses, actions, hint] of [
     expect(blockedSubmitHint(snapshot)).toBe(hint);
     // Repairs that need a new credential or model come first; continuation waits until the repair activates.
     if (category === "auth" || category === "model" || category === "credential-store") expect(blockedSubmitHint(snapshot)).not.toContain("Ctrl+R continue");
+    // The short retry key leaves naming the credential store to the error row's message line.
+    if (category === "credential-store") expect(errorRow(snapshot)[0]).toStartWith("Credential storage unavailable");
     expect(JSON.stringify(snapshot)).not.toContain("secret-sentinel");
   });
 });

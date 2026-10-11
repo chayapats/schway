@@ -53,7 +53,7 @@ export const HINT_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "Ctrl+F": ["find"],
   "Ctrl+O": ["tools"],
   "Ctrl+P": ["pin", "unpin"],
-  "Ctrl+R": ["continue", "reload", "retry", "retry credential access"],
+  "Ctrl+R": ["continue", "reload", "retry"],
   "Ctrl+W": ["other workspaces", "scope"],
   C: ["copy", "copy Markdown source", "copy this part"],
   R: ["read"],
