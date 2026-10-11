@@ -1,5 +1,4 @@
 import { preferenceRows, preferenceChoice, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
-import { CHATGPT_ROUTE, canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
@@ -120,13 +119,13 @@ export abstract class SettingsLayer extends UndoLayer {
         if (this.disposed || this.preferences !== panel || generation !== this.preferenceGeneration) return false;
         this.preferenceTransaction = transaction;
         const origin = row.key === "appearance" && this.appearanceEnvironment ? "environment" : transaction.origins[(row.key === "ui.splash" ? "ui" : row.key) as keyof ConfigLayer] ?? transaction.origins.model;
-        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : row.key === "ui.splash" ? transaction.settings.splash : transaction.settings[row.key as keyof ResolvedSettings];
+        const effective = panel.scope === "memory" ? `${transaction.settings.provider}/${transaction.settings.model} (${displaySetting(transaction.settings.provider === "xai" ? "xaiAuth" : "openaiAuth", transaction.settings.provider === "xai" ? transaction.settings.xaiAuth : transaction.settings.openaiAuth ?? transaction.settings.auth)}); thinking ${transaction.settings.thinking ?? "default"}` : row.key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : row.key === "git" ? transaction.settings.gitChangeTracking : row.key === "ui.splash" ? transaction.settings.splash : transaction.settings[row.key as keyof ResolvedSettings];
         const expectedOrigin = { session: "current-session override", memory: "interactive memory", user: "user-global", project: "project" }[panel.scope];
         const advanced = panel.page === "advanced";
         const shadowing = (panel.scope === "memory" ? panel.choiceIndex === 0 : choice !== undefined) && expectedOrigin !== origin
           ? advanced ? ` Saved but not effective: shadowed by ${origin}.` : ` Saved but not effective: overridden by ${friendlyPreferenceOrigin(origin)}.` : "";
         const evidence = advanced ? ` [${origin}]` : "";
-        panel.preview = redactSecrets(`${previewScopeText(panel.scope)} ${row.label}: ${preferenceChoice(choice)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing}`, this.secrets);
+        panel.preview = redactSecrets(`${previewScopeText(panel.scope)} ${row.label}: ${preferenceChoice(choice, row.key)}. Effective after save: ${displaySetting(row.key, effective)}${evidence}.${shadowing}`, this.secrets);
         panel.error = undefined;
         return true;
       } catch (error) {
@@ -162,10 +161,8 @@ export abstract class SettingsLayer extends UndoLayer {
       this.noticeIgnoredProjectApproval();
       const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
       const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "approval" ? { mode: this.configEditor!.settings.approvalMode } : key === "git" ? this.configEditor!.settings.gitChangeTracking : key === "undo" ? { maxAgeDays: this.configEditor!.settings.undoMaxAgeDays, maxSizeMB: this.configEditor!.settings.undoMaxSizeMB } : key === "ui" ? { splash: this.configEditor!.settings.splash, inlineDiffLines: this.configEditor!.settings.inlineDiffLines } : this.configEditor!.settings[key as keyof ResolvedSettings];
-      // The report names the ChatGPT route `chatgpt` for any accepted spelling; config still stores `codex`.
-      const reported = (shown: unknown) => key === "openaiAuth" && canonicalOpenAIAuth(shown) === "codex" ? CHATGPT_ROUTE : displaySetting(key!, shown);
-      const effective = key === "model" && !rawEffective ? "unset" : reported(rawEffective);
-      const saved = action === "reset" ? "removed override" : `saved ${reported(value)}`;
+      const effective = key === "model" && !rawEffective ? "unset" : displaySetting(key!, rawEffective);
+      const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
       const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
       const shownOrigin = origin ?? (key === "model" && !rawEffective ? "not configured" : origin);

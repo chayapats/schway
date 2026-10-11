@@ -1,4 +1,5 @@
 import { redactSecrets } from "../auth/secrets.ts";
+import { CHATGPT_ROUTE, canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
 import type { TuiRecovery } from "./controller-types.ts";
 import { sanitizeBaseUrl } from "./transcript-format.ts";
 
@@ -53,6 +54,7 @@ export function redactRecoveryDetails(message: string, secrets: readonly string[
 
 /** Render one resolved setting with secrets masked and structured values summarized. */
 export function displaySetting(key: string, value: unknown): string {
+  if (key === "openaiAuth" && canonicalOpenAIAuth(value) === "codex") return CHATGPT_ROUTE;
   if (key === "baseUrl" && typeof value === "string") return sanitizeBaseUrl(value);
   if ((key === "git" || key === "undo") && typeof value === "object" && value !== null) return JSON.stringify(value);
   return value === undefined ? "unset" : String(value);

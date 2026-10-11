@@ -17,12 +17,12 @@ export function preferenceEscape(panel: PreferencesSnapshot): string {
 /** Render the basic list and explicit save preview without exposing advanced provenance. */
 export function preferenceLines(panel: PreferencesSnapshot, compact: boolean): string[] {
   const row = panel.rows[panel.selectedIndex]!;
-  const choice = preferenceChoice(row.choices[panel.choiceIndex]);
+  const choice = preferenceChoice(row.choices[panel.choiceIndex], row.key);
   const advanced = panel.page === "advanced";
   const action = opensPreferenceAction(panel);
   const escape = preferenceEscape(panel);
   const scope = { session: "This session", memory: "This workspace", user: "All workspaces", project: "This project" }[panel.scope];
-  const value = (item: typeof row) => preferenceChoice(advanced ? item.value : item.effectiveValue ?? item.value);
+  const value = (item: typeof row) => preferenceChoice(advanced ? item.value : item.effectiveValue ?? item.value, item.key);
   const selected = `› ${row.label}: ${value(row)}`;
   const hint = action ? "Enter open · Esc back" : "←→ change · Enter preview · Esc back";
   const state = panel.error ? `! Not saved: ${choice}` : panel.preview ? `Enter save · ${choice}` : action ? hint : `Choice: ${choice}`;
