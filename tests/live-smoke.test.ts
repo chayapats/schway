@@ -493,7 +493,7 @@ test("compatible live runner classifies undelimited SSE over wire budget as outp
 test("rejected subscription refresh asks for interactive re-login without starting one", async () => {
   const report = await runLiveSmoke(selection(["codex"]), {
     createStore: () => ({ ...missingStore, get: async () => JSON.stringify({ accessToken: "private" }) }),
-    createModel: async () => createScriptedModel({ error: "The ChatGPT subscription session was revoked or rejected by the provider. Sign in again in interactive mode with /login codex.", status: 401 }),
+    createModel: async () => createScriptedModel({ error: "The ChatGPT subscription session was revoked or rejected by the provider. Sign in again in interactive mode with /login chatgpt.", status: 401 }),
   });
   expect(report.scenarios[0]).toMatchObject({ status: "pending", reason: "subscription_requires_login" });
 });
