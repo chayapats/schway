@@ -85,7 +85,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     return !!this.loginChooserState && this.loginChooserState === this.failureChooser && !this.running;
   }
 
-  /** From a failure-reopened chooser, start sign-in again at its first level, as the failure's `Alt+L retry` names. */
+  /** From a failure-reopened chooser, start sign-in again at its first level, as the failure's `Alt+L sign in` names. */
   retryFailedSignIn(): boolean {
     return this.atFailureChooser() && this.openLoginChooser();
   }
@@ -300,7 +300,7 @@ export abstract class CredentialsLayer extends ControllerCore {
     this.credentialMutation = true;
     const task = (async () => {
       const result = await entry.submit();
-      if (!result.ok) { this.fail("Key not saved · Alt+L retry · /model choose model", result.message); return false; }
+      if (!result.ok) { this.fail("Key not saved · Alt+L sign in · /model choose model", result.message); return false; }
       this.notice(result.message);
       savedNotice = this.transcript.at(-1)?.id;
       if (endpointUrl && preserveSelection) {
@@ -628,8 +628,8 @@ export abstract class CredentialsLayer extends ControllerCore {
         return applied;
       } catch (error) {
         if (this.loginGeneration !== generation) return false;
-        if (abort.signal.aborted) this.notice(saved ? "Sign-in saved; activation cancelled · /model choose model" : "Sign-in cancelled · Alt+L retry");
-        else this.fail(saved ? "Models unavailable; sign-in saved · /model retry · Alt+L sign in · F2 details" : "Grok sign-in failed · Alt+L retry · /model choose model", redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
+        if (abort.signal.aborted) this.notice(saved ? "Sign-in saved; activation cancelled · /model choose model" : "Sign-in cancelled · Alt+L sign in");
+        else this.fail(saved ? "Models unavailable; sign-in saved · /model retry · Alt+L sign in · F2 details" : "Grok sign-in failed · Alt+L sign in · /model choose model", redactSecrets(error instanceof Error ? error.message : String(error), this.secrets));
         return false;
       }
     })();
@@ -656,7 +656,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       const removed = await deleteSubscriptionTokens(this.credentials.store);
       this.notice(removed ? "Grok sign-in removed · Alt+L sign in" : "No Grok sign-in saved · Alt+L sign in");
       this.grokModels = undefined; this.grokPending = false; this.clearXaiCapabilities("grok");
-      if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("Grok disconnected · Alt+L reconnect this account"); }
+      if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("Grok disconnected · Alt+L sign in"); }
       return true;
     } catch { this.fail(credentialStoreError("delete")); return false; }
     finally { this.credentialMutation = false; }
@@ -758,10 +758,10 @@ export abstract class CredentialsLayer extends ControllerCore {
         if (abort.signal.aborted) {
           this.notice(credentialSaved
             ? "Sign-in cancelled; credential saved · /model choose model"
-            : "Sign-in cancelled; nothing saved · Alt+L retry");
+            : "Sign-in cancelled; nothing saved · Alt+L sign in");
           this.status = "idle";
         } else {
-          this.fail("ChatGPT sign-in failed · Alt+L retry");
+          this.fail("ChatGPT sign-in failed · Alt+L sign in");
           this.loginChooserState = { level: "main", selectedId: "chatgpt" };
           this.failureChooser = this.loginChooserState;
         }
@@ -850,7 +850,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       if (wasActiveCodex) {
         this.model = undefined;
         this.subscriptionReactivationRequired = true;
-        this.notice("ChatGPT disconnected · Alt+L reconnect this account");
+        this.notice("ChatGPT disconnected · Alt+L sign in");
         this.status = "idle";
         return true;
       }

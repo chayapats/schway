@@ -68,7 +68,7 @@ async function withLogin(route: Route, run: (controller: TuiController) => Promi
     /** Save fixture credentials or settle the scripted approval failure. */
     const login = async ({ signal, onSaved }: { signal: AbortSignal; onSaved?: () => void }) => {
       if (outcome === "cancel") await new Promise<void>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
-      if (outcome === "denied") return { ok: false as const, message: "Sign-in denied · Alt+L retry" };
+      if (outcome === "denied") return { ok: false as const, message: "Sign-in denied · Alt+L sign in" };
       await store.set(route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity(), "saved");
       onSaved?.();
       return { ok: true as const, status: "Saved" };

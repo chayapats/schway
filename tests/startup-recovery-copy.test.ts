@@ -12,13 +12,12 @@ test("startup recovery messages leave every key to the action row", () => {
   for (const category of STARTUP_RECOVERY_CATEGORIES) expect(startupRecoveryMessage(category).match(KEY), category).toBeNull();
 });
 
-test("startup recovery messages name their next step with the action row's verb", () => {
+test("startup recovery guidance names its next step and offers sign-in with Alt+L", () => {
   const verb = (label: string) => label.split(" ")[1]!;
   expect(startupRecoveryMessage("auth").split(" · ")[1]).toStartWith("Connect ");
-  expect(verb(RECOVERY_ACTION_LABELS.connect)).toBe("connect");
+  expect(RECOVERY_ACTION_LABELS.connect).toBe("Alt+L sign in");
   expect(startupRecoveryMessage("model").split(" · ")[1]).toStartWith("Choose ");
   expect(verb(RECOVERY_ACTION_LABELS["choose-model"])).toBe("choose");
-  expect(startupRecoveryMessage("auth")).not.toMatch(/sign in/i);
   // A provider failure has no repair key, so its step points at the details the row offers.
   expect(startupRecoveryMessage("provider").split(" · ")[1]).toEndWith(" details");
   expect(verb(RECOVERY_ACTION_LABELS.details)).toBe("details");

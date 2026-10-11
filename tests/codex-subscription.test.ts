@@ -1457,7 +1457,7 @@ test("controller cancels a live device poll before saving and clears the approva
       expect(await pending).toBe(false);
       expect(await loadSubscriptionTokens(store)).toBeNull();
       const text = JSON.stringify(controller.snapshot());
-      expect(text).toContain("Sign-in cancelled; nothing saved · Alt+L retry");
+      expect(text).toContain("Sign-in cancelled; nothing saved · Alt+L sign in");
       expect(text).not.toContain("CANCEL-CODE");
     } finally { controller.dispose(); }
   });
@@ -1540,7 +1540,7 @@ test("logout blocks an active ChatGPT account while reporting untouched API-key 
       expect(reloads).toBe(0);
       const text = JSON.stringify(controller.snapshot());
       expect(text).toContain("OPENAI_API_KEY");
-      expect(text).toContain("ChatGPT disconnected · Alt+L reconnect this account");
+      expect(text).toContain("ChatGPT disconnected · Alt+L sign in");
       expect(text).not.toContain("env-api-key-secret");
     } finally { controller.dispose(); }
   });

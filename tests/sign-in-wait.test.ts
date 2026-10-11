@@ -91,7 +91,7 @@ test("ChatGPT callback timeout shows a short status, keeps the recovery recipe i
   expect(await controller.login("codex")).toBe(false);
   const failure = controller.snapshot().transcript.at(-1)!;
   expect(failure).toMatchObject({ kind: "error", text: SIGN_IN_TIMED_OUT });
-  expect(SIGN_IN_TIMED_OUT).toBe("Sign-in timed out · Alt+L retry · F2 details");
+  expect(SIGN_IN_TIMED_OUT).toBe("Sign-in timed out · Alt+L sign in · F2 details");
   expect(statusWords(failure.text)).toBeLessThanOrEqual(6);
   expect(controller.snapshot().transcript.some(entry => /\/login \w+ --/.test(entry.text))).toBe(false);
   const chooser = controller.snapshot().loginChooser!;
@@ -164,7 +164,7 @@ test("ChatGPT browser wait names its provider before any approval data and Enter
   expect(JSON.stringify(controller.snapshot())).toBe(before);
   expect(controller.running).toBe(true); expect(calls).toBe(1);
   ui.mockInput.pressEscape(); await controller.waitForIdle(); await ui.settle();
-  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Sign-in cancelled; nothing saved · Alt+L retry");
+  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Sign-in cancelled; nothing saved · Alt+L sign in");
 });
 
 for (const provider of ["ChatGPT", "Grok"] as const) test(`${provider} device code stays out of the transcript, details and saved session; Esc cancels without saving`, async () => {
@@ -194,7 +194,7 @@ for (const provider of ["ChatGPT", "Grok"] as const) test(`${provider} device co
     expect(rows.indexOf(`Sign in to ${provider}`)).toBeGreaterThan(-1);
     ui.mockInput.pressEscape();
     expect(await running).toBe(false); await ui.settle();
-    expect(controller.snapshot().transcript.at(-1)!.text).toBe(provider === "Grok" ? "Sign-in cancelled · Alt+L retry" : "Sign-in cancelled; nothing saved · Alt+L retry");
+    expect(controller.snapshot().transcript.at(-1)!.text).toBe(provider === "Grok" ? "Sign-in cancelled · Alt+L sign in" : "Sign-in cancelled; nothing saved · Alt+L sign in");
     expect(await store.get(provider === "Grok" ? grokSubscriptionIdentity() : codexSubscriptionIdentity())).toBeNull();
     expect(await controller.submit("Continue the task")).toBe(true);
     await controller.waitForIdle();
@@ -387,7 +387,7 @@ test("a second Esc while a sign-in is cancelling is quiet, and the hint offers n
   expect(controller.snapshot().transcript.length).toBe(before);
   stop.resolve();
   expect(await running).toBe(false);
-  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Sign-in cancelled; nothing saved · Alt+L retry");
+  expect(controller.snapshot().transcript.at(-1)!.text).toBe("Sign-in cancelled; nothing saved · Alt+L sign in");
 });
 
 test("the API-key save still explains a second Esc while secure storage writes", async () => {

@@ -19,7 +19,7 @@ export function runningSubmitNotice(stopping: boolean): string {
 
 /** Error-row label for each recovery action; the hint row reuses these so both surfaces name the same keys. */
 export const RECOVERY_ACTION_LABELS: Readonly<Record<TuiRecovery["actions"][number], string>> = {
-  connect: "Alt+L connect", "retry-credentials": "Ctrl+R retry", "choose-model": "Alt+M choose model",
+  connect: "Alt+L sign in", "retry-credentials": "Ctrl+R retry", "choose-model": "Alt+M choose model",
   continue: "Ctrl+R continue", details: "F2 details", "keep-editing": "Esc keep editing",
 };
 

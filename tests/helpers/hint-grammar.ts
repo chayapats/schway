@@ -45,7 +45,7 @@ export const HINT_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "Alt+B": ["resume"],
   "Alt+D": ["discard"],
   "Alt+I": ["inspect"],
-  "Alt+L": ["connect", "retry", "sign in"],
+  "Alt+L": ["sign in"],
   "Alt+M": ["choose model"],
   "Alt+R": ["review"],
   "Ctrl+C": ["cancel turn"],
