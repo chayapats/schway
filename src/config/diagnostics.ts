@@ -110,7 +110,8 @@ export function schemaDiagnostics(root: TSchema, errors: Iterable<ValueError>, s
   for (const error of errors) {
     if (diagnostics.has(error.path)) continue;
     const schema = error.schema;
-    const literals = (node: TSchema): string[] => node.anyOf ? node.anyOf.flatMap(literals) : typeof node.const === "string" ? [node.const] : [];
+    // A literal's `displayValue` is the accepted input users read in repair text; the stored value stays `const`.
+    const literals = (node: TSchema): string[] => node.anyOf ? node.anyOf.flatMap(literals) : typeof node.const === "string" ? [typeof node.displayValue === "string" ? node.displayValue : node.const] : [];
     const values = literals(schema);
     if (!values.length && error.type === ValueErrorType.Union) {
       const branch = schema.anyOf.findIndex((part: TSchema) => part.type === (error.value === null ? "null" : typeof error.value));

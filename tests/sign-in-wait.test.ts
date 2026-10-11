@@ -175,7 +175,7 @@ for (const provider of ["ChatGPT", "Grok"] as const) test(`${provider} device co
     let attempt = 0;
     const wait = async (signal: AbortSignal) => {
       // The first attempt fails with details; the second waits for Esc.
-      if (++attempt === 1) return { ok: false as const, message: provider === "Grok" ? "Grok device sign-in timed out waiting for approval. Restart /login grok --device." : "Device sign-in timed out after 900s without approval. Restart /login codex --device for a fresh code." };
+      if (++attempt === 1) return { ok: false as const, message: provider === "Grok" ? "Grok device sign-in timed out waiting for approval. Restart /login grok --device." : "Device sign-in timed out after 900s without approval. Restart /login chatgpt --device for a fresh code." };
       await aborted(signal); return { ok: false as const, message: "Cancelled." };
     };
     const codexLogin: CodexLoginRunner = async ({ signal, onProgress }) => { onProgress(`Enter this code at https://auth.openai.com/codex/device: ${code}`); return wait(signal); };

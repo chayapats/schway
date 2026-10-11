@@ -568,7 +568,7 @@ test("catalog failure never falls back to static OpenAI choices", async () => {
       session: createSession(), sessionId: "failure", workspace, configEditor,
       provider: "openai", modelId: "gpt-5.4", model: createScriptedModel({ provider: "codex-subscription" }),
       contextManager: createContextManager(workspace),
-      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: async () => { throw Error("Sign in with /login codex"); } },
+      credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }), listSubscriptionModels: async () => { throw Error("Sign in with /login chatgpt"); } },
     });
     try {
       controller.openModelPicker();

@@ -566,7 +566,7 @@ const SIGN_IN_FIXTURE_SCREENS = ["chatgpt-device-approval", "sign-in-timeout", "
 /** Drive one scripted ChatGPT sign-in fixture without network or browser; a returned result ends the sign-in, otherwise it keeps waiting. */
 function signInFixture(id: string, onProgress: (message: string) => void): { ok: false; message: string } | undefined {
   if (id === "chatgpt-device-approval") onProgress("Enter this code at https://auth.openai.com/codex/device: ABCD-1234");
-  if (id === "sign-in-timeout") return { ok: false, message: "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login codex --code <callback-url-or-code>; otherwise retry /login codex, or use /login codex --device on headless machines." };
+  if (id === "sign-in-timeout") return { ok: false, message: "ChatGPT sign-in timed out waiting for the browser callback. If you already approved in the browser, paste the redirect with /login chatgpt --code <callback-url-or-code>; otherwise retry /login chatgpt, or use /login chatgpt --device on headless machines." };
   if (id === "sign-in-browser-not-opened") {
     onProgress("Open this URL to sign in with ChatGPT: https://auth.openai.com/oauth/authorize?client_id=app_fixture&state=fixture");
     onProgress("The browser could not be opened automatically; use the printed URL instead.");

@@ -2,14 +2,16 @@ import { expect, test } from "bun:test";
 import { mkdir, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { canonicalOpenAIAuth } from "../src/auth/chatgpt-route.ts";
+import { selectOpenAITransport } from "../src/auth/credentials.ts";
 import { codexSubscriptionIdentity, credentialIdentity } from "../src/auth/store.ts";
 import { resolveSubscriptionRoute } from "../src/auth/subscription-route.ts";
 import { formatDoctorHelp, formatHelp } from "../src/cli/help.ts";
 import { MODELS_HELP } from "../src/cli/models.ts";
+import { parseConfigObject } from "../src/config/config.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { diagnose } from "../src/doctor/doctor.ts";
-import { createSubscriptionTokenRefresher, exchangeCodeForTokens, extractCodeFromCallbackUrl, loginWithBrowserFlow, pollDeviceAuthorization, saveSubscriptionTokens } from "../src/model/providers/codex-subscription.ts";
+import { codexRefreshFailedError, createSubscriptionTokenRefresher, exchangeCodeForTokens, extractCodeFromCallbackUrl, loginWithBrowserFlow, pollDeviceAuthorization, saveSubscriptionTokens } from "../src/model/providers/codex-subscription.ts";
 import { createSession } from "../src/session/session.ts";
 import { LOGIN_USAGE, helpText, parseLoginTarget } from "../src/tui/commands.ts";
 import { TuiController } from "../src/tui/controller.ts";
@@ -185,6 +187,7 @@ test("ChatGPT sign-in and session recovery messages name /login chatgpt with the
     timeout: await loginWithBrowserFlow({ store: fakeCredentialStore(), timeoutMs: 20, deps: { openBrowser: () => {},
       waitForCallbackCode: ({ signal }) => new Promise<string>((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })) } }).catch((error: Error) => error.message),
     device: await pollDeviceAuthorization({ deviceAuthId: "d", userCode: "u", pollIntervalMs: 1, fetch: rejected }).catch((error: Error) => error.message),
+    refreshFailed: codexRefreshFailedError("network"),
   };
   expect(messages.missing).toContain("with /login chatgpt (or /login chatgpt --device on headless machines)");
   expect(messages.expired).toContain("Sign in again in interactive mode with /login chatgpt.");
@@ -193,5 +196,49 @@ test("ChatGPT sign-in and session recovery messages name /login chatgpt with the
   expect(messages.noAccessToken).toBe("The sign-in response has no access token. Restart /login chatgpt for a fresh attempt.");
   expect(messages.timeout).toContain("paste the redirect with /login chatgpt --code <callback-url-or-code>; otherwise retry /login chatgpt, or use /login chatgpt --device on headless machines.");
   expect(messages.device).toMatch(/\/login chatgpt --device/);
+  expect(messages.refreshFailed).toContain("never falls back to API-key billing after explicit chatgpt selection.");
   for (const message of Object.values(messages)) expect(message).not.toContain("codex");
+});
+
+test("an invalid openaiAuth config value is told to use auto, chatgpt, or api-key", () => {
+  const parsed = parseConfigObject({ openaiAuth: "chat-gpt" }, "/home/user/.schway/config.json");
+  expect(parsed).toHaveProperty("diagnostics");
+  const { error, diagnostics } = parsed as { error: string; diagnostics: Array<{ path: string; constraint: string; values?: readonly string[] }> };
+  expect(diagnostics).toEqual([expect.objectContaining({ path: "openaiAuth", category: "enum", constraint: "Use auto, chatgpt, or api-key", values: ["auto", "chatgpt", "api-key"] })]);
+  expect(error).toContain("Invalid openaiAuth · Use auto, chatgpt, or api-key");
+  expect(error).not.toContain("codex");
+  for (const spelling of ["chatgpt", "codex"]) expect(parseConfigObject({ openaiAuth: spelling }, "config.json")).toMatchObject({ openaiAuth: "codex" });
+});
+
+test("the explicit ChatGPT route notice about an ignored API key names chatgpt", async () => {
+  const store = fakeCredentialStore();
+  await store.set(codexSubscriptionIdentity(), "saved-account");
+  for (const keys of [{ runtimeApiKey: "runtime-key", env: {} }, { env: { OPENAI_API_KEY: "env-key" } }]) {
+    expect(await selectOpenAITransport({ openaiAuth: "codex", ...keys, store })).toEqual({ transport: "codex",
+      notice: "Explicit chatgpt selection ignores the runtime/environment API key; subscription billing applies." });
+  }
+});
+
+test("/config set openaiAuth reports the ChatGPT route as chatgpt and still stores codex", async () => {
+  for (const spelling of ["chatgpt", "ChatGPT", "codex"]) {
+    await withTempDir(async root => {
+      const workspace = { root, launchCwd: root, extraRoots: [] };
+      await mkdir(join(root, "home"), { recursive: true });
+      const configEditor = await loadConfigEditor({ home: join(root, "home"), workspaceRoot: root, cli: { provider: "openai" } });
+      const controller = new TuiController({
+        session: createSession(), sessionId: `report-${spelling}`, workspace, configEditor,
+        provider: "openai", modelId: "", contextManager: createContextManager(workspace),
+        credentials: { store: fakeCredentialStore(), env: {}, reload: async () => ({ error: "unused" }) },
+        stageSettings: async () => ({ contextManager: createContextManager(workspace) }),
+      });
+      try {
+        expect(await controller.configCommand(`set openaiAuth ${spelling} --scope user`)).toBe(true);
+        expect(controller.snapshot().transcript.at(-1)?.text).toBe("openaiAuth (user): saved chatgpt. Effective: chatgpt [user-global].");
+        expect(configEditor.settings.openaiAuth).toBe("codex");
+        expect(JSON.parse(await Bun.file(join(root, "home/.schway/config.json")).text())).toMatchObject({ openaiAuth: "codex" });
+        expect(await controller.configCommand("set openaiAuth api-key")).toBe(true);
+        expect(controller.snapshot().transcript.at(-1)?.text).toBe("openaiAuth (session): saved api-key. Effective: api-key [current-session override].");
+      } finally { controller.dispose(); }
+    });
+  }
 });
