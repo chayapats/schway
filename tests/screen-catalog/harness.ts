@@ -123,6 +123,32 @@ const fixtureTurn = (branchId: string, parentId: string, id: string, task: strin
 ] });
 const stopped = (signal?: AbortSignal) => signal?.aborted ? Promise.resolve() : new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
 
+// A fast Git read can replace the loading panel before its first layout. Scope the completion gate to each fixture's cwd.
+const reviewStatusGates = new Map<string, Promise<void>>();
+let ungatedSpawn: typeof Bun.spawn | undefined;
+function gateReviewStatus(root: string): () => void {
+  const gate = Promise.withResolvers<void>();
+  reviewStatusGates.set(root, gate.promise);
+  if (!ungatedSpawn) {
+    const spawn = Bun.spawn;
+    ungatedSpawn = spawn;
+    Bun.spawn = ((...args: Parameters<typeof Bun.spawn>) => {
+      const child = Reflect.apply(spawn, Bun, args) as ReturnType<typeof Bun.spawn>;
+      const [command, options] = args;
+      const completion = Array.isArray(command) && command[0] === "git" && command.includes("status")
+        ? reviewStatusGates.get(String(options?.cwd)) : undefined;
+      if (!completion) return child;
+      const exited = child.exited.then(async code => { await completion; return code; });
+      return new Proxy(child, { get: (target, key) => key === "exited" ? exited : Reflect.get(target, key, target) });
+    }) as typeof Bun.spawn;
+  }
+  return () => {
+    gate.resolve();
+    reviewStatusGates.delete(root);
+    if (!reviewStatusGates.size && ungatedSpawn) { Bun.spawn = ungatedSpawn; ungatedSpawn = undefined; }
+  };
+}
+
 /** Opt-in settings for tests that press keys on a catalog state (#305); omitting every field keeps each golden byte-identical. */
 export interface BuildScreenOptions {
   /** Key encoding the renderer decodes and `mockInput` sends: kitty (the default) or legacy terminal bytes. */
@@ -443,10 +469,28 @@ export async function buildScreen(screen: Screen, variant: Variant, harnessOptio
   const commandContext = { controller, home, workspaceRoot: root, skillScope: { workspaceRoot: root, manager: controller.activeContextManager() }, sessionsDir: sessionsDirectory(home), settings: () => catalogConfig.settings, env: {}, secrets, finishQuit() {}, stderr: { write() {} } };
   const view = createConversationView(terminal.renderer, { controller, draftPersistence: draft, secrets, workspaceRoot: root, home, env: { SCHWAY_THEME: variant.theme, ...(variant.noColor ? { NO_COLOR: "1" } : {}) }, motion: "reduced", splash: "none", now: () => CATALOG_VIEW_NOW_MS, wallClock: () => Date.parse(CATALOG_TIME), quit: () => {}, openUrl: async url => { harnessOptions.onOpenUrl?.(url); },
     submit: (value, accepted) => { harnessOptions.onSubmit?.(value); return dispatchEditorInput(value, controller, (command, onAccepted) => handleSlashCommand(command.name, command.args, commandContext, command.raw, onAccepted), accepted); } });
-  const settle = async () => { await Bun.sleep(1); view.refresh(); await terminal.flush(); };
+  let releaseReviewStatus = screen.id === "resumed-review-git-failed" ? gateReviewStatus(root) : undefined;
+  const assertLive = () => {
+    const editor = terminal.renderer.root.findDescendantById("prompt");
+    if (terminal.renderer.isDestroyed || !editor || editor.isDestroyed) throw new Error(`Screen ${screen.id} was disposed while waiting`);
+  };
+  const settle = async () => {
+    assertLive();
+    await Bun.sleep(1); view.refresh(); await terminal.flush();
+    assertLive();
+    if (releaseReviewStatus && controller.snapshot().changeReview?.loading) {
+      const scroll = terminal.renderer.root.findDescendantById("change-review-diff") as ScrollBoxRenderable;
+      if (scroll.visible && scroll.height > 0 && terminal.captureCharFrame().includes("Loading current")
+          && scroll.verticalScrollBar.scrollSize === scroll.content.height && scroll.verticalScrollBar.viewportSize === scroll.viewport.height) {
+        releaseReviewStatus(); releaseReviewStatus = undefined;
+      }
+    }
+  };
   const waitFor = async (predicate: (snapshot: TuiSnapshot) => boolean) => {
     const start = performance.now();
-    while (!predicate(controller.snapshot())) {
+    while (true) {
+      assertLive();
+      if (predicate(controller.snapshot())) return;
       if (performance.now() - start > 10_000) throw new Error(`Screen ${screen.id} timed out\n${terminal.captureCharFrame()}`);
       await settle();
     }
@@ -454,7 +498,7 @@ export async function buildScreen(screen: Screen, variant: Variant, harnessOptio
   await settle();
   return { ...terminal, controller, view, session, sessionDirectory, secrets, draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
-    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
+    dispose: async () => { releaseReviewStatus?.(); releaseReviewStatus = undefined; view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
   };
 }
 /** Reach the named state, capture all spans and dispose every owned resource. */
