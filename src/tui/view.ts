@@ -5,7 +5,7 @@ import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/stor
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type PasteEvent, type Selection, type TextChunk } from "@opentui/core";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
-import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitEntryValue } from "./credential-entry.ts";
+import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitCredentialEntry } from "./credential-entry.ts";
 import { MAX_BRANCH_TREE_PREVIEW_ENTRIES, type TuiController, type TuiTranscriptEntry, type TuiSnapshot } from "./controller.ts";
 import { modelPickerAction, modelPickerDiagnosticOpen, modelPickerErrorRows, modelPickerName } from "./model-picker.ts";
 import { fitHintSegments } from "./hint-text.ts";
@@ -1045,6 +1045,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       draftStatus.visible = !!draftMessage;
       draftStatus.height = draftMessage.includes("\n") ? 2 : 1;
       draftStatus.content = draftMessage;
+      // Rows the top bar, activity row, hint row, draft status, composer caps and status bar take at this height.
+      const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + (draftStatus.visible ? draftStatus.height : 0) + 3;
       editor.visible = (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason) && !snapshot.undoPreview && !snapshot.changeReview && !snapshot.history && !snapshot.endpointUrlEntry && !snapshot.credentialEntry && !snapshot.loginCallbackEntry && !snapshot.loginApproval && !snapshot.loginChooser && !reader;
       // An open approval without reason entry takes the composer's rows for its choices.
       composerTop.visible = composer.visible = composerBottom.visible = !reader && (panelMode !== "tool-approval" || !!snapshot.toolApproval?.enteringReason);
@@ -1060,15 +1062,19 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else if (entryPanel || snapshot.loginApproval || snapshot.loginChooser) {
         editor.blur();
         if (entryPanel) {
-          entryTitle.content = safe(entryPanel.title);
+          // The panel gets the rows the chrome, the composer caps, the status bar and one conversation row leave. A long URL
+          // keeps its end in a few rows, so the caret stays on the last value row; a short frame drops extra value rows, then
+          // error rows, then the title, so the hint row stays whole above the status bar.
+          const fitted = fitCredentialEntry({ ...entryPanel, title: safe(entryPanel.title), value: safe(entryPanel.value), ...(entryPanel.error ? { error: safe(entryPanel.error) } : {}) },
+            width - 4, renderer.height - chromeRows - 1, Math.max(1, Math.min(6, Math.floor(renderer.height / 4))));
+          entryTitle.visible = !!fitted.title;
+          entryTitle.content = fitted.title;
           // Words tell the placeholder from a value; the muted shade is only a second cue.
-          // A long URL keeps its end in a few rows, so the caret stays on the last value row.
-          const valueRows = Math.max(1, Math.min(6, Math.floor(renderer.height / 4)));
-          entryValue.content = entryPanel.value ? fitEntryValue(safe(entryPanel.value), width - 5, valueRows) : new StyledText([fg(theme.muted)(entryPanel.placeholder)]);
+          entryValue.content = entryPanel.value ? fitted.value : new StyledText([fg(theme.muted)(fitted.value)]);
           entryValue.fg = theme.text;
-          entryError.visible = !!entryPanel.error;
-          entryError.content = safe(entryPanel.error ?? "");
-          entryHint.content = entryPanel.hint;
+          entryError.visible = !!fitted.error;
+          entryError.content = fitted.error;
+          entryHint.content = fitted.hint;
         } else credential.content = snapshot.loginApproval ? SIGN_IN_COMPOSER_TEXT : SIGN_IN_CHOOSER_COMPOSER_TEXT;
       } else if (reader) editor.blur();
       else if ((!inspection || searchOpen) && !editor.focused) editor.focus();
@@ -1376,7 +1382,6 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       // F2 on a discovery error swaps the model rows for its diagnostic until Esc returns to the list.
       const pickerErrorRows = snapshot.modelPicker ? modelPickerErrorRows(snapshot.modelPicker, width - 2, maxRows) : undefined;
       const pickerRows = snapshot.sessionPicker ? Math.max(1, sessionLines.length) : snapshot.loginChooser ? Math.min(maxRows, snapshot.loginChooser.rows.length) + 1 : snapshot.loginApproval ? approvalRows : snapshot.modelPicker ? (pickerErrorRows?.length ?? Math.min(maxRows, snapshot.modelPicker.entries.length)) + 2 : guide ? guidanceHeight(guide, width - 2) : Math.max(1, Math.min(maxRows, commandRows.length)) + (paletteNote ? 1 : 0) + (selectedDetail ? 1 : 0);
-      const chromeRows = (topBar.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (activity.visible ? 1 + (renderer.height >= 20 ? 1 : 0) : 0) + (hints.visible ? 1 : 0) + (draftStatus.visible ? draftStatus.height : 0) + 3;
       // Reserve the transcript, composer borders, status and picker before
       // allowing the editor to grow. A wrapping placeholder also consumes rows.
       editor.maxHeight = searchOpen ? 1 : Math.max(1, Math.min(6, Math.floor(renderer.height / 4), renderer.height - chromeRows - pickerRows - 1));
