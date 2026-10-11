@@ -1,5 +1,170 @@
 # Installed v0.2-v0.3 release gate (#58)
 
+## 1.0.0-rc.2 release (2026-10-11)
+
+**Verdict: 1.0.0-rc.2 published.**
+
+Release commit **`R = 5919cb47324a0149d8783c9e785b6d5a65769c09`** was merged
+through [PR #388](https://github.com/chayapats/schway/pull/388). This cut follows
+[#161's subsequent-RC rule](https://github.com/chayapats/schway/issues/161):
+offline checks and registry installation, renewed design sign-off for changed
+screens, and full evals on the four affected auth routes. The compatible adapter
+is unchanged since `v1.0.0-rc.1`; no new compatible live-eval pass is claimed.
+Raw reports, credentials, logs, sessions and tarballs remain private outside Git
+in `~/schway-release-evidence/1.0.0-rc.2/` and the coordinator run directory.
+
+### Release contents and actual-R checks
+
+The package and extension-guide/greeting peer examples name `1.0.0-rc.2`.
+[The changelog](../CHANGELOG.md) records changes since rc.1, including the merged
+UI follow-ups and provider/auth fixes. The inspected offline demo is
+**361,584 bytes**, below 2,097,152 bytes, and shows the ready screen, inline diff,
+outcome and review. The session fixture is committed for this version. #389's
+optional-telemetry test fix is included in the release commit.
+
+The actual merge commit has the same tree as the independently reviewed
+candidate `ec0dcbec1a66057e96667123f32982e04109a199`; the coordinator separately
+ran the required checks on clean `R`.
+
+| Check | Result |
+| --- | --- |
+| `bun install --frozen-lockfile` | Passed; no lockfile change |
+| `bun run typecheck` | Passed |
+| Full `bun test` | 5,337 passed, 0 failed; 136,798 assertions across 201 files; 765.16 seconds |
+| Actual-R `npm pack` and `npm pack --dry-run` | Identical inventory: 248 files; declarations/entrypoints/changelog present; tests and private release evidence excluded |
+| Actual-R tarball session-fixture regeneration | Installed release code, scripted model and isolated HOME; generated history passed discovery and both-branch resume contract check (1 test, 41 assertions) |
+
+The full suite ran once in a transient user scope with four CPUs and no memory
+high/max limit. Supervisor exit was 0 with no timeout; all memory high/max/OOM
+counters were zero. Peak memory was **3,605,622,784 bytes**. Toolchain:
+Linux 6.8.12-43-pve, Bun 1.4.2, npm 11.19.1.
+
+The tested package is **715,643 bytes**, SHA256
+`518f28651b0b53052f07d5e93afc8e699ed9fe9d0fead655b0d866f277c9abf6`.
+It is byte-identical to the reviewed committed fixture's source tarball.
+The unchanged fixture generator was rerun against the actual-R tarball outside
+Git; new UUIDs/timestamps were verified with their generated expectations.
+The committed reviewed fixture bytes remain unchanged. The registry supplies no
+`gitHead`; artifact equality and the verified release tag establish provenance.
+
+Both open P0 and P1 queries were empty on **2026-10-11 at 14:17 UTC**.
+
+### Full affected-route evals on R
+
+The maintainer approved these exact models/thinking levels, subscription quota
+and a **USD 10 combined API budget**. Runs used 8 turns, 120,000 ms per case and
+8,192 output tokens. Every accepted original run and rerun has the full `R`
+above as `sourceRevision`; credentials came from the selected Schway identity.
+No model, thinking, auth route or billing fallback was used.
+
+| Route | Provider | Model | Thinking | Billing | sourceRevision | Original success/total | Rerun | spend.totalUsd | spend.exact | Eval exit code(s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI key | `openai` | `gpt-6-luna` | `high` | `usage` | `5919cb47324a0149d8783c9e785b6d5a65769c09` | 7/7 | None | 0.004693 | true | 0 |
+| xAI key | `xai` | `grok-4.7` | `medium` | `usage` | `5919cb47324a0149d8783c9e785b6d5a65769c09` | 6/7 | `tool-error-recovery`: success, 1/1 | 0.198054, including rerun | true | Original 1; rerun 0 |
+| ChatGPT subscription | `codex` | `gpt-6.1-sol` | `medium` | `subscription` | `5919cb47324a0149d8783c9e785b6d5a65769c09` | 7/7 | None | 0 | true | 0 |
+| Grok subscription | `grok` | `grok-4.7` | `medium` | `subscription` | `5919cb47324a0149d8783c9e785b6d5a65769c09` | 6/7 | `tool-error-recovery`: success, 1/1 | 0 | true | Original 1; rerun 0 |
+
+All four affected routes meet #160's pass rule. The two failed original recovery
+cases and their sole permitted successful reruns remain recorded, not replaced.
+There were **30 case attempts after prerequisites passed**, including the two
+reruns. Total exact usage-billed eval spend is **USD 0.202747 of USD 10**.
+Both subscription routes record only `billing: "subscription"` and USD 0.
+No budget stop occurred and no run exited 3.
+
+Initial xAI, Grok and ChatGPT attempts skipped all seven cases before inference
+when cold model-catalog connections exceeded the bounded discovery deadline.
+Those zero-inference artifacts are preserved and are not counted as passes.
+Same-process selected-account availability inspection preceded the accepted
+runs; the actual-R eval and its normal bounded preflight were unchanged.
+Rejected OpenAI/ChatGPT credentials were repaired by the maintainer before their
+accepted runs. Private evidence retains every original, prerequisite retry and
+single-case rerun with artifact hashes.
+
+Verified official prices, supplied as explicit eval flags, were USD per million
+input/output tokens: [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
+0.10/0.50 and [Grok 4.7](https://docs.x.ai/developers/models/grok-4.7) 2/6.
+Subscription quota is separate from per-token USD accounting. The local
+compatible installation check below is a protocol fixture, not a live eval.
+
+### Design sign-off #2
+
+Design sign-off #2: approved by chayapats on 2026-10-11 at 5919cb47324a0149d8783c9e785b6d5a65769c09
+
+The maintainer reviewed the generated rc.2 gallery and explicitly approved the
+release commit with no changes requested; [approval is recorded on #161](https://github.com/chayapats/schway/issues/161#issuecomment-6109617621).
+The reviewed gallery contains 141 screens and 1,577 frames, covering dark/light
+at 120, 80 and 50 columns and no-color variants. `G = R`, so
+`git diff --stat G R -- tests/screen-catalog/goldens` prints nothing.
+
+| Screen | Variant | Request | Merged PR (fixed) or issue (filed) |
+| --- | --- | --- | --- |
+
+### Publication, registry artifact and tag
+
+`npm publish <tested-tarball> --access public --tag next` exited 0 after the
+maintainer completed npm's account write authentication. Registry verification
+at **2026-10-11T14:08:11.789Z** confirmed `1.0.0-rc.2`, `next: 1.0.0-rc.2`
+and unchanged `latest: 1.0.0-rc.1` (the observed pre-publication value).
+An initial post-publication 404 cleared during registry propagation; retained
+checks use ordinary canonical URLs without cache busting.
+
+The downloaded registry tarball is byte-identical to the tested package:
+SHA1 `a8feae82a5a0d092059e6c1325da73dd7ebde93c`; SHA256 matches the value above.
+The advertised SHA512 integrity matches the downloaded bytes. Registry metadata
+reports 248 files and executable mapping `schway: bin/schway`.
+The annotated `v1.0.0-rc.2` tag was pushed and its remote peeled commit verified
+as `R`. No GitHub Release page or CI publishing step was used.
+
+### Registry installation and daily executable
+
+Checks completed at **2026-10-11T14:11:41.505Z**, with an empty HOME, a separate
+Git workspace and a temporary prefix outside the checkout. No login/logout or
+production-account change was performed by the installation checks.
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| Exact registry `npm install -g --prefix <temporary-prefix> --no-audit --no-fund schway@1.0.0-rc.2` | 0 | Installed rc.2 |
+| Installed `--help` | 0 | Help printed |
+| Bare installed `doctor --json` | 1 | Version rc.2; missing-model/auth checks reported in empty HOME |
+| Installed configured `doctor --json` with local compatible fixture and `--auth none` | 0 | Version rc.2 |
+| Installed `-p hello` without a model | 1 | Exact no-model message |
+| Installed local-compatible headless turn | 0 | `agent.finished` reason `completed`; one request and exactly one session JSONL |
+| Installed `-p hi` with `{"provider":"anthropic"}` | 1 | Exact removal message |
+| Daily `npm install -g --no-audit --no-fund schway@1.0.0-rc.2` | 0 | Default CLI resolves to the registry-installed rc.2 binary |
+| Daily bare `doctor --json` | 1 | Version rc.2; only missing default model reported |
+| Daily configured OpenAI `doctor --json` (`gpt-6-luna/high`, API-key route) | 0 | Version rc.2; configuration accepted, no inference |
+| Daily `schway -V` | 0 | `schway 1.0.0-rc.2` |
+
+Bare doctor's nonzero status is its configuration diagnosis, not a different
+installed version. The initial private installation harness incorrectly required
+exit 0 for bare doctor in empty HOME; that expectation was corrected against
+the documented version check and deterministic doctor contract. Initial raw
+results are retained. User configuration was not rewritten to force a pass.
+
+Exact no-model message:
+
+```text
+No model configured · Pass --provider and --model, or set them in config
+```
+
+Exact removed-provider message:
+
+```text
+Anthropic support ended in 0.4
+Use Claude through a compatible endpoint:
+  schway --provider openai-compatible --base-url <url> --model <id>
+See docs/configuration.md
+```
+
+### Remaining human round
+
+[#161](https://github.com/chayapats/schway/issues/161) stays open for round 2 on
+the installed rc.2: three consecutive calendar days, at least eight completed
+real-work sessions, and at least two auth routes. Synthetic eval and installation
+fixtures do not count as those sessions. Grok real-use sessions also supply
+[#316](https://github.com/chayapats/schway/issues/316)'s before/after measurements.
+The stable 1.0 verdict and publication remain pending those gates.
+
 ## 1.0.0-rc.1 release (2026-10-02)
 
 **Verdict: 1.0.0-rc.1 published.**
