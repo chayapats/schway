@@ -776,8 +776,9 @@ When a provider step fails, the error row gives the available recovery keys for
 that operation. Alt+L opens sign-in after an authentication failure, Alt+M opens
 model selection after an unavailable-model failure, F2 shows optional
 redacted diagnostics, and **Esc keep editing** hides the controls while keeping the editor.
-While details are open, the failed turn's error row drops F2 details, since F2 does
-nothing until Esc closes them.
+While details are open, notice and error rows hide **F2 details** and
+**Esc keep editing** offers. **Esc back** closes details and restores those
+offers; copied model, diff, path and diagnostic text stays unchanged.
 For an accepted turn, Ctrl+R continues from saved conversation progress when
 offered. It does not submit the original user message again or rerun saved tool
 calls. Authentication and model failures offer continuation only after their
