@@ -1,4 +1,7 @@
+import { wrappedRows } from "./approval-layout.ts";
 import type { TuiSnapshot } from "./controller-types.ts";
+import { wrapHintSegments } from "./hint-text.ts";
+import { fitLine } from "./presentation.ts";
 
 /** Empty endpoint field instruction; it is not a URL, so it cannot pass for a prefilled value. */
 export const ENDPOINT_URL_PLACEHOLDER = "Paste or type a URL…";
@@ -49,18 +52,79 @@ export function credentialCaretCell(origin: { x: number; y: number }, lineWidths
   return { x: origin.x + (empty ? 0 : lineWidths[last] ?? 0) + 1, y: origin.y + last + 1 };
 }
 
-/** Fit a displayed value into `rows` rows of `columns` cells; a longer value keeps its end, where the caret sits, behind a leading `…`. */
+const graphemes = (text: string) => [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(part => part.segment);
+
+/** Rows that character wrapping at `columns` takes for graphemes of these cell widths; a grapheme that does not fit moves to the next row. */
+function charRows(cells: readonly number[], columns: number): number {
+  let rows = 1, column = 0;
+  for (const width of cells) {
+    if (column > 0 && column + width > columns) { rows++; column = 0; }
+    column += width;
+  }
+  return rows;
+}
+
+/** Fit a displayed value into `rows` character-wrapped rows of `columns` cells; a longer value keeps its end, where the caret sits, behind a leading `…`. */
 export function fitEntryValue(value: string, columns: number, rows: number): string {
+  // Rows are counted as the renderer wraps them, so a wide grapheme that skips a row's last cell costs that cell.
   // A pasted line break or tab would add rows the bound cannot see, so the field shows it as a space.
   const line = value.replace(/[\t\n\r]/g, " ");
-  const room = Math.max(1, columns) * Math.max(1, rows);
-  if (Bun.stringWidth(line) <= room) return line;
-  const graphemes = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(line)].map(part => part.segment);
-  let tail = "", width = 0;
-  for (let index = graphemes.length - 1; index >= 0; index--) {
-    const next = Bun.stringWidth(graphemes[index]!);
-    if (width + next > room - 1) break;
-    tail = graphemes[index] + tail; width += next;
+  const width = Math.max(1, columns), limit = Math.max(1, rows), room = width * limit;
+  if (Bun.stringWidth(line) <= width) return line;
+  const parts = graphemes(line), cells = parts.map(part => Bun.stringWidth(part));
+  if (Bun.stringWidth(line) <= room && charRows(cells, width) <= limit) return line;
+  // Take the tail that fills the cells behind `…`, then drop leading graphemes until the wrapped rows fit.
+  let start = parts.length, used = 1;
+  while (start > 0 && used + cells[start - 1]! <= room) used += cells[--start]!;
+  while (start < parts.length - 1 && charRows([1, ...cells.slice(start)], width) > limit) start++;
+  return `…${parts.slice(start).join("")}`;
+}
+
+/** One entry panel as the composer shows it: each text is final, and an empty title or error takes no row. */
+export interface CredentialEntryLayout {
+  /** Title text, whole, shortened to one row, or empty. */
+  title: string;
+  /** Fitted value, or the placeholder while the field is empty. */
+  value: string;
+  /** Error text, whole, shortened to its leading sentences on one row, or empty. */
+  error: string;
+  /** Hint rows joined by line breaks, broken only at ` · `; never shortened. */
+  hint: string;
+}
+
+/** Leading ` · ` sentences of an error that fit one row, or its first sentence shortened with `…`. */
+function errorRow(error: string, columns: number): string {
+  const sentences = error.split(" · ");
+  for (let count = sentences.length; count > 0; count--) {
+    const row = sentences.slice(0, count).join(" · ");
+    if (Bun.stringWidth(row) <= columns) return row;
   }
-  return `…${tail}`;
+  return fitLine(sentences[0]!, columns);
+}
+
+/** Fit an entry panel into `rows` rows of `columns` cells with at most `maxValueRows` value rows, always keeping the whole hint and one value row. */
+export function fitCredentialEntry(panel: CredentialEntryPanel, columns: number, rows: number, maxValueRows: number): CredentialEntryLayout {
+  // When rows run short the panel gives up extra value rows first, then the error's wrapped rows (it keeps its leading
+  // sentences on one row), then the title's wrapped rows (it shortens to one row), then the title, then the error.
+  const hintRows = wrapHintSegments(panel.hint, columns);
+  // The value row keeps one spare cell so a caret after a full row stays inside the panel.
+  const valueColumns = Math.max(1, columns - 1);
+  const shown = panel.value.replace(/[\t\n\r]/g, " ") || panel.placeholder;
+  const valueNeed = charRows(graphemes(shown).map(part => Bun.stringWidth(part)), valueColumns);
+  const cap = Math.max(1, Math.min(maxValueRows, valueNeed));
+  const left = rows - hintRows.length - 1;
+  const title = { whole: panel.title, rows: wrappedRows(panel.title, columns) };
+  const error = panel.error ? { whole: panel.error, rows: wrappedRows(panel.error, columns) } : { whole: "", rows: 0 };
+  const short = { title: fitLine(panel.title, columns), error: panel.error ? errorRow(panel.error, columns) : "" };
+  const shortErrorRows = short.error ? 1 : 0;
+  const choices: [string, number, string, number][] = [
+    [title.whole, title.rows, error.whole, error.rows],
+    [title.whole, title.rows, short.error, shortErrorRows],
+    [short.title, 1, short.error, shortErrorRows],
+    ["", 0, short.error, shortErrorRows],
+  ];
+  const [titleText, titleRows, errorText, errorRows] = choices.find(([, titleRows, , errorRows]) => titleRows + errorRows <= left) ?? ["", 0, "", 0];
+  const valueRows = Math.min(cap, 1 + Math.max(0, left - titleRows - errorRows));
+  const value = panel.value ? fitEntryValue(panel.value, valueColumns, valueRows) : valueNeed <= valueRows ? panel.placeholder : fitLine(panel.placeholder, valueColumns);
+  return { title: titleText, value, error: errorText, hint: hintRows.join("\n") };
 }
