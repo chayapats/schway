@@ -35,7 +35,7 @@ cursor 7 27 visible
   ▌ › Draft your next task…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ⠋ Retry · Attempt 2/3 in 2s   scripted/scripted-model   Provider default                                ctx ~6
-  Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  Wait, then Enter sends · Esc stop · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · / commands
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -114,8 +114,6 @@ cursor 7 27 visible
 29 68-76 #8b95a7 #0e1117 -
 29 76-81 #e6eaf0 #293140 b
 29 81-92 #8b95a7 #0e1117 -
-29 92-98 #e6eaf0 #293140 b
-29 98-107 #8b95a7 #0e1117 -
-29 107-108 #e6eaf0 #293140 b
-29 108-117 #8b95a7 #0e1117 -
-29 117-120 #ffffff #0e1117 -
+29 92-93 #e6eaf0 #293140 b
+29 93-102 #8b95a7 #0e1117 -
+29 102-120 #ffffff #0e1117 -

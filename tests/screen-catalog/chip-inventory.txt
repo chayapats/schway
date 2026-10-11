@@ -128,7 +128,7 @@ compaction-cancelled | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I 
 compaction-failed | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 compaction-noop | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 compaction-in-turn | Esc stop | Shift+Tab change mode | Ctrl+F find
-no-color | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find | Alt+I inspect | Ctrl+O tools | / commands
+no-color | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find | Alt+I inspect | / commands
 narrow-layout | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 table-and-code | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 inspection-unfocused | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect

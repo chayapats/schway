@@ -34,7 +34,7 @@ cursor 16 26 visible
       ยังไม่ส่ง 🧪
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   scripted/scripted-model   Provider default                                                    ctx ~0
-  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · / commands
   Draft restored · Alt+D discard
 == styles
 00 0-1 #ffffff #161b24 -
@@ -106,11 +106,9 @@ cursor 16 26 visible
 28 45-53 #8b95a7 #0e1117 -
 28 53-58 #e6eaf0 #293140 b
 28 58-69 #8b95a7 #0e1117 -
-28 69-75 #e6eaf0 #293140 b
-28 75-84 #8b95a7 #0e1117 -
-28 84-85 #e6eaf0 #293140 b
-28 85-94 #8b95a7 #0e1117 -
-28 94-120 #ffffff #0e1117 -
+28 69-70 #e6eaf0 #293140 b
+28 70-79 #8b95a7 #0e1117 -
+28 79-120 #ffffff #0e1117 -
 29 0-2 #ffffff #0e1117 -
 29 2-32 #8b95a7 #0e1117 -
 29 32-120 #ffffff #0e1117 -

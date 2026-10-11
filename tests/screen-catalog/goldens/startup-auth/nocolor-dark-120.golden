@@ -35,7 +35,7 @@ cursor 7 27 visible
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ! Attention   scripted/scripted-model   Provider default                                               ctx ~19
-  Alt+L connect · F2 details · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  Alt+L connect · F2 details · Shift+Tab change mode · Ctrl+F find · Alt+I inspect · / commands
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #e6eaf0 #161b24 b
@@ -131,8 +131,6 @@ cursor 7 27 visible
 29 61-69 #8b95a7 #0e1117 -
 29 69-74 #e6eaf0 #293140 b
 29 74-85 #8b95a7 #0e1117 -
-29 85-91 #e6eaf0 #293140 b
-29 91-100 #8b95a7 #0e1117 -
-29 100-101 #e6eaf0 #293140 b
-29 101-110 #8b95a7 #0e1117 -
-29 110-120 #ffffff #0e1117 -
+29 85-86 #e6eaf0 #293140 b
+29 86-95 #8b95a7 #0e1117 -
+29 95-120 #ffffff #0e1117 -
