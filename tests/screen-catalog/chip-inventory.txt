@@ -69,7 +69,7 @@ stopped-streaming | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F f
 stopped-tool | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 failed-turn | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 details-notice | PgUp/PgDn scroll | Esc back
-details-recovery | Ctrl+R continue | F2 details | Esc keep editing | Esc back | Alt+R review | PgUp/PgDn scroll
+details-recovery | Ctrl+R continue | Esc keep editing | Esc back | Alt+R review | PgUp/PgDn scroll
 details-unavailable | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
 retry-countdown | Esc stop | Shift+Tab change mode | Ctrl+F find
 retry-rate-limit | Esc stop | Shift+Tab change mode | Ctrl+F find
