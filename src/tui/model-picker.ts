@@ -57,7 +57,7 @@ export interface ModelPickerEntry {
   verifiedCatalog?: boolean;
   /** Connection action shown when subscription catalog rows cannot yet be known. */
   connect?: boolean;
-  /** Static catalog row shown because this route's model list could not be fetched. */
+  /** Fallback row shown because this route's model list could not be fetched. */
   listUnavailable?: boolean;
 }
 
@@ -248,10 +248,12 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
       else entries.push(row);
     }
   }
-  const grok: readonly import("../model/model-list.ts").ListedModel[] = options?.grokModels ?? (options?.grokModelsUnavailable ? [] : [{ id: ROUTE_FALLBACK_MODELS.xai }]);
+  const currentGrok = provider === "xai" && activeRoute === "grok" && modelId ? [{ id: modelId }] : [];
+  const grok: readonly import("../model/model-list.ts").ListedModel[] = options?.grokModels ?? (options?.grokModelsUnavailable ? currentGrok : [{ id: ROUTE_FALLBACK_MODELS.xai }]);
   for (const listed of grok) {
     entries.push({ identity: modelPickerIdentity({ provider: "xai", authRoute: "grok", modelId: listed.id }), provider: "xai", modelId: listed.id, authRoute: "grok",
       ...budgets("xai", listed.id, { contextWindow: listed.contextWindow ?? limits.contextWindow, maxOutput: listed.maxOutput ?? limits.maxOutput }), active: provider === "xai" && modelId === listed.id && activeRoute === "grok", custom: false,
+      ...(options?.grokModelsUnavailable ? { listUnavailable: true } : {}),
       ...(listed.supportedThinking ? { supportedThinking: listed.supportedThinking } : {}),
       ...(options?.subscriptionMode ? { otherProvider: true } : {}),
     });
