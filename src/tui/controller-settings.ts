@@ -1,4 +1,5 @@
 import { preferenceRows, preferenceChoice, PREFERENCE_SCOPES, type PreferencesSnapshot } from "./preferences.ts";
+import { CHATGPT_ROUTE, canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import type { Model } from "../model/model.ts";
@@ -161,8 +162,10 @@ export abstract class SettingsLayer extends UndoLayer {
       this.noticeIgnoredProjectApproval();
       const origin = key === "appearance" && this.appearanceEnvironment ? "environment" : this.configEditor!.origins[key as keyof ConfigLayer];
       const rawEffective = key === "appearance" && this.appearanceEnvironment ? this.appearanceEnvironment : key === "approval" ? { mode: this.configEditor!.settings.approvalMode } : key === "git" ? this.configEditor!.settings.gitChangeTracking : key === "undo" ? { maxAgeDays: this.configEditor!.settings.undoMaxAgeDays, maxSizeMB: this.configEditor!.settings.undoMaxSizeMB } : key === "ui" ? { splash: this.configEditor!.settings.splash, inlineDiffLines: this.configEditor!.settings.inlineDiffLines } : this.configEditor!.settings[key as keyof ResolvedSettings];
-      const effective = key === "model" && !rawEffective ? "unset" : displaySetting(key!, rawEffective);
-      const saved = action === "reset" ? "removed override" : `saved ${displaySetting(key!, value)}`;
+      // The report names the ChatGPT route `chatgpt` for any accepted spelling; config still stores `codex`.
+      const reported = (shown: unknown) => key === "openaiAuth" && canonicalOpenAIAuth(shown) === "codex" ? CHATGPT_ROUTE : displaySetting(key!, shown);
+      const effective = key === "model" && !rawEffective ? "unset" : reported(rawEffective);
+      const saved = action === "reset" ? "removed override" : `saved ${reported(value)}`;
       const source = scope === "session" ? "current-session override" : scope === "user" ? "user-global" : "project";
       const providerSource = key === "model" ? this.configEditor!.modelFallbackSource : undefined;
       const shownOrigin = origin ?? (key === "model" && !rawEffective ? "not configured" : origin);

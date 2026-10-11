@@ -66,7 +66,7 @@ export function isOpenAIAuthPreference(value: unknown): value is OpenAIAuthPrefe
   return value === "auto" || value === "codex" || value === "api-key";
 }
 
-/** Guidance returned when explicit codex selection has no stored subscription login. */
+/** Guidance returned when the explicit ChatGPT subscription route has no stored subscription login. */
 export const MISSING_CODEX_SUBSCRIPTION =
   "No ChatGPT subscription login found. Sign in in interactive mode with /login chatgpt (or /login chatgpt --device on headless machines). Headless runs never start a browser automatically and never read another CLI's credential cache.";
 
@@ -105,7 +105,7 @@ export async function selectOpenAITransport(input: {
       return { error: MISSING_CODEX_SUBSCRIPTION };
     }
     const notice = runtimeKey !== undefined || envKey !== undefined
-      ? "Explicit codex selection ignores the runtime/environment API key; subscription billing applies."
+      ? "Explicit chatgpt selection ignores the runtime/environment API key; subscription billing applies."
       : undefined;
     return notice !== undefined ? { transport: "codex", notice } : { transport: "codex" };
   }

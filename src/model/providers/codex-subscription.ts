@@ -236,7 +236,7 @@ export function codexRevokedSessionError(): string {
 /** Actionable error when renewal fails transiently, keeping retry ownership with Schway. */
 export function codexRefreshFailedError(detail?: string): string {
   const suffix = detail?.trim() ? ` (${detail.trim()})` : "";
-  return `Refreshing the ChatGPT subscription session failed${suffix}. Retry the turn; Schway owns retries and never falls back to API-key billing after explicit codex selection.`;
+  return `Refreshing the ChatGPT subscription session failed${suffix}. Retry the turn; Schway owns retries and never falls back to API-key billing after explicit chatgpt selection.`;
 }
 
 /** Load the stored subscription tokens, returning null when this identity was never saved. */

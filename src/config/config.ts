@@ -6,7 +6,7 @@ import { configDiagnostic, configDiagnosticSecrets, configReadError, safeConfigS
 import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { CREDENTIAL_HEADER_NAMES } from "../auth/secrets.ts";
-import { canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
+import { CHATGPT_ROUTE, canonicalOpenAIAuth } from "../auth/chatgpt-route.ts";
 import {
   type ModelCapability,
   lookupModel,
@@ -75,10 +75,10 @@ const AuthSchema = Type.Union([
   Type.Literal("none"),
 ]);
 
-/** Validated OpenAI credential preference, independent of compatible required/optional/none auth. */
+/** Validated OpenAI credential preference, independent of compatible required/optional/none auth; diagnostics name `codex` as `chatgpt`. */
 export const OpenAIAuthSchema = Type.Union([
   Type.Literal("auto"),
-  Type.Literal("codex"),
+  Type.Literal("codex", { displayValue: CHATGPT_ROUTE }),
   Type.Literal("api-key"),
 ]);
 

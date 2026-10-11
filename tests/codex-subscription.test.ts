@@ -1844,7 +1844,7 @@ test("explicit codex notice survives interactive model loading and the TUI reloa
       credentials: {
         store: reloadStore,
         env: {},
-        reload: async () => ({ model: createScriptedModel({ text: "ok" }), notice: "Explicit codex selection ignores the runtime/environment API key; subscription billing applies." }),
+        reload: async () => ({ model: createScriptedModel({ text: "ok" }), notice: "Explicit chatgpt selection ignores the runtime/environment API key; subscription billing applies." }),
       },
     });
     expect(await controller.logout("codex")).toBe(true);
