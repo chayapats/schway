@@ -854,7 +854,8 @@ test("slash completion uses Tab without sending a prompt; light theme updates a 
   expect(ui.captureCharFrame()).toContain("Enter send");
   ui.resize(100, 30);
   await settle(ui);
-  expect(ui.captureCharFrame()).toContain("Ctrl+O tools");
+  // The wide hint adds / commands; Ctrl+O tools waits for a tool row (tests/tui-tools-hint.test.ts).
+  expect(ui.captureCharFrame()).toContain("Ctrl+F find · Alt+I inspect · / commands");
 });
 
 test("scrollback remains anchored while new messages arrive and Ctrl+End resumes following", async () => {

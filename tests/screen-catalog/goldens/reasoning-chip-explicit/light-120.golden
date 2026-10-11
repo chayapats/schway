@@ -35,7 +35,7 @@ cursor 7 27 visible
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ● Ready   openai/gpt-5.4   high  OpenAI API key                                              ctx ━━━━━━━━━━ 0%
-  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · Ctrl+O tools · / commands
+  Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect · / commands
 == styles
 00 0-1 #ffffff #ecedea -
 00 1-3 #b27b00 #ecedea b
@@ -103,8 +103,6 @@ cursor 7 27 visible
 29 45-53 #545e6c #f7f7f4 -
 29 53-58 #1d232c #caced3 b
 29 58-69 #545e6c #f7f7f4 -
-29 69-75 #1d232c #caced3 b
-29 75-84 #545e6c #f7f7f4 -
-29 84-85 #1d232c #caced3 b
-29 85-94 #545e6c #f7f7f4 -
-29 94-120 #ffffff #f7f7f4 -
+29 69-70 #1d232c #caced3 b
+29 70-79 #545e6c #f7f7f4 -
+29 79-120 #ffffff #f7f7f4 -

@@ -239,7 +239,6 @@ const resultFor = (screen: Screen, encoding: ChipEncoding) => {
 };
 
 // Unowned dead chips found by #305; each constant names the open issue that fixes the chip.
-const FOLLOW_UP_CTRL_O_NO_TOOLS = 355;
 const FOLLOW_UP_F2_WHILE_DETAILS_OPEN = 356;
 const inspectNothing = (screen: string): ChipAllowEntry => ({ screen, chip: "Alt+I inspect", reason: "notice-by-design",
   note: "Nothing to inspect yet: the notice says so and names the next step (#275)." });
@@ -269,7 +268,6 @@ const CHIP_ALLOWLIST: readonly ChipAllowEntry[] = [
   { screen: "details-recovery", chip: "PgUp/PgDn scroll", reason: "content-fits", note: "The failure details fit the transcript at 80 columns; `details-recovery/dark-50` pages them." },
   { screen: "details-recovery", chip: "F2 details", reason: "known-defect", issue: FOLLOW_UP_F2_WHILE_DETAILS_OPEN,
     note: "The transcript error row keeps F2 details while those details are open, and F2 does nothing then." },
-  { screen: "no-color", chip: "Ctrl+O tools", reason: "known-defect", issue: FOLLOW_UP_CTRL_O_NO_TOOLS, note: "A failed turn without tool rows still offers Ctrl+O tools, which then changes nothing." },
 ];
 
 /** Verdicts each allowlist reason may cover; `unknown` chips are never allowlisted. */
