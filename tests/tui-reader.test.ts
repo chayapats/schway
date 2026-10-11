@@ -681,7 +681,8 @@ for (const outcome of ["approve", "deny", "cancel"] as const) test(`a deferred a
   const saved = ui.readerText();
   expect(saved).toContain("Find: value 2 · 2/11");
   const turn = ui.controller.submit("edit");
-  await ui.waitFor(() => !!ui.controller.snapshot().toolApproval && !ui.controller.snapshot().toolApproval!.loading, "approval");
+  await ui.waitFor(() => !!ui.controller.snapshot().toolApproval && !ui.controller.snapshot().toolApproval!.loading
+    && ui.readerText().includes("◌ Approval waiting · Esc back to request"), "painted reader approval");
   const request = ui.controller.snapshot().toolApproval;
   expect(ui.reading()).toBe(true);
   expect(ui.readerText()).toContain("◌ Approval waiting · Esc back to request");
