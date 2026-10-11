@@ -281,7 +281,7 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
 /** Render the real conversation view with a scripted model and a recording clipboard transport. */
-async function setup(width = 80, height = 24, options: { overrides?: Partial<TuiControllerOptions>; motion?: MotionMode; env?: Record<string, string | undefined> } = {}) {
+async function setup(width = 80, height = 24, options: { overrides?: Partial<TuiControllerOptions>; motion?: MotionMode; now?: () => number; env?: Record<string, string | undefined> } = {}) {
   const ui = await createTestRenderer({ width, height, kittyKeyboard: true, exitOnCtrlC: false });
   const workspace = { root: "/project", launchCwd: "/project", extraRoots: [] };
   const controller = new TuiController({
@@ -294,7 +294,7 @@ async function setup(width = 80, height = 24, options: { overrides?: Partial<Tui
   let quit = false;
   ui.renderer.copyToClipboardOSC52 = text => { if (clipboard === "throw") throw new Error("Clipboard unavailable"); if (clipboard) copied.push(text); return clipboard; };
   const view = createConversationView(ui.renderer, {
-    controller, workspaceRoot: options.overrides?.workspace?.root ?? "/project", home: "/home/test", env: options.env ?? {}, secrets: ["secret-sentinel"], motion: options.motion,
+    controller, workspaceRoot: options.overrides?.workspace?.root ?? "/project", home: "/home/test", env: options.env ?? {}, secrets: ["secret-sentinel"], motion: options.motion, now: options.now,
     quit: () => { quit = true; }, submit: async () => {},
   });
   cleanups.push(() => { view.destroy(); controller.dispose(); ui.renderer.destroy(); });
@@ -516,11 +516,14 @@ test("streaming code opens as a stable snapshot and reopening refreshes it", asy
 });
 
 test("a streaming table snapshot excludes the presentation caret under full motion", async () => {
-  const ui = await setup(80, 24, { motion: "full" });
+  // Keep the presentation caret on: a real-time blink can reparse the selected table between inspection and R under load.
+  const ui = await setup(80, 24, { motion: "full", now: () => 0 });
   ui.controller.applyEvent({ type: "model.delta", content: { type: "text", text: "| Col | Value |\n| --- | --- |\n| one | two |" } });
-  await ui.settle();
-  ui.mockInput.pressKey("i", { meta: true }); await ui.settle();
-  ui.mockInput.pressKey("r"); await ui.settle();
+  await ui.waitFor(() => ui.captureCharFrame().includes("Alt+I inspect") && ui.captureCharFrame().includes("two"), "painted streaming table");
+  ui.mockInput.pressKey("i", { meta: true });
+  await ui.waitFor(() => ui.captureCharFrame().includes("› table"), "painted table inspection");
+  ui.mockInput.pressKey("r");
+  await ui.waitFor(() => ui.reading() && ui.captureCharFrame().includes("Read table") && ui.captureCharFrame().includes("Snapshot · Esc back"), "painted table reader snapshot");
   expect(ui.readerText()).toContain("Read table");
   expect(ui.readerText()).toContain("Snapshot · Esc back");
   expect(ui.readerText()).not.toContain("▍");

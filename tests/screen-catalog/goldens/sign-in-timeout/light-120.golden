@@ -57,7 +57,9 @@ cursor 1 1 hidden
 05 0-2 #ffffff #f7f7f4 -
 05 2-3 #a61f16 #edddd9 -
 05 3-4 #ffffff #edddd9 -
-05 4-50 #a61f16 #edddd9 -
+05 4-40 #a61f16 #edddd9 -
+05 40-42 #1d232c #c9cbd0 b
+05 42-50 #a61f16 #edddd9 -
 05 50-117 #ffffff #edddd9 -
 05 117-120 #ffffff #f7f7f4 -
 06 0-120 #ffffff #f7f7f4 -

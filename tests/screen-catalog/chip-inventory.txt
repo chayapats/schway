@@ -26,7 +26,7 @@ chatgpt-device-approval | Esc cancel sign-in
 grok-browser-approval | Esc cancel sign-in
 grok-device-approval | Esc cancel sign-in
 sign-in-browser-not-opened | ↑↓ select | Enter continue | Esc cancel sign-in
-sign-in-timeout | Esc back | ↑↓ select | Enter continue
+sign-in-timeout | F2 details | Esc back | ↑↓ select | Enter continue
 grok-plan-error | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 model-picker | ↑↓ select | Enter use | Esc back
 details-model | ↑↓ select | Enter use | Esc back
@@ -69,7 +69,7 @@ stopped-streaming | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F f
 stopped-tool | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 failed-turn | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 details-notice | PgUp/PgDn scroll | Esc back
-details-recovery | Ctrl+R continue | Esc keep editing | Esc back | Alt+R review | PgUp/PgDn scroll
+details-recovery | Ctrl+R continue | Alt+R review | PgUp/PgDn scroll | Esc back
 details-unavailable | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
 retry-countdown | Esc stop | Shift+Tab change mode | Ctrl+F find
 retry-rate-limit | Esc stop | Shift+Tab change mode | Ctrl+F find
@@ -100,7 +100,7 @@ undo-preview-no-git | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc canc
 undo-shell-only | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc back
 undo-shell-only-review | ↑↓ files | PgUp/PgDn scroll | Ctrl+R reload | F2 details | Esc back
 undo-older-target | ↑↓ select | PgUp/PgDn scroll | Alt+R review | Esc cancel
-undo-detection-unavailable | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+undo-detection-unavailable | F2 details | Alt+R review | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 history-list | ↑↓ select | Enter open | F2 details | Esc back
 history-detail | ↑↓ files | Enter current diff | F2 details | Esc back
 history-stopped-turn | ↑↓ files | Enter current diff | F2 details | Esc back
@@ -114,7 +114,7 @@ history-timing-details | PgUp/PgDn scroll | F2 back | Esc back
 history-reasoning | PgUp/PgDn scroll | F2 details | Esc back
 history-reasoning-details | PgUp/PgDn scroll | F2 back | Esc back
 history-reasoning-legacy | PgUp/PgDn scroll | F2 details | Esc back
-delete-session-busy | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+delete-session-busy | F2 details | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 session-picker | ↑↓ select | Enter resume | Ctrl+W scope | Esc back
 session-picker-resume-failed | ↑↓ choose another | F2 details | Esc back
 session-picker-empty | Ctrl+W other workspaces | Esc back

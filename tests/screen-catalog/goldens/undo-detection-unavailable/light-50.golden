@@ -74,7 +74,9 @@ cursor 6 27 visible
 07 27-50 #ffffff #f7f7f4 -
 08 0-50 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
-09 1-42 #545e6c #f7f7f4 -
+09 1-32 #545e6c #f7f7f4 -
+09 32-34 #1d232c #caced3 b
+09 34-42 #545e6c #f7f7f4 -
 09 42-50 #ffffff #f7f7f4 -
 10 0-50 #ffffff #f7f7f4 -
 11 0-50 #ffffff #f7f7f4 -

@@ -11,7 +11,7 @@ cursor 16 27 visible
  ▌ ! Error
  ▌ Request failed
  ▌ Inspect details before continuing
- ▌ Ctrl+R continue · Esc keep editing
+ ▌ Ctrl+R continue
 
  ✗ Failed
  Failure details: Provider request failed after
@@ -66,10 +66,8 @@ cursor 16 27 visible
 05 1-2 #a61f16 #edddd9 -
 05 2-3 #ffffff #edddd9 -
 05 3-9 #1d232c #c9cbd0 b
-05 9-21 #a61f16 #edddd9 -
-05 21-24 #1d232c #c9cbd0 b
-05 24-37 #a61f16 #edddd9 -
-05 37-48 #ffffff #edddd9 -
+05 9-18 #a61f16 #edddd9 -
+05 18-48 #ffffff #edddd9 -
 05 48-50 #ffffff #f7f7f4 -
 06 0-50 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -

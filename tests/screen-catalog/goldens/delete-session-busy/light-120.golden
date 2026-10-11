@@ -53,7 +53,9 @@ cursor 36 27 visible
 03 0-2 #ffffff #f7f7f4 -
 03 2-3 #a61f16 #edddd9 -
 03 3-4 #ffffff #edddd9 -
-03 4-79 #a61f16 #edddd9 -
+03 4-69 #a61f16 #edddd9 -
+03 69-71 #1d232c #c9cbd0 b
+03 71-79 #a61f16 #edddd9 -
 03 79-117 #ffffff #edddd9 -
 03 117-120 #ffffff #f7f7f4 -
 04 0-120 #ffffff #f7f7f4 -
