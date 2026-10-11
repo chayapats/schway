@@ -19,7 +19,7 @@
 - An in-app reader opens long code blocks and wide tables with `R` from
   inspection. Search, wrapping and horizontal navigation keep canonical source
   anchors, and copying uses the source rather than the displayed rows (#256).
-- `--version` and `-v` report the installed package version without loading
+- `--version` and `-V` report the installed package version without loading
   the TUI, reading credentials or creating a session (#258).
 - Headless users can list saved sessions with safe previews and discover
   route-specific models before starting a turn. Help names the JSON session ID
