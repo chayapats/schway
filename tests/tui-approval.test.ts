@@ -753,7 +753,10 @@ for (const panel of ["inspection", "tree"] as const) test(`${panel} preserves a 
   const ui = await askSetup(root, [{ toolCalls: [{ id: "read", name: "read", arguments: { path: "note.txt" } }] }, { text: "done" }, { toolCalls: [editCall("pending")] }, { text: "done" }]);
   await ui.controller.submit("read"); await ui.settle();
   if (panel === "inspection") ui.mockInput.pressKey("i", { meta: true });
-  else { await ui.mockInput.typeText("/branch tree"); ui.mockInput.pressEnter(); }
+  else {
+    await ui.mockInput.typeText("/branch tree"); ui.mockInput.pressEnter();
+    await ui.waitFor(s => !!s.branchTree);
+  }
   await ui.settle();
   const turn = ui.controller.submit("edit"); await ui.waitFor(s => !!s.toolApproval?.diff);
   expect(ui.captureCharFrame()).not.toContain("Allow edit? · ask mode");
