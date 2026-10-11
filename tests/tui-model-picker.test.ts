@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
+import { join } from "node:path";
 import { grokSubscriptionIdentity } from "../src/auth/store.ts";
+import { ConfigEditor } from "../src/config/editing.ts";
 import { createContextManager } from "../src/context/manager.ts";
+import type { ModelCapability } from "../src/model/catalog.ts";
 import { bindGrokModel } from "../src/model/loader.ts";
 import { createSession } from "../src/session/session.ts";
 import { TuiController } from "../src/tui/controller.ts";
@@ -65,4 +68,40 @@ test("Grok discovery fallback neither copies an API-key choice nor revives a mod
     const entries = modelPickerEntries("", "xai", "grok-account-only", {}, { access, ...options });
     expect(entries.filter(entry => entry.kind === "model" && entry.authRoute === "grok")).toEqual([]);
   }
+});
+
+test("selecting the current Grok fallback offline retains cached capabilities and its configured thinking level", async () => {
+  await withTempDir(async home => {
+    const modelId = "grok-account-only";
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    const capability: ModelCapability = { id: modelId, authRoute: "grok", contextWindow: 64_000, maxOutput: 4_000,
+      supportedThinking: ["low", "high"], defaultThinking: "low" };
+    const editor = new ConfigEditor({ cli: { provider: "xai", xaiAuth: "grok", model: modelId, thinking: "high" } },
+      { user: join(home, "config.json"), project: join(home, "project.json") }, [capability]);
+    const store = fakeCredentialStore();
+    await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-oauth", obtainedAt: 0 }));
+    const controller = new TuiController({ home, workspace, session: createSession(), sessionId: "grok-cached-picker",
+      provider: "xai", modelId, configEditor: editor,
+      model: bindGrokModel(createScriptedModel({ provider: "xai", id: modelId })), contextManager: createContextManager(workspace),
+      credentials: { store, env: {}, reload: async () => ({ error: "unused" }),
+        listGrokModels: async () => { throw new Error("fetch failed: network offline"); } },
+      stageSettings: async settings => ({ model: bindGrokModel(createScriptedModel({ provider: "xai", id: settings.model })),
+        contextManager: createContextManager(workspace) }),
+    });
+    try {
+      controller.openModelPicker();
+      const deadline = Date.now() + 2_000;
+      while (controller.snapshot().modelPicker?.loading && Date.now() < deadline) await Bun.sleep(1);
+      const picker = controller.snapshot().modelPicker!;
+      expect(picker.loading).toBe(false);
+      expect(picker.entries[picker.selectedIndex]).toMatchObject({ authRoute: "grok", modelId, active: true, listUnavailable: true });
+      expect(await controller.selectPickerModel()).toBe(true);
+      expect(editor.modelCapability(modelId)).toEqual(capability);
+      expect(editor.settings).toMatchObject({ provider: "xai", xaiAuth: "grok", model: modelId, thinking: "high",
+        supportedThinking: ["low", "high"], contextWindow: 64_000, maxOutput: 4_000 });
+      // A later thinking edit uses the retained account evidence while discovery remains offline.
+      expect(await controller.thinkingCommand("low")).toBe(true);
+      expect(editor.settings.thinking).toBe("low");
+    } finally { controller.dispose(); }
+  });
 });
