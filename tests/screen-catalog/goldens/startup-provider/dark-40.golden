@@ -16,7 +16,7 @@ cursor 6 17 visible
 
  ▌ ! Error
  ▌ Connection unavailable
- ▌ F2 inspect details
+ ▌ Check provider settings
  ▌ F2 details · Esc keep editing
 
 
@@ -64,8 +64,8 @@ cursor 6 17 visible
 10 0-1 #ffffff #0e1117 -
 10 1-2 #f79d9d #2a2227 -
 10 2-3 #ffffff #2a2227 -
-10 3-21 #f79d9d #2a2227 -
-10 21-38 #ffffff #2a2227 -
+10 3-26 #f79d9d #2a2227 -
+10 26-38 #ffffff #2a2227 -
 10 38-40 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
 11 1-2 #f79d9d #2a2227 -

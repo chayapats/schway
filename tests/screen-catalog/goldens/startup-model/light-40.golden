@@ -15,7 +15,7 @@ cursor 6 17 visible
 
  ▌ ! Error
  ▌ Model unavailable
- ▌ Alt+M choose model
+ ▌ Choose another model
  ▌ Alt+M choose model · F2 details
  ▌ Esc keep editing
 
@@ -58,8 +58,8 @@ cursor 6 17 visible
 09 0-1 #ffffff #f7f7f4 -
 09 1-2 #a61f16 #edddd9 -
 09 2-3 #ffffff #edddd9 -
-09 3-21 #a61f16 #edddd9 -
-09 21-38 #ffffff #edddd9 -
+09 3-23 #a61f16 #edddd9 -
+09 23-38 #ffffff #edddd9 -
 09 38-40 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-2 #a61f16 #edddd9 -

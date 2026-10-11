@@ -15,7 +15,7 @@ cursor 7 27 visible
   It merges defaults, user and project settings.
 
   ▌ ! Error
-  ▌ Connection unavailable · F2 inspect details
+  ▌ Connection unavailable · Check provider settings
   ▌ F2 details · Esc keep editing
 
 
@@ -71,8 +71,8 @@ cursor 7 27 visible
 09 0-2 #ffffff #0e1117 -
 09 2-3 #e6eaf0 #282b31 -
 09 3-4 #ffffff #282b31 -
-09 4-47 #e6eaf0 #282b31 -
-09 47-77 #ffffff #282b31 -
+09 4-52 #e6eaf0 #282b31 -
+09 52-77 #ffffff #282b31 -
 09 77-80 #ffffff #0e1117 -
 10 0-2 #ffffff #0e1117 -
 10 2-3 #e6eaf0 #282b31 -

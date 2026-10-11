@@ -26,7 +26,7 @@ cursor 6 27 visible
 
 
   Choose model · Enter use · Esc back
-  › GPT-6 Astra · ChatGPT subscription
+  › GPT-6 Astra · ChatGPT subscription ✓
     fake-coder · API · localhost:8787
     Browse all models
     Connect a provider
@@ -71,8 +71,8 @@ cursor 6 27 visible
 19 49-50 #ffffff #f7f7f4 -
 20 0-1 #ffffff #f7f7f4 -
 20 1-2 #ffffff #e1e3df -
-20 2-38 #1d232c #c7d2d6 -
-20 38-49 #ffffff #e1e3df -
+20 2-40 #1d232c #c7d2d6 -
+20 40-49 #ffffff #e1e3df -
 20 49-50 #ffffff #f7f7f4 -
 21 0-1 #ffffff #f7f7f4 -
 21 1-2 #ffffff #e1e3df -
