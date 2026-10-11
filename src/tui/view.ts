@@ -76,7 +76,7 @@ export function hasToggleableTools(entries: readonly TuiTranscriptEntry[], inlin
   return entries.some(entry => entry.kind === "tool" && !hasInlineDiff(entry, inlineDiffLines) && (entry.toolStatus !== "error" || rowToggles.has(entry.id)));
 }
 
-/** Drop F2 details from an error row's last (action) line, leaving its other keys and ` · ` separators intact. */
+/** Drop F2 details from a row's last (action) line, leaving its other keys and ` · ` separators intact. */
 function withoutDetailsKey(text: string): string {
   const lines = text.split("\n");
   lines[lines.length - 1] = lines.at(-1)!.split(" · ").filter(segment => segment !== RECOVERY_ACTION_LABELS.details).join(" · ");
@@ -1294,8 +1294,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const updateRow = (row: TranscriptItemView, entry: TuiTranscriptEntry) => {
         // OpenTUI 0.5.11 caches finalized Markdown prefixes. A notice may follow an
         // active answer; finalizing that row early permanently splits later deltas.
-        // Open details ignore F2, so the failed turn's error row stops offering it until Esc closes them.
-        const text = detailsReturn && entry.id === snapshot.recovery?.entryId ? withoutDetailsKey(entry.text) : entry.text;
+        // Open details ignore F2, so error and notice rows stop offering it until Esc closes them.
+        const text = detailsReturn && (entry.kind === "error" || entry.kind === "system") ? withoutDetailsKey(entry.text) : entry.text;
         row.update({ ...entry, text: safe(text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
             resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
           }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,

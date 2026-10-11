@@ -9,13 +9,13 @@ cursor 16 17 visible
  ⚡ schway  /project
 
  Choice used for this session
- F2 details
 
  Details · Esc keep editing
  The choice could not be saved.
  The project settings file is read-
  only.
  ตรวจสอบสิทธิ์ของไฟล์ 🧪
+
 
 
 
@@ -37,25 +37,23 @@ cursor 16 17 visible
 02 0-1 #ffffff #f7f7f4 -
 02 1-29 #545e6c #f7f7f4 -
 02 29-40 #ffffff #f7f7f4 -
-03 0-1 #ffffff #f7f7f4 -
-03 1-11 #545e6c #f7f7f4 -
-03 11-40 #ffffff #f7f7f4 -
-04 0-40 #ffffff #f7f7f4 -
+03 0-40 #ffffff #f7f7f4 -
+04 0-1 #ffffff #f7f7f4 -
+04 1-27 #545e6c #f7f7f4 -
+04 27-40 #ffffff #f7f7f4 -
 05 0-1 #ffffff #f7f7f4 -
-05 1-27 #545e6c #f7f7f4 -
-05 27-40 #ffffff #f7f7f4 -
+05 1-31 #545e6c #f7f7f4 -
+05 31-40 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
-06 1-31 #545e6c #f7f7f4 -
-06 31-40 #ffffff #f7f7f4 -
+06 1-35 #545e6c #f7f7f4 -
+06 35-40 #ffffff #f7f7f4 -
 07 0-1 #ffffff #f7f7f4 -
-07 1-35 #545e6c #f7f7f4 -
-07 35-40 #ffffff #f7f7f4 -
+07 1-6 #545e6c #f7f7f4 -
+07 6-40 #ffffff #f7f7f4 -
 08 0-1 #ffffff #f7f7f4 -
-08 1-6 #545e6c #f7f7f4 -
-08 6-40 #ffffff #f7f7f4 -
-09 0-1 #ffffff #f7f7f4 -
-09 1-20 #545e6c #f7f7f4 -
-09 20-40 #ffffff #f7f7f4 -
+08 1-20 #545e6c #f7f7f4 -
+08 20-40 #ffffff #f7f7f4 -
+09 0-40 #ffffff #f7f7f4 -
 10 0-40 #ffffff #f7f7f4 -
 11 0-40 #ffffff #f7f7f4 -
 12 0-40 #ffffff #f7f7f4 -

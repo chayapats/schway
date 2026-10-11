@@ -36,9 +36,10 @@ async function failedTurn() {
   const recovery = controller.snapshot().recovery!;
   expect(recovery.actions).toContain("details");
   /** The painted action line of the recovery's error row. */
-  const actionRow = () => terminal.captureCharFrame().split("\n").map(line => line.replace(/^[\s▌]+/, "").trimEnd()).find(line => line.startsWith("Ctrl+R continue"));
+  const frameLines = () => terminal.captureCharFrame().split("\n").map(line => line.replace(/^[\s▌]+/, "").trimEnd());
+  const actionRow = () => frameLines().find(line => line.startsWith("Ctrl+R continue"));
   const press = async (key: string) => { if (key === "escape") terminal.mockInput.pressEscape(); else terminal.mockInput.pressKey(key); await settle(); };
-  return { controller, view, recovery, actionRow, press };
+  return { controller, view, recovery, actionRow, frameLines, press, settle };
 }
 
 test("open failure details drop F2 details from the error row and Esc restores it", async () => {
@@ -58,13 +59,19 @@ test("open failure details drop F2 details from the error row and Esc restores i
   expect(ui.actionRow()).toBe(OFFERED);
 });
 
-test("open notice details also drop F2 details from the failed turn's error row", async () => {
+test("open notice details drop F2 details from the notice and the failed turn's error row", async () => {
   const ui = await failedTurn();
   ui.controller.notice("Saved locally · F2 details", "Local evidence");
+  await ui.settle();
+  const noticeRow = () => ui.frameLines().find(line => line.startsWith("Saved locally"));
+  expect(noticeRow()).toBe("Saved locally · F2 details");
   await ui.press(F2);
   expect(ui.view.detailsKind()).toBe("notice");
   expect(ui.actionRow()).toBe(OPEN);
+  // The notice whose details are open stops offering F2 too.
+  expect(noticeRow()).toBe("Saved locally");
   await ui.press("escape");
   expect(ui.view.detailsKind()).toBeUndefined();
   expect(ui.actionRow()).toBe(OFFERED);
+  expect(noticeRow()).toBe("Saved locally · F2 details");
 });

@@ -8,7 +8,7 @@ cursor 16 27 visible
 == text
  ⚡ schway  /project
 
- Choice used for this session · F2 details
+ Choice used for this session
 
  Details · Esc keep editing
  The choice could not be saved.
@@ -45,8 +45,8 @@ cursor 16 27 visible
 00 20-50 #ffffff #ecedea -
 01 0-50 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
-02 1-42 #545e6c #f7f7f4 -
-02 42-50 #ffffff #f7f7f4 -
+02 1-29 #545e6c #f7f7f4 -
+02 29-50 #ffffff #f7f7f4 -
 03 0-50 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-27 #545e6c #f7f7f4 -
