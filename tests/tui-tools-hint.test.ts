@@ -45,7 +45,10 @@ test("only tool rows that expand or collapse count as Ctrl+O targets", () => {
   // A diff larger than the inline limit collapses to a toggleable row.
   expect(hasToggleableTools([inlineEdit], 0)).toBe(true);
   expect(hasToggleableTools([inlineEdit, tool("read")], DEFAULT_INLINE_DIFF_LINES)).toBe(true);
-  expect(hasToggleableTools([tool("bash", { toolName: "bash", toolStatus: "error" })], DEFAULT_INLINE_DIFF_LINES)).toBe(true);
+  // A failed row always shows expanded, so Ctrl+O changes it only after the user collapsed that row.
+  const failed = tool("bash", { toolName: "bash", toolStatus: "error" });
+  expect(hasToggleableTools([failed], DEFAULT_INLINE_DIFF_LINES)).toBe(false);
+  expect(hasToggleableTools([failed], DEFAULT_INLINE_DIFF_LINES, new Set([failed.id]))).toBe(true);
 });
 
 test("the idle hint offers Ctrl+O tools only once a tool row can toggle", async () => {
