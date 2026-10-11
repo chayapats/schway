@@ -12,7 +12,9 @@ import { tmpdir } from "node:os";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createConversationView } from "../src/tui/view.ts";
 import type { Model } from "../src/model/model.ts";
-import { SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
+import { getEffectiveConversation, getEffectiveSummary, SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
+import { shortenEarlierTurnToolResults } from "../src/context/replay.ts";
+import { estimateSessionTokens, estimateTextTokens } from "../src/context/tokens.ts";
 import { activityDetail } from "../src/tui/presentation.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
 import { handleSlashCommand } from "../src/tui/app.ts";
@@ -100,6 +102,46 @@ test("selected-model context keeps unknowns, separates reported usage and follow
     expect(controller.snapshot().context.providerUsage).toBeNull();
     controller.setModel(createScriptedModel(), "openai-compatible", "gpt-4o");
     expect(controller.snapshot().context.capacity).toBe(128_000);
+    controller.dispose();
+  });
+});
+
+test("a long earlier-turn tool result lowers the context meter on the next turn", async () => {
+  await withTempDir(async home => {
+    const workspace = { root: home, launchCwd: home, extraRoots: [] };
+    const big = "x".repeat(20_000);
+    const session = createSession([
+      { type: "user", id: "u0", content: [{ type: "text", text: "read the log" }] },
+      { type: "assistant", id: "a0", content: [{ type: "tool_call", id: "c0", name: "read", arguments: { path: "log" } }] },
+      { type: "tool_result", id: "r0", toolCallId: "c0", content: big, isError: false },
+    ]);
+    const controller = new TuiController({ session, workspace, sessionId: "meter", provider: "scripted", modelId: "custom",
+      model: createScriptedModel(), contextManager: createContextManager(workspace, { home }) });
+    const meter = () => {
+      const items = session.items;
+      const summary = estimateTextTokens(getEffectiveSummary(items) ?? "");
+      return {
+        shown: controller.snapshot().context.estimatedTokens,
+        full: estimateSessionTokens(getEffectiveConversation(items)) + summary,
+        shortened: estimateSessionTokens(shortenEarlierTurnToolResults(getEffectiveConversation(items))) + summary,
+      };
+    };
+    // The turn in progress stays full, so a long result there does not lower the meter.
+    const current = meter();
+    expect(current.shown).toBe(current.full);
+    expect(current.shown).toBe(current.shortened);
+    session.append({ type: "user", id: "u1", content: [{ type: "text", text: "what changed" }] });
+    const next = meter();
+    expect(next.shortened).toBeLessThan(next.full);
+    expect(next.shown).toBe(next.shortened);
+    expect(controller.describeContext()).toContain(`Estimated conversation + summary: ~${next.shortened} tokens`);
+    session.append({ type: "assistant", id: "a1", content: [{ type: "tool_call", id: "c1", name: "read", arguments: { path: "log" } }] });
+    const beforeResult = meter().shown;
+    const inProgress = { type: "tool_result" as const, id: "r1", toolCallId: "c1", content: big, isError: false };
+    session.append(inProgress);
+    const during = meter();
+    expect(during.shown).toBe(during.shortened);
+    expect(during.shown - beforeResult).toBe(estimateSessionTokens([inProgress]));
     controller.dispose();
   });
 });

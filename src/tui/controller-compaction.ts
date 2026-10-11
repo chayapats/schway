@@ -1,4 +1,5 @@
 import { getEffectiveConversation, getEffectiveSummary, getLatestCompaction } from "../context/compaction.ts";
+import { shortenEarlierTurnToolResults } from "../context/replay.ts";
 import { estimateSessionTokens, estimateTextTokens } from "../context/tokens.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { redactSecrets } from "../auth/secrets.ts";
@@ -25,7 +26,7 @@ export abstract class CompactionLayer extends SettingsLayer {
       const boundary = getLatestCompaction(items);
       this.contextEstimate = {
         session: this.session, branch: this.session.activeBranchId, last,
-        tokens: estimateSessionTokens(getEffectiveConversation(items)) + estimateTextTokens(getEffectiveSummary(items) ?? ""),
+        tokens: estimateSessionTokens(shortenEarlierTurnToolResults(getEffectiveConversation(items))) + estimateTextTokens(getEffectiveSummary(items) ?? ""),
         ...(boundary ? { summaryId: boundary.id, firstKeptId: boundary.firstKeptId } : {}),
       };
     }
