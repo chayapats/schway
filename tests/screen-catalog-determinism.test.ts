@@ -51,6 +51,7 @@ test("a disposed palette stops readiness checks before they read the editor", as
   const variant = variantsFor(screen).find(variant => variant.id === "nocolor-dark-50")!;
   const ui = await buildScreen(screen, variant);
   await ui.dispose();
+  expect(screen.ready(ui.controller.snapshot(), ui)).toBe(false);
   let polls = 0;
   await expect(ui.waitFor(snapshot => { polls++; return screen.ready(snapshot, ui); })).rejects.toThrow("disposed");
   expect(polls).toBe(0);
