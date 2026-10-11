@@ -1,6 +1,6 @@
 {
   "name": "schway",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "A lean, light, fast, and hackable coding-agent harness",
   "type": "module",
   "license": "MIT",

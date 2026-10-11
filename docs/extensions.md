@@ -599,7 +599,7 @@ A package declares capabilities in its `package.json`:
   "name": "your-schway-package",
   "version": "1.0.0",
   "type": "module",
-  "peerDependencies": { "schway": "^1.0.0-rc.1" },
+  "peerDependencies": { "schway": "^1.0.0-rc.2" },
   "schway": {
     "extensions": ["extensions/main.ts"],
     "skills": ["skills/review"]

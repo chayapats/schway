@@ -76,18 +76,45 @@ test("a line with malformed telemetry loads with the field dropped and still res
 
 const fixtureRoot = join(import.meta.dir, "fixtures/sessions");
 for (const release of (await readdir(fixtureRoot)).sort()) {
-  test(`published ${release} session still loads every branch with telemetry absent`, async () => {
-    const expected = JSON.parse(await readFile(join(fixtureRoot, release, "expect.json"), "utf8")) as { sessionId: string; mainBranchId: string; alternateBranchId: string };
-    await withTempDir(async directory => {
-      const text = await readFile(join(fixtureRoot, release, `${expected.sessionId}.jsonl`), "utf8");
-      await writeFile(join(directory, `${expected.sessionId}.jsonl`), text.replaceAll("__SCHWAY_FIXTURE_WORKSPACE__", directory));
-      for (const branchId of [expected.mainBranchId, expected.alternateBranchId]) {
-        const loaded = await loadJsonlSession({ directory, id: expected.sessionId, branchId });
-        expect(loaded.items.length).toBeGreaterThan(0);
-        expect(loaded.items.some(item => "telemetry" in item)).toBe(false);
-      }
+  for (const telemetry of ["recorded", "absent"] as const) {
+    test(`release ${release} fixture loads every branch with ${telemetry} telemetry`, async () => {
+      const expected = JSON.parse(await readFile(join(fixtureRoot, release, "expect.json"), "utf8")) as { sessionId: string; mainBranchId: string; alternateBranchId: string };
+      await withTempDir(async directory => {
+        const fixturePath = join(fixtureRoot, release, `${expected.sessionId}.jsonl`);
+        const text = await readFile(fixturePath, "utf8");
+        const records = text.trimEnd().split("\n").map(line => JSON.parse(line) as { type: string; entries?: { item: SessionRecord }[] });
+        const recordedItems = new Map(records.flatMap(record => record.type === "branch_append"
+          ? (record.entries ?? []).map(({ item }) => [item.id, item] as const) : []));
+        if (telemetry === "absent") {
+          for (const record of records) {
+            if (record.type !== "branch_append") continue;
+            for (const { item } of record.entries ?? []) {
+              if (item.type === "assistant" || item.type === "tool_result") delete item.telemetry;
+            }
+          }
+        }
+        const copy = (telemetry === "absent" ? `${records.map(record => JSON.stringify(record)).join("\n")}\n` : text)
+          .replaceAll("__SCHWAY_FIXTURE_WORKSPACE__", directory);
+        const path = join(directory, `${expected.sessionId}.jsonl`);
+        await writeFile(path, copy);
+        for (const branchId of [expected.mainBranchId, expected.alternateBranchId]) {
+          const loaded = await loadJsonlSession({ directory, id: expected.sessionId, branchId });
+          expect(loaded.items.length).toBeGreaterThan(0);
+          if (telemetry === "absent") {
+            expect(loaded.items.some(item => "telemetry" in item)).toBe(false);
+          } else {
+            for (const item of loaded.items) {
+              const recorded = recordedItems.get(item.id);
+              expect(recorded).toBeDefined();
+              expect("telemetry" in item ? item.telemetry : undefined)
+                .toEqual(recorded && "telemetry" in recorded ? recorded.telemetry : undefined);
+            }
+          }
+        }
+        expect(await readFile(fixturePath, "utf8")).toBe(text);
+      });
     });
-  });
+  }
 }
 
 /** Strip harness telemetry, leaving the same conversation. */
