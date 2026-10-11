@@ -82,6 +82,23 @@ test("controller.fail hides its first-line F2 offer while notice details are ope
   expect(ui.frame()).toContain("/delete-session retry · F2 details");
 });
 
+test("compaction repair details hides its marked offer and preserves the same diagnostic literal", async () => {
+  const ui = await noticeView();
+  // The runtime's failed-compaction event reaches the same notice producer used by manual /compact.
+  ui.controller.applyEvent({ type: "compaction.finished", reason: "manual", status: "failed", message: "F2 repair details" });
+  await ui.settle();
+  expect(ui.frame()).toContain("Compaction failed · F2 repair details");
+  await ui.press("F2");
+  expect(ui.view.detailsKind()).toBe("notice");
+  expect(ui.frame()).not.toContain("Compaction failed · F2 repair details");
+  expect(ui.frame()).toContain("Compaction failed");
+  expect(ui.frame().split("\n").map(line => line.trim())).toContain("F2 repair details");
+  expect(ui.frame()).not.toContain("Esc keep editing");
+  expect(ui.frame()).toContain("Esc back");
+  await ui.press("Esc");
+  expect(ui.frame()).toContain("Compaction failed · F2 repair details");
+});
+
 test("opening details preserves unmarked model and compaction literals", async () => {
   const ui = await noticeView();
   await ui.controller.submit("Show an example");

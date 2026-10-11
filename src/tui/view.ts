@@ -80,7 +80,7 @@ export function hasToggleableTools(entries: readonly TuiTranscriptEntry[], inlin
 function withoutDetailsKeys(entry: TuiTranscriptEntry): string {
   if ((entry.kind !== "error" && entry.kind !== "system") || !entry.keyHintLines?.length) return entry.text;
   return entry.text.split("\n").map((line, index) => entry.keyHintLines!.includes(index)
-    ? line.split(" · ").filter(segment => segment !== RECOVERY_ACTION_LABELS.details && segment !== RECOVERY_ACTION_LABELS["keep-editing"]).join(" · ")
+    ? line.split(" · ").filter(segment => segment !== RECOVERY_ACTION_LABELS.details && segment !== "F2 repair details" && segment !== RECOVERY_ACTION_LABELS["keep-editing"]).join(" · ")
     : line).join("\n");
 }
 
