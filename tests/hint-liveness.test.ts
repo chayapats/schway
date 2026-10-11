@@ -238,8 +238,6 @@ const resultFor = (screen: Screen, encoding: ChipEncoding) => {
   return probes.get(key)!;
 };
 
-// Unowned dead chips found by #305; each constant names the open issue that fixes the chip.
-const FOLLOW_UP_F2_WHILE_DETAILS_OPEN = 356;
 const inspectNothing = (screen: string): ChipAllowEntry => ({ screen, chip: "Alt+I inspect", reason: "notice-by-design",
   note: "Nothing to inspect yet: the notice says so and names the next step (#275)." });
 const pagingFits = (screen: string, note: string): ChipAllowEntry => ({ screen, chip: "PgUp/PgDn scroll", reason: "content-fits", note });
@@ -266,8 +264,6 @@ const CHIP_ALLOWLIST: readonly ChipAllowEntry[] = [
   ...["history-timing", "history-timing-cache-unreported", "history-timing-partial", "history-reasoning", "history-reasoning-legacy"].map(screen => pagingFits(screen, "The record fits the panel; `history-timing/dark-40` pages it.")),
   pagingFits("details-notice", "The notice details fit the transcript; `details-recovery/dark-50` pages failure details."),
   { screen: "details-recovery", chip: "PgUp/PgDn scroll", reason: "content-fits", note: "The failure details fit the transcript at 80 columns; `details-recovery/dark-50` pages them." },
-  { screen: "details-recovery", chip: "F2 details", reason: "known-defect", issue: FOLLOW_UP_F2_WHILE_DETAILS_OPEN,
-    note: "The transcript error row keeps F2 details while those details are open, and F2 does nothing then." },
 ];
 
 /** Verdicts each allowlist reason may cover; `unknown` chips are never allowlisted. */

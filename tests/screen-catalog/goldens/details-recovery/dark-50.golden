@@ -8,10 +8,10 @@ cursor 16 27 visible
 == text
  ⚡ schway  ~/demo
 
+ ▌ ! Error
  ▌ Request failed
  ▌ Inspect details before continuing
- ▌ Ctrl+R continue · F2 details
- ▌ Esc keep editing
+ ▌ Ctrl+R continue · Esc keep editing
 
  ✗ Failed
  Failure details: Provider request failed after
@@ -47,30 +47,29 @@ cursor 16 27 visible
 02 0-1 #ffffff #0e1117 -
 02 1-2 #f79d9d #2a2227 -
 02 2-3 #ffffff #2a2227 -
-02 3-17 #f79d9d #2a2227 -
-02 17-48 #ffffff #2a2227 -
+02 3-10 #f79d9d #2a2227 b
+02 10-48 #ffffff #2a2227 -
 02 48-50 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
 03 1-2 #f79d9d #2a2227 -
 03 2-3 #ffffff #2a2227 -
-03 3-36 #f79d9d #2a2227 -
-03 36-48 #ffffff #2a2227 -
+03 3-17 #f79d9d #2a2227 -
+03 17-48 #ffffff #2a2227 -
 03 48-50 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
 04 1-2 #f79d9d #2a2227 -
 04 2-3 #ffffff #2a2227 -
-04 3-9 #e6eaf0 #2c3241 b
-04 9-21 #f79d9d #2a2227 -
-04 21-23 #e6eaf0 #2c3241 b
-04 23-31 #f79d9d #2a2227 -
-04 31-48 #ffffff #2a2227 -
+04 3-36 #f79d9d #2a2227 -
+04 36-48 #ffffff #2a2227 -
 04 48-50 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
 05 1-2 #f79d9d #2a2227 -
 05 2-3 #ffffff #2a2227 -
-05 3-6 #e6eaf0 #2c3241 b
-05 6-19 #f79d9d #2a2227 -
-05 19-48 #ffffff #2a2227 -
+05 3-9 #e6eaf0 #2c3241 b
+05 9-21 #f79d9d #2a2227 -
+05 21-24 #e6eaf0 #2c3241 b
+05 24-37 #f79d9d #2a2227 -
+05 37-48 #ffffff #2a2227 -
 05 48-50 #ffffff #0e1117 -
 06 0-50 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -

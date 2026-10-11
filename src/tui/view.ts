@@ -14,7 +14,7 @@ import { diffGutter, wrapDiffLine } from "./diff-wrap.ts";
 import { activityDetail, displayText, fitActionLine, fitLine, fitModelLabel, fitStatusAction, shortenWorkspacePath, formatOutcomeLine, statusPill, type StatusTone } from "./presentation.ts";
 import { APPROVAL_RETURN_HINT, fitDescription, keyHintChunks, wrapHintSegments } from "./hints.ts";
 import { fitSessionPickerHint, sessionPanelLines, sessionPickerHint } from "./session-picker-view.ts";
-import { RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
+import { RECOVERY_ACTION_LABELS, RUNNING_DRAFT_HINT, RUNNING_NARROW_HINT, blockedSubmitHint, runningPlaceholder } from "./running-hints.ts";
 import { mixColor, resolveTheme, textOn, tint, type ThemeMode } from "./theme.ts";
 import { createTicker, easeOut, progress, shimmer, spinnerFrame, type MotionMode } from "./motion.ts";
 import { SPLASH_DURATION_MS, SPLASH_ACCENT_DURATION_MS, SPLASH_MIN_SIZE, SplashRenderable } from "./splash.ts";
@@ -74,6 +74,13 @@ export type PanelMode = (typeof PANEL_MODES)[number];
 export function hasToggleableTools(entries: readonly TuiTranscriptEntry[], inlineDiffLines: number, rowToggles: ReadonlySet<string> = new Set()): boolean {
   // A failed row always shows expanded, so Ctrl+O changes it only after the user collapsed it by hand.
   return entries.some(entry => entry.kind === "tool" && !hasInlineDiff(entry, inlineDiffLines) && (entry.toolStatus !== "error" || rowToggles.has(entry.id)));
+}
+
+/** Drop F2 details from an error row's last (action) line, leaving its other keys and ` · ` separators intact. */
+function withoutDetailsKey(text: string): string {
+  const lines = text.split("\n");
+  lines[lines.length - 1] = lines.at(-1)!.split(" · ").filter(segment => segment !== RECOVERY_ACTION_LABELS.details).join(" · ");
+  return lines.join("\n");
 }
 
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
@@ -1287,7 +1294,9 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const updateRow = (row: TranscriptItemView, entry: TuiTranscriptEntry) => {
         // OpenTUI 0.5.11 caches finalized Markdown prefixes. A notice may follow an
         // active answer; finalizing that row early permanently splits later deltas.
-        row.update({ ...entry, text: safe(entry.text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
+        // Open details ignore F2, so the failed turn's error row stops offering it until Esc closes them.
+        const text = detailsReturn && entry.id === snapshot.recovery?.entryId ? withoutDetailsKey(entry.text) : entry.text;
+        row.update({ ...entry, text: safe(text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
             resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
           }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,
           inspection?.id === entry.id && inspection.kind === "code" ? inspection.index : undefined,
