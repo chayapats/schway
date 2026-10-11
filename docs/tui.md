@@ -119,7 +119,7 @@ until a model is active.
 
 Once a model is selected, an empty conversation identifies the workspace,
 effective model and auth route, then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
-**Ctrl+R retry locked credential storage**, or **type a task**. **F2** opens
+**Ctrl+R retry** after unlocking credential storage, or **type a task**. **F2** opens
 failure details; its hint appears only when those details exist. The ready screen
 does not add a recurring welcome or restored-choice message to the transcript; `/config` retains setting provenance and `/model forget`
 clears remembered interactive choices.
