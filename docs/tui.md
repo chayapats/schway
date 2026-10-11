@@ -118,7 +118,7 @@ keep the sign-in action. Enter leaves an ordinary draft and its cursor unchanged
 until a model is active.
 
 Once a model is selected, an empty conversation identifies the workspace,
-effective model and auth route, then offers the relevant action: **Alt+L connect**, **Alt+M choose/repair model**,
+effective model and auth route, then offers the relevant action: **Alt+L sign in**, **Alt+M choose/repair model**,
 **Ctrl+R retry** after unlocking credential storage, or **type a task**. **F2** opens
 failure details; its hint appears only when those details exist. The ready screen
 does not add a recurring welcome or restored-choice message to the transcript; `/config` retains setting provenance and `/model forget`
@@ -641,7 +641,7 @@ compact status bar when the hint row is hidden; while secure storage saves, the
 hint reads `Wait for secure storage` because a submitted save cannot be
 cancelled, and after Esc it reads `Wait for sign-in to stop` until the sign-in
 ends. Once a Grok approval is saved, the panel closes while models load. A
-timeout reads `Sign-in timed out · Alt+L retry · F2 details`, with the
+timeout reads `Sign-in timed out · Alt+L sign in · F2 details`, with the
 provider's recovery steps in F2 details; both keys work from the chooser that
 reopens after a ChatGPT timeout. When the browser cannot open, the
 link stays in the conversation above `Browser didn't open · Open the link above`.
@@ -769,7 +769,7 @@ Slash and extension commands keep their own busy messages and stay unrun. When
 the turn completes, stops or fails, the draft remains in the editor until you
 press Enter again. After a completed or stopped turn the hint returns to Enter
 send; after a failure it leads with that failure's recovery keys, such as
-Ctrl+R continue or Alt+L connect. When the session cannot save another turn,
+Ctrl+R continue or Alt+L sign in. When the session cannot save another turn,
 the hint leads with `/new start fresh · /sessions browse` instead of Enter send.
 
 When a provider step fails, the error row gives the available recovery keys for

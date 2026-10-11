@@ -211,7 +211,7 @@ test("a recovery-required failure leads with its repair action and still never s
     expect(snapshot.recovery?.category).toBe("auth");
     expect(snapshot.recovery?.actions).toContain("connect");
     const hint = await ui.hintRow();
-    expect(hint).toStartWith("Alt+L connect");
+    expect(hint).toStartWith("Alt+L sign in");
     expect(hint).not.toContain("Enter send");
     await expectUnsentUntilEnter(ui, cursor);
   } finally { ui.close(); }

@@ -59,7 +59,7 @@ async function failTurn(dir: string, responses: ScriptedTurn[], storage: Paramet
 const errorRow = (snapshot: TuiSnapshot) => snapshot.transcript.find(entry => entry.kind === "error")!.text.split("\n");
 
 for (const [category, responses, actions, hint] of [
-  ["auth", [{ error: "Incorrect API key secret-sentinel", status: 401 }], ["connect", "details", "keep-editing"], "Alt+L connect · F2 details"],
+  ["auth", [{ error: "Incorrect API key secret-sentinel", status: 401 }], ["connect", "details", "keep-editing"], "Alt+L sign in · F2 details"],
   ["credential-store", [{ error: credentialStoreError("read") }], ["retry-credentials", "details", "keep-editing"], "Ctrl+R retry · F2 details"],
   ["model", [{ error: "The model secret-sentinel does not exist", status: 404, code: "model_not_found" }], ["choose-model", "details", "keep-editing"], "Alt+M choose model · F2 details"],
   ["offline", Array.from({ length: 3 }, () => ({ error: "fetch failed secret-sentinel", code: "ENETUNREACH" })), ["continue", "details", "keep-editing"], "Ctrl+R continue · F2 details"],

@@ -71,6 +71,11 @@ test("R1 skips slash-command segments, which R2, R5 and R6 still check", () => {
   passes(golden(["Change tracking is off", "/config set git {\"changeTracking\":\"on-demand\"}", "enable"], { cols: 40 }));
 });
 
+test("Alt+L names sign-in on every hint surface", () => {
+  passes(golden(["Connect to continue · Alt+L sign in", "Sign-in timed out · Alt+L sign in · F2 details"]));
+  for (const action of ["connect", "retry", "reconnect this account"]) fails("R1", golden([`Alt+L ${action}`]));
+});
+
 test("R2 rejects bare keys and keys whose action is cut off", () => {
   for (const row of ["↑↓ select · Enter · Tab more options · Esc back", "Connect a provider · Alt+L", "Find: absent · No matches · Esc resto…",
     "Ctrl+C cancel t…", "Nothing running · Enter s…", "Receiving response · Esc …"])
@@ -99,10 +104,10 @@ test("R4 rejects slashed arrow pairs", () => {
 });
 
 test("R5 rejects rows that end on a separator, except the composer input row", () => {
-  fails("R5", golden(["▌ Sign-in timed out · Alt+L retry ·", "▌ F2 details"]));
+  fails("R5", golden(["▌ Sign-in timed out · Alt+L sign in ·", "▌ F2 details"]));
   fails("R5", golden(["No saved undo for these changes · Alt+R review ·   │", "Esc back"]));
   expect(rules(golden(["  ▌ › /", "  ▌ › review ·"]))).toEqual([]);
-  passes(golden(["▌ Sign-in timed out · Alt+L retry", "▌ F2 details"]));
+  passes(golden(["▌ Sign-in timed out · Alt+L sign in", "▌ F2 details"]));
 });
 
 test("R6 keeps every key on the row with its action", () => {

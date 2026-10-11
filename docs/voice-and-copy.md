@@ -69,6 +69,8 @@ Bad: `1 files changed · Esc back`
 
 A key hint is a key or command followed by the action it takes, such as `Enter send` or `/sessions browse`. `tests/helpers/hint-grammar.ts` checks every catalog golden against these points; its rule IDs are in brackets. Add a new key and action pair to its allowlist on purpose.
 
+Write `Alt+L sign in` on every surface, including retry and reconnect offers. It opens the Sign in panel; surrounding status text such as `Connect to continue` may stay.
+
 Key first, then an imperative verb [R1, R3].  
 Good: `Ready · Enter send · Esc stop`  
 Bad: `Ready · Enter sends · Esc stop` [R3]

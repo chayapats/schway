@@ -114,7 +114,7 @@ test("interactive login and overwrite refresh the active real provider and logou
     expect(await store.get(credentialIdentity({ provider: "openai" }))).toBeNull();
     await controller.submit("cannot reuse deleted key");
     expect(headers).toHaveLength(2);
-    expect(controller.snapshot().transcript.at(-1)?.text).toContain("Alt+L connect");
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("Alt+L sign in");
     controller.notice("first-secret-sentinel second-secret-sentinel");
     expect(JSON.stringify(controller.snapshot())).not.toContain("secret-sentinel");
     expect(await Bun.file(join(sessionsDirectory(home), `${session.header.id}.jsonl`)).text()).not.toContain("secret-sentinel");
@@ -198,7 +198,7 @@ test("Grok sign-in activates its recommended model, emits billing route, and log
       expect(await controller.login("grok")).toBe(true); expect(editor.settings.xaiAuth).toBe("grok"); expect(controller.snapshot().modelId).toBe("grok-4.7"); expect(activated).toEqual(["grok"]);
       expect(controller.snapshot().transcript.some(entry => entry.text === "Grok model active · grok-4.7 · Enter send")).toBe(true);
       expect(await controller.logout("grok")).toBe(true); expect(await store.get(grokSubscriptionIdentity())).toBeNull(); expect(await store.get(credentialIdentity({ provider: "xai" }))).toBe("billing-key");
-      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Grok disconnected · Alt+L reconnect this account"))).toBe(true); expect(await controller.submit("Do not bill an API key")).toBe(false);
+      expect(controller.snapshot().transcript.some(entry => entry.text.includes("Grok disconnected · Alt+L sign in"))).toBe(true); expect(await controller.submit("Do not bill an API key")).toBe(false);
     } finally { controller.dispose(); }
   });
 });
@@ -225,7 +225,7 @@ test("Grok cancellation and disposal abort the shared login path without saving 
     expect(controller.snapshot().transcript.some(entry => entry.text.includes("ABCD-EFGH"))).toBe(false);
     if (dispose) controller.dispose(); else controller.cancel();
     expect(await running).toBe(false); expect(controller.snapshot().loginApproval).toBeUndefined();
-    expect(controller.snapshot().transcript.some(entry => entry.text === "Sign-in cancelled · Alt+L retry")).toBe(true); controller.dispose();
+    expect(controller.snapshot().transcript.some(entry => entry.text === "Sign-in cancelled · Alt+L sign in")).toBe(true); controller.dispose();
   }
 });
 
@@ -457,7 +457,7 @@ test("URL and key Esc retain the typed endpoint while an empty key saves nothing
     controller.enterEndpointUrlText("http://localhost:8787"); controller.submitEndpointUrl(); controller.enterCredentialText("cancelled-key");
     controller.cancel(); expect(controller.snapshot().endpointUrlEntry).toEqual({ value: "http://localhost:8787" });
     expect(controller.submitEndpointUrl()).toBe(true); expect(await controller.submitCredential()).toBe(false);
-    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Key not saved · Alt+L retry · /model choose model");
+    expect(controller.snapshot().transcript.at(-1)?.text).toBe("Key not saved · Alt+L sign in · /model choose model");
     expect(controller.snapshot().loginChooser).toBeUndefined();
   } finally { controller.dispose(); }
 });

@@ -337,7 +337,7 @@ test("forbidden credentials do not imply expiry and retain diagnostic details", 
     const tui = controller(dir, [{ error: "account access forbidden", status: 403 }]);
     await tui.submit("test access");
     expect(tui.snapshot().recovery?.category).toBe("auth");
-    expect(tui.snapshot().transcript.at(-1)?.text).toBe("Access rejected · Connect again to continue\nAlt+L connect · F2 details · Esc keep editing");
+    expect(tui.snapshot().transcript.at(-1)?.text).toBe("Access rejected · Connect again to continue\nAlt+L sign in · F2 details · Esc keep editing");
     expect(tui.inspectRecovery()).toBe(true);
     expect(tui.snapshot().transcript.at(-1)?.text).toContain("account access forbidden");
     tui.dispose();

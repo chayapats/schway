@@ -18,7 +18,7 @@ export const SIGN_IN_CHOOSER_COMPOSER_TEXT = "Choosing sign-in";
 /** Primary transcript status after a browser launcher failure; the authorization link is the line above. */
 export const BROWSER_NOT_OPENED = "Browser didn't open · Open the link above";
 /** Primary status for any subscription sign-in timeout; F2 details keep the provider's recovery text. */
-export const SIGN_IN_TIMED_OUT = "Sign-in timed out · Alt+L retry · F2 details";
+export const SIGN_IN_TIMED_OUT = "Sign-in timed out · Alt+L sign in · F2 details";
 
 /** One wait-panel row and its semantic tone. */
 export interface SignInWaitRow { text: string; tone: "accent" | "text" | "muted" }

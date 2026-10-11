@@ -206,7 +206,7 @@ test("missing credentials explain the interactive login path", async () => {
     snapshot = controller.snapshot();
     const lastError = [...snapshot.transcript].reverse().find((entry) => entry.kind === "error");
     expect(lastError?.text).toContain("Sign-in needed · Connect to continue");
-    expect(lastError?.text).toContain("Alt+L connect");
+    expect(lastError?.text).toContain("Alt+L sign in");
     expect(snapshot.status).toBe("error");
   });
 });
