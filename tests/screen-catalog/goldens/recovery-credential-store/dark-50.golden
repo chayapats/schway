@@ -14,8 +14,8 @@ cursor 6 27 visible
  ▌ ! Error
  ▌ Credential storage unavailable
  ▌ Unlock the secure store
- ▌ Ctrl+R retry credential access · F2 details
- ▌ Esc keep editing
+ ▌ Ctrl+R retry · F2 details · Esc keep editing
+
 
 
 
@@ -35,7 +35,7 @@ cursor 6 27 visible
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ◆ Auto  ! Attention   scripted-model      ctx ~6
- Ctrl+R retry credential access · F2 details
+ Ctrl+R retry · F2 details
 == styles
 00 0-1 #ffffff #161b24 -
 00 1-3 #ffd84a #161b24 b
@@ -79,18 +79,14 @@ cursor 6 27 visible
 08 1-2 #f79d9d #2a2227 -
 08 2-3 #ffffff #2a2227 -
 08 3-9 #e6eaf0 #2c3241 b
-08 9-36 #f79d9d #2a2227 -
-08 36-38 #e6eaf0 #2c3241 b
-08 38-46 #f79d9d #2a2227 -
-08 46-48 #ffffff #2a2227 -
+08 9-18 #f79d9d #2a2227 -
+08 18-20 #e6eaf0 #2c3241 b
+08 20-31 #f79d9d #2a2227 -
+08 31-34 #e6eaf0 #2c3241 b
+08 34-47 #f79d9d #2a2227 -
+08 47-48 #ffffff #2a2227 -
 08 48-50 #ffffff #0e1117 -
-09 0-1 #ffffff #0e1117 -
-09 1-2 #f79d9d #2a2227 -
-09 2-3 #ffffff #2a2227 -
-09 3-6 #e6eaf0 #2c3241 b
-09 6-19 #f79d9d #2a2227 -
-09 19-48 #ffffff #2a2227 -
-09 48-50 #ffffff #0e1117 -
+09 0-50 #ffffff #0e1117 -
 10 0-50 #ffffff #0e1117 -
 11 0-50 #ffffff #0e1117 -
 12 0-50 #ffffff #0e1117 -
@@ -137,7 +133,7 @@ cursor 6 27 visible
 28 49-50 #ffffff #0e1117 -
 29 0-1 #ffffff #0e1117 -
 29 1-7 #e6eaf0 #293140 b
-29 7-34 #8b95a7 #0e1117 -
-29 34-36 #e6eaf0 #293140 b
-29 36-44 #8b95a7 #0e1117 -
-29 44-50 #ffffff #0e1117 -
+29 7-16 #8b95a7 #0e1117 -
+29 16-18 #e6eaf0 #293140 b
+29 18-26 #8b95a7 #0e1117 -
+29 26-50 #ffffff #0e1117 -

@@ -52,9 +52,6 @@ export const SWEEP_EXEMPTIONS: readonly SweepExemption[] = [
   ...["approval-command", "approval-edit", "approval-diff-overflow"].map(screen => ({ screen, width: 29, invariant: "S5" as const,
     reason: "a waiting approval's compact status bar shows `Enter allow once · Esc deny` instead of the mode; the panel heading names ask mode" })),
   { screen: "reader-approval", width: 24, invariant: "S5", reason: "a request waiting behind the reader keeps `Esc back to request` over the mode in the 24-column compact status bar" },
-  // The recovery action is one key-led segment wider than the hint row below 32 columns; fitting it needs a shorter label, a copy decision.
-  ...["recovery-credential-store", "startup-credential-store"].flatMap(screen => [24, 29, 30, 31].map(width => ({ screen, width, invariant: "S1" as const,
-    reason: "`Ctrl+R retry credential access` is wider than the hint row below 32 columns and is cut with …; a shorter label is a copy follow-up" }))),
   // The session picker shortens its status at a word or grapheme with … by design (#333); its key-led actions stay whole.
   ...([["session-picker-empty", [24, 29, 30, 31, 33, 34, 35]], ["session-picker-no-matches", [24, 29, 30, 31]], ["session-picker-resume-failed", [24, 29, 30, 31, 33]]] as const)
     .flatMap(([screen, widths]) => widths.map(width => ({ screen, width, invariant: "S1" as const,
