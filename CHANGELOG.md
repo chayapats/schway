@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-10-11
+
 ### Breaking
 
 - Extensions can no longer name a prompt or turn context section
@@ -14,6 +16,15 @@
 
 ### Added
 
+- An in-app reader opens long code blocks and wide tables with `R` from
+  inspection. Search, wrapping and horizontal navigation keep canonical source
+  anchors, and copying uses the source rather than the displayed rows (#256).
+- `--version` and `-v` report the installed package version without loading
+  the TUI, reading credentials or creating a session (#258).
+- Headless users can list saved sessions with safe previews and discover
+  route-specific models before starting a turn. Help names the JSON session ID
+  and resume commands; discovery does not start a conversation or load the TUI
+  (#259, #260, #261).
 - xAI server-side web search on routes that are verified for it. With the new
   `webSearch` setting at its default `"auto"`, requests on the xAI API-key route
   with `grok-4.7` add `{"type": "web_search"}` after the function tools; the
@@ -98,6 +109,26 @@
 
 ### Changed
 
+- F2 opens details for the visible turn, notice, tool, code or model target
+  and Esc returns to its prior draft and reading position. Notice and recovery
+  rows hide F2 and `Esc keep editing` offers while details own those keys;
+  closing details restores the offers without changing copied text
+  (#244, #351, #356, #376, #377).
+- Sign-in hints consistently say `Alt+L sign in`, and configuration panels and
+  diagnostics name the ChatGPT subscription route `chatgpt`. Stored config and
+  machine identifiers remain `codex` (#347, #368, #371).
+- Help is a searchable action palette with key guidance, change review works
+  after resume, and saved drafts remain distinct from accepted turns. The ready
+  screen offers task examples, approval mode stays visible, and review separates
+  recorded turn evidence from the current Git diff
+  (#243, #248, #250, #251, #262, #263, #264).
+- Inspection names the selected copy target and keeps copy hints accurate.
+  Selected rows and diff backgrounds improve secondary-text contrast; review
+  explains why shell changes cannot be undone and directs users to the current
+  diff (#249, #254, #255).
+- Approval prompts keep their choices and Enter action visible on short
+  terminals, and failed-turn details show the cause before recovery steps
+  (#295, #298).
 - Narrow undo and review panels stay readable. A wrapped diff row continues
   under a blank gutter at its text column instead of under the line numbers;
   undo notes and read-only explanations wrap between ` · ` segments and at
@@ -190,6 +221,29 @@
   the keys. Its status line stays, and the action line returns when that
   surface closes. The outcome strip decides `Alt+R review` and `F2 details`
   separately, so it names each key only while it acts (#301).
+
+### Fixed
+
+- Edit, write and undo preserve existing file permissions (#242).
+- Failed shell spawns settle with an actionable outcome, pipe cleanup is bounded,
+  and requested stops preserve completed work without reporting a failure
+  (#245, #246, #267).
+- Doctor names invalid configuration fields and a missing configured model;
+  startup rejects empty headless tasks and unavailable interactive terminal
+  input/output before loading the application (#247, #252, #253).
+- Sign-in entry keeps its keys and caret above the status bar on short terminals;
+  narrow recovery hints keep each key and action together (#340, #354, #360).
+- The Grok picker keeps the active model available when discovery fails, including
+  its current marker and known reasoning capabilities (#354, #372).
+- Tool expansion hints appear only when a row can expand or collapse, and
+  `/branch tree` no longer leaves a stale key notice (#339, #355).
+- The context meter uses the same shortened earlier-turn tool results that the
+  model request sends (#346).
+- Catalog captures wait for measured review layout and a live command composer;
+  the reader caret regression uses a fixed presentation clock, and deferred
+  approval checks wait for the painted reader banner and completed branch-tree
+  dispatch. These checks remain stable when two full suites run concurrently
+  (#359, #384, #385).
 
 ## [1.0.0-rc.1] - 2026-10-02
 
