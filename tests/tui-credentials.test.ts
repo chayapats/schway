@@ -114,7 +114,7 @@ test("interactive login and overwrite refresh the active real provider and logou
     expect(await store.get(credentialIdentity({ provider: "openai" }))).toBeNull();
     await controller.submit("cannot reuse deleted key");
     expect(headers).toHaveLength(2);
-    expect(controller.snapshot().transcript.at(-1)?.text).toContain("Alt+L sign in");
+    expect(controller.snapshot().transcript.at(-1)?.text).toContain("Alt+L connect");
     controller.notice("first-secret-sentinel second-secret-sentinel");
     expect(JSON.stringify(controller.snapshot())).not.toContain("secret-sentinel");
     expect(await Bun.file(join(sessionsDirectory(home), `${session.header.id}.jsonl`)).text()).not.toContain("secret-sentinel");

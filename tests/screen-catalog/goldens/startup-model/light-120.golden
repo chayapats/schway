@@ -15,7 +15,7 @@ cursor 7 27 visible
   It merges defaults, user and project settings.
 
   ▌ ! Error
-  ▌ Model unavailable · Alt+M choose model
+  ▌ Model unavailable · Choose another model
   ▌ Alt+M choose model · F2 details · Esc keep editing
 
 
@@ -71,8 +71,8 @@ cursor 7 27 visible
 09 0-2 #ffffff #f7f7f4 -
 09 2-3 #a61f16 #edddd9 -
 09 3-4 #ffffff #edddd9 -
-09 4-42 #a61f16 #edddd9 -
-09 42-117 #ffffff #edddd9 -
+09 4-44 #a61f16 #edddd9 -
+09 44-117 #ffffff #edddd9 -
 09 117-120 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
 10 2-3 #a61f16 #edddd9 -

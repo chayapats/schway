@@ -29,13 +29,13 @@ export function startupFailureCategory(message: string): "auth" | "credential-st
   return "provider";
 }
 
-/** Explain a startup failure while keeping its diagnostic out of the primary row. */
+/** Explain a startup failure in words; the action row beneath names every key, and the diagnostic stays out of both. */
 export function startupRecoveryMessage(category: "auth" | "credential-store" | "model" | "provider"): string {
   switch (category) {
-    case "auth": return "Sign in to continue · Alt+L sign in";
+    case "auth": return "Sign-in needed · Connect to continue";
     case "credential-store": return "Credential storage unavailable · Unlock the secure store";
-    case "model": return "Model unavailable · Alt+M choose model";
-    case "provider": return "Connection unavailable · F2 inspect details";
+    case "model": return "Model unavailable · Choose another model";
+    case "provider": return "Connection unavailable · Check the details";
   }
 }
 

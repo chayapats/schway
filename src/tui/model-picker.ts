@@ -218,9 +218,12 @@ export function modelPickerEntries(query: string, provider: string, modelId: str
     });
   }
   if (options?.subscriptionUnavailable && !options.subscriptionModels?.length) {
-    for (const entry of listCatalog().filter(item => item.provider === "openai")) {
-        entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "codex", modelId: entry.id }), provider: "openai", modelId: entry.id, authRoute: "codex",
-        ...budgets("openai", entry.id, limits), active: false, custom: false, listUnavailable: true });
+    // The current subscription model stays listed and marked even when the account list cannot load.
+    const currentSubscription = provider === "openai" && activeRoute === "codex" && modelId ? modelId : undefined;
+    const fallbackIds = listCatalog().filter(item => item.provider === "openai").map(item => item.id);
+    for (const id of currentSubscription && !fallbackIds.includes(currentSubscription) ? [...fallbackIds, currentSubscription] : fallbackIds) {
+      entries.push({ identity: modelPickerIdentity({ provider: "openai", authRoute: "codex", modelId: id }), provider: "openai", modelId: id, authRoute: "codex",
+        ...budgets("openai", id, limits), active: id === currentSubscription, custom: false, listUnavailable: true });
     }
   }
   const profiles = options?.profiles ?? {};

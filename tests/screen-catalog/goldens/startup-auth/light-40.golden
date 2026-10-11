@@ -14,8 +14,8 @@ cursor 6 17 visible
  settings.
 
  ▌ ! Error
- ▌ Sign in to continue
- ▌ Alt+L sign in
+ ▌ Sign-in needed
+ ▌ Connect to continue
  ▌ Alt+L connect · F2 details
  ▌ Esc keep editing
 
@@ -52,14 +52,14 @@ cursor 6 17 visible
 08 0-1 #ffffff #f7f7f4 -
 08 1-2 #a61f16 #edddd9 -
 08 2-3 #ffffff #edddd9 -
-08 3-22 #a61f16 #edddd9 -
-08 22-38 #ffffff #edddd9 -
+08 3-17 #a61f16 #edddd9 -
+08 17-38 #ffffff #edddd9 -
 08 38-40 #ffffff #f7f7f4 -
 09 0-1 #ffffff #f7f7f4 -
 09 1-2 #a61f16 #edddd9 -
 09 2-3 #ffffff #edddd9 -
-09 3-16 #a61f16 #edddd9 -
-09 16-38 #ffffff #edddd9 -
+09 3-22 #a61f16 #edddd9 -
+09 22-38 #ffffff #edddd9 -
 09 38-40 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-2 #a61f16 #edddd9 -
